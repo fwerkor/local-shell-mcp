@@ -31,9 +31,13 @@ COPY pyproject.toml README.md LICENSE /app/
 COPY src /app/src
 RUN pip install --no-cache-dir -e . "playwright==${PLAYWRIGHT_VERSION}"
 
-RUN useradd -m -u 10001 agent && mkdir -p /workspace /workspace/.local-shell-mcp && chown -R agent:agent /workspace /app
-USER agent
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN useradd -m -u 10001 agent \
+  && mkdir -p /workspace /workspace/.local-shell-mcp \
+  && chown -R agent:agent /workspace /app \
+  && chmod +x /usr/local/bin/docker-entrypoint.sh
 WORKDIR /workspace
 
 EXPOSE 8765
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["local-shell-mcp", "--mode", "mcp"]

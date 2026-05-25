@@ -141,6 +141,14 @@ To also start the Cloudflare Tunnel sidecar, set `CLOUDFLARE_TUNNEL_TOKEN` in `.
 docker compose --profile tunnel up -d
 ```
 
+If the container restarts with `Permission denied: '/workspace/.local-shell-mcp'`, fix the host workspace ownership:
+
+```bash
+sudo mkdir -p workspaces/default/.local-shell-mcp
+sudo chown -R 10001:10001 workspaces/default
+docker compose --profile tunnel up -d
+```
+
 The MCP endpoint is served by the process on port `8765`. For ChatGPT custom connectors, expose it as HTTPS, commonly:
 
 ```text
