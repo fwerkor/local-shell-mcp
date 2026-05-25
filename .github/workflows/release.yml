@@ -38,7 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check tag matches project version
+      - name: Validate tag and read project version
         id: version
         env:
           RELEASE_TAG: ${{ github.event.inputs.tag }}
@@ -54,12 +54,6 @@ jobs:
 
           with open("pyproject.toml", "rb") as f:
               version = tomllib.load(f)["project"]["version"]
-
-          tag_version = tag[1:] if tag.startswith("v") else tag
-          if tag_version != version:
-              raise SystemExit(
-                  f"Release tag {tag!r} does not match pyproject.toml version {version!r}"
-              )
 
           print(f"version={version}")
           PY
@@ -164,6 +158,8 @@ jobs:
           \`\`\`
 
           Python package artifacts and SHA256 checksums are attached below.
+
+          Python package version in \`pyproject.toml\`: \`${{ needs.validate-release.outputs.version }}\`
           EOF
 
       - name: Publish GitHub release
