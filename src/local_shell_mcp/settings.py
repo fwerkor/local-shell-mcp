@@ -9,6 +9,10 @@ import yaml
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEFAULT_WORKSPACE_ROOT = Path("/workspace")
+DEFAULT_STATE_DIR = DEFAULT_WORKSPACE_ROOT / ".local-shell-mcp"
+DEFAULT_AUDIT_LOG_PATH = DEFAULT_STATE_DIR / "audit.jsonl"
+
 
 def _split_csv(value: str | list[str] | None) -> list[str]:
     if value is None:
@@ -31,9 +35,9 @@ class Settings(BaseSettings):
     port: int = 8765
     mode: Literal["mcp", "http", "both", "stdio"] = "mcp"
 
-    workspace_root: Path = Path("/workspace")
-    audit_log_path: Path = Path("/workspace/.local-shell-mcp/audit.jsonl")
-    state_dir: Path = Path("/workspace/.local-shell-mcp")
+    workspace_root: Path = DEFAULT_WORKSPACE_ROOT
+    audit_log_path: Path = DEFAULT_AUDIT_LOG_PATH
+    state_dir: Path = DEFAULT_STATE_DIR
 
     # By default, tools are limited to workspace_root. Set true only inside a disposable container.
     allow_full_container: bool = False
@@ -122,6 +126,21 @@ class Settings(BaseSettings):
         merged.update(flat)
         return Settings(**merged)
 
+    def with_workspace_relative_defaults(self) -> Settings:
+        if self.workspace_root == DEFAULT_WORKSPACE_ROOT:
+            return self
+
+        updates = {}
+        if self.state_dir == DEFAULT_STATE_DIR:
+            updates["state_dir"] = self.workspace_root / ".local-shell-mcp"
+        if self.audit_log_path == DEFAULT_AUDIT_LOG_PATH:
+            state_dir = updates.get("state_dir", self.state_dir)
+            updates["audit_log_path"] = state_dir / "audit.jsonl"
+
+        if not updates:
+            return self
+        return self.model_copy(update=updates)
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
@@ -129,6 +148,7 @@ def get_settings() -> Settings:
     config = os.getenv("LOCAL_SHELL_MCP_CONFIG")
     if config:
         settings = settings.apply_yaml(Path(config).expanduser())
+    settings = settings.with_workspace_relative_defaults()
     settings.workspace_root.mkdir(parents=True, exist_ok=True)
     settings.state_dir.mkdir(parents=True, exist_ok=True)
     settings.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
