@@ -1,4 +1,6 @@
-FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
+ARG PLAYWRIGHT_VERSION=1.59.0
+FROM mcr.microsoft.com/playwright/python:v${PLAYWRIGHT_VERSION}-noble
+ARG PLAYWRIGHT_VERSION
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -27,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY pyproject.toml README.md LICENSE /app/
 COPY src /app/src
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir -e . "playwright==${PLAYWRIGHT_VERSION}"
 
 RUN useradd -m -u 10001 agent && mkdir -p /workspace /workspace/.local-shell-mcp && chown -R agent:agent /workspace /app
 USER agent
