@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
 from functools import lru_cache
@@ -8,11 +9,22 @@ from typing import Any
 import jwt
 from fastapi import HTTPException, Request
 from jwt import PyJWKClient
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .audit import audit
 from .settings import Settings, get_settings
+
+PUBLIC_PATHS = {"/healthz", "/readyz", "/docs", "/openapi.json"}
+MCP_DISCOVERY_METHODS = {
+    "initialize",
+    "notifications/initialized",
+    "ping",
+    "tools/list",
+    "resources/list",
+    "resources/templates/list",
+    "prompts/list",
+}
 
 
 @dataclass
@@ -129,23 +141,102 @@ def verify_request(request: Request) -> Principal:
     return principal
 
 
-class AuthMiddleware(BaseHTTPMiddleware):
+async def _read_body(receive: Receive) -> bytes:
+    chunks = []
+    while True:
+        message = await receive()
+        if message["type"] == "http.disconnect":
+            break
+        chunks.append(message.get("body", b""))
+        if not message.get("more_body", False):
+            break
+    return b"".join(chunks)
+
+
+def _body_receive(body: bytes, original_receive: Receive) -> Receive:
+    sent = False
+
+    async def receive() -> Message:
+        nonlocal sent
+        if sent:
+            return await original_receive()
+        sent = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return receive
+
+
+def _mcp_methods_from_body(body: bytes) -> set[str]:
+    if not body:
+        return set()
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return set()
+
+    messages = payload if isinstance(payload, list) else [payload]
+    methods = set()
+    for message in messages:
+        if isinstance(message, dict) and isinstance(message.get("method"), str):
+            methods.add(message["method"])
+    return methods
+
+
+def _is_mcp_discovery_request(scope: Scope, body: bytes | None) -> bool:
+    if scope.get("path") != "/mcp":
+        return False
+
+    method = scope.get("method", "").upper()
+    if method in {"GET", "DELETE", "OPTIONS"}:
+        return True
+    if method != "POST" or body is None:
+        return False
+
+    methods = _mcp_methods_from_body(body)
+    return bool(methods) and methods <= MCP_DISCOVERY_METHODS
+
+
+class AuthMiddleware:
     """ASGI middleware for OAuth bearer verification or legacy Cloudflare Access verification."""
 
-    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
-        path = request.url.path
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        if path in PUBLIC_PATHS or path.startswith("/.well-known/") or path.startswith("/oauth/"):
+            await self.app(scope, receive, send)
+            return
+
+        body = None
+        downstream_receive = receive
+        if path == "/mcp" and scope.get("method", "").upper() == "POST":
+            body = await _read_body(receive)
+            downstream_receive = _body_receive(body, receive)
+
+        settings = get_settings()
         if (
-            path in {"/healthz", "/readyz", "/docs", "/openapi.json"}
-            or path.startswith("/.well-known/")
-            or path.startswith("/oauth/")
+            settings.auth_mode == "oauth"
+            and not settings.require_auth_for_mcp_discovery
+            and _is_mcp_discovery_request(scope, body)
         ):
-            return await call_next(request)
+            await self.app(scope, downstream_receive, send)
+            return
+
         try:
+            request = Request(scope, downstream_receive)
             request.state.principal = verify_request(request)
         except HTTPException as exc:
             headers = getattr(exc, "headers", None) or {}
-            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=headers)
-        return await call_next(request)
+            response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=headers)
+            await response(scope, downstream_receive, send)
+            return
+
+        await self.app(scope, downstream_receive, send)
 
 
 # Backwards-compatible alias.

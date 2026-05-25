@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     cf_access_allowed_emails: list[str] = Field(default_factory=list)
     cf_access_allowed_email_domains: list[str] = Field(default_factory=list)
     auth_bypass_localhost: bool = True
+    require_auth_for_mcp_discovery: bool = False
 
     # Built-in OAuth 2.1 authorization server for ChatGPT MCP connectors.
     # Set public_base_url to the externally reachable HTTPS origin, e.g. https://local-shell-mcp.example.com

@@ -370,3 +370,12 @@ docker compose logs --tail=200 local-shell-mcp
 
 If you see `Task group is not initialized`, update to a newer image that includes
 the MCP lifespan fix.
+
+You can also probe the public endpoint from a machine with the project installed:
+
+```bash
+python scripts/probe-mcp.py https://your-public-host.example.com --pin "$LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN"
+```
+
+The probe should report successful unauthenticated `initialize/list_tools` and a
+successful authenticated `environment_info` call.

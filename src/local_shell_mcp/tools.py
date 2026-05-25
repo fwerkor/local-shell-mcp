@@ -5,8 +5,10 @@ import json
 import shlex
 import uuid
 from typing import Any
+from urllib.parse import urlparse
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 
 from .audit import audit
@@ -86,6 +88,50 @@ SECRET_PATTERNS = {
     "generic_assignment": r"(?i)(token|secret|password|passwd|api_key|apikey)\s*[:=]\s*['\"][^'\"]{8,}['\"]",
 }
 
+OAUTH_SECURITY_SCHEMES = [
+    {
+        "type": "oauth2",
+        "scopes": ["shell:read", "shell:write", "shell:execute", "git:write", "browser:use"],
+    }
+]
+NOAUTH_SECURITY_SCHEMES = [{"type": "noauth"}]
+
+
+def _security_meta(schemes: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"securitySchemes": schemes}
+
+
+def _transport_security_settings() -> TransportSecuritySettings:
+    settings = get_settings()
+    allowed_hosts = {
+        "127.0.0.1",
+        "127.0.0.1:*",
+        "localhost",
+        "localhost:*",
+        "[::1]",
+        "[::1]:*",
+    }
+    allowed_origins = {
+        "http://127.0.0.1:*",
+        "http://localhost:*",
+        "http://[::1]:*",
+        "https://chatgpt.com",
+        "https://chat.openai.com",
+    }
+
+    if settings.public_base_url:
+        parsed = urlparse(settings.public_base_url)
+        if parsed.netloc:
+            allowed_hosts.add(parsed.netloc)
+            allowed_hosts.add(f"{parsed.hostname}:*")
+            allowed_origins.add(f"{parsed.scheme}://{parsed.netloc}")
+
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=sorted(allowed_hosts),
+        allowed_origins=sorted(allowed_origins),
+    )
+
 
 async def _secret_scan(cwd: str = ".", glob: str | None = None, max_results: int = 200) -> dict:
     import re
@@ -112,10 +158,12 @@ async def _secret_scan(cwd: str = ".", glob: str | None = None, max_results: int
 
 def build_mcp() -> FastMCP:
     settings = get_settings()
-    mcp = FastMCP("local-shell-mcp")
+    mcp = FastMCP("local-shell-mcp", transport_security=_transport_security_settings())
     read_only_tool = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+    read_only_meta = _security_meta([*NOAUTH_SECURITY_SCHEMES, *OAUTH_SECURITY_SCHEMES])
+    oauth_meta = _security_meta(OAUTH_SECURITY_SCHEMES)
 
-    @mcp.tool(annotations=read_only_tool)
+    @mcp.tool(annotations=read_only_tool, meta=read_only_meta)
     async def search(query: str) -> str:
         """Search workspace files and return ChatGPT connector-compatible results."""
         try:
@@ -141,7 +189,7 @@ def build_mcp() -> FastMCP:
             audit("tool_error", error=repr(exc))
             return json.dumps({"results": []})
 
-    @mcp.tool(annotations=read_only_tool)
+    @mcp.tool(annotations=read_only_tool, meta=read_only_meta)
     async def fetch(id: str) -> str:
         """Fetch a workspace file by id returned from search."""
         try:
@@ -170,7 +218,7 @@ def build_mcp() -> FastMCP:
                 ensure_ascii=False,
             )
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def environment_info() -> dict:
         """Return workspace, auth, policy, and basic environment information."""
         try:
@@ -179,7 +227,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def run_shell_tool(command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None) -> dict:
         """Run a shell command in the controlled container. This is the primary coding-agent tool."""
         try:
@@ -187,7 +235,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def run_python_tool(code: str, cwd: str = ".", timeout_s: int = 120) -> dict:
         """Write Python code to a temporary file and execute it."""
         try:
@@ -195,7 +243,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def shell_start(cwd: str = ".", name: str | None = None, command: str | None = None) -> dict:
         """Start a persistent tmux-backed shell session."""
         try:
@@ -203,7 +251,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def shell_send(session_id: str, input_text: str, enter: bool = True) -> dict:
         """Send input to a persistent shell session."""
         try:
@@ -211,7 +259,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def shell_read(session_id: str, lines: int = 200) -> dict:
         """Read recent output from a persistent shell session."""
         try:
@@ -219,7 +267,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def shell_kill(session_id: str) -> dict:
         """Kill a persistent shell session."""
         try:
@@ -227,7 +275,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def shell_list() -> dict:
         """List persistent shell sessions."""
         try:
@@ -235,7 +283,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def list_files(path: str = ".", recursive: bool = False, max_entries: int = 500) -> dict:
         """List files and directories."""
         try:
@@ -243,7 +291,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def tree_view(cwd: str = ".", depth: int = 3, max_entries: int = 500) -> dict:
         """Return a compact directory tree."""
         try:
@@ -251,7 +299,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def glob_search(pattern: str, cwd: str = ".", max_results: int = 500) -> dict:
         """Find files by glob pattern."""
         try:
@@ -259,7 +307,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def grep_search(query: str, cwd: str = ".", glob: str | None = None, regex: bool = True, case_sensitive: bool = True, max_results: int | None = None) -> dict:
         """Search file contents using ripgrep."""
         try:
@@ -267,7 +315,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def read_file(path: str, start_line: int | None = None, end_line: int | None = None) -> dict:
         """Read a UTF-8 text file, optionally by line range."""
         try:
@@ -275,7 +323,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def read_many_files(paths: list[str], start_line: int | None = None, end_line: int | None = None) -> dict:
         """Read multiple UTF-8 text files."""
         try:
@@ -283,7 +331,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def write_file(path: str, content: str, overwrite: bool = True) -> dict:
         """Write a UTF-8 text file."""
         try:
@@ -291,7 +339,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> dict:
         """Replace exact text in a file. Use this for precise code edits."""
         try:
@@ -299,7 +347,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def multi_edit_file(path: str, edits: list[dict]) -> dict:
         """Apply multiple exact-text edits to one file. Each edit has old, new, replace_all."""
         try:
@@ -307,7 +355,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def delete_file_or_dir(path: str, recursive: bool = False) -> dict:
         """Delete a file or directory inside the controlled workspace/container."""
         try:
@@ -315,7 +363,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def apply_patch(patch: str, cwd: str = ".") -> dict:
         """Apply a unified diff using git apply."""
         try:
@@ -323,7 +371,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def git_clone_tool(repo_url: str, dest: str | None = None, branch: str | None = None, cwd: str = ".") -> dict:
         """Clone a Git repository."""
         try:
@@ -331,7 +379,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def git_status_tool(cwd: str = ".") -> dict:
         """Run git status and list remotes."""
         try:
@@ -339,7 +387,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def git_diff_tool(cwd: str = ".", staged: bool = False, path: str | None = None, stat: bool = False) -> dict:
         """Run git diff."""
         try:
@@ -347,7 +395,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def git_log_tool(cwd: str = ".", max_count: int = 20) -> dict:
         """Show recent git commits."""
         try:
@@ -355,7 +403,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def git_checkout_tool(cwd: str, ref: str, create: bool = False) -> dict:
         """Checkout an existing ref or create a branch."""
         try:
@@ -363,7 +411,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def git_fetch_tool(cwd: str = ".", remote: str = "origin", prune: bool = True) -> dict:
         """Fetch a git remote."""
         try:
@@ -371,7 +419,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def git_pull_tool(cwd: str = ".", ff_only: bool = True) -> dict:
         """Pull current branch."""
         try:
@@ -379,7 +427,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def git_add_tool(cwd: str = ".", paths: list[str] | None = None) -> dict:
         """Stage paths for commit."""
         try:
@@ -387,7 +435,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def git_commit_tool(cwd: str, message: str, all_changes: bool = False) -> dict:
         """Create a git commit."""
         try:
@@ -395,7 +443,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def git_push_tool(cwd: str, remote: str = "origin", branch: str | None = None, set_upstream: bool = True) -> dict:
         """Push current HEAD to a remote branch."""
         try:
@@ -403,7 +451,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def git_show_tool(cwd: str = ".", ref: str = "HEAD", path: str | None = None) -> dict:
         """Show a commit, object, or file at ref:path."""
         try:
@@ -411,7 +459,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def git_reset_tool(cwd: str = ".", mode: str = "soft", ref: str = "HEAD") -> dict:
         """Run git reset. Modes: soft, mixed, hard."""
         try:
@@ -419,7 +467,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def secret_scan(cwd: str = ".", glob: str | None = None, max_results: int = 200) -> dict:
         """Scan workspace text files for common secrets before commit/push."""
         try:
@@ -427,7 +475,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def todo_read_tool() -> dict:
         """Read the agent todo list. Similar to Claude Code TodoRead."""
         try:
@@ -435,7 +483,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def todo_write_tool(todos: list[dict]) -> dict:
         """Write the agent todo list. Each todo: id, content, status, priority."""
         try:
@@ -443,7 +491,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def playwright_install_tool(browser: str = "chromium", with_deps: bool = False) -> dict:
         """Install Playwright browser binaries in the container."""
         try:
@@ -451,7 +499,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def browser_screenshot_tool(url: str, output_path: str = "screenshots/page.png", browser: str = "chromium", full_page: bool = True, width: int = 1440, height: int = 1000, wait_until: str = "networkidle") -> dict:
         """Open a URL with Playwright and save a screenshot."""
         try:
@@ -459,7 +507,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def browser_get_text_tool(url: str, browser: str = "chromium", wait_until: str = "networkidle", selector: str = "body") -> dict:
         """Open a URL with Playwright and return visible text for a selector."""
         try:
@@ -467,7 +515,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def browser_eval_tool(url: str, javascript: str, browser: str = "chromium", wait_until: str = "networkidle") -> dict:
         """Open a URL with Playwright and evaluate JavaScript."""
         try:
@@ -475,7 +523,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def browser_pdf_tool(url: str, output_path: str = "screenshots/page.pdf", width: int = 1440, height: int = 1000, wait_until: str = "networkidle") -> dict:
         """Open a URL with Chromium and save a PDF."""
         try:
@@ -483,7 +531,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def playwright_run_script_tool(script: str, cwd: str = ".", timeout_s: int = 300) -> dict:
         """Run a full Python Playwright script. Powerful; use in disposable containers."""
         try:
@@ -491,7 +539,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _error(exc)
 
-    @mcp.tool()
+    @mcp.tool(meta=oauth_meta)
     async def audit_tail(lines: int = 100) -> dict:
         """Read recent audit log entries."""
         try:
