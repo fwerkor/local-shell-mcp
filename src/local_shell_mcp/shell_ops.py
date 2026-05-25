@@ -7,7 +7,6 @@ import shlex
 import signal
 import time
 import uuid
-from pathlib import Path
 
 from .audit import audit
 from .fs_ops import relative_display, resolve_path
@@ -57,7 +56,7 @@ async def run_shell(command: str, cwd: str = ".", timeout_s: int | None = None, 
     timed_out = False
     try:
         stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=clamp_timeout(timeout_s))
-    except asyncio.TimeoutError:
+    except TimeoutError:
         timed_out = True
         try:
             os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
@@ -65,7 +64,7 @@ async def run_shell(command: str, cwd: str = ".", timeout_s: int | None = None, 
             proc.terminate()
         try:
             stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=5)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             try:
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             except Exception:

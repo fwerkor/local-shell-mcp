@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     def split_csv_fields(cls, value):  # noqa: ANN001
         return _split_csv(value)
 
-    def apply_yaml(self, path: Path) -> "Settings":
+    def apply_yaml(self, path: Path) -> Settings:
         if not path.exists():
             raise FileNotFoundError(path)
         data = yaml.safe_load(path.read_text()) or {}

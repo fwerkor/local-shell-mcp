@@ -4,7 +4,6 @@ import json
 import shlex
 import textwrap
 import uuid
-from pathlib import Path
 
 from .fs_ops import relative_display, resolve_path
 from .shell_ops import run_shell

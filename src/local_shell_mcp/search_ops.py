@@ -4,8 +4,8 @@ import json
 import shlex
 
 from .fs_ops import resolve_path
-from .shell_ops import run_shell
 from .settings import get_settings
+from .shell_ops import run_shell
 
 
 async def grep(query: str, cwd: str = ".", glob: str | None = None, regex: bool = True, case_sensitive: bool = True, max_results: int | None = None) -> dict:

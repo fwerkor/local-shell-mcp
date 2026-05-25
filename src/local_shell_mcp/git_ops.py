@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import shlex
 
-from .shell_ops import run_shell
 from .settings import get_settings
+from .shell_ops import run_shell
 
 
 def _git(*args: str) -> str:
