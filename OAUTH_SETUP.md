@@ -41,6 +41,8 @@ https://your-public-host.example.com/mcp
 
 On first connection, ChatGPT will open `/oauth/authorize`. Enter `LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN` to approve the connector. ChatGPT will then exchange the authorization code for a bearer token and call `/mcp` with `Authorization: Bearer ...`.
 
+Bearer tokens do not expire by default. Set `LOCAL_SHELL_MCP_OAUTH_ACCESS_TOKEN_TTL_S` to a positive number of seconds if you want expiring tokens.
+
 ## Important
 
 Do not use `LOCAL_SHELL_MCP_AUTH_MODE=none` on a public hostname. This server can execute shell commands in the container.

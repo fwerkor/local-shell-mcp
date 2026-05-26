@@ -253,10 +253,11 @@ def issue_access_token(*, client_id: str, scope: str, resource: str, subject: st
         "sub": subject,
         "aud": resource,
         "iat": now,
-        "exp": now + settings.oauth_access_token_ttl_s,
         "client_id": client_id,
         "scope": scope,
     }
+    if settings.oauth_access_token_ttl_s > 0:
+        payload["exp"] = now + settings.oauth_access_token_ttl_s
     return jwt.encode(payload, settings.oauth_jwt_secret, algorithm="HS256")
 
 
@@ -281,14 +282,14 @@ async def oauth_token(request: Request) -> JSONResponse:
     code_obj.used = True
     token = issue_access_token(client_id=client_id, scope=code_obj.scope, resource=code_obj.resource)
     audit("oauth_token_issued", client_id=client_id, resource=code_obj.resource)
-    return _json(
-        {
-            "access_token": token,
-            "token_type": "Bearer",
-            "expires_in": get_settings().oauth_access_token_ttl_s,
-            "scope": code_obj.scope,
-        }
-    )
+    body = {
+        "access_token": token,
+        "token_type": "Bearer",
+        "scope": code_obj.scope,
+    }
+    if get_settings().oauth_access_token_ttl_s > 0:
+        body["expires_in"] = get_settings().oauth_access_token_ttl_s
+    return _json(body)
 
 
 def validate_bearer_token(token: str, request: Request | None = None) -> dict[str, Any]:
@@ -299,5 +300,5 @@ def validate_bearer_token(token: str, request: Request | None = None) -> dict[st
         algorithms=["HS256"],
         audience=resource_url(request),
         issuer=issuer_url(request),
-        options={"require": ["exp", "iat", "aud", "iss"]},
+        options={"require": ["iat", "aud", "iss"]},
     )

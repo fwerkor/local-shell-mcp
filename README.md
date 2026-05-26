@@ -261,6 +261,7 @@ Environment variables use the `LOCAL_SHELL_MCP_` prefix.
 | `LOCAL_SHELL_MCP_PUBLIC_BASE_URL` | unset | Public HTTPS origin used for OAuth metadata |
 | `LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN` | unset | PIN required to approve OAuth authorization |
 | `LOCAL_SHELL_MCP_OAUTH_JWT_SECRET` | `dev-change-me` | Secret used to sign bearer tokens |
+| `LOCAL_SHELL_MCP_OAUTH_ACCESS_TOKEN_TTL_S` | `0` | OAuth bearer token lifetime in seconds; `0` means never expires |
 | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `false` | Give the AI unrestricted control of the container, including paths outside workspace and root access |
 | `LOCAL_SHELL_MCP_MAX_TIMEOUT_S` | `3600` | Max command timeout |
 | `LOCAL_SHELL_MCP_MAX_OUTPUT_BYTES` | `200000` | Output truncation limit |

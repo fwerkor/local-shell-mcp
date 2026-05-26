@@ -3,6 +3,7 @@ import json
 import pytest
 
 from local_shell_mcp.auth import _is_mcp_discovery_request
+from local_shell_mcp.oauth import issue_access_token, validate_bearer_token
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.tools import build_mcp
 
@@ -30,3 +31,19 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
     tools = {tool.name: tool for tool in await mcp.list_tools()}
     assert tools["search"].meta["securitySchemes"][0]["type"] == "noauth"
     assert tools["environment_info"].meta["securitySchemes"][0]["type"] == "oauth2"
+
+
+def test_oauth_access_tokens_do_not_expire_by_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET", "test-secret")
+    get_settings.cache_clear()
+
+    token = issue_access_token(
+        client_id="test-client",
+        scope="shell:execute",
+        resource="http://127.0.0.1:8765",
+    )
+    claims = validate_bearer_token(token)
+
+    assert "exp" not in claims
+    assert claims["client_id"] == "test-client"
