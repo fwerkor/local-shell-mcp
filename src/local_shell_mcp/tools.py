@@ -4,6 +4,7 @@ import asyncio
 import json
 import shlex
 import uuid
+from contextlib import suppress
 from typing import Any
 from urllib.parse import urlparse
 
@@ -17,6 +18,7 @@ from .fs_ops import (
     edit_text,
     glob_paths,
     list_dir,
+    missing_path_context,
     multi_edit_text,
     read_text,
     relative_display,
@@ -57,7 +59,11 @@ def _ok(data: Any = None, message: str = "") -> dict:
 
 def _error(exc: Exception) -> dict:
     audit("tool_error", error=repr(exc))
-    return {"ok": False, "error": type(exc).__name__, "message": str(exc)}
+    payload = {"ok": False, "error": type(exc).__name__, "message": str(exc)}
+    if isinstance(exc, FileNotFoundError) and str(exc):
+        with suppress(Exception):
+            payload["details"] = missing_path_context(str(exc))
+    return payload
 
 
 def _sync(coro):  # noqa: ANN001

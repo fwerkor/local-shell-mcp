@@ -48,6 +48,31 @@ def relative_display(path: Path) -> str:
         return str(path)
 
 
+def missing_path_context(path: str | Path, *, max_entries: int = 50) -> dict:
+    resolved = resolve_path(path)
+    nearest = next((parent for parent in [resolved, *resolved.parents] if parent.exists()), None)
+    entries: list[str] = []
+    truncated = False
+
+    if nearest and nearest.is_dir():
+        limit = max(0, max_entries)
+        for child in sorted(nearest.iterdir()):
+            if child.name == ".git":
+                continue
+            if len(entries) >= limit:
+                truncated = True
+                break
+            entries.append(f"{child.name}/" if child.is_dir() else child.name)
+
+    return {
+        "path": str(resolved),
+        "exists": resolved.exists(),
+        "nearest_existing_parent": str(nearest) if nearest else None,
+        "nearest_parent_entries": entries,
+        "truncated": truncated,
+    }
+
+
 def list_dir(path: str = ".", recursive: bool = False, max_entries: int = 500) -> list[dict]:
     base = resolve_path(path, must_exist=True)
     if not base.is_dir():

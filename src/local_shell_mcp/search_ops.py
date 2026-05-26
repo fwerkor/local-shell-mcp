@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import shlex
 
-from .fs_ops import resolve_path
+from .fs_ops import missing_path_context, resolve_path
 from .settings import get_settings
 from .shell_ops import run_shell
 
@@ -52,7 +52,32 @@ async def grep(query: str, cwd: str = ".", glob: str | None = None, regex: bool 
 
 
 async def tree(cwd: str = ".", depth: int = 3, max_entries: int = 500) -> dict:
-    base = resolve_path(cwd, must_exist=True)
+    base = resolve_path(cwd)
+    if not base.exists():
+        context = missing_path_context(base, max_entries=min(max_entries, 100))
+        return {
+            "root": context["path"],
+            "exists": False,
+            "is_directory": False,
+            "entries": [],
+            "count": 0,
+            "truncated": False,
+            "message": f"Path does not exist: {context['path']}",
+            "nearest_existing_parent": context["nearest_existing_parent"],
+            "nearest_parent_entries": context["nearest_parent_entries"],
+            "nearest_parent_entries_truncated": context["truncated"],
+        }
+    if not base.is_dir():
+        return {
+            "root": str(base),
+            "exists": True,
+            "is_directory": False,
+            "entries": [],
+            "count": 0,
+            "truncated": False,
+            "message": f"Path exists but is not a directory: {base}",
+        }
+
     depth = max(0, min(depth, 10))
     rows: list[str] = []
     count = 0
@@ -68,4 +93,11 @@ async def tree(cwd: str = ".", depth: int = 3, max_entries: int = 500) -> dict:
         count += 1
         if count >= max_entries:
             break
-    return {"root": str(base), "entries": rows, "count": count, "truncated": count >= max_entries}
+    return {
+        "root": str(base),
+        "exists": True,
+        "is_directory": True,
+        "entries": rows,
+        "count": count,
+        "truncated": count >= max_entries,
+    }
