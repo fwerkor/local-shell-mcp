@@ -11,6 +11,7 @@ ENV PYTHONUNBUFFERED=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     ca-certificates \
+    sudo \
     curl \
     git \
     jq \
@@ -24,7 +25,44 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip \
     unzip \
     build-essential \
+    autoconf \
+    automake \
+    clang \
+    cmake \
+    gdb \
+    lldb \
+    libtool \
+    make \
+    ninja-build \
+    pkg-config \
+    python3-dev \
+    python3-pip \
+    python3-venv \
+    pipx \
+    nodejs \
+    npm \
+    golang-go \
+    rustc \
+    cargo \
+    openjdk-21-jdk \
+    maven \
+    gradle \
+    ruby-full \
+    php-cli \
+    php-curl \
+    php-dev \
+    php-mbstring \
+    php-xml \
+    composer \
+    perl \
+    lua5.4 \
+    luarocks \
+    r-base \
+    shellcheck \
+    sqlite3 \
   && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g yarn pnpm typescript ts-node
 
 WORKDIR /app
 COPY pyproject.toml README.md LICENSE /app/
@@ -34,6 +72,8 @@ RUN pip install --no-cache-dir -e . "playwright==${PLAYWRIGHT_VERSION}"
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN useradd -m -u 10001 agent \
   && mkdir -p /workspace /workspace/.local-shell-mcp \
+  && echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent-nopasswd \
+  && chmod 0440 /etc/sudoers.d/agent-nopasswd \
   && chown -R agent:agent /workspace /app \
   && chmod +x /usr/local/bin/docker-entrypoint.sh
 WORKDIR /workspace

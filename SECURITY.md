@@ -13,6 +13,11 @@
 - Leave `allow_full_container=false` by default.
 - Review audit logs after each session.
 
+`LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER=true` is an explicit full-control mode. It
+disables built-in command and path denylists, runs the container service as root
+when started through the bundled entrypoint, and grants the `agent` user
+passwordless `sudo`. Only enable it in a disposable container or VM.
+
 ## Threats considered
 
 - Prompt injection in repository files.

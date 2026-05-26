@@ -16,7 +16,7 @@ def resolve_path(path: str | Path, *, must_exist: bool = False, allow_missing_pa
     """Resolve a path, optionally restricting it to workspace_root.
 
     In normal mode, absolute paths outside workspace are rejected. In full-container mode,
-    any absolute path inside the container is allowed except denylisted paths.
+    any absolute path inside the container is allowed.
     """
     settings = get_settings()
     root = settings.workspace_root.resolve()

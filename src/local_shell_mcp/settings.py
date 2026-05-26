@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_WORKSPACE_ROOT = Path("/workspace")
@@ -111,6 +111,13 @@ class Settings(BaseSettings):
     @classmethod
     def split_csv_fields(cls, value):  # noqa: ANN001
         return _split_csv(value)
+
+    @model_validator(mode="after")
+    def disable_builtin_restrictions_in_full_container_mode(self) -> Settings:
+        if self.allow_full_container:
+            self.command_denylist = []
+            self.path_denylist = []
+        return self
 
     def apply_yaml(self, path: Path) -> Settings:
         if not path.exists():
