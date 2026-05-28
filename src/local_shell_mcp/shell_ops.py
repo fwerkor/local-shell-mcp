@@ -14,6 +14,7 @@ from .fs_ops import relative_display, resolve_path
 from .models import CommandResult
 from .settings import get_settings
 
+PUBLIC_RUN_SHELL_DEFAULT_TIMEOUT_S = 10
 PUBLIC_RUN_SHELL_TIMEOUT_CAP_S = 60
 GRACEFUL_TERMINATION_TIMEOUT_S = 5
 KILL_TERMINATION_TIMEOUT_S = 2
@@ -58,7 +59,7 @@ def clamp_timeout(timeout_s: int | None) -> int:
 def public_run_shell_timeout(timeout_s: int | None) -> int:
     if timeout_s is not None and timeout_s > PUBLIC_RUN_SHELL_TIMEOUT_CAP_S:
         raise ValueError(f"timeout_s must be <= {PUBLIC_RUN_SHELL_TIMEOUT_CAP_S} seconds for public run_shell")
-    return max(1, min(timeout_s or get_settings().default_timeout_s, PUBLIC_RUN_SHELL_TIMEOUT_CAP_S))
+    return max(1, min(timeout_s or PUBLIC_RUN_SHELL_DEFAULT_TIMEOUT_S, PUBLIC_RUN_SHELL_TIMEOUT_CAP_S))
 
 
 def clamp_output(stdout: str, stderr: str, max_output_bytes: int | None = None) -> tuple[str, str, bool]:

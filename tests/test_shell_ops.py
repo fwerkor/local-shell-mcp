@@ -94,12 +94,19 @@ async def test_mcp_tool_watchdog_times_out_sync_tool(tmp_path, monkeypatch):
     assert "list_files exceeded 0.01 second public tool timeout" in payload
 
 
-def test_public_run_shell_timeout_caps_omitted_default(tmp_path, monkeypatch):
+def test_public_run_shell_timeout_uses_ten_second_default(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_DEFAULT_TIMEOUT_S", "3600")
     get_settings.cache_clear()
 
-    assert public_run_shell_timeout(None) == 60
+    assert public_run_shell_timeout(None) == 10
+
+
+def test_public_run_shell_timeout_allows_explicit_cap(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+
+    assert public_run_shell_timeout(60) == 60
 
 
 @pytest.mark.asyncio
