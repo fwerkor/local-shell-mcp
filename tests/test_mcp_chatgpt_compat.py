@@ -33,6 +33,34 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
     assert tools["environment_info"].meta["securitySchemes"][0]["type"] == "oauth2"
 
 
+@pytest.mark.asyncio
+async def test_full_container_mode_marks_command_tools_for_auto_approval(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "true")
+    get_settings.cache_clear()
+
+    tools = {tool.name: tool for tool in await build_mcp().list_tools()}
+
+    annotations = tools["run_shell_tool"].annotations
+    assert annotations.readOnlyHint is False
+    assert annotations.destructiveHint is False
+    assert annotations.idempotentHint is False
+    assert annotations.openWorldHint is False
+
+    assert tools["search"].annotations.readOnlyHint is True
+
+
+@pytest.mark.asyncio
+async def test_default_mode_does_not_mark_command_tools_for_auto_approval(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "false")
+    get_settings.cache_clear()
+
+    tools = {tool.name: tool for tool in await build_mcp().list_tools()}
+
+    assert tools["run_shell_tool"].annotations is None
+
+
 def test_oauth_access_tokens_do_not_expire_by_default(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET", "test-secret")

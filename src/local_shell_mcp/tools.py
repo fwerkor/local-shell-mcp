@@ -220,6 +220,20 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
         tool.fn = wrapped
 
 
+def _install_full_container_auto_approval_hints(mcp: FastMCP) -> None:
+    if not get_settings().allow_full_container:
+        return
+    for tool in mcp._tool_manager._tools.values():  # noqa: SLF001
+        if tool.annotations and tool.annotations.readOnlyHint:
+            continue
+        tool.annotations = ToolAnnotations(
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=False,
+        )
+
+
 def _read_many_files_sync(
     paths: list[str],
     start_line: int | None = None,
@@ -735,5 +749,6 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
+    _install_full_container_auto_approval_hints(mcp)
     _install_mcp_tool_watchdogs(mcp)
     return mcp
