@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from .auth import CloudflareAccessMiddleware, Principal, verify_request
 from .fs_ops import (
@@ -37,6 +40,7 @@ from .playwright_ops import (
 from .search_ops import grep, tree
 from .settings import get_settings
 from .shell_ops import (
+    PUBLIC_RUN_SHELL_TIMEOUT_CAP_S,
     kill_shell,
     list_shells,
     public_run_shell,
@@ -45,6 +49,8 @@ from .shell_ops import (
     start_shell,
 )
 from .todo_ops import todo_read, todo_write
+
+PUBLIC_TOOL_TIMEOUT_S = PUBLIC_RUN_SHELL_TIMEOUT_CAP_S
 
 
 def principal_dep(request: Request) -> Principal:
@@ -59,6 +65,26 @@ def build_http_app() -> FastAPI:
     settings = get_settings()
     if settings.auth_mode != "none":
         app.add_middleware(CloudflareAccessMiddleware)
+
+    @app.exception_handler(ValueError)
+    async def value_error_handler(request: Request, exc: ValueError):  # noqa: ARG001
+        return JSONResponse(status_code=400, content={"ok": False, "error": "validation_error", "message": str(exc)})
+
+    @app.middleware("http")
+    async def tools_timeout_middleware(request: Request, call_next):  # noqa: ANN001
+        if not request.url.path.startswith("/tools/"):
+            return await call_next(request)
+        try:
+            return await asyncio.wait_for(call_next(request), timeout=PUBLIC_TOOL_TIMEOUT_S)
+        except TimeoutError:
+            return JSONResponse(
+                status_code=504,
+                content={
+                    "ok": False,
+                    "error": "tool_timeout",
+                    "message": f"{request.url.path} exceeded {PUBLIC_TOOL_TIMEOUT_S} second public tool timeout",
+                },
+            )
 
     @app.get("/healthz")
     async def healthz():
@@ -215,6 +241,6 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/playwright/run_script")
     async def api_playwright_run_script(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await playwright_run_script(body["script"], body.get("cwd", "."), body.get("timeout_s", 300))
+        return await playwright_run_script(body["script"], body.get("cwd", "."), body.get("timeout_s", 60))
 
     return app

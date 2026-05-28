@@ -6,7 +6,7 @@ import textwrap
 import uuid
 
 from .fs_ops import relative_display, resolve_path
-from .shell_ops import run_shell
+from .shell_ops import public_run_shell_timeout, run_shell
 
 
 async def playwright_install(browser: str = "chromium", with_deps: bool = False) -> dict:
@@ -17,7 +17,7 @@ async def playwright_install(browser: str = "chromium", with_deps: bool = False)
         cmd += " --with-deps"
     if browser != "all":
         cmd += " " + shlex.quote(browser)
-    result = await run_shell(cmd, timeout_s=1800, max_output_bytes=500_000)
+    result = await run_shell(cmd, timeout_s=60, max_output_bytes=500_000)
     return result.model_dump()
 
 
@@ -49,7 +49,7 @@ with sync_playwright() as p:
     browser.close()
 '''
     script_path.write_text(textwrap.dedent(script), encoding="utf-8")
-    result = await run_shell(f"python3 {shlex.quote(str(script_path))}", timeout_s=120, max_output_bytes=200_000)
+    result = await run_shell(f"python3 {shlex.quote(str(script_path))}", timeout_s=60, max_output_bytes=200_000)
     return {**result.model_dump(), "screenshot_path": relative_display(out)}
 
 
@@ -76,7 +76,7 @@ with sync_playwright() as p:
     browser.close()
 '''
     script_path.write_text(textwrap.dedent(script), encoding="utf-8")
-    result = await run_shell(f"python3 {shlex.quote(str(script_path))}", timeout_s=120, max_output_bytes=500_000)
+    result = await run_shell(f"python3 {shlex.quote(str(script_path))}", timeout_s=60, max_output_bytes=500_000)
     return result.model_dump()
 
 
@@ -106,7 +106,7 @@ with sync_playwright() as p:
     browser.close()
 '''
     script_path.write_text(textwrap.dedent(script), encoding="utf-8")
-    result = await run_shell(f"python3 {shlex.quote(str(script_path))}", timeout_s=120, max_output_bytes=500_000)
+    result = await run_shell(f"python3 {shlex.quote(str(script_path))}", timeout_s=60, max_output_bytes=500_000)
     parsed = None
     if result.ok and result.stdout.strip():
         try:
@@ -138,11 +138,11 @@ with sync_playwright() as p:
     browser.close()
 '''
     script_path.write_text(textwrap.dedent(script), encoding="utf-8")
-    result = await run_shell(f"python3 {shlex.quote(str(script_path))}", timeout_s=120, max_output_bytes=200_000)
+    result = await run_shell(f"python3 {shlex.quote(str(script_path))}", timeout_s=60, max_output_bytes=200_000)
     return {**result.model_dump(), "pdf_path": relative_display(out)}
 
 
-async def playwright_run_script(script: str, cwd: str = ".", timeout_s: int = 300) -> dict:
+async def playwright_run_script(script: str, cwd: str = ".", timeout_s: int = 60) -> dict:
     """Run a caller-supplied Python Playwright script inside the workspace.
 
     The script is written to .local-shell-mcp/tmp and executed with python3. This is powerful;
@@ -151,5 +151,5 @@ async def playwright_run_script(script: str, cwd: str = ".", timeout_s: int = 30
     path = resolve_path(f".local-shell-mcp/tmp/playwright-custom-{uuid.uuid4().hex}.py")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(script, encoding="utf-8")
-    result = await run_shell(f"python3 {shlex.quote(str(path))}", cwd=cwd, timeout_s=timeout_s, max_output_bytes=1_000_000)
+    result = await run_shell(f"python3 {shlex.quote(str(path))}", cwd=cwd, timeout_s=public_run_shell_timeout(timeout_s), max_output_bytes=1_000_000)
     return {**result.model_dump(), "script_path": relative_display(path)}

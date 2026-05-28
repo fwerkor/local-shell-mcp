@@ -50,9 +50,11 @@ from .playwright_ops import (
 from .search_ops import grep, tree
 from .settings import get_settings
 from .shell_ops import (
+    PUBLIC_RUN_SHELL_TIMEOUT_CAP_S,
     kill_shell,
     list_shells,
     public_run_shell,
+    public_run_shell_timeout,
     read_shell,
     run_shell,
     send_shell,
@@ -98,15 +100,15 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict:
     patch_path.parent.mkdir(parents=True, exist_ok=True)
     patch_path.write_text(patch, encoding="utf-8")
     quoted = shlex.quote(str(patch_path))
-    result = await run_shell(f"git apply --check {quoted} && git apply {quoted}", cwd=cwd, timeout_s=120, max_output_bytes=500_000)
+    result = await run_shell(f"git apply --check {quoted} && git apply {quoted}", cwd=cwd, timeout_s=60, max_output_bytes=500_000)
     return {**result.model_dump(), "patch_path": relative_display(patch_path)}
 
 
-async def _run_python(code: str, cwd: str = ".", timeout_s: int = 120) -> dict:
+async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict:
     path = resolve_path(f".local-shell-mcp/tmp/script-{uuid.uuid4().hex}.py")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(code, encoding="utf-8")
-    result = await run_shell(f"python3 {shlex.quote(str(path))}", cwd=cwd, timeout_s=timeout_s, max_output_bytes=1_000_000)
+    result = await run_shell(f"python3 {shlex.quote(str(path))}", cwd=cwd, timeout_s=public_run_shell_timeout(timeout_s), max_output_bytes=1_000_000)
     return {**result.model_dump(), "script_path": relative_display(path)}
 
 
@@ -124,6 +126,11 @@ OAUTH_SECURITY_SCHEMES = [
     }
 ]
 NOAUTH_SECURITY_SCHEMES = [{"type": "noauth"}]
+PUBLIC_TOOL_TIMEOUT_S = PUBLIC_RUN_SHELL_TIMEOUT_CAP_S
+
+
+class PublicToolTimeoutError(TimeoutError):
+    pass
 
 
 def _security_meta(schemes: list[dict[str, Any]]) -> dict[str, Any]:
@@ -160,6 +167,39 @@ def _transport_security_settings() -> TransportSecuritySettings:
         allowed_hosts=sorted(allowed_hosts),
         allowed_origins=sorted(allowed_origins),
     )
+
+
+def _timeout_payload_for_tool(tool_name: str, exc: Exception) -> dict | str:
+    if tool_name == "search":
+        return json.dumps({"results": []}, ensure_ascii=False)
+    if tool_name == "fetch":
+        return json.dumps(
+            {
+                "id": "",
+                "title": "",
+                "text": str(exc),
+                "url": "file:///workspace/",
+                "metadata": {"source": "workspace", "error": type(exc).__name__},
+            },
+            ensure_ascii=False,
+        )
+    return _handled_error(exc)
+
+
+def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
+    for tool in mcp._tool_manager._tools.values():  # noqa: SLF001
+        original = tool.fn
+        tool_name = tool.name
+
+        async def wrapped(*args, __original=original, __tool_name=tool_name, **kwargs):  # noqa: ANN002, ANN003
+            try:
+                return await asyncio.wait_for(__original(*args, **kwargs), timeout=PUBLIC_TOOL_TIMEOUT_S)
+            except TimeoutError:
+                exc = PublicToolTimeoutError(f"{__tool_name} exceeded {PUBLIC_TOOL_TIMEOUT_S} second public tool timeout")
+                audit("tool_timeout", tool=__tool_name, timeout_s=PUBLIC_TOOL_TIMEOUT_S)
+                return _timeout_payload_for_tool(__tool_name, exc)
+
+        tool.fn = wrapped
 
 
 async def _secret_scan(cwd: str = ".", glob: str | None = None, max_results: int = 200) -> dict:
@@ -270,7 +310,7 @@ def build_mcp() -> FastMCP:
             return _handled_error(exc)
 
     @mcp.tool(meta=oauth_meta)
-    async def run_python_tool(code: str, cwd: str = ".", timeout_s: int = 120) -> dict:
+    async def run_python_tool(code: str, cwd: str = ".", timeout_s: int = 60) -> dict:
         """Write Python code to a temporary file and execute it."""
         try:
             return _ok(await _run_python(code, cwd, timeout_s))
@@ -578,7 +618,7 @@ def build_mcp() -> FastMCP:
             return _handled_error(exc)
 
     @mcp.tool(meta=oauth_meta)
-    async def playwright_run_script_tool(script: str, cwd: str = ".", timeout_s: int = 300) -> dict:
+    async def playwright_run_script_tool(script: str, cwd: str = ".", timeout_s: int = 60) -> dict:
         """Run a full Python Playwright script. Powerful; use in disposable containers."""
         try:
             return _ok(await playwright_run_script(script, cwd, timeout_s))
@@ -603,4 +643,5 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
+    _install_mcp_tool_watchdogs(mcp)
     return mcp

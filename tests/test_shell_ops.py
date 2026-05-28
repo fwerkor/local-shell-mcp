@@ -1,7 +1,11 @@
 import asyncio
 
 import pytest
+from fastapi.testclient import TestClient
 
+import local_shell_mcp.http_app as http_app_module
+import local_shell_mcp.tools as tools_module
+from local_shell_mcp.http_app import build_http_app
 from local_shell_mcp.models import CommandResult
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.shell_ops import public_run_shell_timeout, run_shell, send_shell
@@ -17,6 +21,40 @@ async def test_run_shell_tool_rejects_timeout_above_public_cap(tmp_path, monkeyp
     payload = response[0].text
 
     assert "timeout_s must be <= 60 seconds for public run_shell" in payload
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_watchdog_returns_handled_timeout(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(tools_module, "PUBLIC_TOOL_TIMEOUT_S", 0.01)
+    get_settings.cache_clear()
+
+    async def hanging_git_status(cwd: str = "."):  # noqa: ARG001
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(tools_module, "git_status", hanging_git_status)
+
+    response = await build_mcp().call_tool("git_status_tool", {"cwd": "."})
+    payload = response[0].text
+
+    assert "git_status_tool exceeded 0.01 second public tool timeout" in payload
+
+
+def test_rest_tool_watchdog_returns_timeout(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    monkeypatch.setattr(http_app_module, "PUBLIC_TOOL_TIMEOUT_S", 0.01)
+    get_settings.cache_clear()
+
+    async def hanging_git_status(cwd: str = "."):  # noqa: ARG001
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(http_app_module, "git_status", hanging_git_status)
+
+    response = TestClient(build_http_app()).post("/tools/git/status", json={"cwd": "."})
+
+    assert response.status_code == 504
+    assert response.json()["error"] == "tool_timeout"
 
 
 def test_public_run_shell_timeout_caps_omitted_default(tmp_path, monkeypatch):

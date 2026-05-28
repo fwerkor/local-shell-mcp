@@ -20,7 +20,7 @@ async def grep(query: str, cwd: str = ".", glob: str | None = None, regex: bool 
         args.extend(["--glob", glob])
     args.append(query)
     cmd = " ".join(shlex.quote(x) for x in args)
-    result = await run_shell(cmd, cwd=cwd, timeout_s=120, max_output_bytes=1_000_000)
+    result = await run_shell(cmd, cwd=cwd, timeout_s=60, max_output_bytes=1_000_000)
     matches = []
     for line in result.stdout.splitlines():
         try:

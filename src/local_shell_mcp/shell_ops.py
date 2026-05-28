@@ -110,6 +110,10 @@ async def run_shell(command: str, cwd: str = ".", timeout_s: int | None = None, 
             stdout_b, stderr_b = b"", b"Timed out while starting subprocess"
         else:
             stdout_b, stderr_b = await _terminate_process_group(proc)
+    except asyncio.CancelledError:
+        if proc is not None:
+            await asyncio.shield(_terminate_process_group(proc))
+        raise
 
     stdout = stdout_b.decode(errors="replace")
     stderr = stderr_b.decode(errors="replace")
