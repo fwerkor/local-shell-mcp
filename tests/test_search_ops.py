@@ -21,6 +21,21 @@ async def test_tree_reports_existing_directory(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_tree_clamps_entries_without_sorting_entire_tree(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_TREE_ENTRIES", "3")
+    get_settings.cache_clear()
+    for idx in range(10):
+        (tmp_path / f"file-{idx}.txt").write_text("x", encoding="utf-8")
+
+    result = await tree(".", max_entries=100)
+
+    assert result["count"] == 3
+    assert len(result["entries"]) == 3
+    assert result["truncated"] is True
+
+
+@pytest.mark.asyncio
 async def test_tree_returns_context_for_missing_directory(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     get_settings.cache_clear()

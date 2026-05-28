@@ -19,6 +19,40 @@ def workspace_root() -> Path:
     return get_settings().workspace_root.resolve()
 
 
+def temp_dir() -> Path:
+    path = get_settings().state_dir / "tmp"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def prune_temp_dir() -> None:
+    settings = get_settings()
+    path = temp_dir()
+    try:
+        files = [item for item in path.iterdir() if item.is_file()]
+    except OSError:
+        return
+
+    entries: list[tuple[float, int, Path]] = []
+    for item in files:
+        try:
+            stat = item.stat()
+        except OSError:
+            continue
+        entries.append((stat.st_mtime, stat.st_size, item))
+
+    entries.sort(reverse=True)
+    total_bytes = 0
+    for index, (_, size, item) in enumerate(entries):
+        total_bytes += size
+        if index < settings.max_tmp_files and total_bytes <= settings.max_tmp_bytes:
+            continue
+        try:
+            item.unlink()
+        except OSError:
+            continue
+
+
 def resolve_path(path: str | Path, *, must_exist: bool = False, allow_missing_parent: bool = True) -> Path:
     """Resolve a path, optionally restricting it to workspace_root.
 
@@ -32,8 +66,11 @@ def resolve_path(path: str | Path, *, must_exist: bool = False, allow_missing_pa
         raw = root / raw
     resolved = raw.resolve(strict=False)
 
-    if not settings.allow_full_container and not str(resolved).startswith(str(root)):
-        raise ValueError(f"Path escapes workspace: {path}")
+    if not settings.allow_full_container:
+        try:
+            resolved.relative_to(root)
+        except ValueError as exc:
+            raise ValueError(f"Path escapes workspace: {path}") from exc
 
     lower = str(resolved).lower()
     for denied in settings.path_denylist:
@@ -63,7 +100,7 @@ def missing_path_context(path: str | Path, *, max_entries: int = 50) -> dict:
 
     if nearest and nearest.is_dir():
         limit = max(0, max_entries)
-        for child in sorted(nearest.iterdir()):
+        for child in nearest.iterdir():
             if child.name == ".git":
                 continue
             if len(entries) >= limit:
@@ -81,13 +118,15 @@ def missing_path_context(path: str | Path, *, max_entries: int = 50) -> dict:
 
 
 def list_dir(path: str = ".", recursive: bool = False, max_entries: int = 500) -> list[dict]:
+    settings = get_settings()
     base = resolve_path(path, must_exist=True)
     if not base.is_dir():
         raise NotADirectoryError(str(base))
     out: list[dict] = []
+    limit = max(1, min(max_entries, settings.max_directory_entries))
     iterator = base.rglob("*") if recursive else base.iterdir()
     for item in iterator:
-        if len(out) >= max_entries:
+        if len(out) >= limit:
             break
         try:
             stat = item.stat()
@@ -105,13 +144,15 @@ def list_dir(path: str = ".", recursive: bool = False, max_entries: int = 500) -
 
 
 def glob_paths(pattern: str, cwd: str = ".", max_results: int = 500) -> list[str]:
+    settings = get_settings()
     base = resolve_path(cwd, must_exist=True)
     results: list[str] = []
+    limit = max(1, min(max_results, settings.max_glob_results))
     for item in base.rglob("*"):
         rel = str(item.relative_to(base))
         if fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(item.name, pattern):
             results.append(relative_display(item))
-            if len(results) >= max_results:
+            if len(results) >= limit:
                 break
     return results
 
@@ -145,7 +186,8 @@ def _binary_metadata(p: Path, size: int, preview: str | None = None, preview_byt
     }
     if preview:
         limit = max(0, min(preview_bytes, BINARY_PREVIEW_BYTES))
-        data = p.read_bytes()[:limit]
+        with p.open("rb") as fh:
+            data = fh.read(limit)
         if preview == "hex":
             result["preview"] = binascii.hexlify(data).decode("ascii")
             result["preview_encoding"] = "hex"
@@ -217,17 +259,20 @@ def write_text(path: str, content: str, overwrite: bool = True) -> dict:
     if p.exists() and not overwrite:
         raise FileExistsError(str(p))
     p.parent.mkdir(parents=True, exist_ok=True)
-    before = p.read_text(errors="replace") if p.exists() else None
+    created = not p.exists()
     p.write_text(content, encoding="utf-8")
     return {
         "path": relative_display(p),
         "bytes": len(data),
-        "created": before is None,
+        "created": created,
     }
 
 
 def edit_text(path: str, old: str, new: str, replace_all: bool = False) -> dict:
+    settings = get_settings()
     p = resolve_path(path, must_exist=True)
+    if p.stat().st_size > settings.max_file_write_bytes:
+        raise ValueError(f"Refusing to edit {p.stat().st_size} bytes; max is {settings.max_file_write_bytes}")
     _assert_text_file(p)
     text = p.read_text(encoding="utf-8")
     count = text.count(old)
@@ -236,12 +281,18 @@ def edit_text(path: str, old: str, new: str, replace_all: bool = False) -> dict:
     if not replace_all and count > 1:
         raise ValueError(f"old text occurs {count} times; set replace_all=true or provide more context")
     updated = text.replace(old, new) if replace_all else text.replace(old, new, 1)
+    updated_bytes = len(updated.encode("utf-8"))
+    if updated_bytes > settings.max_file_write_bytes:
+        raise ValueError(f"Refusing to write {updated_bytes} bytes; max is {settings.max_file_write_bytes}")
     p.write_text(updated, encoding="utf-8")
     return {"path": relative_display(p), "replacements": count if replace_all else 1}
 
 
 def multi_edit_text(path: str, edits: list[dict]) -> dict:
+    settings = get_settings()
     p = resolve_path(path, must_exist=True)
+    if p.stat().st_size > settings.max_file_write_bytes:
+        raise ValueError(f"Refusing to edit {p.stat().st_size} bytes; max is {settings.max_file_write_bytes}")
     _assert_text_file(p)
     text = p.read_text(encoding="utf-8")
     total = 0
@@ -256,6 +307,9 @@ def multi_edit_text(path: str, edits: list[dict]) -> dict:
             raise ValueError(f"old text occurs {count} times: {old[:80]!r}")
         text = text.replace(old, new) if replace_all else text.replace(old, new, 1)
         total += count if replace_all else 1
+    updated_bytes = len(text.encode("utf-8"))
+    if updated_bytes > settings.max_file_write_bytes:
+        raise ValueError(f"Refusing to write {updated_bytes} bytes; max is {settings.max_file_write_bytes}")
     p.write_text(text, encoding="utf-8")
     return {"path": relative_display(p), "replacements": total}
 

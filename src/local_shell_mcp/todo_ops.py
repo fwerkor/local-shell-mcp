@@ -17,10 +17,17 @@ def todo_read() -> dict:
     path = _todo_path()
     if not path.exists():
         return {"todos": []}
+    settings = get_settings()
+    size = path.stat().st_size
+    if size > settings.max_todo_bytes:
+        raise ValueError(f"Refusing to read {size} todo bytes; max is {settings.max_todo_bytes}")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def todo_write(todos: list[dict]) -> dict:
+    settings = get_settings()
+    if len(todos) > settings.max_todos:
+        raise ValueError(f"Refusing to write {len(todos)} todos; max is {settings.max_todos}")
     normalized = []
     for idx, item in enumerate(todos):
         normalized.append(
@@ -32,5 +39,9 @@ def todo_write(todos: list[dict]) -> dict:
             }
         )
     payload = {"updated_at": time.time(), "todos": normalized}
-    _todo_path().write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    encoded = json.dumps(payload, ensure_ascii=False, indent=2)
+    encoded_bytes = len(encoded.encode("utf-8"))
+    if encoded_bytes > settings.max_todo_bytes:
+        raise ValueError(f"Refusing to write {encoded_bytes} todo bytes; max is {settings.max_todo_bytes}")
+    _todo_path().write_text(encoded, encoding="utf-8")
     return payload

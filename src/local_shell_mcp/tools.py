@@ -20,9 +20,11 @@ from .fs_ops import (
     list_dir,
     missing_path_context,
     multi_edit_text,
+    prune_temp_dir,
     read_text,
     relative_display,
     resolve_path,
+    temp_dir,
     write_text,
 )
 from .git_ops import (
@@ -95,19 +97,35 @@ def _sync(coro):  # noqa: ANN001
     return asyncio.get_event_loop().run_until_complete(coro)
 
 
+async def _to_thread(func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+    return await asyncio.to_thread(func, *args, **kwargs)
+
+
+def _assert_text_input_size(label: str, text: str, limit: int | None = None) -> None:
+    settings = get_settings()
+    max_bytes = limit or settings.max_file_write_bytes
+    size = len(text.encode("utf-8"))
+    if size > max_bytes:
+        raise ValueError(f"Refusing {label} of {size} bytes; max is {max_bytes}")
+
+
 async def _apply_patch_text(patch: str, cwd: str = ".") -> dict:
-    patch_path = resolve_path(f".local-shell-mcp/tmp/patch-{uuid.uuid4().hex}.diff")
+    _assert_text_input_size("patch", patch)
+    await _to_thread(prune_temp_dir)
+    patch_path = temp_dir() / f"patch-{uuid.uuid4().hex}.diff"
     patch_path.parent.mkdir(parents=True, exist_ok=True)
-    patch_path.write_text(patch, encoding="utf-8")
+    await _to_thread(patch_path.write_text, patch, encoding="utf-8")
     quoted = shlex.quote(str(patch_path))
     result = await run_shell(f"git apply --check {quoted} && git apply {quoted}", cwd=cwd, timeout_s=60, max_output_bytes=500_000)
     return {**result.model_dump(), "patch_path": relative_display(patch_path)}
 
 
 async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict:
-    path = resolve_path(f".local-shell-mcp/tmp/script-{uuid.uuid4().hex}.py")
+    _assert_text_input_size("Python script", code)
+    await _to_thread(prune_temp_dir)
+    path = temp_dir() / f"script-{uuid.uuid4().hex}.py"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(code, encoding="utf-8")
+    await _to_thread(path.write_text, code, encoding="utf-8")
     result = await run_shell(f"python3 {shlex.quote(str(path))}", cwd=cwd, timeout_s=public_run_shell_timeout(timeout_s), max_output_bytes=1_000_000)
     return {**result.model_dump(), "script_path": relative_display(path)}
 
@@ -202,27 +220,102 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
         tool.fn = wrapped
 
 
-async def _secret_scan(cwd: str = ".", glob: str | None = None, max_results: int = 200) -> dict:
+def _read_many_files_sync(
+    paths: list[str],
+    start_line: int | None = None,
+    end_line: int | None = None,
+    binary_preview: str | None = None,
+    binary_preview_bytes: int = 256,
+) -> dict:
+    settings = get_settings()
+    if len(paths) > settings.max_read_many_files:
+        raise ValueError(f"Refusing to read {len(paths)} files; max is {settings.max_read_many_files}")
+
+    files = []
+    total_content_bytes = 0
+    for path in paths:
+        item = read_text(path, start_line, end_line, binary_preview, binary_preview_bytes)
+        content = item.get("content")
+        if isinstance(content, str):
+            total_content_bytes += len(content.encode("utf-8"))
+        preview = item.get("preview")
+        if isinstance(preview, str):
+            total_content_bytes += len(preview.encode("utf-8"))
+        if total_content_bytes > settings.max_read_many_total_bytes:
+            raise ValueError(
+                f"Refusing to return {total_content_bytes} bytes from read_many_files; "
+                f"max is {settings.max_read_many_total_bytes}"
+            )
+        files.append(item)
+    return {"files": files, "total_content_bytes": total_content_bytes}
+
+
+def _secret_scan_sync(cwd: str = ".", glob: str | None = None, max_results: int = 200) -> dict:
     import re
 
+    settings = get_settings()
+    max_results = max(1, min(max_results, settings.max_grep_results))
     base = resolve_path(cwd, must_exist=True)
     findings = []
+    truncated_files = 0
     for path in base.rglob("*"):
         if ".git" in path.parts or not path.is_file():
             continue
         if glob and not path.match(glob):
             continue
         try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
+            data = read_text(str(path))
         except Exception:
             continue
+        if data.get("binary"):
+            continue
+        if data.get("truncated"):
+            truncated_files += 1
+        text = data.get("content") or ""
         for name, pattern in SECRET_PATTERNS.items():
             for match in re.finditer(pattern, text):
                 line = text.count("\n", 0, match.start()) + 1
                 findings.append({"type": name, "path": relative_display(path), "line": line})
                 if len(findings) >= max_results:
-                    return {"findings": findings, "truncated": True}
-    return {"findings": findings, "truncated": False}
+                    return {"findings": findings, "truncated": True, "truncated_files": truncated_files}
+    return {"findings": findings, "truncated": False, "truncated_files": truncated_files}
+
+
+async def _secret_scan(cwd: str = ".", glob: str | None = None, max_results: int = 200) -> dict:
+    return await _to_thread(_secret_scan_sync, cwd, glob, max_results)
+
+
+def _read_audit_tail_entries(lines: int = 100) -> dict:
+    settings = get_settings()
+    path = settings.audit_log_path
+    if not path.exists():
+        return {"entries": []}
+
+    line_limit = max(1, min(lines, 1000))
+    max_bytes = max(1, settings.max_audit_tail_bytes)
+    chunks: list[bytes] = []
+    bytes_read = 0
+    newline_count = 0
+    with path.open("rb") as fh:
+        fh.seek(0, 2)
+        position = fh.tell()
+        while position > 0 and bytes_read < max_bytes and newline_count <= line_limit:
+            read_size = min(8192, position, max_bytes - bytes_read)
+            position -= read_size
+            fh.seek(position)
+            chunk = fh.read(read_size)
+            chunks.append(chunk)
+            bytes_read += len(chunk)
+            newline_count += chunk.count(b"\n")
+
+    content = b"".join(reversed(chunks)).decode("utf-8", errors="replace").splitlines()[-line_limit:]
+    entries = []
+    for line in content:
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            entries.append({"raw": line})
+    return {"entries": entries, "bytes_read": bytes_read, "truncated_bytes": max(0, path.stat().st_size - bytes_read)}
 
 
 def build_mcp() -> FastMCP:
@@ -262,7 +355,7 @@ def build_mcp() -> FastMCP:
     async def fetch(id: str) -> str:
         """Fetch a workspace file by id returned from search."""
         try:
-            data = read_text(id)
+            data = await _to_thread(read_text, id)
             path = data.get("path") or id
             binary = bool(data.get("binary"))
             return json.dumps(
@@ -361,7 +454,7 @@ def build_mcp() -> FastMCP:
     async def list_files(path: str = ".", recursive: bool = False, max_entries: int = 500) -> dict:
         """List files and directories."""
         try:
-            return _ok(list_dir(path, recursive, max_entries))
+            return _ok(await _to_thread(list_dir, path, recursive, max_entries))
         except Exception as exc:
             return _handled_error(exc)
 
@@ -377,7 +470,7 @@ def build_mcp() -> FastMCP:
     async def glob_search(pattern: str, cwd: str = ".", max_results: int = 500) -> dict:
         """Find files by glob pattern."""
         try:
-            return _ok({"paths": glob_paths(pattern, cwd, max_results)})
+            return _ok({"paths": await _to_thread(glob_paths, pattern, cwd, max_results)})
         except Exception as exc:
             return _handled_error(exc)
 
@@ -399,7 +492,7 @@ def build_mcp() -> FastMCP:
     ) -> dict:
         """Read a UTF-8 text file, optionally by line range."""
         try:
-            return _ok(read_text(path, start_line, end_line, binary_preview, binary_preview_bytes))
+            return _ok(await _to_thread(read_text, path, start_line, end_line, binary_preview, binary_preview_bytes))
         except Exception as exc:
             return _handled_error(exc)
 
@@ -413,7 +506,16 @@ def build_mcp() -> FastMCP:
     ) -> dict:
         """Read multiple UTF-8 text files."""
         try:
-            return _ok({"files": [read_text(p, start_line, end_line, binary_preview, binary_preview_bytes) for p in paths]})
+            return _ok(
+                await _to_thread(
+                    _read_many_files_sync,
+                    paths,
+                    start_line,
+                    end_line,
+                    binary_preview,
+                    binary_preview_bytes,
+                )
+            )
         except Exception as exc:
             return _handled_error(exc)
 
@@ -421,7 +523,7 @@ def build_mcp() -> FastMCP:
     async def write_file(path: str, content: str, overwrite: bool = True) -> dict:
         """Write a UTF-8 text file."""
         try:
-            return _ok(write_text(path, content, overwrite))
+            return _ok(await _to_thread(write_text, path, content, overwrite))
         except Exception as exc:
             return _handled_error(exc)
 
@@ -429,7 +531,7 @@ def build_mcp() -> FastMCP:
     async def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> dict:
         """Replace exact text in a file. Use this for precise code edits."""
         try:
-            return _ok(edit_text(path, old, new, replace_all))
+            return _ok(await _to_thread(edit_text, path, old, new, replace_all))
         except Exception as exc:
             return _handled_error(exc)
 
@@ -437,7 +539,7 @@ def build_mcp() -> FastMCP:
     async def multi_edit_file(path: str, edits: list[dict]) -> dict:
         """Apply multiple exact-text edits to one file. Each edit has old, new, replace_all."""
         try:
-            return _ok(multi_edit_text(path, edits))
+            return _ok(await _to_thread(multi_edit_text, path, edits))
         except Exception as exc:
             return _handled_error(exc)
 
@@ -445,7 +547,7 @@ def build_mcp() -> FastMCP:
     async def delete_file_or_dir(path: str, recursive: bool = False) -> dict:
         """Delete a file or directory inside the controlled workspace/container."""
         try:
-            return _ok(delete_path(path, recursive))
+            return _ok(await _to_thread(delete_path, path, recursive))
         except Exception as exc:
             return _handled_error(exc)
 
@@ -565,7 +667,7 @@ def build_mcp() -> FastMCP:
     async def todo_read_tool() -> dict:
         """Read the agent todo list. Similar to Claude Code TodoRead."""
         try:
-            return _ok(todo_read())
+            return _ok(await _to_thread(todo_read))
         except Exception as exc:
             return _handled_error(exc)
 
@@ -573,7 +675,7 @@ def build_mcp() -> FastMCP:
     async def todo_write_tool(todos: list[dict]) -> dict:
         """Write the agent todo list. Each todo: id, content, status, priority."""
         try:
-            return _ok(todo_write(todos))
+            return _ok(await _to_thread(todo_write, todos))
         except Exception as exc:
             return _handled_error(exc)
 
@@ -629,17 +731,7 @@ def build_mcp() -> FastMCP:
     async def audit_tail(lines: int = 100) -> dict:
         """Read recent audit log entries."""
         try:
-            path = settings.audit_log_path
-            if not path.exists():
-                return _ok({"entries": []})
-            content = path.read_text(encoding="utf-8", errors="replace").splitlines()[-max(1, min(lines, 1000)) :]
-            entries = []
-            for line in content:
-                try:
-                    entries.append(json.loads(line))
-                except json.JSONDecodeError:
-                    entries.append({"raw": line})
-            return _ok({"entries": entries})
+            return _ok(await _to_thread(_read_audit_tail_entries, lines))
         except Exception as exc:
             return _handled_error(exc)
 

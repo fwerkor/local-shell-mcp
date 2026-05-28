@@ -60,6 +60,10 @@ def principal_dep(request: Request) -> Principal:
 PRINCIPAL_DEP = Depends(principal_dep)
 
 
+async def _blocking(func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+    return await asyncio.to_thread(func, *args, **kwargs)
+
+
 def build_http_app() -> FastAPI:
     app = FastAPI(title="local-shell-mcp REST API", version="0.1.0")
     settings = get_settings()
@@ -123,7 +127,7 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/list_files")
     async def api_list_files(body: dict, _: Principal = PRINCIPAL_DEP):
-        return list_dir(body.get("path", "."), body.get("recursive", False), body.get("max_entries", 500))
+        return await _blocking(list_dir, body.get("path", "."), body.get("recursive", False), body.get("max_entries", 500))
 
     @app.post("/tools/tree")
     async def api_tree(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -131,7 +135,7 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/glob")
     async def api_glob(body: dict, _: Principal = PRINCIPAL_DEP):
-        return {"paths": glob_paths(body["pattern"], body.get("cwd", "."), body.get("max_results", 500))}
+        return {"paths": await _blocking(glob_paths, body["pattern"], body.get("cwd", "."), body.get("max_results", 500))}
 
     @app.post("/tools/grep")
     async def api_grep(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -139,7 +143,8 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/read_file")
     async def api_read_file(body: dict, _: Principal = PRINCIPAL_DEP):
-        return read_text(
+        return await _blocking(
+            read_text,
             body["path"],
             body.get("start_line"),
             body.get("end_line"),
@@ -149,19 +154,19 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/write_file")
     async def api_write_file(body: dict, _: Principal = PRINCIPAL_DEP):
-        return write_text(body["path"], body["content"], body.get("overwrite", True))
+        return await _blocking(write_text, body["path"], body["content"], body.get("overwrite", True))
 
     @app.post("/tools/edit_file")
     async def api_edit_file(body: dict, _: Principal = PRINCIPAL_DEP):
-        return edit_text(body["path"], body["old"], body["new"], body.get("replace_all", False))
+        return await _blocking(edit_text, body["path"], body["old"], body["new"], body.get("replace_all", False))
 
     @app.post("/tools/multi_edit_file")
     async def api_multi_edit_file(body: dict, _: Principal = PRINCIPAL_DEP):
-        return multi_edit_text(body["path"], body["edits"])
+        return await _blocking(multi_edit_text, body["path"], body["edits"])
 
     @app.post("/tools/delete")
     async def api_delete(body: dict, _: Principal = PRINCIPAL_DEP):
-        return delete_path(body["path"], body.get("recursive", False))
+        return await _blocking(delete_path, body["path"], body.get("recursive", False))
 
     @app.post("/tools/git/status")
     async def api_git_status(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -213,11 +218,11 @@ def build_http_app() -> FastAPI:
 
     @app.get("/tools/todo")
     async def api_todo_read(_: Principal = PRINCIPAL_DEP):
-        return todo_read()
+        return await _blocking(todo_read)
 
     @app.post("/tools/todo")
     async def api_todo_write(body: dict, _: Principal = PRINCIPAL_DEP):
-        return todo_write(body.get("todos", []))
+        return await _blocking(todo_write, body.get("todos", []))
 
     @app.post("/tools/playwright/install")
     async def api_playwright_install(body: dict, _: Principal = PRINCIPAL_DEP):

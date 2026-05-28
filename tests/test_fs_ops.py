@@ -1,5 +1,6 @@
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -48,6 +49,21 @@ def test_read_text_binary_preview_is_explicit_and_limited(tmp_path, monkeypatch)
     assert result["preview_bytes"] == 2
 
 
+def test_binary_preview_does_not_read_entire_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    (tmp_path / "blob.bin").write_bytes(b"\x00\x01\x02\x03\x04")
+
+    def fail_read_bytes(self):  # noqa: ANN001, ARG001
+        raise AssertionError("read_bytes should not be used for bounded previews")
+
+    monkeypatch.setattr(Path, "read_bytes", fail_read_bytes)
+
+    result = read_text("blob.bin", binary_preview="hex", binary_preview_bytes=2)
+
+    assert result["preview"] == "0001"
+
+
 def test_read_text_reports_original_size_and_truncation(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_FILE_READ_BYTES", "5")
@@ -61,6 +77,32 @@ def test_read_text_reports_original_size_and_truncation(tmp_path, monkeypatch):
     assert result["truncated_bytes"] == 6
     assert result["truncated"] is True
     assert result["content"] == "hello"
+
+
+def test_write_text_does_not_read_existing_file_before_overwrite(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    (tmp_path / "existing.txt").write_text("old", encoding="utf-8")
+
+    def fail_read_text(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ARG001
+        raise AssertionError("write_text should not read old file contents")
+
+    monkeypatch.setattr(Path, "read_text", fail_read_text)
+
+    result = write_text("existing.txt", "new")
+
+    assert result["created"] is False
+    assert (tmp_path / "existing.txt").read_bytes().decode("utf-8") == "new"
+
+
+def test_edit_refuses_files_above_write_limit(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_FILE_WRITE_BYTES", "5")
+    get_settings.cache_clear()
+    (tmp_path / "large.txt").write_text("hello world", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Refusing to edit"):
+        edit_text("large.txt", "world", "mcp")
 
 
 def test_edits_refuse_binary_files(tmp_path, monkeypatch):
@@ -89,6 +131,20 @@ async def test_fetch_omits_binary_content_from_text_field(tmp_path, monkeypatch)
     assert payload["text"] == "Refusing to read binary file as text"
     assert payload["metadata"]["binary"] is True
     assert payload["metadata"]["bytes"] == 9
+
+
+@pytest.mark.asyncio
+async def test_read_many_files_rejects_too_many_files(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_READ_MANY_FILES", "1")
+    get_settings.cache_clear()
+    (tmp_path / "a.txt").write_text("a", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("b", encoding="utf-8")
+
+    response = await build_mcp().call_tool("read_many_files", {"paths": ["a.txt", "b.txt"]})
+    payload = response[0].text
+
+    assert "Refusing to read 2 files; max is 1" in payload
 
 
 def test_reject_path_escape(tmp_path, monkeypatch):

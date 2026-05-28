@@ -7,6 +7,7 @@ import shlex
 import signal
 import time
 import uuid
+from dataclasses import dataclass
 
 from .audit import audit
 from .fs_ops import relative_display, resolve_path
@@ -16,6 +17,29 @@ from .settings import get_settings
 PUBLIC_RUN_SHELL_TIMEOUT_CAP_S = 60
 GRACEFUL_TERMINATION_TIMEOUT_S = 5
 KILL_TERMINATION_TIMEOUT_S = 2
+READER_DRAIN_TIMEOUT_S = 2
+_COMMAND_SEMAPHORE: asyncio.Semaphore | None = None
+_COMMAND_SEMAPHORE_SIZE: int | None = None
+
+
+@dataclass
+class TailBuffer:
+    keep_bytes: int
+    data: bytearray
+    total_bytes: int = 0
+
+    def append(self, chunk: bytes) -> None:
+        if not chunk:
+            return
+        self.total_bytes += len(chunk)
+        self.data.extend(chunk)
+        overflow = len(self.data) - self.keep_bytes
+        if overflow > 0:
+            del self.data[:overflow]
+
+    @property
+    def truncated(self) -> bool:
+        return self.total_bytes > len(self.data)
 
 
 def check_command_policy(command: str) -> None:
@@ -38,13 +62,29 @@ def public_run_shell_timeout(timeout_s: int | None) -> int:
 
 
 def clamp_output(stdout: str, stderr: str, max_output_bytes: int | None = None) -> tuple[str, str, bool]:
-    settings = get_settings()
-    limit = max_output_bytes or settings.max_output_bytes
+    limit = _effective_output_limit(max_output_bytes)
     encoded_len = len(stdout.encode()) + len(stderr.encode())
     if encoded_len <= limit:
         return stdout, stderr, False
-    half = max(1024, limit // 2)
+    half = max(1, limit // 2)
     return stdout[-half:], stderr[-half:], True
+
+
+def _effective_output_limit(max_output_bytes: int | None = None) -> int:
+    settings = get_settings()
+    configured = max(1, settings.max_output_bytes)
+    if max_output_bytes is None:
+        return configured
+    return max(1, min(max_output_bytes, configured))
+
+
+def _command_semaphore() -> asyncio.Semaphore:
+    global _COMMAND_SEMAPHORE, _COMMAND_SEMAPHORE_SIZE
+    size = max(1, get_settings().max_concurrent_commands)
+    if _COMMAND_SEMAPHORE is None or size != _COMMAND_SEMAPHORE_SIZE:
+        _COMMAND_SEMAPHORE = asyncio.Semaphore(size)
+        _COMMAND_SEMAPHORE_SIZE = size
+    return _COMMAND_SEMAPHORE
 
 
 async def _spawn_process(command: str, cwd: str) -> asyncio.subprocess.Process:
@@ -60,22 +100,33 @@ async def _spawn_process(command: str, cwd: str) -> asyncio.subprocess.Process:
     )
 
 
-async def _wait_for_process_exit(proc: asyncio.subprocess.Process, timeout_s: int) -> tuple[bytes, bytes] | None:
+async def _read_stream_tail(stream: asyncio.StreamReader | None, tail: TailBuffer) -> None:
+    if stream is None:
+        return
+    while True:
+        chunk = await stream.read(65536)
+        if not chunk:
+            return
+        tail.append(chunk)
+
+
+async def _wait_for_process_exit(proc: asyncio.subprocess.Process, timeout_s: int) -> bool:
     try:
-        return await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+        await asyncio.wait_for(proc.wait(), timeout=timeout_s)
+        return True
     except TimeoutError:
-        return None
+        return False
 
 
-async def _terminate_process_group(proc: asyncio.subprocess.Process) -> tuple[bytes, bytes]:
+async def _terminate_process_group(proc: asyncio.subprocess.Process) -> str:
     try:
         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
     except Exception:
         proc.terminate()
 
     output = await _wait_for_process_exit(proc, GRACEFUL_TERMINATION_TIMEOUT_S)
-    if output is not None:
-        return output
+    if output:
+        return ""
 
     try:
         os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
@@ -83,9 +134,18 @@ async def _terminate_process_group(proc: asyncio.subprocess.Process) -> tuple[by
         proc.kill()
 
     output = await _wait_for_process_exit(proc, KILL_TERMINATION_TIMEOUT_S)
-    if output is not None:
-        return output
-    return b"", b"Process did not exit after SIGKILL"
+    if output:
+        return ""
+    return "Process did not exit after SIGKILL"
+
+
+async def _finish_reader_tasks(tasks: list[asyncio.Task[None]], timeout_s: float = READER_DRAIN_TIMEOUT_S) -> None:
+    try:
+        await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout_s)
+    except TimeoutError:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def run_shell(command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None) -> CommandResult:
@@ -93,31 +153,63 @@ async def run_shell(command: str, cwd: str = ".", timeout_s: int | None = None, 
     resolved_cwd = resolve_path(cwd, must_exist=True)
     start = time.time()
     audit("run_shell_start", command=command, cwd=str(resolved_cwd))
+    timeout = clamp_timeout(timeout_s)
 
     proc: asyncio.subprocess.Process | None = None
     timed_out = False
+    termination_error = ""
+    output_limit = _effective_output_limit(max_output_bytes)
+    per_stream_limit = max(1, output_limit // 2)
+    stdout_tail = TailBuffer(per_stream_limit, bytearray())
+    stderr_tail = TailBuffer(per_stream_limit, bytearray())
+    reader_tasks: list[asyncio.Task[None]] = []
 
-    async def spawn_and_communicate() -> tuple[bytes, bytes]:
+    async def spawn_and_wait() -> None:
         nonlocal proc
         proc = await _spawn_process(command, str(resolved_cwd))
-        return await proc.communicate()
+        reader_tasks.extend(
+            [
+                asyncio.create_task(_read_stream_tail(proc.stdout, stdout_tail)),
+                asyncio.create_task(_read_stream_tail(proc.stderr, stderr_tail)),
+            ]
+        )
+        await proc.wait()
 
+    semaphore = _command_semaphore()
+    acquired = False
     try:
-        stdout_b, stderr_b = await asyncio.wait_for(spawn_and_communicate(), timeout=clamp_timeout(timeout_s))
-    except TimeoutError:
-        timed_out = True
-        if proc is None:
-            stdout_b, stderr_b = b"", b"Timed out while starting subprocess"
-        else:
-            stdout_b, stderr_b = await _terminate_process_group(proc)
-    except asyncio.CancelledError:
-        if proc is not None:
-            await asyncio.shield(_terminate_process_group(proc))
-        raise
+        try:
+            await asyncio.wait_for(semaphore.acquire(), timeout=timeout)
+            acquired = True
+            elapsed = max(0.0, time.time() - start)
+            remaining_timeout = max(0.001, timeout - elapsed)
+            await asyncio.wait_for(spawn_and_wait(), timeout=remaining_timeout)
+        except TimeoutError:
+            timed_out = True
+            if proc is None:
+                reader_tasks = []
+                termination_error = "Timed out while starting subprocess"
+            else:
+                termination_error = await _terminate_process_group(proc)
+        except asyncio.CancelledError:
+            if proc is not None:
+                await asyncio.shield(_terminate_process_group(proc))
+            raise
+    finally:
+        if acquired:
+            semaphore.release()
 
+    if reader_tasks:
+        await _finish_reader_tasks(reader_tasks)
+
+    if termination_error:
+        stderr_tail.append(termination_error.encode())
+
+    stdout_b = bytes(stdout_tail.data)
+    stderr_b = bytes(stderr_tail.data)
     stdout = stdout_b.decode(errors="replace")
     stderr = stderr_b.decode(errors="replace")
-    stdout, stderr, truncated = clamp_output(stdout, stderr, max_output_bytes)
+    truncated = stdout_tail.truncated or stderr_tail.truncated
     duration_ms = int((time.time() - start) * 1000)
     result = CommandResult(
         ok=(proc is not None and proc.returncode == 0 and not timed_out),
@@ -158,6 +250,10 @@ async def tmux(args: list[str], timeout_s: int = 10) -> CommandResult:
 
 async def start_shell(cwd: str = ".", name: str | None = None, command: str | None = None) -> dict:
     resolved_cwd = resolve_path(cwd, must_exist=True)
+    sessions = await list_shells()
+    max_sessions = max(1, get_settings().max_tmux_sessions)
+    if len(sessions.get("sessions", [])) >= max_sessions:
+        raise RuntimeError(f"Refusing to start more than {max_sessions} tmux sessions")
     session = _tmux_session_name(name)
     initial = command or get_settings().shell_executable
     check_command_policy(initial)

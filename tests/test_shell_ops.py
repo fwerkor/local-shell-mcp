@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -57,6 +58,42 @@ def test_rest_tool_watchdog_returns_timeout(tmp_path, monkeypatch):
     assert response.json()["error"] == "tool_timeout"
 
 
+def test_rest_tool_watchdog_times_out_sync_tool(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    monkeypatch.setattr(http_app_module, "PUBLIC_TOOL_TIMEOUT_S", 0.01)
+    get_settings.cache_clear()
+
+    def blocking_list_dir(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
+        time.sleep(0.2)
+        return []
+
+    monkeypatch.setattr(http_app_module, "list_dir", blocking_list_dir)
+
+    response = TestClient(build_http_app()).post("/tools/list_files", json={"path": "."})
+
+    assert response.status_code == 504
+    assert response.json()["error"] == "tool_timeout"
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_watchdog_times_out_sync_tool(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(tools_module, "PUBLIC_TOOL_TIMEOUT_S", 0.01)
+    get_settings.cache_clear()
+
+    def blocking_list_dir(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
+        time.sleep(0.2)
+        return []
+
+    monkeypatch.setattr(tools_module, "list_dir", blocking_list_dir)
+
+    response = await build_mcp().call_tool("list_files", {"path": "."})
+    payload = response[0].text
+
+    assert "list_files exceeded 0.01 second public tool timeout" in payload
+
+
 def test_public_run_shell_timeout_caps_omitted_default(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_DEFAULT_TIMEOUT_S", "3600")
@@ -93,6 +130,33 @@ async def test_run_shell_fast_command_succeeds(tmp_path, monkeypatch):
     assert result.ok is True
     assert result.timed_out is False
     assert "ok" in result.stdout
+
+
+@pytest.mark.asyncio
+async def test_run_shell_streams_and_bounds_large_output(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+
+    result = await run_shell(
+        "python3 -c 'import sys; sys.stdout.write(\"x\" * 200000)'",
+        timeout_s=5,
+        max_output_bytes=1000,
+    )
+
+    assert result.ok is True
+    assert result.truncated is True
+    assert len(result.stdout.encode()) <= 500
+
+
+@pytest.mark.asyncio
+async def test_run_shell_timeout_marks_result_and_cleans_up(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+
+    result = await run_shell("sleep 30", timeout_s=1)
+
+    assert result.ok is False
+    assert result.timed_out is True
 
 
 @pytest.mark.asyncio

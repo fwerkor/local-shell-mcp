@@ -49,6 +49,19 @@ class Settings(BaseSettings):
     max_file_read_bytes: int = 512_000
     max_file_write_bytes: int = 5_000_000
     max_grep_results: int = 200
+    max_directory_entries: int = 5_000
+    max_glob_results: int = 5_000
+    max_tree_entries: int = 5_000
+    max_read_many_files: int = 100
+    max_read_many_total_bytes: int = 5_000_000
+    max_todos: int = 1_000
+    max_todo_bytes: int = 1_000_000
+    max_audit_tail_bytes: int = 1_000_000
+    max_audit_log_bytes: int = 20_000_000
+    max_tmp_files: int = 500
+    max_tmp_bytes: int = 50_000_000
+    max_concurrent_commands: int = 4
+    max_tmux_sessions: int = 16
 
     shell_executable: str = "/bin/bash"
     tmux_bin: str = "tmux"

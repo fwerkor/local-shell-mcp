@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import shlex
 
@@ -51,7 +52,8 @@ async def grep(query: str, cwd: str = ".", glob: str | None = None, regex: bool 
     }
 
 
-async def tree(cwd: str = ".", depth: int = 3, max_entries: int = 500) -> dict:
+def tree_sync(cwd: str = ".", depth: int = 3, max_entries: int = 500) -> dict:
+    settings = get_settings()
     base = resolve_path(cwd)
     if not base.exists():
         context = missing_path_context(base, max_entries=min(max_entries, 100))
@@ -79,25 +81,46 @@ async def tree(cwd: str = ".", depth: int = 3, max_entries: int = 500) -> dict:
         }
 
     depth = max(0, min(depth, 10))
+    limit = max(1, min(max_entries, settings.max_tree_entries))
     rows: list[str] = []
     count = 0
-    for path in sorted(base.rglob("*")):
-        rel = path.relative_to(base)
-        if len(rel.parts) > depth:
-            continue
-        if ".git" in rel.parts:
-            continue
-        indent = "  " * (len(rel.parts) - 1)
-        suffix = "/" if path.is_dir() else ""
-        rows.append(f"{indent}{path.name}{suffix}")
-        count += 1
-        if count >= max_entries:
-            break
+    truncated = False
+
+    def walk(directory, current_depth: int) -> None:  # noqa: ANN001
+        nonlocal count, truncated
+        if current_depth >= depth or count >= limit:
+            return
+        try:
+            iterator = directory.iterdir()
+        except OSError:
+            return
+        for path in iterator:
+            if path.name == ".git":
+                continue
+            if count >= limit:
+                truncated = True
+                return
+            rel = path.relative_to(base)
+            indent = "  " * (len(rel.parts) - 1)
+            suffix = "/" if path.is_dir() else ""
+            rows.append(f"{indent}{path.name}{suffix}")
+            count += 1
+            if path.is_dir():
+                walk(path, current_depth + 1)
+            if count >= limit:
+                truncated = True
+                return
+
+    walk(base, 0)
     return {
         "root": str(base),
         "exists": True,
         "is_directory": True,
         "entries": rows,
         "count": count,
-        "truncated": count >= max_entries,
+        "truncated": truncated,
     }
+
+
+async def tree(cwd: str = ".", depth: int = 3, max_entries: int = 500) -> dict:
+    return await asyncio.to_thread(tree_sync, cwd, depth, max_entries)
