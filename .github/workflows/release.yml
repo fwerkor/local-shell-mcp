@@ -121,11 +121,11 @@ jobs:
             binary: local-shell-mcp
             archive: tar.gz
           - artifact: macos-x86_64
-            runner: macos-13
+            runner: macos-15-intel
             binary: local-shell-mcp
             archive: tar.gz
           - artifact: macos-aarch64
-            runner: macos-14
+            runner: macos-15
             binary: local-shell-mcp
             archive: tar.gz
           - artifact: windows-x86_64
