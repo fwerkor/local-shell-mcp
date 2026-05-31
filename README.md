@@ -99,6 +99,7 @@ Default protections:
 - Sensitive path fragments are denied by default.
 - Host-control fragments such as `/var/run/docker.sock` are denied by default.
 - Audit logs are written to `/workspace/.local-shell-mcp/audit.jsonl`.
+- Docker deployments persist GitHub CLI, Git HTTPS, GitCode, SSH, `.netrc`, and GPG credentials in `/persist/credentials` by default.
 
 When `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER=true`, the server intentionally gives
 the AI full control of the container: path and command denylists are disabled,
@@ -113,6 +114,7 @@ Hard rules:
 4. Do not put long-lived GitHub PATs in environment variables visible to the model.
 5. Prefer a single-repository deploy key or short-lived GitHub App token.
 6. Run this in a disposable container or VM.
+7. Treat the `local-shell-mcp-credentials` Docker volume as sensitive. It may contain access tokens and private keys.
 
 ## Quick Start
 
@@ -138,6 +140,14 @@ Run the published Docker image:
 mkdir -p workspaces/default
 docker compose up -d
 ```
+
+The Compose file persists `/workspace` and also creates a separate
+`local-shell-mcp-credentials` volume for developer login state. Docker
+deployments link common Git, GitHub CLI, SSH, `.netrc`, and GPG paths into
+`/persist/credentials` on startup, so GitHub and GitCode authentication survives
+image updates and container recreation. Set
+`LOCAL_SHELL_MCP_PERSISTENT_CREDENTIALS=false` for a fully disposable
+authentication state.
 
 Start the Cloudflare Tunnel sidecar too:
 

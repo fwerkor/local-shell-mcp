@@ -15,8 +15,11 @@ services:
       LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN: "${LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN:-}"
       LOCAL_SHELL_MCP_OAUTH_JWT_SECRET: "${LOCAL_SHELL_MCP_OAUTH_JWT_SECRET:-dev-change-me}"
       LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER: "${LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER:-false}"
+      LOCAL_SHELL_MCP_PERSISTENT_CREDENTIALS: "${LOCAL_SHELL_MCP_PERSISTENT_CREDENTIALS:-true}"
+      LOCAL_SHELL_MCP_CREDENTIALS_DIR: "/persist/credentials"
     volumes:
       - ./workspaces/default:/workspace
+      - local-shell-mcp-credentials:/persist/credentials
       # Optional: mount an ssh-agent socket instead of private keys.
       # - ${SSH_AUTH_SOCK}:${SSH_AUTH_SOCK}
     # environment:
@@ -31,3 +34,6 @@ services:
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:
       - local-shell-mcp
+
+volumes:
+  local-shell-mcp-credentials:

@@ -6,7 +6,9 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     LOCAL_SHELL_MCP_WORKSPACE_ROOT=/workspace \
     LOCAL_SHELL_MCP_HOST=0.0.0.0 \
-    LOCAL_SHELL_MCP_PORT=8765
+    LOCAL_SHELL_MCP_PORT=8765 \
+    LOCAL_SHELL_MCP_PERSISTENT_CREDENTIALS=true \
+    LOCAL_SHELL_MCP_CREDENTIALS_DIR=/persist/credentials
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
@@ -80,12 +82,14 @@ RUN pip install --no-cache-dir -e . "playwright==${PLAYWRIGHT_VERSION}"
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN useradd -m -u 10001 agent \
-  && mkdir -p /workspace /workspace/.local-shell-mcp \
+  && mkdir -p /workspace /workspace/.local-shell-mcp /persist/credentials \
   && echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent-nopasswd \
   && chmod 0440 /etc/sudoers.d/agent-nopasswd \
   && chown -R agent:agent /workspace /app \
   && chmod +x /usr/local/bin/docker-entrypoint.sh
 WORKDIR /workspace
+
+VOLUME ["/workspace", "/persist/credentials"]
 
 EXPOSE 8765
 ENTRYPOINT ["docker-entrypoint.sh"]
