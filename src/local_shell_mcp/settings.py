@@ -77,12 +77,7 @@ class Settings(BaseSettings):
     python_bin: str = "python3"
 
     # Authentication. OAuth is the default for ChatGPT custom connectors.
-    # "cloudflare_access" is kept for legacy deployments only.
-    auth_mode: Literal["none", "oauth", "cloudflare_access"] = "oauth"
-    cf_access_team_domain: str | None = None  # e.g. your-team.cloudflareaccess.com
-    cf_access_audience: str | None = None
-    cf_access_allowed_emails: list[str] = Field(default_factory=list)
-    cf_access_allowed_email_domains: list[str] = Field(default_factory=list)
+    auth_mode: Literal["none", "oauth"] = "oauth"
     auth_bypass_localhost: bool = True
     require_auth_for_mcp_discovery: bool = False
 
@@ -128,7 +123,7 @@ class Settings(BaseSettings):
     def expand_path(cls, value: str | Path) -> Path:
         return Path(os.path.expandvars(os.path.expanduser(str(value)))).resolve()
 
-    @field_validator("cf_access_allowed_emails", "cf_access_allowed_email_domains", "command_denylist", "path_denylist", mode="before")
+    @field_validator("command_denylist", "path_denylist", mode="before")
     @classmethod
     def split_csv_fields(cls, value):  # noqa: ANN001
         return _split_csv(value)

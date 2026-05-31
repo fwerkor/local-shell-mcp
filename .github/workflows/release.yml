@@ -133,10 +133,6 @@ jobs:
             runner: windows-latest
             binary: local-shell-mcp.exe
             archive: zip
-          - artifact: windows-aarch64
-            runner: windows-11-arm
-            binary: local-shell-mcp.exe
-            archive: zip
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
@@ -150,7 +146,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e . pyinstaller 'mcp[cli]'
+          python -m pip install -e . pyinstaller typer
           pyinstaller \
             --clean \
             --onefile \
@@ -340,7 +336,6 @@ jobs:
           macos-x86_64
           macos-aarch64
           windows-x86_64
-          windows-aarch64
           \`\`\`
 
           Start without Docker:

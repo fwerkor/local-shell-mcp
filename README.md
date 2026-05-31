@@ -177,7 +177,7 @@ On Windows PowerShell:
 .\local-shell-mcp.exe --mode mcp
 ```
 
-For binary deployments, set `LOCAL_SHELL_MCP_WORKSPACE_ROOT` to the directory you want the tool to control. The binary includes the Python server and default OAuth dependencies, but not system tools such as Git, tmux, shells, compilers, LibreOffice, or Playwright browser binaries; those are taken from the host system. Cloudflare Access JWT verification requires the optional `cloudflare-access` Python extra because it needs RSA crypto support; the prebuilt all-in-one binaries are optimized for the default OAuth mode.
+For binary deployments, set `LOCAL_SHELL_MCP_WORKSPACE_ROOT` to the directory you want the tool to control. The binary includes the Python server and default OAuth dependencies, but not system tools such as Git, tmux, shells, compilers, LibreOffice, or Playwright browser binaries; those are taken from the host system.
 
 Start the Cloudflare Tunnel sidecar too:
 
@@ -360,7 +360,7 @@ Environment variables use the `LOCAL_SHELL_MCP_` prefix.
 | Variable | Default | Meaning |
 |---|---:|---|
 | `LOCAL_SHELL_MCP_WORKSPACE_ROOT` | `/workspace` | Root for file and command operations |
-| `LOCAL_SHELL_MCP_AUTH_MODE` | `oauth` | `oauth`, `cloudflare_access`, or `none` |
+| `LOCAL_SHELL_MCP_AUTH_MODE` | `oauth` | `oauth` or `none` |
 | `LOCAL_SHELL_MCP_PUBLIC_BASE_URL` | unset | Public HTTPS origin used for OAuth metadata |
 | `LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN` | unset | PIN required to approve OAuth authorization |
 | `LOCAL_SHELL_MCP_OAUTH_JWT_SECRET` | `dev-change-me` | Secret used to sign bearer tokens |
