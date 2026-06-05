@@ -1,0 +1,138 @@
+{
+  "name": "local-shell-mcp-vscode",
+  "displayName": "local-shell-mcp",
+  "description": "Start and manage local-shell-mcp from VS Code so ChatGPT can collaborate on the current workspace through MCP.",
+  "version": "2.1.0",
+  "publisher": "fwerkor",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fwerkor/local-shell-mcp"
+  },
+  "homepage": "https://github.com/fwerkor/local-shell-mcp",
+  "bugs": {
+    "url": "https://github.com/fwerkor/local-shell-mcp/issues"
+  },
+  "engines": {
+    "vscode": "^1.92.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "mcp",
+    "chatgpt",
+    "shell",
+    "coding-agent",
+    "codex"
+  ],
+  "activationEvents": [
+    "onCommand:local-shell-mcp.startServer",
+    "onCommand:local-shell-mcp.stopServer",
+    "onCommand:local-shell-mcp.restartServer",
+    "onCommand:local-shell-mcp.showStatus",
+    "onCommand:local-shell-mcp.copyMcpUrl",
+    "onCommand:local-shell-mcp.copySetupPrompt",
+    "onCommand:local-shell-mcp.openGuide"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "local-shell-mcp.startServer",
+        "title": "local-shell-mcp: Start Server"
+      },
+      {
+        "command": "local-shell-mcp.stopServer",
+        "title": "local-shell-mcp: Stop Server"
+      },
+      {
+        "command": "local-shell-mcp.restartServer",
+        "title": "local-shell-mcp: Restart Server"
+      },
+      {
+        "command": "local-shell-mcp.showStatus",
+        "title": "local-shell-mcp: Show Server Status"
+      },
+      {
+        "command": "local-shell-mcp.copyMcpUrl",
+        "title": "local-shell-mcp: Copy MCP URL"
+      },
+      {
+        "command": "local-shell-mcp.copySetupPrompt",
+        "title": "local-shell-mcp: Copy ChatGPT Setup Prompt"
+      },
+      {
+        "command": "local-shell-mcp.openGuide",
+        "title": "local-shell-mcp: Open Guide"
+      }
+    ],
+    "configuration": {
+      "title": "local-shell-mcp",
+      "properties": {
+        "local-shell-mcp.executablePath": {
+          "type": "string",
+          "default": "local-shell-mcp",
+          "description": "Path to the local-shell-mcp executable. Use the binary from GitHub Releases or a command available on PATH."
+        },
+        "local-shell-mcp.host": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "Host passed to local-shell-mcp. Use 127.0.0.1 for local-only usage."
+        },
+        "local-shell-mcp.port": {
+          "type": "number",
+          "default": 8765,
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Port passed to local-shell-mcp."
+        },
+        "local-shell-mcp.workspaceRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Workspace root exposed to ChatGPT. Empty means the first VS Code workspace folder."
+        },
+        "local-shell-mcp.authMode": {
+          "type": "string",
+          "enum": [
+            "oauth",
+            "none"
+          ],
+          "default": "oauth",
+          "description": "Authentication mode. Use oauth for ChatGPT connector usage; none is only for trusted local testing."
+        },
+        "local-shell-mcp.publicBaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Externally reachable HTTPS origin, for example a tunnel URL. Empty uses the local http://host:port URL."
+        },
+        "local-shell-mcp.oauthAdminPin": {
+          "type": "string",
+          "default": "",
+          "description": "Optional OAuth admin PIN. Leave empty for local testing or set a value when exposing the server publicly."
+        },
+        "local-shell-mcp.allowFullContainer": {
+          "type": "boolean",
+          "default": false,
+          "description": "Set LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER. Keep disabled for direct host usage; enable only inside a disposable container."
+        },
+        "local-shell-mcp.extraEnv": {
+          "type": "object",
+          "default": {},
+          "description": "Extra environment variables passed to the local-shell-mcp process. Values are converted to strings."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package:vsix": "vsce package --no-dependencies --out ../dist/local-shell-mcp-vscode-${npm_package_version}.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "@types/vscode": "^1.92.0",
+    "@vscode/vsce": "3.6.2",
+    "typescript": "^5.5.4"
+  }
+}

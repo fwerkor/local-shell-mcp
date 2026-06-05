@@ -28,6 +28,21 @@ ChatGPT / MCP client
   tmux, ripgrep, and Playwright.
 - Audit log at `/workspace/.local-shell-mcp/audit.jsonl`.
 
+
+## VS Code extension
+
+`local-shell-mcp` also ships a VS Code extension package, `local-shell-mcp-vscode-<version>.vsix`, attached to GitHub Releases. The extension is a thin wrapper around the server: it starts `local-shell-mcp` for the current VS Code workspace, shows an output channel, checks `/healthz`, copies the MCP URL, and copies a ready-to-paste ChatGPT setup prompt.
+
+Basic usage:
+
+1. Install the `local-shell-mcp` executable from GitHub Releases or with `pipx install local-shell-mcp`.
+2. Install the `.vsix` file from the same release in VS Code.
+3. Open a project folder and run **local-shell-mcp: Start Server** from the command palette.
+4. Run **local-shell-mcp: Copy MCP URL** and paste the URL into ChatGPT's MCP connector setup.
+5. Run **local-shell-mcp: Copy ChatGPT Setup Prompt** when starting a coding session.
+
+For public ChatGPT access, expose the local server through an HTTPS tunnel and set `local-shell-mcp.publicBaseUrl` in VS Code settings. Keep `local-shell-mcp.allowFullContainer` disabled for direct host usage; enable it only inside a disposable container.
+
 ## Tools
 
 Read-only connector tools:

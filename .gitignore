@@ -15,3 +15,7 @@ workspaces/
 playwright-report/
 test-results/
 node_modules/
+# VS Code extension local build outputs
+vscode-extension/node_modules/
+vscode-extension/out/
+dist/

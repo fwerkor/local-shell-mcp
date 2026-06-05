@@ -29,6 +29,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   IMAGE_NAME: fwerkor/local-shell-mcp
   PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
 
 jobs:
   validate-release:
@@ -209,6 +210,54 @@ jobs:
             release/local-shell-mcp-${{ matrix.artifact }}.*
           if-no-files-found: error
 
+
+  build-vscode-extension:
+    name: Build VS Code extension
+    runs-on: ubuntu-latest
+    needs: validate-release
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: vscode-extension/package-lock.json
+
+      - name: Sync extension version from release tag
+        working-directory: vscode-extension
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          npm version "${VERSION}" --no-git-tag-version --allow-same-version
+
+      - name: Install extension dependencies
+        working-directory: vscode-extension
+        run: npm ci
+
+      - name: Compile extension
+        working-directory: vscode-extension
+        run: npm run compile
+
+      - name: Package VSIX
+        working-directory: vscode-extension
+        run: npm run package:vsix
+
+      - name: Generate VSIX checksum
+        shell: bash
+        run: |
+          cd dist
+          sha256sum local-shell-mcp-vscode-*.vsix > local-shell-mcp-vscode.sha256
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: vscode-extension
+          path: |
+            dist/local-shell-mcp-vscode-*.vsix
+            dist/local-shell-mcp-vscode.sha256
+          if-no-files-found: error
+
   publish-docker-platform:
     name: Publish Docker image (${{ matrix.platform }})
     needs: validate-release
@@ -297,6 +346,7 @@ jobs:
       - validate-release
       - build-python-package
       - build-binary
+      - build-vscode-extension
       - publish-docker-manifest
     steps:
       - uses: actions/checkout@v6
@@ -313,6 +363,12 @@ jobs:
           pattern: binary-*
           path: dist
           merge-multiple: true
+
+      - name: Download VS Code extension artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: vscode-extension
+          path: dist
 
       - name: Create combined checksums
         run: |
@@ -351,7 +407,13 @@ jobs:
           ./local-shell-mcp --mode mcp
           \`\`\`
 
-          Python package artifacts, executable archives, and SHA256 checksums are attached below.
+          VS Code extension download:
+
+          \`\`\`text
+          local-shell-mcp-vscode-${{ needs.validate-release.outputs.version }}.vsix
+          \`\`\`
+
+          Python package artifacts, executable archives, VS Code extension, and SHA256 checksums are attached below.
 
           Python package version in \`pyproject.toml\`: \`${{ needs.validate-release.outputs.version }}\`
           EOF
