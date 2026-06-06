@@ -13,6 +13,14 @@ DEFAULT_WORKSPACE_ROOT = Path("/workspace")
 DEFAULT_STATE_DIR = DEFAULT_WORKSPACE_ROOT / ".local-shell-mcp"
 DEFAULT_AUDIT_LOG_PATH = DEFAULT_STATE_DIR / "audit.jsonl"
 
+SENSITIVE_SETTING_KEYS = {
+    "cf_access_audience",
+    "cf_access_allowed_emails",
+    "cf_access_allowed_email_domains",
+    "oauth_admin_pin",
+    "oauth_jwt_secret",
+}
+
 
 def _split_csv(value: str | list[str] | None) -> list[str]:
     if value is None:
@@ -177,3 +185,17 @@ def get_settings() -> Settings:
     settings.state_dir.mkdir(parents=True, exist_ok=True)
     settings.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
     return settings
+
+
+def safe_settings_dump(settings: Settings | None = None) -> dict:
+    """Return settings for diagnostics without exposing credentials or auth secrets."""
+
+    data = (settings or get_settings()).model_dump(mode="json")
+    for key in SENSITIVE_SETTING_KEYS:
+        if key in data:
+            value = data[key]
+            if value in (None, "", []):
+                data[key] = value
+            else:
+                data[key] = "<redacted>"
+    return data

@@ -56,7 +56,7 @@ from .playwright_ops import (
     playwright_run_script,
 )
 from .search_ops import grep, tree
-from .settings import get_settings
+from .settings import get_settings, safe_settings_dump
 from .shell_ops import (
     kill_shell,
     list_shells,
@@ -385,7 +385,7 @@ async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict[st
 async def execute_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "environment_info":
         result = await run_shell("uname -a; echo '---'; id; echo '---'; pwd; echo '---'; python3 --version; git --version", cwd=".", timeout_s=10)
-        return {"settings": get_settings().model_dump(mode="json"), "probe": result.model_dump()}
+        return {"settings": safe_settings_dump(), "probe": result.model_dump()}
     if tool == "run_shell_tool":
         return (await public_run_shell(args["command"], args.get("cwd", "."), args.get("timeout_s"), args.get("max_output_bytes"))).model_dump()
     if tool == "run_python_tool":

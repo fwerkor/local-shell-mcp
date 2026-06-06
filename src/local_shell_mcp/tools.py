@@ -51,7 +51,7 @@ from .playwright_ops import (
 )
 from .remote import remote_manager
 from .search_ops import grep, tree
-from .settings import get_settings
+from .settings import get_settings, safe_settings_dump
 from .shell_ops import (
     PUBLIC_RUN_SHELL_TIMEOUT_CAP_S,
     kill_shell,
@@ -405,7 +405,7 @@ def build_mcp() -> FastMCP:
         """Return workspace, auth, policy, and basic environment information."""
         try:
             result = await run_shell("uname -a; echo '---'; id; echo '---'; pwd; echo '---'; python3 --version; git --version", cwd=".", timeout_s=10)
-            return _ok({"settings": settings.model_dump(mode="json"), "probe": result.model_dump()})
+            return _ok({"settings": safe_settings_dump(settings), "probe": result.model_dump()})
         except Exception as exc:
             return _handled_error(exc)
 
