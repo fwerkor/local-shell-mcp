@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib.metadata as importlib_metadata
 import os
+import re
 import secrets
 import shlex
 import socket
@@ -71,6 +73,54 @@ from .shell_ops import (
 REMOTE_JOIN_PATH = "/join"
 REMOTE_API_PREFIX = "/remote"
 REMOTE_WORKER_BUNDLE_PATH = "/remote/worker-bundle.tgz"
+REMOTE_WORKER_DISTRIBUTIONS = (
+    "mcp",
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "pydantic-settings",
+    "PyYAML",
+    "Py" + "JWT",
+    "httpx",
+    "aiofiles",
+    "python-multipart",
+    "pathspec",
+    "playwright",
+)
+
+
+def _canonical_dist_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _dist_name_from_requirement(requirement: str) -> str | None:
+    match = re.match(r"\s*([A-Za-z0-9_.-]+)", requirement)
+    return match.group(1) if match else None
+
+
+def _add_distribution_to_tar(tar: tarfile.TarFile, dist_name: str, seen: set[str]) -> None:
+    canonical = _canonical_dist_name(dist_name)
+    if canonical in seen:
+        return
+    seen.add(canonical)
+    try:
+        dist = importlib_metadata.distribution(dist_name)
+    except importlib_metadata.PackageNotFoundError:
+        return
+
+    for requirement in dist.requires or []:
+        required_name = _dist_name_from_requirement(requirement)
+        if required_name:
+            _add_distribution_to_tar(tar, required_name, seen)
+
+    for entry in dist.files or []:
+        entry_path = Path(entry)
+        if entry_path.is_absolute() or ".." in entry_path.parts:
+            continue
+        source = Path(dist.locate_file(entry))
+        if not source.is_file() or source.suffix in {".pyc", ".pyo"}:
+            continue
+        tar.add(source, arcname=str(Path("vendor") / entry_path))
 
 
 def _utc() -> float:
@@ -271,6 +321,9 @@ async def worker_bundle(request: Request) -> Response:  # noqa: ARG001
     with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
         for path in package_root.rglob("*.py"):
             tar.add(path, arcname=str(path.relative_to(package_root.parent)))
+        seen: set[str] = set()
+        for dist_name in REMOTE_WORKER_DISTRIBUTIONS:
+            _add_distribution_to_tar(tar, dist_name, seen)
     return Response(buffer.getvalue(), media_type="application/gzip")
 
 
