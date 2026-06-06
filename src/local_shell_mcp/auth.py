@@ -12,7 +12,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from .audit import audit
 from .settings import Settings, get_settings
 
-PUBLIC_PATHS = {"/healthz", "/readyz", "/docs", "/openapi.json", "/join", "/remote/register", "/remote/poll", "/remote/result"}
+PUBLIC_PATHS = {"/healthz", "/readyz", "/docs", "/openapi.json", "/join", "/remote/worker-bundle.tgz", "/remote/register", "/remote/poll", "/remote/result"}
 MCP_DISCOVERY_METHODS = {
     "initialize",
     "notifications/initialized",
