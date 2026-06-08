@@ -42,8 +42,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/fwerkor/local-shell-mcp"
-Repository = "https://github.com/fwerkor/local-shell-mcp"
+Homepage = "https://github.com/rijuyuezhu/local-shell-mcp"
+Repository = "https://github.com/rijuyuezhu/local-shell-mcp"
 
 [project.scripts]
 local-shell-mcp = "local_shell_mcp.main:main"

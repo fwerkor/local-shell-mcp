@@ -33,3 +33,16 @@ jobs:
         run: npm run compile
       - working-directory: vscode-extension
         run: npm run package:vsix
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: false
+          cache-from: type=gha,scope=ci-docker
+          cache-to: type=gha,mode=max,scope=ci-docker
