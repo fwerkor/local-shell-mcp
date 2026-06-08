@@ -1,6 +1,10 @@
 name: Release
 
 on:
+  push:
+    tags:
+      - "v*.*.*"
+
   workflow_dispatch:
     inputs:
       tag:
@@ -22,7 +26,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.event.inputs.tag }}
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -30,6 +34,9 @@ env:
   IMAGE_NAME: rijuyuezhu/local-shell-mcp
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "22"
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  PUSH_LATEST: ${{ github.event_name == 'push' || inputs.push_latest }}
+  PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
 
 jobs:
   validate-release:
@@ -44,7 +51,7 @@ jobs:
       - name: Validate tag and read project version
         id: version
         env:
-          RELEASE_TAG: ${{ github.event.inputs.tag }}
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
         run: |
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import os
@@ -64,8 +71,8 @@ jobs:
       - name: Prepare Docker release tags
         id: docker-tags
         env:
-          RELEASE_TAG: ${{ github.event.inputs.tag }}
-          PUSH_LATEST: ${{ github.event.inputs.push_latest }}
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+          PUSH_LATEST: ${{ env.PUSH_LATEST }}
         run: |
           tags=("${IMAGE_NAME}:${RELEASE_TAG}")
           if [[ "${RELEASE_TAG}" == v* ]]; then
@@ -227,7 +234,7 @@ jobs:
       - name: Sync extension version from release tag
         working-directory: vscode-extension
         env:
-          RELEASE_TAG: ${{ github.event.inputs.tag }}
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
         run: |
           VERSION="${RELEASE_TAG#v}"
           npm version "${VERSION}" --no-git-tag-version --allow-same-version
@@ -381,7 +388,7 @@ jobs:
           Docker image:
 
           \`\`\`bash
-          docker pull ${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}
+          docker pull ${{ env.IMAGE_NAME }}:${{ env.RELEASE_TAG }}
           \`\`\`
 
           Docker platforms are built in parallel and published as a multi-arch manifest:
@@ -421,9 +428,9 @@ jobs:
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag }}
+          tag_name: ${{ env.RELEASE_TAG }}
           target_commitish: ${{ github.sha }}
-          prerelease: ${{ github.event.inputs.prerelease }}
+          prerelease: ${{ env.PRERELEASE }}
           generate_release_notes: true
           body_path: RELEASE_NOTES.md
           files: dist/*
