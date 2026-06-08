@@ -1,32 +1,32 @@
-ARG PLAYWRIGHT_VERSION=1.59.0
-FROM mcr.microsoft.com/playwright/python:v${PLAYWRIGHT_VERSION}-noble
-ARG PLAYWRIGHT_VERSION
+FROM archlinux:latest
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_BREAK_SYSTEM_PACKAGES=1 \
     LOCAL_SHELL_MCP_WORKSPACE_ROOT=/workspace \
     LOCAL_SHELL_MCP_HOST=0.0.0.0 \
     LOCAL_SHELL_MCP_PORT=8765 \
     LOCAL_SHELL_MCP_PERSISTENT_CREDENTIALS=true \
     LOCAL_SHELL_MCP_CREDENTIALS_DIR=/persist/credentials
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN pacman -Syu --noconfirm archlinux-keyring \
+  && pacman -Syu --needed --noconfirm \
     bash \
     ca-certificates \
     sudo \
     curl \
     git \
     jq \
-    openssh-client \
+    openssh \
     patch \
     ripgrep \
     tmux \
     tree \
-    vim-tiny \
+    vim \
     wget \
     zip \
     unzip \
-    build-essential \
+    base-devel \
     autoconf \
     automake \
     clang \
@@ -35,42 +35,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     lldb \
     libtool \
     make \
-    ninja-build \
-    pkg-config \
-    python3-dev \
-    python3-pip \
-    python3-venv \
-    pipx \
+    ninja \
+    pkgconf \
+    python \
+    python-pip \
+    python-virtualenv \
+    python-pipx \
     nodejs \
     npm \
-    golang-go \
-    rustc \
-    cargo \
-    openjdk-21-jdk \
+    go \
+    rust \
+    jdk21-openjdk \
     maven \
     gradle \
-    ruby-full \
-    php-cli \
-    php-curl \
-    php-dev \
-    php-mbstring \
-    php-xml \
+    ruby \
+    php \
     composer \
     perl \
-    lua5.4 \
+    lua \
     luarocks \
-    r-base \
+    r \
     shellcheck \
-    sqlite3 \
+    sqlite \
     file \
-    libmagic1 \
     pandoc \
-    poppler-utils \
-    tesseract-ocr \
-    libreoffice-calc \
-    libreoffice-impress \
-    libreoffice-writer \
-  && rm -rf /var/lib/apt/lists/*
+    poppler \
+    tesseract \
+    libreoffice-fresh \
+  && pacman -Scc --noconfirm
 
 RUN npm install -g yarn pnpm typescript ts-node
 
@@ -78,7 +70,7 @@ WORKDIR /app
 COPY requirements-agent.txt pyproject.toml README.md LICENSE /app/
 RUN pip install --no-cache-dir -r requirements-agent.txt
 COPY src /app/src
-RUN pip install --no-cache-dir -e . "playwright==${PLAYWRIGHT_VERSION}"
+RUN pip install --no-cache-dir -e .
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN useradd -m -u 10001 agent \
@@ -87,6 +79,7 @@ RUN useradd -m -u 10001 agent \
   && chmod 0440 /etc/sudoers.d/agent-nopasswd \
   && chown -R agent:agent /workspace /app \
   && chmod +x /usr/local/bin/docker-entrypoint.sh
+
 WORKDIR /workspace
 
 VOLUME ["/workspace", "/persist/credentials"]
