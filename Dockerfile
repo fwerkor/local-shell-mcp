@@ -1,5 +1,6 @@
 ARG BASE_IMAGE=archlinux:latest
 FROM ${BASE_IMAGE}
+ARG KEYRING_PACKAGE=archlinux-keyring
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -10,8 +11,8 @@ ENV PYTHONUNBUFFERED=1 \
     LOCAL_SHELL_MCP_PERSISTENT_CREDENTIALS=true \
     LOCAL_SHELL_MCP_CREDENTIALS_DIR=/persist/credentials
 
-RUN pacman -Syu --noconfirm archlinux-keyring \
-  && pacman -Syu --needed --noconfirm \
+RUN pacman -Sy --noconfirm "${KEYRING_PACKAGE}" \
+  && pacman -S --needed --noconfirm \
     bash \
     zsh \
     ca-certificates \

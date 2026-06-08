@@ -276,10 +276,12 @@ jobs:
             suffix: amd64
             runner: ubuntu-latest
             base_image: archlinux:latest
+            keyring_package: archlinux-keyring
           - platform: linux/arm64
             suffix: arm64
             runner: ubuntu-24.04-arm
             base_image: menci/archlinuxarm:base-devel
+            keyring_package: archlinuxarm-keyring
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
@@ -318,6 +320,7 @@ jobs:
           tags: ${{ steps.platform-tags.outputs.tags }}
           build-args: |
             BASE_IMAGE=${{ matrix.base_image }}
+            KEYRING_PACKAGE=${{ matrix.keyring_package }}
           cache-from: type=gha,scope=docker-${{ matrix.suffix }}
           cache-to: type=gha,mode=max,scope=docker-${{ matrix.suffix }}
 
