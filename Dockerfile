@@ -1,4 +1,5 @@
-FROM archlinux:latest
+ARG BASE_IMAGE=archlinux:latest
+FROM ${BASE_IMAGE}
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
