@@ -265,24 +265,11 @@ jobs:
             dist/local-shell-mcp-vscode.sha256
           if-no-files-found: error
 
-  publish-docker-platform:
-    name: Publish Docker image (${{ matrix.platform }})
+
+  publish-docker-image:
+    name: Publish Docker image (linux/amd64)
+    runs-on: ubuntu-latest
     needs: validate-release
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux/amd64
-            suffix: amd64
-            runner: ubuntu-latest
-            base_image: archlinux:latest
-            keyring_package: archlinux-keyring
-          - platform: linux/arm64
-            suffix: arm64
-            runner: ubuntu-24.04-arm
-            base_image: menci/archlinuxarm:base-devel
-            keyring_package: archlinuxarm-keyring
-    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
 
@@ -293,65 +280,18 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Prepare platform tags
-        id: platform-tags
-        env:
-          DOCKER_TAGS_JSON: ${{ needs.validate-release.outputs.docker_tags }}
-          SUFFIX: ${{ matrix.suffix }}
-        run: |
-          python - <<'PY' >> "$GITHUB_OUTPUT"
-          import json
-          import os
-
-          tags = json.loads(os.environ["DOCKER_TAGS_JSON"])
-          suffix = os.environ["SUFFIX"]
-          print("tags<<EOF")
-          for tag in tags:
-              print(f"{tag}-{suffix}")
-          print("EOF")
-          PY
-
-      - name: Build and push platform image
+      - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64
           push: true
-          tags: ${{ steps.platform-tags.outputs.tags }}
+          tags: ${{ join(fromJSON(needs.validate-release.outputs.docker_tags), ',') }}
           build-args: |
-            BASE_IMAGE=${{ matrix.base_image }}
-            KEYRING_PACKAGE=${{ matrix.keyring_package }}
-          cache-from: type=gha,scope=docker-${{ matrix.suffix }}
-          cache-to: type=gha,mode=max,scope=docker-${{ matrix.suffix }}
-
-  publish-docker-manifest:
-    name: Publish Docker manifest
-    runs-on: ubuntu-latest
-    needs:
-      - validate-release
-      - publish-docker-platform
-    steps:
-      - uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Create and push multi-arch manifests
-        env:
-          DOCKER_TAGS_JSON: ${{ needs.validate-release.outputs.docker_tags }}
-        run: |
-          python - <<'PY' > /tmp/create-manifests.sh
-          import json
-          import os
-
-          tags = json.loads(os.environ["DOCKER_TAGS_JSON"])
-          for tag in tags:
-              print("docker buildx imagetools create \\")
-              print(f"  -t {tag} \\")
-              print(f"  {tag}-amd64 \\")
-              print(f"  {tag}-arm64")
-          PY
-          bash /tmp/create-manifests.sh
+            BASE_IMAGE=archlinux:latest
+            KEYRING_PACKAGE=archlinux-keyring
+          cache-from: type=gha,scope=docker-amd64
+          cache-to: type=gha,mode=max,scope=docker-amd64
 
   github-release:
     name: Publish GitHub release
@@ -361,7 +301,7 @@ jobs:
       - build-python-package
       - build-binary
       - build-vscode-extension
-      - publish-docker-manifest
+      - publish-docker-image
     steps:
       - uses: actions/checkout@v6
 
@@ -398,11 +338,10 @@ jobs:
           docker pull ${{ env.IMAGE_NAME }}:${{ env.RELEASE_TAG }}
           \`\`\`
 
-          Docker platforms are built in parallel and published as a multi-arch manifest:
+          Docker platform:
 
           \`\`\`text
           linux/amd64
-          linux/arm64
           \`\`\`
 
           All-in-one executable downloads are attached for:
