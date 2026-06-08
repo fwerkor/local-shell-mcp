@@ -342,7 +342,7 @@ To disable remote worker mode explicitly, run with `--no-remote` or set
 Pull and run without Compose:
 
 ```bash
-docker pull fwerkor/local-shell-mcp:latest
+docker pull rijuyuezhu/local-shell-mcp:latest
 mkdir -p workspace
 docker run -d \
   --name local-shell-mcp \
@@ -350,7 +350,7 @@ docker run -d \
   --env-file .env \
   -p 127.0.0.1:8765:8765 \
   -v "$PWD/workspace:/workspace" \
-  fwerkor/local-shell-mcp:latest
+  rijuyuezhu/local-shell-mcp:latest
 ```
 
 Check restart policy:
