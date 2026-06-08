@@ -64,7 +64,9 @@ def build_http_app() -> FastAPI:
 
     @app.exception_handler(ValueError)
     async def value_error_handler(request: Request, exc: ValueError):  # noqa: ARG001
-        return JSONResponse(status_code=400, content={"ok": False, "error": "validation_error", "message": str(exc)})
+        return JSONResponse(
+            status_code=400, content={"ok": False, "error": "validation_error", "message": str(exc)}
+        )
 
     @app.middleware("http")
     async def tools_timeout_middleware(request: Request, call_next):  # noqa: ANN001
@@ -93,7 +95,14 @@ def build_http_app() -> FastAPI:
     @app.post("/tools/run_shell")
     async def api_run_shell(body: dict, _: Principal = PRINCIPAL_DEP):
         try:
-            return (await public_run_shell(body["command"], body.get("cwd", "."), body.get("timeout_s"), body.get("max_output_bytes"))).model_dump()
+            return (
+                await public_run_shell(
+                    body["command"],
+                    body.get("cwd", "."),
+                    body.get("timeout_s"),
+                    body.get("max_output_bytes"),
+                )
+            ).model_dump()
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -119,7 +128,12 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/list_files")
     async def api_list_files(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(list_dir, body.get("path", "."), body.get("recursive", False), body.get("max_entries", 500))
+        return await _blocking(
+            list_dir,
+            body.get("path", "."),
+            body.get("recursive", False),
+            body.get("max_entries", 500),
+        )
 
     @app.post("/tools/tree")
     async def api_tree(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -127,11 +141,22 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/glob")
     async def api_glob(body: dict, _: Principal = PRINCIPAL_DEP):
-        return {"paths": await _blocking(glob_paths, body["pattern"], body.get("cwd", "."), body.get("max_results", 500))}
+        return {
+            "paths": await _blocking(
+                glob_paths, body["pattern"], body.get("cwd", "."), body.get("max_results", 500)
+            )
+        }
 
     @app.post("/tools/grep")
     async def api_grep(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await grep(body["query"], body.get("cwd", "."), body.get("glob"), body.get("regex", True), body.get("case_sensitive", True), body.get("max_results"))
+        return await grep(
+            body["query"],
+            body.get("cwd", "."),
+            body.get("glob"),
+            body.get("regex", True),
+            body.get("case_sensitive", True),
+            body.get("max_results"),
+        )
 
     @app.post("/tools/read_file")
     async def api_read_file(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -146,11 +171,15 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/write_file")
     async def api_write_file(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(write_text, body["path"], body["content"], body.get("overwrite", True))
+        return await _blocking(
+            write_text, body["path"], body["content"], body.get("overwrite", True)
+        )
 
     @app.post("/tools/edit_file")
     async def api_edit_file(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(edit_text, body["path"], body["old"], body["new"], body.get("replace_all", False))
+        return await _blocking(
+            edit_text, body["path"], body["old"], body["new"], body.get("replace_all", False)
+        )
 
     @app.post("/tools/multi_edit_file")
     async def api_multi_edit_file(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -166,7 +195,12 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/git/diff")
     async def api_git_diff(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_diff(body.get("cwd", "."), body.get("staged", False), body.get("path"), body.get("stat", False))
+        return await git_diff(
+            body.get("cwd", "."),
+            body.get("staged", False),
+            body.get("path"),
+            body.get("stat", False),
+        )
 
     @app.post("/tools/git/log")
     async def api_git_log(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -174,7 +208,9 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/git/clone")
     async def api_git_clone(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_clone(body["repo_url"], body.get("dest"), body.get("branch"), body.get("cwd", "."))
+        return await git_clone(
+            body["repo_url"], body.get("dest"), body.get("branch"), body.get("cwd", ".")
+        )
 
     @app.post("/tools/git/checkout")
     async def api_git_checkout(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -182,7 +218,9 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/git/fetch")
     async def api_git_fetch(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_fetch(body.get("cwd", "."), body.get("remote", "origin"), body.get("prune", True))
+        return await git_fetch(
+            body.get("cwd", "."), body.get("remote", "origin"), body.get("prune", True)
+        )
 
     @app.post("/tools/git/pull")
     async def api_git_pull(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -198,7 +236,12 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/git/push")
     async def api_git_push(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_push(body["cwd"], body.get("remote", "origin"), body.get("branch"), body.get("set_upstream", True))
+        return await git_push(
+            body["cwd"],
+            body.get("remote", "origin"),
+            body.get("branch"),
+            body.get("set_upstream", True),
+        )
 
     @app.post("/tools/git/show")
     async def api_git_show(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -206,7 +249,9 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/git/reset")
     async def api_git_reset(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_reset(body.get("cwd", "."), body.get("mode", "soft"), body.get("ref", "HEAD"))
+        return await git_reset(
+            body.get("cwd", "."), body.get("mode", "soft"), body.get("ref", "HEAD")
+        )
 
     @app.get("/tools/todo")
     async def api_todo_read(_: Principal = PRINCIPAL_DEP):
@@ -215,6 +260,5 @@ def build_http_app() -> FastAPI:
     @app.post("/tools/todo")
     async def api_todo_write(body: dict, _: Principal = PRINCIPAL_DEP):
         return await _blocking(todo_write, body.get("todos", []))
-
 
     return app

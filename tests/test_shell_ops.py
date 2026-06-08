@@ -18,7 +18,9 @@ async def test_run_shell_tool_rejects_timeout_above_public_cap(tmp_path, monkeyp
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     get_settings.cache_clear()
 
-    response = await build_mcp().call_tool("run_shell_tool", {"command": "echo ok", "timeout_s": 3600})
+    response = await build_mcp().call_tool(
+        "run_shell_tool", {"command": "echo ok", "timeout_s": 3600}
+    )
     payload = response[0].text
 
     assert "timeout_s must be <= 60 seconds for public run_shell" in payload

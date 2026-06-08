@@ -42,6 +42,8 @@ def todo_write(todos: list[dict]) -> dict:
     encoded = json.dumps(payload, ensure_ascii=False, indent=2)
     encoded_bytes = len(encoded.encode("utf-8"))
     if encoded_bytes > settings.max_todo_bytes:
-        raise ValueError(f"Refusing to write {encoded_bytes} todo bytes; max is {settings.max_todo_bytes}")
+        raise ValueError(
+            f"Refusing to write {encoded_bytes} todo bytes; max is {settings.max_todo_bytes}"
+        )
     _todo_path().write_text(encoded, encoding="utf-8")
     return payload

@@ -58,11 +58,17 @@ def clamp_timeout(timeout_s: int | None) -> int:
 
 def public_run_shell_timeout(timeout_s: int | None) -> int:
     if timeout_s is not None and timeout_s > PUBLIC_RUN_SHELL_TIMEOUT_CAP_S:
-        raise ValueError(f"timeout_s must be <= {PUBLIC_RUN_SHELL_TIMEOUT_CAP_S} seconds for public run_shell")
-    return max(1, min(timeout_s or PUBLIC_RUN_SHELL_DEFAULT_TIMEOUT_S, PUBLIC_RUN_SHELL_TIMEOUT_CAP_S))
+        raise ValueError(
+            f"timeout_s must be <= {PUBLIC_RUN_SHELL_TIMEOUT_CAP_S} seconds for public run_shell"
+        )
+    return max(
+        1, min(timeout_s or PUBLIC_RUN_SHELL_DEFAULT_TIMEOUT_S, PUBLIC_RUN_SHELL_TIMEOUT_CAP_S)
+    )
 
 
-def clamp_output(stdout: str, stderr: str, max_output_bytes: int | None = None) -> tuple[str, str, bool]:
+def clamp_output(
+    stdout: str, stderr: str, max_output_bytes: int | None = None
+) -> tuple[str, str, bool]:
     limit = _effective_output_limit(max_output_bytes)
     encoded_len = len(stdout.encode()) + len(stderr.encode())
     if encoded_len <= limit:
@@ -140,7 +146,9 @@ async def _terminate_process_group(proc: asyncio.subprocess.Process) -> str:
     return "Process did not exit after SIGKILL"
 
 
-async def _finish_reader_tasks(tasks: list[asyncio.Task[None]], timeout_s: float = READER_DRAIN_TIMEOUT_S) -> None:
+async def _finish_reader_tasks(
+    tasks: list[asyncio.Task[None]], timeout_s: float = READER_DRAIN_TIMEOUT_S
+) -> None:
     try:
         await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout_s)
     except TimeoutError:
@@ -149,7 +157,9 @@ async def _finish_reader_tasks(tasks: list[asyncio.Task[None]], timeout_s: float
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
-async def run_shell(command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None) -> CommandResult:
+async def run_shell(
+    command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None
+) -> CommandResult:
     check_command_policy(command)
     resolved_cwd = resolve_path(cwd, must_exist=True)
     start = time.time()
@@ -235,7 +245,9 @@ async def run_shell(command: str, cwd: str = ".", timeout_s: int | None = None, 
     return result
 
 
-async def public_run_shell(command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None) -> CommandResult:
+async def public_run_shell(
+    command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None
+) -> CommandResult:
     return await run_shell(command, cwd, public_run_shell_timeout(timeout_s), max_output_bytes)
 
 
@@ -300,7 +312,10 @@ async def kill_shell(session_id: str) -> dict:
 
 
 async def list_shells() -> dict:
-    result = await tmux(["list-sessions", "-F", "#{session_name}\t#{session_created}\t#{session_attached}"], timeout_s=5)
+    result = await tmux(
+        ["list-sessions", "-F", "#{session_name}\t#{session_created}\t#{session_attached}"],
+        timeout_s=5,
+    )
     if not result.ok:
         # tmux exits nonzero when no server/sessions exist.
         return {"sessions": []}
@@ -308,5 +323,11 @@ async def list_shells() -> dict:
     for line in result.stdout.splitlines():
         parts = line.split("\t")
         if parts:
-            sessions.append({"session_id": parts[0], "created": parts[1] if len(parts) > 1 else None, "attached": parts[2] if len(parts) > 2 else None})
+            sessions.append(
+                {
+                    "session_id": parts[0],
+                    "created": parts[1] if len(parts) > 1 else None,
+                    "attached": parts[2] if len(parts) > 2 else None,
+                }
+            )
     return {"sessions": sessions}

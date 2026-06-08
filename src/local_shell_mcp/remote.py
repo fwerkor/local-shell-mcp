@@ -161,19 +161,31 @@ class RemoteManager:
         base = settings.public_base_url or f"http://{settings.host}:{settings.port}"
         return base.rstrip("/") + REMOTE_JOIN_PATH
 
-    async def create_invite(self, name: str | None = None, workdir: str | None = None, ttl_s: int | None = None) -> dict[str, Any]:
+    async def create_invite(
+        self, name: str | None = None, workdir: str | None = None, ttl_s: int | None = None
+    ) -> dict[str, Any]:
         settings = get_settings()
         ttl = max(60, min(ttl_s or settings.remote_invite_ttl_s, 24 * 3600))
         code = "lsmcp_inv_" + secrets.token_urlsafe(24)
         invite = RemoteInvite(code=code, name=name, workdir=workdir, expires_at=_utc() + ttl)
         async with self._lock:
             self.invites[code] = invite
-        command = f"curl -fsSL {shlex.quote(self._join_url())} | bash -s -- --invite {shlex.quote(code)}"
+        command = (
+            f"curl -fsSL {shlex.quote(self._join_url())} | bash -s -- --invite {shlex.quote(code)}"
+        )
         if name:
             command += f" --name {shlex.quote(name)}"
         if workdir:
             command += f" --workdir {shlex.quote(workdir)}"
-        return {"code": code, "name": name, "workdir": workdir, "expires_at": invite.expires_at, "ttl_s": ttl, "join_url": self._join_url(), "command": command}
+        return {
+            "code": code,
+            "name": name,
+            "workdir": workdir,
+            "expires_at": invite.expires_at,
+            "ttl_s": ttl,
+            "join_url": self._join_url(),
+            "command": command,
+        }
 
     async def register_worker(self, payload: dict[str, Any]) -> dict[str, Any]:
         code = str(payload.get("invite") or "")
@@ -192,7 +204,13 @@ class RemoteManager:
             if name in self.workers:
                 raise ValueError(f"machine name already exists: {name}")
             token = "lsmcp_wk_" + secrets.token_urlsafe(32)
-            worker = RemoteWorker(name=name, token=token, workdir=str(payload.get("workdir") or invite.workdir or ""), capabilities=list(payload.get("capabilities") or []), info=dict(payload.get("info") or {}))
+            worker = RemoteWorker(
+                name=name,
+                token=token,
+                workdir=str(payload.get("workdir") or invite.workdir or ""),
+                capabilities=list(payload.get("capabilities") or []),
+                info=dict(payload.get("info") or {}),
+            )
             self.workers[name] = worker
             self.tokens[token] = name
             invite.used = True
@@ -216,7 +234,9 @@ class RemoteManager:
         worker.status = "online"
         worker.last_seen = _utc()
         try:
-            job = await asyncio.wait_for(worker.queue.get(), timeout=get_settings().remote_poll_timeout_s)
+            job = await asyncio.wait_for(
+                worker.queue.get(), timeout=get_settings().remote_poll_timeout_s
+            )
             return {"job": job}
         except TimeoutError:
             return {"job": None, "heartbeat": True}
@@ -231,7 +251,9 @@ class RemoteManager:
             future.set_result(payload)
         return {"accepted": bool(future)}
 
-    async def call(self, machine: str, tool: str, args: dict[str, Any], timeout_s: int | None = None) -> dict[str, Any]:
+    async def call(
+        self, machine: str, tool: str, args: dict[str, Any], timeout_s: int | None = None
+    ) -> dict[str, Any]:
         worker = self.workers.get(machine)
         if not worker:
             raise ValueError(f"unknown remote machine: {machine}")
@@ -244,21 +266,42 @@ class RemoteManager:
         self.pending[job_id] = future
         await worker.queue.put({"id": job_id, "tool": tool, "args": args})
         try:
-            result = await asyncio.wait_for(future, timeout=timeout_s or get_settings().remote_job_timeout_s)
+            result = await asyncio.wait_for(
+                future, timeout=timeout_s or get_settings().remote_job_timeout_s
+            )
         except TimeoutError as exc:
             self.pending.pop(job_id, None)
             raise TimeoutError(f"remote job timed out: {tool} on {machine}") from exc
         if not result.get("ok", False):
-            return _ok({"status": "error", "error_type": result.get("error", "remote_error"), "message": result.get("message", "remote job failed")})
+            return _ok(
+                {
+                    "status": "error",
+                    "error_type": result.get("error", "remote_error"),
+                    "message": result.get("message", "remote job failed"),
+                }
+            )
         return _ok(result.get("data"))
 
     def list_machines(self) -> dict[str, Any]:
         now = _utc()
         rows = []
         for worker in self.workers.values():
-            status = "online" if now - worker.last_seen <= max(2 * get_settings().remote_poll_timeout_s, 60) else "offline"
+            status = (
+                "online"
+                if now - worker.last_seen <= max(2 * get_settings().remote_poll_timeout_s, 60)
+                else "offline"
+            )
             worker.status = status
-            rows.append({"name": worker.name, "status": status, "workdir": worker.workdir, "last_seen": worker.last_seen, "capabilities": worker.capabilities, "info": worker.info})
+            rows.append(
+                {
+                    "name": worker.name,
+                    "status": status,
+                    "workdir": worker.workdir,
+                    "last_seen": worker.last_seen,
+                    "capabilities": worker.capabilities,
+                    "info": worker.info,
+                }
+            )
         return {"machines": sorted(rows, key=lambda item: item["name"])}
 
     def revoke(self, machine: str) -> dict[str, Any]:
@@ -321,7 +364,7 @@ async def worker_bundle(request: Request) -> Response:  # noqa: ARG001
 async def join_script(request: Request) -> PlainTextResponse:  # noqa: ARG001
     settings = get_settings()
     server = (settings.public_base_url or f"http://{settings.host}:{settings.port}").rstrip("/")
-    script = f'''#!/usr/bin/env bash
+    script = f"""#!/usr/bin/env bash
 set -euo pipefail
 SERVER={shlex.quote(server)}
 BUNDLE_URL="$SERVER{REMOTE_WORKER_BUNDLE_PATH}"
@@ -361,7 +404,7 @@ if [ "$BACKGROUND" = "1" ]; then
 else
   exec python3 -m local_shell_mcp.main worker "${{ARGS[@]}}"
 fi
-'''
+"""
     return PlainTextResponse(script, media_type="text/x-shellscript")
 
 
@@ -381,7 +424,9 @@ async def poll_endpoint(request: Request) -> JSONResponse:
 
 async def result_endpoint(request: Request) -> JSONResponse:
     try:
-        return JSONResponse(_ok(await remote_manager().submit_result(_bearer_token(request), await request.json())))
+        return JSONResponse(
+            _ok(await remote_manager().submit_result(_bearer_token(request), await request.json()))
+        )
     except Exception as exc:
         return _error(str(exc), type(exc).__name__, 401)
 
@@ -404,9 +449,23 @@ def _handled_remote_exception(exc: Exception) -> dict[str, Any]:
     return {"ok": False, "error": type(exc).__name__, "message": str(exc)}
 
 
-def _read_many_files_sync(paths: list[str], start_line: int | None = None, end_line: int | None = None, binary_preview: str | None = None, binary_preview_bytes: int = 256) -> dict[str, Any]:
-    files = [read_text(path, start_line, end_line, binary_preview, binary_preview_bytes) for path in paths]
-    return {"files": files, "total_content_bytes": sum(len(str(item.get("content") or item.get("preview") or "").encode()) for item in files)}
+def _read_many_files_sync(
+    paths: list[str],
+    start_line: int | None = None,
+    end_line: int | None = None,
+    binary_preview: str | None = None,
+    binary_preview_bytes: int = 256,
+) -> dict[str, Any]:
+    files = [
+        read_text(path, start_line, end_line, binary_preview, binary_preview_bytes)
+        for path in paths
+    ]
+    return {
+        "files": files,
+        "total_content_bytes": sum(
+            len(str(item.get("content") or item.get("preview") or "").encode()) for item in files
+        ),
+    }
 
 
 async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
@@ -414,7 +473,12 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
     patch_path = temp_dir() / f"remote-patch-{uuid.uuid4().hex}.diff"
     patch_path.parent.mkdir(parents=True, exist_ok=True)
     await _to_thread(patch_path.write_text, patch, encoding="utf-8")
-    result = await run_shell(f"git apply --check {shlex.quote(str(patch_path))} && git apply {shlex.quote(str(patch_path))}", cwd=cwd, timeout_s=60, max_output_bytes=500_000)
+    result = await run_shell(
+        f"git apply --check {shlex.quote(str(patch_path))} && git apply {shlex.quote(str(patch_path))}",
+        cwd=cwd,
+        timeout_s=60,
+        max_output_bytes=500_000,
+    )
     return {**result.model_dump(), "patch_path": relative_display(patch_path)}
 
 
@@ -423,15 +487,32 @@ async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict[st
     script = temp_dir() / f"remote-script-{uuid.uuid4().hex}.py"
     script.parent.mkdir(parents=True, exist_ok=True)
     await _to_thread(script.write_text, code, encoding="utf-8")
-    result = await run_shell(f"python3 {shlex.quote(str(script))}", cwd=cwd, timeout_s=public_run_shell_timeout(timeout_s), max_output_bytes=1_000_000)
+    result = await run_shell(
+        f"python3 {shlex.quote(str(script))}",
+        cwd=cwd,
+        timeout_s=public_run_shell_timeout(timeout_s),
+        max_output_bytes=1_000_000,
+    )
     return {**result.model_dump(), "script_path": relative_display(script)}
+
 
 async def execute_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "environment_info":
-        result = await run_shell("uname -a; echo '---'; id; echo '---'; pwd; echo '---'; python3 --version; git --version", cwd=".", timeout_s=10)
+        result = await run_shell(
+            "uname -a; echo '---'; id; echo '---'; pwd; echo '---'; python3 --version; git --version",
+            cwd=".",
+            timeout_s=10,
+        )
         return {"settings": safe_settings_dump(), "probe": result.model_dump()}
     if tool == "run_shell_tool":
-        return (await public_run_shell(args["command"], args.get("cwd", "."), args.get("timeout_s"), args.get("max_output_bytes"))).model_dump()
+        return (
+            await public_run_shell(
+                args["command"],
+                args.get("cwd", "."),
+                args.get("timeout_s"),
+                args.get("max_output_bytes"),
+            )
+        ).model_dump()
     if tool == "run_python_tool":
         return await _run_python(args["code"], args.get("cwd", "."), args.get("timeout_s", 60))
     if tool == "shell_start":
@@ -445,21 +526,55 @@ async def execute_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "shell_list":
         return await list_shells()
     if tool == "list_files":
-        return await _to_thread(list_dir, args.get("path", "."), args.get("recursive", False), args.get("max_entries", 500))
+        return await _to_thread(
+            list_dir,
+            args.get("path", "."),
+            args.get("recursive", False),
+            args.get("max_entries", 500),
+        )
     if tool == "tree_view":
         return await tree(args.get("cwd", "."), args.get("depth", 3), args.get("max_entries", 500))
     if tool == "glob_search":
-        return {"paths": await _to_thread(glob_paths, args["pattern"], args.get("cwd", "."), args.get("max_results", 500))}
+        return {
+            "paths": await _to_thread(
+                glob_paths, args["pattern"], args.get("cwd", "."), args.get("max_results", 500)
+            )
+        }
     if tool == "grep_search":
-        return await grep(args["query"], args.get("cwd", "."), args.get("glob"), args.get("regex", True), args.get("case_sensitive", True), args.get("max_results"))
+        return await grep(
+            args["query"],
+            args.get("cwd", "."),
+            args.get("glob"),
+            args.get("regex", True),
+            args.get("case_sensitive", True),
+            args.get("max_results"),
+        )
     if tool == "read_file":
-        return await _to_thread(read_text, args["path"], args.get("start_line"), args.get("end_line"), args.get("binary_preview"), args.get("binary_preview_bytes", 256))
+        return await _to_thread(
+            read_text,
+            args["path"],
+            args.get("start_line"),
+            args.get("end_line"),
+            args.get("binary_preview"),
+            args.get("binary_preview_bytes", 256),
+        )
     if tool == "read_many_files":
-        return await _to_thread(_read_many_files_sync, args["paths"], args.get("start_line"), args.get("end_line"), args.get("binary_preview"), args.get("binary_preview_bytes", 256))
+        return await _to_thread(
+            _read_many_files_sync,
+            args["paths"],
+            args.get("start_line"),
+            args.get("end_line"),
+            args.get("binary_preview"),
+            args.get("binary_preview_bytes", 256),
+        )
     if tool == "write_file":
-        return await _to_thread(write_text, args["path"], args["content"], args.get("overwrite", True))
+        return await _to_thread(
+            write_text, args["path"], args["content"], args.get("overwrite", True)
+        )
     if tool == "edit_file":
-        return await _to_thread(edit_text, args["path"], args["old"], args["new"], args.get("replace_all", False))
+        return await _to_thread(
+            edit_text, args["path"], args["old"], args["new"], args.get("replace_all", False)
+        )
     if tool == "multi_edit_file":
         return await _to_thread(multi_edit_text, args["path"], args["edits"])
     if tool == "delete_file_or_dir":
@@ -467,17 +582,26 @@ async def execute_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "apply_patch":
         return await _apply_patch_text(args["patch"], args.get("cwd", "."))
     if tool == "git_clone_tool":
-        return await git_clone(args["repo_url"], args.get("dest"), args.get("branch"), args.get("cwd", "."))
+        return await git_clone(
+            args["repo_url"], args.get("dest"), args.get("branch"), args.get("cwd", ".")
+        )
     if tool == "git_status_tool":
         return await git_status(args.get("cwd", "."))
     if tool == "git_diff_tool":
-        return await git_diff(args.get("cwd", "."), args.get("staged", False), args.get("path"), args.get("stat", False))
+        return await git_diff(
+            args.get("cwd", "."),
+            args.get("staged", False),
+            args.get("path"),
+            args.get("stat", False),
+        )
     if tool == "git_log_tool":
         return await git_log(args.get("cwd", "."), args.get("max_count", 20))
     if tool == "git_checkout_tool":
         return await git_checkout(args["cwd"], args["ref"], args.get("create", False))
     if tool == "git_fetch_tool":
-        return await git_fetch(args.get("cwd", "."), args.get("remote", "origin"), args.get("prune", True))
+        return await git_fetch(
+            args.get("cwd", "."), args.get("remote", "origin"), args.get("prune", True)
+        )
     if tool == "git_pull_tool":
         return await git_pull(args.get("cwd", "."), args.get("ff_only", True))
     if tool == "git_add_tool":
@@ -485,11 +609,18 @@ async def execute_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "git_commit_tool":
         return await git_commit(args["cwd"], args["message"], args.get("all_changes", False))
     if tool == "git_push_tool":
-        return await git_push(args["cwd"], args.get("remote", "origin"), args.get("branch"), args.get("set_upstream", True))
+        return await git_push(
+            args["cwd"],
+            args.get("remote", "origin"),
+            args.get("branch"),
+            args.get("set_upstream", True),
+        )
     if tool == "git_show_tool":
         return await git_show(args.get("cwd", "."), args.get("ref", "HEAD"), args.get("path"))
     if tool == "git_reset_tool":
-        return await git_reset(args.get("cwd", "."), args.get("mode", "soft"), args.get("ref", "HEAD"))
+        return await git_reset(
+            args.get("cwd", "."), args.get("mode", "soft"), args.get("ref", "HEAD")
+        )
     raise ValueError(f"unsupported remote worker tool: {tool}")
 
 
@@ -498,19 +629,41 @@ def worker_capabilities() -> list[str]:
 
 
 def worker_info(workdir: str) -> dict[str, Any]:
-    return {"hostname": socket.gethostname(), "user": os.getenv("USER") or os.getenv("USERNAME") or "unknown", "cwd": os.getcwd(), "workdir": workdir, "python": sys.version.split()[0], "platform": sys.platform}
+    return {
+        "hostname": socket.gethostname(),
+        "user": os.getenv("USER") or os.getenv("USERNAME") or "unknown",
+        "cwd": os.getcwd(),
+        "workdir": workdir,
+        "python": sys.version.split()[0],
+        "platform": sys.platform,
+    }
 
 
-async def run_worker(server: str, invite: str, name: str | None = None, workdir: str | None = None, persist: bool = False) -> None:  # noqa: ARG001
+async def run_worker(
+    server: str,
+    invite: str,
+    name: str | None = None,
+    workdir: str | None = None,
+    persist: bool = False,
+) -> None:  # noqa: ARG001
     workdir = str(Path(workdir or os.getcwd()).expanduser().resolve())
     os.environ.setdefault("LOCAL_SHELL_MCP_WORKSPACE_ROOT", workdir)
     os.environ.setdefault("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "true")
     from .settings import get_settings as _get_settings
+
     _get_settings.cache_clear()
     server = server.rstrip("/")
     async with httpx.AsyncClient(timeout=None) as client:
-        register_payload = {"invite": invite, "name": name, "workdir": workdir, "capabilities": worker_capabilities(), "info": worker_info(workdir)}
-        response = await client.post(f"{server}{REMOTE_API_PREFIX}/register", json=register_payload, timeout=30)
+        register_payload = {
+            "invite": invite,
+            "name": name,
+            "workdir": workdir,
+            "capabilities": worker_capabilities(),
+            "info": worker_info(workdir),
+        }
+        response = await client.post(
+            f"{server}{REMOTE_API_PREFIX}/register", json=register_payload, timeout=30
+        )
         response.raise_for_status()
         body = response.json()
         if not body.get("ok"):
@@ -523,10 +676,15 @@ async def run_worker(server: str, invite: str, name: str | None = None, workdir:
         print(f"Name:    {machine_name}")
         print(f"Workdir: {workdir}")
         print("Status: connected")
-        print("Keep this process running while ChatGPT should access this machine. Press Ctrl-C to disconnect.", flush=True)
+        print(
+            "Keep this process running while ChatGPT should access this machine. Press Ctrl-C to disconnect.",
+            flush=True,
+        )
         headers = {"Authorization": f"Bearer {token}"}
         while True:
-            poll = await client.post(f"{server}{REMOTE_API_PREFIX}/poll", headers=headers, json={}, timeout=None)
+            poll = await client.post(
+                f"{server}{REMOTE_API_PREFIX}/poll", headers=headers, json={}, timeout=None
+            )
             poll.raise_for_status()
             payload = poll.json().get("data", {})
             job = payload.get("job")
@@ -537,7 +695,9 @@ async def run_worker(server: str, invite: str, name: str | None = None, workdir:
                 out = {"job_id": job["id"], "ok": True, "data": result}
             except Exception as exc:  # noqa: BLE001
                 out = {"job_id": job.get("id"), **_handled_remote_exception(exc)}
-            await client.post(f"{server}{REMOTE_API_PREFIX}/result", headers=headers, json=out, timeout=30)
+            await client.post(
+                f"{server}{REMOTE_API_PREFIX}/result", headers=headers, json=out, timeout=30
+            )
 
 
 def add_worker_cli_args(parser: argparse.ArgumentParser) -> None:
@@ -545,7 +705,9 @@ def add_worker_cli_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--invite", required=True)
     parser.add_argument("--name", default=None)
     parser.add_argument("--workdir", default=None)
-    parser.add_argument("--persist", action="store_true", help="Reserved for future user-service installation")
+    parser.add_argument(
+        "--persist", action="store_true", help="Reserved for future user-service installation"
+    )
 
 
 def run_worker_from_args(args: argparse.Namespace) -> None:
@@ -553,7 +715,9 @@ def run_worker_from_args(args: argparse.Namespace) -> None:
 
 
 def run_worker_cli(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Connect this machine to a local-shell-mcp control server")
+    parser = argparse.ArgumentParser(
+        description="Connect this machine to a local-shell-mcp control server"
+    )
     add_worker_cli_args(parser)
     args = parser.parse_args(argv)
     run_worker_from_args(args)

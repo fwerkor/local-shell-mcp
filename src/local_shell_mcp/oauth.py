@@ -48,7 +48,11 @@ def public_base_url(request: Request | None = None) -> str:
         return settings.public_base_url.rstrip("/")
     if request is not None:
         proto = request.headers.get("x-forwarded-proto") or request.url.scheme
-        host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+        host = (
+            request.headers.get("x-forwarded-host")
+            or request.headers.get("host")
+            or request.url.netloc
+        )
         return f"{proto}://{host}".rstrip("/")
     return "http://127.0.0.1:8765"
 
@@ -143,7 +147,10 @@ def _validate_authorize_params(params: dict[str, str]) -> str | None:
     client = _CLIENTS.get(params["client_id"])
     if client and client.redirect_uris and params["redirect_uri"] not in client.redirect_uris:
         return "redirect_uri is not registered for this client"
-    if params.get("code_challenge_method") and params.get("code_challenge_method") not in {"S256", "plain"}:
+    if params.get("code_challenge_method") and params.get("code_challenge_method") not in {
+        "S256",
+        "plain",
+    }:
         return "Unsupported code_challenge_method"
     return None
 
@@ -157,7 +164,9 @@ def _hidden_inputs(params: dict[str, str]) -> str:
             .replace(">", "&gt;")
         )
 
-    return "\n".join(f'<input type="hidden" name="{esc(k)}" value="{esc(v)}" />' for k, v in params.items())
+    return "\n".join(
+        f'<input type="hidden" name="{esc(k)}" value="{esc(v)}" />' for k, v in params.items()
+    )
 
 
 def _authorize_form(params: dict[str, str], error: str | None = None) -> HTMLResponse:
@@ -245,7 +254,9 @@ def _verify_pkce(code_obj: AuthCode, verifier: str | None) -> bool:
     return hmac.compare_digest(verifier, code_obj.code_challenge)
 
 
-def issue_access_token(*, client_id: str, scope: str, resource: str, subject: str = "local-user") -> str:
+def issue_access_token(
+    *, client_id: str, scope: str, resource: str, subject: str = "local-user"
+) -> str:
     settings = get_settings()
     now = int(time.time())
     payload = {
@@ -272,15 +283,27 @@ async def oauth_token(request: Request) -> JSONResponse:
     verifier = str(form.get("code_verifier") or "") or None
     code_obj = _CODES.get(code)
     if not code_obj or code_obj.used:
-        return _json({"error": "invalid_grant", "error_description": "Unknown or used code"}, status_code=400)
+        return _json(
+            {"error": "invalid_grant", "error_description": "Unknown or used code"}, status_code=400
+        )
     if int(time.time()) - code_obj.created_at > get_settings().oauth_code_ttl_s:
-        return _json({"error": "invalid_grant", "error_description": "Expired code"}, status_code=400)
+        return _json(
+            {"error": "invalid_grant", "error_description": "Expired code"}, status_code=400
+        )
     if code_obj.client_id != client_id or code_obj.redirect_uri != redirect_uri:
-        return _json({"error": "invalid_grant", "error_description": "Client or redirect mismatch"}, status_code=400)
+        return _json(
+            {"error": "invalid_grant", "error_description": "Client or redirect mismatch"},
+            status_code=400,
+        )
     if not _verify_pkce(code_obj, verifier):
-        return _json({"error": "invalid_grant", "error_description": "PKCE verification failed"}, status_code=400)
+        return _json(
+            {"error": "invalid_grant", "error_description": "PKCE verification failed"},
+            status_code=400,
+        )
     code_obj.used = True
-    token = issue_access_token(client_id=client_id, scope=code_obj.scope, resource=code_obj.resource)
+    token = issue_access_token(
+        client_id=client_id, scope=code_obj.scope, resource=code_obj.resource
+    )
     audit("oauth_token_issued", client_id=client_id, resource=code_obj.resource)
     body = {
         "access_token": token,

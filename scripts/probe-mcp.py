@@ -49,24 +49,30 @@ async def oauth_token(base_url: str, pin: str) -> str:
 
 async def list_tools(mcp_url: str, token: str | None = None) -> list[str]:
     headers = {"Authorization": f"Bearer {token}"} if token else None
-    async with streamablehttp_client(
-        mcp_url,
-        headers=headers,
-        timeout=20,
-        sse_read_timeout=20,
-    ) as (read, write, _), ClientSession(read, write) as session:
+    async with (
+        streamablehttp_client(
+            mcp_url,
+            headers=headers,
+            timeout=20,
+            sse_read_timeout=20,
+        ) as (read, write, _),
+        ClientSession(read, write) as session,
+    ):
         await session.initialize()
         tools = await session.list_tools()
         return [tool.name for tool in tools.tools]
 
 
 async def call_environment_info(mcp_url: str, token: str) -> bool:
-    async with streamablehttp_client(
-        mcp_url,
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=20,
-        sse_read_timeout=20,
-    ) as (read, write, _), ClientSession(read, write) as session:
+    async with (
+        streamablehttp_client(
+            mcp_url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=20,
+            sse_read_timeout=20,
+        ) as (read, write, _),
+        ClientSession(read, write) as session,
+    ):
         await session.initialize()
         result = await session.call_tool("environment_info", {})
         return not bool(result.isError)
@@ -75,14 +81,20 @@ async def call_environment_info(mcp_url: str, token: str) -> bool:
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Probe a local-shell-mcp remote endpoint.")
     parser.add_argument("base_url", help="Public base URL, for example https://mcp.example.com")
-    parser.add_argument("--pin", help="OAuth admin PIN. If set, also tests an authenticated tool call.")
+    parser.add_argument(
+        "--pin", help="OAuth admin PIN. If set, also tests an authenticated tool call."
+    )
     args = parser.parse_args()
 
     base_url = args.base_url.rstrip("/")
     mcp_url = f"{base_url}/mcp"
 
     async with httpx.AsyncClient(timeout=20) as client:
-        for path in ("/healthz", "/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server"):
+        for path in (
+            "/healthz",
+            "/.well-known/oauth-protected-resource",
+            "/.well-known/oauth-authorization-server",
+        ):
             response = await client.get(f"{base_url}{path}")
             print(f"{path}: {response.status_code}")
             response.raise_for_status()

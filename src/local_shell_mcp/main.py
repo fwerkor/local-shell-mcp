@@ -26,9 +26,23 @@ from .tools import build_mcp
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="local-shell-mcp")
-    parser.add_argument("--mode", choices=["mcp", "http", "stdio"], default=None)
-    parser.add_argument("--config", default=None, help="Path to config YAML")
+    parser = argparse.ArgumentParser(
+        prog="local-shell-mcp",
+        description="Run a local-shell-mcp server or remote worker.",
+    )
+    parser.set_defaults(handler=_run_server_from_args)
+    parser.add_argument(
+        "--mode",
+        choices=["mcp", "http", "stdio"],
+        default=None,
+        help="Server transport mode; overrides LOCAL_SHELL_MCP_MODE",
+    )
+    parser.add_argument(
+        "--config",
+        default=None,
+        metavar="PATH",
+        help="Path to config YAML; overrides LOCAL_SHELL_MCP_CONFIG",
+    )
     parser.add_argument(
         "--remote",
         dest="remote",
@@ -49,6 +63,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Connect this machine to a local-shell-mcp control server",
     )
     add_worker_cli_args(worker)
+    worker.set_defaults(handler=run_worker_from_args)
     return parser
 
 
@@ -61,6 +76,20 @@ def _apply_server_args(args: argparse.Namespace) -> None:
         os.environ["LOCAL_SHELL_MCP_REMOTE_ENABLED"] = "true" if args.remote else "false"
 
 
+def _run_server_from_args(args: argparse.Namespace) -> None:
+    _apply_server_args(args)
+
+    settings = get_settings()
+    if settings.mode == "http":
+        run_http()
+    elif settings.mode in {"mcp", "stdio"}:
+        run_mcp()
+    elif settings.mode == "both":
+        raise SystemExit("mode=both is reserved; run separate mcp/http processes for now")
+    else:
+        raise SystemExit(f"Unsupported mode: {settings.mode}")
+
+
 def _with_oauth_routes(inner_app) -> Starlette:  # noqa: ANN001
     @asynccontextmanager
     async def lifespan(app):  # noqa: ANN001
@@ -68,17 +97,17 @@ def _with_oauth_routes(inner_app) -> Starlette:  # noqa: ANN001
             yield
 
     routes = [
-            Route("/healthz", lambda request: JSONResponse({"ok": True}), methods=["GET"]),
-            Route("/readyz", lambda request: JSONResponse({"ok": True}), methods=["GET"]),
-            Route("/.well-known/oauth-protected-resource", oauth_protected_resource, methods=["GET"]),
-            Route("/.well-known/oauth-authorization-server", oauth_server_metadata, methods=["GET"]),
-            Route("/.well-known/openid-configuration", oauth_server_metadata, methods=["GET"]),
-            Route("/oauth/register", oauth_register, methods=["POST"]),
-            Route("/oauth/authorize", oauth_authorize_get, methods=["GET"]),
-            Route("/oauth/authorize", oauth_authorize_post, methods=["POST"]),
-            Route("/oauth/token", oauth_token, methods=["POST"]),
-            Mount("/", app=inner_app),
-        ]
+        Route("/healthz", lambda request: JSONResponse({"ok": True}), methods=["GET"]),
+        Route("/readyz", lambda request: JSONResponse({"ok": True}), methods=["GET"]),
+        Route("/.well-known/oauth-protected-resource", oauth_protected_resource, methods=["GET"]),
+        Route("/.well-known/oauth-authorization-server", oauth_server_metadata, methods=["GET"]),
+        Route("/.well-known/openid-configuration", oauth_server_metadata, methods=["GET"]),
+        Route("/oauth/register", oauth_register, methods=["POST"]),
+        Route("/oauth/authorize", oauth_authorize_get, methods=["GET"]),
+        Route("/oauth/authorize", oauth_authorize_post, methods=["POST"]),
+        Route("/oauth/token", oauth_token, methods=["POST"]),
+        Mount("/", app=inner_app),
+    ]
     settings = get_settings()
     if settings.remote_enabled:
         routes[2:2] = remote_routes()
@@ -122,23 +151,8 @@ def run_http() -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    argv = sys.argv[1:] if argv is None else list(argv)
     args = _build_parser().parse_args(argv)
-    if args.command == "worker":
-        run_worker_from_args(args)
-        return
-
-    _apply_server_args(args)
-
-    settings = get_settings()
-    if settings.mode == "http":
-        run_http()
-    elif settings.mode in {"mcp", "stdio"}:
-        run_mcp()
-    elif settings.mode == "both":
-        raise SystemExit("mode=both is reserved; run separate mcp/http processes for now")
-    else:
-        raise SystemExit(f"Unsupported mode: {settings.mode}")
+    args.handler(args)
 
 
 if __name__ == "__main__":

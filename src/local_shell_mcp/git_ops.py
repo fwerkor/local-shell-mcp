@@ -11,11 +11,15 @@ def _git(*args: str) -> str:
 
 
 async def git_status(cwd: str = ".") -> dict:
-    result = await run_shell(f"{_git('status', '--short', '--branch')} && echo '---' && {_git('remote', '-v')}", cwd=cwd)
+    result = await run_shell(
+        f"{_git('status', '--short', '--branch')} && echo '---' && {_git('remote', '-v')}", cwd=cwd
+    )
     return result.model_dump()
 
 
-async def git_diff(cwd: str = ".", staged: bool = False, path: str | None = None, stat: bool = False) -> dict:
+async def git_diff(
+    cwd: str = ".", staged: bool = False, path: str | None = None, stat: bool = False
+) -> dict:
     args = ["diff"]
     if staged:
         args.append("--cached")
@@ -29,11 +33,15 @@ async def git_diff(cwd: str = ".", staged: bool = False, path: str | None = None
 
 async def git_log(cwd: str = ".", max_count: int = 20) -> dict:
     max_count = max(1, min(max_count, 200))
-    result = await run_shell(_git("log", f"--max-count={max_count}", "--oneline", "--decorate"), cwd=cwd)
+    result = await run_shell(
+        _git("log", f"--max-count={max_count}", "--oneline", "--decorate"), cwd=cwd
+    )
     return result.model_dump()
 
 
-async def git_clone(repo_url: str, dest: str | None = None, branch: str | None = None, cwd: str = ".") -> dict:
+async def git_clone(
+    repo_url: str, dest: str | None = None, branch: str | None = None, cwd: str = "."
+) -> dict:
     args = ["clone"]
     if branch:
         args.extend(["--branch", branch])
@@ -85,7 +93,9 @@ async def git_commit(cwd: str, message: str, all_changes: bool = False) -> dict:
     return result.model_dump()
 
 
-async def git_push(cwd: str, remote: str = "origin", branch: str | None = None, set_upstream: bool = True) -> dict:
+async def git_push(
+    cwd: str, remote: str = "origin", branch: str | None = None, set_upstream: bool = True
+) -> dict:
     args = ["push"]
     if set_upstream and branch:
         args.extend(["-u", remote, f"HEAD:{branch}"])

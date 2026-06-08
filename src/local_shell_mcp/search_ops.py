@@ -9,7 +9,14 @@ from .settings import get_settings
 from .shell_ops import run_shell
 
 
-async def grep(query: str, cwd: str = ".", glob: str | None = None, regex: bool = True, case_sensitive: bool = True, max_results: int | None = None) -> dict:
+async def grep(
+    query: str,
+    cwd: str = ".",
+    glob: str | None = None,
+    regex: bool = True,
+    case_sensitive: bool = True,
+    max_results: int | None = None,
+) -> dict:
     settings = get_settings()
     max_results = max_results or settings.max_grep_results
     args = [settings.rg_bin, "--json", "--line-number", "--column"]

@@ -187,6 +187,31 @@ On Windows PowerShell:
 
 For binary deployments, set `LOCAL_SHELL_MCP_WORKSPACE_ROOT` to the directory you want the tool to control. The binary includes the Python server and default OAuth dependencies, but not system tools such as Git, tmux, shells, compilers, or LibreOffice; those are taken from the host system.
 
+## CLI Usage
+
+The executable uses an `argparse` CLI. Running `local-shell-mcp` without a
+subcommand starts the server:
+
+```text
+local-shell-mcp [--mode {mcp,http,stdio}] [--config PATH] [--remote | --no-remote]
+```
+
+Server options:
+
+- `--mode {mcp,http,stdio}` overrides `LOCAL_SHELL_MCP_MODE`.
+- `--config PATH` sets `LOCAL_SHELL_MCP_CONFIG` before loading settings.
+- `--remote` enables remote worker routes and tools.
+- `--no-remote` disables remote worker routes and tools.
+
+Remote workers use the `worker` subcommand:
+
+```text
+local-shell-mcp worker --server URL --invite TOKEN [--name NAME] [--workdir PATH] [--persist]
+```
+
+Use `local-shell-mcp --help` or `local-shell-mcp worker --help` to print the
+current parser help.
+
 Start the Cloudflare Tunnel sidecar too:
 
 ```bash
@@ -314,6 +339,17 @@ and then long-polls the control server for jobs. The default mode is foreground
 and temporary; press `Ctrl-C` on the remote machine to disconnect. Add
 `--background` to the generated command for a simple `nohup` background worker.
 `--persist` is accepted for future user-service installation support.
+
+If `local-shell-mcp` is already installed on the remote machine, the equivalent
+foreground worker command is:
+
+```bash
+local-shell-mcp worker \
+  --server https://your-public-host.example.com \
+  --invite lsmcp_inv_xxxxx \
+  --name npu-4card \
+  --workdir /home/cyh/FrameDiff
+```
 
 After it connects, ask ChatGPT to list machines:
 
@@ -447,10 +483,15 @@ Do not expose HTTP debug mode publicly.
 
 ```bash
 uv sync --group dev
+uv run pre-commit install
+uv run pre-commit run --all-files
 uv run ruff check .
 uv run pytest -q
 LOCAL_SHELL_MCP_AUTH_MODE=none uv run local-shell-mcp --mode mcp
 ```
+
+The pre-commit hooks run Ruff linting with auto-fix and Ruff formatting before
+commits.
 
 You can verify the MCP endpoint with a standard MCP client:
 

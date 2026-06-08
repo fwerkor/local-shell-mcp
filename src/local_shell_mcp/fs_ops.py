@@ -53,7 +53,9 @@ def prune_temp_dir() -> None:
             continue
 
 
-def resolve_path(path: str | Path, *, must_exist: bool = False, allow_missing_parent: bool = True) -> Path:
+def resolve_path(
+    path: str | Path, *, must_exist: bool = False, allow_missing_parent: bool = True
+) -> Path:
     """Resolve a path, optionally restricting it to workspace_root.
 
     In normal mode, absolute paths outside workspace are rejected. In full-container mode,
@@ -176,7 +178,9 @@ def _is_probably_binary(sample: bytes) -> bool:
     return (control_bytes / len(sample)) > BINARY_CONTROL_RATIO
 
 
-def _binary_metadata(p: Path, size: int, preview: str | None = None, preview_bytes: int = BINARY_PREVIEW_BYTES) -> dict:
+def _binary_metadata(
+    p: Path, size: int, preview: str | None = None, preview_bytes: int = BINARY_PREVIEW_BYTES
+) -> dict:
     result = {
         "path": relative_display(p),
         "bytes": size,
@@ -254,7 +258,9 @@ def write_text(path: str, content: str, overwrite: bool = True) -> dict:
     settings = get_settings()
     data = content.encode("utf-8")
     if len(data) > settings.max_file_write_bytes:
-        raise ValueError(f"Refusing to write {len(data)} bytes; max is {settings.max_file_write_bytes}")
+        raise ValueError(
+            f"Refusing to write {len(data)} bytes; max is {settings.max_file_write_bytes}"
+        )
     p = resolve_path(path)
     if p.exists() and not overwrite:
         raise FileExistsError(str(p))
@@ -272,18 +278,24 @@ def edit_text(path: str, old: str, new: str, replace_all: bool = False) -> dict:
     settings = get_settings()
     p = resolve_path(path, must_exist=True)
     if p.stat().st_size > settings.max_file_write_bytes:
-        raise ValueError(f"Refusing to edit {p.stat().st_size} bytes; max is {settings.max_file_write_bytes}")
+        raise ValueError(
+            f"Refusing to edit {p.stat().st_size} bytes; max is {settings.max_file_write_bytes}"
+        )
     _assert_text_file(p)
     text = p.read_text(encoding="utf-8")
     count = text.count(old)
     if count == 0:
         raise ValueError("old text not found")
     if not replace_all and count > 1:
-        raise ValueError(f"old text occurs {count} times; set replace_all=true or provide more context")
+        raise ValueError(
+            f"old text occurs {count} times; set replace_all=true or provide more context"
+        )
     updated = text.replace(old, new) if replace_all else text.replace(old, new, 1)
     updated_bytes = len(updated.encode("utf-8"))
     if updated_bytes > settings.max_file_write_bytes:
-        raise ValueError(f"Refusing to write {updated_bytes} bytes; max is {settings.max_file_write_bytes}")
+        raise ValueError(
+            f"Refusing to write {updated_bytes} bytes; max is {settings.max_file_write_bytes}"
+        )
     p.write_text(updated, encoding="utf-8")
     return {"path": relative_display(p), "replacements": count if replace_all else 1}
 
@@ -292,7 +304,9 @@ def multi_edit_text(path: str, edits: list[dict]) -> dict:
     settings = get_settings()
     p = resolve_path(path, must_exist=True)
     if p.stat().st_size > settings.max_file_write_bytes:
-        raise ValueError(f"Refusing to edit {p.stat().st_size} bytes; max is {settings.max_file_write_bytes}")
+        raise ValueError(
+            f"Refusing to edit {p.stat().st_size} bytes; max is {settings.max_file_write_bytes}"
+        )
     _assert_text_file(p)
     text = p.read_text(encoding="utf-8")
     total = 0
@@ -309,7 +323,9 @@ def multi_edit_text(path: str, edits: list[dict]) -> dict:
         total += count if replace_all else 1
     updated_bytes = len(text.encode("utf-8"))
     if updated_bytes > settings.max_file_write_bytes:
-        raise ValueError(f"Refusing to write {updated_bytes} bytes; max is {settings.max_file_write_bytes}")
+        raise ValueError(
+            f"Refusing to write {updated_bytes} bytes; max is {settings.max_file_write_bytes}"
+        )
     p.write_text(text, encoding="utf-8")
     return {"path": relative_display(p), "replacements": total}
 

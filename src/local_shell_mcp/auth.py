@@ -12,7 +12,17 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from .audit import audit
 from .settings import Settings, get_settings
 
-PUBLIC_PATHS = {"/healthz", "/readyz", "/docs", "/openapi.json", "/join", "/remote/worker-bundle.tgz", "/remote/register", "/remote/poll", "/remote/result"}
+PUBLIC_PATHS = {
+    "/healthz",
+    "/readyz",
+    "/docs",
+    "/openapi.json",
+    "/join",
+    "/remote/worker-bundle.tgz",
+    "/remote/register",
+    "/remote/poll",
+    "/remote/result",
+}
 MCP_DISCOVERY_METHODS = {
     "initialize",
     "notifications/initialized",
@@ -52,16 +62,26 @@ def _verify_oauth(request: Request, settings: Settings) -> Principal:
 
     token = _extract_token(request)
     if not token:
-        metadata_url = protected_resource_metadata(request)["resource"].rstrip("/") + "/.well-known/oauth-protected-resource"
+        metadata_url = (
+            protected_resource_metadata(request)["resource"].rstrip("/")
+            + "/.well-known/oauth-protected-resource"
+        )
         raise HTTPException(
             status_code=401,
             detail="Missing OAuth bearer token",
-            headers={"WWW-Authenticate": f'Bearer resource_metadata="{metadata_url}", scope="shell:execute"'},
+            headers={
+                "WWW-Authenticate": f'Bearer resource_metadata="{metadata_url}", scope="shell:execute"'
+            },
         )
     try:
         claims = validate_bearer_token(token, request)
     except jwt.PyJWTError as exc:
-        audit("oauth_auth_failed", error=str(exc), path=str(request.url.path), ip=_client_host(request))
+        audit(
+            "oauth_auth_failed",
+            error=str(exc),
+            path=str(request.url.path),
+            ip=_client_host(request),
+        )
         raise HTTPException(status_code=401, detail=f"Invalid OAuth bearer token: {exc}") from exc
     return Principal(email=None, subject=claims.get("sub"), claims=claims)
 
@@ -71,12 +91,16 @@ def verify_request(request: Request) -> Principal:
     if settings.auth_mode == "none":
         return Principal(email=None, subject="anonymous", claims={"auth": "none"})
     if settings.auth_bypass_localhost and _is_localhost(request) and settings.mode == "http":
-        return Principal(email="localhost", subject="localhost", claims={"auth": "localhost-bypass"})
+        return Principal(
+            email="localhost", subject="localhost", claims={"auth": "localhost-bypass"}
+        )
     if settings.auth_mode == "oauth":
         principal = _verify_oauth(request, settings)
     else:
         raise HTTPException(status_code=500, detail=f"Unsupported auth_mode: {settings.auth_mode}")
-    audit("auth_ok", subject=principal.subject, path=str(request.url.path), ip=_client_host(request))
+    audit(
+        "auth_ok", subject=principal.subject, path=str(request.url.path), ip=_client_host(request)
+    )
     return principal
 
 
@@ -171,7 +195,9 @@ class AuthMiddleware:
             request.state.principal = verify_request(request)
         except HTTPException as exc:
             headers = getattr(exc, "headers", None) or {}
-            response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=headers)
+            response = JSONResponse(
+                {"detail": exc.detail}, status_code=exc.status_code, headers=headers
+            )
             await response(scope, downstream_receive, send)
             return
 

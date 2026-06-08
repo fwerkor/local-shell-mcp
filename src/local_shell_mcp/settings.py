@@ -95,7 +95,9 @@ class Settings(BaseSettings):
     oauth_issuer: str | None = None
     oauth_resource: str | None = None
     oauth_admin_pin: str | None = None
-    oauth_jwt_secret: str = Field(default_factory=lambda: os.getenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET") or "dev-change-me")
+    oauth_jwt_secret: str = Field(
+        default_factory=lambda: os.getenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET") or "dev-change-me"
+    )
     # 0 means access tokens never expire.
     oauth_access_token_ttl_s: int = 0
     oauth_code_ttl_s: int = 300
