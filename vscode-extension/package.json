@@ -2,7 +2,7 @@
   "name": "local-shell-mcp-vscode",
   "displayName": "local-shell-mcp",
   "description": "Start and manage local-shell-mcp from VS Code so ChatGPT can collaborate on the current workspace through MCP.",
-  "version": "2.1.1",
+  "version": "3.0.0",
   "publisher": "fwerkor",
   "license": "MIT",
   "repository": {

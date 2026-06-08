@@ -12,6 +12,7 @@ ENV PYTHONUNBUFFERED=1 \
 RUN pacman -Syu --noconfirm archlinux-keyring \
   && pacman -Syu --needed --noconfirm \
     bash \
+    zsh \
     ca-certificates \
     sudo \
     curl \
