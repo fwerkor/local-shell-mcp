@@ -2,6 +2,8 @@ import json
 
 import pytest
 
+import local_shell_mcp.tools as tools_module
+from local_shell_mcp.agent_mcp import AgentMcpTool
 from local_shell_mcp.auth import _is_mcp_discovery_request
 from local_shell_mcp.oauth import issue_access_token, validate_bearer_token
 from local_shell_mcp.settings import get_settings
@@ -48,6 +50,48 @@ async def test_full_container_mode_marks_command_tools_for_auto_approval(tmp_pat
     assert annotations.openWorldHint is False
 
     assert tools["search"].annotations.readOnlyHint is True
+
+
+@pytest.mark.asyncio
+async def test_full_container_mode_does_not_auto_approve_agent_mcp_proxies(tmp_path, monkeypatch):
+    config_dir = tmp_path / "agent-config"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "mcpServers": {"docs": {"type": "http", "url": "https://docs.example/mcp"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeMcpClientManager:
+        async def list_tools(self, name, server):  # noqa: ANN001, ARG002
+            return [
+                AgentMcpTool(
+                    name="search",
+                    description="Search docs",
+                    input_schema={"type": "object"},
+                )
+            ]
+
+        async def call_tool(self, name, server, tool, args):  # noqa: ANN001, ARG002
+            return {"ok": True}
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AGENT_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "true")
+    monkeypatch.setattr(
+        tools_module, "AgentMcpClientManager", lambda _timeout: FakeMcpClientManager()
+    )
+    get_settings.cache_clear()
+
+    tools = {tool.name: tool for tool in await build_mcp().list_tools()}
+
+    assert tools["run_shell_tool"].annotations.openWorldHint is False
+    assert tools["call_agent_mcp_tool"].annotations is None
+    assert tools["agent_mcp__docs__search"].annotations is None
 
 
 @pytest.mark.asyncio

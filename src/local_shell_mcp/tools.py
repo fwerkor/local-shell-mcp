@@ -12,6 +12,9 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 
+from .agent_bridge import build_agent_registry
+from .agent_bridge_tools import register_agent_bridge_tools
+from .agent_mcp import AgentMcpClientManager
 from .audit import audit
 from .fs_ops import (
     delete_path,
@@ -231,6 +234,8 @@ def _install_full_container_auto_approval_hints(mcp: FastMCP) -> None:
     if not get_settings().allow_full_container:
         return
     for tool in mcp._tool_manager._tools.values():  # noqa: SLF001
+        if tool.name == "call_agent_mcp_tool" or tool.name.startswith("agent_mcp__"):
+            continue
         if tool.annotations and tool.annotations.readOnlyHint:
             continue
         tool.annotations = ToolAnnotations(
@@ -359,6 +364,25 @@ def build_mcp() -> FastMCP:
     )
     read_only_meta = _security_meta([*NOAUTH_SECURITY_SCHEMES, *OAUTH_SECURITY_SCHEMES])
     oauth_meta = _security_meta(OAUTH_SECURITY_SCHEMES)
+
+    if settings.agent_bridge_enabled:
+        registry = build_agent_registry(
+            settings.agent_config_dir,
+            AgentMcpClientManager(settings.agent_mcp_call_timeout_s),
+            settings.agent_mcp_probe_timeout_s,
+            None if settings.agent_dynamic_mcp_tools else False,
+            None if settings.agent_dynamic_skill_tools else False,
+        )
+        register_agent_bridge_tools(
+            mcp,
+            registry,
+            oauth_meta,
+            _ok,
+            _handled_error,
+            settings.agent_mcp_probe_timeout_s,
+            None if settings.agent_dynamic_mcp_tools else False,
+            None if settings.agent_dynamic_skill_tools else False,
+        )
 
     @mcp.tool(annotations=read_only_tool, meta=read_only_meta)
     async def search(query: str) -> str:

@@ -12,6 +12,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 DEFAULT_WORKSPACE_ROOT = Path("/workspace")
 DEFAULT_STATE_DIR = DEFAULT_WORKSPACE_ROOT / ".local-shell-mcp"
 DEFAULT_AUDIT_LOG_PATH = DEFAULT_STATE_DIR / "audit.jsonl"
+DEFAULT_AGENT_CONFIG_DIR = Path("/home/agent/local-shell-mcp-config")
 
 SENSITIVE_SETTING_KEYS = {
     "cf_access_audience",
@@ -78,6 +79,15 @@ class Settings(BaseSettings):
     remote_poll_timeout_s: int = 25
     remote_job_timeout_s: int = 3600
 
+    # Agent capability bridge. External sync tools write normalized MCP and skill
+    # config here; local-shell-mcp reads it without mutating it.
+    agent_bridge_enabled: bool = True
+    agent_config_dir: Path = DEFAULT_AGENT_CONFIG_DIR
+    agent_mcp_probe_timeout_s: int = 5
+    agent_mcp_call_timeout_s: int = 60
+    agent_dynamic_mcp_tools: bool = True
+    agent_dynamic_skill_tools: bool = True
+
     shell_executable: str = "/bin/bash"
     tmux_bin: str = "tmux"
     rg_bin: str = "rg"
@@ -128,7 +138,9 @@ class Settings(BaseSettings):
         ]
     )
 
-    @field_validator("workspace_root", "audit_log_path", "state_dir", mode="before")
+    @field_validator(
+        "workspace_root", "audit_log_path", "state_dir", "agent_config_dir", mode="before"
+    )
     @classmethod
     def expand_path(cls, value: str | Path) -> Path:
         return Path(os.path.expandvars(os.path.expanduser(str(value)))).resolve()

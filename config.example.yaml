@@ -1,7 +1,17 @@
-# Minimal YAML config example. Environment variables with LOCAL_SHELL_MCP_ prefix override these values.
+# Minimal YAML config example. Values here are applied after environment defaults.
 
 host: 0.0.0.0
 port: 8765
 mode: mcp
 workspace_root: /workspace
 auth_mode: oauth
+
+# Agent capability bridge. External sync tools can write normalized MCP and
+# skill config into this directory. The Docker Compose default host path is
+# workspaces/default/agent/local-shell-mcp-config.
+agent_bridge_enabled: true
+agent_config_dir: /home/agent/local-shell-mcp-config
+agent_mcp_probe_timeout_s: 5
+agent_mcp_call_timeout_s: 60
+agent_dynamic_mcp_tools: true
+agent_dynamic_skill_tools: true
