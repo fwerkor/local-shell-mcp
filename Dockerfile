@@ -163,7 +163,8 @@ RUN pacman -Sy --noconfirm archlinux-keyring \
     yazi \
     fzf \
     github-cli \
-    pre-commit
+    pre-commit \
+    uv
 
 COPY --from=aur-builder /tmp/aur-packages /tmp/aur-packages
 RUN pacman -U --needed --noconfirm /tmp/aur-packages/*.pkg.tar.zst \
