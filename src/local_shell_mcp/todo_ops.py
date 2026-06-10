@@ -6,7 +6,7 @@ import json
 import time
 from pathlib import Path
 
-from .settings import get_settings
+from .config.settings import get_settings
 
 
 def _todo_path() -> Path:
@@ -24,7 +24,9 @@ def todo_read() -> dict:
     settings = get_settings()
     size = path.stat().st_size
     if size > settings.max_todo_bytes:
-        raise ValueError(f"Refusing to read {size} todo bytes; max is {settings.max_todo_bytes}")
+        raise ValueError(
+            f"Refusing to read {size} todo bytes; max is {settings.max_todo_bytes}"
+        )
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -32,7 +34,9 @@ def todo_write(todos: list[dict]) -> dict:
     """Normalize todo entries and enforce count and byte limits before replacing persisted state."""
     settings = get_settings()
     if len(todos) > settings.max_todos:
-        raise ValueError(f"Refusing to write {len(todos)} todos; max is {settings.max_todos}")
+        raise ValueError(
+            f"Refusing to write {len(todos)} todos; max is {settings.max_todos}"
+        )
     normalized = []
     for idx, item in enumerate(todos):
         normalized.append(

@@ -75,7 +75,9 @@ def test_scan_agent_skills_rejects_directories_outside_config_root(tmp_path):
     outside = tmp_path / "outside"
     skill_dir = outside / "sneaky"
     skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text("# Sneaky\n\nDo not scan.\n", encoding="utf-8")
+    (skill_dir / "SKILL.md").write_text(
+        "# Sneaky\n\nDo not scan.\n", encoding="utf-8"
+    )
 
     relative_result = scan_agent_skills(config_dir, "../outside")
     absolute_result = scan_agent_skills(config_dir, str(outside))
@@ -93,7 +95,9 @@ def test_scan_agent_skills_rejects_directories_outside_config_root(tmp_path):
 def test_activate_skill_returns_content_and_related_files(tmp_path):
     skill_dir = tmp_path / "skills" / "debugging"
     skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text("# Debugging\n\nFind root causes.\n", encoding="utf-8")
+    (skill_dir / "SKILL.md").write_text(
+        "# Debugging\n\nFind root causes.\n", encoding="utf-8"
+    )
 
     records = scan_agent_skills(tmp_path, "skills").skills
     payload = activate_skill(tmp_path, records["debugging"])
@@ -122,7 +126,9 @@ def test_make_unique_tool_name_preserves_empty_raw_name_segment():
     assert result == "activate_skill__unnamed"
 
 
-def test_scan_agent_skills_description_uses_early_paragraph_over_later_example(tmp_path):
+def test_scan_agent_skills_description_uses_early_paragraph_over_later_example(
+    tmp_path,
+):
     skill_dir = tmp_path / "skills" / "examples"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
@@ -135,7 +141,9 @@ def test_scan_agent_skills_description_uses_early_paragraph_over_later_example(t
     assert result.skills["examples"].description == "Use the early paragraph."
 
 
-def test_scan_agent_skills_warns_when_directory_iteration_fails(tmp_path, monkeypatch):
+def test_scan_agent_skills_warns_when_directory_iteration_fails(
+    tmp_path, monkeypatch
+):
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()
     original_iterdir = Path.iterdir
@@ -150,10 +158,14 @@ def test_scan_agent_skills_warns_when_directory_iteration_fails(tmp_path, monkey
     result = scan_agent_skills(tmp_path, "skills")
 
     assert result.skills == {}
-    assert result.warnings == ["Could not scan skills directory skills: racing directory"]
+    assert result.warnings == [
+        "Could not scan skills directory skills: racing directory"
+    ]
 
 
-def test_scan_agent_skills_warns_when_skills_dir_resolution_fails(tmp_path, monkeypatch):
+def test_scan_agent_skills_warns_when_skills_dir_resolution_fails(
+    tmp_path, monkeypatch
+):
     original_resolve = Path.resolve
 
     def fail_resolve(path, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
@@ -166,16 +178,24 @@ def test_scan_agent_skills_warns_when_skills_dir_resolution_fails(tmp_path, monk
     result = scan_agent_skills(tmp_path, "skills")
 
     assert result.skills == {}
-    assert result.warnings == ["Could not scan skills directory skills: symlink loop"]
+    assert result.warnings == [
+        "Could not scan skills directory skills: symlink loop"
+    ]
 
 
-def test_scan_agent_skills_skips_unreadable_skill_and_continues(tmp_path, monkeypatch):
+def test_scan_agent_skills_skips_unreadable_skill_and_continues(
+    tmp_path, monkeypatch
+):
     broken_dir = tmp_path / "skills" / "broken"
     good_dir = tmp_path / "skills" / "good"
     broken_dir.mkdir(parents=True)
     good_dir.mkdir()
-    (broken_dir / "SKILL.md").write_text("# Broken\n\nDo not load.\n", encoding="utf-8")
-    (good_dir / "SKILL.md").write_text("# Good\n\nLoad this.\n", encoding="utf-8")
+    (broken_dir / "SKILL.md").write_text(
+        "# Broken\n\nDo not load.\n", encoding="utf-8"
+    )
+    (good_dir / "SKILL.md").write_text(
+        "# Good\n\nLoad this.\n", encoding="utf-8"
+    )
     original_read_text = Path.read_text
 
     def fail_read_text(path, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
@@ -191,10 +211,14 @@ def test_scan_agent_skills_skips_unreadable_skill_and_continues(tmp_path, monkey
     assert result.warnings == ["Skipping skill broken: unreadable skill"]
 
 
-def test_scan_agent_skills_warns_when_related_file_scan_fails(tmp_path, monkeypatch):
+def test_scan_agent_skills_warns_when_related_file_scan_fails(
+    tmp_path, monkeypatch
+):
     skill_dir = tmp_path / "skills" / "racing"
     skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text("# Racing\n\nStill load.\n", encoding="utf-8")
+    (skill_dir / "SKILL.md").write_text(
+        "# Racing\n\nStill load.\n", encoding="utf-8"
+    )
     original_rglob = Path.rglob
 
     def fail_rglob(path, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
@@ -207,4 +231,6 @@ def test_scan_agent_skills_warns_when_related_file_scan_fails(tmp_path, monkeypa
     result = scan_agent_skills(tmp_path, "skills")
 
     assert set(result.skills) == {"racing"}
-    assert result.warnings == ["Skipping related files for skill racing: rglob failed"]
+    assert result.warnings == [
+        "Skipping related files for skill racing: rglob failed"
+    ]

@@ -6,7 +6,7 @@ from local_shell_mcp.agent_bridge import (
     load_agent_manifest,
     redact_mapping,
 )
-from local_shell_mcp.settings import get_settings
+from local_shell_mcp.config.settings import get_settings
 
 
 def test_agent_config_dir_defaults_to_home_agent(monkeypatch, tmp_path):
@@ -16,14 +16,18 @@ def test_agent_config_dir_defaults_to_home_agent(monkeypatch, tmp_path):
 
     settings = get_settings()
 
-    assert str(settings.agent_config_dir) == "/home/agent/local-shell-mcp-config"
+    assert (
+        str(settings.agent_config_dir) == "/home/agent/local-shell-mcp-config"
+    )
     assert settings.agent_bridge_enabled is True
     assert settings.agent_mcp_probe_timeout_s == 5
 
 
 def test_agent_config_dir_env_override(monkeypatch, tmp_path):
     config_dir = tmp_path / "agent-config"
-    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    monkeypatch.setenv(
+        "LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path / "workspace")
+    )
     monkeypatch.setenv("LOCAL_SHELL_MCP_AGENT_CONFIG_DIR", str(config_dir))
     get_settings.cache_clear()
 
@@ -91,7 +95,9 @@ def test_load_agent_manifest_invalid_encoding(tmp_path):
     assert manifest.errors
 
 
-def test_load_agent_manifest_invalid_schema_does_not_leak_sensitive_inputs(tmp_path):
+def test_load_agent_manifest_invalid_schema_does_not_leak_sensitive_inputs(
+    tmp_path,
+):
     config = {
         "version": 1,
         "mcpServers": {
@@ -139,14 +145,21 @@ def test_redact_mapping_hides_secret_values():
     assert redacted["normal"] == "visible"
     assert redacted["nested"]["password"] == "<redacted>"
     assert redacted["nested"]["label"] == "ok"
-    assert redacted["argv"] == ["--token=<redacted>", "--api-key=<redacted>", "visible"]
+    assert redacted["argv"] == [
+        "--token=<redacted>",
+        "--api-key=<redacted>",
+        "visible",
+    ]
     assert redacted["split_argv"] == ["--password", "<redacted>", "visible"]
     assert redact_mapping("--token=secret") == "--token=<redacted>"
 
     spaced_token = redact_mapping("tool --token secret")
     assert "secret" not in spaced_token
     assert "<redacted>" in spaced_token
-    assert redact_mapping(["--password secret", "safe"]) == ["--password <redacted>", "safe"]
+    assert redact_mapping(["--password secret", "safe"]) == [
+        "--password <redacted>",
+        "safe",
+    ]
 
 
 def test_redact_text_hides_quoted_dict_argv_and_url_userinfo_secrets():
@@ -201,7 +214,9 @@ def test_redact_text_hides_standalone_high_confidence_tokens():
 
 def test_agent_bridge_manifest_populates_python_field_names():
     manifest = AgentBridgeManifest(
-        mcp_servers={"github": {"type": "stdio", "command": "github-mcp-server"}},
+        mcp_servers={
+            "github": {"type": "stdio", "command": "github-mcp-server"}
+        },
         dynamic_tools={"mcp": False, "skills": True},
     )
 

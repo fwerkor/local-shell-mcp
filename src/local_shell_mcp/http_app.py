@@ -8,6 +8,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from .auth import CloudflareAccessMiddleware, Principal, verify_request
+from .config.settings import get_settings
 from .fs_ops import (
     delete_path,
     edit_text,
@@ -32,7 +33,6 @@ from .git_ops import (
     git_status,
 )
 from .search_ops import grep, tree
-from .settings import get_settings
 from .shell_ops import (
     PUBLIC_RUN_SHELL_TIMEOUT_CAP_S,
     kill_shell,
@@ -70,7 +70,12 @@ def build_http_app() -> FastAPI:
     @app.exception_handler(ValueError)
     async def value_error_handler(request: Request, exc: ValueError):  # noqa: ARG001
         return JSONResponse(
-            status_code=400, content={"ok": False, "error": "validation_error", "message": str(exc)}
+            status_code=400,
+            content={
+                "ok": False,
+                "error": "validation_error",
+                "message": str(exc),
+            },
         )
 
     @app.middleware("http")
@@ -78,7 +83,9 @@ def build_http_app() -> FastAPI:
         if not request.url.path.startswith("/tools/"):
             return await call_next(request)
         try:
-            return await asyncio.wait_for(call_next(request), timeout=PUBLIC_TOOL_TIMEOUT_S)
+            return await asyncio.wait_for(
+                call_next(request), timeout=PUBLIC_TOOL_TIMEOUT_S
+            )
         except TimeoutError:
             return JSONResponse(
                 status_code=504,
@@ -113,11 +120,15 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/shell_start")
     async def api_shell_start(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await start_shell(body.get("cwd", "."), body.get("name"), body.get("command"))
+        return await start_shell(
+            body.get("cwd", "."), body.get("name"), body.get("command")
+        )
 
     @app.post("/tools/shell_send")
     async def api_shell_send(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await send_shell(body["session_id"], body["input_text"], body.get("enter", True))
+        return await send_shell(
+            body["session_id"], body["input_text"], body.get("enter", True)
+        )
 
     @app.post("/tools/shell_read")
     async def api_shell_read(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -142,13 +153,20 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/tree")
     async def api_tree(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await tree(body.get("cwd", "."), body.get("depth", 3), body.get("max_entries", 500))
+        return await tree(
+            body.get("cwd", "."),
+            body.get("depth", 3),
+            body.get("max_entries", 500),
+        )
 
     @app.post("/tools/glob")
     async def api_glob(body: dict, _: Principal = PRINCIPAL_DEP):
         return {
             "paths": await _blocking(
-                glob_paths, body["pattern"], body.get("cwd", "."), body.get("max_results", 500)
+                glob_paths,
+                body["pattern"],
+                body.get("cwd", "."),
+                body.get("max_results", 500),
             )
         }
 
@@ -177,13 +195,20 @@ def build_http_app() -> FastAPI:
     @app.post("/tools/write_file")
     async def api_write_file(body: dict, _: Principal = PRINCIPAL_DEP):
         return await _blocking(
-            write_text, body["path"], body["content"], body.get("overwrite", True)
+            write_text,
+            body["path"],
+            body["content"],
+            body.get("overwrite", True),
         )
 
     @app.post("/tools/edit_file")
     async def api_edit_file(body: dict, _: Principal = PRINCIPAL_DEP):
         return await _blocking(
-            edit_text, body["path"], body["old"], body["new"], body.get("replace_all", False)
+            edit_text,
+            body["path"],
+            body["old"],
+            body["new"],
+            body.get("replace_all", False),
         )
 
     @app.post("/tools/multi_edit_file")
@@ -192,7 +217,9 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/delete")
     async def api_delete(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(delete_path, body["path"], body.get("recursive", False))
+        return await _blocking(
+            delete_path, body["path"], body.get("recursive", False)
+        )
 
     @app.post("/tools/git/status")
     async def api_git_status(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -214,17 +241,24 @@ def build_http_app() -> FastAPI:
     @app.post("/tools/git/clone")
     async def api_git_clone(body: dict, _: Principal = PRINCIPAL_DEP):
         return await git_clone(
-            body["repo_url"], body.get("dest"), body.get("branch"), body.get("cwd", ".")
+            body["repo_url"],
+            body.get("dest"),
+            body.get("branch"),
+            body.get("cwd", "."),
         )
 
     @app.post("/tools/git/checkout")
     async def api_git_checkout(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_checkout(body["cwd"], body["ref"], body.get("create", False))
+        return await git_checkout(
+            body["cwd"], body["ref"], body.get("create", False)
+        )
 
     @app.post("/tools/git/fetch")
     async def api_git_fetch(body: dict, _: Principal = PRINCIPAL_DEP):
         return await git_fetch(
-            body.get("cwd", "."), body.get("remote", "origin"), body.get("prune", True)
+            body.get("cwd", "."),
+            body.get("remote", "origin"),
+            body.get("prune", True),
         )
 
     @app.post("/tools/git/pull")
@@ -237,7 +271,9 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/git/commit")
     async def api_git_commit(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_commit(body["cwd"], body["message"], body.get("all_changes", False))
+        return await git_commit(
+            body["cwd"], body["message"], body.get("all_changes", False)
+        )
 
     @app.post("/tools/git/push")
     async def api_git_push(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -250,12 +286,16 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/git/show")
     async def api_git_show(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_show(body.get("cwd", "."), body.get("ref", "HEAD"), body.get("path"))
+        return await git_show(
+            body.get("cwd", "."), body.get("ref", "HEAD"), body.get("path")
+        )
 
     @app.post("/tools/git/reset")
     async def api_git_reset(body: dict, _: Principal = PRINCIPAL_DEP):
         return await git_reset(
-            body.get("cwd", "."), body.get("mode", "soft"), body.get("ref", "HEAD")
+            body.get("cwd", "."),
+            body.get("mode", "soft"),
+            body.get("ref", "HEAD"),
         )
 
     @app.get("/tools/todo")

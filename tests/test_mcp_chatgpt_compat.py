@@ -5,16 +5,22 @@ import pytest
 import local_shell_mcp.tools as tools_module
 from local_shell_mcp.agent_mcp import AgentMcpTool
 from local_shell_mcp.auth import _is_mcp_discovery_request
+from local_shell_mcp.config.settings import get_settings
 from local_shell_mcp.oauth import issue_access_token, validate_bearer_token
-from local_shell_mcp.settings import get_settings
 from local_shell_mcp.tools import build_mcp
 
 
 def test_mcp_discovery_methods_are_unauthenticated():
     scope = {"type": "http", "path": "/mcp", "method": "POST"}
-    initialize = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize"}).encode()
-    tools_list = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}).encode()
-    tools_call = json.dumps({"jsonrpc": "2.0", "id": 3, "method": "tools/call"}).encode()
+    initialize = json.dumps(
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize"}
+    ).encode()
+    tools_list = json.dumps(
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
+    ).encode()
+    tools_call = json.dumps(
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call"}
+    ).encode()
 
     assert _is_mcp_discovery_request(scope, initialize)
     assert _is_mcp_discovery_request(scope, tools_list)
@@ -24,19 +30,28 @@ def test_mcp_discovery_methods_are_unauthenticated():
 @pytest.mark.asyncio
 async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
-    monkeypatch.setenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL", "https://local-shell-mcp.example.com")
+    monkeypatch.setenv(
+        "LOCAL_SHELL_MCP_PUBLIC_BASE_URL", "https://local-shell-mcp.example.com"
+    )
     get_settings.cache_clear()
 
     mcp = build_mcp()
-    assert "local-shell-mcp.example.com" in mcp.settings.transport_security.allowed_hosts
+    assert (
+        "local-shell-mcp.example.com"
+        in mcp.settings.transport_security.allowed_hosts
+    )
 
     tools = {tool.name: tool for tool in await mcp.list_tools()}
     assert tools["search"].meta["securitySchemes"][0]["type"] == "noauth"
-    assert tools["environment_info"].meta["securitySchemes"][0]["type"] == "oauth2"
+    assert (
+        tools["environment_info"].meta["securitySchemes"][0]["type"] == "oauth2"
+    )
 
 
 @pytest.mark.asyncio
-async def test_full_container_mode_marks_command_tools_for_auto_approval(tmp_path, monkeypatch):
+async def test_full_container_mode_marks_command_tools_for_auto_approval(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "true")
     get_settings.cache_clear()
@@ -53,14 +68,18 @@ async def test_full_container_mode_marks_command_tools_for_auto_approval(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_full_container_mode_does_not_auto_approve_agent_mcp_proxies(tmp_path, monkeypatch):
+async def test_full_container_mode_does_not_auto_approve_agent_mcp_proxies(
+    tmp_path, monkeypatch
+):
     config_dir = tmp_path / "agent-config"
     config_dir.mkdir()
     (config_dir / "config.json").write_text(
         json.dumps(
             {
                 "version": 1,
-                "mcpServers": {"docs": {"type": "http", "url": "https://docs.example/mcp"}},
+                "mcpServers": {
+                    "docs": {"type": "http", "url": "https://docs.example/mcp"}
+                },
             }
         ),
         encoding="utf-8",
@@ -79,11 +98,15 @@ async def test_full_container_mode_does_not_auto_approve_agent_mcp_proxies(tmp_p
         async def call_tool(self, name, server, tool, args):  # noqa: ANN001, ARG002
             return {"ok": True}
 
-    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    monkeypatch.setenv(
+        "LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path / "workspace")
+    )
     monkeypatch.setenv("LOCAL_SHELL_MCP_AGENT_CONFIG_DIR", str(config_dir))
     monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "true")
     monkeypatch.setattr(
-        tools_module, "AgentMcpClientManager", lambda _timeout: FakeMcpClientManager()
+        tools_module,
+        "AgentMcpClientManager",
+        lambda _timeout: FakeMcpClientManager(),
     )
     get_settings.cache_clear()
 
@@ -95,7 +118,9 @@ async def test_full_container_mode_does_not_auto_approve_agent_mcp_proxies(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_default_mode_does_not_mark_command_tools_for_auto_approval(tmp_path, monkeypatch):
+async def test_default_mode_does_not_mark_command_tools_for_auto_approval(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "false")
     get_settings.cache_clear()

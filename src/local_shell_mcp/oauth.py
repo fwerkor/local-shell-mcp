@@ -13,10 +13,15 @@ from urllib.parse import urlencode
 
 import jwt
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from starlette.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 
 from .audit import audit
-from .settings import get_settings
+from .config.settings import get_settings
 
 
 @dataclass
@@ -111,7 +116,9 @@ def authorization_server_metadata(request: Request) -> dict[str, Any]:
 
 def _json(data: dict, status_code: int = 200) -> JSONResponse:
     """Return compact JSON responses with the media type expected by OAuth metadata clients."""
-    return JSONResponse(data, status_code=status_code, headers={"Cache-Control": "no-store"})
+    return JSONResponse(
+        data, status_code=status_code, headers={"Cache-Control": "no-store"}
+    )
 
 
 async def oauth_protected_resource(request: Request) -> JSONResponse:
@@ -131,14 +138,22 @@ async def oauth_register(request: Request) -> JSONResponse:
     except Exception:
         body = {}
     client_id = "local-shell-mcp-" + secrets.token_urlsafe(24)
-    redirect_uris = [str(x) for x in body.get("redirect_uris", []) if isinstance(x, str)]
+    redirect_uris = [
+        str(x) for x in body.get("redirect_uris", []) if isinstance(x, str)
+    ]
     client = OAuthClient(
         client_id=client_id,
         redirect_uris=redirect_uris,
-        client_name=body.get("client_name") if isinstance(body.get("client_name"), str) else None,
+        client_name=body.get("client_name")
+        if isinstance(body.get("client_name"), str)
+        else None,
     )
     _CLIENTS[client_id] = client
-    audit("oauth_client_registered", client_id=client_id, redirect_uris=redirect_uris)
+    audit(
+        "oauth_client_registered",
+        client_id=client_id,
+        redirect_uris=redirect_uris,
+    )
     return _json(
         {
             "client_id": client_id,
@@ -162,9 +177,15 @@ def _validate_authorize_params(params: dict[str, str]) -> str | None:
     if not params.get("redirect_uri"):
         return "Missing redirect_uri"
     client = _CLIENTS.get(params["client_id"])
-    if client and client.redirect_uris and params["redirect_uri"] not in client.redirect_uris:
+    if (
+        client
+        and client.redirect_uris
+        and params["redirect_uri"] not in client.redirect_uris
+    ):
         return "redirect_uri is not registered for this client"
-    if params.get("code_challenge_method") and params.get("code_challenge_method") not in {
+    if params.get("code_challenge_method") and params.get(
+        "code_challenge_method"
+    ) not in {
         "S256",
         "plain",
     }:
@@ -184,11 +205,14 @@ def _hidden_inputs(params: dict[str, str]) -> str:
         )
 
     return "\n".join(
-        f'<input type="hidden" name="{esc(k)}" value="{esc(v)}" />' for k, v in params.items()
+        f'<input type="hidden" name="{esc(k)}" value="{esc(v)}" />'
+        for k, v in params.items()
     )
 
 
-def _authorize_form(params: dict[str, str], error: str | None = None) -> HTMLResponse:
+def _authorize_form(
+    params: dict[str, str], error: str | None = None
+) -> HTMLResponse:
     """Render the local approval form used before issuing an authorization code."""
     settings = get_settings()
     scope = params.get("scope") or " ".join(_scopes())
@@ -217,10 +241,14 @@ def _authorize_form(params: dict[str, str], error: str | None = None) -> HTMLRes
     return HTMLResponse(html)
 
 
-def _make_redirect(redirect_uri: str, query: dict[str, str]) -> RedirectResponse:
+def _make_redirect(
+    redirect_uri: str, query: dict[str, str]
+) -> RedirectResponse:
     """Append authorization response parameters to a redirect URI."""
     sep = "&" if "?" in redirect_uri else "?"
-    return RedirectResponse(f"{redirect_uri}{sep}{urlencode(query)}", status_code=302)
+    return RedirectResponse(
+        f"{redirect_uri}{sep}{urlencode(query)}", status_code=302
+    )
 
 
 async def oauth_authorize_get(request: Request) -> Response:
@@ -258,7 +286,11 @@ async def oauth_authorize_post(request: Request) -> Response:
         code_challenge_method=params.get("code_challenge_method"),
     )
     _CODES[code] = auth_code
-    audit("oauth_code_issued", client_id=auth_code.client_id, resource=auth_code.resource)
+    audit(
+        "oauth_code_issued",
+        client_id=auth_code.client_id,
+        resource=auth_code.resource,
+    )
     query = {"code": code, "iss": issuer_url(request)}
     if params.get("state"):
         query["state"] = params["state"]
@@ -310,20 +342,31 @@ async def oauth_token(request: Request) -> JSONResponse:
     code_obj = _CODES.get(code)
     if not code_obj or code_obj.used:
         return _json(
-            {"error": "invalid_grant", "error_description": "Unknown or used code"}, status_code=400
+            {
+                "error": "invalid_grant",
+                "error_description": "Unknown or used code",
+            },
+            status_code=400,
         )
     if int(time.time()) - code_obj.created_at > get_settings().oauth_code_ttl_s:
         return _json(
-            {"error": "invalid_grant", "error_description": "Expired code"}, status_code=400
+            {"error": "invalid_grant", "error_description": "Expired code"},
+            status_code=400,
         )
     if code_obj.client_id != client_id or code_obj.redirect_uri != redirect_uri:
         return _json(
-            {"error": "invalid_grant", "error_description": "Client or redirect mismatch"},
+            {
+                "error": "invalid_grant",
+                "error_description": "Client or redirect mismatch",
+            },
             status_code=400,
         )
     if not _verify_pkce(code_obj, verifier):
         return _json(
-            {"error": "invalid_grant", "error_description": "PKCE verification failed"},
+            {
+                "error": "invalid_grant",
+                "error_description": "PKCE verification failed",
+            },
             status_code=400,
         )
     code_obj.used = True
@@ -341,7 +384,9 @@ async def oauth_token(request: Request) -> JSONResponse:
     return _json(body)
 
 
-def validate_bearer_token(token: str, request: Request | None = None) -> dict[str, Any]:
+def validate_bearer_token(
+    token: str, request: Request | None = None
+) -> dict[str, Any]:
     """Decode and validate issuer, audience, resource, and scope claims for incoming bearer tokens."""
     settings = get_settings()
     return jwt.decode(

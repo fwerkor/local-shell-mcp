@@ -14,7 +14,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+)
 
 SENSITIVE_KEY_PATTERN = (
     r"(?:authorization|cookie|credentials?|api[_-]?key|access[_-]?key|private[_-]?key|"
@@ -68,7 +74,9 @@ HIGH_CONFIDENCE_TOKEN_RE = re.compile(
     r"\b(?:gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{20,}|"
     r"sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16})\b"
 )
-URL_USERINFO_PASSWORD_RE = re.compile(r"(?P<prefix>https?://[^/\s:@?#]+:)[^@/\s?#]+(?=@)", re.I)
+URL_USERINFO_PASSWORD_RE = re.compile(
+    r"(?P<prefix>https?://[^/\s:@?#]+:)[^@/\s?#]+(?=@)", re.I
+)
 URL_QUERY_RE = re.compile(r"(?P<prefix>https?://[^\s?]+)\?[^\s\"')]+", re.I)
 
 
@@ -118,7 +126,9 @@ class AgentBridgeManifest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     version: int = 1
-    mcp_servers: dict[str, AgentMcpServerConfig] = Field(default_factory=dict, alias="mcpServers")
+    mcp_servers: dict[str, AgentMcpServerConfig] = Field(
+        default_factory=dict, alias="mcpServers"
+    )
     skills: AgentSkillsConfig = Field(default_factory=AgentSkillsConfig)
     dynamic_tools: AgentDynamicToolsConfig = Field(
         default_factory=AgentDynamicToolsConfig, alias="dynamicTools"
@@ -212,7 +222,10 @@ class AgentCapabilityRegistry:
             "config_path": str(self.config_path),
             "manifest_status": self.manifest_status,
             "manifest_errors": self.manifest_errors,
-            "skills": {"count": len(self.skills), "warnings": self.skill_warnings},
+            "skills": {
+                "count": len(self.skills),
+                "warnings": self.skill_warnings,
+            },
             "mcp_servers": {
                 name: {
                     "type": record.config.type,
@@ -230,8 +243,12 @@ class AgentCapabilityRegistry:
                         if record.error
                         else None
                     ),
-                    "env": {str(key): "<redacted>" for key in record.config.env},
-                    "headers": {str(key): "<redacted>" for key in record.config.headers},
+                    "env": {
+                        str(key): "<redacted>" for key in record.config.env
+                    },
+                    "headers": {
+                        str(key): "<redacted>" for key in record.config.headers
+                    },
                 }
                 for name, record in self.mcp_servers.items()
             },
@@ -304,46 +321,66 @@ def _skill_description(markdown: str) -> str:
     return "Agent skill"
 
 
-def scan_agent_skills(config_dir: Path, directory: str = "skills") -> SkillScanResult:
+def scan_agent_skills(
+    config_dir: Path, directory: str = "skills"
+) -> SkillScanResult:
     """Discover valid Markdown skill files, resolve related files, and report unsafe or malformed entries as warnings."""
     try:
         config_root = config_dir.resolve()
     except (OSError, RuntimeError) as exc:
-        return SkillScanResult(warnings=[f"Could not scan skills directory {directory}: {exc}"])
+        return SkillScanResult(
+            warnings=[f"Could not scan skills directory {directory}: {exc}"]
+        )
     directory_path = Path(directory)
     if not _is_relative_child_path(directory_path):
         return SkillScanResult(
-            warnings=[f"Skills directory must be inside config directory: {directory}"]
+            warnings=[
+                f"Skills directory must be inside config directory: {directory}"
+            ]
         )
 
     try:
         skills_dir = (config_root / directory_path).resolve()
     except (OSError, RuntimeError) as exc:
-        return SkillScanResult(warnings=[f"Could not scan skills directory {directory}: {exc}"])
+        return SkillScanResult(
+            warnings=[f"Could not scan skills directory {directory}: {exc}"]
+        )
     if not skills_dir.is_relative_to(config_root):
         return SkillScanResult(
-            warnings=[f"Skills directory must be inside config directory: {directory}"]
+            warnings=[
+                f"Skills directory must be inside config directory: {directory}"
+            ]
         )
     try:
         skills_dir_exists = skills_dir.exists()
     except OSError as exc:
-        return SkillScanResult(warnings=[f"Could not scan skills directory {directory}: {exc}"])
+        return SkillScanResult(
+            warnings=[f"Could not scan skills directory {directory}: {exc}"]
+        )
     if not skills_dir_exists:
-        return SkillScanResult(warnings=[f"Skills directory not found: {directory}"])
+        return SkillScanResult(
+            warnings=[f"Skills directory not found: {directory}"]
+        )
 
     skills: dict[str, SkillRecord] = {}
     warnings: list[str] = []
     try:
-        children = sorted(skills_dir.iterdir(), key=lambda candidate: candidate.name)
+        children = sorted(
+            skills_dir.iterdir(), key=lambda candidate: candidate.name
+        )
     except OSError as exc:
-        return SkillScanResult(warnings=[f"Could not scan skills directory {directory}: {exc}"])
+        return SkillScanResult(
+            warnings=[f"Could not scan skills directory {directory}: {exc}"]
+        )
 
     for child in children:
         try:
             if not child.is_dir():
                 continue
             if child.is_symlink():
-                warnings.append(f"Skipping skill {child.name}: skill directory is a symlink")
+                warnings.append(
+                    f"Skipping skill {child.name}: skill directory is a symlink"
+                )
                 continue
             skill_root = child.resolve()
             if not skill_root.is_relative_to(config_root):
@@ -359,7 +396,9 @@ def scan_agent_skills(config_dir: Path, directory: str = "skills") -> SkillScanR
                 )
                 continue
             if not entry_path.is_file():
-                warnings.append(f"Skipping skill {child.name}: missing SKILL.md")
+                warnings.append(
+                    f"Skipping skill {child.name}: missing SKILL.md"
+                )
                 continue
             if not entry_path.resolve().is_relative_to(skill_root):
                 warnings.append(
@@ -377,8 +416,9 @@ def scan_agent_skills(config_dir: Path, directory: str = "skills") -> SkillScanR
                 try:
                     if not related_path.is_file():
                         continue
-                    if related_path.is_symlink() or not related_path.resolve().is_relative_to(
-                        skill_root
+                    if (
+                        related_path.is_symlink()
+                        or not related_path.resolve().is_relative_to(skill_root)
                     ):
                         warnings.append(
                             f"Skipping related file "
@@ -386,15 +426,23 @@ def scan_agent_skills(config_dir: Path, directory: str = "skills") -> SkillScanR
                             "file must be inside the skill directory"
                         )
                         continue
-                    related_files.append(_relative_posix(config_root, related_path))
+                    related_files.append(
+                        _relative_posix(config_root, related_path)
+                    )
                 except OSError as exc:
                     try:
-                        related_display = related_path.relative_to(config_root).as_posix()
+                        related_display = related_path.relative_to(
+                            config_root
+                        ).as_posix()
                     except ValueError:
                         related_display = str(related_path)
-                    warnings.append(f"Skipping related file {related_display}: {exc}")
+                    warnings.append(
+                        f"Skipping related file {related_display}: {exc}"
+                    )
         except OSError as exc:
-            warnings.append(f"Skipping related files for skill {child.name}: {exc}")
+            warnings.append(
+                f"Skipping related files for skill {child.name}: {exc}"
+            )
 
         skills[child.name] = SkillRecord(
             name=child.name,
@@ -483,7 +531,9 @@ def _redact_text(value: str) -> str:
     """Mask credential-like tokens in free-form text before returning diagnostics or errors."""
     redacted = redact_mapping(value)
     redacted = SENSITIVE_QUOTED_ARG_LIST_RE.sub(
-        lambda match: f"{match.group('prefix')}<redacted>{match.group('value_quote')}",
+        lambda match: (
+            f"{match.group('prefix')}<redacted>{match.group('value_quote')}"
+        ),
         redacted,
     )
     redacted = BEARER_TOKEN_RE.sub("Bearer <redacted>", redacted)
@@ -510,9 +560,17 @@ def _redact_text(value: str) -> str:
 def _configured_value_variants(value: str) -> set[str]:
     """Build literal and URL-decoded variants of configured secrets so all common renderings can be redacted."""
     variants = {value}
-    for serialized in (repr(value), json.dumps(value), json.dumps(value, ensure_ascii=False)):
+    for serialized in (
+        repr(value),
+        json.dumps(value),
+        json.dumps(value, ensure_ascii=False),
+    ):
         variants.add(serialized)
-        if len(serialized) >= 2 and serialized[0] == serialized[-1] and serialized[0] in {"'", '"'}:
+        if (
+            len(serialized) >= 2
+            and serialized[0] == serialized[-1]
+            and serialized[0] in {"'", '"'}
+        ):
             variants.add(serialized[1:-1])
     return {variant for variant in variants if variant}
 
@@ -536,9 +594,9 @@ def redact_configured_value_tree(value: Any, *maps: dict[str, str]) -> Any:
     """Apply configured-value and key-based redaction across nested response structures."""
     if isinstance(value, dict):
         return {
-            _redact_text(redact_configured_values(str(key), *maps)): redact_configured_value_tree(
-                child, *maps
-            )
+            _redact_text(
+                redact_configured_values(str(key), *maps)
+            ): redact_configured_value_tree(child, *maps)
             for key, child in value.items()
         }
     if isinstance(value, list):
@@ -573,7 +631,12 @@ def agent_config_fingerprint(config_dir: Path) -> str:
             return
 
         mode = file_stat.st_mode
-        update(relative, stat.S_IFMT(mode), file_stat.st_size, file_stat.st_mtime_ns)
+        update(
+            relative,
+            stat.S_IFMT(mode),
+            file_stat.st_size,
+            file_stat.st_mtime_ns,
+        )
         if stat.S_ISLNK(mode):
             try:
                 update("link", os.readlink(path))
@@ -603,7 +666,9 @@ def agent_config_fingerprint(config_dir: Path) -> str:
     def on_walk_error(exc: OSError) -> None:
         walk_errors.append(exc)
 
-    for current, dirnames, filenames in os.walk(root, topdown=True, onerror=on_walk_error):
+    for current, dirnames, filenames in os.walk(
+        root, topdown=True, onerror=on_walk_error
+    ):
         dirnames.sort()
         filenames.sort()
         current_path = Path(current)
@@ -631,7 +696,9 @@ def load_agent_manifest(config_dir: Path) -> LoadedAgentManifest:
     """Read and validate the bridge manifest while preserving structured errors for status reporting."""
     config_path = config_dir / "config.json"
     if not config_path.exists():
-        return LoadedAgentManifest(config_path=config_path, status="missing_config")
+        return LoadedAgentManifest(
+            config_path=config_path, status="missing_config"
+        )
     try:
         raw = json.loads(config_path.read_text(encoding="utf-8"))
         data = AgentBridgeManifest.model_validate(raw)
@@ -647,7 +714,9 @@ def load_agent_manifest(config_dir: Path) -> LoadedAgentManifest:
             status="invalid_config",
             errors=[str(exc)],
         )
-    return LoadedAgentManifest(config_path=config_path, status="loaded", data=data)
+    return LoadedAgentManifest(
+        config_path=config_path, status="loaded", data=data
+    )
 
 
 def _run_async_blocking(coro: Any, timeout_s: float | None = None) -> Any:
@@ -674,7 +743,9 @@ def _run_async_blocking(coro: Any, timeout_s: float | None = None) -> Any:
         else:
             success, result = result_queue.get(timeout=timeout_s)
     except queue.Empty:
-        raise TimeoutError(f"operation timed out after {timeout_s:g}s") from None
+        raise TimeoutError(
+            f"operation timed out after {timeout_s:g}s"
+        ) from None
     if success:
         return result
     raise result
@@ -705,7 +776,9 @@ def build_agent_registry(
     mcp_servers: dict[str, AgentMcpServerRecord] = {}
     if manifest.status == "loaded":
         if manifest.data.skills.enabled:
-            skill_scan = scan_agent_skills(config_root, manifest.data.skills.directory)
+            skill_scan = scan_agent_skills(
+                config_root, manifest.data.skills.directory
+            )
 
         for name, server in manifest.data.mcp_servers.items():
             if not server.enabled:
@@ -742,18 +815,26 @@ def build_agent_registry(
             )
 
     effective_dynamic_skills = (
-        manifest.data.dynamic_tools.skills if dynamic_skill_tools is None else dynamic_skill_tools
+        manifest.data.dynamic_tools.skills
+        if dynamic_skill_tools is None
+        else dynamic_skill_tools
     )
     effective_dynamic_mcp = (
-        manifest.data.dynamic_tools.mcp if dynamic_mcp_tools is None else dynamic_mcp_tools
+        manifest.data.dynamic_tools.mcp
+        if dynamic_mcp_tools is None
+        else dynamic_mcp_tools
     )
 
     seen_names: set[str] = set()
     skill_tool_map: dict[str, DynamicSkillToolRecord] = {}
     if effective_dynamic_skills:
         for skill_name in skill_scan.skills:
-            dynamic_name = make_unique_tool_name("activate_skill", skill_name, seen_names)
-            skill_tool_map[dynamic_name] = DynamicSkillToolRecord(dynamic_name, skill_name)
+            dynamic_name = make_unique_tool_name(
+                "activate_skill", skill_name, seen_names
+            )
+            skill_tool_map[dynamic_name] = DynamicSkillToolRecord(
+                dynamic_name, skill_name
+            )
 
     mcp_tool_map: dict[str, DynamicMcpToolRecord] = {}
     if effective_dynamic_mcp:
@@ -776,7 +857,9 @@ def build_agent_registry(
                     )
                 )
                 dynamic_name = make_unique_tool_name(
-                    f"agent_mcp__{display_server_name}", display_tool_name, seen_names
+                    f"agent_mcp__{display_server_name}",
+                    display_tool_name,
+                    seen_names,
                 )
                 mcp_tool_map[dynamic_name] = DynamicMcpToolRecord(
                     dynamic_name, server_name, tool.name

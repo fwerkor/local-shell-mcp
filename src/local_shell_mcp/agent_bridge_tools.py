@@ -61,18 +61,28 @@ def _tool_row(
             str(data.get("name") or _tool_value(tool, "name", "")), env, headers
         ),
         "description": redact_configured_value_tree(
-            str(data.get("description") or _tool_value(tool, "description", "") or ""),
+            str(
+                data.get("description")
+                or _tool_value(tool, "description", "")
+                or ""
+            ),
             env,
             headers,
         ),
-        "input_schema": redact_configured_value_tree(input_schema or {}, env, headers),
+        "input_schema": redact_configured_value_tree(
+            input_schema or {}, env, headers
+        ),
     }
     if dynamic_tool_name is not None:
-        row["dynamic_tool_name"] = redact_configured_value_tree(dynamic_tool_name, env, headers)
+        row["dynamic_tool_name"] = redact_configured_value_tree(
+            dynamic_tool_name, env, headers
+        )
     return row
 
 
-def _redacted_mcp_call_error(exc: Exception, *maps: dict[str, str]) -> ValueError:
+def _redacted_mcp_call_error(
+    exc: Exception, *maps: dict[str, str]
+) -> ValueError:
     """Wrap upstream MCP call failures after removing configured secrets and token-like values."""
     error = _redact_text(redact_configured_values(str(exc), *maps))
     return ValueError(f"Agent MCP tool call failed: {error}")
@@ -85,7 +95,9 @@ def _redact_mcp_payload_strings(value: Any, *maps: dict[str, str]) -> Any:
 
 def _redact_mcp_error_payload(data: Any, *maps: dict[str, str]) -> Any:
     """Redact only MCP tool-result payloads that are explicitly marked as errors."""
-    if not isinstance(data, dict) or not (data.get("is_error") or data.get("isError")):
+    if not isinstance(data, dict) or not (
+        data.get("is_error") or data.get("isError")
+    ):
         return data
     return _redact_mcp_payload_strings(redact_mapping(data), *maps)
 
@@ -144,7 +156,10 @@ class AgentBridgeToolReloader:
     def register_dynamic_tools(self) -> None:
         """Register generated skill and MCP handlers on the FastMCP server."""
         self._remove_dynamic_tools()
-        for dynamic_name, record in self.registry.dynamic_skill_tool_map.items():
+        for (
+            dynamic_name,
+            record,
+        ) in self.registry.dynamic_skill_tool_map.items():
             skill = self.registry.skills[record.skill_name]
             description = f"[agent skill] Activate {record.skill_name}: {skill.description}"
             self.mcp.add_tool(
@@ -202,7 +217,9 @@ def make_skill_handler(reloader: AgentBridgeToolReloader, skill_name: str):  # n
     return handler
 
 
-def make_mcp_handler(reloader: AgentBridgeToolReloader, server_name: str, tool_name: str):  # noqa: ANN202
+def make_mcp_handler(
+    reloader: AgentBridgeToolReloader, server_name: str, tool_name: str
+):  # noqa: ANN202
     """Create a FastMCP handler that proxies one upstream MCP tool with redacted arguments and errors."""
 
     async def handler(args: dict[str, Any] | None = None) -> dict:
@@ -232,7 +249,9 @@ def make_mcp_handler(reloader: AgentBridgeToolReloader, server_name: str, tool_n
     return handler
 
 
-def _install_agent_bridge_reload_hooks(mcp: Any, reloader: AgentBridgeToolReloader) -> None:
+def _install_agent_bridge_reload_hooks(
+    mcp: Any, reloader: AgentBridgeToolReloader
+) -> None:
     """Patch tool-listing paths so dynamic bridge tools refresh before discovery responses are built."""
     original_list_tools = mcp.list_tools
     original_call_tool = mcp.call_tool
@@ -326,7 +345,9 @@ def register_agent_bridge_tools(
                     tool,
                     record.config.env,
                     record.config.headers,
-                    dynamic_names.get((server_name, str(_tool_value(tool, "name", "")))),
+                    dynamic_names.get(
+                        (server_name, str(_tool_value(tool, "name", "")))
+                    ),
                 )
                 for server_name, record in records
                 for tool in record.tools

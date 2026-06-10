@@ -12,9 +12,9 @@ import uuid
 from dataclasses import dataclass
 
 from .audit import audit
+from .config.settings import get_settings
 from .fs_ops import relative_display, resolve_path
 from .models import CommandResult
-from .settings import get_settings
 
 PUBLIC_RUN_SHELL_DEFAULT_TIMEOUT_S = 10
 PUBLIC_RUN_SHELL_TIMEOUT_CAP_S = 60
@@ -54,7 +54,9 @@ def check_command_policy(command: str) -> None:
     settings = get_settings()
     for denied in settings.command_denylist:
         if denied and denied in command:
-            raise PermissionError(f"Command contains denylisted fragment: {denied!r}")
+            raise PermissionError(
+                f"Command contains denylisted fragment: {denied!r}"
+            )
 
 
 def clamp_timeout(timeout_s: int | None) -> int:
@@ -71,7 +73,11 @@ def public_run_shell_timeout(timeout_s: int | None) -> int:
             f"timeout_s must be <= {PUBLIC_RUN_SHELL_TIMEOUT_CAP_S} seconds for public run_shell"
         )
     return max(
-        1, min(timeout_s or PUBLIC_RUN_SHELL_DEFAULT_TIMEOUT_S, PUBLIC_RUN_SHELL_TIMEOUT_CAP_S)
+        1,
+        min(
+            timeout_s or PUBLIC_RUN_SHELL_DEFAULT_TIMEOUT_S,
+            PUBLIC_RUN_SHELL_TIMEOUT_CAP_S,
+        ),
     )
 
 
@@ -130,7 +136,9 @@ async def _spawn_process(command: str, cwd: str) -> asyncio.subprocess.Process:
     )
 
 
-async def _read_stream_tail(stream: asyncio.StreamReader | None, tail: TailBuffer) -> None:
+async def _read_stream_tail(
+    stream: asyncio.StreamReader | None, tail: TailBuffer
+) -> None:
     """Continuously read a process stream into a bounded tail buffer."""
     if stream is None:
         return
@@ -141,7 +149,9 @@ async def _read_stream_tail(stream: asyncio.StreamReader | None, tail: TailBuffe
         tail.append(chunk)
 
 
-async def _wait_for_process_exit(proc: asyncio.subprocess.Process, timeout_s: int) -> bool:
+async def _wait_for_process_exit(
+    proc: asyncio.subprocess.Process, timeout_s: int
+) -> bool:
     """Wait for process completion while converting timeout into structured result state."""
     try:
         await asyncio.wait_for(proc.wait(), timeout=timeout_s)
@@ -185,7 +195,10 @@ async def _finish_reader_tasks(
 
 
 async def run_shell(
-    command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None
+    command: str,
+    cwd: str = ".",
+    timeout_s: int | None = None,
+    max_output_bytes: int | None = None,
 ) -> CommandResult:
     """Execute a shell command with policy enforcement, concurrency limits, timeout handling, and bounded output capture."""
     check_command_policy(command)
@@ -208,8 +221,12 @@ async def run_shell(
         proc = await _spawn_process(command, str(resolved_cwd))
         reader_tasks.extend(
             [
-                asyncio.create_task(_read_stream_tail(proc.stdout, stdout_tail)),
-                asyncio.create_task(_read_stream_tail(proc.stderr, stderr_tail)),
+                asyncio.create_task(
+                    _read_stream_tail(proc.stdout, stdout_tail)
+                ),
+                asyncio.create_task(
+                    _read_stream_tail(proc.stderr, stderr_tail)
+                ),
             ]
         )
         await proc.wait()
@@ -274,10 +291,15 @@ async def run_shell(
 
 
 async def public_run_shell(
-    command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None
+    command: str,
+    cwd: str = ".",
+    timeout_s: int | None = None,
+    max_output_bytes: int | None = None,
 ) -> CommandResult:
     """Execute a shell command through the public API using stricter timeout defaults."""
-    return await run_shell(command, cwd, public_run_shell_timeout(timeout_s), max_output_bytes)
+    return await run_shell(
+        command, cwd, public_run_shell_timeout(timeout_s), max_output_bytes
+    )
 
 
 def _tmux_session_name(name: str | None = None) -> str:
@@ -292,13 +314,17 @@ async def tmux(args: list[str], timeout_s: int = 10) -> CommandResult:
     return await run_shell(cmd, cwd=".", timeout_s=timeout_s)
 
 
-async def start_shell(cwd: str = ".", name: str | None = None, command: str | None = None) -> dict:
+async def start_shell(
+    cwd: str = ".", name: str | None = None, command: str | None = None
+) -> dict:
     """Start or replace a tmux-backed persistent shell session in a resolved working directory."""
     resolved_cwd = resolve_path(cwd, must_exist=True)
     sessions = await list_shells()
     max_sessions = max(1, get_settings().max_tmux_sessions)
     if len(sessions.get("sessions", [])) >= max_sessions:
-        raise RuntimeError(f"Refusing to start more than {max_sessions} tmux sessions")
+        raise RuntimeError(
+            f"Refusing to start more than {max_sessions} tmux sessions"
+        )
     session = _tmux_session_name(name)
     initial = command or get_settings().shell_executable
     check_command_policy(initial)
@@ -314,11 +340,19 @@ async def start_shell(cwd: str = ".", name: str | None = None, command: str | No
     result = await tmux(cmd)
     if not result.ok:
         raise RuntimeError(result.stderr or result.stdout)
-    audit("shell_start", session=session, cwd=str(resolved_cwd), command=initial)
-    return {"session_id": session, "cwd": relative_display(resolved_cwd), "command": initial}
+    audit(
+        "shell_start", session=session, cwd=str(resolved_cwd), command=initial
+    )
+    return {
+        "session_id": session,
+        "cwd": relative_display(resolved_cwd),
+        "command": initial,
+    }
 
 
-async def send_shell(session_id: str, input_text: str, enter: bool = True) -> dict:
+async def send_shell(
+    session_id: str, input_text: str, enter: bool = True
+) -> dict:
     """Send input to a persistent shell session, optionally appending Enter."""
     args = ["send-keys", "-t", session_id, input_text]
     if enter:
@@ -326,13 +360,24 @@ async def send_shell(session_id: str, input_text: str, enter: bool = True) -> di
     result = await tmux(args)
     if not result.ok:
         raise RuntimeError(result.stderr or result.stdout)
-    audit("shell_send", session=session_id, bytes=len(input_text.encode()), enter=enter)
-    return {"session_id": session_id, "sent_bytes": len(input_text.encode()), "enter": enter}
+    audit(
+        "shell_send",
+        session=session_id,
+        bytes=len(input_text.encode()),
+        enter=enter,
+    )
+    return {
+        "session_id": session_id,
+        "sent_bytes": len(input_text.encode()),
+        "enter": enter,
+    }
 
 
 async def read_shell(session_id: str, lines: int = 200) -> dict:
     """Read recent output from a persistent shell session through tmux capture-pane."""
-    result = await tmux(["capture-pane", "-p", "-t", session_id, "-S", f"-{max(1, lines)}"])
+    result = await tmux(
+        ["capture-pane", "-p", "-t", session_id, "-S", f"-{max(1, lines)}"]
+    )
     if not result.ok:
         raise RuntimeError(result.stderr or result.stdout)
     audit("shell_read", session=session_id, lines=lines)
@@ -343,13 +388,21 @@ async def kill_shell(session_id: str) -> dict:
     """Terminate a persistent shell session by its normalized tmux session id."""
     result = await tmux(["kill-session", "-t", session_id])
     audit("shell_kill", session=session_id, ok=result.ok)
-    return {"session_id": session_id, "killed": result.ok, "stderr": result.stderr}
+    return {
+        "session_id": session_id,
+        "killed": result.ok,
+        "stderr": result.stderr,
+    }
 
 
 async def list_shells() -> dict:
     """List active tmux-backed shell sessions managed by local-shell-mcp."""
     result = await tmux(
-        ["list-sessions", "-F", "#{session_name}\t#{session_created}\t#{session_attached}"],
+        [
+            "list-sessions",
+            "-F",
+            "#{session_name}\t#{session_created}\t#{session_attached}",
+        ],
         timeout_s=5,
     )
     if not result.ok:

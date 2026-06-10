@@ -1,5 +1,8 @@
 import local_shell_mcp.main as cli
-from local_shell_mcp.config_registry import SETTING_SPECS, cli_overrides_from_args
+from local_shell_mcp.config.registry import (
+    SETTING_SPECS,
+    cli_overrides_from_args,
+)
 
 
 def test_server_options_parse_to_default_handler():
@@ -58,10 +61,24 @@ def test_every_setting_has_cli_option():
 def test_bool_cli_values_parse_explicitly():
     parser = cli._build_parser()
 
-    assert parser.parse_args(["--allow-full-container", "true"]).allow_full_container is True
-    assert parser.parse_args(["--allow-full-container", "false"]).allow_full_container is False
-    assert parser.parse_args(["--remote-enabled", "no"]).remote_enabled is False
-    assert parser.parse_args(["--remote-enabled", "yes"]).remote_enabled is True
+    assert (
+        parser.parse_args(
+            ["--allow-full-container", "true"]
+        ).allow_full_container
+        is True
+    )
+    assert (
+        parser.parse_args(
+            ["--allow-full-container", "false"]
+        ).allow_full_container
+        is False
+    )
+    assert (
+        parser.parse_args(["--remote-enabled", "false"]).remote_enabled is False
+    )
+    assert (
+        parser.parse_args(["--remote-enabled", "true"]).remote_enabled is True
+    )
 
 
 def test_worker_subcommand_parse_to_worker_handler():
@@ -102,7 +119,9 @@ def test_main_dispatches_to_argparse_handler(monkeypatch):
 
 
 def test_server_overrides_include_only_explicit_values():
-    args = cli._build_parser().parse_args(["--mode", "stdio", "--remote-enabled", "false"])
+    args = cli._build_parser().parse_args(
+        ["--mode", "stdio", "--remote-enabled", "false"]
+    )
 
     assert cli_overrides_from_args(args) == {
         "mode": "stdio",

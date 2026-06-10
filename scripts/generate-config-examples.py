@@ -8,9 +8,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from local_shell_mcp.config_registry import (
+from local_shell_mcp.config.registry import (
     SECTION_ORDER,
     SETTING_SPECS,
+    SettingSpec,
     default_to_string,
     default_value,
     validate_setting_specs,
@@ -79,7 +80,9 @@ def generate_env_example() -> str:
         "# Docker Compose uses this file as the main container environment via `env_file: .env`.",
         "# Copy it with: cp .env.example .env",
     ]
-    specs_by_section = {section: [] for section in SECTION_ORDER}
+    specs_by_section: dict[str, list[SettingSpec]] = {
+        section: [] for section in SECTION_ORDER
+    }
     for spec in SETTING_SPECS:
         specs_by_section[spec.section].append(spec)
 
@@ -91,7 +94,10 @@ def generate_env_example() -> str:
             lines.append(_env_line(spec.env_var, default_value(spec.name)))
 
     lines.extend(
-        ["", "# Docker entrypoint settings. These are read before local-shell-mcp starts."]
+        [
+            "",
+            "# Docker entrypoint settings. These are read before local-shell-mcp starts.",
+        ]
     )
     for name, default, help_text in DOCKER_ENTRYPOINT_SPECS:
         for comment in _wrap_comment(help_text):
@@ -138,7 +144,6 @@ def generate_yaml_example() -> str:
     lines: list[str] = [
         "# Full YAML config example.",
         "# Effective precedence: defaults < config file < LOCAL_SHELL_MCP_* environment variables < CLI arguments.",
-        "# This file configures application Settings only. Docker entrypoint and sidecar variables stay in .env.",
     ]
     specs_by_section = {section: [] for section in SECTION_ORDER}
     for spec in SETTING_SPECS:
@@ -180,7 +185,11 @@ def write_examples(*, check: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true", help="Fail if generated examples are stale")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Fail if generated examples are stale",
+    )
     args = parser.parse_args()
     return write_examples(check=args.check)
 

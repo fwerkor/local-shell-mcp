@@ -1,7 +1,7 @@
 import pytest
 
+from local_shell_mcp.config.settings import get_settings
 from local_shell_mcp.search_ops import tree
-from local_shell_mcp.settings import get_settings
 from local_shell_mcp.tools import _handled_error
 
 
@@ -21,7 +21,9 @@ async def test_tree_reports_existing_directory(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_tree_clamps_entries_without_sorting_entire_tree(tmp_path, monkeypatch):
+async def test_tree_clamps_entries_without_sorting_entire_tree(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_TREE_ENTRIES", "3")
     get_settings.cache_clear()
@@ -36,7 +38,9 @@ async def test_tree_clamps_entries_without_sorting_entire_tree(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_tree_returns_context_for_missing_directory(tmp_path, monkeypatch):
+async def test_tree_returns_context_for_missing_directory(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     get_settings.cache_clear()
     (tmp_path / "actual").mkdir()
@@ -55,7 +59,9 @@ def test_tool_error_returns_successful_not_found_result(tmp_path, monkeypatch):
     get_settings.cache_clear()
     (tmp_path / "actual").mkdir()
 
-    result = _handled_error(FileNotFoundError(str(tmp_path / "missing" / "project")))
+    result = _handled_error(
+        FileNotFoundError(str(tmp_path / "missing" / "project"))
+    )
 
     assert result["ok"] is True
     assert result["data"]["status"] == "not_found"

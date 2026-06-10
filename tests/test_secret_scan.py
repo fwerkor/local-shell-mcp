@@ -1,7 +1,7 @@
 import pytest
 
+from local_shell_mcp.config.settings import get_settings
 from local_shell_mcp.fs_ops import write_text
-from local_shell_mcp.settings import get_settings
 from local_shell_mcp.tools import _secret_scan
 
 

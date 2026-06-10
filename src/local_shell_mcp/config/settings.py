@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -18,9 +17,6 @@ DEFAULT_AGENT_CONFIG_DIR = Path("/home/agent/local-shell-mcp-config")
 ENV_PREFIX = "LOCAL_SHELL_MCP_"
 
 SENSITIVE_SETTING_KEYS = {
-    "cf_access_audience",
-    "cf_access_allowed_emails",
-    "cf_access_allowed_email_domains",
     "oauth_admin_pin",
     "oauth_jwt_secret",
 }
@@ -111,7 +107,9 @@ class Settings(BaseSettings):
     oauth_resource: str | None = None
     oauth_admin_pin: str | None = None
     oauth_jwt_secret: str = Field(
-        default_factory=lambda: os.getenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET") or "dev-change-me"
+        default_factory=lambda: (
+            os.getenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET") or "dev-change-me"
+        )
     )
     # 0 means access tokens never expire.
     oauth_access_token_ttl_s: int = 0
@@ -144,12 +142,18 @@ class Settings(BaseSettings):
     )
 
     @field_validator(
-        "workspace_root", "audit_log_path", "state_dir", "agent_config_dir", mode="before"
+        "workspace_root",
+        "audit_log_path",
+        "state_dir",
+        "agent_config_dir",
+        mode="before",
     )
     @classmethod
     def expand_path(cls, value: str | Path) -> Path:
         """Expand user and environment variables for path settings before validation."""
-        return Path(os.path.expandvars(os.path.expanduser(str(value)))).resolve()
+        return Path(
+            os.path.expandvars(os.path.expanduser(str(value)))
+        ).resolve()
 
     @field_validator("command_denylist", "path_denylist", mode="before")
     @classmethod
@@ -217,7 +221,10 @@ def _env_overrides() -> dict[str, Any]:
     if not present:
         return {}
     env_settings = Settings()
-    return {field_name: getattr(env_settings, field_name) for field_name in present.values()}
+    return {
+        field_name: getattr(env_settings, field_name)
+        for field_name in present.values()
+    }
 
 
 def _prepare_settings(settings: Settings, *, create_dirs: bool) -> Settings:
@@ -247,32 +254,24 @@ def load_settings(
 _configured_settings: Settings | None = None
 
 
-@lru_cache(maxsize=1)
-def _load_cached_settings() -> Settings:
-    return load_settings()
-
-
 def get_settings() -> Settings:
     """Return cached settings, optionally primed by configure_settings."""
-    if _configured_settings is not None:
-        return _configured_settings
-    return _load_cached_settings()
+    global _configured_settings
+    if _configured_settings is None:
+        _configured_settings = load_settings()
+    return _configured_settings
 
 
 def configure_settings(settings: Settings) -> None:
     """Install a fully resolved Settings object for subsequent get_settings calls."""
     global _configured_settings
-
     _configured_settings = settings
-    _load_cached_settings.cache_clear()
 
 
 def clear_settings_cache() -> None:
     """Clear cached settings. Intended for tests and CLI reconfiguration."""
     global _configured_settings
-
     _configured_settings = None
-    _load_cached_settings.cache_clear()
 
 
 # Backwards-compatible test helper: many tests call get_settings.cache_clear().
@@ -293,12 +292,14 @@ def safe_settings_dump(settings: Settings | None = None) -> dict:
     return data
 
 
-def validate_public_oauth_configuration(settings: Settings | None = None) -> None:
+def validate_public_oauth_configuration(
+    settings: Settings | None = None,
+) -> None:
     """Reject HTTP OAuth startup configurations that cannot produce externally valid issuer and resource metadata."""
     settings = settings or get_settings()
     if settings.auth_mode != "oauth" or not settings.public_base_url:
         return
-    weak_values = {"", "dev-" + "change-me"}
+    weak_values = {"", "dev-change-me"}
     if settings.oauth_jwt_secret in weak_values:
         raise RuntimeError(
             "LOCAL_SHELL_MCP_OAUTH_JWT_SECRET must be set to a strong random value "

@@ -11,11 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, get_args, get_origin
 
-from pydantic.fields import PydanticUndefined
-
 from .settings import ENV_PREFIX, Settings
 
-SectionName = Literal[
+type SectionName = Literal[
     "Server",
     "Paths and state",
     "Authentication and OAuth",
@@ -24,6 +22,8 @@ SectionName = Literal[
     "Agent capability bridge",
     "Tool executables",
 ]
+
+SECTION_ORDER: tuple[SectionName, ...] = get_args(SectionName.__value__)
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,7 @@ class SettingSpec:
     section: SectionName
     help: str
     metavar: str | None = None
-    example_default: Any | None = None
+    example_default: Any | None = None  # override the default value in Settings
 
     @property
     def env_var(self) -> str:
@@ -47,18 +47,13 @@ class SettingSpec:
         return f"--{self.name.replace('_', '-')}"
 
 
-SECTION_ORDER: tuple[SectionName, ...] = (
-    "Server",
-    "Paths and state",
-    "Authentication and OAuth",
-    "Safety and resource limits",
-    "Remote workers",
-    "Agent capability bridge",
-    "Tool executables",
-)
-
 SETTING_SPECS: tuple[SettingSpec, ...] = (
-    SettingSpec("mode", "Server", "Server transport mode: mcp, http, stdio, or both.", "MODE"),
+    SettingSpec(
+        "mode",
+        "Server",
+        "Server transport mode.",
+        # we do not set metavar here to get the choices
+    ),
     SettingSpec("host", "Server", "Bind host for HTTP/MCP transports.", "HOST"),
     SettingSpec("port", "Server", "Bind port for HTTP/MCP transports.", "PORT"),
     SettingSpec(
@@ -73,7 +68,12 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         "Directory for runtime state such as audit logs and temporary files.",
         "PATH",
     ),
-    SettingSpec("audit_log_path", "Paths and state", "Path to the JSONL audit log.", "PATH"),
+    SettingSpec(
+        "audit_log_path",
+        "Paths and state",
+        "Path to the JSONL audit log.",
+        "PATH",
+    ),
     SettingSpec(
         "auth_mode",
         "Authentication and OAuth",
@@ -84,13 +84,11 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         "auth_bypass_localhost",
         "Authentication and OAuth",
         "Allow localhost requests without bearer authentication.",
-        "BOOL",
     ),
     SettingSpec(
         "require_auth_for_mcp_discovery",
         "Authentication and OAuth",
         "Require authentication for MCP initialize/list-tools discovery calls.",
-        "BOOL",
     ),
     SettingSpec(
         "public_base_url",
@@ -139,10 +137,11 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         "allow_full_container",
         "Safety and resource limits",
         "Disable built-in workspace and command restrictions; use only in disposable containers or VMs.",
-        "BOOL",
     ),
     SettingSpec(
-        "allow_network", "Safety and resource limits", "Allow network-capable operations.", "BOOL"
+        "allow_network",
+        "Safety and resource limits",
+        "Allow network-capable operations.",
     ),
     SettingSpec(
         "default_timeout_s",
@@ -175,7 +174,10 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         "BYTES",
     ),
     SettingSpec(
-        "max_grep_results", "Safety and resource limits", "Maximum grep result count.", "COUNT"
+        "max_grep_results",
+        "Safety and resource limits",
+        "Maximum grep result count.",
+        "COUNT",
     ),
     SettingSpec(
         "max_directory_entries",
@@ -184,10 +186,16 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         "COUNT",
     ),
     SettingSpec(
-        "max_glob_results", "Safety and resource limits", "Maximum glob search results.", "COUNT"
+        "max_glob_results",
+        "Safety and resource limits",
+        "Maximum glob search results.",
+        "COUNT",
     ),
     SettingSpec(
-        "max_tree_entries", "Safety and resource limits", "Maximum tree-view entries.", "COUNT"
+        "max_tree_entries",
+        "Safety and resource limits",
+        "Maximum tree-view entries.",
+        "COUNT",
     ),
     SettingSpec(
         "max_read_many_files",
@@ -201,9 +209,17 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         "Combined byte limit for multi-file reads.",
         "BYTES",
     ),
-    SettingSpec("max_todos", "Safety and resource limits", "Todo-list item limit.", "COUNT"),
     SettingSpec(
-        "max_todo_bytes", "Safety and resource limits", "Todo-list serialized byte limit.", "BYTES"
+        "max_todos",
+        "Safety and resource limits",
+        "Todo-list item limit.",
+        metavar="COUNT",
+    ),
+    SettingSpec(
+        "max_todo_bytes",
+        "Safety and resource limits",
+        "Todo-list serialized byte limit.",
+        "BYTES",
     ),
     SettingSpec(
         "max_audit_tail_bytes",
@@ -218,10 +234,16 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         "BYTES",
     ),
     SettingSpec(
-        "max_tmp_files", "Safety and resource limits", "Temporary-file count limit.", "COUNT"
+        "max_tmp_files",
+        "Safety and resource limits",
+        "Temporary-file count limit.",
+        "COUNT",
     ),
     SettingSpec(
-        "max_tmp_bytes", "Safety and resource limits", "Temporary-file byte limit.", "BYTES"
+        "max_tmp_bytes",
+        "Safety and resource limits",
+        "Temporary-file byte limit.",
+        "BYTES",
     ),
     SettingSpec(
         "max_concurrent_commands",
@@ -248,7 +270,9 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         "CSV",
     ),
     SettingSpec(
-        "remote_enabled", "Remote workers", "Enable remote worker routes and MCP tools.", "BOOL"
+        "remote_enabled",
+        "Remote workers",
+        "Enable remote worker routes and MCP tools.",
     ),
     SettingSpec(
         "remote_invite_ttl_s",
@@ -272,7 +296,6 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         "agent_bridge_enabled",
         "Agent capability bridge",
         "Enable agent capability bridge tools.",
-        "BOOL",
     ),
     SettingSpec(
         "agent_config_dir",
@@ -296,16 +319,17 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
         "agent_dynamic_mcp_tools",
         "Agent capability bridge",
         "Register dynamic MCP bridge tools.",
-        "BOOL",
     ),
     SettingSpec(
         "agent_dynamic_skill_tools",
         "Agent capability bridge",
         "Register dynamic skill bridge tools.",
-        "BOOL",
     ),
     SettingSpec(
-        "shell_executable", "Tool executables", "Shell executable used for shell commands.", "PATH"
+        "shell_executable",
+        "Tool executables",
+        "Shell executable used for shell commands.",
+        "PATH",
     ),
     SettingSpec("tmux_bin", "Tool executables", "tmux executable.", "PATH"),
     SettingSpec("rg_bin", "Tool executables", "ripgrep executable.", "PATH"),
@@ -313,14 +337,23 @@ SETTING_SPECS: tuple[SettingSpec, ...] = (
     SettingSpec("python_bin", "Tool executables", "Python executable.", "PATH"),
 )
 
-SPECS_BY_NAME = {spec.name: spec for spec in SETTING_SPECS}
+type SpecBySection = list[tuple[SectionName, list[SettingSpec]]]
 
-CONFIG_SPEC = SettingSpec(
-    "config",
-    "Server",
-    "Path to optional YAML config file. This selects the config file and is not itself a Settings field.",
-    "PATH",
-)
+
+def _group_setting_specs_by_section() -> SpecBySection:
+    """Group setting specs by section while preserving registry order within each section."""
+    specs_by_section: dict[SectionName, list[SettingSpec]] = {
+        section: [] for section in SECTION_ORDER
+    }
+    for spec in SETTING_SPECS:
+        specs_by_section[spec.section].append(spec)
+    return [(section, specs_by_section[section]) for section in SECTION_ORDER]
+
+
+SETTING_SPECS_BY_SECTION: SpecBySection = _group_setting_specs_by_section()
+SPECS_BY_NAME: dict[str, SettingSpec] = {
+    spec.name: spec for spec in SETTING_SPECS
+}
 
 
 def validate_setting_specs() -> None:
@@ -330,7 +363,9 @@ def validate_setting_specs() -> None:
     missing = sorted(fields - specs)
     extra = sorted(specs - fields)
     if missing or extra:
-        raise RuntimeError(f"Setting spec mismatch: missing={missing}, extra={extra}")
+        raise RuntimeError(
+            f"Setting spec mismatch: missing={missing}, extra={extra}"
+        )
 
 
 def default_value(name: str) -> Any:
@@ -338,11 +373,7 @@ def default_value(name: str) -> Any:
     if (spec := SPECS_BY_NAME.get(name)) and spec.example_default is not None:
         return spec.example_default
     field = Settings.model_fields[name]
-    if field.default is not PydanticUndefined:
-        return field.default
-    if field.default_factory is not None:
-        return field.default_factory()
-    return None
+    return field.get_default(call_default_factory=True)
 
 
 def default_to_string(value: Any) -> str:
@@ -378,6 +409,8 @@ def argparse_choices_for(name: str) -> tuple[str, ...] | None:
     annotation = Settings.model_fields[name].annotation
     if get_origin(annotation) is Literal:
         return tuple(str(item) for item in get_args(annotation))
+    elif is_bool_setting(name):
+        return ("true", "false")
     return None
 
 
@@ -386,12 +419,19 @@ def is_bool_setting(name: str) -> bool:
     return Settings.model_fields[name].annotation is bool
 
 
+class BoolChoiceAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        if values not in ("true", "false"):
+            raise argparse.ArgumentTypeError(f"Invalid boolean value: {values}")
+        setattr(namespace, self.dest, values == "true")
+
+
 def register_setting_cli_args(parser: argparse.ArgumentParser) -> None:
     """Register one CLI option for every Settings field, grouped by section."""
     validate_setting_specs()
-    for section in SECTION_ORDER:
+    for section, specs in SETTING_SPECS_BY_SECTION:
         group = parser.add_argument_group(section)
-        for spec in (item for item in SETTING_SPECS if item.section == section):
+        for spec in specs:
             kwargs: dict[str, Any] = {
                 "dest": spec.name,
                 "default": None,
@@ -402,21 +442,12 @@ def register_setting_cli_args(parser: argparse.ArgumentParser) -> None:
             choices = argparse_choices_for(spec.name)
             if choices:
                 kwargs["choices"] = choices
-            if is_bool_setting(spec.name):
-                kwargs.update({"type": _parse_bool})
-            elif Settings.model_fields[spec.name].annotation is int:
+
+            if Settings.model_fields[spec.name].annotation is int:
                 kwargs["type"] = int
+            elif is_bool_setting(spec.name):
+                kwargs["action"] = BoolChoiceAction
             group.add_argument(spec.cli_flag, **kwargs)
-
-
-def _parse_bool(value: str) -> bool:
-    """Parse a boolean value for CLI settings."""
-    normalized = value.strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    raise argparse.ArgumentTypeError("expected one of: true, false, yes, no, 1, 0, on, off")
 
 
 def cli_overrides_from_args(args: argparse.Namespace) -> dict[str, object]:

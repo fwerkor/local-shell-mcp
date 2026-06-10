@@ -1,13 +1,9 @@
-[build-system]
-requires = ["uv_build>=0.11.0,<0.12.0"]
-build-backend = "uv_build"
-
 [project]
 name = "local-shell-mcp"
 version = "3.2.1"
 description = "A ChatGPT-compatible OAuth MCP server that gives AI coding agents controlled shell, filesystem, and git access inside a local container."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "local-shell-mcp contributors" }]
@@ -21,26 +17,31 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-  "mcp>=1.9.0",
-  "fastapi>=0.111.0",
-  "uvicorn[standard]>=0.30.0",
-  "pydantic>=2.7.0",
-  "pydantic-settings>=2.3.0",
-  "PyYAML>=6.0.1",
-  "PyJWT>=2.8.0",
-  "httpx>=0.27.0",
-  "aiofiles>=23.2.1",
-  "python-multipart>=0.0.9",
-  "pathspec>=0.12.1",
+    "aiofiles>=25.1.0",
+    "fastapi>=0.136.3",
+    "httpx>=0.28.1",
+    "mcp>=1.27.2",
+    "pathspec>=1.1.1",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.1",
+    "pyjwt>=2.13.0",
+    "python-multipart>=0.0.32",
+    "pyyaml>=6.0.3",
+    "uvicorn[standard]>=0.49.0",
 ]
 
 [dependency-groups]
 dev = [
-  "pre-commit>=4.0.0",
-  "pytest>=8.2.0",
-  "pytest-asyncio>=0.23.0",
-  "ruff>=0.5.0",
+    "pre-commit>=4.6.0",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.15.16",
 ]
+
+[build-system]
+requires = ["uv_build>=0.11.0,<0.12.0"]
+build-backend = "uv_build"
+
 
 [project.urls]
 Homepage = "https://github.com/rijuyuezhu/local-shell-mcp"
@@ -50,8 +51,8 @@ Repository = "https://github.com/rijuyuezhu/local-shell-mcp"
 local-shell-mcp = "local_shell_mcp.main:main"
 
 [tool.ruff]
-line-length = 100
-target-version = "py311"
+line-length = 80
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

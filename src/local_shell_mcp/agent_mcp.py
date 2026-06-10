@@ -65,8 +65,14 @@ def normalize_tool_result(result: Any) -> dict[str, Any]:
         structured_content = structured_content.model_dump(mode="json")
 
     return {
-        "is_error": bool(_value(result, "isError", False) or _value(result, "is_error", False)),
-        "content": [_normalize_content_item(item) for item in _value(result, "content", [])],
+        "is_error": bool(
+            _value(result, "isError", False)
+            or _value(result, "is_error", False)
+        ),
+        "content": [
+            _normalize_content_item(item)
+            for item in _value(result, "content", [])
+        ],
         "structured_content": structured_content,
     }
 
@@ -102,7 +108,9 @@ class AgentMcpClientManager:
             if not server.url:
                 raise ValueError("http MCP server requires url")
             async with (
-                streamablehttp_client(server.url, headers=server.headers or None) as (
+                streamablehttp_client(
+                    server.url, headers=server.headers or None
+                ) as (
                     read_stream,
                     write_stream,
                     _get_session_id,
@@ -127,9 +135,13 @@ class AgentMcpClientManager:
                 yield session
             return
 
-        raise ValueError(f"unsupported MCP server type for {name}: {server.type}")
+        raise ValueError(
+            f"unsupported MCP server type for {name}: {server.type}"
+        )
 
-    async def list_tools(self, name: str, server: AgentMcpServerConfig) -> list[AgentMcpTool]:
+    async def list_tools(
+        self, name: str, server: AgentMcpServerConfig
+    ) -> list[AgentMcpTool]:
         """Page through an upstream server's tool list within the configured call timeout."""
 
         async def _list_tools() -> list[AgentMcpTool]:
@@ -139,13 +151,16 @@ class AgentMcpClientManager:
                 while True:
                     result = await session.list_tools(cursor=cursor)
                     tools.extend(
-                        normalize_mcp_tool(tool) for tool in _value(result, "tools", result)
+                        normalize_mcp_tool(tool)
+                        for tool in _value(result, "tools", result)
                     )
                     cursor = getattr(result, "nextCursor", None)
                     if not cursor:
                         return tools
 
-        return await asyncio.wait_for(_list_tools(), timeout=self.call_timeout_s)
+        return await asyncio.wait_for(
+            _list_tools(), timeout=self.call_timeout_s
+        )
 
     async def call_tool(
         self,
@@ -158,6 +173,8 @@ class AgentMcpClientManager:
 
         async def _call_tool() -> dict[str, Any]:
             async with self._session(name, server) as session:
-                return normalize_tool_result(await session.call_tool(tool, args))
+                return normalize_tool_result(
+                    await session.call_tool(tool, args)
+                )
 
         return await asyncio.wait_for(_call_tool(), timeout=self.call_timeout_s)

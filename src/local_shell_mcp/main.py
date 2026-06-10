@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -12,7 +11,13 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
 from .auth import AuthMiddleware
-from .config_registry import cli_overrides_from_args, register_setting_cli_args
+from .config.registry import cli_overrides_from_args, register_setting_cli_args
+from .config.settings import (
+    configure_settings,
+    get_settings,
+    load_settings,
+    validate_public_oauth_configuration,
+)
 from .http_app import build_http_app
 from .oauth import (
     oauth_authorize_get,
@@ -23,12 +28,6 @@ from .oauth import (
     oauth_token,
 )
 from .remote import add_worker_cli_args, remote_routes, run_worker_from_args
-from .settings import (
-    configure_settings,
-    get_settings,
-    load_settings,
-    validate_public_oauth_configuration,
-)
 from .tools import build_mcp
 
 
@@ -69,12 +68,14 @@ def _run_server_from_args(args: argparse.Namespace) -> None:
     elif settings.mode in {"mcp", "stdio"}:
         run_mcp()
     elif settings.mode == "both":
-        raise SystemExit("mode=both is reserved; run separate mcp/http processes for now")
+        raise SystemExit(
+            "mode=both is reserved; run separate mcp/http processes for now"
+        )
     else:
         raise SystemExit(f"Unsupported mode: {settings.mode}")
 
 
-def _with_oauth_routes(inner_app) -> Starlette:  # noqa: ANN001
+def _with_oauth_routes(inner_app) -> Starlette:
     """Wrap the MCP ASGI app with OAuth and remote routes when serving over HTTP."""
 
     @asynccontextmanager
@@ -83,11 +84,31 @@ def _with_oauth_routes(inner_app) -> Starlette:  # noqa: ANN001
             yield
 
     routes = [
-        Route("/healthz", lambda request: JSONResponse({"ok": True}), methods=["GET"]),
-        Route("/readyz", lambda request: JSONResponse({"ok": True}), methods=["GET"]),
-        Route("/.well-known/oauth-protected-resource", oauth_protected_resource, methods=["GET"]),
-        Route("/.well-known/oauth-authorization-server", oauth_server_metadata, methods=["GET"]),
-        Route("/.well-known/openid-configuration", oauth_server_metadata, methods=["GET"]),
+        Route(
+            "/healthz",
+            lambda request: JSONResponse({"ok": True}),
+            methods=["GET"],
+        ),
+        Route(
+            "/readyz",
+            lambda request: JSONResponse({"ok": True}),
+            methods=["GET"],
+        ),
+        Route(
+            "/.well-known/oauth-protected-resource",
+            oauth_protected_resource,
+            methods=["GET"],
+        ),
+        Route(
+            "/.well-known/oauth-authorization-server",
+            oauth_server_metadata,
+            methods=["GET"],
+        ),
+        Route(
+            "/.well-known/openid-configuration",
+            oauth_server_metadata,
+            methods=["GET"],
+        ),
         Route("/oauth/register", oauth_register, methods=["POST"]),
         Route("/oauth/authorize", oauth_authorize_get, methods=["GET"]),
         Route("/oauth/authorize", oauth_authorize_post, methods=["POST"]),
@@ -145,4 +166,4 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    main()

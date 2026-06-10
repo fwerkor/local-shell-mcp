@@ -6,8 +6,8 @@ import asyncio
 import json
 import shlex
 
+from .config.settings import get_settings
 from .fs_ops import missing_path_context, resolve_path
-from .settings import get_settings
 from .shell_ops import run_shell
 
 
@@ -31,7 +31,9 @@ async def grep(
         args.extend(["--glob", glob])
     args.append(query)
     cmd = " ".join(shlex.quote(x) for x in args)
-    result = await run_shell(cmd, cwd=cwd, timeout_s=60, max_output_bytes=1_000_000)
+    result = await run_shell(
+        cmd, cwd=cwd, timeout_s=60, max_output_bytes=1_000_000
+    )
     matches = []
     for line in result.stdout.splitlines():
         try:
@@ -47,7 +49,9 @@ async def grep(
             {
                 "path": data.get("path", {}).get("text"),
                 "line": data.get("line_number"),
-                "column": first.get("start") + 1 if first.get("start") is not None else None,
+                "column": first.get("start") + 1
+                if first.get("start") is not None
+                else None,
                 "text": data.get("lines", {}).get("text", "").rstrip("\n"),
             }
         )

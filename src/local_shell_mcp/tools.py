@@ -18,6 +18,7 @@ from .agent_bridge import build_agent_registry
 from .agent_bridge_tools import register_agent_bridge_tools
 from .agent_mcp import AgentMcpClientManager
 from .audit import audit
+from .config.settings import get_settings, safe_settings_dump
 from .fs_ops import (
     delete_path,
     edit_text,
@@ -48,7 +49,6 @@ from .git_ops import (
 )
 from .remote import remote_manager
 from .search_ops import grep, tree
-from .settings import get_settings, safe_settings_dump
 from .shell_ops import (
     PUBLIC_RUN_SHELL_TIMEOUT_CAP_S,
     kill_shell,
@@ -103,13 +103,17 @@ async def _to_thread(func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
     return await asyncio.to_thread(func, *args, **kwargs)
 
 
-def _assert_text_input_size(label: str, text: str, limit: int | None = None) -> None:
+def _assert_text_input_size(
+    label: str, text: str, limit: int | None = None
+) -> None:
     """Reject oversized text payloads before they are written to disk or passed to patch tools."""
     settings = get_settings()
     max_bytes = limit or settings.max_file_write_bytes
     size = len(text.encode("utf-8"))
     if size > max_bytes:
-        raise ValueError(f"Refusing {label} of {size} bytes; max is {max_bytes}")
+        raise ValueError(
+            f"Refusing {label} of {size} bytes; max is {max_bytes}"
+        )
 
 
 async def _apply_patch_text(patch: str, cwd: str = ".") -> dict:
@@ -217,7 +221,10 @@ def _timeout_payload_for_tool(tool_name: str, exc: Exception) -> dict | str:
                 "title": "",
                 "text": str(exc),
                 "url": "file:///workspace/",
-                "metadata": {"source": "workspace", "error": type(exc).__name__},
+                "metadata": {
+                    "source": "workspace",
+                    "error": type(exc).__name__,
+                },
             },
             ensure_ascii=False,
         )
@@ -230,7 +237,9 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
         original = tool.fn
         tool_name = tool.name
 
-        async def wrapped(*args, __original=original, __tool_name=tool_name, **kwargs):  # noqa: ANN002, ANN003
+        async def wrapped(
+            *args, __original=original, __tool_name=tool_name, **kwargs
+        ):  # noqa: ANN002, ANN003
             try:
                 return await asyncio.wait_for(
                     __original(*args, **kwargs), timeout=PUBLIC_TOOL_TIMEOUT_S
@@ -239,7 +248,11 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                 exc = PublicToolTimeoutError(
                     f"{__tool_name} exceeded {PUBLIC_TOOL_TIMEOUT_S} second public tool timeout"
                 )
-                audit("tool_timeout", tool=__tool_name, timeout_s=PUBLIC_TOOL_TIMEOUT_S)
+                audit(
+                    "tool_timeout",
+                    tool=__tool_name,
+                    timeout_s=PUBLIC_TOOL_TIMEOUT_S,
+                )
                 return _timeout_payload_for_tool(__tool_name, exc)
 
         tool.fn = wrapped
@@ -250,7 +263,9 @@ def _install_full_container_auto_approval_hints(mcp: FastMCP) -> None:
     if not get_settings().allow_full_container:
         return
     for tool in mcp._tool_manager._tools.values():  # noqa: SLF001
-        if tool.name == "call_agent_mcp_tool" or tool.name.startswith("agent_mcp__"):
+        if tool.name == "call_agent_mcp_tool" or tool.name.startswith(
+            "agent_mcp__"
+        ):
             continue
         if tool.annotations and tool.annotations.readOnlyHint:
             continue
@@ -279,7 +294,9 @@ def _read_many_files_sync(
     files = []
     total_content_bytes = 0
     for path in paths:
-        item = read_text(path, start_line, end_line, binary_preview, binary_preview_bytes)
+        item = read_text(
+            path, start_line, end_line, binary_preview, binary_preview_bytes
+        )
         content = item.get("content")
         if isinstance(content, str):
             total_content_bytes += len(content.encode("utf-8"))
@@ -295,7 +312,9 @@ def _read_many_files_sync(
     return {"files": files, "total_content_bytes": total_content_bytes}
 
 
-def _secret_scan_sync(cwd: str = ".", glob: str | None = None, max_results: int = 200) -> dict:
+def _secret_scan_sync(
+    cwd: str = ".", glob: str | None = None, max_results: int = 200
+) -> dict:
     """Scan workspace text files for credential-like strings while respecting size, binary, and result limits."""
     import re
 
@@ -321,17 +340,25 @@ def _secret_scan_sync(cwd: str = ".", glob: str | None = None, max_results: int 
         for name, pattern in SECRET_PATTERNS.items():
             for match in re.finditer(pattern, text):
                 line = text.count("\n", 0, match.start()) + 1
-                findings.append({"type": name, "path": relative_display(path), "line": line})
+                findings.append(
+                    {"type": name, "path": relative_display(path), "line": line}
+                )
                 if len(findings) >= max_results:
                     return {
                         "findings": findings,
                         "truncated": True,
                         "truncated_files": truncated_files,
                     }
-    return {"findings": findings, "truncated": False, "truncated_files": truncated_files}
+    return {
+        "findings": findings,
+        "truncated": False,
+        "truncated_files": truncated_files,
+    }
 
 
-async def _secret_scan(cwd: str = ".", glob: str | None = None, max_results: int = 200) -> dict:
+async def _secret_scan(
+    cwd: str = ".", glob: str | None = None, max_results: int = 200
+) -> dict:
     """Expose secret scanning through an async wrapper for MCP handlers."""
     return await _to_thread(_secret_scan_sync, cwd, glob, max_results)
 
@@ -351,7 +378,11 @@ def _read_audit_tail_entries(lines: int = 100) -> dict:
     with path.open("rb") as fh:
         fh.seek(0, 2)
         position = fh.tell()
-        while position > 0 and bytes_read < max_bytes and newline_count <= line_limit:
+        while (
+            position > 0
+            and bytes_read < max_bytes
+            and newline_count <= line_limit
+        ):
             read_size = min(8192, position, max_bytes - bytes_read)
             position -= read_size
             fh.seek(position)
@@ -361,7 +392,9 @@ def _read_audit_tail_entries(lines: int = 100) -> dict:
             newline_count += chunk.count(b"\n")
 
     content = (
-        b"".join(reversed(chunks)).decode("utf-8", errors="replace").splitlines()[-line_limit:]
+        b"".join(reversed(chunks))
+        .decode("utf-8", errors="replace")
+        .splitlines()[-line_limit:]
     )
     entries = []
     for line in content:
@@ -379,11 +412,18 @@ def _read_audit_tail_entries(lines: int = 100) -> dict:
 def build_mcp() -> FastMCP:
     """Create the configured FastMCP server and register every local, remote, git, shell, filesystem, and bridge tool."""
     settings = get_settings()
-    mcp = FastMCP("local-shell-mcp", transport_security=_transport_security_settings())
-    read_only_tool = ToolAnnotations(
-        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    mcp = FastMCP(
+        "local-shell-mcp", transport_security=_transport_security_settings()
     )
-    read_only_meta = _security_meta([*NOAUTH_SECURITY_SCHEMES, *OAUTH_SECURITY_SCHEMES])
+    read_only_tool = ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
+    read_only_meta = _security_meta(
+        [*NOAUTH_SECURITY_SCHEMES, *OAUTH_SECURITY_SCHEMES]
+    )
     oauth_meta = _security_meta(OAUTH_SECURITY_SCHEMES)
 
     if settings.agent_bridge_enabled:
@@ -409,7 +449,13 @@ def build_mcp() -> FastMCP:
     async def search(query: str) -> str:
         """Search workspace files and return ChatGPT connector-compatible results."""
         try:
-            result = await grep(query, cwd=".", regex=False, case_sensitive=False, max_results=20)
+            result = await grep(
+                query,
+                cwd=".",
+                regex=False,
+                case_sensitive=False,
+                max_results=20,
+            )
             seen: set[str] = set()
             rows = []
             for match in result.get("matches", []):
@@ -462,7 +508,10 @@ def build_mcp() -> FastMCP:
                     "title": id,
                     "text": f"Unable to fetch file: {type(exc).__name__}: {exc}",
                     "url": f"file:///workspace/{id}",
-                    "metadata": {"source": "workspace", "error": type(exc).__name__},
+                    "metadata": {
+                        "source": "workspace",
+                        "error": type(exc).__name__,
+                    },
                 },
                 ensure_ascii=False,
             )
@@ -476,7 +525,12 @@ def build_mcp() -> FastMCP:
                 cwd=".",
                 timeout_s=10,
             )
-            return _ok({"settings": safe_settings_dump(settings), "probe": result.model_dump()})
+            return _ok(
+                {
+                    "settings": safe_settings_dump(settings),
+                    "probe": result.model_dump(),
+                }
+            )
         except Exception as exc:
             return _handled_error(exc)
 
@@ -490,13 +544,19 @@ def build_mcp() -> FastMCP:
         """Run a shell command in the controlled container. This is the primary coding-agent tool."""
         try:
             return _ok(
-                (await public_run_shell(command, cwd, timeout_s, max_output_bytes)).model_dump()
+                (
+                    await public_run_shell(
+                        command, cwd, timeout_s, max_output_bytes
+                    )
+                ).model_dump()
             )
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(meta=oauth_meta)
-    async def run_python_tool(code: str, cwd: str = ".", timeout_s: int = 60) -> dict:
+    async def run_python_tool(
+        code: str, cwd: str = ".", timeout_s: int = 60
+    ) -> dict:
         """Write Python code to a temporary file and execute it."""
         try:
             return _ok(await _run_python(code, cwd, timeout_s))
@@ -514,7 +574,9 @@ def build_mcp() -> FastMCP:
             return _handled_error(exc)
 
     @mcp.tool(meta=oauth_meta)
-    async def shell_send(session_id: str, input_text: str, enter: bool = True) -> dict:
+    async def shell_send(
+        session_id: str, input_text: str, enter: bool = True
+    ) -> dict:
         """Send input to a persistent shell session."""
         try:
             return _ok(await send_shell(session_id, input_text, enter))
@@ -546,7 +608,9 @@ def build_mcp() -> FastMCP:
             return _handled_error(exc)
 
     @mcp.tool(meta=oauth_meta)
-    async def list_files(path: str = ".", recursive: bool = False, max_entries: int = 500) -> dict:
+    async def list_files(
+        path: str = ".", recursive: bool = False, max_entries: int = 500
+    ) -> dict:
         """List files and directories."""
         try:
             return _ok(await _to_thread(list_dir, path, recursive, max_entries))
@@ -554,7 +618,9 @@ def build_mcp() -> FastMCP:
             return _handled_error(exc)
 
     @mcp.tool(meta=oauth_meta)
-    async def tree_view(cwd: str = ".", depth: int = 3, max_entries: int = 500) -> dict:
+    async def tree_view(
+        cwd: str = ".", depth: int = 3, max_entries: int = 500
+    ) -> dict:
         """Return a compact directory tree."""
         try:
             return _ok(await tree(cwd, depth, max_entries))
@@ -562,10 +628,18 @@ def build_mcp() -> FastMCP:
             return _handled_error(exc)
 
     @mcp.tool(meta=oauth_meta)
-    async def glob_search(pattern: str, cwd: str = ".", max_results: int = 500) -> dict:
+    async def glob_search(
+        pattern: str, cwd: str = ".", max_results: int = 500
+    ) -> dict:
         """Find files by glob pattern."""
         try:
-            return _ok({"paths": await _to_thread(glob_paths, pattern, cwd, max_results)})
+            return _ok(
+                {
+                    "paths": await _to_thread(
+                        glob_paths, pattern, cwd, max_results
+                    )
+                }
+            )
         except Exception as exc:
             return _handled_error(exc)
 
@@ -580,7 +654,9 @@ def build_mcp() -> FastMCP:
     ) -> dict:
         """Search file contents using ripgrep."""
         try:
-            return _ok(await grep(query, cwd, glob, regex, case_sensitive, max_results))
+            return _ok(
+                await grep(query, cwd, glob, regex, case_sensitive, max_results)
+            )
         except Exception as exc:
             return _handled_error(exc)
 
@@ -596,7 +672,12 @@ def build_mcp() -> FastMCP:
         try:
             return _ok(
                 await _to_thread(
-                    read_text, path, start_line, end_line, binary_preview, binary_preview_bytes
+                    read_text,
+                    path,
+                    start_line,
+                    end_line,
+                    binary_preview,
+                    binary_preview_bytes,
                 )
             )
         except Exception as exc:
@@ -626,7 +707,9 @@ def build_mcp() -> FastMCP:
             return _handled_error(exc)
 
     @mcp.tool(meta=oauth_meta)
-    async def write_file(path: str, content: str, overwrite: bool = True) -> dict:
+    async def write_file(
+        path: str, content: str, overwrite: bool = True
+    ) -> dict:
         """Write a UTF-8 text file."""
         try:
             return _ok(await _to_thread(write_text, path, content, overwrite))
@@ -634,7 +717,9 @@ def build_mcp() -> FastMCP:
             return _handled_error(exc)
 
     @mcp.tool(meta=oauth_meta)
-    async def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> dict:
+    async def edit_file(
+        path: str, old: str, new: str, replace_all: bool = False
+    ) -> dict:
         """Replace exact text in a file. Use this for precise code edits."""
         try:
             return _ok(await _to_thread(edit_text, path, old, new, replace_all))
@@ -667,7 +752,10 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(meta=oauth_meta)
     async def git_clone_tool(
-        repo_url: str, dest: str | None = None, branch: str | None = None, cwd: str = "."
+        repo_url: str,
+        dest: str | None = None,
+        branch: str | None = None,
+        cwd: str = ".",
     ) -> dict:
         """Clone a Git repository."""
         try:
@@ -685,7 +773,10 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(meta=oauth_meta)
     async def git_diff_tool(
-        cwd: str = ".", staged: bool = False, path: str | None = None, stat: bool = False
+        cwd: str = ".",
+        staged: bool = False,
+        path: str | None = None,
+        stat: bool = False,
     ) -> dict:
         """Run git diff."""
         try:
@@ -702,7 +793,9 @@ def build_mcp() -> FastMCP:
             return _handled_error(exc)
 
     @mcp.tool(meta=oauth_meta)
-    async def git_checkout_tool(cwd: str, ref: str, create: bool = False) -> dict:
+    async def git_checkout_tool(
+        cwd: str, ref: str, create: bool = False
+    ) -> dict:
         """Checkout an existing ref or create a branch."""
         try:
             return _ok(await git_checkout(cwd, ref, create))
@@ -710,7 +803,9 @@ def build_mcp() -> FastMCP:
             return _handled_error(exc)
 
     @mcp.tool(meta=oauth_meta)
-    async def git_fetch_tool(cwd: str = ".", remote: str = "origin", prune: bool = True) -> dict:
+    async def git_fetch_tool(
+        cwd: str = ".", remote: str = "origin", prune: bool = True
+    ) -> dict:
         """Fetch a git remote."""
         try:
             return _ok(await git_fetch(cwd, remote, prune))
@@ -726,7 +821,9 @@ def build_mcp() -> FastMCP:
             return _handled_error(exc)
 
     @mcp.tool(meta=oauth_meta)
-    async def git_add_tool(cwd: str = ".", paths: list[str] | None = None) -> dict:
+    async def git_add_tool(
+        cwd: str = ".", paths: list[str] | None = None
+    ) -> dict:
         """Stage paths for commit."""
         try:
             return _ok(await git_add(cwd, paths))
@@ -734,7 +831,9 @@ def build_mcp() -> FastMCP:
             return _handled_error(exc)
 
     @mcp.tool(meta=oauth_meta)
-    async def git_commit_tool(cwd: str, message: str, all_changes: bool = False) -> dict:
+    async def git_commit_tool(
+        cwd: str, message: str, all_changes: bool = False
+    ) -> dict:
         """Create a git commit."""
         try:
             return _ok(await git_commit(cwd, message, all_changes))
@@ -743,7 +842,10 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(meta=oauth_meta)
     async def git_push_tool(
-        cwd: str, remote: str = "origin", branch: str | None = None, set_upstream: bool = True
+        cwd: str,
+        remote: str = "origin",
+        branch: str | None = None,
+        set_upstream: bool = True,
     ) -> dict:
         """Push current HEAD to a remote branch."""
         try:
@@ -752,7 +854,9 @@ def build_mcp() -> FastMCP:
             return _handled_error(exc)
 
     @mcp.tool(meta=oauth_meta)
-    async def git_show_tool(cwd: str = ".", ref: str = "HEAD", path: str | None = None) -> dict:
+    async def git_show_tool(
+        cwd: str = ".", ref: str = "HEAD", path: str | None = None
+    ) -> dict:
         """Show a commit, object, or file at ref:path."""
         try:
             return _ok(await git_show(cwd, ref, path))
@@ -760,7 +864,9 @@ def build_mcp() -> FastMCP:
             return _handled_error(exc)
 
     @mcp.tool(meta=oauth_meta)
-    async def git_reset_tool(cwd: str = ".", mode: str = "soft", ref: str = "HEAD") -> dict:
+    async def git_reset_tool(
+        cwd: str = ".", mode: str = "soft", ref: str = "HEAD"
+    ) -> dict:
         """Run git reset. Modes: soft, mixed, hard."""
         try:
             return _ok(await git_reset(cwd, mode, ref))
@@ -768,7 +874,9 @@ def build_mcp() -> FastMCP:
             return _handled_error(exc)
 
     @mcp.tool(meta=oauth_meta)
-    async def secret_scan(cwd: str = ".", glob: str | None = None, max_results: int = 200) -> dict:
+    async def secret_scan(
+        cwd: str = ".", glob: str | None = None, max_results: int = 200
+    ) -> dict:
         """Scan workspace text files for common secrets before commit/push."""
         try:
             return _ok(await _secret_scan(cwd, glob, max_results))
@@ -809,11 +917,15 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(meta=oauth_meta)
     async def remote_invite(
-        name: str | None = None, workdir: str | None = None, ttl_s: int | None = None
+        name: str | None = None,
+        workdir: str | None = None,
+        ttl_s: int | None = None,
     ) -> dict:
         """Create a one-time command for a remote machine to join this control server."""
         try:
-            return _ok(await remote_manager().create_invite(name, workdir, ttl_s))
+            return _ok(
+                await remote_manager().create_invite(name, workdir, ttl_s)
+            )
         except Exception as exc:
             return _handled_error(exc)
 
@@ -881,11 +993,16 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(meta=oauth_meta)
     async def remote_shell_start(
-        machine: str, cwd: str = ".", name: str | None = None, command: str | None = None
+        machine: str,
+        cwd: str = ".",
+        name: str | None = None,
+        command: str | None = None,
     ) -> dict:
         """Start a persistent shell session on a remote worker."""
         return await _remote_call(
-            machine, "shell_start", {"cwd": cwd, "name": name, "command": command}
+            machine,
+            "shell_start",
+            {"cwd": cwd, "name": name, "command": command},
         )
 
     @mcp.tool(meta=oauth_meta)
@@ -896,18 +1013,28 @@ def build_mcp() -> FastMCP:
         return await _remote_call(
             machine,
             "shell_send",
-            {"session_id": session_id, "input_text": input_text, "enter": enter},
+            {
+                "session_id": session_id,
+                "input_text": input_text,
+                "enter": enter,
+            },
         )
 
     @mcp.tool(meta=oauth_meta)
-    async def remote_shell_read(machine: str, session_id: str, lines: int = 200) -> dict:
+    async def remote_shell_read(
+        machine: str, session_id: str, lines: int = 200
+    ) -> dict:
         """Read recent output from a persistent remote shell session."""
-        return await _remote_call(machine, "shell_read", {"session_id": session_id, "lines": lines})
+        return await _remote_call(
+            machine, "shell_read", {"session_id": session_id, "lines": lines}
+        )
 
     @mcp.tool(meta=oauth_meta)
     async def remote_shell_kill(machine: str, session_id: str) -> dict:
         """Kill a persistent remote shell session."""
-        return await _remote_call(machine, "shell_kill", {"session_id": session_id})
+        return await _remote_call(
+            machine, "shell_kill", {"session_id": session_id}
+        )
 
     @mcp.tool(meta=oauth_meta)
     async def remote_shell_list(machine: str) -> dict:
@@ -916,7 +1043,10 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(meta=oauth_meta)
     async def remote_list_files(
-        machine: str, path: str = ".", recursive: bool = False, max_entries: int = 500
+        machine: str,
+        path: str = ".",
+        recursive: bool = False,
+        max_entries: int = 500,
     ) -> dict:
         """List files and directories on a remote worker."""
         return await _remote_call(
@@ -931,7 +1061,9 @@ def build_mcp() -> FastMCP:
     ) -> dict:
         """Return a compact directory tree from a remote worker."""
         return await _remote_call(
-            machine, "tree_view", {"cwd": cwd, "depth": depth, "max_entries": max_entries}
+            machine,
+            "tree_view",
+            {"cwd": cwd, "depth": depth, "max_entries": max_entries},
         )
 
     @mcp.tool(meta=oauth_meta)
@@ -940,7 +1072,9 @@ def build_mcp() -> FastMCP:
     ) -> dict:
         """Find files by glob pattern on a remote worker."""
         return await _remote_call(
-            machine, "glob_search", {"pattern": pattern, "cwd": cwd, "max_results": max_results}
+            machine,
+            "glob_search",
+            {"pattern": pattern, "cwd": cwd, "max_results": max_results},
         )
 
     @mcp.tool(meta=oauth_meta)
@@ -1017,7 +1151,9 @@ def build_mcp() -> FastMCP:
     ) -> dict:
         """Write a UTF-8 text file on a remote worker."""
         return await _remote_call(
-            machine, "write_file", {"path": path, "content": content, "overwrite": overwrite}
+            machine,
+            "write_file",
+            {"path": path, "content": content, "overwrite": overwrite},
         )
 
     @mcp.tool(meta=oauth_meta)
@@ -1026,25 +1162,39 @@ def build_mcp() -> FastMCP:
     ) -> dict:
         """Replace exact text in a remote file."""
         return await _remote_call(
-            machine, "edit_file", {"path": path, "old": old, "new": new, "replace_all": replace_all}
+            machine,
+            "edit_file",
+            {"path": path, "old": old, "new": new, "replace_all": replace_all},
         )
 
     @mcp.tool(meta=oauth_meta)
-    async def remote_multi_edit_file(machine: str, path: str, edits: list[dict]) -> dict:
+    async def remote_multi_edit_file(
+        machine: str, path: str, edits: list[dict]
+    ) -> dict:
         """Apply multiple exact-text edits to one remote file."""
-        return await _remote_call(machine, "multi_edit_file", {"path": path, "edits": edits})
+        return await _remote_call(
+            machine, "multi_edit_file", {"path": path, "edits": edits}
+        )
 
     @mcp.tool(meta=oauth_meta)
-    async def remote_delete_file_or_dir(machine: str, path: str, recursive: bool = False) -> dict:
+    async def remote_delete_file_or_dir(
+        machine: str, path: str, recursive: bool = False
+    ) -> dict:
         """Delete a file or directory on a remote worker."""
         return await _remote_call(
-            machine, "delete_file_or_dir", {"path": path, "recursive": recursive}
+            machine,
+            "delete_file_or_dir",
+            {"path": path, "recursive": recursive},
         )
 
     @mcp.tool(meta=oauth_meta)
-    async def remote_apply_patch(machine: str, patch: str, cwd: str = ".") -> dict:
+    async def remote_apply_patch(
+        machine: str, patch: str, cwd: str = "."
+    ) -> dict:
         """Apply a unified diff on a remote worker using git apply."""
-        return await _remote_call(machine, "apply_patch", {"patch": patch, "cwd": cwd})
+        return await _remote_call(
+            machine, "apply_patch", {"patch": patch, "cwd": cwd}
+        )
 
     @mcp.tool(meta=oauth_meta)
     async def remote_git_clone_tool(
@@ -1076,13 +1226,19 @@ def build_mcp() -> FastMCP:
     ) -> dict:
         """Run git diff on a remote worker."""
         return await _remote_call(
-            machine, "git_diff_tool", {"cwd": cwd, "staged": staged, "path": path, "stat": stat}
+            machine,
+            "git_diff_tool",
+            {"cwd": cwd, "staged": staged, "path": path, "stat": stat},
         )
 
     @mcp.tool(meta=oauth_meta)
-    async def remote_git_log_tool(machine: str, cwd: str = ".", max_count: int = 20) -> dict:
+    async def remote_git_log_tool(
+        machine: str, cwd: str = ".", max_count: int = 20
+    ) -> dict:
         """Show recent git commits on a remote worker."""
-        return await _remote_call(machine, "git_log_tool", {"cwd": cwd, "max_count": max_count})
+        return await _remote_call(
+            machine, "git_log_tool", {"cwd": cwd, "max_count": max_count}
+        )
 
     @mcp.tool(meta=oauth_meta)
     async def remote_git_checkout_tool(
@@ -1090,7 +1246,9 @@ def build_mcp() -> FastMCP:
     ) -> dict:
         """Checkout an existing ref or create a branch on a remote worker."""
         return await _remote_call(
-            machine, "git_checkout_tool", {"cwd": cwd, "ref": ref, "create": create}
+            machine,
+            "git_checkout_tool",
+            {"cwd": cwd, "ref": ref, "create": create},
         )
 
     @mcp.tool(meta=oauth_meta)
@@ -1099,20 +1257,28 @@ def build_mcp() -> FastMCP:
     ) -> dict:
         """Fetch a git remote on a remote worker."""
         return await _remote_call(
-            machine, "git_fetch_tool", {"cwd": cwd, "remote": remote, "prune": prune}
+            machine,
+            "git_fetch_tool",
+            {"cwd": cwd, "remote": remote, "prune": prune},
         )
 
     @mcp.tool(meta=oauth_meta)
-    async def remote_git_pull_tool(machine: str, cwd: str = ".", ff_only: bool = True) -> dict:
+    async def remote_git_pull_tool(
+        machine: str, cwd: str = ".", ff_only: bool = True
+    ) -> dict:
         """Pull current branch on a remote worker."""
-        return await _remote_call(machine, "git_pull_tool", {"cwd": cwd, "ff_only": ff_only})
+        return await _remote_call(
+            machine, "git_pull_tool", {"cwd": cwd, "ff_only": ff_only}
+        )
 
     @mcp.tool(meta=oauth_meta)
     async def remote_git_add_tool(
         machine: str, cwd: str = ".", paths: list[str] | None = None
     ) -> dict:
         """Stage paths on a remote worker."""
-        return await _remote_call(machine, "git_add_tool", {"cwd": cwd, "paths": paths})
+        return await _remote_call(
+            machine, "git_add_tool", {"cwd": cwd, "paths": paths}
+        )
 
     @mcp.tool(meta=oauth_meta)
     async def remote_git_commit_tool(
@@ -1120,7 +1286,9 @@ def build_mcp() -> FastMCP:
     ) -> dict:
         """Create a git commit on a remote worker."""
         return await _remote_call(
-            machine, "git_commit_tool", {"cwd": cwd, "message": message, "all_changes": all_changes}
+            machine,
+            "git_commit_tool",
+            {"cwd": cwd, "message": message, "all_changes": all_changes},
         )
 
     @mcp.tool(meta=oauth_meta)
@@ -1135,7 +1303,12 @@ def build_mcp() -> FastMCP:
         return await _remote_call(
             machine,
             "git_push_tool",
-            {"cwd": cwd, "remote": remote, "branch": branch, "set_upstream": set_upstream},
+            {
+                "cwd": cwd,
+                "remote": remote,
+                "branch": branch,
+                "set_upstream": set_upstream,
+            },
         )
 
     @mcp.tool(meta=oauth_meta)
@@ -1143,14 +1316,18 @@ def build_mcp() -> FastMCP:
         machine: str, cwd: str = ".", ref: str = "HEAD", path: str | None = None
     ) -> dict:
         """Show a commit, object, or file at ref:path on a remote worker."""
-        return await _remote_call(machine, "git_show_tool", {"cwd": cwd, "ref": ref, "path": path})
+        return await _remote_call(
+            machine, "git_show_tool", {"cwd": cwd, "ref": ref, "path": path}
+        )
 
     @mcp.tool(meta=oauth_meta)
     async def remote_git_reset_tool(
         machine: str, cwd: str = ".", mode: str = "soft", ref: str = "HEAD"
     ) -> dict:
         """Run git reset on a remote worker. Modes: soft, mixed, hard."""
-        return await _remote_call(machine, "git_reset_tool", {"cwd": cwd, "mode": mode, "ref": ref})
+        return await _remote_call(
+            machine, "git_reset_tool", {"cwd": cwd, "mode": mode, "ref": ref}
+        )
 
     _install_full_container_auto_approval_hints(mcp)
     _install_mcp_tool_watchdogs(mcp)

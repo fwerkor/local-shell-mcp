@@ -9,7 +9,7 @@ import os
 import shutil
 from pathlib import Path
 
-from .settings import get_settings
+from .config.settings import get_settings
 
 BINARY_CHECK_BYTES = 8192
 BINARY_CONTROL_RATIO = 0.30
@@ -50,7 +50,10 @@ def prune_temp_dir() -> None:
     total_bytes = 0
     for index, (_, size, item) in enumerate(entries):
         total_bytes += size
-        if index < settings.max_tmp_files and total_bytes <= settings.max_tmp_bytes:
+        if (
+            index < settings.max_tmp_files
+            and total_bytes <= settings.max_tmp_bytes
+        ):
             continue
         try:
             item.unlink()
@@ -59,7 +62,10 @@ def prune_temp_dir() -> None:
 
 
 def resolve_path(
-    path: str | Path, *, must_exist: bool = False, allow_missing_parent: bool = True
+    path: str | Path,
+    *,
+    must_exist: bool = False,
+    allow_missing_parent: bool = True,
 ) -> Path:
     """Resolve a path, optionally restricting it to workspace_root.
 
@@ -103,7 +109,10 @@ def relative_display(path: Path) -> str:
 def missing_path_context(path: str | Path, *, max_entries: int = 50) -> dict:
     """Describe the nearest existing parent and sibling entries for a missing path diagnostic."""
     resolved = resolve_path(path)
-    nearest = next((parent for parent in [resolved, *resolved.parents] if parent.exists()), None)
+    nearest = next(
+        (parent for parent in [resolved, *resolved.parents] if parent.exists()),
+        None,
+    )
     entries: list[str] = []
     truncated = False
 
@@ -126,7 +135,9 @@ def missing_path_context(path: str | Path, *, max_entries: int = 50) -> dict:
     }
 
 
-def list_dir(path: str = ".", recursive: bool = False, max_entries: int = 500) -> list[dict]:
+def list_dir(
+    path: str = ".", recursive: bool = False, max_entries: int = 500
+) -> list[dict]:
     """List directory entries within configured limits using workspace-relative display paths."""
     settings = get_settings()
     base = resolve_path(path, must_exist=True)
@@ -145,7 +156,11 @@ def list_dir(path: str = ".", recursive: bool = False, max_entries: int = 500) -
         out.append(
             {
                 "path": relative_display(item),
-                "type": "dir" if item.is_dir() else "file" if item.is_file() else "other",
+                "type": "dir"
+                if item.is_dir()
+                else "file"
+                if item.is_file()
+                else "other",
                 "size": stat.st_size if item.is_file() else None,
                 "modified": stat.st_mtime,
             }
@@ -153,7 +168,9 @@ def list_dir(path: str = ".", recursive: bool = False, max_entries: int = 500) -
     return out
 
 
-def glob_paths(pattern: str, cwd: str = ".", max_results: int = 500) -> list[str]:
+def glob_paths(
+    pattern: str, cwd: str = ".", max_results: int = 500
+) -> list[str]:
     """Find workspace paths matching a glob pattern without exceeding the configured result limit."""
     settings = get_settings()
     base = resolve_path(cwd, must_exist=True)
@@ -189,7 +206,10 @@ def _is_probably_binary(sample: bytes) -> bool:
 
 
 def _binary_metadata(
-    p: Path, size: int, preview: str | None = None, preview_bytes: int = BINARY_PREVIEW_BYTES
+    p: Path,
+    size: int,
+    preview: str | None = None,
+    preview_bytes: int = BINARY_PREVIEW_BYTES,
 ) -> dict:
     """Return structured metadata and optional base64 preview for a binary file read attempt."""
     result = {
@@ -238,7 +258,9 @@ def read_text(
     with p.open("rb") as fh:
         sample = fh.read(BINARY_CHECK_BYTES)
         if _is_probably_binary(sample):
-            return _binary_metadata(p, size, binary_preview, binary_preview_bytes)
+            return _binary_metadata(
+                p, size, binary_preview, binary_preview_bytes
+            )
         fh.seek(0)
         data = fh.read(settings.max_file_read_bytes + 1)
 
@@ -305,14 +327,19 @@ def edit_text(path: str, old: str, new: str, replace_all: bool = False) -> dict:
         raise ValueError(
             f"old text occurs {count} times; set replace_all=true or provide more context"
         )
-    updated = text.replace(old, new) if replace_all else text.replace(old, new, 1)
+    updated = (
+        text.replace(old, new) if replace_all else text.replace(old, new, 1)
+    )
     updated_bytes = len(updated.encode("utf-8"))
     if updated_bytes > settings.max_file_write_bytes:
         raise ValueError(
             f"Refusing to write {updated_bytes} bytes; max is {settings.max_file_write_bytes}"
         )
     p.write_text(updated, encoding="utf-8")
-    return {"path": relative_display(p), "replacements": count if replace_all else 1}
+    return {
+        "path": relative_display(p),
+        "replacements": count if replace_all else 1,
+    }
 
 
 def multi_edit_text(path: str, edits: list[dict]) -> dict:
@@ -335,7 +362,9 @@ def multi_edit_text(path: str, edits: list[dict]) -> dict:
             raise ValueError(f"old text not found: {old[:80]!r}")
         if not replace_all and count > 1:
             raise ValueError(f"old text occurs {count} times: {old[:80]!r}")
-        text = text.replace(old, new) if replace_all else text.replace(old, new, 1)
+        text = (
+            text.replace(old, new) if replace_all else text.replace(old, new, 1)
+        )
         total += count if replace_all else 1
     updated_bytes = len(text.encode("utf-8"))
     if updated_bytes > settings.max_file_write_bytes:

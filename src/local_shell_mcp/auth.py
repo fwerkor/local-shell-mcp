@@ -12,7 +12,7 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .audit import audit
-from .settings import Settings, get_settings
+from .config.settings import Settings, get_settings
 
 PUBLIC_PATHS = {
     "/healthz",
@@ -90,7 +90,9 @@ def _verify_oauth(request: Request, settings: Settings) -> Principal:
             path=str(request.url.path),
             ip=_client_host(request),
         )
-        raise HTTPException(status_code=401, detail=f"Invalid OAuth bearer token: {exc}") from exc
+        raise HTTPException(
+            status_code=401, detail=f"Invalid OAuth bearer token: {exc}"
+        ) from exc
     return Principal(email=None, subject=claims.get("sub"), claims=claims)
 
 
@@ -98,17 +100,31 @@ def verify_request(request: Request) -> Principal:
     """Resolve the effective principal for a request according to configured auth mode and local bypass rules."""
     settings = get_settings()
     if settings.auth_mode == "none":
-        return Principal(email=None, subject="anonymous", claims={"auth": "none"})
-    if settings.auth_bypass_localhost and _is_localhost(request) and settings.mode == "http":
         return Principal(
-            email="localhost", subject="localhost", claims={"auth": "localhost-bypass"}
+            email=None, subject="anonymous", claims={"auth": "none"}
+        )
+    if (
+        settings.auth_bypass_localhost
+        and _is_localhost(request)
+        and settings.mode == "http"
+    ):
+        return Principal(
+            email="localhost",
+            subject="localhost",
+            claims={"auth": "localhost-bypass"},
         )
     if settings.auth_mode == "oauth":
         principal = _verify_oauth(request, settings)
     else:
-        raise HTTPException(status_code=500, detail=f"Unsupported auth_mode: {settings.auth_mode}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unsupported auth_mode: {settings.auth_mode}",
+        )
     audit(
-        "auth_ok", subject=principal.subject, path=str(request.url.path), ip=_client_host(request)
+        "auth_ok",
+        subject=principal.subject,
+        path=str(request.url.path),
+        ip=_client_host(request),
     )
     return principal
 
@@ -178,14 +194,20 @@ class AuthMiddleware:
     def __init__(self, app: ASGIApp):
         self.app = app
 
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+    async def __call__(
+        self, scope: Scope, receive: Receive, send: Send
+    ) -> None:
         """Apply public-route bypasses, optional MCP discovery bypass, and principal injection for protected HTTP requests."""
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
         path = scope.get("path", "")
-        if path in PUBLIC_PATHS or path.startswith("/.well-known/") or path.startswith("/oauth/"):
+        if (
+            path in PUBLIC_PATHS
+            or path.startswith("/.well-known/")
+            or path.startswith("/oauth/")
+        ):
             await self.app(scope, receive, send)
             return
 
@@ -210,7 +232,9 @@ class AuthMiddleware:
         except HTTPException as exc:
             headers = getattr(exc, "headers", None) or {}
             response = JSONResponse(
-                {"detail": exc.detail}, status_code=exc.status_code, headers=headers
+                {"detail": exc.detail},
+                status_code=exc.status_code,
+                headers=headers,
             )
             await response(scope, downstream_receive, send)
             return
@@ -219,4 +243,4 @@ class AuthMiddleware:
 
 
 # Backwards-compatible alias.
-CloudflareAccessMiddleware = AuthMiddleware
+type CloudflareAccessMiddleware = AuthMiddleware

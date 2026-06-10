@@ -10,7 +10,10 @@ from typing import Any
 import pytest
 from mcp.types import Tool
 
-from local_shell_mcp.agent_bridge import AgentMcpServerConfig, build_agent_registry
+from local_shell_mcp.agent_bridge import (
+    AgentMcpServerConfig,
+    build_agent_registry,
+)
 from local_shell_mcp.agent_mcp import (
     AgentMcpClientManager,
     AgentMcpTool,
@@ -23,13 +26,19 @@ def test_normalize_mcp_tool_preserves_schema():
     sdk_tool = SimpleNamespace(
         name="search",
         description="Search docs",
-        inputSchema={"type": "object", "properties": {"query": {"type": "string"}}},
+        inputSchema={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+        },
     )
 
     assert normalize_mcp_tool(sdk_tool) == AgentMcpTool(
         name="search",
         description="Search docs",
-        input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
+        input_schema={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+        },
     )
 
 
@@ -37,13 +46,19 @@ def test_normalize_mcp_tool_handles_sdk_tool_model():
     sdk_tool = Tool(
         name="search",
         description="Search docs",
-        inputSchema={"type": "object", "properties": {"query": {"type": "string"}}},
+        inputSchema={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+        },
     )
 
     assert normalize_mcp_tool(sdk_tool) == AgentMcpTool(
         name="search",
         description="Search docs",
-        input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
+        input_schema={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+        },
     )
 
 
@@ -80,7 +95,9 @@ async def test_client_manager_rejects_missing_http_url():
 
 
 @pytest.mark.asyncio
-async def test_client_manager_list_tools_accumulates_paginated_pages(monkeypatch):
+async def test_client_manager_list_tools_accumulates_paginated_pages(
+    monkeypatch,
+):
     class FakeSession:
         def __init__(self):
             self.cursors = []
@@ -130,7 +147,9 @@ async def test_client_manager_list_tools_accumulates_paginated_pages(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_client_manager_call_tool_uses_session_and_normalizes_result(monkeypatch):
+async def test_client_manager_call_tool_uses_session_and_normalizes_result(
+    monkeypatch,
+):
     class FakeSession:
         def __init__(self):
             self.calls = []
@@ -155,7 +174,9 @@ async def test_client_manager_call_tool_uses_session_and_normalizes_result(monke
 
     monkeypatch.setattr(manager, "_session", fake_session)
 
-    assert await manager.call_tool("docs", server, "search", {"query": "mcp"}) == {
+    assert await manager.call_tool(
+        "docs", server, "search", {"query": "mcp"}
+    ) == {
         "is_error": False,
         "content": [{"type": "text", "text": "done"}],
         "structured_content": {"ok": True},
@@ -164,7 +185,9 @@ async def test_client_manager_call_tool_uses_session_and_normalizes_result(monke
 
 
 @pytest.mark.asyncio
-async def test_client_manager_list_tools_cleans_up_session_on_use_error(monkeypatch):
+async def test_client_manager_list_tools_cleans_up_session_on_use_error(
+    monkeypatch,
+):
     events = []
 
     class FakeSession:
@@ -244,7 +267,12 @@ def test_build_agent_registry_probes_enabled_servers(tmp_path):
 
 def test_build_agent_registry_records_probe_errors(tmp_path):
     (tmp_path / "config.json").write_text(
-        json.dumps({"version": 1, "mcpServers": {"bad": {"type": "http", "url": "https://bad"}}}),
+        json.dumps(
+            {
+                "version": 1,
+                "mcpServers": {"bad": {"type": "http", "url": "https://bad"}},
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -260,7 +288,12 @@ def test_build_agent_registry_records_probe_errors(tmp_path):
 
 def test_registry_config_status_redacts_probe_errors(tmp_path):
     (tmp_path / "config.json").write_text(
-        json.dumps({"version": 1, "mcpServers": {"bad": {"type": "http", "url": "https://bad"}}}),
+        json.dumps(
+            {
+                "version": 1,
+                "mcpServers": {"bad": {"type": "http", "url": "https://bad"}},
+            }
+        ),
         encoding="utf-8",
     )
     manager = FakeMcpManager(
@@ -271,7 +304,9 @@ def test_registry_config_status_redacts_probe_errors(tmp_path):
         }
     )
 
-    status = build_agent_registry(tmp_path, manager, probe_timeout_s=1).config_status()
+    status = build_agent_registry(
+        tmp_path, manager, probe_timeout_s=1
+    ).config_status()
     serialized = json.dumps(status)
 
     assert "secret" not in serialized.lower()
@@ -299,7 +334,9 @@ def test_registry_config_status_redacts_env_and_header_values(tmp_path):
         encoding="utf-8",
     )
 
-    status = build_agent_registry(tmp_path, FakeMcpManager(), probe_timeout_s=1).config_status()
+    status = build_agent_registry(
+        tmp_path, FakeMcpManager(), probe_timeout_s=1
+    ).config_status()
     server = status["mcp_servers"]["off"]
     serialized = json.dumps(status)
 
@@ -309,7 +346,9 @@ def test_registry_config_status_redacts_env_and_header_values(tmp_path):
     assert server["headers"] == {"X-Auth": "<redacted>"}
 
 
-def test_registry_config_status_redacts_configured_values_in_probe_errors(tmp_path):
+def test_registry_config_status_redacts_configured_values_in_probe_errors(
+    tmp_path,
+):
     env_value = "custom-secret"
     header_value = "super-secret"
     (tmp_path / "config.json").write_text(
@@ -336,7 +375,9 @@ def test_registry_config_status_redacts_configured_values_in_probe_errors(tmp_pa
         }
     )
 
-    status = build_agent_registry(tmp_path, manager, probe_timeout_s=1).config_status()
+    status = build_agent_registry(
+        tmp_path, manager, probe_timeout_s=1
+    ).config_status()
     serialized = json.dumps(status)
 
     assert env_value not in serialized
@@ -347,11 +388,18 @@ def test_registry_config_status_redacts_configured_values_in_probe_errors(tmp_pa
 @pytest.mark.asyncio
 async def test_build_agent_registry_works_inside_running_loop(tmp_path):
     (tmp_path / "config.json").write_text(
-        json.dumps({"version": 1, "mcpServers": {"docs": {"type": "http", "url": "https://docs"}}}),
+        json.dumps(
+            {
+                "version": 1,
+                "mcpServers": {"docs": {"type": "http", "url": "https://docs"}},
+            }
+        ),
         encoding="utf-8",
     )
     manager = FakeMcpManager(
-        tools_by_server={"docs": [AgentMcpTool("search", "Search docs", {"type": "object"})]}
+        tools_by_server={
+            "docs": [AgentMcpTool("search", "Search docs", {"type": "object"})]
+        }
     )
 
     registry = build_agent_registry(tmp_path, manager, probe_timeout_s=1)
@@ -371,7 +419,9 @@ def test_build_agent_registry_dynamic_flag_overrides(tmp_path):
         encoding="utf-8",
     )
 
-    manifest_registry = build_agent_registry(tmp_path, FakeMcpManager(), probe_timeout_s=1)
+    manifest_registry = build_agent_registry(
+        tmp_path, FakeMcpManager(), probe_timeout_s=1
+    )
     override_registry = build_agent_registry(
         tmp_path,
         FakeMcpManager(),
@@ -387,9 +437,13 @@ def test_build_agent_registry_dynamic_flag_overrides(tmp_path):
 
     default_dir = tmp_path / "defaults"
     default_dir.mkdir()
-    (default_dir / "config.json").write_text(json.dumps({"version": 1}), encoding="utf-8")
+    (default_dir / "config.json").write_text(
+        json.dumps({"version": 1}), encoding="utf-8"
+    )
 
-    default_registry = build_agent_registry(default_dir, FakeMcpManager(), probe_timeout_s=1)
+    default_registry = build_agent_registry(
+        default_dir, FakeMcpManager(), probe_timeout_s=1
+    )
 
     assert default_registry.dynamic_mcp_tools is True
     assert default_registry.dynamic_skill_tools is True
@@ -404,7 +458,12 @@ def test_build_agent_registry_records_timeout_without_hanging(tmp_path):
                 await asyncio.sleep(60)
 
     (tmp_path / "config.json").write_text(
-        json.dumps({"version": 1, "mcpServers": {"slow": {"type": "http", "url": "https://slow"}}}),
+        json.dumps(
+            {
+                "version": 1,
+                "mcpServers": {"slow": {"type": "http", "url": "https://slow"}},
+            }
+        ),
         encoding="utf-8",
     )
     result_queue: queue.Queue[Any] = queue.Queue(maxsize=1)
@@ -412,7 +471,9 @@ def test_build_agent_registry_records_timeout_without_hanging(tmp_path):
     def run_registry() -> None:
         try:
             result_queue.put(
-                build_agent_registry(tmp_path, StubbornMcpManager(), probe_timeout_s=0.05)
+                build_agent_registry(
+                    tmp_path, StubbornMcpManager(), probe_timeout_s=0.05
+                )
             )
         except BaseException as exc:
             result_queue.put(exc)
@@ -425,11 +486,15 @@ def test_build_agent_registry_records_timeout_without_hanging(tmp_path):
     try:
         result = result_queue.get(timeout=1)
     except queue.Empty:
-        pytest.fail("build_agent_registry did not return within the probe timeout")
+        pytest.fail(
+            "build_agent_registry did not return within the probe timeout"
+        )
 
     elapsed = time.monotonic() - started_at
     assert elapsed < 1
     assert not isinstance(result, BaseException)
     record = result.mcp_servers["slow"]
     assert record.available is False
-    assert "timeout" in record.error.lower() or "timed out" in record.error.lower()
+    assert (
+        "timeout" in record.error.lower() or "timed out" in record.error.lower()
+    )

@@ -1,4 +1,4 @@
-from local_shell_mcp.settings import load_settings
+from local_shell_mcp.config.settings import load_settings
 
 
 def test_settings_precedence_config_env_cli(monkeypatch, tmp_path):

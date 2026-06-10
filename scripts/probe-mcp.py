@@ -15,7 +15,10 @@ async def oauth_token(base_url: str, pin: str) -> str:
     async with httpx.AsyncClient(follow_redirects=False, timeout=20) as client:
         registered = await client.post(
             f"{base_url}/oauth/register",
-            json={"redirect_uris": [redirect_uri], "client_name": "local-shell-mcp-probe"},
+            json={
+                "redirect_uris": [redirect_uri],
+                "client_name": "local-shell-mcp-probe",
+            },
         )
         registered.raise_for_status()
         client_id = registered.json()["client_id"]
@@ -32,7 +35,9 @@ async def oauth_token(base_url: str, pin: str) -> str:
         )
         if authorized.status_code not in {302, 303, 307, 308}:
             authorized.raise_for_status()
-        code = parse_qs(urlparse(authorized.headers["location"]).query)["code"][0]
+        code = parse_qs(urlparse(authorized.headers["location"]).query)["code"][
+            0
+        ]
 
         token = await client.post(
             f"{base_url}/oauth/token",
@@ -79,10 +84,15 @@ async def call_environment_info(mcp_url: str, token: str) -> bool:
 
 
 async def main() -> None:
-    parser = argparse.ArgumentParser(description="Probe a local-shell-mcp remote endpoint.")
-    parser.add_argument("base_url", help="Public base URL, for example https://mcp.example.com")
+    parser = argparse.ArgumentParser(
+        description="Probe a local-shell-mcp remote endpoint."
+    )
     parser.add_argument(
-        "--pin", help="OAuth admin PIN. If set, also tests an authenticated tool call."
+        "base_url", help="Public base URL, for example https://mcp.example.com"
+    )
+    parser.add_argument(
+        "--pin",
+        help="OAuth admin PIN. If set, also tests an authenticated tool call.",
     )
     args = parser.parse_args()
 
@@ -108,7 +118,9 @@ async def main() -> None:
         tools = await list_tools(mcp_url, token)
         print(f"authenticated initialize/list_tools: ok ({len(tools)} tools)")
         ok = await call_environment_info(mcp_url, token)
-        print(f"authenticated environment_info call: {'ok' if ok else 'failed'}")
+        print(
+            f"authenticated environment_info call: {'ok' if ok else 'failed'}"
+        )
 
 
 if __name__ == "__main__":

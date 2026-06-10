@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .settings import get_settings
+from .config.settings import get_settings
 
 
 def _trim_audit_log(path: Path, max_bytes: int) -> None:
