@@ -18,6 +18,7 @@ classifiers = [
 ]
 dependencies = [
     "aiofiles>=25.1.0",
+    "authlib>=1.7.2",
     "fastapi>=0.136.3",
     "httpx>=0.28.1",
     "mcp>=1.27.2",
