@@ -15,13 +15,13 @@ ChatGPT custom connectors require a public HTTPS origin for OAuth and MCP access
 
 ## Docker Compose
 
-Copy the example environment file:
+Create the required Compose environment file:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
+Edit `.env`; Docker Compose passes this file to the `local-shell-mcp` container with `env_file:`:
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
@@ -59,7 +59,7 @@ The Compose file mounts:
 - `./workspaces/default` as `/home`, the container home tree.
 - `local-shell-mcp-credentials` as `/persist/credentials`, used for persistent GitHub CLI, Git HTTPS, GitCode, SSH, `.netrc`, and GPG state when credential persistence is enabled.
 
-Set `LOCAL_SHELL_MCP_PERSISTENT_CREDENTIALS=false` for a more disposable authentication state.
+Set `DOCKER_PERSISTENT_CREDENTIALS=false` in `.env` for a more disposable authentication state. Docker-only startup knobs use `DOCKER_*`; application settings continue to use `LOCAL_SHELL_MCP_*`.
 
 If the container cannot write `/workspace/.local-shell-mcp`, fix host ownership:
 

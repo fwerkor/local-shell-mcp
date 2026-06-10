@@ -5,18 +5,8 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8765:8765"
-    environment:
-      LOCAL_SHELL_MCP_MODE: "mcp"
-      LOCAL_SHELL_MCP_HOST: "0.0.0.0"
-      LOCAL_SHELL_MCP_PORT: "8765"
-      LOCAL_SHELL_MCP_WORKSPACE_ROOT: "/workspace"
-      LOCAL_SHELL_MCP_AUTH_MODE: "${LOCAL_SHELL_MCP_AUTH_MODE:-oauth}"
-      LOCAL_SHELL_MCP_PUBLIC_BASE_URL: "${LOCAL_SHELL_MCP_PUBLIC_BASE_URL:-}"
-      LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN: "${LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN:-}"
-      LOCAL_SHELL_MCP_OAUTH_JWT_SECRET: "${LOCAL_SHELL_MCP_OAUTH_JWT_SECRET:-dev-change-me}"
-      LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER: "${LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER:-false}"
-      LOCAL_SHELL_MCP_PERSISTENT_CREDENTIALS: "${LOCAL_SHELL_MCP_PERSISTENT_CREDENTIALS:-false}"
-      LOCAL_SHELL_MCP_CREDENTIALS_DIR: "/persist/credentials"
+    env_file:
+      - .env
     volumes:
       - ./workspaces/default:/home
       - ./workspaces/default/agent/workspace:/workspace

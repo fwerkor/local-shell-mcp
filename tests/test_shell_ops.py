@@ -189,3 +189,20 @@ async def test_send_shell_invokes_tmux_promptly(monkeypatch):
 
     assert result == {"session_id": "session-1", "sent_bytes": 7, "enter": True}
     assert calls == [(["send-keys", "-t", "session-1", "echo ok", "Enter"], 10)]
+
+
+@pytest.mark.asyncio
+async def test_run_shell_filters_server_environment(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET", "should-not-leak")
+    monkeypatch.setenv("PYTHONPATH", "/app/src")
+    get_settings.cache_clear()
+
+    result = await run_shell(
+        "env | grep -E '^(PYTHONPATH|LOCAL_SHELL_MCP_)=' || true",
+        cwd=str(tmp_path),
+    )
+
+    assert result.ok
+    assert result.stdout == ""

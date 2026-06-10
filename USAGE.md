@@ -41,15 +41,14 @@ A successful shell call should produce audit events such as `run_shell_start` an
 Running `local-shell-mcp` without a subcommand starts the server:
 
 ```text
-local-shell-mcp [--mode {mcp,http,stdio}] [--config PATH] [--remote | --no-remote]
+local-shell-mcp [--config PATH] [--mode MODE] [--host HOST] [--port PORT] [--workspace-root PATH] [...]
 ```
 
 Server options:
 
-- `--mode {mcp,http,stdio}` overrides `LOCAL_SHELL_MCP_MODE`.
-- `--config PATH` sets `LOCAL_SHELL_MCP_CONFIG` before loading settings.
-- `--remote` enables remote worker routes and tools.
-- `--no-remote` disables remote worker routes and tools.
+- Every `LOCAL_SHELL_MCP_*` application setting has a matching CLI flag, using the lowercase dashed form of the setting name, for example `LOCAL_SHELL_MCP_REMOTE_ENABLED` -> `--remote-enabled true`.
+- Boolean CLI values are explicit: use `true` or `false`, for example `--allow-full-container false`.
+- `--config PATH` selects an optional YAML config file. The effective precedence is defaults < config file < environment variables < CLI arguments.
 
 Use the built-in help for exact parser output:
 
@@ -60,40 +59,31 @@ local-shell-mcp worker --help
 
 ## Configuration
 
-Environment variables use the `LOCAL_SHELL_MCP_` prefix. YAML config can also be passed with `--config`:
+Use CLI arguments for one-off runs, `.env` / `LOCAL_SHELL_MCP_*` environment variables for Compose deployments, and `config.example.yaml` only when a file-based configuration is more convenient. Application settings resolve in this order:
 
-```bash
-local-shell-mcp --config config.example.yaml --mode mcp
+```text
+defaults < config file < LOCAL_SHELL_MCP_* environment variables < CLI arguments
 ```
 
-Common settings:
+The most common settings are:
 
-| Variable | Default | Meaning |
-|---|---:|---|
-| `LOCAL_SHELL_MCP_HOST` | `0.0.0.0` | Bind host |
-| `LOCAL_SHELL_MCP_PORT` | `8765` | Bind port |
-| `LOCAL_SHELL_MCP_MODE` | `mcp` | `mcp`, `http`, or `stdio` |
-| `LOCAL_SHELL_MCP_WORKSPACE_ROOT` | `/workspace` | Root for normal file and command operations |
-| `LOCAL_SHELL_MCP_AUTH_MODE` | `oauth` | `oauth` or `none` |
-| `LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST` | `true` | Allow localhost requests without bearer auth |
-| `LOCAL_SHELL_MCP_REQUIRE_AUTH_FOR_MCP_DISCOVERY` | `false` | Require auth for MCP initialize/list-tools discovery calls |
-| `LOCAL_SHELL_MCP_PUBLIC_BASE_URL` | unset | Public HTTPS origin used in OAuth metadata |
-| `LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN` | unset | PIN required to approve OAuth authorization |
-| `LOCAL_SHELL_MCP_OAUTH_JWT_SECRET` | `dev-change-me` | Secret used to sign bearer tokens |
-| `LOCAL_SHELL_MCP_OAUTH_ACCESS_TOKEN_TTL_S` | `0` | Bearer token lifetime in seconds; `0` means no expiry |
-| `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `false` | Disable built-in workspace and command restrictions; intended only for disposable containers/VMs |
-| `LOCAL_SHELL_MCP_RUN_AS_ROOT` | `false` | Docker entrypoint escape hatch to run the MCP server as root instead of `agent`; prefer explicit `sudo` inside commands |
-| `LOCAL_SHELL_MCP_MAX_TIMEOUT_S` | `3600` | Maximum command timeout |
-| `LOCAL_SHELL_MCP_MAX_OUTPUT_BYTES` | `200000` | Command output truncation limit |
-| `LOCAL_SHELL_MCP_MAX_FILE_READ_BYTES` | `512000` | Per-file read limit |
-| `LOCAL_SHELL_MCP_MAX_FILE_WRITE_BYTES` | `5000000` | Per-file write/edit limit |
-| `LOCAL_SHELL_MCP_MAX_CONCURRENT_COMMANDS` | `4` | Concurrent command limit |
-| `LOCAL_SHELL_MCP_MAX_TMUX_SESSIONS` | `16` | Persistent shell session limit |
-| `LOCAL_SHELL_MCP_REMOTE_ENABLED` | `true` | Enable remote worker routes and tools |
-| `LOCAL_SHELL_MCP_AGENT_BRIDGE_ENABLED` | `true` | Enable agent capability bridge tools |
-| `LOCAL_SHELL_MCP_AGENT_CONFIG_DIR` | `/home/agent/local-shell-mcp-config` | Read-only capability config directory |
+| Setting | CLI | Environment | Default |
+|---|---|---|---:|
+| Server mode | `--mode` | `LOCAL_SHELL_MCP_MODE` | `mcp` |
+| Bind host | `--host` | `LOCAL_SHELL_MCP_HOST` | `0.0.0.0` |
+| Bind port | `--port` | `LOCAL_SHELL_MCP_PORT` | `8765` |
+| Workspace root | `--workspace-root` | `LOCAL_SHELL_MCP_WORKSPACE_ROOT` | `/workspace` |
+| Auth mode | `--auth-mode` | `LOCAL_SHELL_MCP_AUTH_MODE` | `oauth` |
+| Public OAuth origin | `--public-base-url` | `LOCAL_SHELL_MCP_PUBLIC_BASE_URL` | unset |
+| OAuth approval PIN | `--oauth-admin-pin` | `LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN` | unset |
+| OAuth JWT secret | `--oauth-jwt-secret` | `LOCAL_SHELL_MCP_OAUTH_JWT_SECRET` | `dev-change-me` |
+| Full-container mode | `--allow-full-container true/false` | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `false` |
+| Remote worker routes | `--remote-enabled true/false` | `LOCAL_SHELL_MCP_REMOTE_ENABLED` | `true` |
+| Agent bridge config | `--agent-config-dir` | `LOCAL_SHELL_MCP_AGENT_CONFIG_DIR` | `/home/agent/local-shell-mcp-config` |
 
-See `config.example.yaml` and `.env.example` for deployment-oriented examples.
+Docker image startup knobs, such as credential persistence and whether the server process runs as root, use `DOCKER_*` variables because they are consumed by the container entrypoint before the application starts.
+
+For Docker Compose, copy [.env.example](.env.example) to `.env`; the compose file requires it and passes it through with `env_file:`. See [ENV.md](ENV.md) for the complete variable reference and [config.example.yaml](config.example.yaml) for non-Compose file-based configuration.
 
 ## Remote worker mode
 
@@ -145,7 +135,7 @@ Remote settings:
 | `LOCAL_SHELL_MCP_REMOTE_POLL_TIMEOUT_S` | `25` | Long-poll heartbeat timeout |
 | `LOCAL_SHELL_MCP_REMOTE_JOB_TIMEOUT_S` | `3600` | Control-side remote job result timeout |
 
-Disable remote mode with `--no-remote` or `LOCAL_SHELL_MCP_REMOTE_ENABLED=false`.
+Disable remote mode with `--remote-enabled false` or `LOCAL_SHELL_MCP_REMOTE_ENABLED=false`.
 
 ## Agent capability bridge
 

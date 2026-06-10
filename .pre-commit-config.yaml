@@ -7,6 +7,12 @@ repos:
       - id: ruff-format
   - repo: local
     hooks:
+      - id: generate-config-examples
+        name: generate config examples
+        entry: uv run python scripts/generate-config-examples.py
+        language: system
+        pass_filenames: false
+        files: ^(src/local_shell_mcp/(config_registry|settings)\.py|scripts/generate-config-examples\.py|\.env\.example|config\.example\.yaml)$
       - id: vscode-extension-format
         name: vscode-extension format
         entry: bash -c 'cd vscode-extension && npm ci && npm run format:check'

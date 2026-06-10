@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import Field, field_validator, model_validator
@@ -15,6 +15,7 @@ DEFAULT_WORKSPACE_ROOT = Path("/workspace")
 DEFAULT_STATE_DIR = DEFAULT_WORKSPACE_ROOT / ".local-shell-mcp"
 DEFAULT_AUDIT_LOG_PATH = DEFAULT_STATE_DIR / "audit.jsonl"
 DEFAULT_AGENT_CONFIG_DIR = Path("/home/agent/local-shell-mcp-config")
+ENV_PREFIX = "LOCAL_SHELL_MCP_"
 
 SENSITIVE_SETTING_KEYS = {
     "cf_access_audience",
@@ -37,11 +38,12 @@ def _split_csv(value: str | list[str] | None) -> list[str]:
 class Settings(BaseSettings):
     """Runtime settings.
 
-    Environment variables use the LOCAL_SHELL_MCP_ prefix.
-    YAML config values can be supplied with LOCAL_SHELL_MCP_CONFIG.
+    Environment variables use the LOCAL_SHELL_MCP_ prefix. Optional YAML config can
+    be supplied with --config or LOCAL_SHELL_MCP_CONFIG. Effective precedence is:
+    defaults < config file < environment variables < CLI overrides.
     """
 
-    model_config = SettingsConfigDict(env_prefix="LOCAL_SHELL_MCP_", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix=ENV_PREFIX, extra="ignore")
 
     host: str = "0.0.0.0"
     port: int = 8765
@@ -163,22 +165,6 @@ class Settings(BaseSettings):
             self.path_denylist = []
         return self
 
-    def apply_yaml(self, path: Path) -> Settings:
-        """Overlay YAML configuration values onto settings loaded from environment defaults."""
-        if not path.exists():
-            raise FileNotFoundError(path)
-        data = yaml.safe_load(path.read_text()) or {}
-        flat = {}
-        for key, value in data.items():
-            if isinstance(value, dict):
-                for child_key, child_value in value.items():
-                    flat[f"{key}_{child_key}"] = child_value
-            else:
-                flat[key] = value
-        merged = self.model_dump()
-        merged.update(flat)
-        return Settings(**merged)
-
     def with_workspace_relative_defaults(self) -> Settings:
         """Resolve state and audit paths relative to the workspace when they were left at defaults."""
         if self.workspace_root == DEFAULT_WORKSPACE_ROOT:
@@ -196,18 +182,93 @@ class Settings(BaseSettings):
         return self.model_copy(update=updates)
 
 
-@lru_cache(maxsize=1)
-def get_settings() -> Settings:
-    """Load cached settings, optionally overlaying config.yaml from the configured workspace."""
-    settings = Settings()
-    config = os.getenv("LOCAL_SHELL_MCP_CONFIG")
-    if config:
-        settings = settings.apply_yaml(Path(config).expanduser())
+def _flatten_config(data: dict[str, Any]) -> dict[str, Any]:
+    """Flatten one level of grouped YAML keys into Settings field names."""
+    flat: dict[str, Any] = {}
+    for key, value in data.items():
+        if isinstance(value, dict):
+            for child_key, child_value in value.items():
+                flat[f"{key}_{child_key}"] = child_value
+        else:
+            flat[key] = value
+    return flat
+
+
+def read_config_file(path: str | Path | None) -> dict[str, Any]:
+    """Read optional YAML configuration values."""
+    if not path:
+        return {}
+    config_path = Path(path).expanduser()
+    if not config_path.exists():
+        raise FileNotFoundError(config_path)
+    data = yaml.safe_load(config_path.read_text()) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"Config file must contain a mapping: {config_path}")
+    return _flatten_config(data)
+
+
+def _env_overrides() -> dict[str, Any]:
+    """Return settings explicitly present in the process environment."""
+    present = {
+        name: field_name
+        for field_name in Settings.model_fields
+        if (name := f"{ENV_PREFIX}{field_name.upper()}") in os.environ
+    }
+    if not present:
+        return {}
+    env_settings = Settings()
+    return {field_name: getattr(env_settings, field_name) for field_name in present.values()}
+
+
+def _prepare_settings(settings: Settings, *, create_dirs: bool) -> Settings:
+    """Apply derived defaults and create runtime directories when requested."""
     settings = settings.with_workspace_relative_defaults()
-    settings.workspace_root.mkdir(parents=True, exist_ok=True)
-    settings.state_dir.mkdir(parents=True, exist_ok=True)
-    settings.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
+    if create_dirs:
+        settings.workspace_root.mkdir(parents=True, exist_ok=True)
+        settings.state_dir.mkdir(parents=True, exist_ok=True)
+        settings.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
     return settings
+
+
+def load_settings(
+    config_path: str | Path | None = None,
+    overrides: dict[str, Any] | None = None,
+    *,
+    create_dirs: bool = True,
+) -> Settings:
+    """Load settings with precedence: defaults < config file < environment < explicit overrides."""
+    config_path = config_path or os.getenv("LOCAL_SHELL_MCP_CONFIG")
+    values = read_config_file(config_path)
+    values.update(_env_overrides())
+    values.update({k: v for k, v in (overrides or {}).items() if v is not None})
+    return _prepare_settings(Settings(**values), create_dirs=create_dirs)
+
+
+@lru_cache(maxsize=1)
+def _cached_settings(settings: Settings | None = None) -> Settings:
+    if settings is None:
+        return load_settings()
+    return settings
+
+
+def get_settings() -> Settings:
+    """Return cached settings, optionally primed by configure_settings."""
+    return _cached_settings()
+
+
+def configure_settings(settings: Settings) -> None:
+    """Install a fully resolved Settings object for subsequent get_settings calls."""
+    _cached_settings.cache_clear()
+    _cached_settings(settings)
+
+
+def clear_settings_cache() -> None:
+    """Clear cached settings. Intended for tests and CLI reconfiguration."""
+    _cached_settings.cache_clear()
+
+
+# Backwards-compatible test helper: many tests call get_settings.cache_clear().
+get_settings.cache_clear = clear_settings_cache  # type: ignore[attr-defined]
 
 
 def safe_settings_dump(settings: Settings | None = None) -> dict:

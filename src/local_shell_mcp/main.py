@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from contextlib import asynccontextmanager
 
@@ -13,6 +12,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
 from .auth import AuthMiddleware
+from .config_registry import cli_overrides_from_args, register_setting_cli_args
 from .http_app import build_http_app
 from .oauth import (
     oauth_authorize_get,
@@ -23,7 +23,12 @@ from .oauth import (
     oauth_token,
 )
 from .remote import add_worker_cli_args, remote_routes, run_worker_from_args
-from .settings import get_settings, validate_public_oauth_configuration
+from .settings import (
+    configure_settings,
+    get_settings,
+    load_settings,
+    validate_public_oauth_configuration,
+)
 from .tools import build_mcp
 
 
@@ -35,30 +40,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.set_defaults(handler=_run_server_from_args)
     parser.add_argument(
-        "--mode",
-        choices=["mcp", "http", "stdio"],
-        default=None,
-        help="Server transport mode; overrides LOCAL_SHELL_MCP_MODE",
-    )
-    parser.add_argument(
         "--config",
         default=None,
         metavar="PATH",
-        help="Path to config YAML; overrides LOCAL_SHELL_MCP_CONFIG",
+        help=(
+            "Path to optional YAML config file. Overrides LOCAL_SHELL_MCP_CONFIG. "
+            "This selects the config file and is not itself a Settings field."
+        ),
     )
-    parser.add_argument(
-        "--remote",
-        dest="remote",
-        action="store_true",
-        default=None,
-        help="Enable remote worker mode (default)",
-    )
-    parser.add_argument(
-        "--no-remote",
-        dest="remote",
-        action="store_false",
-        help="Disable remote worker mode",
-    )
+    register_setting_cli_args(parser)
 
     subparsers = parser.add_subparsers(dest="command")
     worker = subparsers.add_parser(
@@ -70,21 +60,10 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _apply_server_args(args: argparse.Namespace) -> None:
-    """Project CLI server options into environment variables consumed by settings loading."""
-    if args.config:
-        os.environ["LOCAL_SHELL_MCP_CONFIG"] = args.config
-    if args.mode:
-        os.environ["LOCAL_SHELL_MCP_MODE"] = args.mode
-    if args.remote is not None:
-        os.environ["LOCAL_SHELL_MCP_REMOTE_ENABLED"] = "true" if args.remote else "false"
-
-
 def _run_server_from_args(args: argparse.Namespace) -> None:
     """Select stdio MCP or HTTP server startup based on parsed CLI arguments."""
-    _apply_server_args(args)
-
-    settings = get_settings()
+    settings = load_settings(args.config, cli_overrides_from_args(args))
+    configure_settings(settings)
     if settings.mode == "http":
         run_http()
     elif settings.mode in {"mcp", "stdio"}:

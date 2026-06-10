@@ -106,6 +106,15 @@ def _command_semaphore() -> asyncio.Semaphore:
     return _COMMAND_SEMAPHORE
 
 
+def _subprocess_env() -> dict[str, str]:
+    """Return the environment exposed to user shell commands."""
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key != "PYTHONPATH" and not key.startswith("LOCAL_SHELL_MCP_")
+    }
+
+
 async def _spawn_process(command: str, cwd: str) -> asyncio.subprocess.Process:
     """Start a shell command in its own process group with workspace-aware cwd resolution."""
     settings = get_settings()
@@ -114,6 +123,7 @@ async def _spawn_process(command: str, cwd: str) -> asyncio.subprocess.Process:
         "-lc",
         command,
         cwd=cwd,
+        env=_subprocess_env(),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         start_new_session=True,

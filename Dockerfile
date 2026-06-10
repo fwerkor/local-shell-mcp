@@ -47,8 +47,8 @@ ENV PYTHONUNBUFFERED=1 \
     LOCAL_SHELL_MCP_WORKSPACE_ROOT=/workspace \
     LOCAL_SHELL_MCP_HOST=0.0.0.0 \
     LOCAL_SHELL_MCP_PORT=8765 \
-    LOCAL_SHELL_MCP_PERSISTENT_CREDENTIALS=true \
-    LOCAL_SHELL_MCP_CREDENTIALS_DIR=/persist/credentials
+    DOCKER_PERSISTENT_CREDENTIALS=true \
+    DOCKER_CREDENTIALS_DIR=/persist/credentials
 
 RUN pacman -Sy --noconfirm archlinux-keyring \
   && pacman -S --needed --noconfirm \
@@ -174,14 +174,13 @@ RUN pacman -U --needed --noconfirm /tmp/aur-packages/*.pkg.tar.zst \
 RUN npm install -g yarn pnpm typescript ts-node
 
 WORKDIR /app
-COPY pyproject.toml README.md LICENSE /app/
+COPY pyproject.toml uv.lock README.md LICENSE /app/
 COPY src /app/src
-RUN python -m compileall -q /app/src \
+RUN uv sync --locked --no-dev \
+  && /app/.venv/bin/python -m compileall -q /app/src \
   && mkdir -p /usr/local/bin \
-  && printf '#!/usr/bin/env bash\nexec python -m local_shell_mcp.main "$@"\n' > /usr/local/bin/local-shell-mcp \
+  && printf '#!/usr/bin/env bash\nexec /app/.venv/bin/python -m local_shell_mcp.main "$@"\n' > /usr/local/bin/local-shell-mcp \
   && chmod +x /usr/local/bin/local-shell-mcp
-ENV PYTHONPATH="/app/src"
-
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN useradd -m -u 10001 agent \
   && mkdir -p /workspace /workspace/.local-shell-mcp /persist/credentials \

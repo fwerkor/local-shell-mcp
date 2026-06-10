@@ -1,17 +1,143 @@
-# Minimal YAML config example. Values here are applied after environment defaults.
+# Full YAML config example.
+# Effective precedence: defaults < config file < LOCAL_SHELL_MCP_* environment variables < CLI arguments.
+# This file configures application Settings only. Docker entrypoint and sidecar variables stay in .env.
 
-host: 0.0.0.0
+# Server.
+# Server transport mode: mcp, http, stdio, or both.
+mode: "mcp"
+# Bind host for HTTP/MCP transports.
+host: "0.0.0.0"
+# Bind port for HTTP/MCP transports.
 port: 8765
-mode: mcp
-workspace_root: /workspace
-auth_mode: oauth
 
-# Agent capability bridge. External sync tools can write normalized MCP and
-# skill config into this directory. The Docker Compose default host path is
-# workspaces/default/agent/local-shell-mcp-config.
+# Paths and state.
+# Root directory for normal file and command operations.
+workspace_root: "/workspace"
+# Directory for runtime state such as audit logs and temporary files.
+state_dir: "/workspace/.local-shell-mcp"
+# Path to the JSONL audit log.
+audit_log_path: "/workspace/.local-shell-mcp/audit.jsonl"
+
+# Authentication and OAuth.
+# Authentication mode: oauth or none. Do not expose public services with none.
+auth_mode: "oauth"
+# Allow localhost requests without bearer authentication.
+auth_bypass_localhost: true
+# Require authentication for MCP initialize/list-tools discovery calls.
+require_auth_for_mcp_discovery: false
+# Public HTTPS origin used in OAuth metadata and callbacks.
+public_base_url: null
+# Override OAuth issuer metadata; defaults to public_base_url when unset.
+oauth_issuer: null
+# Override OAuth resource metadata; defaults to public_base_url when unset.
+oauth_resource: null
+# PIN required to approve OAuth authorization.
+oauth_admin_pin: null
+# Secret used to sign OAuth bearer tokens; set a strong random value.
+oauth_jwt_secret: "dev-change-me"
+# Bearer token lifetime in seconds; 0 means no expiry.
+oauth_access_token_ttl_s: 0
+# OAuth authorization-code lifetime in seconds.
+oauth_code_ttl_s: 300
+
+# Safety and resource limits.
+# Disable built-in workspace and command restrictions; use only in disposable containers or VMs.
+allow_full_container: false
+# Allow network-capable operations.
+allow_network: true
+# Default shell command timeout in seconds.
+default_timeout_s: 60
+# Maximum shell command timeout in seconds.
+max_timeout_s: 3600
+# Command output truncation limit in bytes.
+max_output_bytes: 200000
+# Per-file read limit in bytes.
+max_file_read_bytes: 512000
+# Per-file write/edit limit in bytes.
+max_file_write_bytes: 5000000
+# Maximum grep result count.
+max_grep_results: 200
+# Maximum listed directory entries.
+max_directory_entries: 5000
+# Maximum glob search results.
+max_glob_results: 5000
+# Maximum tree-view entries.
+max_tree_entries: 5000
+# Maximum files read by a multi-file read operation.
+max_read_many_files: 100
+# Combined byte limit for multi-file reads.
+max_read_many_total_bytes: 5000000
+# Todo-list item limit.
+max_todos: 1000
+# Todo-list serialized byte limit.
+max_todo_bytes: 1000000
+# Audit-tail response byte limit.
+max_audit_tail_bytes: 1000000
+# Audit-log rotation threshold in bytes.
+max_audit_log_bytes: 20000000
+# Temporary-file count limit.
+max_tmp_files: 500
+# Temporary-file byte limit.
+max_tmp_bytes: 50000000
+# Concurrent command limit.
+max_concurrent_commands: 4
+# Persistent shell session limit.
+max_tmux_sessions: 16
+# Comma-separated command denylist in env/CLI, or a YAML list in config files. Cleared when
+# full-container mode is enabled.
+command_denylist:
+  - "docker.sock"
+  - "/var/run/docker.sock"
+  - "mkfs"
+  - "mount "
+  - "umount "
+  - "shutdown"
+  - "reboot"
+  - "systemctl "
+  - "iptables"
+  - "nft "
+# Comma-separated path denylist in env/CLI, or a YAML list in config files. Cleared when
+# full-container mode is enabled.
+path_denylist:
+  - ".ssh/id_rsa"
+  - ".ssh/id_ed25519"
+  - ".env"
+  - "secrets"
+  - "credentials"
+  - ".git/config"
+
+# Remote workers.
+# Enable remote worker routes and MCP tools.
+remote_enabled: true
+# One-time remote worker invite lifetime in seconds.
+remote_invite_ttl_s: 600
+# Remote worker long-poll heartbeat timeout in seconds.
+remote_poll_timeout_s: 25
+# Control-side remote job result timeout in seconds.
+remote_job_timeout_s: 3600
+
+# Agent capability bridge.
+# Enable agent capability bridge tools.
 agent_bridge_enabled: true
-agent_config_dir: /home/agent/local-shell-mcp-config
+# Read-only capability config directory.
+agent_config_dir: "/home/agent/local-shell-mcp-config"
+# Agent MCP server probe timeout in seconds.
 agent_mcp_probe_timeout_s: 5
+# Agent MCP tool-call timeout in seconds.
 agent_mcp_call_timeout_s: 60
+# Register dynamic MCP bridge tools.
 agent_dynamic_mcp_tools: true
+# Register dynamic skill bridge tools.
 agent_dynamic_skill_tools: true
+
+# Tool executables.
+# Shell executable used for shell commands.
+shell_executable: "/bin/bash"
+# tmux executable.
+tmux_bin: "tmux"
+# ripgrep executable.
+rg_bin: "rg"
+# Git executable.
+git_bin: "git"
+# Python executable.
+python_bin: "python3"

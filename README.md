@@ -59,7 +59,8 @@ More examples are in [examples/chatgpt-prompts.md](examples/chatgpt-prompts.md).
 ## Documentation
 
 - [INSTALL.md](INSTALL.md): installation, Docker Compose, Cloudflare Tunnel, VS Code, and binary deployments.
-- [USAGE.md](USAGE.md): ChatGPT connector setup, CLI modes, remote workers, REST debug API, Git access, troubleshooting, and common workflows.
+- [USAGE.md](USAGE.md): ChatGPT connector setup, CLI/configuration basics, remote workers, REST debug API, Git access, troubleshooting, and common workflows.
+- [ENV.md](ENV.md): complete environment-variable reference for application, Docker entrypoint, and helper-script settings.
 - [TOOLS.md](TOOLS.md): complete built-in MCP tool list and how tool groups behave.
 - [DEVELOPMENT.md](DEVELOPMENT.md): local development, tests, release assets, project layout, and implementation notes.
 - [OAUTH_SETUP.md](OAUTH_SETUP.md): compact OAuth setup checklist.

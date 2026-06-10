@@ -2,9 +2,15 @@
 set -euo pipefail
 
 workspace="${LOCAL_SHELL_MCP_WORKSPACE_ROOT:-/workspace}"
-run_as_root="$(printf '%s' "${LOCAL_SHELL_MCP_RUN_AS_ROOT:-false}" | tr '[:upper:]' '[:lower:]')"
-persist_credentials="$(printf '%s' "${LOCAL_SHELL_MCP_PERSISTENT_CREDENTIALS:-true}" | tr '[:upper:]' '[:lower:]')"
-credentials_dir="${LOCAL_SHELL_MCP_CREDENTIALS_DIR:-/persist/credentials}"
+
+lower() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+run_as_root="$(lower "${DOCKER_RUN_AS_ROOT:-false}")"
+persist_credentials="$(lower "${DOCKER_PERSISTENT_CREDENTIALS:-true}")"
+credentials_dir="${DOCKER_CREDENTIALS_DIR:-/persist/credentials}"
+chown_workspace="$(lower "${DOCKER_CHOWN_WORKSPACE:-true}")"
 
 is_truthy() {
   case "$1" in
@@ -122,7 +128,7 @@ if [ "$(id -u)" = "0" ]; then
     exec "$@"
   fi
   setup_persistent_credentials agent /home/agent
-  if [ "${LOCAL_SHELL_MCP_CHOWN_WORKSPACE:-true}" != "false" ]; then
+  if is_truthy "$chown_workspace"; then
     chown -R agent:agent "$workspace"
   fi
   exec runuser -u agent -- "$@"
