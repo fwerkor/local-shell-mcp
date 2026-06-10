@@ -1,3 +1,5 @@
+"""Authenticate HTTP and MCP requests while preserving unauthenticated access for explicit public and discovery routes."""
+
 from __future__ import annotations
 
 import json
@@ -36,21 +38,26 @@ MCP_DISCOVERY_METHODS = {
 
 @dataclass
 class Principal:
+    """Authenticated caller identity attached to requests after local bypass or OAuth verification."""
+
     email: str | None
     subject: str | None
     claims: dict[str, Any]
 
 
 def _client_host(request: Request) -> str:
+    """Extract the peer host from a FastAPI request without failing when client metadata is absent."""
     return request.client.host if request.client else ""
 
 
 def _is_localhost(request: Request) -> bool:
+    """Detect requests eligible for localhost auth bypass in HTTP mode."""
     host = _client_host(request)
     return host in {"127.0.0.1", "::1", "localhost"}
 
 
 def _extract_token(request: Request) -> str | None:
+    """Parse a bearer token from the Authorization header without accepting other auth schemes."""
     auth = request.headers.get("authorization")
     if auth and auth.lower().startswith("bearer "):
         return auth.split(" ", 1)[1].strip()
@@ -58,6 +65,7 @@ def _extract_token(request: Request) -> str | None:
 
 
 def _verify_oauth(request: Request, settings: Settings) -> Principal:
+    """Validate an OAuth bearer token and return the subject claims used by downstream handlers."""
     from .oauth import protected_resource_metadata, validate_bearer_token
 
     token = _extract_token(request)
@@ -87,6 +95,7 @@ def _verify_oauth(request: Request, settings: Settings) -> Principal:
 
 
 def verify_request(request: Request) -> Principal:
+    """Resolve the effective principal for a request according to configured auth mode and local bypass rules."""
     settings = get_settings()
     if settings.auth_mode == "none":
         return Principal(email=None, subject="anonymous", claims={"auth": "none"})
@@ -105,6 +114,7 @@ def verify_request(request: Request) -> Principal:
 
 
 async def _read_body(receive: Receive) -> bytes:
+    """Buffer an ASGI request body so MCP discovery checks can inspect batched JSON-RPC messages."""
     chunks = []
     while True:
         message = await receive()
@@ -117,6 +127,7 @@ async def _read_body(receive: Receive) -> bytes:
 
 
 def _body_receive(body: bytes, original_receive: Receive) -> Receive:
+    """Replay a previously buffered body to downstream ASGI handlers exactly once."""
     sent = False
 
     async def receive() -> Message:
@@ -130,6 +141,7 @@ def _body_receive(body: bytes, original_receive: Receive) -> Receive:
 
 
 def _mcp_methods_from_body(body: bytes) -> set[str]:
+    """Extract JSON-RPC method names from single or batched MCP request bodies."""
     if not body:
         return set()
     try:
@@ -146,6 +158,7 @@ def _mcp_methods_from_body(body: bytes) -> set[str]:
 
 
 def _is_mcp_discovery_request(scope: Scope, body: bytes | None) -> bool:
+    """Identify MCP discovery traffic that can be served before full OAuth authentication is required."""
     if scope.get("path") != "/mcp":
         return False
 
@@ -166,6 +179,7 @@ class AuthMiddleware:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Apply public-route bypasses, optional MCP discovery bypass, and principal injection for protected HTTP requests."""
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return

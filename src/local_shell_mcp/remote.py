@@ -1,3 +1,5 @@
+"""Coordinate remote worker enrollment, polling, tool execution, and standalone worker startup."""
+
 from __future__ import annotations
 
 import argparse
@@ -81,15 +83,18 @@ REMOTE_WORKER_DISTRIBUTIONS = (
 
 
 def _canonical_dist_name(name: str) -> str:
+    """Normalize distribution names so dependency bundles avoid duplicate tar entries."""
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
 def _dist_name_from_requirement(requirement: str) -> str | None:
+    """Extract the installable distribution name from a requirement string."""
     match = re.match(r"\s*([A-Za-z0-9_.-]+)", requirement)
     return match.group(1) if match else None
 
 
 def _add_distribution_to_tar(tar: tarfile.TarFile, dist_name: str, seen: set[str]) -> None:
+    """Add a wheel-installed distribution and its importable files to the remote worker bundle."""
     canonical = _canonical_dist_name(dist_name)
     if canonical in seen:
         return
@@ -115,19 +120,24 @@ def _add_distribution_to_tar(tar: tarfile.TarFile, dist_name: str, seen: set[str
 
 
 def _utc() -> float:
+    """Return a Unix timestamp used for invite and worker bookkeeping."""
     return time.time()
 
 
 def _ok(data: Any = None, message: str = "") -> dict[str, Any]:
+    """Build a consistent success envelope for remote-worker HTTP endpoints."""
     return {"ok": True, "message": message, "data": data}
 
 
 def _error(message: str, error: str = "remote_error", status_code: int = 400) -> JSONResponse:
+    """Build a consistent error envelope with the HTTP status code mirrored in the payload."""
     return JSONResponse({"ok": False, "error": error, "message": message}, status_code=status_code)
 
 
 @dataclass
 class RemoteInvite:
+    """One-time enrollment token that allows a remote worker to register before expiry."""
+
     code: str
     name: str | None
     workdir: str | None
@@ -137,6 +147,8 @@ class RemoteInvite:
 
 @dataclass
 class RemoteWorker:
+    """Registered remote worker state, including polling queue, current job, and last heartbeat."""
+
     name: str
     token: str
     workdir: str | None = None
@@ -149,6 +161,8 @@ class RemoteWorker:
 
 
 class RemoteManager:
+    """In-memory coordinator for remote worker invites, registration, polling, results, and tool calls."""
+
     def __init__(self) -> None:
         self.invites: dict[str, RemoteInvite] = {}
         self.workers: dict[str, RemoteWorker] = {}
@@ -157,6 +171,7 @@ class RemoteManager:
         self._lock = asyncio.Lock()
 
     def _join_url(self) -> str:
+        """Build the copy-paste registration command for a pending invite."""
         settings = get_settings()
         base = settings.public_base_url or f"http://{settings.host}:{settings.port}"
         return base.rstrip("/") + REMOTE_JOIN_PATH
@@ -164,6 +179,7 @@ class RemoteManager:
     async def create_invite(
         self, name: str | None = None, workdir: str | None = None, ttl_s: int | None = None
     ) -> dict[str, Any]:
+        """Create a time-limited registration invitation and return the command used by a worker."""
         settings = get_settings()
         ttl = max(60, min(ttl_s or settings.remote_invite_ttl_s, 24 * 3600))
         code = "lsmcp_inv_" + secrets.token_urlsafe(24)
@@ -188,6 +204,7 @@ class RemoteManager:
         }
 
     async def register_worker(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Validate an invite token and attach a newly started worker to the manager."""
         code = str(payload.get("invite") or "")
         requested_name = str(payload.get("name") or "").strip() or None
         async with self._lock:
@@ -218,6 +235,7 @@ class RemoteManager:
         return {"token": token, "name": name, "poll_interval_s": 0}
 
     def _default_machine_name(self, payload: dict[str, Any]) -> str:
+        """Choose a stable human-readable worker name when the worker did not provide one."""
         info = payload.get("info") if isinstance(payload.get("info"), dict) else {}
         user = info.get("user") or os.getenv("USER") or "user"
         host = info.get("hostname") or "remote"
@@ -230,6 +248,7 @@ class RemoteManager:
         return f"{base}-{index}"
 
     async def poll(self, token: str) -> dict[str, Any]:
+        """Hold a worker poll request until a job is available or the long-poll timeout expires."""
         worker = self._worker_by_token(token)
         worker.status = "online"
         worker.last_seen = _utc()
@@ -242,6 +261,7 @@ class RemoteManager:
             return {"job": None, "heartbeat": True}
 
     async def submit_result(self, token: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Accept a worker result and wake the caller waiting for that job."""
         worker = self._worker_by_token(token)
         worker.status = "online"
         worker.last_seen = _utc()
@@ -254,6 +274,7 @@ class RemoteManager:
     async def call(
         self, machine: str, tool: str, args: dict[str, Any], timeout_s: int | None = None
     ) -> dict[str, Any]:
+        """Send one tool invocation to a worker and wait for its result with timeout handling."""
         worker = self.workers.get(machine)
         if not worker:
             raise ValueError(f"unknown remote machine: {machine}")
@@ -283,6 +304,7 @@ class RemoteManager:
         return _ok(result.get("data"))
 
     def list_machines(self) -> dict[str, Any]:
+        """Return worker inventory and heartbeat-derived status for remote management tools."""
         now = _utc()
         rows = []
         for worker in self.workers.values():
@@ -305,6 +327,7 @@ class RemoteManager:
         return {"machines": sorted(rows, key=lambda item: item["name"])}
 
     def revoke(self, machine: str) -> dict[str, Any]:
+        """Remove a registered worker and invalidate its polling token."""
         worker = self.workers.pop(machine, None)
         if not worker:
             raise ValueError(f"unknown remote machine: {machine}")
@@ -312,6 +335,7 @@ class RemoteManager:
         return {"machine": machine, "revoked": True}
 
     def rename(self, machine: str, new_name: str) -> dict[str, Any]:
+        """Rename a registered worker while preserving its token and job state."""
         new_name = new_name.strip()
         if not new_name:
             raise ValueError("new_name is required")
@@ -326,6 +350,7 @@ class RemoteManager:
         return {"old_name": machine, "new_name": new_name}
 
     def _worker_by_token(self, token: str) -> RemoteWorker:
+        """Resolve a bearer token to the worker currently authorized to poll or submit results."""
         name = self.tokens.get(token)
         if not name:
             raise PermissionError("invalid worker token")
@@ -339,10 +364,12 @@ REMOTE_MANAGER = RemoteManager()
 
 
 def remote_manager() -> RemoteManager:
+    """Return the process-wide remote manager used by HTTP endpoints and MCP tools."""
     return REMOTE_MANAGER
 
 
 def _bearer_token(request: Request) -> str:
+    """Extract the worker bearer token from an Authorization header."""
     auth = request.headers.get("authorization", "")
     if auth.lower().startswith("bearer "):
         return auth.split(" ", 1)[1].strip()
@@ -350,6 +377,7 @@ def _bearer_token(request: Request) -> str:
 
 
 async def worker_bundle(request: Request) -> Response:  # noqa: ARG001
+    """Serve a source-and-dependency bundle used to bootstrap a remote worker."""
     package_root = Path(__file__).resolve().parent
     buffer = BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
@@ -362,6 +390,7 @@ async def worker_bundle(request: Request) -> Response:  # noqa: ARG001
 
 
 async def join_script(request: Request) -> PlainTextResponse:  # noqa: ARG001
+    """Serve a shell script that installs and starts a remote worker for a pending invite."""
     settings = get_settings()
     server = (settings.public_base_url or f"http://{settings.host}:{settings.port}").rstrip("/")
     script = f"""#!/usr/bin/env bash
@@ -409,6 +438,7 @@ fi
 
 
 async def register_endpoint(request: Request) -> JSONResponse:
+    """Register a worker over HTTP and return its long-poll token."""
     try:
         return JSONResponse(_ok(await remote_manager().register_worker(await request.json())))
     except Exception as exc:
@@ -416,6 +446,7 @@ async def register_endpoint(request: Request) -> JSONResponse:
 
 
 async def poll_endpoint(request: Request) -> JSONResponse:
+    """Long-poll for the next job assigned to the authenticated worker."""
     try:
         return JSONResponse(_ok(await remote_manager().poll(_bearer_token(request))))
     except Exception as exc:
@@ -423,6 +454,7 @@ async def poll_endpoint(request: Request) -> JSONResponse:
 
 
 async def result_endpoint(request: Request) -> JSONResponse:
+    """Accept the authenticated worker's result for its current job."""
     try:
         return JSONResponse(
             _ok(await remote_manager().submit_result(_bearer_token(request), await request.json()))
@@ -432,6 +464,7 @@ async def result_endpoint(request: Request) -> JSONResponse:
 
 
 def remote_routes() -> list[Route]:
+    """Create the APIRouter containing worker bootstrap and control endpoints."""
     return [
         Route(REMOTE_JOIN_PATH, join_script, methods=["GET"]),
         Route(REMOTE_WORKER_BUNDLE_PATH, worker_bundle, methods=["GET"]),
@@ -442,10 +475,12 @@ def remote_routes() -> list[Route]:
 
 
 async def _to_thread(func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+    """Run blocking local helpers in a thread when executing worker tools asynchronously."""
     return await asyncio.to_thread(func, *args, **kwargs)
 
 
 def _handled_remote_exception(exc: Exception) -> dict[str, Any]:
+    """Convert local helper failures into serializable worker-side error payloads."""
     return {"ok": False, "error": type(exc).__name__, "message": str(exc)}
 
 
@@ -456,6 +491,7 @@ def _read_many_files_sync(
     binary_preview: str | None = None,
     binary_preview_bytes: int = 256,
 ) -> dict[str, Any]:
+    """Read multiple files on a worker while preserving per-file errors in the response list."""
     files = [
         read_text(path, start_line, end_line, binary_preview, binary_preview_bytes)
         for path in paths
@@ -469,6 +505,7 @@ def _read_many_files_sync(
 
 
 async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
+    """Apply a unified diff on a worker through stdin and return the git-apply result."""
     await _to_thread(prune_temp_dir)
     patch_path = temp_dir() / f"remote-patch-{uuid.uuid4().hex}.diff"
     patch_path.parent.mkdir(parents=True, exist_ok=True)
@@ -483,6 +520,7 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
 
 
 async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict[str, Any]:
+    """Execute Python code from a temporary file on a worker and clean up the file afterwards."""
     await _to_thread(prune_temp_dir)
     script = temp_dir() / f"remote-script-{uuid.uuid4().hex}.py"
     script.parent.mkdir(parents=True, exist_ok=True)
@@ -497,6 +535,7 @@ async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict[st
 
 
 async def execute_worker_tool(tool: str, args: dict[str, Any]) -> Any:
+    """Dispatch a remote-worker tool call to the corresponding filesystem, shell, git, browser, or session helper."""
     if tool == "environment_info":
         result = await run_shell(
             "uname -a; echo '---'; id; echo '---'; pwd; echo '---'; python3 --version; git --version",
@@ -625,10 +664,12 @@ async def execute_worker_tool(tool: str, args: dict[str, Any]) -> Any:
 
 
 def worker_capabilities() -> list[str]:
+    """List browser and Playwright capabilities available in the worker environment."""
     return ["shell", "persistent_shell", "files", "search", "git", "python"]
 
 
 def worker_info(workdir: str) -> dict[str, Any]:
+    """Return worker identity, workspace, platform, Python, and capability metadata."""
     return {
         "hostname": socket.gethostname(),
         "user": os.getenv("USER") or os.getenv("USERNAME") or "unknown",
@@ -646,6 +687,7 @@ async def run_worker(
     workdir: str | None = None,
     persist: bool = False,
 ) -> None:  # noqa: ARG001
+    """Register with a server, poll for jobs, execute tools locally, and submit results until stopped."""
     workdir = str(Path(workdir or os.getcwd()).expanduser().resolve())
     os.environ.setdefault("LOCAL_SHELL_MCP_WORKSPACE_ROOT", workdir)
     os.environ.setdefault("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "true")
@@ -701,6 +743,7 @@ async def run_worker(
 
 
 def add_worker_cli_args(parser: argparse.ArgumentParser) -> None:
+    """Add remote-worker connection and lifecycle options to the shared CLI parser."""
     parser.add_argument("--server", required=True)
     parser.add_argument("--invite", required=True)
     parser.add_argument("--name", default=None)
@@ -711,10 +754,12 @@ def add_worker_cli_args(parser: argparse.ArgumentParser) -> None:
 
 
 def run_worker_from_args(args: argparse.Namespace) -> None:
+    """Run a remote worker from parsed CLI arguments."""
     asyncio.run(run_worker(args.server, args.invite, args.name, args.workdir, args.persist))
 
 
 def run_worker_cli(argv: list[str] | None = None) -> None:
+    """Entry point for launching a standalone remote worker process."""
     parser = argparse.ArgumentParser(
         description="Connect this machine to a local-shell-mcp control server"
     )

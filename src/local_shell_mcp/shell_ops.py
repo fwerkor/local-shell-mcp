@@ -1,3 +1,5 @@
+"""Run bounded shell commands and tmux-backed sessions with policy checks, timeout handling, and output truncation."""
+
 from __future__ import annotations
 
 import asyncio
@@ -25,11 +27,14 @@ _COMMAND_SEMAPHORE_SIZE: int | None = None
 
 @dataclass
 class TailBuffer:
+    """Accumulate bounded process output while tracking how many bytes were dropped from the head."""
+
     keep_bytes: int
     data: bytearray
     total_bytes: int = 0
 
     def append(self, chunk: bytes) -> None:
+        """Append bytes to the tail buffer and discard the oldest data beyond the configured limit."""
         if not chunk:
             return
         self.total_bytes += len(chunk)
@@ -40,10 +45,12 @@ class TailBuffer:
 
     @property
     def truncated(self) -> bool:
+        """Report whether any output was dropped while enforcing the buffer limit."""
         return self.total_bytes > len(self.data)
 
 
 def check_command_policy(command: str) -> None:
+    """Reject shell commands matching configured denylist entries before execution."""
     settings = get_settings()
     for denied in settings.command_denylist:
         if denied and denied in command:
@@ -51,12 +58,14 @@ def check_command_policy(command: str) -> None:
 
 
 def clamp_timeout(timeout_s: int | None) -> int:
+    """Clamp requested command timeouts to configured server bounds."""
     settings = get_settings()
     timeout = timeout_s or settings.default_timeout_s
     return max(1, min(timeout, settings.max_timeout_s))
 
 
 def public_run_shell_timeout(timeout_s: int | None) -> int:
+    """Apply stricter public shell defaults while still respecting the global maximum timeout."""
     if timeout_s is not None and timeout_s > PUBLIC_RUN_SHELL_TIMEOUT_CAP_S:
         raise ValueError(
             f"timeout_s must be <= {PUBLIC_RUN_SHELL_TIMEOUT_CAP_S} seconds for public run_shell"
@@ -69,6 +78,7 @@ def public_run_shell_timeout(timeout_s: int | None) -> int:
 def clamp_output(
     stdout: str, stderr: str, max_output_bytes: int | None = None
 ) -> tuple[str, str, bool]:
+    """Trim stdout and stderr to a shared byte budget while reporting which streams were truncated."""
     limit = _effective_output_limit(max_output_bytes)
     encoded_len = len(stdout.encode()) + len(stderr.encode())
     if encoded_len <= limit:
@@ -78,6 +88,7 @@ def clamp_output(
 
 
 def _effective_output_limit(max_output_bytes: int | None = None) -> int:
+    """Resolve the output byte limit requested by a caller against server-wide maximums."""
     settings = get_settings()
     configured = max(1, settings.max_output_bytes)
     if max_output_bytes is None:
@@ -86,6 +97,7 @@ def _effective_output_limit(max_output_bytes: int | None = None) -> int:
 
 
 def _command_semaphore() -> asyncio.Semaphore:
+    """Return the process-wide semaphore that limits concurrent shell commands."""
     global _COMMAND_SEMAPHORE, _COMMAND_SEMAPHORE_SIZE
     size = max(1, get_settings().max_concurrent_commands)
     if _COMMAND_SEMAPHORE is None or size != _COMMAND_SEMAPHORE_SIZE:
@@ -95,6 +107,7 @@ def _command_semaphore() -> asyncio.Semaphore:
 
 
 async def _spawn_process(command: str, cwd: str) -> asyncio.subprocess.Process:
+    """Start a shell command in its own process group with workspace-aware cwd resolution."""
     settings = get_settings()
     return await asyncio.create_subprocess_exec(
         settings.shell_executable,
@@ -108,6 +121,7 @@ async def _spawn_process(command: str, cwd: str) -> asyncio.subprocess.Process:
 
 
 async def _read_stream_tail(stream: asyncio.StreamReader | None, tail: TailBuffer) -> None:
+    """Continuously read a process stream into a bounded tail buffer."""
     if stream is None:
         return
     while True:
@@ -118,6 +132,7 @@ async def _read_stream_tail(stream: asyncio.StreamReader | None, tail: TailBuffe
 
 
 async def _wait_for_process_exit(proc: asyncio.subprocess.Process, timeout_s: int) -> bool:
+    """Wait for process completion while converting timeout into structured result state."""
     try:
         await asyncio.wait_for(proc.wait(), timeout=timeout_s)
         return True
@@ -126,6 +141,7 @@ async def _wait_for_process_exit(proc: asyncio.subprocess.Process, timeout_s: in
 
 
 async def _terminate_process_group(proc: asyncio.subprocess.Process) -> str:
+    """Terminate an entire shell process group, escalating to kill when graceful shutdown times out."""
     try:
         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
     except Exception:
@@ -149,6 +165,7 @@ async def _terminate_process_group(proc: asyncio.subprocess.Process) -> str:
 async def _finish_reader_tasks(
     tasks: list[asyncio.Task[None]], timeout_s: float = READER_DRAIN_TIMEOUT_S
 ) -> None:
+    """Let stream-reader tasks drain briefly before cancelling unfinished readers."""
     try:
         await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout_s)
     except TimeoutError:
@@ -160,6 +177,7 @@ async def _finish_reader_tasks(
 async def run_shell(
     command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None
 ) -> CommandResult:
+    """Execute a shell command with policy enforcement, concurrency limits, timeout handling, and bounded output capture."""
     check_command_policy(command)
     resolved_cwd = resolve_path(cwd, must_exist=True)
     start = time.time()
@@ -248,20 +266,24 @@ async def run_shell(
 async def public_run_shell(
     command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None
 ) -> CommandResult:
+    """Execute a shell command through the public API using stricter timeout defaults."""
     return await run_shell(command, cwd, public_run_shell_timeout(timeout_s), max_output_bytes)
 
 
 def _tmux_session_name(name: str | None = None) -> str:
+    """Normalize user-facing shell session names into the tmux naming scheme used by the server."""
     base = name or f"mcp-{uuid.uuid4().hex[:8]}"
     return re.sub(r"[^A-Za-z0-9_.-]", "-", base)[:64]
 
 
 async def tmux(args: list[str], timeout_s: int = 10) -> CommandResult:
+    """Run a tmux command with a bounded timeout and normalized command result payload."""
     cmd = " ".join(shlex.quote(x) for x in [get_settings().tmux_bin, *args])
     return await run_shell(cmd, cwd=".", timeout_s=timeout_s)
 
 
 async def start_shell(cwd: str = ".", name: str | None = None, command: str | None = None) -> dict:
+    """Start or replace a tmux-backed persistent shell session in a resolved working directory."""
     resolved_cwd = resolve_path(cwd, must_exist=True)
     sessions = await list_shells()
     max_sessions = max(1, get_settings().max_tmux_sessions)
@@ -287,6 +309,7 @@ async def start_shell(cwd: str = ".", name: str | None = None, command: str | No
 
 
 async def send_shell(session_id: str, input_text: str, enter: bool = True) -> dict:
+    """Send input to a persistent shell session, optionally appending Enter."""
     args = ["send-keys", "-t", session_id, input_text]
     if enter:
         args.append("Enter")
@@ -298,6 +321,7 @@ async def send_shell(session_id: str, input_text: str, enter: bool = True) -> di
 
 
 async def read_shell(session_id: str, lines: int = 200) -> dict:
+    """Read recent output from a persistent shell session through tmux capture-pane."""
     result = await tmux(["capture-pane", "-p", "-t", session_id, "-S", f"-{max(1, lines)}"])
     if not result.ok:
         raise RuntimeError(result.stderr or result.stdout)
@@ -306,12 +330,14 @@ async def read_shell(session_id: str, lines: int = 200) -> dict:
 
 
 async def kill_shell(session_id: str) -> dict:
+    """Terminate a persistent shell session by its normalized tmux session id."""
     result = await tmux(["kill-session", "-t", session_id])
     audit("shell_kill", session=session_id, ok=result.ok)
     return {"session_id": session_id, "killed": result.ok, "stderr": result.stderr}
 
 
 async def list_shells() -> dict:
+    """List active tmux-backed shell sessions managed by local-shell-mcp."""
     result = await tmux(
         ["list-sessions", "-F", "#{session_name}\t#{session_created}\t#{session_attached}"],
         timeout_s=5,

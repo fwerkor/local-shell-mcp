@@ -1,3 +1,5 @@
+"""Normalize upstream MCP protocol objects and manage client sessions for configured agent bridge servers."""
+
 from __future__ import annotations
 
 import asyncio
@@ -16,18 +18,22 @@ from local_shell_mcp.agent_bridge import AgentMcpServerConfig
 
 @dataclass(frozen=True)
 class AgentMcpTool:
+    """Normalized description of an upstream MCP tool exposed through the bridge."""
+
     name: str
     description: str
     input_schema: dict[str, Any]
 
 
 def _value(source: Any, name: str, default: Any = None) -> Any:
+    """Read an MCP protocol field from either a mapping or SDK object."""
     if isinstance(source, dict):
         return source.get(name, default)
     return getattr(source, name, default)
 
 
 def normalize_mcp_tool(tool: Any) -> AgentMcpTool:
+    """Normalize SDK-specific MCP tool objects into a stable serializable shape."""
     input_schema = _value(tool, "inputSchema")
     if input_schema is None:
         input_schema = _value(tool, "input_schema", {})
@@ -40,6 +46,7 @@ def normalize_mcp_tool(tool: Any) -> AgentMcpTool:
 
 
 def _normalize_content_item(item: Any) -> Any:
+    """Convert MCP content blocks to JSON-serializable dictionaries while preserving unknown fields."""
     if _value(item, "type") == "text":
         return {"type": "text", "text": _value(item, "text", "")}
     if hasattr(item, "model_dump"):
@@ -50,6 +57,7 @@ def _normalize_content_item(item: Any) -> Any:
 
 
 def normalize_tool_result(result: Any) -> dict[str, Any]:
+    """Convert an MCP tool result into a stable payload with content blocks and error state."""
     structured_content = _value(result, "structuredContent")
     if structured_content is None:
         structured_content = _value(result, "structured_content")
@@ -64,6 +72,8 @@ def normalize_tool_result(result: Any) -> dict[str, Any]:
 
 
 class AgentMcpClientManager:
+    """Create short-lived MCP client sessions for stdio, HTTP, and SSE upstream servers."""
+
     def __init__(self, call_timeout_s: float = 60) -> None:
         self.call_timeout_s = call_timeout_s
 
@@ -71,6 +81,7 @@ class AgentMcpClientManager:
     async def _session(
         self, name: str, server: AgentMcpServerConfig
     ) -> AsyncIterator[ClientSession]:
+        """Open and initialize the transport-specific MCP client session for one configured server."""
         if server.type == "stdio":
             if not server.command:
                 raise ValueError("stdio MCP server requires command")
@@ -119,6 +130,8 @@ class AgentMcpClientManager:
         raise ValueError(f"unsupported MCP server type for {name}: {server.type}")
 
     async def list_tools(self, name: str, server: AgentMcpServerConfig) -> list[AgentMcpTool]:
+        """Page through an upstream server's tool list within the configured call timeout."""
+
         async def _list_tools() -> list[AgentMcpTool]:
             async with self._session(name, server) as session:
                 tools: list[AgentMcpTool] = []
@@ -141,6 +154,8 @@ class AgentMcpClientManager:
         tool: str,
         args: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Invoke an upstream MCP tool and normalize its protocol result for local-shell-mcp responses."""
+
         async def _call_tool() -> dict[str, Any]:
             async with self._session(name, server) as session:
                 return normalize_tool_result(await session.call_tool(tool, args))

@@ -1,3 +1,5 @@
+"""Load agent bridge manifests, scan local skills, probe configured MCP servers, and assemble redacted dynamic tool registries."""
+
 from __future__ import annotations
 
 import asyncio
@@ -71,6 +73,8 @@ URL_QUERY_RE = re.compile(r"(?P<prefix>https?://[^\s?]+)\?[^\s\"')]+", re.I)
 
 
 class AgentMcpServerConfig(BaseModel):
+    """Configuration for one upstream MCP server exposed through the agent bridge."""
+
     type: Literal["stdio", "http", "sse"]
     enabled: bool = True
     command: str | None = None
@@ -95,16 +99,22 @@ class AgentMcpServerConfig(BaseModel):
 
 
 class AgentSkillsConfig(BaseModel):
+    """Configuration for loading Markdown-based agent skills from the agent config directory."""
+
     enabled: bool = True
     directory: str = "skills"
 
 
 class AgentDynamicToolsConfig(BaseModel):
+    """Feature flags that control whether discovered skills and MCP tools become dynamic public tools."""
+
     mcp: bool = True
     skills: bool = True
 
 
 class AgentBridgeManifest(BaseModel):
+    """Validated bridge manifest describing upstream MCP servers, skill discovery, and dynamic-tool settings."""
+
     model_config = ConfigDict(populate_by_name=True)
 
     version: int = 1
@@ -124,6 +134,8 @@ class AgentBridgeManifest(BaseModel):
 
 @dataclass(frozen=True)
 class LoadedAgentManifest:
+    """Manifest load result that keeps missing or invalid configuration visible without aborting startup."""
+
     config_path: Path
     status: Literal["missing_config", "invalid_config", "loaded"]
     data: AgentBridgeManifest = field(default_factory=AgentBridgeManifest)
@@ -132,6 +144,8 @@ class LoadedAgentManifest:
 
 @dataclass(frozen=True)
 class SkillRecord:
+    """Resolved skill metadata used to activate a Markdown skill and expose it as a dynamic tool."""
+
     name: str
     entry_path: str
     description: str
@@ -140,12 +154,16 @@ class SkillRecord:
 
 @dataclass(frozen=True)
 class SkillScanResult:
+    """Skill discovery result containing accepted skill records and warnings for ignored entries."""
+
     skills: dict[str, SkillRecord] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class AgentMcpServerRecord:
+    """Probe result for one configured upstream MCP server, including available tools or a redacted error."""
+
     name: str
     config: AgentMcpServerConfig
     available: bool
@@ -155,12 +173,16 @@ class AgentMcpServerRecord:
 
 @dataclass(frozen=True)
 class DynamicSkillToolRecord:
+    """Association between a generated tool name and the skill it activates."""
+
     dynamic_name: str
     skill_name: str
 
 
 @dataclass(frozen=True)
 class DynamicMcpToolRecord:
+    """Association between a generated public tool name and an upstream MCP server tool."""
+
     dynamic_name: str
     server_name: str
     tool_name: str
@@ -168,6 +190,8 @@ class DynamicMcpToolRecord:
 
 @dataclass(frozen=True)
 class AgentCapabilityRegistry:
+    """Snapshot of the bridge configuration, discovered skills, probed servers, and dynamic-tool maps."""
+
     config_dir: Path
     config_path: Path
     manifest_status: str
@@ -182,6 +206,7 @@ class AgentCapabilityRegistry:
     client_manager: Any
 
     def config_status(self) -> dict[str, Any]:
+        """Return a redacted status payload suitable for diagnostics and public tool responses."""
         return {
             "config_dir": str(self.config_dir),
             "config_path": str(self.config_path),
@@ -218,14 +243,17 @@ class AgentCapabilityRegistry:
 
 
 def _relative_posix(base: Path, path: Path) -> str:
+    """Render a path relative to a base directory using POSIX separators for stable manifest output."""
     return path.resolve().relative_to(base.resolve()).as_posix()
 
 
 def _is_relative_child_path(value: Path) -> bool:
+    """Accept only relative child paths so skill manifests cannot reference arbitrary filesystem locations."""
     return not value.is_absolute() and ".." not in value.parts
 
 
 def _first_sentence(value: str) -> str:
+    """Extract the first prose sentence used as a compact skill or tool description."""
     match = re.match(r"(.+?[.!?])(?:\s|$)", value)
     if match:
         return match.group(1)
@@ -233,6 +261,7 @@ def _first_sentence(value: str) -> str:
 
 
 def _description_value(line: str) -> str | None:
+    """Parse a front-matter description field from a Markdown skill file."""
     key, separator, value = line.strip().partition(":")
     if separator and key.strip().lower() == "description":
         return value.strip().strip("'\"") or "Agent skill"
@@ -240,6 +269,7 @@ def _description_value(line: str) -> str | None:
 
 
 def _skill_description(markdown: str) -> str:
+    """Derive a human-readable skill description from front matter, heading text, or body prose."""
     lines = markdown.splitlines()
     line_index = 0
     while line_index < len(lines) and not lines[line_index].strip():
@@ -275,6 +305,7 @@ def _skill_description(markdown: str) -> str:
 
 
 def scan_agent_skills(config_dir: Path, directory: str = "skills") -> SkillScanResult:
+    """Discover valid Markdown skill files, resolve related files, and report unsafe or malformed entries as warnings."""
     try:
         config_root = config_dir.resolve()
     except (OSError, RuntimeError) as exc:
@@ -375,6 +406,7 @@ def scan_agent_skills(config_dir: Path, directory: str = "skills") -> SkillScanR
 
 
 def activate_skill(config_dir: Path, skill: SkillRecord) -> dict[str, Any]:
+    """Load a skill entry point and related files into a payload that an agent can use to execute the skill."""
     config_root = config_dir.resolve()
     entry_relative = Path(skill.entry_path)
     if not _is_relative_child_path(entry_relative):
@@ -399,11 +431,13 @@ def activate_skill(config_dir: Path, skill: SkillRecord) -> dict[str, Any]:
 
 
 def _sanitize_name(value: str) -> str:
+    """Convert arbitrary server, skill, or tool names into safe lowercase fragments for generated tool names."""
     sanitized = re.sub(r"[^A-Za-z0-9_]", "_", value).strip("_").lower()
     return sanitized or "unnamed"
 
 
 def make_unique_tool_name(prefix: str, raw_name: str, seen: set[str]) -> str:
+    """Create a collision-free public tool name from a prefix and upstream name."""
     base_name = f"{_sanitize_name(prefix)}__{_sanitize_name(raw_name)}"
     candidate = base_name
     if candidate in seen:
@@ -418,6 +452,7 @@ def make_unique_tool_name(prefix: str, raw_name: str, seen: set[str]) -> str:
 
 
 def redact_mapping(value: Any) -> Any:
+    """Recursively redact mapping values whose keys are likely to contain credentials."""
     if isinstance(value, dict):
         result: dict[str, Any] = {}
         for key, child in value.items():
@@ -445,6 +480,7 @@ def redact_mapping(value: Any) -> Any:
 
 
 def _redact_text(value: str) -> str:
+    """Mask credential-like tokens in free-form text before returning diagnostics or errors."""
     redacted = redact_mapping(value)
     redacted = SENSITIVE_QUOTED_ARG_LIST_RE.sub(
         lambda match: f"{match.group('prefix')}<redacted>{match.group('value_quote')}",
@@ -472,6 +508,7 @@ def _redact_text(value: str) -> str:
 
 
 def _configured_value_variants(value: str) -> set[str]:
+    """Build literal and URL-decoded variants of configured secrets so all common renderings can be redacted."""
     variants = {value}
     for serialized in (repr(value), json.dumps(value), json.dumps(value, ensure_ascii=False)):
         variants.add(serialized)
@@ -481,6 +518,7 @@ def _configured_value_variants(value: str) -> set[str]:
 
 
 def redact_configured_values(text: str, *maps: dict[str, str]) -> str:
+    """Replace configured environment and header values wherever they appear in text."""
     redacted = text
     values = {
         variant
@@ -495,6 +533,7 @@ def redact_configured_values(text: str, *maps: dict[str, str]) -> str:
 
 
 def redact_configured_value_tree(value: Any, *maps: dict[str, str]) -> Any:
+    """Apply configured-value and key-based redaction across nested response structures."""
     if isinstance(value, dict):
         return {
             _redact_text(redact_configured_values(str(key), *maps)): redact_configured_value_tree(
@@ -589,6 +628,7 @@ def agent_config_fingerprint(config_dir: Path) -> str:
 
 
 def load_agent_manifest(config_dir: Path) -> LoadedAgentManifest:
+    """Read and validate the bridge manifest while preserving structured errors for status reporting."""
     config_path = config_dir / "config.json"
     if not config_path.exists():
         return LoadedAgentManifest(config_path=config_path, status="missing_config")
@@ -611,6 +651,7 @@ def load_agent_manifest(config_dir: Path) -> LoadedAgentManifest:
 
 
 def _run_async_blocking(coro: Any, timeout_s: float | None = None) -> Any:
+    """Run an async probe from synchronous registry-building code with a bounded timeout."""
     if timeout_s is None:
         try:
             asyncio.get_running_loop()
@@ -640,6 +681,7 @@ def _run_async_blocking(coro: Any, timeout_s: float | None = None) -> Any:
 
 
 def _probe_timeout_seconds(probe_timeout_s: float) -> float:
+    """Clamp the MCP probe timeout to a positive value before probing upstream servers."""
     return max(0.001, probe_timeout_s)
 
 
@@ -650,6 +692,7 @@ def build_agent_registry(
     dynamic_mcp_tools: bool | None = None,
     dynamic_skill_tools: bool | None = None,
 ) -> AgentCapabilityRegistry:
+    """Build a complete bridge registry by loading config, scanning skills, probing MCP servers, and assigning dynamic names."""
     config_root = Path(config_dir)
     manifest = load_agent_manifest(config_root)
     probe_timeout = _probe_timeout_seconds(probe_timeout_s)
