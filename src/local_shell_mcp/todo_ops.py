@@ -1,3 +1,5 @@
+"""Persist the agent-visible todo list as JSON in the server state directory."""
+
 from __future__ import annotations
 
 import json
@@ -8,12 +10,14 @@ from .settings import get_settings
 
 
 def _todo_path() -> Path:
+    """Return the state-file path used to persist the agent todo list."""
     path = get_settings().state_dir / "todos.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def todo_read() -> dict:
+    """Read the persisted todo list, treating missing state as an empty list."""
     path = _todo_path()
     if not path.exists():
         return {"todos": []}
@@ -25,6 +29,7 @@ def todo_read() -> dict:
 
 
 def todo_write(todos: list[dict]) -> dict:
+    """Normalize todo entries and enforce count and byte limits before replacing persisted state."""
     settings = get_settings()
     if len(todos) > settings.max_todos:
         raise ValueError(f"Refusing to write {len(todos)} todos; max is {settings.max_todos}")

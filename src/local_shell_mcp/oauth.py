@@ -1,3 +1,5 @@
+"""Implement the OAuth metadata, registration, authorization, token, and bearer-token validation flow used by HTTP mode."""
+
 from __future__ import annotations
 
 import base64
@@ -19,6 +21,8 @@ from .settings import get_settings
 
 @dataclass
 class OAuthClient:
+    """Dynamically registered OAuth client metadata used during authorization and token exchange."""
+
     client_id: str
     redirect_uris: list[str] = field(default_factory=list)
     client_name: str | None = None
@@ -27,6 +31,8 @@ class OAuthClient:
 
 @dataclass
 class AuthCode:
+    """Short-lived authorization code record including PKCE challenge and requested resource scope."""
+
     code: str
     client_id: str
     redirect_uri: str
@@ -43,6 +49,7 @@ _CODES: dict[str, AuthCode] = {}
 
 
 def public_base_url(request: Request | None = None) -> str:
+    """Determine the externally visible base URL from configured public URL or request headers."""
     settings = get_settings()
     if settings.public_base_url:
         return settings.public_base_url.rstrip("/")
@@ -58,20 +65,24 @@ def public_base_url(request: Request | None = None) -> str:
 
 
 def issuer_url(request: Request | None = None) -> str:
+    """Return the OAuth issuer URL advertised in metadata and encoded into access tokens."""
     settings = get_settings()
     return (settings.oauth_issuer or public_base_url(request)).rstrip("/")
 
 
 def resource_url(request: Request | None = None) -> str:
+    """Return the resource URL that clients use for protected-resource discovery."""
     settings = get_settings()
     return (settings.oauth_resource or public_base_url(request)).rstrip("/")
 
 
 def _scopes() -> list[str]:
+    """Return the static scopes supported by local-shell-mcp's OAuth flow."""
     return ["shell:read", "shell:write", "shell:execute", "git:write"]
 
 
 def protected_resource_metadata(request: Request) -> dict[str, Any]:
+    """Build RFC-style protected-resource metadata for MCP clients discovering authorization servers."""
     return {
         "resource": resource_url(request),
         "authorization_servers": [issuer_url(request)],
@@ -81,6 +92,7 @@ def protected_resource_metadata(request: Request) -> dict[str, Any]:
 
 
 def authorization_server_metadata(request: Request) -> dict[str, Any]:
+    """Build OAuth authorization-server metadata for dynamic clients and PKCE code flow."""
     issuer = issuer_url(request)
     return {
         "issuer": issuer,
@@ -98,18 +110,22 @@ def authorization_server_metadata(request: Request) -> dict[str, Any]:
 
 
 def _json(data: dict, status_code: int = 200) -> JSONResponse:
+    """Return compact JSON responses with the media type expected by OAuth metadata clients."""
     return JSONResponse(data, status_code=status_code, headers={"Cache-Control": "no-store"})
 
 
 async def oauth_protected_resource(request: Request) -> JSONResponse:
+    """Serve protected-resource metadata from the well-known OAuth endpoint."""
     return _json(protected_resource_metadata(request))
 
 
 async def oauth_server_metadata(request: Request) -> JSONResponse:
+    """Serve authorization-server metadata from the well-known OAuth endpoint."""
     return _json(authorization_server_metadata(request))
 
 
 async def oauth_register(request: Request) -> JSONResponse:
+    """Accept dynamic client registration and persist the issued client identifier."""
     try:
         body = await request.json()
     except Exception:
@@ -138,6 +154,7 @@ async def oauth_register(request: Request) -> JSONResponse:
 
 
 def _validate_authorize_params(params: dict[str, str]) -> str | None:
+    """Validate authorization request parameters before rendering the consent form or redirecting."""
     if params.get("response_type") != "code":
         return "Only response_type=code is supported"
     if not params.get("client_id"):
@@ -156,6 +173,8 @@ def _validate_authorize_params(params: dict[str, str]) -> str | None:
 
 
 def _hidden_inputs(params: dict[str, str]) -> str:
+    """Preserve validated authorization parameters as hidden fields in the approval form."""
+
     def esc(value: str) -> str:
         return (
             value.replace("&", "&amp;")
@@ -170,6 +189,7 @@ def _hidden_inputs(params: dict[str, str]) -> str:
 
 
 def _authorize_form(params: dict[str, str], error: str | None = None) -> HTMLResponse:
+    """Render the local approval form used before issuing an authorization code."""
     settings = get_settings()
     scope = params.get("scope") or " ".join(_scopes())
     resource = params.get("resource") or resource_url()
@@ -198,11 +218,13 @@ def _authorize_form(params: dict[str, str], error: str | None = None) -> HTMLRes
 
 
 def _make_redirect(redirect_uri: str, query: dict[str, str]) -> RedirectResponse:
+    """Append authorization response parameters to a redirect URI."""
     sep = "&" if "?" in redirect_uri else "?"
     return RedirectResponse(f"{redirect_uri}{sep}{urlencode(query)}", status_code=302)
 
 
 async def oauth_authorize_get(request: Request) -> Response:
+    """Validate authorization input and render the approval form for the local user."""
     params = {k: v for k, v in request.query_params.items()}
     error = _validate_authorize_params(params)
     if error:
@@ -211,6 +233,7 @@ async def oauth_authorize_get(request: Request) -> Response:
 
 
 async def oauth_authorize_post(request: Request) -> Response:
+    """Issue an authorization code after form approval and redirect the client back."""
     form = await request.form()
     params = {k: str(v) for k, v in form.items() if k != "pin"}
     error = _validate_authorize_params(params)
@@ -243,6 +266,7 @@ async def oauth_authorize_post(request: Request) -> Response:
 
 
 def _verify_pkce(code_obj: AuthCode, verifier: str | None) -> bool:
+    """Validate a PKCE verifier against the stored plain or S256 code challenge."""
     if not code_obj.code_challenge:
         return True
     if not verifier:
@@ -257,6 +281,7 @@ def _verify_pkce(code_obj: AuthCode, verifier: str | None) -> bool:
 def issue_access_token(
     *, client_id: str, scope: str, resource: str, subject: str = "local-user"
 ) -> str:
+    """Create a signed bearer token for an approved client, scope, resource, and subject."""
     settings = get_settings()
     now = int(time.time())
     payload = {
@@ -273,6 +298,7 @@ def issue_access_token(
 
 
 async def oauth_token(request: Request) -> JSONResponse:
+    """Exchange an authorization code for an access token after client, redirect, expiry, and PKCE checks."""
     form = await request.form()
     grant_type = str(form.get("grant_type") or "")
     if grant_type != "authorization_code":
@@ -316,6 +342,7 @@ async def oauth_token(request: Request) -> JSONResponse:
 
 
 def validate_bearer_token(token: str, request: Request | None = None) -> dict[str, Any]:
+    """Decode and validate issuer, audience, resource, and scope claims for incoming bearer tokens."""
     settings = get_settings()
     return jwt.decode(
         token,

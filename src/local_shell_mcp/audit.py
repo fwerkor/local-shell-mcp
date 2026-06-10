@@ -1,3 +1,5 @@
+"""Append structured audit events to a bounded JSONL log in the server state directory."""
+
 from __future__ import annotations
 
 import json
@@ -9,6 +11,7 @@ from .settings import get_settings
 
 
 def _trim_audit_log(path: Path, max_bytes: int) -> None:
+    """Keep the audit log bounded by retaining recent complete JSONL records."""
     if max_bytes <= 0 or not path.exists():
         return
     size = path.stat().st_size
@@ -26,6 +29,7 @@ def _trim_audit_log(path: Path, max_bytes: int) -> None:
 
 
 def audit(event: str, **fields: Any) -> None:
+    """Append one structured audit record and trim the log before it can grow without bound."""
     settings = get_settings()
     record = {
         "ts": time.time(),

@@ -1,3 +1,5 @@
+"""Search workspace text files and produce compact directory trees for code-navigation tools."""
+
 from __future__ import annotations
 
 import asyncio
@@ -17,6 +19,7 @@ async def grep(
     case_sensitive: bool = True,
     max_results: int | None = None,
 ) -> dict:
+    """Run ripgrep with workspace path resolution and return structured match records."""
     settings = get_settings()
     max_results = max_results or settings.max_grep_results
     args = [settings.rg_bin, "--json", "--line-number", "--column"]
@@ -60,6 +63,7 @@ async def grep(
 
 
 def tree_sync(cwd: str = ".", depth: int = 3, max_entries: int = 500) -> dict:
+    """Build a compact, depth-limited directory tree while skipping common generated directories."""
     settings = get_settings()
     base = resolve_path(cwd)
     if not base.exists():
@@ -130,4 +134,5 @@ def tree_sync(cwd: str = ".", depth: int = 3, max_entries: int = 500) -> dict:
 
 
 async def tree(cwd: str = ".", depth: int = 3, max_entries: int = 500) -> dict:
+    """Expose tree generation through an async API used by MCP and HTTP handlers."""
     return await asyncio.to_thread(tree_sync, cwd, depth, max_entries)

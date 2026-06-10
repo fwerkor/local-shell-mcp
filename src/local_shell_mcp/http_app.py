@@ -1,3 +1,5 @@
+"""Build the FastAPI application that exposes shell, filesystem, git, remote-worker, and MCP endpoints."""
+
 from __future__ import annotations
 
 import asyncio
@@ -46,6 +48,7 @@ PUBLIC_TOOL_TIMEOUT_S = PUBLIC_RUN_SHELL_TIMEOUT_CAP_S
 
 
 def principal_dep(request: Request) -> Principal:
+    """Expose the principal installed by auth middleware to FastAPI route handlers."""
     return verify_request(request)
 
 
@@ -53,10 +56,12 @@ PRINCIPAL_DEP = Depends(principal_dep)
 
 
 async def _blocking(func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+    """Run blocking filesystem or git helpers in a worker thread from async HTTP routes."""
     return await asyncio.to_thread(func, *args, **kwargs)
 
 
 def build_http_app() -> FastAPI:
+    """Construct the authenticated HTTP API and mount MCP, OAuth, tool, and remote-worker routes."""
     app = FastAPI(title="local-shell-mcp REST API", version="0.1.0")
     settings = get_settings()
     if settings.auth_mode != "none":

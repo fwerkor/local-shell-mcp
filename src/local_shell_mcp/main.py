@@ -1,3 +1,5 @@
+"""Provide command-line entry points for stdio MCP, HTTP server, and remote-worker modes."""
+
 from __future__ import annotations
 
 import argparse
@@ -26,6 +28,7 @@ from .tools import build_mcp
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    """Build the command-line parser shared by server and remote-worker modes."""
     parser = argparse.ArgumentParser(
         prog="local-shell-mcp",
         description="Run a local-shell-mcp server or remote worker.",
@@ -68,6 +71,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _apply_server_args(args: argparse.Namespace) -> None:
+    """Project CLI server options into environment variables consumed by settings loading."""
     if args.config:
         os.environ["LOCAL_SHELL_MCP_CONFIG"] = args.config
     if args.mode:
@@ -77,6 +81,7 @@ def _apply_server_args(args: argparse.Namespace) -> None:
 
 
 def _run_server_from_args(args: argparse.Namespace) -> None:
+    """Select stdio MCP or HTTP server startup based on parsed CLI arguments."""
     _apply_server_args(args)
 
     settings = get_settings()
@@ -91,6 +96,8 @@ def _run_server_from_args(args: argparse.Namespace) -> None:
 
 
 def _with_oauth_routes(inner_app) -> Starlette:  # noqa: ANN001
+    """Wrap the MCP ASGI app with OAuth and remote routes when serving over HTTP."""
+
     @asynccontextmanager
     async def lifespan(app):  # noqa: ANN001
         async with inner_app.router.lifespan_context(inner_app):
@@ -118,6 +125,7 @@ def _with_oauth_routes(inner_app) -> Starlette:  # noqa: ANN001
 
 
 def run_mcp() -> None:
+    """Run the FastMCP server on stdio using the current environment configuration."""
     settings = get_settings()
     validate_public_oauth_configuration(settings)
     mcp = build_mcp()
@@ -144,6 +152,7 @@ def run_mcp() -> None:
 
 
 def run_http() -> None:
+    """Run the HTTP server with FastAPI routes, MCP transport, OAuth metadata, and remote-worker endpoints."""
     settings = get_settings()
     validate_public_oauth_configuration(settings)
     app = build_http_app()
@@ -151,6 +160,7 @@ def run_http() -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Parse CLI arguments and dispatch to server or worker mode."""
     args = _build_parser().parse_args(argv)
     args.handler(args)
 

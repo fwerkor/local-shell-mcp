@@ -1,3 +1,5 @@
+"""Assemble the FastMCP server and register local, remote, git, shell, filesystem, and agent-bridge tools."""
+
 from __future__ import annotations
 
 import asyncio
@@ -62,10 +64,12 @@ from .todo_ops import todo_read, todo_write
 
 
 def _ok(data: Any = None, message: str = "") -> dict:
+    """Wrap successful tool data in the response envelope used by MCP handlers."""
     return {"ok": True, "message": message, "data": data}
 
 
 def _handled_error(exc: Exception) -> dict:
+    """Convert expected operational exceptions into user-visible tool error payloads."""
     audit("tool_error", error=repr(exc))
     if isinstance(exc, FileNotFoundError) and str(exc):
         with suppress(Exception):
@@ -90,14 +94,17 @@ def _handled_error(exc: Exception) -> dict:
 
 
 def _sync(coro):  # noqa: ANN001
+    """Run an async helper from synchronous FastMCP registration paths."""
     return asyncio.get_event_loop().run_until_complete(coro)
 
 
 async def _to_thread(func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+    """Run blocking helpers in a worker thread while preserving async tool-handler flow."""
     return await asyncio.to_thread(func, *args, **kwargs)
 
 
 def _assert_text_input_size(label: str, text: str, limit: int | None = None) -> None:
+    """Reject oversized text payloads before they are written to disk or passed to patch tools."""
     settings = get_settings()
     max_bytes = limit or settings.max_file_write_bytes
     size = len(text.encode("utf-8"))
@@ -106,6 +113,7 @@ def _assert_text_input_size(label: str, text: str, limit: int | None = None) -> 
 
 
 async def _apply_patch_text(patch: str, cwd: str = ".") -> dict:
+    """Apply a unified diff through git apply and return the command result envelope."""
     _assert_text_input_size("patch", patch)
     await _to_thread(prune_temp_dir)
     patch_path = temp_dir() / f"patch-{uuid.uuid4().hex}.diff"
@@ -122,6 +130,7 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict:
 
 
 async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict:
+    """Execute provided Python code from a temporary file and clean it up after completion."""
     _assert_text_input_size("Python script", code)
     await _to_thread(prune_temp_dir)
     path = temp_dir() / f"script-{uuid.uuid4().hex}.py"
@@ -154,14 +163,18 @@ PUBLIC_TOOL_TIMEOUT_S = PUBLIC_RUN_SHELL_TIMEOUT_CAP_S
 
 
 class PublicToolTimeoutError(TimeoutError):
+    """Signals that a public tool timed out and should return structured retry guidance instead of a generic failure."""
+
     pass
 
 
 def _security_meta(schemes: list[dict[str, Any]]) -> dict[str, Any]:
+    """Attach security-scheme metadata to tools when HTTP OAuth mode requires authenticated calls."""
     return {"securitySchemes": schemes}
 
 
 def _transport_security_settings() -> TransportSecuritySettings:
+    """Derive transport-specific auth metadata from the active server settings."""
     settings = get_settings()
     allowed_hosts = {
         "127.0.0.1",
@@ -194,6 +207,7 @@ def _transport_security_settings() -> TransportSecuritySettings:
 
 
 def _timeout_payload_for_tool(tool_name: str, exc: Exception) -> dict | str:
+    """Build an actionable timeout payload that reports limits and next-step guidance for the failed tool."""
     if tool_name == "search":
         return json.dumps({"results": []}, ensure_ascii=False)
     if tool_name == "fetch":
@@ -211,6 +225,7 @@ def _timeout_payload_for_tool(tool_name: str, exc: Exception) -> dict | str:
 
 
 def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
+    """Wrap FastMCP execution paths so public tools return structured timeout errors."""
     for tool in mcp._tool_manager._tools.values():  # noqa: SLF001
         original = tool.fn
         tool_name = tool.name
@@ -231,6 +246,7 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
 
 
 def _install_full_container_auto_approval_hints(mcp: FastMCP) -> None:
+    """Patch generated tool schemas to advertise reduced confirmation needs in full-container mode."""
     if not get_settings().allow_full_container:
         return
     for tool in mcp._tool_manager._tools.values():  # noqa: SLF001
@@ -253,6 +269,7 @@ def _read_many_files_sync(
     binary_preview: str | None = None,
     binary_preview_bytes: int = 256,
 ) -> dict:
+    """Read many files for a tool call while preserving per-path success and error entries."""
     settings = get_settings()
     if len(paths) > settings.max_read_many_files:
         raise ValueError(
@@ -279,6 +296,7 @@ def _read_many_files_sync(
 
 
 def _secret_scan_sync(cwd: str = ".", glob: str | None = None, max_results: int = 200) -> dict:
+    """Scan workspace text files for credential-like strings while respecting size, binary, and result limits."""
     import re
 
     settings = get_settings()
@@ -314,10 +332,12 @@ def _secret_scan_sync(cwd: str = ".", glob: str | None = None, max_results: int 
 
 
 async def _secret_scan(cwd: str = ".", glob: str | None = None, max_results: int = 200) -> dict:
+    """Expose secret scanning through an async wrapper for MCP handlers."""
     return await _to_thread(_secret_scan_sync, cwd, glob, max_results)
 
 
 def _read_audit_tail_entries(lines: int = 100) -> dict:
+    """Parse the recent audit-log tail into structured records, preserving malformed lines as raw entries."""
     settings = get_settings()
     path = settings.audit_log_path
     if not path.exists():
@@ -357,6 +377,7 @@ def _read_audit_tail_entries(lines: int = 100) -> dict:
 
 
 def build_mcp() -> FastMCP:
+    """Create the configured FastMCP server and register every local, remote, git, shell, filesystem, and bridge tool."""
     settings = get_settings()
     mcp = FastMCP("local-shell-mcp", transport_security=_transport_security_settings())
     read_only_tool = ToolAnnotations(

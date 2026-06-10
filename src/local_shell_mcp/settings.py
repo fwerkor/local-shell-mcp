@@ -1,3 +1,5 @@
+"""Load, normalize, and validate runtime settings for workspace boundaries, authentication, tools, and remote workers."""
+
 from __future__ import annotations
 
 import os
@@ -24,6 +26,7 @@ SENSITIVE_SETTING_KEYS = {
 
 
 def _split_csv(value: str | list[str] | None) -> list[str]:
+    """Normalize comma-delimited environment values into trimmed non-empty items."""
     if value is None:
         return []
     if isinstance(value, list):
@@ -143,21 +146,25 @@ class Settings(BaseSettings):
     )
     @classmethod
     def expand_path(cls, value: str | Path) -> Path:
+        """Expand user and environment variables for path settings before validation."""
         return Path(os.path.expandvars(os.path.expanduser(str(value)))).resolve()
 
     @field_validator("command_denylist", "path_denylist", mode="before")
     @classmethod
     def split_csv_fields(cls, value):  # noqa: ANN001
+        """Normalize comma-delimited restriction lists supplied through environment variables."""
         return _split_csv(value)
 
     @model_validator(mode="after")
     def disable_builtin_restrictions_in_full_container_mode(self) -> Settings:
+        """Remove built-in command and path restrictions when full-container mode is explicitly enabled."""
         if self.allow_full_container:
             self.command_denylist = []
             self.path_denylist = []
         return self
 
     def apply_yaml(self, path: Path) -> Settings:
+        """Overlay YAML configuration values onto settings loaded from environment defaults."""
         if not path.exists():
             raise FileNotFoundError(path)
         data = yaml.safe_load(path.read_text()) or {}
@@ -173,6 +180,7 @@ class Settings(BaseSettings):
         return Settings(**merged)
 
     def with_workspace_relative_defaults(self) -> Settings:
+        """Resolve state and audit paths relative to the workspace when they were left at defaults."""
         if self.workspace_root == DEFAULT_WORKSPACE_ROOT:
             return self
 
@@ -190,6 +198,7 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    """Load cached settings, optionally overlaying config.yaml from the configured workspace."""
     settings = Settings()
     config = os.getenv("LOCAL_SHELL_MCP_CONFIG")
     if config:
@@ -216,6 +225,7 @@ def safe_settings_dump(settings: Settings | None = None) -> dict:
 
 
 def validate_public_oauth_configuration(settings: Settings | None = None) -> None:
+    """Reject HTTP OAuth startup configurations that cannot produce externally valid issuer and resource metadata."""
     settings = settings or get_settings()
     if settings.auth_mode != "oauth" or not settings.public_base_url:
         return

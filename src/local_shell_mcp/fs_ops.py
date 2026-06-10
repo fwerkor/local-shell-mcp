@@ -1,3 +1,5 @@
+"""Provide workspace-aware filesystem operations with path containment, binary detection, and bounded file output."""
+
 from __future__ import annotations
 
 import base64
@@ -16,16 +18,19 @@ BINARY_MESSAGE = "Refusing to read binary file as text"
 
 
 def workspace_root() -> Path:
+    """Return the normalized workspace root used as the default filesystem boundary."""
     return get_settings().workspace_root.resolve()
 
 
 def temp_dir() -> Path:
+    """Create and return the scratch directory used for generated temporary files."""
     path = get_settings().state_dir / "tmp"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def prune_temp_dir() -> None:
+    """Remove old temporary files once count or byte limits are exceeded."""
     settings = get_settings()
     path = temp_dir()
     try:
@@ -87,6 +92,7 @@ def resolve_path(
 
 
 def relative_display(path: Path) -> str:
+    """Render paths relative to the workspace when possible while preserving absolute paths outside it."""
     root = workspace_root()
     try:
         return str(path.resolve().relative_to(root))
@@ -95,6 +101,7 @@ def relative_display(path: Path) -> str:
 
 
 def missing_path_context(path: str | Path, *, max_entries: int = 50) -> dict:
+    """Describe the nearest existing parent and sibling entries for a missing path diagnostic."""
     resolved = resolve_path(path)
     nearest = next((parent for parent in [resolved, *resolved.parents] if parent.exists()), None)
     entries: list[str] = []
@@ -120,6 +127,7 @@ def missing_path_context(path: str | Path, *, max_entries: int = 50) -> dict:
 
 
 def list_dir(path: str = ".", recursive: bool = False, max_entries: int = 500) -> list[dict]:
+    """List directory entries within configured limits using workspace-relative display paths."""
     settings = get_settings()
     base = resolve_path(path, must_exist=True)
     if not base.is_dir():
@@ -146,6 +154,7 @@ def list_dir(path: str = ".", recursive: bool = False, max_entries: int = 500) -
 
 
 def glob_paths(pattern: str, cwd: str = ".", max_results: int = 500) -> list[str]:
+    """Find workspace paths matching a glob pattern without exceeding the configured result limit."""
     settings = get_settings()
     base = resolve_path(cwd, must_exist=True)
     results: list[str] = []
@@ -160,6 +169,7 @@ def glob_paths(pattern: str, cwd: str = ".", max_results: int = 500) -> list[str
 
 
 def _is_probably_binary(sample: bytes) -> bool:
+    """Classify byte samples that should not be decoded as normal UTF-8 text."""
     if not sample:
         return False
     if b"\x00" in sample:
@@ -181,6 +191,7 @@ def _is_probably_binary(sample: bytes) -> bool:
 def _binary_metadata(
     p: Path, size: int, preview: str | None = None, preview_bytes: int = BINARY_PREVIEW_BYTES
 ) -> dict:
+    """Return structured metadata and optional base64 preview for a binary file read attempt."""
     result = {
         "path": relative_display(p),
         "bytes": size,
@@ -206,6 +217,7 @@ def _binary_metadata(
 
 
 def _assert_text_file(p: Path) -> None:
+    """Reject binary files before text editing operations mutate them."""
     with p.open("rb") as fh:
         sample = fh.read(BINARY_CHECK_BYTES)
     if _is_probably_binary(sample):
@@ -219,6 +231,7 @@ def read_text(
     binary_preview: str | None = None,
     binary_preview_bytes: int = BINARY_PREVIEW_BYTES,
 ) -> dict:
+    """Read text files by optional line range and return binary metadata instead of unsafe decoding."""
     settings = get_settings()
     p = resolve_path(path, must_exist=True)
     size = p.stat().st_size
@@ -255,6 +268,7 @@ def read_text(
 
 
 def write_text(path: str, content: str, overwrite: bool = True) -> dict:
+    """Write a text file after path validation, parent creation, and overwrite checks."""
     settings = get_settings()
     data = content.encode("utf-8")
     if len(data) > settings.max_file_write_bytes:
@@ -275,6 +289,7 @@ def write_text(path: str, content: str, overwrite: bool = True) -> dict:
 
 
 def edit_text(path: str, old: str, new: str, replace_all: bool = False) -> dict:
+    """Replace exact text in a validated text file and report how many occurrences changed."""
     settings = get_settings()
     p = resolve_path(path, must_exist=True)
     if p.stat().st_size > settings.max_file_write_bytes:
@@ -301,6 +316,7 @@ def edit_text(path: str, old: str, new: str, replace_all: bool = False) -> dict:
 
 
 def multi_edit_text(path: str, edits: list[dict]) -> dict:
+    """Apply a sequence of exact-text replacements and write the file only after all edits validate."""
     settings = get_settings()
     p = resolve_path(path, must_exist=True)
     if p.stat().st_size > settings.max_file_write_bytes:
@@ -331,6 +347,7 @@ def multi_edit_text(path: str, edits: list[dict]) -> dict:
 
 
 def delete_path(path: str, recursive: bool = False) -> dict:
+    """Delete a file or directory after enforcing recursive-directory semantics."""
     p = resolve_path(path, must_exist=True)
     if p.is_dir():
         if not recursive:
