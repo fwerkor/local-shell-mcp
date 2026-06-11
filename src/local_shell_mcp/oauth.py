@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import hmac
 import secrets
 import time
@@ -12,6 +10,18 @@ from typing import Any
 from urllib.parse import urlencode
 
 import jwt
+from authlib.oauth2.rfc6749.errors import (
+    InvalidGrantError,
+    InvalidRequestError,
+    OAuth2Error,
+    UnsupportedGrantTypeError,
+)
+from authlib.oauth2.rfc7636.challenge import (
+    CODE_CHALLENGE_PATTERN,
+    CODE_VERIFIER_PATTERN,
+    compare_plain_code_challenge,
+    compare_s256_code_challenge,
+)
 from starlette.requests import Request
 from starlette.responses import (
     HTMLResponse,
@@ -135,6 +145,24 @@ def _json(data: dict, status_code: int = 200) -> JSONResponse:
     )
 
 
+def _oauth_error(exc: OAuth2Error, status_code: int = 400) -> JSONResponse:
+    """Serialize Authlib OAuth errors in the RFC6749 JSON shape."""
+    body = {"error": exc.error}
+    if exc.description:
+        body["error_description"] = exc.description
+    return _json(body, status_code=status_code)
+
+
+def _invalid_request(description: str) -> JSONResponse:
+    """Return an Authlib-backed invalid_request response."""
+    return _oauth_error(InvalidRequestError(description=description))
+
+
+def _invalid_grant(description: str) -> JSONResponse:
+    """Return an Authlib-backed invalid_grant response."""
+    return _oauth_error(InvalidGrantError(description=description))
+
+
 async def oauth_protected_resource(request: Request) -> JSONResponse:
     """Serve protected-resource metadata from the well-known OAuth endpoint."""
     return _json(protected_resource_metadata(request))
@@ -201,12 +229,11 @@ def _validate_authorize_params(params: dict[str, str]) -> str | None:
         and params["redirect_uri"] not in client.redirect_uris
     ):
         return "redirect_uri is not registered for this client"
-    if params.get("code_challenge_method") and params.get(
-        "code_challenge_method"
-    ) not in {
-        "S256",
-        "plain",
-    }:
+    challenge = params.get("code_challenge")
+    if challenge and not CODE_CHALLENGE_PATTERN.match(challenge):
+        return "Invalid code_challenge"
+    method = params.get("code_challenge_method")
+    if method and method not in {"S256", "plain"}:
         return "Unsupported code_challenge_method"
     return None
 
@@ -316,16 +343,15 @@ async def oauth_authorize_post(request: Request) -> Response:
 
 
 def _verify_pkce(code_obj: AuthCode, verifier: str | None) -> bool:
-    """Validate a PKCE verifier against the stored plain or S256 code challenge."""
+    """Validate PKCE using Authlib's RFC7636 challenge helpers."""
     if not code_obj.code_challenge:
-        return True
-    if not verifier:
+        return verifier is None
+    if not verifier or not CODE_VERIFIER_PATTERN.match(verifier):
         return False
-    if code_obj.code_challenge_method == "S256":
-        digest = hashlib.sha256(verifier.encode()).digest()
-        challenge = base64.urlsafe_b64encode(digest).decode().rstrip("=")
-        return hmac.compare_digest(challenge, code_obj.code_challenge)
-    return hmac.compare_digest(verifier, code_obj.code_challenge)
+    method = code_obj.code_challenge_method or "plain"
+    if method == "S256":
+        return compare_s256_code_challenge(verifier, code_obj.code_challenge)
+    return compare_plain_code_challenge(verifier, code_obj.code_challenge)
 
 
 def issue_access_token(
@@ -352,58 +378,25 @@ async def oauth_token(request: Request) -> JSONResponse:
     form = await request.form()
     grant_type = str(form.get("grant_type") or "")
     if grant_type != "authorization_code":
-        return _json({"error": "unsupported_grant_type"}, status_code=400)
+        return _oauth_error(UnsupportedGrantTypeError())
     code = str(form.get("code") or "")
     client_id = str(form.get("client_id") or "")
     redirect_uri = str(form.get("redirect_uri") or "")
     verifier = str(form.get("code_verifier") or "") or None
     resource = str(form.get("resource") or "")
     if not resource:
-        return _json(
-            {
-                "error": "invalid_request",
-                "error_description": "Missing resource",
-            },
-            status_code=400,
-        )
+        return _invalid_request("Missing resource")
     code_obj = _CODES.get(code)
     if not code_obj or code_obj.used:
-        return _json(
-            {
-                "error": "invalid_grant",
-                "error_description": "Unknown or used code",
-            },
-            status_code=400,
-        )
+        return _invalid_grant("Unknown or used code")
     if int(time.time()) - code_obj.created_at > get_settings().oauth_code_ttl_s:
-        return _json(
-            {"error": "invalid_grant", "error_description": "Expired code"},
-            status_code=400,
-        )
+        return _invalid_grant("Expired code")
     if code_obj.client_id != client_id or code_obj.redirect_uri != redirect_uri:
-        return _json(
-            {
-                "error": "invalid_grant",
-                "error_description": "Client or redirect mismatch",
-            },
-            status_code=400,
-        )
+        return _invalid_grant("Client or redirect mismatch")
     if _normalize_resource(resource) != _normalize_resource(code_obj.resource):
-        return _json(
-            {
-                "error": "invalid_grant",
-                "error_description": "Resource mismatch",
-            },
-            status_code=400,
-        )
+        return _invalid_grant("Resource mismatch")
     if not _verify_pkce(code_obj, verifier):
-        return _json(
-            {
-                "error": "invalid_grant",
-                "error_description": "PKCE verification failed",
-            },
-            status_code=400,
-        )
+        return _invalid_grant("PKCE verification failed")
     code_obj.used = True
     token = issue_access_token(
         client_id=client_id, scope=code_obj.scope, resource=code_obj.resource
