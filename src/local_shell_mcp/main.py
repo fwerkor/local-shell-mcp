@@ -10,7 +10,15 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
-from .auth import AuthMiddleware
+from .auth import (
+    AuthMiddleware,
+    oauth_authorize_get,
+    oauth_authorize_post,
+    oauth_protected_resource,
+    oauth_register,
+    oauth_server_metadata,
+    oauth_token,
+)
 from .config.registry import cli_overrides_from_args, register_setting_cli_args
 from .config.settings import (
     configure_settings,
@@ -19,14 +27,6 @@ from .config.settings import (
     validate_public_oauth_configuration,
 )
 from .http_app import build_http_app
-from .oauth import (
-    oauth_authorize_get,
-    oauth_authorize_post,
-    oauth_protected_resource,
-    oauth_register,
-    oauth_server_metadata,
-    oauth_token,
-)
 from .remote import add_worker_cli_args, remote_routes, run_worker_from_args
 from .tools import build_mcp
 

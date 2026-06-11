@@ -10,8 +10,8 @@ from fastapi import HTTPException, Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from .audit import audit
-from .config.settings import Settings, get_settings
+from ..audit import audit
+from ..config.settings import Settings, get_settings
 
 PUBLIC_PATHS = {
     "/healthz",

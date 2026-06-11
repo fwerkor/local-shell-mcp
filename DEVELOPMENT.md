@@ -39,8 +39,7 @@ LOCAL_SHELL_MCP_AUTH_MODE=none uv run local-shell-mcp --mode http
 | `src/local_shell_mcp/tools.py` | MCP tool registration and public tool wrappers. |
 | `src/local_shell_mcp/http_app.py` | REST debug API and HTTP routes. |
 | `src/local_shell_mcp/settings.py` | Pydantic settings, environment variables, YAML config, safe settings dump. |
-| `src/local_shell_mcp/auth.py` | Request auth middleware and ChatGPT-compatible MCP discovery handling. |
-| `src/local_shell_mcp/oauth.py` | OAuth metadata, dynamic client registration, authorization, token issue/validation. |
+| `src/local_shell_mcp/auth/` | Authentication package. `middleware.py` protects HTTP/MCP requests; `oauth.py` handles OAuth metadata, dynamic client registration, authorization, token issue/validation. |
 | `src/local_shell_mcp/shell_ops.py` | Bounded shell execution and tmux-backed persistent sessions. |
 | `src/local_shell_mcp/fs_ops.py` | Workspace path resolution and file operations. |
 | `src/local_shell_mcp/search_ops.py` | Ripgrep search and compact tree views. |
