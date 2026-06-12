@@ -359,7 +359,7 @@ cleanup() {{ rm -rf "$TMPDIR"; }}
 trap cleanup EXIT
 curl -fsSL "$BUNDLE_URL" -o "$TMPDIR/worker.tgz"
 tar -xzf "$TMPDIR/worker.tgz" -C "$TMPDIR"
-export PYTHONPATH="$TMPDIR:${{PYTHONPATH:-}}"
+export PYTHONPATH="$TMPDIR:$TMPDIR/vendor:${{PYTHONPATH:-}}"
 ARGS=(--server "$SERVER" --invite "$INVITE" --workdir "$WORKDIR")
 if [ -n "$NAME" ]; then ARGS+=(--name "$NAME"); fi
 if [ "$PERSIST" = "1" ]; then ARGS+=(--persist); fi
