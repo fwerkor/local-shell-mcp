@@ -1,3 +1,5 @@
+import shutil
+
 import pytest
 
 from local_shell_mcp.search_ops import grep, tree
@@ -81,6 +83,8 @@ def test_tool_error_returns_successful_error_result():
 async def test_grep_accepts_query_starting_with_dash(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     get_settings.cache_clear()
+    if not shutil.which(get_settings().rg_bin):
+        pytest.skip("missing rg")
     term = chr(45) + "needle"
     (tmp_path / "dash.txt").write_text(term + "\\n", encoding="utf-8")
 
