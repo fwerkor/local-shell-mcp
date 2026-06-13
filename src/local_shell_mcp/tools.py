@@ -411,7 +411,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(meta=oauth_meta)
     async def run_shell_tool(command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None) -> dict:
-        """Run a shell command in the controlled container. This is the primary coding-agent tool."""
+        """Run a shell command in the controlled container. This is the primary coding-agent tool. timeout_s defaults to 10 seconds and may be set to at most 120 seconds."""
         try:
             return _ok((await public_run_shell(command, cwd, timeout_s, max_output_bytes)).model_dump())
         except Exception as exc:
@@ -797,7 +797,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(meta=oauth_meta)
     async def remote_run_shell_tool(machine: str, command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None) -> dict:
-        """Run a shell command on a remote worker machine."""
+        """Run a shell command on a remote worker machine. timeout_s defaults to 10 seconds and may be set to at most 120 seconds."""
         return await _remote_call(machine, "run_shell_tool", {"command": command, "cwd": cwd, "timeout_s": timeout_s, "max_output_bytes": max_output_bytes}, timeout_s)
 
     @mcp.tool(meta=oauth_meta)
