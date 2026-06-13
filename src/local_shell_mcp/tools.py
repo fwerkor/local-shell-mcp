@@ -64,6 +64,18 @@ from .shell_ops import (
     start_shell,
 )
 from .todo_ops import todo_read, todo_write
+from .transfer_ops import (
+    normalize_chunk_size,
+    transfer_abort_write,
+    transfer_alloc_temp_path,
+    transfer_begin_write,
+    transfer_finish_write,
+    transfer_pack_dir,
+    transfer_read_chunk,
+    transfer_stat,
+    transfer_unpack_archive,
+    transfer_write_chunk,
+)
 
 
 def _ok(data: Any = None, message: str = "") -> dict:
@@ -298,6 +310,305 @@ def _secret_scan_sync(cwd: str = ".", glob: str | None = None, max_results: int 
 
 async def _secret_scan(cwd: str = ".", glob: str | None = None, max_results: int = 200) -> dict:
     return await _to_thread(_secret_scan_sync, cwd, glob, max_results)
+
+
+class RemoteTransferError(RuntimeError):
+    pass
+
+
+def _unwrap_remote_transfer_result(result: dict, *, machine: str, tool: str) -> Any:
+    if not result.get("ok", False):
+        raise RemoteTransferError(f"{tool} on {machine} failed: {result.get('message') or result}")
+    data = result.get("data")
+    if isinstance(data, dict) and data.get("status") == "error":
+        raise RemoteTransferError(
+            f"{tool} on {machine} failed: {data.get('error_type', 'remote_error')}: {data.get('message', '')}"
+        )
+    return data
+
+
+async def _remote_transfer_data(machine: str, tool: str, args: dict, timeout_s: int | None = None) -> Any:
+    result = await remote_manager().call(machine, tool, args, timeout_s)
+    return _unwrap_remote_transfer_result(result, machine=machine, tool=tool)
+
+
+async def _copy_local_file_to_remote(
+    source_path: str,
+    dst_machine: str,
+    dst_path: str,
+    overwrite: bool = True,
+    chunk_size: int | None = None,
+) -> dict:
+    chunk_bytes = normalize_chunk_size(chunk_size)
+    stat = await _to_thread(transfer_stat, source_path, True)
+    if stat.get("type") != "file":
+        raise ValueError(f"source is not a file: {source_path}")
+    begin = await _remote_transfer_data(
+        dst_machine,
+        "transfer_begin_write",
+        {"path": dst_path, "overwrite": overwrite, "expected_bytes": stat["size"]},
+    )
+    transfer_id = begin["transfer_id"]
+    chunks = 0
+    offset = 0
+    try:
+        while offset < stat["size"]:
+            chunk = await _to_thread(transfer_read_chunk, source_path, offset, chunk_bytes)
+            if chunk["bytes"] == 0:
+                break
+            await _remote_transfer_data(
+                dst_machine,
+                "transfer_write_chunk",
+                {
+                    "path": dst_path,
+                    "transfer_id": transfer_id,
+                    "offset": offset,
+                    "data_b64": chunk["data_b64"],
+                    "expected_sha256": chunk["sha256"],
+                },
+            )
+            offset += chunk["bytes"]
+            chunks += 1
+        finish = await _remote_transfer_data(
+            dst_machine,
+            "transfer_finish_write",
+            {
+                "path": dst_path,
+                "transfer_id": transfer_id,
+                "expected_bytes": stat["size"],
+                "expected_sha256": stat.get("sha256"),
+            },
+        )
+    except Exception:
+        with suppress(Exception):
+            await _remote_transfer_data(dst_machine, "transfer_abort_write", {"path": dst_path, "transfer_id": transfer_id})
+        raise
+    return {
+        "source": {"machine": "controller", "path": stat["path"]},
+        "destination": {"machine": dst_machine, "path": finish["path"]},
+        "bytes": stat["size"],
+        "sha256": stat.get("sha256"),
+        "chunks": chunks,
+        "chunk_size": chunk_bytes,
+    }
+
+
+async def _copy_remote_file_to_local(
+    src_machine: str,
+    src_path: str,
+    destination_path: str,
+    overwrite: bool = True,
+    chunk_size: int | None = None,
+) -> dict:
+    chunk_bytes = normalize_chunk_size(chunk_size)
+    stat = await _remote_transfer_data(src_machine, "transfer_stat", {"path": src_path, "sha256": True})
+    if stat.get("type") != "file":
+        raise ValueError(f"source is not a file: {src_path}")
+    begin = await _to_thread(transfer_begin_write, destination_path, overwrite, stat["size"])
+    transfer_id = begin["transfer_id"]
+    chunks = 0
+    offset = 0
+    try:
+        while offset < stat["size"]:
+            chunk = await _remote_transfer_data(
+                src_machine,
+                "transfer_read_chunk",
+                {"path": src_path, "offset": offset, "chunk_size": chunk_bytes},
+            )
+            if chunk["bytes"] == 0:
+                break
+            await _to_thread(
+                transfer_write_chunk,
+                destination_path,
+                transfer_id,
+                offset,
+                chunk["data_b64"],
+                chunk["sha256"],
+            )
+            offset += chunk["bytes"]
+            chunks += 1
+        finish = await _to_thread(
+            transfer_finish_write,
+            destination_path,
+            transfer_id,
+            stat["size"],
+            stat.get("sha256"),
+        )
+    except Exception:
+        with suppress(Exception):
+            await _to_thread(transfer_abort_write, destination_path, transfer_id)
+        raise
+    return {
+        "source": {"machine": src_machine, "path": stat["path"]},
+        "destination": {"machine": "controller", "path": finish["path"]},
+        "bytes": stat["size"],
+        "sha256": stat.get("sha256"),
+        "chunks": chunks,
+        "chunk_size": chunk_bytes,
+    }
+
+
+async def _copy_remote_file_to_remote(
+    src_machine: str,
+    src_path: str,
+    dst_machine: str,
+    dst_path: str,
+    overwrite: bool = True,
+    chunk_size: int | None = None,
+) -> dict:
+    chunk_bytes = normalize_chunk_size(chunk_size)
+    stat = await _remote_transfer_data(src_machine, "transfer_stat", {"path": src_path, "sha256": True})
+    if stat.get("type") != "file":
+        raise ValueError(f"source is not a file: {src_path}")
+    begin = await _remote_transfer_data(
+        dst_machine,
+        "transfer_begin_write",
+        {"path": dst_path, "overwrite": overwrite, "expected_bytes": stat["size"]},
+    )
+    transfer_id = begin["transfer_id"]
+    chunks = 0
+    offset = 0
+    try:
+        while offset < stat["size"]:
+            chunk = await _remote_transfer_data(
+                src_machine,
+                "transfer_read_chunk",
+                {"path": src_path, "offset": offset, "chunk_size": chunk_bytes},
+            )
+            if chunk["bytes"] == 0:
+                break
+            await _remote_transfer_data(
+                dst_machine,
+                "transfer_write_chunk",
+                {
+                    "path": dst_path,
+                    "transfer_id": transfer_id,
+                    "offset": offset,
+                    "data_b64": chunk["data_b64"],
+                    "expected_sha256": chunk["sha256"],
+                },
+            )
+            offset += chunk["bytes"]
+            chunks += 1
+        finish = await _remote_transfer_data(
+            dst_machine,
+            "transfer_finish_write",
+            {
+                "path": dst_path,
+                "transfer_id": transfer_id,
+                "expected_bytes": stat["size"],
+                "expected_sha256": stat.get("sha256"),
+            },
+        )
+    except Exception:
+        with suppress(Exception):
+            await _remote_transfer_data(dst_machine, "transfer_abort_write", {"path": dst_path, "transfer_id": transfer_id})
+        raise
+    return {
+        "source": {"machine": src_machine, "path": stat["path"]},
+        "destination": {"machine": dst_machine, "path": finish["path"]},
+        "bytes": stat["size"],
+        "sha256": stat.get("sha256"),
+        "chunks": chunks,
+        "chunk_size": chunk_bytes,
+    }
+
+
+async def _remote_cleanup_file(machine: str, path: str) -> None:
+    with suppress(Exception):
+        await _remote_transfer_data(machine, "delete_file_or_dir", {"path": path, "recursive": False})
+
+
+async def _copy_remote_dir_to_remote(
+    src_machine: str,
+    src_path: str,
+    dst_machine: str,
+    dst_path: str,
+    overwrite: bool = True,
+    chunk_size: int | None = None,
+) -> dict:
+    pack = await _remote_transfer_data(src_machine, "transfer_pack_dir", {"path": src_path, "compression": "gz"})
+    dst_archive = await _remote_transfer_data(dst_machine, "transfer_alloc_temp_path", {"suffix": ".tar.gz"})
+    try:
+        copy_result = await _copy_remote_file_to_remote(
+            src_machine, pack["archive_path"], dst_machine, dst_archive["path"], True, chunk_size
+        )
+        unpack = await _remote_transfer_data(
+            dst_machine,
+            "transfer_unpack_archive",
+            {"archive_path": dst_archive["path"], "dst_path": dst_path, "overwrite": overwrite, "cleanup_archive": True},
+        )
+    except Exception:
+        await _remote_cleanup_file(dst_machine, dst_archive.get("path", ""))
+        raise
+    finally:
+        await _remote_cleanup_file(src_machine, pack.get("archive_path", ""))
+    return {
+        "source": {"machine": src_machine, "path": pack["path"]},
+        "destination": {"machine": dst_machine, "path": unpack["path"]},
+        "archive_bytes": pack["bytes"],
+        "archive_sha256": pack["sha256"],
+        "chunks": copy_result["chunks"],
+        "entries": unpack["entries"],
+    }
+
+
+async def _copy_remote_dir_to_local(
+    src_machine: str,
+    src_path: str,
+    destination_path: str,
+    overwrite: bool = True,
+    chunk_size: int | None = None,
+) -> dict:
+    pack = await _remote_transfer_data(src_machine, "transfer_pack_dir", {"path": src_path, "compression": "gz"})
+    archive = await _to_thread(transfer_alloc_temp_path, ".tar.gz")
+    try:
+        copy_result = await _copy_remote_file_to_local(
+            src_machine, pack["archive_path"], archive["path"], True, chunk_size
+        )
+        unpack = await _to_thread(transfer_unpack_archive, archive["path"], destination_path, overwrite, True)
+    finally:
+        await _remote_cleanup_file(src_machine, pack.get("archive_path", ""))
+    return {
+        "source": {"machine": src_machine, "path": pack["path"]},
+        "destination": {"machine": "controller", "path": unpack["path"]},
+        "archive_bytes": pack["bytes"],
+        "archive_sha256": pack["sha256"],
+        "chunks": copy_result["chunks"],
+        "entries": unpack["entries"],
+    }
+
+
+async def _copy_local_dir_to_remote(
+    source_path: str,
+    dst_machine: str,
+    dst_path: str,
+    overwrite: bool = True,
+    chunk_size: int | None = None,
+) -> dict:
+    pack = await _to_thread(transfer_pack_dir, source_path, "gz")
+    dst_archive = await _remote_transfer_data(dst_machine, "transfer_alloc_temp_path", {"suffix": ".tar.gz"})
+    try:
+        copy_result = await _copy_local_file_to_remote(pack["archive_path"], dst_machine, dst_archive["path"], True, chunk_size)
+        unpack = await _remote_transfer_data(
+            dst_machine,
+            "transfer_unpack_archive",
+            {"archive_path": dst_archive["path"], "dst_path": dst_path, "overwrite": overwrite, "cleanup_archive": True},
+        )
+    except Exception:
+        await _remote_cleanup_file(dst_machine, dst_archive.get("path", ""))
+        raise
+    finally:
+        with suppress(Exception):
+            delete_path(pack.get("archive_path", ""), False)
+    return {
+        "source": {"machine": "controller", "path": pack["path"]},
+        "destination": {"machine": dst_machine, "path": unpack["path"]},
+        "archive_bytes": pack["bytes"],
+        "archive_sha256": pack["sha256"],
+        "chunks": copy_result["chunks"],
+        "entries": unpack["entries"],
+    }
 
 
 def _read_audit_tail_entries(lines: int = 100) -> dict:
@@ -906,6 +1217,54 @@ def build_mcp() -> FastMCP:
     async def remote_delete_file_or_dir(machine: str, path: str, recursive: bool = False) -> dict:
         """Delete a file or directory on a remote worker."""
         return await _remote_call(machine, "delete_file_or_dir", {"path": path, "recursive": recursive})
+
+    @mcp.tool(meta=oauth_meta)
+    async def remote_copy_file(src_machine: str, src_path: str, dst_machine: str, dst_path: str, overwrite: bool = True, chunk_size: int | None = None) -> dict:
+        """Copy a file from one remote worker machine to another through the control server."""
+        try:
+            return _ok(await _copy_remote_file_to_remote(src_machine, src_path, dst_machine, dst_path, overwrite, chunk_size))
+        except Exception as exc:
+            return _handled_error(exc)
+
+    @mcp.tool(meta=oauth_meta)
+    async def remote_copy_dir(src_machine: str, src_path: str, dst_machine: str, dst_path: str, overwrite: bool = False, chunk_size: int | None = None) -> dict:
+        """Copy a directory tree from one remote worker machine to another through the control server."""
+        try:
+            return _ok(await _copy_remote_dir_to_remote(src_machine, src_path, dst_machine, dst_path, overwrite, chunk_size))
+        except Exception as exc:
+            return _handled_error(exc)
+
+    @mcp.tool(meta=oauth_meta)
+    async def remote_pull_file(machine: str, remote_path: str, local_path: str, overwrite: bool = True, chunk_size: int | None = None) -> dict:
+        """Copy a file from a remote worker to the control server workspace."""
+        try:
+            return _ok(await _copy_remote_file_to_local(machine, remote_path, local_path, overwrite, chunk_size))
+        except Exception as exc:
+            return _handled_error(exc)
+
+    @mcp.tool(meta=oauth_meta)
+    async def remote_push_file(local_path: str, machine: str, remote_path: str, overwrite: bool = True, chunk_size: int | None = None) -> dict:
+        """Copy a file from the control server workspace to a remote worker."""
+        try:
+            return _ok(await _copy_local_file_to_remote(local_path, machine, remote_path, overwrite, chunk_size))
+        except Exception as exc:
+            return _handled_error(exc)
+
+    @mcp.tool(meta=oauth_meta)
+    async def remote_pull_dir(machine: str, remote_path: str, local_path: str, overwrite: bool = False, chunk_size: int | None = None) -> dict:
+        """Copy a directory tree from a remote worker to the control server workspace."""
+        try:
+            return _ok(await _copy_remote_dir_to_local(machine, remote_path, local_path, overwrite, chunk_size))
+        except Exception as exc:
+            return _handled_error(exc)
+
+    @mcp.tool(meta=oauth_meta)
+    async def remote_push_dir(local_path: str, machine: str, remote_path: str, overwrite: bool = False, chunk_size: int | None = None) -> dict:
+        """Copy a directory tree from the control server workspace to a remote worker."""
+        try:
+            return _ok(await _copy_local_dir_to_remote(local_path, machine, remote_path, overwrite, chunk_size))
+        except Exception as exc:
+            return _handled_error(exc)
 
     @mcp.tool(meta=oauth_meta)
     async def remote_apply_patch(machine: str, patch: str, cwd: str = ".") -> dict:

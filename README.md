@@ -102,6 +102,7 @@ Remote worker control and near-parity tools:
 - `remote_shell_start` / `remote_shell_send` / `remote_shell_read` / `remote_shell_kill` / `remote_shell_list`
 - `remote_list_files` / `remote_tree_view` / `remote_glob_search` / `remote_grep_search`
 - `remote_read_file` / `remote_read_many_files` / `remote_write_file` / `remote_edit_file` / `remote_multi_edit_file` / `remote_delete_file_or_dir` / `remote_apply_patch`
+- `remote_copy_file` / `remote_copy_dir` / `remote_pull_file` / `remote_push_file` / `remote_pull_dir` / `remote_push_dir`
 - `remote_git_clone_tool` / `remote_git_status_tool` / `remote_git_diff_tool` / `remote_git_log_tool` / `remote_git_checkout_tool` / `remote_git_fetch_tool` / `remote_git_pull_tool` / `remote_git_add_tool` / `remote_git_commit_tool` / `remote_git_push_tool` / `remote_git_show_tool` / `remote_git_reset_tool`
 - `remote_playwright_install_tool` / `remote_browser_screenshot_tool` / `remote_browser_get_text_tool` / `remote_browser_eval_tool` / `remote_browser_pdf_tool` / `remote_playwright_run_script_tool`
 
@@ -331,6 +332,20 @@ Use local-shell-mcp remote_list_machines.
 Then use the near-parity remote tool set, such as `remote_run_shell_tool`,
 `remote_read_file`, `remote_write_file`, `remote_grep_search`,
 `remote_git_pull_tool`, or `remote_shell_start`.
+
+Remote workers also support control-server-mediated file transfer when machines
+cannot reach each other directly. Files are copied in base64 chunks through the
+control server into a destination-side temporary file, then size/SHA-256 checked
+and atomically renamed into place. Directory transfer packs the source directory
+as a `tar.gz`, transfers the archive, then safely unpacks it on the destination.
+Directory transfer tools default to `overwrite=false`; set it explicitly when replacing an existing destination tree.
+
+```text
+remote_copy_file(src_machine="hpc-a", src_path="/data/result.bin", dst_machine="hpc-b", dst_path="/scratch/result.bin")
+remote_copy_dir(src_machine="hpc-a", src_path="/data/run-42", dst_machine="hpc-b", dst_path="/scratch/run-42")
+remote_pull_file(machine="hpc-a", remote_path="/data/result.bin", local_path="downloads/result.bin")
+remote_push_dir(local_path="configs/run-42", machine="hpc-a", remote_path="/data/configs/run-42")
+```
 
 Remote mode settings:
 

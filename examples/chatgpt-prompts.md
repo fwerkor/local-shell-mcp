@@ -23,3 +23,12 @@ Use local-shell-mcp. On remote machine `npu-4card`, run `pwd`, `hostname`, `pyth
 ## Remote code edit and test
 
 Use local-shell-mcp. On remote machine `hpc-a`, inspect `/home/cyh/project`, search for the requested symbol with `remote_grep_search`, edit the file with `remote_edit_file` or `remote_apply_patch`, run the relevant test with `remote_run_shell_tool`, then show `remote_git_diff_tool`.
+
+
+## Remote host-to-host file transfer
+
+Use local-shell-mcp. Copy `/data/run-42/result.tar.zst` from remote machine `hpc-a` to `/scratch/imports/result.tar.zst` on remote machine `hpc-b` using `remote_copy_file`, then verify the destination size and checksum with `remote_run_shell_tool`.
+
+## Remote directory transfer through the controller
+
+Use local-shell-mcp. Copy directory `/data/run-42` from remote machine `hpc-a` to `/scratch/run-42` on remote machine `hpc-b` using `remote_copy_dir`. The remote machines cannot SSH to each other, so use the control-server-mediated transfer tools rather than `scp` or `rsync`.

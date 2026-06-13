@@ -69,6 +69,17 @@ from .shell_ops import (
     send_shell,
     start_shell,
 )
+from .transfer_ops import (
+    transfer_abort_write,
+    transfer_alloc_temp_path,
+    transfer_begin_write,
+    transfer_finish_write,
+    transfer_pack_dir,
+    transfer_read_chunk,
+    transfer_stat,
+    transfer_unpack_archive,
+    transfer_write_chunk,
+)
 
 REMOTE_JOIN_PATH = "/join"
 REMOTE_API_PREFIX = "/remote"
@@ -473,6 +484,24 @@ async def execute_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         return await _to_thread(multi_edit_text, args["path"], args["edits"])
     if tool == "delete_file_or_dir":
         return await _to_thread(delete_path, args["path"], args.get("recursive", False))
+    if tool == "transfer_stat":
+        return await _to_thread(transfer_stat, args["path"], args.get("sha256", True))
+    if tool == "transfer_read_chunk":
+        return await _to_thread(transfer_read_chunk, args["path"], args.get("offset", 0), args.get("chunk_size"))
+    if tool == "transfer_begin_write":
+        return await _to_thread(transfer_begin_write, args["path"], args.get("overwrite", True), args.get("expected_bytes"))
+    if tool == "transfer_write_chunk":
+        return await _to_thread(transfer_write_chunk, args["path"], args["transfer_id"], args["offset"], args["data_b64"], args.get("expected_sha256"))
+    if tool == "transfer_finish_write":
+        return await _to_thread(transfer_finish_write, args["path"], args["transfer_id"], args.get("expected_bytes"), args.get("expected_sha256"))
+    if tool == "transfer_abort_write":
+        return await _to_thread(transfer_abort_write, args["path"], args["transfer_id"])
+    if tool == "transfer_alloc_temp_path":
+        return await _to_thread(transfer_alloc_temp_path, args.get("suffix", ".bin"))
+    if tool == "transfer_pack_dir":
+        return await _to_thread(transfer_pack_dir, args["path"], args.get("compression", "gz"))
+    if tool == "transfer_unpack_archive":
+        return await _to_thread(transfer_unpack_archive, args["archive_path"], args["dst_path"], args.get("overwrite", True), args.get("cleanup_archive", True))
     if tool == "apply_patch":
         return await _apply_patch_text(args["patch"], args.get("cwd", "."))
     if tool == "git_clone_tool":
@@ -515,7 +544,7 @@ async def execute_worker_tool(tool: str, args: dict[str, Any]) -> Any:
 
 
 def worker_capabilities() -> list[str]:
-    return ["shell", "persistent_shell", "files", "search", "git", "python", "playwright"]
+    return ["shell", "persistent_shell", "files", "file_transfer", "search", "git", "python", "playwright"]
 
 
 def worker_info(workdir: str) -> dict[str, Any]:
