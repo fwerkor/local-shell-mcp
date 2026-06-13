@@ -164,6 +164,7 @@ jobs:
             --collect-all uvicorn \
             --collect-all fastapi \
             --collect-all starlette \
+            --exclude-module cryptography \
             scripts/pyinstaller-entry.py
 
       - name: Smoke test executable
