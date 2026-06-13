@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo \
     curl \
     git \
+    gh \
     jq \
     openssh-client \
     patch \
@@ -78,7 +79,7 @@ WORKDIR /app
 COPY requirements-agent.txt pyproject.toml README.md LICENSE /app/
 RUN pip install --no-cache-dir -r requirements-agent.txt
 COPY src /app/src
-RUN pip install --no-cache-dir -e . "playwright==${PLAYWRIGHT_VERSION}"
+RUN pip install --no-cache-dir -e ".[dev]" "playwright==${PLAYWRIGHT_VERSION}"
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN useradd -m -u 10001 agent \
