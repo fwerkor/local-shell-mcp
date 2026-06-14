@@ -19,7 +19,7 @@ async def test_run_shell_tool_rejects_timeout_above_public_cap(tmp_path, monkeyp
     get_settings.cache_clear()
 
     response = await build_mcp().call_tool("run_shell_tool", {"command": "echo ok", "timeout_s": 3600})
-    payload = response[0].text
+    payload = response[0][0].text
 
     assert "timeout_s must be <= 120 seconds for public run_shell" in payload
 
@@ -36,7 +36,7 @@ async def test_mcp_tool_watchdog_returns_handled_timeout(tmp_path, monkeypatch):
     monkeypatch.setattr(tools_module, "git_status", hanging_git_status)
 
     response = await build_mcp().call_tool("git_status_tool", {"cwd": "."})
-    payload = response[0].text
+    payload = response[0][0].text
 
     assert "git_status_tool exceeded 0.01 second public tool timeout" in payload
 
@@ -89,7 +89,7 @@ async def test_mcp_tool_watchdog_times_out_sync_tool(tmp_path, monkeypatch):
     monkeypatch.setattr(tools_module, "list_dir", blocking_list_dir)
 
     response = await build_mcp().call_tool("list_files", {"path": "."})
-    payload = response[0].text
+    payload = response[0][0].text
 
     assert "list_files exceeded 0.01 second public tool timeout" in payload
 

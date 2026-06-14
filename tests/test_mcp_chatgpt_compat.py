@@ -32,6 +32,15 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
     assert tools["search"].meta["securitySchemes"][0]["type"] == "noauth"
     assert tools["environment_info"].meta["securitySchemes"][0]["type"] == "oauth2"
 
+    assert all(tool.outputSchema is not None for tool in tools.values())
+    assert tools["run_shell_tool"].outputSchema["title"] == "ToolResult"
+    assert set(tools["run_shell_tool"].outputSchema["properties"]) == {"ok", "message", "data"}
+    assert tools["search"].outputSchema["properties"]["result"]["type"] == "string"
+
+    content, structured = await mcp.call_tool("environment_info", {})
+    assert content
+    assert structured["ok"] is True
+
 
 @pytest.mark.asyncio
 async def test_full_container_mode_marks_command_tools_for_auto_approval(tmp_path, monkeypatch):

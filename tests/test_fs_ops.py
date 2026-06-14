@@ -142,7 +142,7 @@ async def test_read_many_files_rejects_too_many_files(tmp_path, monkeypatch):
     (tmp_path / "b.txt").write_text("b", encoding="utf-8")
 
     response = await build_mcp().call_tool("read_many_files", {"paths": ["a.txt", "b.txt"]})
-    payload = response[0].text
+    payload = response[0][0].text
 
     assert "Refusing to read 2 files; max is 1" in payload
 
