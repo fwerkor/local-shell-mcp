@@ -7,9 +7,18 @@ nav:
   - Home: index.md
   - Getting started:
       - Quickstart: getting-started/quickstart.md
-      - Deployment and installation: guides/deployment.md
+      - Runtime vs client model: guides/deployment.md
+  - Runtime installation:
+      - Choose a runtime: guides/deployment.md
+      - Docker Compose: installation/docker.md
+      - VS Code extension: installation/vscode-extension.md
+      - Standalone binary: installation/binary.md
+      - Python / pipx / source: installation/python.md
+      - Stdio mode: installation/stdio.md
+  - Client connections:
       - ChatGPT connector: getting-started/chatgpt-connector.md
-      - VS Code extension: guides/vscode.md
+      - Generic MCP clients: clients/generic-mcp.md
+      - Network connectivity: clients/connectivity.md
   - Guides:
       - Usage patterns: guides/usage-patterns.md
       - Remote workers: guides/remote-workers.md

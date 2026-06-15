@@ -1,6 +1,21 @@
 # ChatGPT connector
 
-`local-shell-mcp` is designed for ChatGPT Developer Mode and full MCP clients. It also exposes read-only connector-style `search` and `fetch` tools for normal connector discovery.
+This page covers ChatGPT as a client connection. It does not choose the runtime. Before using this page, run the server with Docker, the VS Code extension, a binary, or a Python install.
+
+`local-shell-mcp` is designed for ChatGPT Developer Mode and full MCP clients. It also exposes read-only connector-style `search` and `fetch` tools for connector discovery.
+
+## Runtime prerequisites
+
+Pick and start one runtime first:
+
+| Runtime | Page |
+|---|---|
+| Docker Compose | [Docker Compose runtime](../installation/docker.md) |
+| VS Code extension | [VS Code extension runtime](../installation/vscode-extension.md) |
+| Standalone binary | [Standalone binary runtime](../installation/binary.md) |
+| Python / pipx / source | [Python runtimes](../installation/python.md) |
+
+Then expose that runtime through a network path ChatGPT can reach. See [network connectivity](../clients/connectivity.md).
 
 ## Public URL
 

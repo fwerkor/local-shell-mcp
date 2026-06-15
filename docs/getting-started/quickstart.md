@@ -1,6 +1,6 @@
 # Quickstart
 
-This guide starts the recommended Docker Compose deployment and connects it to ChatGPT. Other installation methods are documented in [Deployment and installation methods](../guides/deployment.md).
+This guide uses Docker Compose as the first runtime and ChatGPT as the first client. These are separate choices: Docker, VS Code extension, binary, Python, and stdio are runtime options; ChatGPT and generic MCP clients are client options. See [runtime choices and deployment model](../guides/deployment.md) for the full map.
 
 ## Requirements
 
@@ -122,9 +122,12 @@ curl -i http://127.0.0.1:8765/healthz
 
 | Need | Page |
 |---|---|
-| Compare Docker, VS Code, binary, source, and stdio deployments | [Deployment and installation methods](../guides/deployment.md) |
-| Add ChatGPT | [ChatGPT connector](chatgpt-connector.md) |
-| Use the VS Code extension | [VS Code extension](../guides/vscode.md) |
+| Understand runtime vs client choices | [Runtime choices and deployment model](../guides/deployment.md) |
+| Run with Docker Compose | [Docker Compose runtime](../installation/docker.md) |
+| Run from VS Code | [VS Code extension runtime](../installation/vscode-extension.md) |
+| Run with a release binary | [Standalone binary runtime](../installation/binary.md) |
+| Run with Python or source checkout | [Python runtimes](../installation/python.md) |
+| Add ChatGPT as a client | [ChatGPT connector](chatgpt-connector.md) |
 | Choose tools and write better prompts | [Usage patterns](../guides/usage-patterns.md) |
 | Attach an HPC, NPU/GPU, or NAT machine | [Remote workers](../guides/remote-workers.md) |
 | Understand every MCP tool | [Tools reference](../reference/tools.md) |

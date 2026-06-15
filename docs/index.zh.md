@@ -7,7 +7,7 @@
 
 <div class="hero-actions" markdown>
 [快速开始](getting-started/quickstart.md){ .hero-action .hero-action--primary }
-[部署方式对比](guides/deployment.md){ .hero-action .hero-action--secondary }
+[选择运行时](guides/deployment.md){ .hero-action .hero-action--secondary }
 [工具参考](reference/tools.md){ .hero-action .hero-action--secondary }
 </div>
 </div>
@@ -19,8 +19,8 @@
 </div>
 
 <div class="feature-card" markdown>
-### 多种部署路径
-支持 Docker Compose、隧道 sidecar、VS Code 扩展、独立二进制、`pipx`、源码安装和 stdio 模式。
+### 运行时和客户端分层
+Docker、VS Code 扩展、二进制、Python 和 stdio 是运行时；ChatGPT 和其它 MCP 客户端是接入层。
 </div>
 
 <div class="feature-card" markdown>
@@ -38,11 +38,11 @@
 ## 架构
 
 ```text
-ChatGPT / MCP client
-  -> HTTPS 端点，通常是隧道或反向代理
-  -> local-shell-mcp server
-  -> /workspace 受控工作区
-  -> 可选远程节点，通过出站轮询连接
+运行时层：Docker / VS Code 扩展 / 二进制 / Python / stdio
+网络层：localhost / HTTPS 反向代理 / 隧道 / stdio 管道
+客户端层：ChatGPT / 通用 MCP 客户端 / 编辑器辅助入口
+受控工作区：/workspace 或配置的 workspace root
+可选远程节点：远程机器主动连接控制端
 ```
 
 建议把容器或虚拟机作为隔离边界。
@@ -52,11 +52,11 @@ ChatGPT / MCP client
 | 场景 | 阅读页面 | 原因 |
 |---|---|---|
 | 第一次部署给 ChatGPT 使用 | [快速开始](getting-started/quickstart.md) | Docker Compose、OAuth 和 `/mcp` 基础路径 |
-| 比较 Docker、VS Code、二进制、源码或 stdio | [部署与安装](guides/deployment.md) | 并列说明各部署方式和反向代理要求 |
-| 添加 ChatGPT | [ChatGPT 连接器](getting-started/chatgpt-connector.md) | 端点、OAuth、首次安全提示和工具发现 |
-| 从 VS Code 启动 | [VS Code 扩展](guides/vscode.md) | 扩展安装、设置和公网 URL 行为 |
+| 选择运行时层 | [运行时选择](guides/deployment.md) | 把 Docker、VS Code、二进制、Python 和 stdio 与客户端接入分开说明 |
+| 把 ChatGPT 作为客户端接入 | [ChatGPT 连接器](getting-started/chatgpt-connector.md) | 端点、OAuth、首次安全提示和工具发现 |
+| 从 VS Code 启动运行时 | [VS Code 扩展运行时](installation/vscode-extension.md) | 编辑器启动、设置和主机安全边界 |
 | 学习如何使用工具集 | [使用模式](guides/usage-patterns.md) | 提示词模板和工具选择建议 |
-| 理解所有工具 | [工具参考](reference/tools.md) | 本地和远程 MCP 工具完整目录 |
+| 理解所有工具 | [工具参考](reference/tools.md) | 每个工具的用途、参数、返回值、组合方式和注意事项 |
 | 连接 HPC、NPU/GPU 或服务器节点 | [远程节点](guides/remote-workers.md) | 出站 worker 加入流程和远程工具用法 |
 | 分享生成的文件 | [文件链接](guides/file-links.md) | 带 TTL 和撤销能力的临时下载链接 |
 | 加固公开部署 | [安全](security.md) | 隔离、OAuth、工作区范围和审计日志 |
@@ -76,11 +76,12 @@ ChatGPT / MCP client
 
 ### 用 ChatGPT 编程
 
-1. 在专用工作区启动 `local-shell-mcp`。
-2. 把公开 `/mcp` 端点添加到 ChatGPT。
-3. 先让 ChatGPT 检查仓库并执行只读检查。
-4. 确认后再让它修改文件、运行测试、检查 diff、提交和推送。
-5. 涉及文件链接或远程系统时查看审计日志。
+1. 选择 Docker Compose、VS Code 扩展、二进制或 Python 等运行时，并在专用工作区启动。
+2. 如果 ChatGPT 需要访问该运行时，先配置网络入口。
+3. 把公开 `/mcp` 端点添加到 ChatGPT。
+4. 先让 ChatGPT 检查仓库并执行只读检查。
+5. 确认后再让它修改文件、运行测试、检查 diff、提交和推送。
+6. 涉及文件链接或远程系统时查看审计日志。
 
 ### 远程 HPC 或加速卡主机
 

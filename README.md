@@ -11,7 +11,7 @@
 [![Docker](https://img.shields.io/badge/docker-ready-2496ed?logo=docker&logoColor=white)](https://github.com/fwerkor/local-shell-mcp/pkgs/container/local-shell-mcp)
 [![License](https://img.shields.io/github/license/fwerkor/local-shell-mcp)](LICENSE)
 
-[Documentation](https://fwerkor.github.io/local-shell-mcp/) · [Quickstart](https://fwerkor.github.io/local-shell-mcp/getting-started/quickstart/) · [ChatGPT connector](https://fwerkor.github.io/local-shell-mcp/getting-started/chatgpt-connector/) · [Remote workers](https://fwerkor.github.io/local-shell-mcp/guides/remote-workers/) · [Releases](https://github.com/fwerkor/local-shell-mcp/releases)
+[Documentation](https://fwerkor.github.io/local-shell-mcp/) · [Quickstart](https://fwerkor.github.io/local-shell-mcp/getting-started/quickstart/) · [Runtime choices](https://fwerkor.github.io/local-shell-mcp/guides/deployment/) · [ChatGPT connector](https://fwerkor.github.io/local-shell-mcp/getting-started/chatgpt-connector/) · [Tools](https://fwerkor.github.io/local-shell-mcp/reference/tools/) · [Releases](https://github.com/fwerkor/local-shell-mcp/releases)
 
 </div>
 
@@ -20,10 +20,10 @@
 `local-shell-mcp` gives ChatGPT Developer Mode and other MCP clients controlled access to a real execution environment. It exposes a dedicated workspace with shell, persistent shell, filesystem, search, patch, Git, Playwright, audit, todo, public file links, and outbound remote-worker tools.
 
 ```text
-ChatGPT / MCP client
-  -> HTTPS endpoint, commonly Cloudflare Tunnel
-  -> local-shell-mcp container or binary
-  -> controlled workspace at /workspace
+Runtime: Docker / VS Code extension / binary / Python / stdio
+  -> exposure: localhost, HTTPS proxy/tunnel, or stdio pipe
+  -> client: ChatGPT or another MCP client
+  -> controlled workspace at /workspace or configured root
   -> optional remote workers connected over outbound HTTP(S)
 ```
 
@@ -81,11 +81,11 @@ The public MCP endpoint is:
 https://your-public-host.example.com/mcp
 ```
 
-Full setup instructions are in the [documentation](https://fwerkor.github.io/local-shell-mcp/).
+Full setup instructions are in the [documentation](https://fwerkor.github.io/local-shell-mcp/). Runtime choices are documented separately from client connections.
 
 ## ChatGPT setup
 
-For full shell, filesystem, Git, and Playwright tools, use ChatGPT Developer Mode or another full MCP client.
+For full shell, filesystem, Git, and Playwright tools, use ChatGPT Developer Mode or another full MCP client. ChatGPT is a client connection; choose and start a runtime first.
 
 1. Expose the server through HTTPS.
 2. Keep OAuth enabled.
@@ -95,9 +95,9 @@ For full shell, filesystem, Git, and Playwright tools, use ChatGPT Developer Mod
 
 Read the dedicated [ChatGPT connector guide](https://fwerkor.github.io/local-shell-mcp/getting-started/chatgpt-connector/).
 
-## VS Code extension
+## VS Code extension runtime
 
-Release assets include `local-shell-mcp-vscode-<version>.vsix`. The extension starts `local-shell-mcp` for the current VS Code workspace, checks `/healthz`, copies the MCP URL, and copies a ready-to-paste ChatGPT setup prompt.
+Release assets include `local-shell-mcp-vscode-<version>.vsix`. The extension is a runtime launcher for the current VS Code workspace. It starts the same server, checks `/healthz`, copies the MCP URL, and copies a ready-to-paste ChatGPT setup prompt.
 
 Basic flow:
 
@@ -132,7 +132,7 @@ The public MCP surface includes:
 - Remote workers: `remote_invite`, `remote_list_machines`, `remote_run_shell_tool`, `remote_*` filesystem/Git/browser/transfer tools.
 - Diagnostics: `environment_info`, `audit_tail`, `todo_read_tool`, `todo_write_tool`.
 
-The generated tool reference is available in the [docs](https://fwerkor.github.io/local-shell-mcp/reference/tools/).
+The detailed tool reference, including purpose, inputs, returns, combinations, and notes for every tool, is available in the [docs](https://fwerkor.github.io/local-shell-mcp/reference/tools/).
 
 ## Security model
 

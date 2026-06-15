@@ -7,7 +7,7 @@ Give your AI assistant a controlled shell, a real workspace, Git, browser automa
 
 <div class="hero-actions" markdown>
 [Get started](getting-started/quickstart.md){ .hero-action .hero-action--primary }
-[Compare deployments](guides/deployment.md){ .hero-action .hero-action--secondary }
+[Choose runtime](guides/deployment.md){ .hero-action .hero-action--secondary }
 [Tools reference](reference/tools.md){ .hero-action .hero-action--secondary }
 </div>
 </div>
@@ -19,8 +19,8 @@ Run tests, inspect repositories, patch files, operate Git, and keep an audit tra
 </div>
 
 <div class="feature-card" markdown>
-### Multiple deployment paths
-Run it with Docker Compose, a tunnel sidecar, the VS Code extension, a standalone binary, `pipx`, source install, or stdio mode.
+### Runtime and client layers
+Choose a runtime such as Docker, VS Code extension, binary, Python, or stdio, then connect ChatGPT or another MCP client separately.
 </div>
 
 <div class="feature-card" markdown>
@@ -38,11 +38,11 @@ Use it when the AI needs to inspect a repository, run tests, edit files, operate
 ## Architecture
 
 ```text
-ChatGPT / MCP client
-  -> HTTPS endpoint, usually a tunnel or reverse proxy
-  -> local-shell-mcp server
-  -> controlled workspace at /workspace
-  -> optional remote workers connected through outbound polling
+Runtime layer: Docker / VS Code extension / binary / Python / stdio
+Exposure layer: localhost / HTTPS proxy / tunnel / stdio pipe
+Client layer: ChatGPT / generic MCP client / editor helper
+Controlled workspace: /workspace or configured workspace root
+Optional remote workers: outbound machine connections
 ```
 
 The intended isolation boundary is the container or VM running the service.
@@ -52,11 +52,11 @@ The intended isolation boundary is the container or VM running the service.
 | Scenario | Start here | Why |
 |---|---|---|
 | First public ChatGPT deployment | [Quickstart](getting-started/quickstart.md) | Docker Compose path with OAuth and `/mcp` setup |
-| Choosing between Docker, VS Code, binary, source, or stdio | [Deployment and installation methods](guides/deployment.md) | Side-by-side method comparison and proxy requirements |
-| Adding ChatGPT | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, first safe prompt, tool discovery |
-| Running from VS Code | [VS Code extension](guides/vscode.md) | Extension install, settings, public URL behavior |
+| Choosing the runtime layer | [Runtime choices](guides/deployment.md) | Explains Docker, VS Code, binary, Python, and stdio as separate runtime options |
+| Adding ChatGPT as a client | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, first safe prompt, tool discovery |
+| Running from VS Code | [VS Code extension runtime](installation/vscode-extension.md) | Editor-launched runtime and host-safety notes |
 | Learning how to operate the toolset | [Usage patterns](guides/usage-patterns.md) | Prompt templates and tool-choice guidance |
-| Understanding every tool | [Tools reference](reference/tools.md) | Complete catalog of local and remote MCP tools |
+| Understanding every tool | [Tools reference](reference/tools.md) | Detailed purpose, inputs, returns, combinations, and notes for every tool |
 | Connecting an HPC, NPU/GPU, or server node | [Remote workers](guides/remote-workers.md) | Outbound worker join flow and remote tool usage |
 | Sharing generated files | [File links](guides/file-links.md) | Tokenized download URLs with TTL and revocation |
 | Hardening a deployment | [Security](security.md) | Isolation, OAuth, workspace scope, and audit logs |
@@ -76,11 +76,12 @@ The intended isolation boundary is the container or VM running the service.
 
 ### Coding with ChatGPT
 
-1. Start `local-shell-mcp` in a dedicated workspace.
-2. Add the public `/mcp` endpoint to ChatGPT.
-3. Ask ChatGPT to inspect the repository and run read-only checks first.
-4. Let it patch files, run tests, review diffs, commit, and push when approved.
-5. Review the audit log when the task involves file links or remote systems.
+1. Start a runtime such as Docker Compose, VS Code extension, binary, or Python in a dedicated workspace.
+2. Expose the HTTP runtime if ChatGPT needs network access.
+3. Add the public `/mcp` endpoint to ChatGPT.
+4. Ask ChatGPT to inspect the repository and run read-only checks first.
+5. Let it patch files, run tests, review diffs, commit, and push when approved.
+6. Review the audit log when the task involves file links or remote systems.
 
 ### Remote HPC or accelerator host
 

@@ -1,6 +1,6 @@
 # 快速开始
 
-本页使用推荐的 Docker Compose 方式启动服务，并连接到 ChatGPT。其它安装方式见 [部署与安装](../guides/deployment.md)。
+本页把 Docker Compose 作为第一个运行时，把 ChatGPT 作为第一个客户端。两者是独立选择：Docker、VS Code 扩展、二进制、Python 和 stdio 是运行时；ChatGPT 和通用 MCP 客户端是接入方式。完整关系见 [运行时与客户端模型](../guides/deployment.md)。
 
 ## 要求
 
@@ -122,9 +122,12 @@ curl -i http://127.0.0.1:8765/healthz
 
 | 需求 | 页面 |
 |---|---|
-| 比较 Docker、VS Code、二进制、源码和 stdio 部署 | [部署与安装](../guides/deployment.md) |
-| 添加 ChatGPT | [ChatGPT 连接器](chatgpt-connector.md) |
-| 使用 VS Code 扩展 | [VS Code 扩展](../guides/vscode.md) |
+| 理解运行时与客户端关系 | [运行时与客户端模型](../guides/deployment.md) |
+| 使用 Docker Compose 运行 | [Docker Compose 运行时](../installation/docker.md) |
+| 从 VS Code 启动运行时 | [VS Code 扩展运行时](../installation/vscode-extension.md) |
+| 使用独立二进制运行 | [独立二进制运行时](../installation/binary.md) |
+| 使用 Python、pipx 或源码运行 | [Python 运行时](../installation/python.md) |
+| 添加 ChatGPT 客户端 | [ChatGPT 连接器](chatgpt-connector.md) |
 | 选择工具并写更好的提示词 | [使用模式](../guides/usage-patterns.md) |
 | 连接 HPC、NPU/GPU 或 NAT 机器 | [远程节点](../guides/remote-workers.md) |
 | 理解每一个 MCP 工具 | [工具参考](../reference/tools.md) |
