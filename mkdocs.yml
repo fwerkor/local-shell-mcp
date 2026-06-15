@@ -18,8 +18,29 @@ nav:
   - Troubleshooting: troubleshooting.md
 markdown_extensions:
   - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.superfences
   - toc:
       permalink: true
 
 theme:
   name: material
+  language: en
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    - scheme: slate
+      primary: deep purple
+      accent: cyan
+    - scheme: default
+      primary: deep purple
+      accent: cyan
+extra_css:
+  - assets/stylesheets/extra.css
