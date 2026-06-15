@@ -1,5 +1,5 @@
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
 from local_shell_mcp.http_app import build_http_app
 from local_shell_mcp.settings import get_settings
@@ -26,8 +26,10 @@ async def test_http_list_files_matches_mcp_payload(tmp_path, monkeypatch):
     http_payload = client.post("/tools/list_files", json={"path": "."}).json()
     mcp_payload = _mcp_data(await build_mcp().call_tool("list_files", {"path": "."}))
 
-    trim = lambda rows: sorted((item["path"], item["type"], item["size"]) for item in rows)
-    assert trim(http_payload) == trim(mcp_payload)
+    def comparable_listing(rows):
+        return sorted((item["path"], item["type"], item["size"]) for item in rows)
+
+    assert comparable_listing(http_payload) == comparable_listing(mcp_payload)
 
 
 @pytest.mark.asyncio

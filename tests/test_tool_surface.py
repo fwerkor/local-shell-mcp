@@ -3,7 +3,6 @@ import pytest
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.tools import build_mcp
 
-
 LOCAL_TOOL_NAMES = {
     "search",
     "fetch",

@@ -11,8 +11,7 @@ def test_export_tools_json_script_outputs_current_tool_surface(tmp_path, monkeyp
         [sys.executable, "scripts/export-tools-json.py"],
         check=True,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
 
     tools = json.loads(result.stdout)
