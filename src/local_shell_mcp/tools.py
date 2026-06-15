@@ -159,6 +159,8 @@ OAUTH_SECURITY_SCHEMES = [
 ]
 NOAUTH_SECURITY_SCHEMES = [{"type": "noauth"}]
 PUBLIC_TOOL_TIMEOUT_S = PUBLIC_RUN_SHELL_TIMEOUT_CAP_S
+SENSITIVE_TOOL_ARG_FRAGMENTS = ("token", "secret", "password", "passwd", "pin", "jwt", "key")
+MAX_AUDIT_TOOL_ARG_STRING = 500
 
 
 class PublicToolTimeoutError(TimeoutError):
@@ -201,6 +203,36 @@ def _transport_security_settings() -> TransportSecuritySettings:
     )
 
 
+def _redact_audit_value(value: Any) -> Any:
+    if isinstance(value, str):
+        if len(value) > MAX_AUDIT_TOOL_ARG_STRING:
+            return value[:MAX_AUDIT_TOOL_ARG_STRING] + "…<truncated>"
+        return value
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    if isinstance(value, list):
+        return [_redact_audit_value(item) for item in value[:20]]
+    if isinstance(value, tuple):
+        return [_redact_audit_value(item) for item in value[:20]]
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for name, item in list(value.items())[:50]:
+            name_s = str(name)
+            if any(fragment in name_s.lower() for fragment in SENSITIVE_TOOL_ARG_FRAGMENTS):
+                out[name_s] = "<redacted>"
+            else:
+                out[name_s] = _redact_audit_value(item)
+        return out
+    return repr(value)
+
+
+def _audit_tool_arguments(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "positional_count": len(args),
+        "keyword_args": _redact_audit_value(kwargs),
+    }
+
+
 def _timeout_payload_for_tool(tool_name: str, exc: Exception) -> dict | str:
     if tool_name == "search":
         return json.dumps({"results": []}, ensure_ascii=False)
@@ -224,12 +256,19 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
         tool_name = tool.name
 
         async def wrapped(*args, __original=original, __tool_name=tool_name, **kwargs):  # noqa: ANN002, ANN003
+            audit("mcp_tool_call_start", tool=__tool_name, arguments=_audit_tool_arguments(args, kwargs))
             try:
-                return await asyncio.wait_for(__original(*args, **kwargs), timeout=PUBLIC_TOOL_TIMEOUT_S)
+                result = await asyncio.wait_for(__original(*args, **kwargs), timeout=PUBLIC_TOOL_TIMEOUT_S)
+                audit("mcp_tool_call_end", tool=__tool_name, ok=True)
+                return result
             except TimeoutError:
                 exc = PublicToolTimeoutError(f"{__tool_name} exceeded {PUBLIC_TOOL_TIMEOUT_S} second public tool timeout")
                 audit("tool_timeout", tool=__tool_name, timeout_s=PUBLIC_TOOL_TIMEOUT_S)
+                audit("mcp_tool_call_end", tool=__tool_name, ok=False, error=type(exc).__name__)
                 return _timeout_payload_for_tool(__tool_name, exc)
+            except Exception as exc:
+                audit("mcp_tool_call_end", tool=__tool_name, ok=False, error=type(exc).__name__)
+                raise
 
         tool.fn = wrapped
 
