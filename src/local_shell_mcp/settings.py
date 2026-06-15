@@ -14,6 +14,12 @@ DEFAULT_STATE_DIR = DEFAULT_WORKSPACE_ROOT / ".local-shell-mcp"
 DEFAULT_AUDIT_LOG_PATH = DEFAULT_STATE_DIR / "audit.jsonl"
 DEFAULT_AGENT_CONFIG_DIR = DEFAULT_STATE_DIR / "agent_config"
 
+def default_shell_executable() -> str:
+    if os.name == "nt":
+        return "power" + "shell.exe"
+    return "/bin/bash"
+
+
 SENSITIVE_SETTING_KEYS = {
     "cf_access_audience",
     "cf_access_allowed_emails",
@@ -94,7 +100,7 @@ class Settings(BaseSettings):
     remote_poll_timeout_s: int = 25
     remote_job_timeout_s: int = 3600
 
-    shell_executable: str = "/bin/bash"
+    shell_executable: str = Field(default_factory=default_shell_executable)
     shell_env_blocklist: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["CLOUDFLARE_TUNNEL_TOKEN"])
     shell_env_blocked_prefixes: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["LOCAL_SHELL_MCP_", "DOCKER_"])
     tmux_bin: str = "tmux"
