@@ -155,6 +155,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e . pyinstaller typer
+          EXTRA_PYINSTALLER_ARGS=()
+          if [[ "${{ matrix.runner }}" == windows-* ]]; then
+            EXTRA_PYINSTALLER_ARGS+=(--collect-all winpty)
+          fi
           pyinstaller \
             --clean \
             --onefile \
@@ -165,6 +169,7 @@ jobs:
             --collect-all fastapi \
             --collect-all starlette \
             --exclude-module cryptography \
+            "${EXTRA_PYINSTALLER_ARGS[@]}" \
             scripts/pyinstaller-entry.py
 
       - name: Smoke test executable

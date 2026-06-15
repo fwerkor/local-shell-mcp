@@ -33,6 +33,7 @@ dependencies = [
   "python-multipart>=0.0.9",
   "pathspec>=0.12.1",
   "playwright>=1.44.0",
+  "pywinpty>=2.0.13; platform_system == \"Windows\"",
 ]
 
 [project.optional-dependencies]

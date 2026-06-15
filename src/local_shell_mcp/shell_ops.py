@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import conpty_ops
 from .audit import audit
 from .fs_ops import relative_display, resolve_path
 from .models import CommandResult
@@ -140,6 +141,10 @@ def _persistent_shell_args(command: str | None = None) -> list[str]:
 
 def _use_native_persistent_shell_backend() -> bool:
     return sys.platform == "win32"
+
+
+def _use_windows_persistent_shell_backend() -> bool:
+    return _use_native_persistent_shell_backend()
 
 
 async def _spawn_process(command: str, cwd: str) -> asyncio.subprocess.Process:
@@ -463,7 +468,9 @@ async def _native_list_shells() -> dict:
 
 
 async def start_shell(cwd: str = ".", name: str | None = None, command: str | None = None) -> dict:
-    if _use_native_persistent_shell_backend():
+    if _use_windows_persistent_shell_backend():
+        if conpty_ops.is_available():
+            return await conpty_ops.start_shell(cwd, name, command, check_command_policy)
         return await _native_start_shell(cwd, name, command)
 
     resolved_cwd = resolve_path(cwd, must_exist=True)
@@ -491,7 +498,9 @@ async def start_shell(cwd: str = ".", name: str | None = None, command: str | No
 
 
 async def send_shell(session_id: str, input_text: str, enter: bool = True) -> dict:
-    if _use_native_persistent_shell_backend():
+    if _use_windows_persistent_shell_backend():
+        if conpty_ops.has_session(session_id):
+            return await conpty_ops.send_shell(session_id, input_text, enter)
         return await _native_send_shell(session_id, input_text, enter)
 
     args = ["send-keys", "-t", session_id, input_text]
@@ -505,7 +514,9 @@ async def send_shell(session_id: str, input_text: str, enter: bool = True) -> di
 
 
 async def read_shell(session_id: str, lines: int = 200) -> dict:
-    if _use_native_persistent_shell_backend():
+    if _use_windows_persistent_shell_backend():
+        if conpty_ops.has_session(session_id):
+            return await conpty_ops.read_shell(session_id, lines)
         return await _native_read_shell(session_id, lines)
 
     result = await tmux(["capture-pane", "-p", "-t", session_id, "-S", f"-{max(1, lines)}"])
@@ -516,7 +527,9 @@ async def read_shell(session_id: str, lines: int = 200) -> dict:
 
 
 async def kill_shell(session_id: str) -> dict:
-    if _use_native_persistent_shell_backend():
+    if _use_windows_persistent_shell_backend():
+        if conpty_ops.has_session(session_id):
+            return await conpty_ops.kill_shell(session_id)
         return await _native_kill_shell(session_id)
 
     result = await tmux(["kill-session", "-t", session_id])
@@ -525,8 +538,10 @@ async def kill_shell(session_id: str) -> dict:
 
 
 async def list_shells() -> dict:
-    if _use_native_persistent_shell_backend():
-        return await _native_list_shells()
+    if _use_windows_persistent_shell_backend():
+        conpty_sessions = await conpty_ops.list_shells()
+        native_sessions = await _native_list_shells()
+        return {"sessions": [*conpty_sessions.get("sessions", []), *native_sessions.get("sessions", [])]}
 
     result = await tmux(["list-sessions", "-F", "#{session_name}\t#{session_created}\t#{session_attached}"], timeout_s=5)
     if not result.ok:

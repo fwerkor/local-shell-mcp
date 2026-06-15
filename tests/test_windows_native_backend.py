@@ -2,8 +2,8 @@ import asyncio
 
 import pytest
 
-from local_shell_mcp.settings import get_settings
 import local_shell_mcp.shell_ops as ops
+from local_shell_mcp.settings import get_settings
 
 
 @pytest.mark.asyncio

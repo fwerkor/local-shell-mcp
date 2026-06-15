@@ -788,7 +788,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, meta=oauth_meta)
     async def shell_start(cwd: str = ".", name: str | None = None, command: str | None = None) -> ToolResult:
-        """Start a persistent shell session using tmux on Unix-like platforms and a native process backend on Windows. Use for interactive programs, development servers, REPLs, long-running watches, or commands whose output must be read incrementally. For one-shot commands, use run_shell_tool."""
+        """Start a persistent shell session using tmux on Unix-like platforms, ConPTY on Windows when pywinpty is available, and native process fallback on Windows. Use for interactive programs, development servers, REPLs, long-running watches, or commands whose output must be read incrementally. For one-shot commands, use run_shell_tool."""
         try:
             return _ok(await start_shell(cwd, name, command))
         except Exception as exc:
