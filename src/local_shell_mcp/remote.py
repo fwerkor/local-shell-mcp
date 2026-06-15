@@ -446,7 +446,59 @@ async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict[st
     result = await run_shell(f"python3 {shlex.quote(str(script))}", cwd=cwd, timeout_s=public_run_shell_timeout(timeout_s), max_output_bytes=1_000_000)
     return {**result.model_dump(), "script_path": relative_display(script)}
 
+REMOTE_WORKER_TOOL_NAMES = frozenset({
+    "environment_info",
+    "run_shell_tool",
+    "run_python_tool",
+    "shell_start",
+    "shell_send",
+    "shell_read",
+    "shell_kill",
+    "shell_list",
+    "list_files",
+    "tree_view",
+    "glob_search",
+    "grep_search",
+    "read_file",
+    "read_many_files",
+    "write_file",
+    "edit_file",
+    "multi_edit_file",
+    "delete_file_or_dir",
+    "transfer_stat",
+    "transfer_read_chunk",
+    "transfer_begin_write",
+    "transfer_write_chunk",
+    "transfer_finish_write",
+    "transfer_abort_write",
+    "transfer_alloc_temp_path",
+    "transfer_pack_dir",
+    "transfer_unpack_archive",
+    "apply_patch",
+    "git_clone_tool",
+    "git_status_tool",
+    "git_diff_tool",
+    "git_log_tool",
+    "git_checkout_tool",
+    "git_fetch_tool",
+    "git_pull_tool",
+    "git_add_tool",
+    "git_commit_tool",
+    "git_push_tool",
+    "git_show_tool",
+    "git_reset_tool",
+    "playwright_install_tool",
+    "browser_screenshot_tool",
+    "browser_get_text_tool",
+    "browser_eval_tool",
+    "browser_pdf_tool",
+    "playwright_run_script_tool",
+})
+
+
 async def execute_worker_tool(tool: str, args: dict[str, Any]) -> Any:
+    if tool not in REMOTE_WORKER_TOOL_NAMES:
+        raise ValueError(f"unsupported remote worker tool: {tool}")
     if tool == "environment_info":
         result = await run_shell("uname -a; echo '---'; id; echo '---'; pwd; echo '---'; python3 --version; git --version", cwd=".", timeout_s=10)
         return {"settings": safe_settings_dump(), "probe": result.model_dump()}
