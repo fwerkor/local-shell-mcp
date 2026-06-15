@@ -1,6 +1,6 @@
 # Quickstart
 
-This guide starts a Docker Compose deployment suitable for ChatGPT Developer Mode and full MCP clients.
+This guide starts the recommended Docker Compose deployment and connects it to ChatGPT. Other installation methods are documented in [Deployment and installation methods](../guides/deployment.md).
 
 ## Requirements
 
@@ -30,16 +30,6 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
 CLOUDFLARE_TUNNEL_TOKEN=
 ```
 
-Generate secrets with any trusted password manager, or use:
-
-```bash
-python3 - <<'PY'
-import secrets
-print('PIN:', secrets.token_urlsafe(24))
-print('JWT:', secrets.token_hex(64))
-PY
-```
-
 ## 2. Start the server
 
 ```bash
@@ -55,11 +45,11 @@ docker compose logs --tail=100 local-shell-mcp
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-A healthy response returns HTTP `200` and a small JSON payload.
+A healthy response returns HTTP `200`.
 
 ## 3. Expose HTTPS
 
-For Cloudflare Tunnel:
+For Cloudflare Tunnel sidecar:
 
 ```bash
 docker compose --profile tunnel up -d
@@ -71,38 +61,53 @@ In Cloudflare Zero Trust, point the public hostname to:
 http://local-shell-mcp:8765
 ```
 
-For a reverse proxy such as Caddy or Nginx, forward HTTPS traffic to `127.0.0.1:8765` or the container network address.
+For Caddy, Nginx, Traefik, Nginx Proxy Manager, or another reverse proxy, forward HTTPS traffic to `127.0.0.1:8765` or the container network address.
 
 ## 4. Connect ChatGPT
 
-Use the endpoint:
+Use the MCP endpoint:
 
 ```text
 https://your-public-host.example.com/mcp
 ```
 
-Follow the [ChatGPT connector guide](chatgpt-connector.md) to finish OAuth and tool discovery.
+Follow the [ChatGPT connector guide](chatgpt-connector.md) to finish OAuth and tool approval.
 
-## 5. Confirm tool access
+## 5. Confirm tool access safely
 
-Ask the model to run a safe command such as:
+Ask the model:
 
 ```text
-Use local-shell-mcp to show the current workspace path and list the top-level files.
+Use local-shell-mcp. First call environment_info, then list the workspace root. Do not modify files yet.
 ```
 
-Expected tools:
+Expected read-only tools:
 
 - `environment_info`
 - `list_files`
-- `run_shell_tool`
+- `tree_view`
 - `read_file`
+
+## 6. Start with a bounded coding task
+
+A good first task:
+
+```text
+Inspect this repository, summarize the project layout, run the existing test suite if one is obvious, and do not change files.
+```
+
+After connectivity is confirmed, give more specific instructions:
+
+```text
+Fix the failing test. Read the relevant files first, make the smallest patch, run the targeted test, then show git diff. Do not commit until I approve.
+```
 
 ## Updating
 
 ```bash
 docker compose pull
 docker compose up -d
+curl -i http://127.0.0.1:8765/healthz
 ```
 
 If you use the tunnel profile:
@@ -110,16 +115,16 @@ If you use the tunnel profile:
 ```bash
 docker compose --profile tunnel pull
 docker compose --profile tunnel up -d
+curl -i http://127.0.0.1:8765/healthz
 ```
 
-## Binary deployment
+## Next pages
 
-Release assets include standalone binaries. Set a workspace root before starting:
-
-```bash
-export LOCAL_SHELL_MCP_WORKSPACE_ROOT=/path/to/workspace
-export LOCAL_SHELL_MCP_AUTH_MODE=oauth
-./local-shell-mcp --mode mcp
-```
-
-Binary deployments use host tools for Git, shells, compilers, tmux, LibreOffice, and Playwright browsers. Docker images include a broader toolchain by default.
+| Need | Page |
+|---|---|
+| Compare Docker, VS Code, binary, source, and stdio deployments | [Deployment and installation methods](../guides/deployment.md) |
+| Add ChatGPT | [ChatGPT connector](chatgpt-connector.md) |
+| Use the VS Code extension | [VS Code extension](../guides/vscode.md) |
+| Choose tools and write better prompts | [Usage patterns](../guides/usage-patterns.md) |
+| Attach an HPC, NPU/GPU, or NAT machine | [Remote workers](../guides/remote-workers.md) |
+| Understand every MCP tool | [Tools reference](../reference/tools.md) |

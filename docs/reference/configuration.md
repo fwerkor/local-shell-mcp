@@ -1,12 +1,147 @@
 # Configuration
 
-Environment variables use the `LOCAL_SHELL_MCP_` prefix and override YAML config values loaded by `LOCAL_SHELL_MCP_CONFIG` or `--config`.
+Environment variables use the `LOCAL_SHELL_MCP_` prefix and override YAML config values loaded by `LOCAL_SHELL_MCP_CONFIG` or `--config`. YAML keys use the field names shown below.
 
-Important settings:
+## Precedence
 
-- `LOCAL_SHELL_MCP_PUBLIC_BASE_URL`: public HTTPS origin used by OAuth and generated links.
-- `LOCAL_SHELL_MCP_AUTH_MODE`: `oauth` or `none`; do not expose public services with `none`.
-- `LOCAL_SHELL_MCP_WORKSPACE_ROOT`: root for normal file and command operations.
-- `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER`: disables built-in workspace/path restrictions when true.
-- `LOCAL_SHELL_MCP_REMOTE_ENABLED`: enables `/join`, `/remote/*`, and remote MCP tools.
-- `LOCAL_SHELL_MCP_SHELL_ENV_BLOCKLIST` and `LOCAL_SHELL_MCP_SHELL_ENV_BLOCKED_PREFIXES`: remove server-side environment values from user shell subprocesses.
+1. Built-in defaults from `Settings`.
+2. YAML config selected by `LOCAL_SHELL_MCP_CONFIG` or `--config`.
+3. Environment variables with the `LOCAL_SHELL_MCP_` prefix.
+4. CLI flags such as `--mode`, `--config`, `--remote`, and `--no-remote`, which set the corresponding environment values before settings load.
+
+## Minimal public configuration
+
+```env
+LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
+LOCAL_SHELL_MCP_AUTH_MODE=oauth
+LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me-long-random-pin
+LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-long-random-secret
+```
+
+For local-only testing, `auth_bypass_localhost` is enabled by default. Do not expose unauthenticated full MCP tools on a public network.
+
+## Settings reference
+
+### Server and workspace
+
+| YAML key | Environment variable | Default | Notes |
+|---|---|---|---|
+| `host` | `LOCAL_SHELL_MCP_HOST` | `'0.0.0.0'` |  |
+| `port` | `LOCAL_SHELL_MCP_PORT` | `8765` |  |
+| `mode` | `LOCAL_SHELL_MCP_MODE` | `'mcp'` | `mcp`, `http`, `stdio`, or reserved `both` value. |
+| `workspace_root` | `LOCAL_SHELL_MCP_WORKSPACE_ROOT` | `PosixPath('/workspace')` |  |
+| `state_dir` | `LOCAL_SHELL_MCP_STATE_DIR` | `PosixPath('/workspace/.local-shell-mcp')` |  |
+| `audit_log_path` | `LOCAL_SHELL_MCP_AUDIT_LOG_PATH` | `PosixPath('/workspace/.local-shell-mcp/audit.jsonl')` |  |
+| `agent_config_dir` | `LOCAL_SHELL_MCP_AGENT_CONFIG_DIR` | `PosixPath('/workspace/.local-shell-mcp/agent_config')` |  |
+| `allow_full_container` | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `True` | Disables workspace/path restrictions when true; use only inside disposable boundaries. |
+| `allow_network` | `LOCAL_SHELL_MCP_ALLOW_NETWORK` | `True` |  |
+
+### Limits
+
+| YAML key | Environment variable | Default | Notes |
+|---|---|---|---|
+| `default_timeout_s` | `LOCAL_SHELL_MCP_DEFAULT_TIMEOUT_S` | `60` |  |
+| `max_timeout_s` | `LOCAL_SHELL_MCP_MAX_TIMEOUT_S` | `3600` |  |
+| `max_output_bytes` | `LOCAL_SHELL_MCP_MAX_OUTPUT_BYTES` | `200000` |  |
+| `max_file_read_bytes` | `LOCAL_SHELL_MCP_MAX_FILE_READ_BYTES` | `512000` |  |
+| `max_file_write_bytes` | `LOCAL_SHELL_MCP_MAX_FILE_WRITE_BYTES` | `5000000` |  |
+| `max_grep_results` | `LOCAL_SHELL_MCP_MAX_GREP_RESULTS` | `200` |  |
+| `max_directory_entries` | `LOCAL_SHELL_MCP_MAX_DIRECTORY_ENTRIES` | `5000` |  |
+| `max_glob_results` | `LOCAL_SHELL_MCP_MAX_GLOB_RESULTS` | `5000` |  |
+| `max_tree_entries` | `LOCAL_SHELL_MCP_MAX_TREE_ENTRIES` | `5000` |  |
+| `max_read_many_files` | `LOCAL_SHELL_MCP_MAX_READ_MANY_FILES` | `100` |  |
+| `max_read_many_total_bytes` | `LOCAL_SHELL_MCP_MAX_READ_MANY_TOTAL_BYTES` | `5000000` |  |
+| `max_todos` | `LOCAL_SHELL_MCP_MAX_TODOS` | `1000` |  |
+| `max_todo_bytes` | `LOCAL_SHELL_MCP_MAX_TODO_BYTES` | `1000000` |  |
+| `max_audit_tail_bytes` | `LOCAL_SHELL_MCP_MAX_AUDIT_TAIL_BYTES` | `1000000` |  |
+| `max_audit_log_bytes` | `LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES` | `20000000` |  |
+| `max_tmp_files` | `LOCAL_SHELL_MCP_MAX_TMP_FILES` | `500` |  |
+| `max_tmp_bytes` | `LOCAL_SHELL_MCP_MAX_TMP_BYTES` | `50000000` |  |
+| `max_concurrent_commands` | `LOCAL_SHELL_MCP_MAX_CONCURRENT_COMMANDS` | `4` |  |
+| `max_tmux_sessions` | `LOCAL_SHELL_MCP_MAX_TMUX_SESSIONS` | `16` |  |
+
+### Agent bridge
+
+| YAML key | Environment variable | Default | Notes |
+|---|---|---|---|
+| `agent_bridge_enabled` | `LOCAL_SHELL_MCP_AGENT_BRIDGE_ENABLED` | `False` |  |
+| `agent_mcp_probe_timeout_s` | `LOCAL_SHELL_MCP_AGENT_MCP_PROBE_TIMEOUT_S` | `5.0` |  |
+| `agent_mcp_call_timeout_s` | `LOCAL_SHELL_MCP_AGENT_MCP_CALL_TIMEOUT_S` | `60.0` |  |
+| `agent_dynamic_mcp_tools` | `LOCAL_SHELL_MCP_AGENT_DYNAMIC_MCP_TOOLS` | `False` |  |
+| `agent_dynamic_skill_tools` | `LOCAL_SHELL_MCP_AGENT_DYNAMIC_SKILL_TOOLS` | `False` |  |
+
+### File links
+
+| YAML key | Environment variable | Default | Notes |
+|---|---|---|---|
+| `file_download_enabled` | `LOCAL_SHELL_MCP_FILE_DOWNLOAD_ENABLED` | `True` |  |
+| `file_download_default_ttl_s` | `LOCAL_SHELL_MCP_FILE_DOWNLOAD_DEFAULT_TTL_S` | `3600` |  |
+| `file_download_max_ttl_s` | `LOCAL_SHELL_MCP_FILE_DOWNLOAD_MAX_TTL_S` | `604800` |  |
+| `file_download_default_max_downloads` | `LOCAL_SHELL_MCP_FILE_DOWNLOAD_DEFAULT_MAX_DOWNLOADS` | `0` | `0` means no default download-count limit. |
+| `file_download_max_file_bytes` | `LOCAL_SHELL_MCP_FILE_DOWNLOAD_MAX_FILE_BYTES` | `0` | `0` means no configured file-size cap for download links. |
+
+### Remote workers
+
+| YAML key | Environment variable | Default | Notes |
+|---|---|---|---|
+| `remote_enabled` | `LOCAL_SHELL_MCP_REMOTE_ENABLED` | `True` | Controls `/join`, `/remote/*`, and `remote_*` MCP tools. |
+| `remote_invite_ttl_s` | `LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S` | `600` |  |
+| `remote_poll_timeout_s` | `LOCAL_SHELL_MCP_REMOTE_POLL_TIMEOUT_S` | `25` |  |
+| `remote_job_timeout_s` | `LOCAL_SHELL_MCP_REMOTE_JOB_TIMEOUT_S` | `3600` |  |
+
+### Shell and executable paths
+
+| YAML key | Environment variable | Default | Notes |
+|---|---|---|---|
+| `shell_executable` | `LOCAL_SHELL_MCP_SHELL_EXECUTABLE` | `'/bin/bash'` |  |
+| `shell_env_blocklist` | `LOCAL_SHELL_MCP_SHELL_ENV_BLOCKLIST` | `['CLOUDFLARE_TUNNEL_TOKEN']` |  |
+| `shell_env_blocked_prefixes` | `LOCAL_SHELL_MCP_SHELL_ENV_BLOCKED_PREFIXES` | `['LOCAL_SHELL_MCP_', 'DOCKER_']` | Comma-separated in environment variables; list in YAML. |
+| `tmux_bin` | `LOCAL_SHELL_MCP_TMUX_BIN` | `'tmux'` |  |
+| `rg_bin` | `LOCAL_SHELL_MCP_RG_BIN` | `'rg'` |  |
+| `git_bin` | `LOCAL_SHELL_MCP_GIT_BIN` | `'git'` |  |
+| `python_bin` | `LOCAL_SHELL_MCP_PYTHON_BIN` | `'python3'` |  |
+
+### Authentication and OAuth
+
+| YAML key | Environment variable | Default | Notes |
+|---|---|---|---|
+| `auth_mode` | `LOCAL_SHELL_MCP_AUTH_MODE` | `'oauth'` | Use `oauth` for public deployments. |
+| `auth_bypass_localhost` | `LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST` | `True` |  |
+| `require_auth_for_mcp_discovery` | `LOCAL_SHELL_MCP_REQUIRE_AUTH_FOR_MCP_DISCOVERY` | `False` |  |
+| `public_base_url` | `LOCAL_SHELL_MCP_PUBLIC_BASE_URL` | `'https://local-shell-mcp.fwerkor.eu.org'` | External HTTPS origin. Do not include `/mcp`. |
+| `oauth_issuer` | `LOCAL_SHELL_MCP_OAUTH_ISSUER` | `None` |  |
+| `oauth_resource` | `LOCAL_SHELL_MCP_OAUTH_RESOURCE` | `None` |  |
+| `oauth_admin_pin` | `LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN` | `'Cyh2006102'` |  |
+| `oauth_jwt_secret` | `LOCAL_SHELL_MCP_OAUTH_JWT_SECRET` | <generated or configured> |  |
+| `oauth_access_token_ttl_s` | `LOCAL_SHELL_MCP_OAUTH_ACCESS_TOKEN_TTL_S` | `0` | `0` means access tokens do not expire automatically. |
+| `oauth_code_ttl_s` | `LOCAL_SHELL_MCP_OAUTH_CODE_TTL_S` | `300` |  |
+
+### Built-in policy lists
+
+| YAML key | Environment variable | Default | Notes |
+|---|---|---|---|
+| `command_denylist` | `LOCAL_SHELL_MCP_COMMAND_DENYLIST` | `[]` | Cleared automatically when full-container mode is enabled. |
+| `path_denylist` | `LOCAL_SHELL_MCP_PATH_DENYLIST` | `[]` | Cleared automatically when full-container mode is enabled. |
+
+## YAML example
+
+```yaml
+host: 0.0.0.0
+port: 8765
+mode: mcp
+workspace_root: /workspace
+auth_mode: oauth
+remote_enabled: true
+file_download_enabled: true
+shell_env_blocked_prefixes:
+  - LOCAL_SHELL_MCP_
+  - DOCKER_
+```
+
+## Operational advice
+
+- Keep `allow_full_container=false` unless the container or VM is disposable.
+- Keep `auth_mode=oauth` for any public endpoint.
+- Disable `remote_enabled` if you do not use remote workers.
+- Disable `file_download_enabled` if you never need chat-downloadable artifacts.
+- Keep command, file, and audit limits high enough for coding tasks but low enough to prevent accidental runaway output.

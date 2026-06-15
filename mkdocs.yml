@@ -7,14 +7,16 @@ nav:
   - Home: index.md
   - Getting started:
       - Quickstart: getting-started/quickstart.md
+      - Deployment and installation: guides/deployment.md
       - ChatGPT connector: getting-started/chatgpt-connector.md
+      - VS Code extension: guides/vscode.md
   - Guides:
-      - Deployment: guides/deployment.md
+      - Usage patterns: guides/usage-patterns.md
       - Remote workers: guides/remote-workers.md
       - File links: guides/file-links.md
-      - Audit log: guides/audit-log.md
       - Git access: guides/git-access.md
-      - VS Code extension: guides/vscode.md
+      - Browser automation: guides/browser-automation.md
+      - Audit log: guides/audit-log.md
   - Reference:
       - Tools: reference/tools.md
       - Configuration: reference/configuration.md
@@ -56,11 +58,14 @@ plugins:
             Quickstart: 快速开始
             ChatGPT connector: ChatGPT 连接器
             Guides: 指南
+            Usage patterns: 使用模式
             Deployment: 部署
+            Deployment and installation: 部署与安装
             Remote workers: 远程节点
             File links: 文件链接
             Audit log: 审计日志
             Git access: Git 访问
+            Browser automation: 浏览器自动化
             VS Code extension: VS Code 扩展
             Reference: 参考
             Tools: 工具
@@ -77,11 +82,14 @@ plugins:
             Quickstart: 快速開始
             ChatGPT connector: ChatGPT 連接器
             Guides: 指南
+            Usage patterns: 使用模式
             Deployment: 部署
+            Deployment and installation: 部署與安裝
             Remote workers: 遠端節點
             File links: 檔案連結
             Audit log: 稽核日誌
             Git access: Git 存取
+            Browser automation: 瀏覽器自動化
             VS Code extension: VS Code 擴充
             Reference: 參考
             Tools: 工具
@@ -98,11 +106,14 @@ plugins:
             Quickstart: クイックスタート
             ChatGPT connector: ChatGPT コネクタ
             Guides: ガイド
+            Usage patterns: 使用パターン
             Deployment: デプロイ
+            Deployment and installation: デプロイとインストール
             Remote workers: リモートワーカー
             File links: ファイルリンク
             Audit log: 監査ログ
             Git access: Git アクセス
+            Browser automation: ブラウザー自動化
             VS Code extension: VS Code 拡張
             Reference: リファレンス
             Tools: ツール
@@ -119,11 +130,14 @@ plugins:
             Quickstart: 빠른 시작
             ChatGPT connector: ChatGPT 커넥터
             Guides: 가이드
+            Usage patterns: 사용 패턴
             Deployment: 배포
+            Deployment and installation: 배포 및 설치
             Remote workers: 원격 워커
             File links: 파일 링크
             Audit log: 감사 로그
             Git access: Git 접근
+            Browser automation: 브라우저 자동화
             VS Code extension: VS Code 확장
             Reference: 참조
             Tools: 도구
@@ -140,11 +154,14 @@ plugins:
             Quickstart: Inicio rápido
             ChatGPT connector: Conector ChatGPT
             Guides: Guías
+            Usage patterns: Patrones de uso
             Deployment: Despliegue
+            Deployment and installation: Despliegue e instalación
             Remote workers: Workers remotos
             File links: Enlaces de archivos
             Audit log: Registro de auditoría
             Git access: Acceso Git
+            Browser automation: Automatización del navegador
             VS Code extension: Extensión VS Code
             Reference: Referencia
             Tools: Herramientas
@@ -161,11 +178,14 @@ plugins:
             Quickstart: Démarrage rapide
             ChatGPT connector: Connecteur ChatGPT
             Guides: Guides
+            Usage patterns: Modèles d’utilisation
             Deployment: Déploiement
+            Deployment and installation: Déploiement et installation
             Remote workers: Workers distants
             File links: Liens de fichiers
             Audit log: Journal d’audit
             Git access: Accès Git
+            Browser automation: Automatisation du navigateur
             VS Code extension: Extension VS Code
             Reference: Référence
             Tools: Outils
@@ -182,11 +202,14 @@ plugins:
             Quickstart: Schnellstart
             ChatGPT connector: ChatGPT-Connector
             Guides: Anleitungen
+            Usage patterns: Nutzungsmuster
             Deployment: Deployment
+            Deployment and installation: Deployment und Installation
             Remote workers: Remote-Worker
             File links: Dateilinks
             Audit log: Audit-Log
             Git access: Git-Zugriff
+            Browser automation: Browser-Automatisierung
             VS Code extension: VS Code-Erweiterung
             Reference: Referenz
             Tools: Tools
@@ -203,11 +226,14 @@ plugins:
             Quickstart: Быстрый старт
             ChatGPT connector: Коннектор ChatGPT
             Guides: Руководства
+            Usage patterns: Сценарии использования
             Deployment: Развертывание
+            Deployment and installation: Развертывание и установка
             Remote workers: Удалённые workers
             File links: Ссылки на файлы
             Audit log: Журнал аудита
             Git access: Доступ к Git
+            Browser automation: Автоматизация браузера
             VS Code extension: Расширение VS Code
             Reference: Справочник
             Tools: Инструменты

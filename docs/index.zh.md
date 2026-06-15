@@ -1,25 +1,101 @@
-# local-shell-mcp 中文文档
+<div class="hero-shell" markdown>
+<span class="hero-eyebrow">ChatGPT-compatible MCP control plane</span>
 
-面向 ChatGPT Developer Mode 和其它 MCP 客户端的本地控制平面。它把受控工作区、shell、文件、Git、浏览器自动化、文件链接和远程节点统一暴露为 MCP 工具。
+# local-shell-mcp
 
-## Documentation paths
+让 ChatGPT 或其它 MCP 客户端在受控环境中使用真实 Shell、工作区、Git、浏览器自动化、文件分享和远程节点能力。
 
-- [快速开始](getting-started/quickstart.md)
-- [ChatGPT 连接器](getting-started/chatgpt-connector.md)
-- [远程节点](guides/remote-workers.md)
-- [安全说明](security.md)
-- [故障排查](troubleshooting.md)
+<div class="hero-actions" markdown>
+[快速开始](getting-started/quickstart.md){ .hero-action .hero-action--primary }
+[部署方式对比](guides/deployment.md){ .hero-action .hero-action--secondary }
+[工具参考](reference/tools.md){ .hero-action .hero-action--secondary }
+</div>
+</div>
 
-## Core architecture
+<div class="feature-grid" markdown>
+<div class="feature-card" markdown>
+### 真实编程环境
+在一个 MCP 端点里运行测试、检查仓库、修改文件、操作 Git，并保留审计记录。
+</div>
+
+<div class="feature-card" markdown>
+### 多种部署路径
+支持 Docker Compose、隧道 sidecar、VS Code 扩展、独立二进制、`pipx`、源码安装和 stdio 模式。
+</div>
+
+<div class="feature-card" markdown>
+### 远程机器控制
+通过远程节点的出站连接控制 NAT、防火墙或 HPC 环境后的机器，无需开放 SSH 入站端口。
+</div>
+</div>
+
+## 它提供什么
+
+`local-shell-mcp` 会把一个受控的本地或容器工作区暴露给 ChatGPT 和其它 MCP 客户端。它提供 Shell、持久 Shell、文件系统、搜索、补丁、Git、Playwright、审计、todo、临时文件链接和远程节点工具，并支持 ChatGPT 兼容的 MCP over HTTP 与 OAuth。
+
+适用场景包括：检查仓库、运行测试、修改代码、操作 Git、采集网页证据、生成可下载产物，或者控制只能主动连接控制端的远程机器。
+
+## 架构
 
 ```text
 ChatGPT / MCP client
-  -> HTTPS endpoint
-  -> local-shell-mcp control server
-  -> controlled workspace
-  -> optional outbound remote workers
+  -> HTTPS 端点，通常是隧道或反向代理
+  -> local-shell-mcp server
+  -> /workspace 受控工作区
+  -> 可选远程节点，通过出站轮询连接
 ```
 
-## Key safety rule
+建议把容器或虚拟机作为隔离边界。
 
-公网部署必须启用 OAuth；不要挂载 Docker socket、宿主机根目录或长期凭据。
+## 按场景选择入口
+
+| 场景 | 阅读页面 | 原因 |
+|---|---|---|
+| 第一次部署给 ChatGPT 使用 | [快速开始](getting-started/quickstart.md) | Docker Compose、OAuth 和 `/mcp` 基础路径 |
+| 比较 Docker、VS Code、二进制、源码或 stdio | [部署与安装](guides/deployment.md) | 并列说明各部署方式和反向代理要求 |
+| 添加 ChatGPT | [ChatGPT 连接器](getting-started/chatgpt-connector.md) | 端点、OAuth、首次安全提示和工具发现 |
+| 从 VS Code 启动 | [VS Code 扩展](guides/vscode.md) | 扩展安装、设置和公网 URL 行为 |
+| 学习如何使用工具集 | [使用模式](guides/usage-patterns.md) | 提示词模板和工具选择建议 |
+| 理解所有工具 | [工具参考](reference/tools.md) | 本地和远程 MCP 工具完整目录 |
+| 连接 HPC、NPU/GPU 或服务器节点 | [远程节点](guides/remote-workers.md) | 出站 worker 加入流程和远程工具用法 |
+| 分享生成的文件 | [文件链接](guides/file-links.md) | 带 TTL 和撤销能力的临时下载链接 |
+| 加固公开部署 | [安全](security.md) | 隔离、OAuth、工作区范围和审计日志 |
+
+## 主要工具族
+
+| 工具族 | 示例 | 用途 |
+|---|---|---|
+| Shell 和 Python | `run_shell_tool`, `run_python_tool`, `shell_start` | 构建、测试、脚本、长时间进程 |
+| 文件和搜索 | `tree_view`, `grep_search`, `read_file`, `apply_patch` | 仓库检查和精确修改 |
+| Git | `git_status_tool`, `git_diff_tool`, `git_commit_tool`, `git_push_tool` | 可审查的源码管理流程 |
+| 浏览器 | `browser_screenshot_tool`, `browser_get_text_tool`, `browser_eval_tool` | UI 检查、截图、渲染文档、页面文本 |
+| 文件链接 | `create_file_link`, `revoke_file_link` | 从聊天中下载生成产物 |
+| 远程节点 | `remote_invite`, `remote_run_shell_tool`, `remote_push_file` | NAT、防火墙或集群登录流程后的机器 |
+
+## 典型工作流
+
+### 用 ChatGPT 编程
+
+1. 在专用工作区启动 `local-shell-mcp`。
+2. 把公开 `/mcp` 端点添加到 ChatGPT。
+3. 先让 ChatGPT 检查仓库并执行只读检查。
+4. 确认后再让它修改文件、运行测试、检查 diff、提交和推送。
+5. 涉及文件链接或远程系统时查看审计日志。
+
+### 远程 HPC 或加速卡主机
+
+1. 创建一次性远程节点邀请。
+2. 在远程主机上粘贴生成的命令。
+3. 通过 ChatGPT 使用 `remote_run_shell_tool`、`remote_read_file`、`remote_push_file` 和远程 Git 工具。
+4. 任务结束后撤销该节点。
+
+### 产物生成
+
+1. 让 AI 在 `/workspace` 下生成文件。
+2. 创建带 TTL 或下载次数限制的临时文件链接。
+3. 在聊天中分享链接。
+4. 使用结束后撤销链接。
+
+## 语言
+
+本站使用 MkDocs 原生 i18n 插件构建。可以通过顶部语言选择器切换语言；尚未翻译的页面会回退到英文版本。
