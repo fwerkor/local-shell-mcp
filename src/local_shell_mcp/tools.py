@@ -772,7 +772,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, meta=oauth_meta)
     async def run_shell_tool(command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None) -> ToolResult:
-        """Run a shell command in the controlled container. This is the primary coding-agent tool. timeout_s defaults to 10 seconds and may be set to at most 120 seconds."""
+        """Run one non-interactive shell command in the controlled workspace/container. Use for build, test, package-manager, git, and inspection commands that should finish promptly. Parameters: command is the shell command string; cwd defaults to '.' and is resolved relative to the workspace unless full-container mode allows absolute paths. timeout_s defaults to 10 seconds and may be set to at most 120 seconds. For long-running, interactive, or streaming processes, use shell_start with shell_send and shell_read."""
         try:
             return _ok((await public_run_shell(command, cwd, timeout_s, max_output_bytes)).model_dump())
         except Exception as exc:
@@ -780,7 +780,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, meta=oauth_meta)
     async def run_python_tool(code: str, cwd: str = ".", timeout_s: int = 60) -> ToolResult:
-        """Write Python code to a temporary file and execute it."""
+        """Write Python code to a temporary file and execute it in the controlled workspace/container. Use for short scripts, structured file analysis, JSON manipulation, or calculations that are easier and safer in Python than shell. Keep code non-interactive and write durable outputs explicitly if needed."""
         try:
             return _ok(await _run_python(code, cwd, timeout_s))
         except Exception as exc:
@@ -788,7 +788,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, meta=oauth_meta)
     async def shell_start(cwd: str = ".", name: str | None = None, command: str | None = None) -> ToolResult:
-        """Start a persistent tmux-backed shell session."""
+        """Start a persistent tmux-backed shell session. Use for interactive programs, development servers, REPLs, long-running watches, or commands whose output must be read incrementally. For one-shot commands, use run_shell_tool."""
         try:
             return _ok(await start_shell(cwd, name, command))
         except Exception as exc:
@@ -796,7 +796,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, meta=oauth_meta)
     async def shell_send(session_id: str, input_text: str, enter: bool = True) -> ToolResult:
-        """Send input to a persistent shell session."""
+        """Send input to an existing persistent shell session. Use after shell_start when a process is waiting for commands or interactive input. Set enter=false only when intentionally sending partial input without a newline."""
         try:
             return _ok(await send_shell(session_id, input_text, enter))
         except Exception as exc:
@@ -804,7 +804,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, meta=oauth_meta)
     async def shell_read(session_id: str, lines: int = 200) -> ToolResult:
-        """Read recent output from a persistent shell session."""
+        """Read recent output from a persistent shell session. Use after shell_start or shell_send to inspect incremental output without blocking. Increase lines only when needed for context."""
         try:
             return _ok(await read_shell(session_id, lines))
         except Exception as exc:
@@ -812,7 +812,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, meta=oauth_meta)
     async def shell_kill(session_id: str) -> ToolResult:
-        """Kill a persistent shell session."""
+        """Terminate a persistent shell session by session_id. Use when a server, watch process, REPL, or stuck command is no longer needed. This is destructive for that session but does not delete files."""
         try:
             return _ok(await kill_shell(session_id))
         except Exception as exc:
@@ -820,7 +820,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, meta=oauth_meta)
     async def shell_list() -> ToolResult:
-        """List persistent shell sessions."""
+        """List active persistent shell sessions. Use before reading, sending to, or killing sessions when you do not know the session_id or need to check what long-running processes are active."""
         try:
             return _ok(await list_shells())
         except Exception as exc:
@@ -828,7 +828,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, meta=oauth_meta)
     async def list_files(path: str = ".", recursive: bool = False, max_entries: int = 500) -> ToolResult:
-        """List files and directories."""
+        """List files and directories under a path. Use for quick directory inspection when a compact listing is enough. path defaults to '.' and is workspace-relative unless full-container mode allows absolute paths; recursive walks descendants and max_entries is capped by server settings."""
         try:
             return _ok(await _to_thread(list_dir, path, recursive, max_entries))
         except Exception as exc:
@@ -866,7 +866,7 @@ def build_mcp() -> FastMCP:
         binary_preview: str | None = None,
         binary_preview_bytes: int = 256,
     ) -> ToolResult:
-        """Read a UTF-8 text file, optionally by line range."""
+        """Read a UTF-8 text file, optionally by line range. Use after locating a file to inspect exact content before editing. start_line and end_line are 1-based inclusive line numbers for paging large files; binary_preview can request a bounded hex or base64 preview."""
         try:
             return _ok(await _to_thread(read_text, path, start_line, end_line, binary_preview, binary_preview_bytes))
         except Exception as exc:
@@ -880,7 +880,7 @@ def build_mcp() -> FastMCP:
         binary_preview: str | None = None,
         binary_preview_bytes: int = 256,
     ) -> ToolResult:
-        """Read multiple UTF-8 text files."""
+        """Read multiple UTF-8 text files with the same optional line range. Use when comparing related small files or collecting context across a targeted path list; server settings cap file count and total bytes."""
         try:
             return _ok(
                 await _to_thread(
@@ -897,7 +897,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, meta=oauth_meta)
     async def create_file_link(path: str, ttl_s: int | None = None, filename: str | None = None, max_downloads: int | None = None) -> ToolResult:
-        """Create a temporary browser-accessible download URL for a file. max_downloads=0 means unlimited until expiry."""
+        """Create a temporary browser-accessible download URL for a regular workspace file. Generated links are public bearer URLs protected by a high-entropy token, TTL, optional download-count limit, optional size limit, and explicit revocation."""
         try:
             mod = __import__("local_shell_mcp.downloads", fromlist=["create_share_link"])
             return _ok(await _to_thread(mod.create_share_link, path, ttl_s, filename, max_downloads))
@@ -924,7 +924,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, meta=oauth_meta)
     async def write_file(path: str, content: str, overwrite: bool = True) -> ToolResult:
-        """Write a UTF-8 text file."""
+        """Write a UTF-8 text file. Use to create a new file or intentionally replace a whole file. overwrite defaults to true; set overwrite=false when creating only if absent. For precise modifications to existing files, use edit_file or apply_patch."""
         try:
             return _ok(await _to_thread(write_text, path, content, overwrite))
         except Exception as exc:
@@ -932,7 +932,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, meta=oauth_meta)
     async def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> ToolResult:
-        """Replace exact text in a file. Use this for precise code edits."""
+        """Replace exact text in a file. Use for small precise edits after reading the target file. old must match exactly, including whitespace and indentation; replace_all should be true only when every exact occurrence should change."""
         try:
             return _ok(await _to_thread(edit_text, path, old, new, replace_all))
         except Exception as exc:
@@ -940,7 +940,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, meta=oauth_meta)
     async def multi_edit_file(path: str, edits: list[dict]) -> ToolResult:
-        """Apply multiple exact-text edits to one file. Each edit has old, new, replace_all."""
+        """Apply multiple exact-text edits to one file. Use when several small replacements in the same file should be made together. Each old string must match exactly; read the file first to avoid stale or ambiguous edits."""
         try:
             return _ok(await _to_thread(multi_edit_text, path, edits))
         except Exception as exc:
@@ -948,7 +948,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, meta=oauth_meta)
     async def delete_file_or_dir(path: str, recursive: bool = False) -> ToolResult:
-        """Delete a file or directory inside the controlled workspace/container."""
+        """Delete a file or directory inside the controlled workspace/container. Use only when removal is intentional. recursive=false deletes files or empty directories; recursive=true is required for non-empty directories and should be used carefully."""
         try:
             return _ok(await _to_thread(delete_path, path, recursive))
         except Exception as exc:
@@ -956,7 +956,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, meta=oauth_meta)
     async def apply_patch(patch: str, cwd: str = ".") -> ToolResult:
-        """Apply a unified diff using git apply."""
+        """Apply a unified diff using git apply. Use for larger or multi-file edits where an exact patch is clearer than multiple edit_file calls. The patch is checked before application and cwd is workspace-relative unless full-container mode allows absolute paths."""
         try:
             return _ok(await _apply_patch_text(patch, cwd))
         except Exception as exc:

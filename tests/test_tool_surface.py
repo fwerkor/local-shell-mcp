@@ -126,3 +126,17 @@ async def test_remote_tools_can_be_disabled_from_surface(tmp_path, monkeypatch):
 
     assert tools == LOCAL_TOOL_NAMES
     assert tools.isdisjoint(REMOTE_TOOL_NAMES)
+
+
+@pytest.mark.asyncio
+async def test_key_tool_descriptions_guide_tool_choice(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
+    get_settings.cache_clear()
+
+    tools = {tool.name: tool for tool in await build_mcp().list_tools()}
+
+    assert "For long-running" in tools["run_shell_tool"].description
+    assert "old must match exactly" in tools["edit_file"].description
+    assert "recursive=true is required" in tools["delete_file_or_dir"].description
+    assert "high-entropy token" in tools["create_file_link"].description
