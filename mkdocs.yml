@@ -65,6 +65,15 @@ plugins:
             Home: 首页
             Getting started: 快速开始
             Quickstart: 快速开始
+            Runtime vs client model: Runtime 与 Client 模型
+            Runtime installation: Runtime 安装
+            Choose a runtime: 选择 Runtime
+            Standalone binary: 独立二进制
+            Python / pipx / source: Python / pipx / 源码
+            Stdio mode: stdio 模式
+            Client connections: Client 接入
+            Generic MCP clients: 通用 MCP Client
+            Network connectivity: 网络连通性
             ChatGPT connector: ChatGPT 连接器
             Guides: 指南
             Usage patterns: 使用模式
@@ -89,6 +98,15 @@ plugins:
             Home: 首頁
             Getting started: 快速開始
             Quickstart: 快速開始
+            Runtime vs client model: Runtime 與 Client 模型
+            Runtime installation: Runtime 安裝
+            Choose a runtime: 選擇 Runtime
+            Standalone binary: 獨立二進位
+            Python / pipx / source: Python / pipx / 原始碼
+            Stdio mode: stdio 模式
+            Client connections: Client 連線
+            Generic MCP clients: 通用 MCP Client
+            Network connectivity: 網路連通性
             ChatGPT connector: ChatGPT 連接器
             Guides: 指南
             Usage patterns: 使用模式
@@ -113,6 +131,15 @@ plugins:
             Home: ホーム
             Getting started: はじめに
             Quickstart: クイックスタート
+            Runtime vs client model: Runtime と Client のモデル
+            Runtime installation: Runtime のインストール
+            Choose a runtime: Runtime を選ぶ
+            Standalone binary: スタンドアロンバイナリ
+            Python / pipx / source: Python / pipx / ソース
+            Stdio mode: stdio モード
+            Client connections: Client 接続
+            Generic MCP clients: 汎用 MCP Client
+            Network connectivity: ネットワーク接続
             ChatGPT connector: ChatGPT コネクタ
             Guides: ガイド
             Usage patterns: 使用パターン
@@ -137,6 +164,15 @@ plugins:
             Home: 홈
             Getting started: 시작하기
             Quickstart: 빠른 시작
+            Runtime vs client model: Runtime 및 Client 모델
+            Runtime installation: Runtime 설치
+            Choose a runtime: Runtime 선택
+            Standalone binary: 독립 실행 바이너리
+            Python / pipx / source: Python / pipx / source
+            Stdio mode: stdio 모드
+            Client connections: Client 연결
+            Generic MCP clients: 일반 MCP Client
+            Network connectivity: 네트워크 연결
             ChatGPT connector: ChatGPT 커넥터
             Guides: 가이드
             Usage patterns: 사용 패턴
@@ -161,6 +197,15 @@ plugins:
             Home: Inicio
             Getting started: Primeros pasos
             Quickstart: Inicio rápido
+            Runtime vs client model: Modelo Runtime y Client
+            Runtime installation: Instalación del Runtime
+            Choose a runtime: Elegir Runtime
+            Standalone binary: Binario independiente
+            Python / pipx / source: Python / pipx / código fuente
+            Stdio mode: Modo stdio
+            Client connections: Conexiones Client
+            Generic MCP clients: Client MCP genérico
+            Network connectivity: Conectividad de red
             ChatGPT connector: Conector ChatGPT
             Guides: Guías
             Usage patterns: Patrones de uso
@@ -185,6 +230,15 @@ plugins:
             Home: Accueil
             Getting started: Démarrage
             Quickstart: Démarrage rapide
+            Runtime vs client model: Modele Runtime et Client
+            Runtime installation: Installation Runtime
+            Choose a runtime: Choisir Runtime
+            Standalone binary: Binaire autonome
+            Python / pipx / source: Python / pipx / source
+            Stdio mode: Mode stdio
+            Client connections: Connexions Client
+            Generic MCP clients: Client MCP generique
+            Network connectivity: Connectivite reseau
             ChatGPT connector: Connecteur ChatGPT
             Guides: Guides
             Usage patterns: Modèles d’utilisation
@@ -209,6 +263,15 @@ plugins:
             Home: Start
             Getting started: Einstieg
             Quickstart: Schnellstart
+            Runtime vs client model: Runtime- und Client-Modell
+            Runtime installation: Runtime-Installation
+            Choose a runtime: Runtime auswaehlen
+            Standalone binary: Eigenstaendiges Binary
+            Python / pipx / source: Python / pipx / Source
+            Stdio mode: stdio-Modus
+            Client connections: Client-Verbindungen
+            Generic MCP clients: Generischer MCP-Client
+            Network connectivity: Netzwerkverbindung
             ChatGPT connector: ChatGPT-Connector
             Guides: Anleitungen
             Usage patterns: Nutzungsmuster
@@ -233,6 +296,15 @@ plugins:
             Home: Главная
             Getting started: Начало
             Quickstart: Быстрый старт
+            Runtime vs client model: Model Runtime i Client
+            Runtime installation: Ustanovka Runtime
+            Choose a runtime: Vybor Runtime
+            Standalone binary: Otdelnyy binary
+            Python / pipx / source: Python / pipx / source
+            Stdio mode: Rezhim stdio
+            Client connections: Podklyucheniya Client
+            Generic MCP clients: Obychniy MCP Client
+            Network connectivity: Setevoe podklyuchenie
             ChatGPT connector: Коннектор ChatGPT
             Guides: Руководства
             Usage patterns: Сценарии использования
@@ -253,6 +325,10 @@ plugins:
         - locale: pt-BR
           name: Português
           build: true
+          nav_translations:
+            Home: Inicio
+            Getting started: Primeiros passos
+            Quickstart: Inicio rapido
         - locale: it
           name: Italiano
           build: true
