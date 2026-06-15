@@ -41,6 +41,9 @@ dev = [
   "pytest-asyncio>=0.23.0",
   "ruff>=0.5.0",
 ]
+docs = [
+  "mkdocs-material>=9.5",
+]
 
 [project.urls]
 Homepage = "https://github.com/fwerkor/local-shell-mcp"

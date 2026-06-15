@@ -1,0 +1,21 @@
+site_name: local-shell-mcp
+site_description: ChatGPT-compatible MCP server for controlled local shell, filesystem, git, browser, and remote-worker access.
+repo_url: https://github.com/fwerkor/local-shell-mcp
+nav:
+  - Home: index.md
+  - Getting started:
+      - Quickstart: getting-started/quickstart.md
+      - ChatGPT connector: getting-started/chatgpt-connector.md
+  - Guides:
+      - Remote workers: guides/remote-workers.md
+      - Audit log: guides/audit-log.md
+      - Git access: guides/git-access.md
+  - Reference:
+      - Tools: reference/tools.md
+      - Configuration: reference/configuration.md
+  - Security: security.md
+  - Troubleshooting: troubleshooting.md
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
