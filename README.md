@@ -1,162 +1,57 @@
+<div align="center">
+
 # local-shell-mcp
 
-`local-shell-mcp` is an OAuth-enabled MCP server for giving ChatGPT Developer Mode,
-Codex-like agents, or other MCP clients controlled access to a dedicated local
-container.
+**A ChatGPT-ready MCP control plane for shell, files, Git, browser automation, file links, and remote machines.**
 
-The container exposes shell, filesystem, Git, todo, Playwright, and diagnostic
-tools inside `/workspace`. The intended safety boundary is the container, not the
-host.
+[![Docs](https://img.shields.io/badge/docs-fwerkor.github.io%2Flocal--shell--mcp-7c3aed?logo=materialformkdocs&logoColor=white)](https://fwerkor.github.io/local-shell-mcp/)
+[![CI](https://github.com/fwerkor/local-shell-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/fwerkor/local-shell-mcp/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/fwerkor/local-shell-mcp?sort=semver)](https://github.com/fwerkor/local-shell-mcp/releases)
+[![Python](https://img.shields.io/badge/python-3.12%2B-3776ab?logo=python&logoColor=white)](https://github.com/fwerkor/local-shell-mcp)
+[![Docker](https://img.shields.io/badge/docker-ready-2496ed?logo=docker&logoColor=white)](https://github.com/fwerkor/local-shell-mcp/pkgs/container/local-shell-mcp)
+[![License](https://img.shields.io/github/license/fwerkor/local-shell-mcp)](LICENSE)
+
+[Documentation](https://fwerkor.github.io/local-shell-mcp/) · [中文](https://fwerkor.github.io/local-shell-mcp/zh/) · [日本語](https://fwerkor.github.io/local-shell-mcp/ja/) · [Español](https://fwerkor.github.io/local-shell-mcp/es/) · [Quickstart](https://fwerkor.github.io/local-shell-mcp/getting-started/quickstart/) · [ChatGPT connector](https://fwerkor.github.io/local-shell-mcp/getting-started/chatgpt-connector/) · [Remote workers](https://fwerkor.github.io/local-shell-mcp/guides/remote-workers/) · [Releases](https://github.com/fwerkor/local-shell-mcp/releases)
+
+</div>
+
+---
+
+`local-shell-mcp` gives ChatGPT Developer Mode and other MCP clients controlled access to a real execution environment. It exposes a dedicated workspace with shell, persistent shell, filesystem, search, patch, Git, Playwright, audit, todo, public file links, and outbound remote-worker tools.
 
 ```text
 ChatGPT / MCP client
-  -> public HTTPS endpoint, commonly Cloudflare Tunnel
-  -> local-shell-mcp container
-  -> /workspace mounted volume
+  -> HTTPS endpoint, commonly Cloudflare Tunnel
+  -> local-shell-mcp container or binary
+  -> controlled workspace at /workspace
+  -> optional remote workers connected over outbound HTTP(S)
 ```
 
-## Features
+The intended safety boundary is the container or VM, not the host.
 
-- Built-in OAuth 2.1 flow for ChatGPT custom connectors.
-- Streamable HTTP MCP endpoint at `/mcp`.
-- Read-only `search` and `fetch` tools for regular ChatGPT connectors.
-- Full coding-agent tools for ChatGPT Developer Mode / Full MCP clients.
-- Remote worker mode is enabled by default: create a one-time invite, paste one command on a remote HPC/NPU/server machine, and use that machine through `remote_*` tools without SSH.
-- Docker image with Python, common data/document/file-processing packages
-  including PDF, Word, PowerPoint, Excel, and LibreOffice conversion support,
-  Node.js, Go, Rust, Java, Ruby, PHP, Perl, Lua, R, C/C++ build tools, Git,
-  tmux, ripgrep, and Playwright.
-- Audit log at `/workspace/.local-shell-mcp/audit.jsonl`.
+## Why use it
 
+| Capability | What it enables |
+|---|---|
+| Real terminal access | Run tests, build projects, inspect logs, and debug with persistent shell sessions. |
+| Workspace-aware file tools | Read, write, patch, search, and review files under a controlled root. |
+| Git workflow support | Clone, diff, commit, push, and inspect history from inside the AI-assisted environment. |
+| Browser automation | Capture screenshots, extract page text, evaluate JavaScript, and save PDFs with Playwright. |
+| Remote workers | Control NAT, firewall, HPC, NPU, or lab machines that can only connect outward. |
+| ChatGPT connector support | OAuth 2.1, `/mcp`, discovery controls, and ChatGPT-compatible tool schemas. |
+| Safer operations | Workspace scoping, shell timeouts, output limits, environment filtering, audit logs, and secret scanning. |
 
-## VS Code extension
+## Quick start
 
-`local-shell-mcp` also ships a VS Code extension package, `local-shell-mcp-vscode-<version>.vsix`, attached to GitHub Releases. The extension is a thin wrapper around the server: it starts `local-shell-mcp` for the current VS Code workspace, shows an output channel, checks `/healthz`, copies the MCP URL, and copies a ready-to-paste ChatGPT setup prompt.
-
-Basic usage:
-
-1. Install the `local-shell-mcp` executable from GitHub Releases or with `pipx install local-shell-mcp`.
-2. Install the `.vsix` file from the same release in VS Code.
-3. Open a project folder and run **local-shell-mcp: Start Server** from the command palette.
-4. Run **local-shell-mcp: Copy MCP URL** and paste the URL into ChatGPT's MCP connector setup.
-5. Run **local-shell-mcp: Copy ChatGPT Setup Prompt** when starting a coding session.
-
-For public ChatGPT access, expose the local server through an HTTPS tunnel and set `local-shell-mcp.publicBaseUrl` in VS Code settings. Keep `local-shell-mcp.allowFullContainer` disabled for direct host usage; enable it only inside a disposable container.
-
-## Tools
-
-Read-only connector tools:
-
-- `search`
-- `fetch`
-
-Shell:
-
-- `run_shell_tool`
-- `run_python_tool`
-- `shell_start`
-- `shell_send`
-- `shell_read`
-- `shell_kill`
-- `shell_list`
-
-Filesystem:
-
-- `list_files`
-- `tree_view`
-- `glob_search`
-- `grep_search`
-- `read_file`
-- `read_many_files`
-- `write_file`
-- `edit_file`
-- `multi_edit_file`
-- `delete_file_or_dir`
-- `apply_patch`
-
-Git:
-
-- `git_clone_tool`
-- `git_status_tool`
-- `git_diff_tool`
-- `git_log_tool`
-- `git_checkout_tool`
-- `git_fetch_tool`
-- `git_pull_tool`
-- `git_add_tool`
-- `git_commit_tool`
-- `git_push_tool`
-- `git_show_tool`
-- `git_reset_tool`
-- `secret_scan`
-
-Remote worker control and near-parity tools:
-
-- `remote_invite`
-- `remote_list_machines`
-- `remote_revoke_machine`
-- `remote_rename_machine`
-- `remote_environment_info`
-- `remote_run_shell_tool`
-- `remote_run_python_tool`
-- `remote_shell_start` / `remote_shell_send` / `remote_shell_read` / `remote_shell_kill` / `remote_shell_list`
-- `remote_list_files` / `remote_tree_view` / `remote_glob_search` / `remote_grep_search`
-- `remote_read_file` / `remote_read_many_files` / `remote_write_file` / `remote_edit_file` / `remote_multi_edit_file` / `remote_delete_file_or_dir` / `remote_apply_patch`
-- `remote_copy_file` / `remote_copy_dir` / `remote_pull_file` / `remote_push_file` / `remote_pull_dir` / `remote_push_dir`
-- `remote_git_clone_tool` / `remote_git_status_tool` / `remote_git_diff_tool` / `remote_git_log_tool` / `remote_git_checkout_tool` / `remote_git_fetch_tool` / `remote_git_pull_tool` / `remote_git_add_tool` / `remote_git_commit_tool` / `remote_git_push_tool` / `remote_git_show_tool` / `remote_git_reset_tool`
-- `remote_playwright_install_tool` / `remote_browser_screenshot_tool` / `remote_browser_get_text_tool` / `remote_browser_eval_tool` / `remote_browser_pdf_tool` / `remote_playwright_run_script_tool`
-
-Playwright and diagnostics:
-
-- `playwright_install_tool`
-- `browser_screenshot_tool`
-- `browser_get_text_tool`
-- `browser_eval_tool`
-- `browser_pdf_tool`
-- `playwright_run_script_tool`
-- `environment_info`
-- `audit_tail`
-- `todo_read_tool`
-- `todo_write_tool`
-
-## Security
-
-This project intentionally exposes powerful tools. Treat the container as
-controlled by the connected model.
-
-Default protections:
-
-- Paths are restricted to `/workspace` unless `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER=true`.
-- Commands have timeout and output limits.
-- Sensitive path fragments are denied by default.
-- Host-control fragments such as `/var/run/docker.sock` are denied by default.
-- Audit logs are written to `/workspace/.local-shell-mcp/audit.jsonl`.
-- Docker deployments persist GitHub CLI, Git HTTPS, GitCode, SSH, `.netrc`, and GPG credentials in `/persist/credentials` by default.
-
-When `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER=true`, the server intentionally gives
-the AI full control of the container: path and command denylists are disabled,
-the Docker entrypoint runs the server as root, and the `agent` user can use
-passwordless `sudo`. Use this only for disposable containers or VMs.
-
-Hard rules:
-
-1. Do not mount `/var/run/docker.sock`.
-2. Do not mount the host root filesystem.
-3. Do not expose the service with `LOCAL_SHELL_MCP_AUTH_MODE=none`.
-4. Do not put long-lived GitHub PATs in environment variables visible to the model.
-5. Prefer a single-repository deploy key or short-lived GitHub App token.
-6. Run this in a disposable container or VM.
-7. Treat the `local-shell-mcp-credentials` Docker volume as sensitive. It may contain access tokens and private keys.
-
-## Quick Start
-
-Copy the example environment file and edit it:
+Clone the repository and prepare configuration:
 
 ```bash
+git clone https://github.com/fwerkor/local-shell-mcp.git
+cd local-shell-mcp
 cp .env.example .env
 ```
 
-Important values:
+Set at least these values in `.env`:
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
@@ -166,357 +61,149 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
 CLOUDFLARE_TUNNEL_TOKEN=
 ```
 
-Run the published Docker image:
+Start the server:
 
 ```bash
 mkdir -p workspaces/default
 docker compose up -d
-```
-
-The Compose file persists `/workspace` and also creates a separate
-`local-shell-mcp-credentials` volume for developer login state. Docker
-deployments link common Git, GitHub CLI, SSH, `.netrc`, and GPG paths into
-`/persist/credentials` on startup, so GitHub and GitCode authentication survives
-image updates and container recreation. Set
-`LOCAL_SHELL_MCP_PERSISTENT_CREDENTIALS=false` for a fully disposable
-authentication state.
-
-Download a Docker-free all-in-one executable from the GitHub release page when you do not want to run Docker. Release assets are built for Linux, macOS, and Windows on x86_64 and ARM64/aarch64. Start it directly:
-
-```bash
-./local-shell-mcp --mode mcp
-```
-
-On Windows PowerShell:
-
-```powershell
-.\local-shell-mcp.exe --mode mcp
-```
-
-For binary deployments, set `LOCAL_SHELL_MCP_WORKSPACE_ROOT` to the directory you want the tool to control. The binary includes the Python server and default OAuth dependencies, but not system tools such as Git, tmux, shells, compilers, LibreOffice, or Playwright browser binaries; those are taken from the host system.
-
-Start the Cloudflare Tunnel sidecar too:
-
-```bash
-docker compose --profile tunnel up -d
-```
-
-Check the service:
-
-```bash
-docker compose ps
-docker compose logs --tail=100 local-shell-mcp
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-If the container cannot write `/workspace/.local-shell-mcp`, fix the host
-workspace ownership:
-
-```bash
-sudo mkdir -p workspaces/default/.local-shell-mcp
-sudo chown -R 10001:10001 workspaces/default
-docker compose --profile tunnel restart local-shell-mcp
-```
-
-## Cloudflare Tunnel
-
-The bundled Compose file has a `cloudflared` sidecar profile:
-
-```yaml
-cloudflared:
-  image: cloudflare/cloudflared:latest
-  command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
-```
-
-Create a tunnel in Cloudflare Zero Trust, add a Public Hostname, and point it to:
-
-```text
-http://local-shell-mcp:8765
-```
-
-Put the tunnel token in `.env`:
-
-```env
-CLOUDFLARE_TUNNEL_TOKEN=...
-```
-
-Then run:
+Start the bundled Cloudflare Tunnel sidecar when you need public HTTPS access:
 
 ```bash
 docker compose --profile tunnel up -d
 ```
 
-The public MCP endpoint should be:
+The public MCP endpoint is:
 
 ```text
 https://your-public-host.example.com/mcp
 ```
 
-## ChatGPT Setup
+Full setup instructions are in the [documentation](https://fwerkor.github.io/local-shell-mcp/).
 
-For full shell, filesystem, Git, and Playwright tools, enable ChatGPT Developer
-Mode:
+## ChatGPT setup
 
-1. Open ChatGPT settings.
-2. Go to Connectors.
-3. Enable Developer Mode under Advanced.
-4. Add a custom MCP connector.
-5. Use `https://your-public-host.example.com/mcp`.
-6. Complete the OAuth flow using `LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN`.
-7. Refresh the connector tool list if you have changed the server.
+For full shell, filesystem, Git, and Playwright tools, use ChatGPT Developer Mode or another full MCP client.
 
-Regular ChatGPT connectors and Deep Research expect read-only `search` and
-`fetch` tools. This project exposes those too, but write/execute actions require
-Developer Mode / Full MCP.
+1. Expose the server through HTTPS.
+2. Keep OAuth enabled.
+3. Add the MCP endpoint: `https://your-public-host.example.com/mcp`.
+4. Complete the OAuth authorization flow.
+5. Start with a bounded task and inspect the audit log when needed.
 
-After connecting, test with:
+Read the dedicated [ChatGPT connector guide](https://fwerkor.github.io/local-shell-mcp/getting-started/chatgpt-connector/).
 
-```text
-Use local-shell-mcp to run pwd and tell me the output.
-```
+## VS Code extension
 
-Watch server-side activity:
+Release assets include `local-shell-mcp-vscode-<version>.vsix`. The extension starts `local-shell-mcp` for the current VS Code workspace, checks `/healthz`, copies the MCP URL, and copies a ready-to-paste ChatGPT setup prompt.
 
-```bash
-docker compose exec local-shell-mcp tail -f /workspace/.local-shell-mcp/audit.jsonl
-```
-
-A successful tool call should produce audit events such as `run_shell_start` and
-`run_shell_end`.
-
-## Remote Worker Mode
-
-Remote worker mode is enabled by default. It lets machines behind NAT, firewalls,
-or restricted HPC login environments connect back to the public control server
-using outbound HTTP(S). The remote machine does not need an inbound port or SSH
-access from the MCP client.
-
-The normal local tools keep their original behavior. Remote tools use the same
-shape and add a required `machine` argument, for example:
+Basic flow:
 
 ```text
-run_shell_tool(command="pwd")
-remote_run_shell_tool(machine="npu-4card", command="pwd")
+Install executable -> install VSIX -> open a workspace -> Start Server -> copy MCP URL
 ```
 
-Create a one-time invite from ChatGPT or any MCP client:
+For public ChatGPT access, expose the local server through an HTTPS tunnel and set `local-shell-mcp.publicBaseUrl` in VS Code settings. Keep `local-shell-mcp.allowFullContainer` disabled for direct host usage; enable it only inside disposable containers or VMs.
 
-```text
-Use local-shell-mcp remote_invite with name=npu-4card and workdir=/home/cyh/FrameDiff.
-```
+## Remote workers
 
-The tool returns a pasteable command like:
+Remote worker mode is enabled by default. Create a one-time invite on the control server, paste the generated command on a remote machine, and use `remote_*` tools without opening SSH ports.
 
-```bash
-curl -fsSL https://your-public-host.example.com/join | bash -s -- \
-  --invite lsmcp_inv_xxxxx \
-  --name npu-4card \
-  --workdir /home/cyh/FrameDiff
-```
+This is intended for:
 
-Paste that command on the remote machine. The join script downloads a worker
-bundle from the control server at `/remote/worker-bundle.tgz`, so the remote side
-uses the same code snapshot as the control server and does not need GitHub or
-PyPI access. The worker registers once, exchanges the invite for a worker token,
-and then long-polls the control server for jobs. The default mode is foreground
-and temporary; press `Ctrl-C` on the remote machine to disconnect. Add
-`--background` to the generated command for a simple `nohup` background worker.
-`--persist` is accepted for future user-service installation support.
+- HPC login nodes or compute nodes behind firewalls.
+- NPU/GPU servers without inbound connectivity.
+- Lab machines that can make outbound HTTPS requests.
+- Temporary build hosts or remote test environments.
 
-After it connects, ask ChatGPT to list machines:
+See the [remote workers guide](https://fwerkor.github.io/local-shell-mcp/guides/remote-workers/).
 
-```text
-Use local-shell-mcp remote_list_machines.
-```
+## Tool surface
 
-Then use the near-parity remote tool set, such as `remote_run_shell_tool`,
-`remote_read_file`, `remote_write_file`, `remote_grep_search`,
-`remote_git_pull_tool`, or `remote_shell_start`.
+The public MCP surface includes:
 
-Remote workers also support control-server-mediated file transfer when machines
-cannot reach each other directly. Files are copied in base64 chunks through the
-control server into a destination-side temporary file, then size/SHA-256 checked
-and atomically renamed into place. Directory transfer packs the source directory
-as a `tar.gz`, transfers the archive, then safely unpacks it on the destination.
-Directory transfer tools default to `overwrite=false`; set it explicitly when replacing an existing destination tree.
+- Shell: `run_shell_tool`, `run_python_tool`, `shell_start`, `shell_send`, `shell_read`, `shell_kill`, `shell_list`.
+- Filesystem: `list_files`, `tree_view`, `glob_search`, `grep_search`, `read_file`, `read_many_files`, `write_file`, `edit_file`, `multi_edit_file`, `delete_file_or_dir`, `apply_patch`.
+- Git: `git_clone_tool`, `git_status_tool`, `git_diff_tool`, `git_log_tool`, `git_checkout_tool`, `git_fetch_tool`, `git_pull_tool`, `git_add_tool`, `git_commit_tool`, `git_push_tool`, `git_show_tool`, `git_reset_tool`, `secret_scan`.
+- Browser: `playwright_install_tool`, `browser_screenshot_tool`, `browser_get_text_tool`, `browser_eval_tool`, `browser_pdf_tool`, `playwright_run_script_tool`.
+- File links: `create_file_link`, `list_file_links`, `revoke_file_link`.
+- Remote workers: `remote_invite`, `remote_list_machines`, `remote_run_shell_tool`, `remote_*` filesystem/Git/browser/transfer tools.
+- Diagnostics: `environment_info`, `audit_tail`, `todo_read_tool`, `todo_write_tool`.
 
-```text
-remote_copy_file(src_machine="hpc-a", src_path="/data/result.bin", dst_machine="hpc-b", dst_path="/scratch/result.bin")
-remote_copy_dir(src_machine="hpc-a", src_path="/data/run-42", dst_machine="hpc-b", dst_path="/scratch/run-42")
-remote_pull_file(machine="hpc-a", remote_path="/data/result.bin", local_path="downloads/result.bin")
-remote_push_dir(local_path="configs/run-42", machine="hpc-a", remote_path="/data/configs/run-42")
-```
+The generated tool reference is available in the [docs](https://fwerkor.github.io/local-shell-mcp/reference/tools/).
 
-Remote mode settings:
+## Security model
 
-| Variable | Default | Meaning |
-|---|---:|---|
-| `LOCAL_SHELL_MCP_REMOTE_ENABLED` | `true` | Enable remote worker routes and MCP tools |
-| `LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S` | `600` | One-time invite lifetime |
-| `LOCAL_SHELL_MCP_REMOTE_POLL_TIMEOUT_S` | `25` | Long-poll heartbeat timeout |
-| `LOCAL_SHELL_MCP_REMOTE_JOB_TIMEOUT_S` | `3600` | Control-side remote job result timeout |
+This project intentionally exposes powerful tools. Treat the connected model as having control of the container or VM.
 
-To disable remote worker mode explicitly, run with `--no-remote` or set
-`LOCAL_SHELL_MCP_REMOTE_ENABLED=false`.
+Default protections include:
 
-## Docker Commands
+- Workspace scoping to `/workspace` unless full-container mode is explicitly enabled.
+- Command timeouts, output limits, and concurrency limits.
+- Default command/path denylists for host-control fragments.
+- Shell subprocess environment filtering for service-side secrets.
+- Audit logs at `/workspace/.local-shell-mcp/audit.jsonl`.
+- Secret scanning helpers before commits and pushes.
+- Tokenized file links with TTL/download limits and revocation.
 
-Pull and run without Compose:
+Hard rules:
 
-```bash
-docker pull fwerkor/local-shell-mcp:latest
-mkdir -p workspace
-docker run -d \
-  --name local-shell-mcp \
-  --restart unless-stopped \
-  --env-file .env \
-  -p 127.0.0.1:8765:8765 \
-  -v "$PWD/workspace:/workspace" \
-  fwerkor/local-shell-mcp:latest
-```
+1. Do not mount `/var/run/docker.sock`.
+2. Do not mount the host root filesystem.
+3. Do not expose the service with `LOCAL_SHELL_MCP_AUTH_MODE=none` on a public network.
+4. Do not put long-lived credentials in environment variables visible to the model.
+5. Prefer single-repository deploy keys or short-lived tokens.
+6. Run the service in a disposable container or VM.
+7. Treat the `local-shell-mcp-credentials` Docker volume as sensitive.
 
-Check restart policy:
-
-```bash
-docker inspect local-shell-mcp --format '{{.HostConfig.RestartPolicy.Name}}'
-```
-
-It should be `unless-stopped`.
+For vulnerability reporting, read [SECURITY.md](SECURITY.md).
 
 ## Configuration
 
-Environment variables use the `LOCAL_SHELL_MCP_` prefix.
+Common settings are documented in [`config.example.yaml`](config.example.yaml), [`.env.example`](.env.example), and the [configuration reference](https://fwerkor.github.io/local-shell-mcp/reference/configuration/).
 
-| Variable | Default | Meaning |
-|---|---:|---|
-| `LOCAL_SHELL_MCP_WORKSPACE_ROOT` | `/workspace` | Root for file and command operations |
-| `LOCAL_SHELL_MCP_AUTH_MODE` | `oauth` | `oauth` or `none` |
-| `LOCAL_SHELL_MCP_PUBLIC_BASE_URL` | unset | Public HTTPS origin used for OAuth metadata |
-| `LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN` | unset | PIN required to approve OAuth authorization |
-| `LOCAL_SHELL_MCP_OAUTH_JWT_SECRET` | `dev-change-me` | Secret used to sign bearer tokens |
-| `LOCAL_SHELL_MCP_OAUTH_ACCESS_TOKEN_TTL_S` | `0` | OAuth bearer token lifetime in seconds; `0` means never expires |
-| `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `false` | Give the AI unrestricted control of the container, including paths outside workspace and root access |
-| `LOCAL_SHELL_MCP_MAX_TIMEOUT_S` | `3600` | Max command timeout |
-| `LOCAL_SHELL_MCP_MAX_OUTPUT_BYTES` | `200000` | Output truncation limit |
-| `LOCAL_SHELL_MCP_REMOTE_ENABLED` | `true` | Enable remote worker invite, join, polling, and `remote_*` tools |
+Important options:
 
-You can also pass YAML:
-
-```bash
-local-shell-mcp --config config.example.yaml --mode mcp
-```
-
-## Git Access
-
-Preferred options:
-
-### Deploy Key
-
-Create a deploy key restricted to one repository:
-
-```bash
-ssh-keygen -t ed25519 -f ./deploy_key_project -C local-shell-mcp-project
-```
-
-Add the public key to the GitHub repository deploy keys with the minimum required
-permissions. Mount the private key only if you accept that the model-controlled
-container can use it:
-
-```yaml
-volumes:
-  - ./deploy_key_project:/home/agent/.ssh/id_ed25519:ro
-```
-
-### SSH Agent Socket
-
-This avoids copying a private key into the container, but the container can still
-ask the agent to sign Git operations:
-
-```yaml
-volumes:
-  - ${SSH_AUTH_SOCK}:${SSH_AUTH_SOCK}
-environment:
-  SSH_AUTH_SOCK: ${SSH_AUTH_SOCK}
-```
-
-Use a key that only has access to repositories you are willing to expose.
-
-## REST Debug API
-
-The normal MCP server runs with:
-
-```bash
-local-shell-mcp --mode mcp
-```
-
-For local-only debugging, you can start the REST API:
-
-```bash
-LOCAL_SHELL_MCP_AUTH_MODE=none local-shell-mcp --mode http
-```
-
-Example:
-
-```bash
-curl -s http://127.0.0.1:8765/tools/run_shell \
-  -H 'content-type: application/json' \
-  -d '{"command":"pwd && ls -la","cwd":"."}' | jq
-```
-
-Do not expose HTTP debug mode publicly.
+| Setting | Purpose |
+|---|---|
+| `LOCAL_SHELL_MCP_PUBLIC_BASE_URL` | Public HTTPS origin used by OAuth and ChatGPT. |
+| `LOCAL_SHELL_MCP_AUTH_MODE` | Use `oauth` for public deployments. |
+| `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | Disable workspace restrictions only in disposable containers/VMs. |
+| `LOCAL_SHELL_MCP_REMOTE_ENABLED` | Enable or disable remote worker control tools. |
+| `LOCAL_SHELL_MCP_SHELL_ENV_BLOCKLIST` | Environment variables removed from spawned shell processes. |
+| `LOCAL_SHELL_MCP_FILE_DOWNLOAD_ENABLED` | Enable tokenized file download links. |
 
 ## Development
 
+Install development dependencies and run checks:
+
 ```bash
-python3 -m venv .venv
+python -m venv .venv
 . .venv/bin/activate
-pip install -e '.[dev]'
+pip install -e '.[dev,docs]'
 ruff check .
 pytest -q
-LOCAL_SHELL_MCP_AUTH_MODE=none local-shell-mcp --mode mcp
+mkdocs build --strict
 ```
 
-You can verify the MCP endpoint with a standard MCP client:
-
-```python
-import anyio
-from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
-
-async def main():
-    async with streamablehttp_client("http://127.0.0.1:8765/mcp") as (read, write, _):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            tools = await session.list_tools()
-            print([tool.name for tool in tools.tools])
-
-anyio.run(main)
-```
-
-## Troubleshooting
-
-If ChatGPT says it connected but no tools are available:
-
-1. Confirm Developer Mode is enabled for full MCP tools.
-2. Delete and re-add the connector after server changes.
-3. Check `/mcp` with the standard MCP client snippet above.
-4. Watch `/workspace/.local-shell-mcp/audit.jsonl`.
-5. Confirm `LOCAL_SHELL_MCP_PUBLIC_BASE_URL` exactly matches the public HTTPS origin.
-
-If OAuth succeeds but tool listing fails, check container logs:
+Build the VS Code extension:
 
 ```bash
-docker compose logs --tail=200 local-shell-mcp
+npm --prefix vscode-extension install
+npm --prefix vscode-extension run compile
 ```
 
-If you see `Task group is not initialized`, update to a newer image that includes
-the MCP lifespan fix.
+Contribution workflow is documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-You can also probe the public endpoint from a machine with the project installed:
+## Project documents
 
-```bash
-python scripts/probe-mcp.py https://your-public-host.example.com --pin "$LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN"
-```
-
-The probe should report successful unauthenticated `initialize/list_tools` and a
-successful authenticated `environment_info` call.
+- [Documentation site](https://fwerkor.github.io/local-shell-mcp/)
+- [Multilingual documentation](https://fwerkor.github.io/local-shell-mcp/#language)
+- [Contributing guide](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
+- [Support guide](SUPPORT.md)
+- [OAuth setup](OAUTH_SETUP.md)
+- [License](LICENSE)

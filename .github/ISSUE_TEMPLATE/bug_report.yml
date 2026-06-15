@@ -1,0 +1,62 @@
+name: Bug report
+description: Report a reproducible local-shell-mcp problem
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include secrets, OAuth pins, tunnel tokens, SSH keys, or bearer file-link URLs.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Provide a minimal sequence of commands or UI steps.
+      placeholder: |
+        1. Start with ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and diagnostics
+      description: Redact sensitive values before posting.
+      render: text
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment mode
+      options:
+        - Docker Compose
+        - Docker image without Compose
+        - Standalone binary
+        - VS Code extension
+        - Remote worker
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v2.5.0 or git SHA
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: OS, architecture, Python version, Docker version, MCP client, browser, tunnel provider

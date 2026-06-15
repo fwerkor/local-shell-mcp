@@ -1,26 +1,55 @@
 site_name: local-shell-mcp
 site_description: ChatGPT-compatible MCP server for controlled local shell, filesystem, git, browser, and remote-worker access.
-site_url: https://local-shell-mcp.github.io/
+site_url: https://fwerkor.github.io/local-shell-mcp/
 repo_url: https://github.com/fwerkor/local-shell-mcp
+repo_name: fwerkor/local-shell-mcp
 nav:
   - Home: index.md
   - Getting started:
       - Quickstart: getting-started/quickstart.md
       - ChatGPT connector: getting-started/chatgpt-connector.md
   - Guides:
+      - Deployment: guides/deployment.md
       - Remote workers: guides/remote-workers.md
+      - File links: guides/file-links.md
       - Audit log: guides/audit-log.md
       - Git access: guides/git-access.md
+      - VS Code extension: guides/vscode.md
   - Reference:
       - Tools: reference/tools.md
       - Configuration: reference/configuration.md
+      - REST API: reference/rest-api.md
   - Security: security.md
   - Troubleshooting: troubleshooting.md
+  - Languages:
+      - 简体中文: zh/index.md
+      - 繁體中文: zh-hant/index.md
+      - 日本語: ja/index.md
+      - 한국어: ko/index.md
+      - Español: es/index.md
+      - Français: fr/index.md
+      - Deutsch: de/index.md
+      - Русский: ru/index.md
+      - Português: pt-br/index.md
+      - Italiano: it/index.md
+      - العربية: ar/index.md
+      - हिन्दी: hi/index.md
+      - Bahasa Indonesia: id/index.md
+      - Tiếng Việt: vi/index.md
+      - Türkçe: tr/index.md
+      - Polski: pl/index.md
 markdown_extensions:
   - admonition
   - attr_list
   - md_in_html
+  - pymdownx.details
   - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
   - toc:
       permalink: true
 
@@ -29,18 +58,82 @@ theme:
   language: en
   features:
     - navigation.instant
+    - navigation.tracking
     - navigation.tabs
     - navigation.sections
+    - navigation.expand
     - navigation.top
     - search.suggest
     - search.highlight
     - content.code.copy
+    - content.tabs.link
   palette:
-    - scheme: slate
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
       primary: deep purple
       accent: cyan
-    - scheme: default
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
       primary: deep purple
       accent: cyan
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+extra:
+  alternate:
+    - name: English
+      link: /
+      lang: en
+    - name: 简体中文
+      link: /zh/
+      lang: zh
+    - name: 繁體中文
+      link: /zh-hant/
+      lang: zh-hant
+    - name: 日本語
+      link: /ja/
+      lang: ja
+    - name: 한국어
+      link: /ko/
+      lang: ko
+    - name: Español
+      link: /es/
+      lang: es
+    - name: Français
+      link: /fr/
+      lang: fr
+    - name: Deutsch
+      link: /de/
+      lang: de
+    - name: Русский
+      link: /ru/
+      lang: ru
+    - name: Português
+      link: /pt-br/
+      lang: pt-br
+    - name: Italiano
+      link: /it/
+      lang: it
+    - name: العربية
+      link: /ar/
+      lang: ar
+    - name: हिन्दी
+      link: /hi/
+      lang: hi
+    - name: Bahasa Indonesia
+      link: /id/
+      lang: id
+    - name: Tiếng Việt
+      link: /vi/
+      lang: vi
+    - name: Türkçe
+      link: /tr/
+      lang: tr
+    - name: Polski
+      link: /pl/
+      lang: pl
 extra_css:
   - assets/stylesheets/extra.css
