@@ -8,7 +8,9 @@ import os
 import re
 import secrets
 import shlex
+import shutil
 import socket
+import subprocess
 import sys
 import tarfile
 import time
@@ -616,21 +618,84 @@ def worker_info(workdir: str) -> dict[str, Any]:
     return {"hostname": socket.gethostname(), "user": os.getenv("USER") or os.getenv("USERNAME") or "unknown", "cwd": os.getcwd(), "workdir": workdir, "python": sys.version.split()[0], "platform": sys.platform}
 
 
-def _worker_post_json(url: str, payload: dict[str, Any], headers: dict[str, str] | None = None, timeout: float | None = None) -> dict[str, Any]:
-    body = json.dumps(payload).encode("utf-8")
+def _parse_worker_http_json(url: str, status_code: int, response_body: str) -> dict[str, Any]:
+    if not 200 <= status_code < 300:
+        detail = response_body.strip() or "<empty response body>"
+        raise RuntimeError(f"worker HTTP POST {url} failed with {status_code}: {detail}")
+    try:
+        parsed = json.loads(response_body)
+    except json.JSONDecodeError as exc:
+        detail = response_body.strip() or "<empty response body>"
+        raise RuntimeError(f"worker HTTP POST {url} returned invalid JSON: {detail}") from exc
+    if not isinstance(parsed, dict):
+        raise RuntimeError(f"worker HTTP POST {url} returned JSON {type(parsed).__name__}, expected object")
+    return parsed
+
+
+def _worker_post_json_with_curl(url: str, body: bytes, headers: dict[str, str], timeout: float | None = None) -> dict[str, Any]:
+    curl = shutil.which("curl")
+    if not curl:
+        raise FileNotFoundError("curl is not available")
+    status_marker = "\nLOCAL_SHELL_MCP_HTTP_STATUS:"
+    command = [
+        curl,
+        "-sS",
+        "-L",
+        "-X",
+        "POST",
+        "-H",
+        "Content-Type: application/json",
+        "--data-binary",
+        "@-",
+        "-w",
+        f"{status_marker}%{{http_code}}",
+    ]
+    for name, value in headers.items():
+        command.extend(["-H", f"{name}: {value}"])
+    if timeout is not None:
+        command[1:1] = ["--max-time", str(timeout)]
+    command.append(url)
+
+    completed = subprocess.run(  # noqa: S603
+        command,
+        input=body,
+        capture_output=True,
+        check=False,
+    )
+    stdout = completed.stdout.decode("utf-8", errors="replace")
+    stderr = completed.stderr.decode("utf-8", errors="replace").strip()
+    response_body, marker, status_text = stdout.rpartition(status_marker)
+    status_code = int(status_text) if marker and status_text.isdigit() else 0
+    if completed.returncode != 0:
+        detail_parts = [part for part in (stderr, response_body.strip()) if part]
+        detail = "\n".join(detail_parts) or "curl exited without a response body"
+        raise RuntimeError(f"worker HTTP POST {url} failed with curl exit {completed.returncode} (HTTP {status_code}): {detail}")
+    return _parse_worker_http_json(url, status_code, response_body)
+
+
+def _worker_post_json_with_urllib(url: str, body: bytes, headers: dict[str, str], timeout: float | None = None) -> dict[str, Any]:
     request = urllib.request.Request(
         url,
         data=body,
-        headers={"Content-Type": "application/json", **(headers or {})},
+        headers={"Content-Type": "application/json", **headers},
         method="POST",
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
-            response_body = response.read().decode("utf-8")
+            response_body = response.read().decode("utf-8", errors="replace")
+            status_code = response.status
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"worker HTTP request failed with {exc.code}: {detail}") from exc
-    return json.loads(response_body)
+        response_body = exc.read().decode("utf-8", errors="replace")
+        return _parse_worker_http_json(url, exc.code, response_body)
+    return _parse_worker_http_json(url, status_code, response_body)
+
+
+def _worker_post_json(url: str, payload: dict[str, Any], headers: dict[str, str] | None = None, timeout: float | None = None) -> dict[str, Any]:
+    body = json.dumps(payload).encode("utf-8")
+    request_headers = headers or {}
+    if shutil.which("curl"):
+        return _worker_post_json_with_curl(url, body, request_headers, timeout)
+    return _worker_post_json_with_urllib(url, body, request_headers, timeout)
 
 
 async def run_worker(server: str, invite: str, name: str | None = None, workdir: str | None = None, persist: bool = False) -> None:  # noqa: ARG001
