@@ -137,3 +137,38 @@ def test_worker_post_json_urllib_reports_non_2xx_body(monkeypatch):
 
     with pytest.raises(RuntimeError, match="failed with 403: <html>Cloudflare 1010</html>"):
         remote._worker_post_json("https://example.test/remote/result", {"job_id": "job_1"})  # noqa: SLF001
+
+
+def test_worker_retry_delay_is_capped():
+    assert [remote._worker_retry_delay(i) for i in range(7)] == [1.0, 2.0, 4.0, 8.0, 16.0, 30.0, 30.0]  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_worker_post_json_forever_retries_until_success(monkeypatch, capsys):
+    calls = []
+    sleeps = []
+
+    def fake_post(url, payload, headers=None, timeout=None):
+        calls.append((url, payload, headers, timeout))
+        if len(calls) < 3:
+            raise RuntimeError(f"temporary failure {len(calls)}")
+        return {"ok": True, "data": {"heartbeat": True}}
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(remote, "_worker_post_json", fake_post)
+    monkeypatch.setattr(remote.asyncio, "sleep", fake_sleep)
+
+    result = await remote._worker_post_json_forever(  # noqa: SLF001
+        "https://example.test/remote/poll",
+        {},
+        {"Authorization": "Bearer token"},
+        12,
+        "poll",
+    )
+
+    assert result == {"ok": True, "data": {"heartbeat": True}}
+    assert len(calls) == 3
+    assert sleeps == [1.0, 2.0]
+    assert "Status: poll failed: temporary failure 1. Retrying in 1s..." in capsys.readouterr().err

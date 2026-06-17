@@ -698,6 +698,36 @@ def _worker_post_json(url: str, payload: dict[str, Any], headers: dict[str, str]
     return _worker_post_json_with_urllib(url, body, request_headers, timeout)
 
 
+_WORKER_RETRY_INITIAL_DELAY_S = 1.0
+_WORKER_RETRY_MAX_DELAY_S = 30.0
+
+
+def _worker_retry_delay(attempt: int) -> float:
+    return min(_WORKER_RETRY_INITIAL_DELAY_S * (2 ** min(attempt, 5)), _WORKER_RETRY_MAX_DELAY_S)
+
+
+def _worker_log_retry(operation: str, exc: Exception, delay_s: float) -> None:
+    print(f"Status: {operation} failed: {exc}. Retrying in {delay_s:g}s...", file=sys.stderr, flush=True)
+
+
+async def _worker_post_json_forever(
+    url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str] | None = None,
+    timeout: float | None = None,
+    operation: str = "request",
+) -> dict[str, Any]:
+    attempt = 0
+    while True:
+        try:
+            return await asyncio.to_thread(_worker_post_json, url, payload, headers, timeout)
+        except Exception as exc:  # noqa: BLE001
+            delay_s = _worker_retry_delay(attempt)
+            attempt += 1
+            _worker_log_retry(operation, exc, delay_s)
+            await asyncio.sleep(delay_s)
+
+
 async def run_worker(server: str, invite: str, name: str | None = None, workdir: str | None = None, persist: bool = False) -> None:  # noqa: ARG001
     workdir = str(Path(workdir or os.getcwd()).expanduser().resolve())
     os.environ.setdefault("LOCAL_SHELL_MCP_WORKSPACE_ROOT", workdir)
@@ -707,7 +737,7 @@ async def run_worker(server: str, invite: str, name: str | None = None, workdir:
     _get_settings.cache_clear()
     server = server.rstrip("/")
     register_payload = {"invite": invite, "name": name, "workdir": workdir, "capabilities": worker_capabilities(), "info": worker_info(workdir)}
-    body = await asyncio.to_thread(_worker_post_json, f"{server}{REMOTE_API_PREFIX}/register", register_payload, None, 30)
+    body = await _worker_post_json_forever(f"{server}{REMOTE_API_PREFIX}/register", register_payload, None, 30, "register")
     if not body.get("ok"):
         raise RuntimeError(body.get("message") or body)
     data = body["data"]
@@ -721,7 +751,7 @@ async def run_worker(server: str, invite: str, name: str | None = None, workdir:
     print("Keep this process running while ChatGPT should access this machine. Press Ctrl-C to disconnect.", flush=True)
     headers = {"Author" + "ization": "B" + "earer " + access}
     while True:
-        poll_body = await asyncio.to_thread(_worker_post_json, f"{server}{REMOTE_API_PREFIX}/poll", {}, headers, None)
+        poll_body = await _worker_post_json_forever(f"{server}{REMOTE_API_PREFIX}/poll", {}, headers, None, "poll")
         payload = poll_body.get("data", {})
         job = payload.get("job")
         if not job:
@@ -731,7 +761,7 @@ async def run_worker(server: str, invite: str, name: str | None = None, workdir:
             out = {"job_id": job["id"], "ok": True, "data": result}
         except Exception as exc:  # noqa: BLE001
             out = {"job_id": job.get("id"), **_handled_remote_exception(exc)}
-        await asyncio.to_thread(_worker_post_json, f"{server}{REMOTE_API_PREFIX}/result", out, headers, 30)
+        await _worker_post_json_forever(f"{server}{REMOTE_API_PREFIX}/result", out, headers, 30, "submit result")
 
 def run_worker_cli(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Connect this machine to a local-shell-mcp control server")
