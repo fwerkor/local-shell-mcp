@@ -36,6 +36,7 @@ from .fs_ops import (
     temp_dir,
     write_text,
 )
+from .jobs import list_jobs, retry_job, start_job, stop_job, tail_job
 from .git_ops import (
     git_add,
     git_checkout,
@@ -575,6 +576,11 @@ REMOTE_WORKER_TOOL_NAMES = frozenset({
     "shell_read",
     "shell_kill",
     "shell_list",
+    "job_start",
+    "job_list",
+    "job_tail",
+    "job_stop",
+    "job_retry",
     "list_files",
     "tree_view",
     "glob_search",
@@ -636,6 +642,16 @@ async def execute_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         return await kill_shell(args["session_id"])
     if tool == "shell_list":
         return await list_shells()
+    if tool == "job_start":
+        return await start_job(args["command"], args.get("cwd", "."), args.get("name"))
+    if tool == "job_list":
+        return await list_jobs(args.get("include_finished", True))
+    if tool == "job_tail":
+        return await tail_job(args["job_id"], args.get("lines", 200))
+    if tool == "job_stop":
+        return await stop_job(args["job_id"])
+    if tool == "job_retry":
+        return await retry_job(args["job_id"])
     if tool == "list_files":
         return await _to_thread(list_dir, args.get("path", "."), args.get("recursive", False), args.get("max_entries", 500))
     if tool == "tree_view":
@@ -716,7 +732,7 @@ async def execute_worker_tool(tool: str, args: dict[str, Any]) -> Any:
 
 
 def worker_capabilities() -> list[str]:
-    return ["shell", "persistent_shell", "files", "file_transfer", "search", "git", "python", "playwright"]
+    return ["shell", "persistent_shell", "jobs", "files", "file_transfer", "search", "git", "python", "playwright"]
 
 
 def worker_info(workdir: str) -> dict[str, Any]:

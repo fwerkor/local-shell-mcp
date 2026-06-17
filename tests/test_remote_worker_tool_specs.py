@@ -19,6 +19,8 @@ def test_remote_worker_allowlist_covers_core_capabilities():
         "run_python_tool",
         "read_file",
         "write_file",
+        "job_start",
+        "job_list",
         "transfer_read_chunk",
         "transfer_write_chunk",
         "git_status_tool",
@@ -26,4 +28,4 @@ def test_remote_worker_allowlist_covers_core_capabilities():
     } <= REMOTE_WORKER_TOOL_NAMES
 
     capabilities = set(worker_capabilities())
-    assert {"shell", "files", "file_transfer", "git", "python", "playwright"} <= capabilities
+    assert {"shell", "jobs", "files", "file_transfer", "git", "python", "playwright"} <= capabilities

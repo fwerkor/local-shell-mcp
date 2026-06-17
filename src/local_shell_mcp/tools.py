@@ -41,6 +41,7 @@ from .git_ops import (
     git_show,
     git_status,
 )
+from .jobs import list_jobs, retry_job, start_job, stop_job, tail_job
 from .models import ToolResult
 from .playwright_ops import (
     browser_eval,
@@ -849,6 +850,48 @@ def build_mcp() -> FastMCP:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, meta=oauth_meta)
+    async def job_start(command: str, cwd: str = ".", name: str | None = None, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
+        """Start a named long-running job backed by a persistent shell session. Use for builds, servers, watches, experiments, or other commands that should be listed, tailed, stopped, or retried later. Optional purpose/explanation fields let agents state why the job is being started."""
+        try:
+            _audit_tool_purpose("job_start", purpose, explanation)
+            return _ok(await start_job(command, cwd, name))
+        except Exception as exc:
+            return _handled_error(exc)
+
+    @mcp.tool(structured_output=True, meta=oauth_meta)
+    async def job_list(include_finished: bool = True) -> ToolResult:
+        """List tracked long-running jobs with running/exited/stopped status counts."""
+        try:
+            return _ok(await list_jobs(include_finished))
+        except Exception as exc:
+            return _handled_error(exc)
+
+    @mcp.tool(structured_output=True, meta=oauth_meta)
+    async def job_tail(job_id: str, lines: int = 200) -> ToolResult:
+        """Read recent output for a tracked long-running job."""
+        try:
+            return _ok(await tail_job(job_id, lines))
+        except Exception as exc:
+            return _handled_error(exc)
+
+    @mcp.tool(structured_output=True, meta=oauth_meta)
+    async def job_stop(job_id: str) -> ToolResult:
+        """Stop a tracked long-running job and its backing persistent shell session."""
+        try:
+            return _ok(await stop_job(job_id))
+        except Exception as exc:
+            return _handled_error(exc)
+
+    @mcp.tool(structured_output=True, meta=oauth_meta)
+    async def job_retry(job_id: str, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
+        """Restart a stopped or exited tracked job using the original command and working directory. Optional purpose/explanation fields let agents state why the retry is needed."""
+        try:
+            _audit_tool_purpose("job_retry", purpose, explanation)
+            return _ok(await retry_job(job_id))
+        except Exception as exc:
+            return _handled_error(exc)
+
+    @mcp.tool(structured_output=True, meta=oauth_meta)
     async def list_files(path: str = ".", recursive: bool = False, max_entries: int = 500) -> ToolResult:
         """List files and directories under a path. Use for quick directory inspection when a compact listing is enough. path defaults to '.' and is workspace-relative unless full-container mode allows absolute paths; recursive walks descendants and max_entries is capped by server settings."""
         try:
@@ -1246,6 +1289,31 @@ def build_mcp() -> FastMCP:
     async def remote_shell_list(machine: str) -> ToolResult:
         """List persistent shell sessions on a remote worker."""
         return await _remote_call(machine, "shell_list", {})
+
+    @mcp.tool(structured_output=True, meta=oauth_meta)
+    async def remote_job_start(machine: str, command: str, cwd: str = ".", name: str | None = None, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
+        """Start a tracked long-running job on a remote worker. Optional purpose/explanation fields let agents state why the job is being started."""
+        return await _remote_call(machine, "job_start", {"command": command, "cwd": cwd, "name": name, "purpose": purpose, "explanation": explanation})
+
+    @mcp.tool(structured_output=True, meta=oauth_meta)
+    async def remote_job_list(machine: str, include_finished: bool = True) -> ToolResult:
+        """List tracked long-running jobs on a remote worker."""
+        return await _remote_call(machine, "job_list", {"include_finished": include_finished})
+
+    @mcp.tool(structured_output=True, meta=oauth_meta)
+    async def remote_job_tail(machine: str, job_id: str, lines: int = 200) -> ToolResult:
+        """Read recent output for a tracked remote job."""
+        return await _remote_call(machine, "job_tail", {"job_id": job_id, "lines": lines})
+
+    @mcp.tool(structured_output=True, meta=oauth_meta)
+    async def remote_job_stop(machine: str, job_id: str) -> ToolResult:
+        """Stop a tracked long-running job on a remote worker."""
+        return await _remote_call(machine, "job_stop", {"job_id": job_id})
+
+    @mcp.tool(structured_output=True, meta=oauth_meta)
+    async def remote_job_retry(machine: str, job_id: str, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
+        """Restart a stopped or exited tracked job on a remote worker. Optional purpose/explanation fields let agents state why the retry is needed."""
+        return await _remote_call(machine, "job_retry", {"job_id": job_id, "purpose": purpose, "explanation": explanation})
 
     @mcp.tool(structured_output=True, meta=oauth_meta)
     async def remote_list_files(machine: str, path: str = ".", recursive: bool = False, max_entries: int = 500) -> ToolResult:
