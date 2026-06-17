@@ -1,6 +1,7 @@
 
 
 import subprocess
+import sys
 import urllib.error
 from io import BytesIO
 
@@ -141,6 +142,30 @@ def test_worker_post_json_urllib_reports_non_2xx_body(monkeypatch):
 
 def test_worker_retry_delay_is_capped():
     assert [remote._worker_retry_delay(i) for i in range(7)] == [1.0, 2.0, 4.0, 8.0, 16.0, 30.0, 30.0]  # noqa: SLF001
+
+
+def test_worker_cli_keyboard_interrupt_exits_cleanly():
+    code = """
+import sys as _sys
+_sys.path.insert(0, "src")
+
+from local_shell_mcp import remote
+
+
+def fake_asyncio_run(coro):
+    coro.close()
+    raise KeyboardInterrupt
+
+
+remote.asyncio.run = fake_asyncio_run
+remote.run_worker_cli(["--server", "https://example.test", "--invite", "lsmcp_inv_test"])
+"""
+
+    completed = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)  # noqa: S603
+
+    assert completed.returncode == 130
+    assert "Status: disconnected by user." in completed.stderr
+    assert "Traceback" not in completed.stderr
 
 
 @pytest.mark.asyncio

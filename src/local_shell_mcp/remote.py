@@ -995,4 +995,8 @@ def run_worker_cli(argv: list[str] | None = None) -> None:
     parser.add_argument("--workdir", default=None)
     parser.add_argument("--persist", action="store_true", help="Reserved for future user-service installation")
     args = parser.parse_args(argv)
-    asyncio.run(run_worker(args.server, args.invite, args.name, args.workdir, args.persist))
+    try:
+        asyncio.run(run_worker(args.server, args.invite, args.name, args.workdir, args.persist))
+    except KeyboardInterrupt:
+        print("\nStatus: disconnected by user.", file=sys.stderr, flush=True)
+        raise SystemExit(130) from None
