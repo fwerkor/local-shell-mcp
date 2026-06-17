@@ -37,6 +37,9 @@ jobs:
       - name: Install docs dependencies
         run: python -m pip install -e ".[docs]"
 
+      - name: Check localized docs
+        run: python scripts/check-doc-i18n.py
+
       - name: Build docs
         run: mkdocs build --strict
 
