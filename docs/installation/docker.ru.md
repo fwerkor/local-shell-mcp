@@ -1,25 +1,25 @@
 # Docker Compose
 
-Это локализованная страница с той же структурой Runtime/Client.
+Эта страница описывает сценарий «Docker Compose» и использует общую структуру Runtime/Client.
 
 ## Обзор
 
-Runtime defines how the server process runs and which workspace it controls. Client defines how ChatGPT or another MCP client connects. Docker, the VS Code extension, standalone binaries, Python/pipx/source installs, and stdio are Runtime choices; ChatGPT connector, generic HTTP MCP client, and stdio MCP client are Client connections.
+Runtime определяет, как запускается серверный процесс и каким рабочим пространством он управляет. Client определяет, как подключается ChatGPT или другой MCP-клиент. Docker, расширение VS Code, автономные бинарные файлы, установки Python/pipx/из исходного кода и stdio — это варианты Runtime; коннектор ChatGPT, общий HTTP MCP-клиент и stdio MCP-клиент — это подключения Client.
 
 ## Когда использовать
 
-- Use this page when the selected Runtime or Client path matches the title.
-- Keep the workspace root, public base URL, MCP endpoint, authentication mode, and available host tools consistent.
-- For ChatGPT web/app, expose an HTTPS MCP endpoint ending in `/mcp`.
-- For local MCP clients, use HTTP localhost or `local-shell-mcp --mode stdio` depending on client support.
+- Используйте эту страницу, когда выбранный путь Runtime или Client соответствует заголовку.
+- Сохраняйте согласованными корень рабочего пространства, публичный base URL, MCP endpoint, режим аутентификации и доступные инструменты хоста.
+- Для ChatGPT web/app опубликуйте HTTPS MCP endpoint, заканчивающийся на `/mcp`.
+- Для локальных MCP-клиентов используйте HTTP localhost или `local-shell-mcp --mode stdio` в зависимости от поддержки клиента.
 
 ## Шаги
 
-1. Choose the Runtime installation page first.
-2. Start the Runtime and verify `/healthz` when HTTP mode is used.
-3. Choose the Client connection page second.
-4. Register the MCP endpoint or stdio command in the Client.
-5. Call `environment_info` to verify the effective workspace and settings.
+1. Сначала выберите страницу установки Runtime.
+2. Запустите Runtime и проверьте `/healthz`, если используется HTTP-режим.
+3. Затем выберите страницу подключения Client.
+4. Зарегистрируйте MCP endpoint или stdio-команду в Client.
+5. Вызовите `environment_info`, чтобы проверить фактическое рабочее пространство и настройки.
 
 ```text
 Runtime: Docker / VS Code extension / binary / Python / stdio
@@ -29,11 +29,11 @@ Endpoint: https://your-host.example.com/mcp
 
 ## Проверка
 
-- `environment_info` confirms runtime settings and workspace.
-- `tree_view` confirms visible files.
-- `git_status_tool` confirms repository context.
-- `run_shell_tool` confirms the command environment.
+- `environment_info` подтверждает настройки Runtime и рабочее пространство.
+- `tree_view` подтверждает видимые файлы.
+- `git_status_tool` подтверждает контекст репозитория.
+- `run_shell_tool` подтверждает командную среду.
 
 ## Примечания
 
-Prefer small, verifiable steps: inspect, edit, diff, test, scan, commit. Large tasks should still be decomposed into tool calls that can be audited.
+Предпочитайте небольшие проверяемые шаги: осмотр, правка, diff, тестирование, сканирование и commit. Большие задачи также нужно разбивать на аудируемые вызовы инструментов.

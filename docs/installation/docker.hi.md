@@ -1,25 +1,25 @@
 # Docker Compose
 
-यह पेज उसी Runtime/Client संरचना की localized version है।
+यह पृष्ठ “Docker Compose” परिदृश्य समझाता है और साइट की समान Runtime/Client संरचना का पालन करता है।
 
-## Overview
+## सारांश
 
-Runtime defines how the server process runs and which workspace it controls. Client defines how ChatGPT or another MCP client connects. Docker, the VS Code extension, standalone binaries, Python/pipx/source installs, and stdio are Runtime choices; ChatGPT connector, generic HTTP MCP client, and stdio MCP client are Client connections.
+Runtime यह तय करता है कि सर्वर प्रक्रिया कैसे चलेगी और कौन-सा workspace नियंत्रित होगा। Client यह तय करता है कि ChatGPT या कोई अन्य MCP क्लाइंट कैसे जुड़ेगा। Docker, VS Code एक्सटेंशन, स्वतंत्र बाइनरी, Python/pipx/source स्थापना और stdio Runtime विकल्प हैं; ChatGPT कनेक्टर, सामान्य HTTP MCP क्लाइंट और stdio MCP क्लाइंट Client कनेक्शन हैं।
 
 ## कब उपयोग करें
 
-- Use this page when the selected Runtime or Client path matches the title.
-- Keep the workspace root, public base URL, MCP endpoint, authentication mode, and available host tools consistent.
-- For ChatGPT web/app, expose an HTTPS MCP endpoint ending in `/mcp`.
-- For local MCP clients, use HTTP localhost or `local-shell-mcp --mode stdio` depending on client support.
+- जब चुना गया Runtime या Client पथ इस शीर्षक से मेल खाए, तब इस पृष्ठ का उपयोग करें।
+- workspace root, public base URL, MCP endpoint, authentication mode और host पर उपलब्ध टूल को संगत रखें।
+- ChatGPT web/app के लिए `/mcp` पर समाप्त होने वाला HTTPS MCP endpoint उपलब्ध कराएँ।
+- स्थानीय MCP क्लाइंट के लिए क्लाइंट समर्थन के अनुसार HTTP localhost या `local-shell-mcp --mode stdio` का उपयोग करें।
 
-## Steps
+## चरण
 
-1. Choose the Runtime installation page first.
-2. Start the Runtime and verify `/healthz` when HTTP mode is used.
-3. Choose the Client connection page second.
-4. Register the MCP endpoint or stdio command in the Client.
-5. Call `environment_info` to verify the effective workspace and settings.
+1. पहले Runtime स्थापना पृष्ठ चुनें।
+2. Runtime शुरू करें और HTTP मोड में `/healthz` जाँचें।
+3. फिर Client कनेक्शन पृष्ठ चुनें।
+4. Client में MCP endpoint या stdio command पंजीकृत करें।
+5. वास्तविक workspace और settings की जाँच के लिए `environment_info` कॉल करें।
 
 ```text
 Runtime: Docker / VS Code extension / binary / Python / stdio
@@ -27,13 +27,13 @@ Client:  ChatGPT connector / generic HTTP MCP / generic stdio MCP
 Endpoint: https://your-host.example.com/mcp
 ```
 
-## Verify
+## सत्यापन
 
-- `environment_info` confirms runtime settings and workspace.
-- `tree_view` confirms visible files.
-- `git_status_tool` confirms repository context.
-- `run_shell_tool` confirms the command environment.
+- `environment_info` Runtime settings और workspace की पुष्टि करता है।
+- `tree_view` दिखाई देने वाली फ़ाइलों की पुष्टि करता है।
+- `git_status_tool` repository context की पुष्टि करता है।
+- `run_shell_tool` command environment की पुष्टि करता है।
 
-## Notes
+## टिप्पणियाँ
 
-Prefer small, verifiable steps: inspect, edit, diff, test, scan, commit. Large tasks should still be decomposed into tool calls that can be audited.
+छोटे और सत्यापित किए जा सकने वाले चरणों को प्राथमिकता दें: निरीक्षण, संपादन, diff, test, scan और commit। बड़े कार्यों को भी audit योग्य tool calls में बाँटें।

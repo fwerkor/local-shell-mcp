@@ -1,16 +1,16 @@
 # Tài liệu local-shell-mcp
 
-Một control plane cục bộ cho ChatGPT Developer Mode và các MCP client khác. Nó cung cấp workspace có kiểm soát, shell, file, Git, tự động hóa trình duyệt, liên kết file và remote worker dưới dạng MCP tools.
+Mặt phẳng điều khiển cục bộ cho ChatGPT Developer Mode và các client MCP khác. Nó cung cấp workspace được kiểm soát, shell, tệp, Git, tự động hóa trình duyệt, liên kết tệp và worker từ xa dưới dạng công cụ MCP.
 
-## Documentation paths
+## Đường dẫn tài liệu
 
 - [Bắt đầu nhanh](getting-started/quickstart.md)
-- [Kết nối ChatGPT](getting-started/chatgpt-connector.md)
-- [Remote workers](guides/remote-workers.md)
+- [Trình kết nối ChatGPT](getting-started/chatgpt-connector.md)
+- [Worker từ xa](guides/remote-workers.md)
 - [Bảo mật](security.md)
-- [Khắc phục sự cố](troubleshooting.md)
+- [Xử lý sự cố](troubleshooting.md)
 
-## Core architecture
+## Kiến trúc lõi
 
 ```text
 ChatGPT / MCP client
@@ -20,6 +20,6 @@ ChatGPT / MCP client
   -> optional outbound remote workers
 ```
 
-## Key safety rule
+## Quy tắc an toàn chính
 
-Với deployment công khai, bật OAuth và không mount Docker socket, root của host hoặc credential dài hạn.
+Khi triển khai công khai, hãy bật OAuth và không mount Docker socket, thư mục gốc của host hoặc thông tin xác thực dài hạn.

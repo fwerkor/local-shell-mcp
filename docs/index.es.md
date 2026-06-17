@@ -1,8 +1,8 @@
 # Documentación de local-shell-mcp
 
-Un plano de control local para ChatGPT Developer Mode y otros clientes MCP. Expone un espacio de trabajo controlado, shell, archivos, Git, automatización de navegador, enlaces de archivos y workers remotos como herramientas MCP.
+Un plano de control local para ChatGPT Developer Mode y otros clientes MCP. Expone un espacio de trabajo controlado, shell, archivos, Git, automatización del navegador, enlaces de archivos y workers remotos como herramientas MCP.
 
-## Documentation paths
+## Rutas de documentación
 
 - [Inicio rápido](getting-started/quickstart.md)
 - [Conector de ChatGPT](getting-started/chatgpt-connector.md)
@@ -10,7 +10,7 @@ Un plano de control local para ChatGPT Developer Mode y otros clientes MCP. Expo
 - [Seguridad](security.md)
 - [Solución de problemas](troubleshooting.md)
 
-## Core architecture
+## Arquitectura principal
 
 ```text
 ChatGPT / MCP client
@@ -20,6 +20,6 @@ ChatGPT / MCP client
   -> optional outbound remote workers
 ```
 
-## Key safety rule
+## Regla de seguridad clave
 
-En despliegues públicos habilita OAuth y no montes el Docker socket, la raíz del host ni credenciales de larga duración.
+En despliegues públicos, habilita OAuth y no montes el Docker socket, la raíz del host ni credenciales de larga duración.

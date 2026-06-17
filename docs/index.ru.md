@@ -1,16 +1,16 @@
 # Документация local-shell-mcp
 
-Локальная плоскость управления для ChatGPT Developer Mode и других MCP-клиентов. Она предоставляет контролируемое рабочее пространство, shell, файлы, Git, автоматизацию браузера, ссылки на файлы и удалённые workers как MCP-инструменты.
+Локальная плоскость управления для ChatGPT Developer Mode и других MCP-клиентов. Она предоставляет контролируемое рабочее пространство, shell, файлы, Git, автоматизацию браузера, ссылки на файлы и удалённые worker как MCP-инструменты.
 
-## Documentation paths
+## Разделы документации
 
 - [Быстрый старт](getting-started/quickstart.md)
 - [Коннектор ChatGPT](getting-started/chatgpt-connector.md)
-- [Удалённые workers](guides/remote-workers.md)
+- [Удалённые worker](guides/remote-workers.md)
 - [Безопасность](security.md)
 - [Диагностика](troubleshooting.md)
 
-## Core architecture
+## Основная архитектура
 
 ```text
 ChatGPT / MCP client
@@ -20,6 +20,6 @@ ChatGPT / MCP client
   -> optional outbound remote workers
 ```
 
-## Key safety rule
+## Ключевое правило безопасности
 
-Для публичного развертывания включайте OAuth и не монтируйте Docker socket, корень хоста или долговременные учётные данные.
+В публичных развертываниях включайте OAuth и не монтируйте Docker socket, корень хоста или долгосрочные учётные данные.

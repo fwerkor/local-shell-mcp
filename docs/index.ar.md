@@ -1,18 +1,16 @@
-<div dir="rtl" markdown>
-
 # توثيق local-shell-mcp
 
-طبقة تحكم محلية لـ ChatGPT Developer Mode وعملاء MCP الآخرين. توفر مساحة عمل مضبوطة و shell وملفات و Git وأتمتة متصفح وروابط ملفات وعمالاً بعيدين كأدوات MCP.
+طبقة تحكم محلية لـ ChatGPT Developer Mode وعملاء MCP الآخرين. تعرض مساحة عمل مضبوطة و shell والملفات و Git وأتمتة المتصفح وروابط الملفات والـ workers البعيدة كأدوات MCP.
 
-## Documentation paths
+## مسارات التوثيق
 
 - [البدء السريع](getting-started/quickstart.md)
 - [موصل ChatGPT](getting-started/chatgpt-connector.md)
-- [العاملون البعيدون](guides/remote-workers.md)
+- [Workers بعيدة](guides/remote-workers.md)
 - [الأمان](security.md)
 - [استكشاف الأخطاء](troubleshooting.md)
 
-## Core architecture
+## البنية الأساسية
 
 ```text
 ChatGPT / MCP client
@@ -22,8 +20,6 @@ ChatGPT / MCP client
   -> optional outbound remote workers
 ```
 
-## Key safety rule
+## قاعدة الأمان الأساسية
 
-في النشر العام فعّل OAuth ولا تربط Docker socket أو جذر المضيف أو بيانات اعتماد طويلة الأمد.
-
-</div>
+في عمليات النشر العامة، فعّل OAuth ولا تركّب Docker socket أو جذر المضيف أو بيانات اعتماد طويلة الأمد.

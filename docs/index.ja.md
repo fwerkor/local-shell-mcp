@@ -1,16 +1,16 @@
-# local-shell-mcp 日本語ドキュメント
+# local-shell-mcp ドキュメント
 
-ChatGPT Developer Mode と他の MCP クライアント向けのローカル制御プレーンです。制御されたワークスペース、shell、ファイル、Git、ブラウザ自動化、ファイルリンク、リモートワーカーを MCP ツールとして提供します。
+ChatGPT Developer Mode とその他の MCP クライアント向けのローカル制御プレーンです。制御されたワークスペース、shell、ファイル、Git、ブラウザー自動化、ファイルリンク、リモート worker を MCP ツールとして公開します。
 
-## Documentation paths
+## ドキュメントの導線
 
 - [クイックスタート](getting-started/quickstart.md)
 - [ChatGPT コネクタ](getting-started/chatgpt-connector.md)
-- [リモートワーカー](guides/remote-workers.md)
+- [リモート worker](guides/remote-workers.md)
 - [セキュリティ](security.md)
 - [トラブルシューティング](troubleshooting.md)
 
-## Core architecture
+## コアアーキテクチャ
 
 ```text
 ChatGPT / MCP client
@@ -20,6 +20,6 @@ ChatGPT / MCP client
   -> optional outbound remote workers
 ```
 
-## Key safety rule
+## 重要な安全ルール
 
-公開環境では OAuth を必ず有効にし、Docker socket、ホスト root、長期認証情報をマウントしないでください。
+公開デプロイでは OAuth を有効にし、Docker socket、ホストのルート、長期認証情報をマウントしないでください。

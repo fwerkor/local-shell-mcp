@@ -1,8 +1,8 @@
-# local-shell-mcp Dokumentation
+# local-shell-mcp-Dokumentation
 
-Eine lokale Steuerungsebene für ChatGPT Developer Mode und andere MCP-Clients. Sie stellt einen kontrollierten Workspace, Shell, Dateien, Git, Browser-Automation, Dateilinks und Remote-Worker als MCP-Tools bereit.
+Eine lokale Steuerungsebene für ChatGPT Developer Mode und andere MCP-Clients. Sie stellt einen kontrollierten Workspace, shell, Dateien, Git, Browser-Automatisierung, Dateilinks und Remote-Worker als MCP-Tools bereit.
 
-## Documentation paths
+## Dokumentationspfade
 
 - [Schnellstart](getting-started/quickstart.md)
 - [ChatGPT-Connector](getting-started/chatgpt-connector.md)
@@ -10,7 +10,7 @@ Eine lokale Steuerungsebene für ChatGPT Developer Mode und andere MCP-Clients. 
 - [Sicherheit](security.md)
 - [Fehlerbehebung](troubleshooting.md)
 
-## Core architecture
+## Kernarchitektur
 
 ```text
 ChatGPT / MCP client
@@ -20,6 +20,6 @@ ChatGPT / MCP client
   -> optional outbound remote workers
 ```
 
-## Key safety rule
+## Wichtige Sicherheitsregel
 
-Bei öffentlicher Bereitstellung OAuth aktivieren und weder Docker-Socket, Host-Root noch langlebige Zugangsdaten einbinden.
+Aktiviere bei öffentlichen Bereitstellungen OAuth und mounte weder Docker socket noch Host-Wurzel noch langfristige Zugangsdaten.

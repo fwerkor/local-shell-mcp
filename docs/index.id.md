@@ -1,16 +1,16 @@
 # Dokumentasi local-shell-mcp
 
-Control plane lokal untuk ChatGPT Developer Mode dan klien MCP lain. Ia mengekspos workspace terkontrol, shell, file, Git, otomasi browser, tautan file, dan remote worker sebagai alat MCP.
+Bidang kendali lokal untuk ChatGPT Developer Mode dan client MCP lain. Ini mengekspos workspace terkendali, shell, file, Git, otomasi browser, tautan file, dan worker jarak jauh sebagai alat MCP.
 
-## Documentation paths
+## Jalur dokumentasi
 
 - [Mulai cepat](getting-started/quickstart.md)
 - [Konektor ChatGPT](getting-started/chatgpt-connector.md)
-- [Remote worker](guides/remote-workers.md)
+- [Worker jarak jauh](guides/remote-workers.md)
 - [Keamanan](security.md)
 - [Pemecahan masalah](troubleshooting.md)
 
-## Core architecture
+## Arsitektur inti
 
 ```text
 ChatGPT / MCP client
@@ -20,6 +20,6 @@ ChatGPT / MCP client
   -> optional outbound remote workers
 ```
 
-## Key safety rule
+## Aturan keamanan utama
 
-Untuk deployment publik, aktifkan OAuth dan jangan mount Docker socket, root host, atau kredensial jangka panjang.
+Pada deployment publik, aktifkan OAuth dan jangan mount Docker socket, root host, atau kredensial jangka panjang.

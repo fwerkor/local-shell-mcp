@@ -1,16 +1,16 @@
-# local-shell-mcp belgeleri
+# local-shell-mcp dokümantasyonu
 
 ChatGPT Developer Mode ve diğer MCP istemcileri için yerel bir kontrol düzlemi. Kontrollü workspace, shell, dosyalar, Git, tarayıcı otomasyonu, dosya bağlantıları ve uzak worker’ları MCP araçları olarak sunar.
 
-## Documentation paths
+## Dokümantasyon yolları
 
 - [Hızlı başlangıç](getting-started/quickstart.md)
-- [ChatGPT bağlayıcı](getting-started/chatgpt-connector.md)
-- [Uzak worker’lar](guides/remote-workers.md)
+- [ChatGPT bağlayıcısı](getting-started/chatgpt-connector.md)
+- [Uzak worker](guides/remote-workers.md)
 - [Güvenlik](security.md)
 - [Sorun giderme](troubleshooting.md)
 
-## Core architecture
+## Temel mimari
 
 ```text
 ChatGPT / MCP client
@@ -20,6 +20,6 @@ ChatGPT / MCP client
   -> optional outbound remote workers
 ```
 
-## Key safety rule
+## Temel güvenlik kuralı
 
-Herkese açık dağıtımda OAuth etkin olsun; Docker socket, host root veya uzun ömürlü kimlik bilgilerini bağlamayın.
+Genel dağıtımlarda OAuth’u etkinleştirin ve Docker socket, host kökü veya uzun ömürlü kimlik bilgilerini mount etmeyin.

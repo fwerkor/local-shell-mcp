@@ -1,16 +1,16 @@
 # Dokumentacja local-shell-mcp
 
-Lokalna płaszczyzna sterowania dla ChatGPT Developer Mode i innych klientów MCP. Udostępnia kontrolowany workspace, shell, pliki, Git, automatyzację przeglądarki, linki do plików i remote workers jako narzędzia MCP.
+Lokalna płaszczyzna sterowania dla ChatGPT Developer Mode i innych klientów MCP. Udostępnia kontrolowany workspace, shell, pliki, Git, automatyzację przeglądarki, linki do plików i zdalne worker jako narzędzia MCP.
 
-## Documentation paths
+## Ścieżki dokumentacji
 
 - [Szybki start](getting-started/quickstart.md)
-- [Konektor ChatGPT](getting-started/chatgpt-connector.md)
-- [Zdalne workery](guides/remote-workers.md)
+- [Łącznik ChatGPT](getting-started/chatgpt-connector.md)
+- [Zdalne worker](guides/remote-workers.md)
 - [Bezpieczeństwo](security.md)
 - [Rozwiązywanie problemów](troubleshooting.md)
 
-## Core architecture
+## Główna architektura
 
 ```text
 ChatGPT / MCP client
@@ -20,6 +20,6 @@ ChatGPT / MCP client
   -> optional outbound remote workers
 ```
 
-## Key safety rule
+## Kluczowa zasada bezpieczeństwa
 
-W publicznych wdrożeniach włącz OAuth i nie montuj Docker socket, katalogu głównego hosta ani długotrwałych poświadczeń.
+W publicznych wdrożeniach włącz OAuth i nie montuj Docker socket, katalogu głównego hosta ani długoterminowych poświadczeń.

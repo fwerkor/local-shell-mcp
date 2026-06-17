@@ -1,25 +1,25 @@
 # REST API
 
-このページは同じ Runtime/Client 構造に沿ったローカライズ版です。
+このページでは「REST API」の場面を説明し、サイト全体で共通の Runtime/Client 構造に従います。
 
 ## 概要
 
-Runtime defines how the server process runs and which workspace it controls. Client defines how ChatGPT or another MCP client connects. Docker, the VS Code extension, standalone binaries, Python/pipx/source installs, and stdio are Runtime choices; ChatGPT connector, generic HTTP MCP client, and stdio MCP client are Client connections.
+Runtime はサーバープロセスの起動方法と制御するワークスペースを決めます。Client は ChatGPT または別の MCP クライアントの接続方法を決めます。Docker、VS Code 拡張、スタンドアロンバイナリ、Python/pipx/ソースインストール、stdio は Runtime の選択肢です。ChatGPT コネクタ、汎用 HTTP MCP クライアント、stdio MCP クライアントは Client 接続です。
 
-## 利用場面
+## 利用する場面
 
-- Use this page when the selected Runtime or Client path matches the title.
-- Keep the workspace root, public base URL, MCP endpoint, authentication mode, and available host tools consistent.
-- For ChatGPT web/app, expose an HTTPS MCP endpoint ending in `/mcp`.
-- For local MCP clients, use HTTP localhost or `local-shell-mcp --mode stdio` depending on client support.
+- 選択した Runtime または Client の経路がこのページのタイトルに一致する場合に使用します。
+- ワークスペースルート、公開 base URL、MCP endpoint、認証モード、ホストで利用できるツールをそろえます。
+- ChatGPT の Web/App では `/mcp` で終わる HTTPS MCP endpoint を公開します。
+- ローカル MCP クライアントでは、対応状況に応じて HTTP localhost または `local-shell-mcp --mode stdio` を使用します。
 
 ## 手順
 
-1. Choose the Runtime installation page first.
-2. Start the Runtime and verify `/healthz` when HTTP mode is used.
-3. Choose the Client connection page second.
-4. Register the MCP endpoint or stdio command in the Client.
-5. Call `environment_info` to verify the effective workspace and settings.
+1. まず Runtime のインストールページを選びます。
+2. Runtime を起動し、HTTP モードでは `/healthz` を確認します。
+3. 次に Client 接続ページを選びます。
+4. Client に MCP endpoint または stdio コマンドを登録します。
+5. `environment_info` を呼び出して実際のワークスペースと設定を確認します。
 
 ```text
 Runtime: Docker / VS Code extension / binary / Python / stdio
@@ -27,13 +27,13 @@ Client:  ChatGPT connector / generic HTTP MCP / generic stdio MCP
 Endpoint: https://your-host.example.com/mcp
 ```
 
-## 確認
+## 検証
 
-- `environment_info` confirms runtime settings and workspace.
-- `tree_view` confirms visible files.
-- `git_status_tool` confirms repository context.
-- `run_shell_tool` confirms the command environment.
+- `environment_info` は Runtime 設定とワークスペースを確認します。
+- `tree_view` は見えているファイルを確認します。
+- `git_status_tool` はリポジトリの文脈を確認します。
+- `run_shell_tool` はコマンド実行環境を確認します。
 
-## 注意
+## 注記
 
-Prefer small, verifiable steps: inspect, edit, diff, test, scan, commit. Large tasks should still be decomposed into tool calls that can be audited.
+小さく検証可能な手順を優先します。確認、編集、diff、テスト、スキャン、コミットの順に進めます。大きな作業も監査可能なツール呼び出しに分解します。
