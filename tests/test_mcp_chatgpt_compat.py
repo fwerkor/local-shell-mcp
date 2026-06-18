@@ -32,6 +32,18 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
     assert tools["search"].meta["securitySchemes"][0]["type"] == "noauth"
     assert tools["environment_info"].meta["securitySchemes"][0]["type"] == "oauth2"
 
+    def scopes(tool_name: str, scheme_index: int = 0) -> list[str]:
+        return tools[tool_name].meta["securitySchemes"][scheme_index]["scopes"]
+
+    assert scopes("search", scheme_index=1) == ["shell:read"]
+    assert scopes("audit_tail") == ["shell:read"]
+    assert scopes("apply_patch") == ["shell:read", "shell:write", "git:write"]
+    assert scopes("browser_get_text_tool") == ["browser:use"]
+    assert scopes("browser_screenshot_tool") == ["browser:use", "shell:write"]
+    assert scopes("remote_run_shell_tool") == ["remote:use", "shell:read", "shell:execute"]
+    assert scopes("remote_git_status_tool") == ["remote:use", "shell:read"]
+    assert scopes("remote_browser_eval_tool") == ["remote:use", "browser:use"]
+
     assert all(tool.outputSchema is not None for tool in tools.values())
     assert tools["run_shell_tool"].outputSchema["title"] == "ToolResult"
     assert set(tools["run_shell_tool"].outputSchema["properties"]) == {"ok", "message", "data"}
