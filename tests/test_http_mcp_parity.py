@@ -1,4 +1,5 @@
 import pytest
+from conftest import python_shell_command
 from fastapi.testclient import TestClient
 
 from local_shell_mcp.http_app import build_http_app
@@ -47,7 +48,7 @@ async def test_http_read_file_matches_mcp_payload(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_http_run_shell_matches_mcp_command_payload(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
-    args = {"command": "printf parity", "cwd": ".", "timeout_s": 5}
+    args = {"command": python_shell_command("print('parity', end='')"), "cwd": ".", "timeout_s": 5}
 
     http_payload = client.post("/tools/run_shell", json=args).json()
     mcp_payload = _mcp_data(await build_mcp().call_tool("run_shell_tool", args))

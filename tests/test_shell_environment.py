@@ -1,4 +1,5 @@
 import pytest
+from conftest import python_shell_command
 
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.shell_ops import run_shell
@@ -14,13 +15,13 @@ async def test_run_shell_filters_server_environment(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
     result = await run_shell(
-        "python3 - <<'PY'\n"
-        "import os\n"
-        "print(os.getenv('LOCAL_SHELL_MCP_EXAMPLE_SECRET'))\n"
-        "print(os.getenv('DOCKER_INTERNAL_FLAG'))\n"
-        "print(os.getenv('CLOUDFLARE_TUNNEL_TOKEN'))\n"
-        "print(os.getenv('VISIBLE_TO_SHELL'))\n"
-        "PY",
+        python_shell_command(
+            "import os; "
+            "print(os.getenv('LOCAL_SHELL_MCP_EXAMPLE_SECRET')); "
+            "print(os.getenv('DOCKER_INTERNAL_FLAG')); "
+            "print(os.getenv('CLOUDFLARE_TUNNEL_TOKEN')); "
+            "print(os.getenv('VISIBLE_TO_SHELL'))"
+        ),
         timeout_s=5,
     )
 
@@ -38,11 +39,11 @@ async def test_shell_environment_filter_is_configurable(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
     result = await run_shell(
-        "python3 - <<'PY'\n"
-        "import os\n"
-        "print(os.getenv('LOCAL_SHELL_MCP_VISIBLE'))\n"
-        "print(os.getenv('ONLY_THIS'))\n"
-        "PY",
+        python_shell_command(
+            "import os; "
+            "print(os.getenv('LOCAL_SHELL_MCP_VISIBLE')); "
+            "print(os.getenv('ONLY_THIS'))"
+        ),
         timeout_s=5,
     )
 

@@ -8,10 +8,11 @@ from local_shell_mcp.settings import get_settings
 
 @pytest.mark.asyncio
 async def test_native_persistent_shell_backend_roundtrip(tmp_path, monkeypatch):
-    monkeypatch.setenv("LOCAL_shell_MCP_workspace_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     get_settings.cache_clear()
     old_backend = ops._use_native_persistent_shell_backend
     ops._use_native_persistent_shell_backend = lambda: True
+    monkeypatch.setattr(ops.conpty_ops, "is_available", lambda: False)
     session = await ops.start_shell(name="native-roundtrip")
     try:
         await ops.send_shell(session["session_id"], "echo native-ok")

@@ -35,7 +35,13 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
     def scopes(tool_name: str, scheme_index: int = 0) -> list[str]:
         return tools[tool_name].meta["securitySchemes"][scheme_index]["scopes"]
 
-    assert scopes("search", scheme_index=1) == ["shell:read"]
+    assert scopes("search", scheme_index=1) == [
+        "shell:read",
+        "shell:write",
+        "shell:execute",
+        "git:write",
+        "browser:use",
+    ]
     assert scopes("audit_tail") == ["shell:read"]
     assert scopes("apply_patch") == ["shell:read", "shell:write", "git:write"]
     assert scopes("browser_get_text_tool") == ["browser:use"]

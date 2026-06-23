@@ -1,98 +1,427 @@
 name: CI
+
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PYTHONUNBUFFERED: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 jobs:
-  test:
-    name: Python tests (${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+  static:
+    name: Static / lint, docs, schemas
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install system tools
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends jq ripgrep shellcheck tmux
+
+      - name: Install project with development and docs extras
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev,docs]'
+
+      - name: Ruff
+        run: ruff check .
+
+      - name: ShellCheck scripts
+        run: shellcheck scripts/*.sh
+
+      - name: Export MCP tool schemas
+        run: |
+          set -euxo pipefail
+          python scripts/export-tools-json.py > /tmp/local-shell-mcp-tools.json
+          jq length /tmp/local-shell-mcp-tools.json
+          test "$(jq length /tmp/local-shell-mcp-tools.json)" -gt 20
+
+      - name: Documentation i18n check
+        run: python scripts/check-doc-i18n.py
+
+      - name: Build documentation strictly
+        run: mkdocs build --strict
+
+  python-tests:
+    name: Python / ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12']
+        include:
+          - label: linux-x86_64 py3.11
+            runner: ubuntu-24.04
+            python-version: "3.11"
+          - label: linux-x86_64 py3.12
+            runner: ubuntu-24.04
+            python-version: "3.12"
+          - label: linux-aarch64 py3.11
+            runner: ubuntu-24.04-arm
+            python-version: "3.11"
+          - label: linux-aarch64 py3.12
+            runner: ubuntu-24.04-arm
+            python-version: "3.12"
+          - label: macos-x86_64 py3.12
+            runner: macos-15-intel
+            python-version: "3.12"
+          - label: macos-aarch64 py3.12
+            runner: macos-15
+            python-version: "3.12"
+          - label: windows-x86_64 py3.11
+            runner: windows-latest
+            python-version: "3.11"
+          - label: windows-x86_64 py3.12
+            runner: windows-latest
+            python-version: "3.12"
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - name: Install runtime smoke-test dependencies
+
+      - name: Install Linux runtime tools
+        if: runner.os == 'Linux'
         run: |
+          set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends tmux ripgrep
-      - name: Install package in editable mode
+          sudo apt-get install -y --no-install-recommends ripgrep tmux
+
+      - name: Install macOS runtime tools
+        if: runner.os == 'macOS'
+        run: |
+          set -euxo pipefail
+          brew update
+          brew install ripgrep tmux
+
+      - name: Install Windows runtime tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install ripgrep -y --no-progress
+
+      - name: Install project
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e '.[dev]'
-      - name: Run CLI smoke tests
+
+      - name: Show runtime versions
         run: |
+          python --version
           local-shell-mcp --version
           local-shell-mcp version
-          python scripts/export-tools-json.py > /tmp/local-shell-mcp-tools.json
-          test -s /tmp/local-shell-mcp-tools.json
-      - run: ruff check .
-      - run: pytest -q
 
-  package-smoke:
-    name: Build and install wheel
-    runs-on: ubuntu-latest
-    needs: test
+      - name: Run pytest
+        run: pytest -vv --durations=25
+
+  endpoint-smoke:
+    name: Endpoint / ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-x86_64 REST none
+            runner: ubuntu-24.04
+            python-version: "3.12"
+            mode: http
+            auth: none
+          - label: linux-aarch64 REST none
+            runner: ubuntu-24.04-arm
+            python-version: "3.12"
+            mode: http
+            auth: none
+          - label: macos-aarch64 REST none
+            runner: macos-15
+            python-version: "3.12"
+            mode: http
+            auth: none
+          - label: windows-x86_64 REST none
+            runner: windows-latest
+            python-version: "3.12"
+            mode: http
+            auth: none
+          - label: linux-x86_64 MCP oauth
+            runner: ubuntu-24.04
+            python-version: "3.12"
+            mode: mcp
+            auth: oauth
+          - label: linux-aarch64 MCP oauth
+            runner: ubuntu-24.04-arm
+            python-version: "3.12"
+            mode: mcp
+            auth: oauth
+          - label: macos-aarch64 MCP oauth
+            runner: macos-15
+            python-version: "3.12"
+            mode: mcp
+            auth: oauth
+          - label: windows-x86_64 MCP oauth
+            runner: windows-latest
+            python-version: "3.12"
+            mode: mcp
+            auth: oauth
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
           cache: pip
-      - name: Build distributions
+
+      - name: Install Linux runtime tools
+        if: runner.os == 'Linux'
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ripgrep tmux
+
+      - name: Install macOS runtime tools
+        if: runner.os == 'macOS'
+        run: |
+          set -euxo pipefail
+          brew update
+          brew install ripgrep tmux
+
+      - name: Install Windows runtime tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install ripgrep -y --no-progress
+
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Boot server and run endpoint smoke test
+        run: python scripts/ci-smoke.py --mode ${{ matrix.mode }} --auth ${{ matrix.auth }}
+
+  package:
+    name: Package / ${{ matrix.artifact }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: wheel linux-x86_64
+            artifact: wheel-linux-x86_64
+            runner: ubuntu-24.04
+          - label: wheel linux-aarch64
+            artifact: wheel-linux-aarch64
+            runner: ubuntu-24.04-arm
+          - label: wheel macos-aarch64
+            artifact: wheel-macos-aarch64
+            runner: macos-15
+          - label: wheel windows-x86_64
+            artifact: wheel-windows-x86_64
+            runner: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Build wheel and source distribution
         run: |
           python -m pip install --upgrade pip build
           python -m build
-      - name: Install wheel in a clean virtualenv
+
+      - name: Install wheel in clean virtualenv and smoke test CLI
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
+          set -euxo pipefail
           python -m venv /tmp/local-shell-mcp-wheel-venv
           /tmp/local-shell-mcp-wheel-venv/bin/python -m pip install --upgrade pip
           /tmp/local-shell-mcp-wheel-venv/bin/python -m pip install dist/*.whl
           /tmp/local-shell-mcp-wheel-venv/bin/local-shell-mcp --version
           /tmp/local-shell-mcp-wheel-venv/bin/local-shell-mcp version
-          /tmp/local-shell-mcp-wheel-venv/bin/python - <<'PY'
-          from local_shell_mcp.version import version_info
-          assert version_info()["version"]
-          PY
 
-  docker-smoke:
-    name: Build Docker image
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - uses: actions/checkout@v6
-      - name: Build image
-        run: docker build -t local-shell-mcp:ci .
-      - name: Run image smoke tests
+      - name: Install wheel in clean virtualenv and smoke test CLI
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          docker run --rm local-shell-mcp:ci local-shell-mcp --version
-          docker run --rm local-shell-mcp:ci local-shell-mcp version
+          python -m venv $env:TEMP\local-shell-mcp-wheel-venv
+          & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\python.exe -m pip install --upgrade pip
+          & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\python.exe -m pip install (Get-Item dist\*.whl).FullName
+          & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\local-shell-mcp.exe --version
+          & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\local-shell-mcp.exe version
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-${{ matrix.artifact }}
+          path: dist/*
+          if-no-files-found: error
+
+
+  docker:
+    name: Docker / ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            suffix: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            suffix: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          push: false
+          load: true
+          tags: local-shell-mcp:ci-${{ matrix.suffix }}
+          cache-from: type=gha,scope=ci-docker-${{ matrix.suffix }}
+          cache-to: type=gha,mode=max,scope=ci-docker-${{ matrix.suffix }}
+
+      - name: Smoke test Docker image CLI
+        run: |
+          set -euxo pipefail
+          docker run --rm local-shell-mcp:ci-${{ matrix.suffix }} local-shell-mcp --version
+          docker run --rm local-shell-mcp:ci-${{ matrix.suffix }} local-shell-mcp version
+
+  compose:
+    name: Docker Compose / config and build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate Docker Compose file
+        run: docker compose config
+
+      - name: Build Compose service image
+        run: docker compose build local-shell-mcp
+
+  binary-release-matrix:
+    name: Binary / release matrix coverage
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate release binary matrix
+        run: python scripts/check-release-matrix.py
 
   vscode-extension:
-    name: Build VS Code extension
-    runs-on: ubuntu-latest
+    name: VS Code / ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-x86_64
+            runner: ubuntu-24.04
+          - label: macos-aarch64
+            runner: macos-15
+          - label: windows-x86_64
+            runner: windows-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
           cache-dependency-path: vscode-extension/package-lock.json
-      - working-directory: vscode-extension
+
+      - name: Install extension dependencies
+        working-directory: vscode-extension
         run: npm ci
-      - working-directory: vscode-extension
+
+      - name: Compile extension
+        working-directory: vscode-extension
         run: npm run compile
-      - working-directory: vscode-extension
+
+      - name: Package VSIX
+        working-directory: vscode-extension
         run: npm run package:vsix
+
       - name: Check VSIX artifact
+        shell: bash
         run: |
+          set -euxo pipefail
           ls -lh dist/*.vsix
           test -s dist/*.vsix
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: vscode-${{ matrix.label }}
+          path: dist/*.vsix
+          if-no-files-found: error
+
+  ci-summary:
+    name: CI / all matrix jobs passed
+    runs-on: ubuntu-24.04
+    needs:
+      - static
+      - python-tests
+      - endpoint-smoke
+      - package
+      - docker
+      - compose
+      - binary-release-matrix
+      - vscode-extension
+    if: always()
+    steps:
+      - name: Check aggregate result
+        env:
+          NEEDS_JSON: ${{ toJson(needs) }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          failed = {name: data["result"] for name, data in needs.items() if data["result"] != "success"}
+          if failed:
+              print("Failed jobs:")
+              for name, result in failed.items():
+                  print(f"- {name}: {result}")
+              sys.exit(1)
+          print("All CI matrix jobs passed.")
+          PY

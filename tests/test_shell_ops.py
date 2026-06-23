@@ -2,6 +2,7 @@ import asyncio
 import time
 
 import pytest
+from conftest import python_shell_command
 from fastapi.testclient import TestClient
 
 import local_shell_mcp.http_app as http_app_module
@@ -145,7 +146,7 @@ async def test_run_shell_streams_and_bounds_large_output(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
     result = await run_shell(
-        "python3 -c 'import sys; sys.stdout.write(\"x\" * 200000)'",
+        python_shell_command('import sys; sys.stdout.write("x" * 200000)'),
         timeout_s=5,
         max_output_bytes=1000,
     )
@@ -160,7 +161,7 @@ async def test_run_shell_timeout_marks_result_and_cleans_up(tmp_path, monkeypatc
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     get_settings.cache_clear()
 
-    result = await run_shell("sleep 30", timeout_s=1)
+    result = await run_shell(python_shell_command("import time; time.sleep(30)"), timeout_s=1)
 
     assert result.ok is False
     assert result.timed_out is True
@@ -169,6 +170,7 @@ async def test_run_shell_timeout_marks_result_and_cleans_up(tmp_path, monkeypatc
 @pytest.mark.asyncio
 async def test_send_shell_invokes_tmux_promptly(monkeypatch):
     calls = []
+    monkeypatch.setattr("local_shell_mcp.shell_ops._use_windows_persistent_shell_backend", lambda: False)
 
     async def fake_tmux(args: list[str], timeout_s: int = 10):
         calls.append((args, timeout_s))
