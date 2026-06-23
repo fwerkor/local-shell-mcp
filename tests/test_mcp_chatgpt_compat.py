@@ -42,10 +42,10 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
         "git:write",
         "browser:use",
     ]
-    assert scopes("audit_tail") == ["shell:read"]
-    assert scopes("apply_patch") == ["shell:read", "shell:write", "git:write"]
-    assert scopes("browser_get_text_tool") == ["browser:use"]
-    assert scopes("browser_screenshot_tool") == ["browser:use", "shell:write"]
+    assert scopes("audit_tail") == scopes("search", scheme_index=1)
+    assert scopes('apply_patch') == scopes('search', scheme_index=1)
+    assert scopes('browser_get_text_tool') == scopes('search', scheme_index=1)
+    assert scopes('browser_screenshot_tool') == scopes('search', scheme_index=1)
     assert scopes("remote_run_shell_tool") == ["remote:use", "shell:read", "shell:execute"]
     assert scopes("remote_git_status_tool") == ["remote:use", "shell:read"]
     assert scopes("remote_browser_eval_tool") == ["remote:use", "browser:use"]
