@@ -116,3 +116,29 @@ def test_oauth_authorize_form_escapes_reflected_fields(tmp_path, monkeypatch):
 
     assert marker not in body
     assert "&lt;unsafe&gt;" in body
+
+
+@pytest.mark.asyncio
+async def test_read_only_tools_have_read_only_hint(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "true")
+    get_settings.cache_clear()
+
+    tools = {tool.name: tool for tool in await build_mcp().list_tools()}
+    names = {
+        "environment_info", "version_info",
+        "shell_read", "shell_list", "job_list", "job_tail",
+        "list_files", "tree_view", "glob_search", "grep_search", "read_file", "read_many_files",
+        "list_file_links",
+        "git_status_tool", "git_diff_tool", "git_log_tool", "git_show_tool",
+        "secret_scan", "todo_read_tool", "audit_tail",
+        "remote_list_machines", "remote_environment_info", "remote_shell_read", "remote_shell_list",
+        "remote_job_list", "remote_job_tail",
+        "remote_list_files", "remote_tree_view", "remote_glob_search", "remote_grep_search",
+        "remote_read_file", "remote_read_many_files",
+        "remote_git_status_tool", "remote_git_diff_tool", "remote_git_log_tool", "remote_git_show_tool",
+    }
+
+    for name in names:
+        assert tools[name].annotations is not None, name
+        assert tools[name].annotations.readOnlyHint is True, name

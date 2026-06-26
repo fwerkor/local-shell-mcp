@@ -835,7 +835,7 @@ def build_mcp() -> FastMCP:
                 ensure_ascii=False,
             )
 
-    @mcp.tool(structured_output=True, meta=shell_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def environment_info() -> ToolResult:
         """Return workspace, auth, policy, and basic environment information."""
         try:
@@ -844,7 +844,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=shell_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def version_info() -> ToolResult:
         """Return the local-shell-mcp version, installed package version, Python version, platform, and executable path."""
         try:
@@ -887,7 +887,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=shell_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def shell_read(session_id: str, lines: int = 200) -> ToolResult:
         """Read recent output from a persistent shell session. Use after shell_start or shell_send to inspect incremental output without blocking. Increase lines only when needed for context."""
         try:
@@ -903,7 +903,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=shell_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def shell_list() -> ToolResult:
         """List active persistent shell sessions. Use before reading, sending to, or killing sessions when you do not know the session_id or need to check what long-running processes are active."""
         try:
@@ -920,7 +920,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=shell_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def job_list(include_finished: bool = True) -> ToolResult:
         """List tracked long-running jobs with running/exited/stopped status counts."""
         try:
@@ -928,7 +928,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=shell_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def job_tail(job_id: str, lines: int = 200) -> ToolResult:
         """Read recent output for a tracked long-running job."""
         try:
@@ -953,7 +953,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=shell_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def list_files(path: str = ".", recursive: bool = False, max_entries: int = 500) -> ToolResult:
         """List files and directories under a path. Use for quick directory inspection when a compact listing is enough. path defaults to '.' and is workspace-relative unless full-container mode allows absolute paths; recursive walks descendants and max_entries is capped by server settings."""
         try:
@@ -961,7 +961,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=shell_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def tree_view(cwd: str = ".", depth: int = 3, max_entries: int = 500) -> ToolResult:
         """Return a compact directory tree."""
         try:
@@ -969,7 +969,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=shell_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def glob_search(pattern: str, cwd: str = ".", max_results: int = 500) -> ToolResult:
         """Find files by glob pattern."""
         try:
@@ -977,7 +977,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=shell_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def grep_search(query: str, cwd: str = ".", glob: str | None = None, regex: bool = True, case_sensitive: bool = True, max_results: int | None = None) -> ToolResult:
         """Search file contents using ripgrep."""
         try:
@@ -985,7 +985,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=shell_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def read_file(
         path: str,
         start_line: int | None = None,
@@ -999,7 +999,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=shell_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def read_many_files(
         paths: list[str],
         start_line: int | None = None,
@@ -1031,7 +1031,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=file_share_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=file_share_meta)
     async def list_file_links(include_expired: bool = False) -> ToolResult:
         """List generated file download URLs."""
         try:
@@ -1102,7 +1102,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=git_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=git_read_meta)
     async def git_status_tool(cwd: str = ".") -> ToolResult:
         """Run git status and list remotes."""
         try:
@@ -1110,7 +1110,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=git_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=git_read_meta)
     async def git_diff_tool(cwd: str = ".", staged: bool = False, path: str | None = None, stat: bool = False) -> ToolResult:
         """Run git diff."""
         try:
@@ -1118,7 +1118,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=git_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=git_read_meta)
     async def git_log_tool(cwd: str = ".", max_count: int = 20) -> ToolResult:
         """Show recent git commits."""
         try:
@@ -1176,7 +1176,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=git_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=git_read_meta)
     async def git_show_tool(cwd: str = ".", ref: str = "HEAD", path: str | None = None) -> ToolResult:
         """Show a commit, object, or file at ref:path."""
         try:
@@ -1192,7 +1192,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=shell_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def secret_scan(cwd: str = ".", glob: str | None = None, max_results: int = 200) -> ToolResult:
         """Scan workspace text files for common secrets before commit/push."""
         try:
@@ -1200,7 +1200,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=shell_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def todo_read_tool() -> ToolResult:
         """Read the agent todo list. Similar to Claude Code TodoRead."""
         try:
@@ -1264,7 +1264,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=shell_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def audit_tail(lines: int = 100) -> ToolResult:
         """Read recent audit log entries."""
         try:
@@ -1288,7 +1288,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=remote_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_meta)
     async def remote_list_machines() -> ToolResult:
         """List remote worker machines connected to this control server."""
         try:
@@ -1312,7 +1312,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=remote_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
     async def remote_environment_info(machine: str) -> ToolResult:
         """Return remote workspace, auth, policy, and basic environment information."""
         return await _remote_call(machine, "environment_info", {})
@@ -1337,7 +1337,7 @@ def build_mcp() -> FastMCP:
         """Send input to a persistent remote shell session."""
         return await _remote_call(machine, "shell_send", {"session_id": session_id, "input_text": input_text, "enter": enter})
 
-    @mcp.tool(structured_output=True, meta=remote_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
     async def remote_shell_read(machine: str, session_id: str, lines: int = 200) -> ToolResult:
         """Read recent output from a persistent remote shell session."""
         return await _remote_call(machine, "shell_read", {"session_id": session_id, "lines": lines})
@@ -1347,7 +1347,7 @@ def build_mcp() -> FastMCP:
         """Kill a persistent remote shell session."""
         return await _remote_call(machine, "shell_kill", {"session_id": session_id})
 
-    @mcp.tool(structured_output=True, meta=remote_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
     async def remote_shell_list(machine: str) -> ToolResult:
         """List persistent shell sessions on a remote worker."""
         return await _remote_call(machine, "shell_list", {})
@@ -1357,12 +1357,12 @@ def build_mcp() -> FastMCP:
         """Start a tracked long-running job on a remote worker. Optional purpose/explanation fields let agents state why the job is being started."""
         return await _remote_call(machine, "job_start", {"command": command, "cwd": cwd, "name": name, "purpose": purpose, "explanation": explanation})
 
-    @mcp.tool(structured_output=True, meta=remote_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
     async def remote_job_list(machine: str, include_finished: bool = True) -> ToolResult:
         """List tracked long-running jobs on a remote worker."""
         return await _remote_call(machine, "job_list", {"include_finished": include_finished})
 
-    @mcp.tool(structured_output=True, meta=remote_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
     async def remote_job_tail(machine: str, job_id: str, lines: int = 200) -> ToolResult:
         """Read recent output for a tracked remote job."""
         return await _remote_call(machine, "job_tail", {"job_id": job_id, "lines": lines})
@@ -1377,32 +1377,32 @@ def build_mcp() -> FastMCP:
         """Restart a stopped or exited tracked job on a remote worker. Optional purpose/explanation fields let agents state why the retry is needed."""
         return await _remote_call(machine, "job_retry", {"job_id": job_id, "purpose": purpose, "explanation": explanation})
 
-    @mcp.tool(structured_output=True, meta=remote_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
     async def remote_list_files(machine: str, path: str = ".", recursive: bool = False, max_entries: int = 500) -> ToolResult:
         """List files and directories on a remote worker."""
         return await _remote_call(machine, "list_files", {"path": path, "recursive": recursive, "max_entries": max_entries})
 
-    @mcp.tool(structured_output=True, meta=remote_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
     async def remote_tree_view(machine: str, cwd: str = ".", depth: int = 3, max_entries: int = 500) -> ToolResult:
         """Return a compact directory tree from a remote worker."""
         return await _remote_call(machine, "tree_view", {"cwd": cwd, "depth": depth, "max_entries": max_entries})
 
-    @mcp.tool(structured_output=True, meta=remote_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
     async def remote_glob_search(machine: str, pattern: str, cwd: str = ".", max_results: int = 500) -> ToolResult:
         """Find files by glob pattern on a remote worker."""
         return await _remote_call(machine, "glob_search", {"pattern": pattern, "cwd": cwd, "max_results": max_results})
 
-    @mcp.tool(structured_output=True, meta=remote_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
     async def remote_grep_search(machine: str, query: str, cwd: str = ".", glob: str | None = None, regex: bool = True, case_sensitive: bool = True, max_results: int | None = None) -> ToolResult:
         """Search remote file contents using ripgrep."""
         return await _remote_call(machine, "grep_search", {"query": query, "cwd": cwd, "glob": glob, "regex": regex, "case_sensitive": case_sensitive, "max_results": max_results})
 
-    @mcp.tool(structured_output=True, meta=remote_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
     async def remote_read_file(machine: str, path: str, start_line: int | None = None, end_line: int | None = None, binary_preview: str | None = None, binary_preview_bytes: int = 256) -> ToolResult:
         """Read a UTF-8 text file on a remote worker, optionally by line range."""
         return await _remote_call(machine, "read_file", {"path": path, "start_line": start_line, "end_line": end_line, "binary_preview": binary_preview, "binary_preview_bytes": binary_preview_bytes})
 
-    @mcp.tool(structured_output=True, meta=remote_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
     async def remote_read_many_files(machine: str, paths: list[str], start_line: int | None = None, end_line: int | None = None, binary_preview: str | None = None, binary_preview_bytes: int = 256) -> ToolResult:
         """Read multiple UTF-8 text files on a remote worker."""
         return await _remote_call(machine, "read_many_files", {"paths": paths, "start_line": start_line, "end_line": end_line, "binary_preview": binary_preview, "binary_preview_bytes": binary_preview_bytes})
@@ -1485,17 +1485,17 @@ def build_mcp() -> FastMCP:
         """Clone a Git repository on a remote worker."""
         return await _remote_call(machine, "git_clone_tool", {"repo_url": repo_url, "dest": dest, "branch": branch, "cwd": cwd})
 
-    @mcp.tool(structured_output=True, meta=remote_git_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_git_read_meta)
     async def remote_git_status_tool(machine: str, cwd: str = ".") -> ToolResult:
         """Run git status on a remote worker."""
         return await _remote_call(machine, "git_status_tool", {"cwd": cwd})
 
-    @mcp.tool(structured_output=True, meta=remote_git_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_git_read_meta)
     async def remote_git_diff_tool(machine: str, cwd: str = ".", staged: bool = False, path: str | None = None, stat: bool = False) -> ToolResult:
         """Run git diff on a remote worker."""
         return await _remote_call(machine, "git_diff_tool", {"cwd": cwd, "staged": staged, "path": path, "stat": stat})
 
-    @mcp.tool(structured_output=True, meta=remote_git_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_git_read_meta)
     async def remote_git_log_tool(machine: str, cwd: str = ".", max_count: int = 20) -> ToolResult:
         """Show recent git commits on a remote worker."""
         return await _remote_call(machine, "git_log_tool", {"cwd": cwd, "max_count": max_count})
@@ -1530,7 +1530,7 @@ def build_mcp() -> FastMCP:
         """Push current HEAD from a remote worker. Optional purpose/explanation fields let agents state why the push is being performed."""
         return await _remote_call(machine, "git_push_tool", {"cwd": cwd, "remote": remote, "branch": branch, "set_upstream": set_upstream, "purpose": purpose, "explanation": explanation})
 
-    @mcp.tool(structured_output=True, meta=remote_git_read_meta)
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_git_read_meta)
     async def remote_git_show_tool(machine: str, cwd: str = ".", ref: str = "HEAD", path: str | None = None) -> ToolResult:
         """Show a commit, object, or file at ref:path on a remote worker."""
         return await _remote_call(machine, "git_show_tool", {"cwd": cwd, "ref": ref, "path": path})
