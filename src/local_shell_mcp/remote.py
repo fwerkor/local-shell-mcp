@@ -558,6 +558,13 @@ async def _to_thread(func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
     return await asyncio.to_thread(func, *args, **kwargs)
 
 
+def _assert_worker_text_input_size(label: str, text: str) -> None:
+    max_bytes = max(1, get_settings().max_file_write_bytes)
+    size = len(text.encode("utf-8"))
+    if size > max_bytes:
+        raise ValueError(f"Refusing {label} of {size} bytes; max is {max_bytes}")
+
+
 def _handled_remote_exception(exc: Exception) -> dict[str, Any]:
     return {"ok": False, "error": type(exc).__name__, "message": str(exc)}
 
@@ -568,6 +575,7 @@ def _read_many_files_sync(paths: list[str], start_line: int | None = None, end_l
 
 
 async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
+    _assert_worker_text_input_size("patch", patch)
     await _to_thread(prune_temp_dir)
     patch_path = temp_dir() / f"remote-patch-{uuid.uuid4().hex}.diff"
     patch_path.parent.mkdir(parents=True, exist_ok=True)
@@ -577,6 +585,7 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
 
 
 async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict[str, Any]:
+    _assert_worker_text_input_size("Python script", code)
     await _to_thread(prune_temp_dir)
     script = temp_dir() / f"remote-script-{uuid.uuid4().hex}.py"
     script.parent.mkdir(parents=True, exist_ok=True)
