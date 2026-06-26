@@ -34,7 +34,6 @@ For local-only testing, `auth_bypass_localhost` is enabled by default. Do not ex
 | `audit_log_path` | `LOCAL_SHELL_MCP_AUDIT_LOG_PATH` | `PosixPath('/workspace/.local-shell-mcp/audit.jsonl')` |  |
 | `agent_config_dir` | `LOCAL_SHELL_MCP_AGENT_CONFIG_DIR` | `PosixPath('/workspace/.local-shell-mcp/agent_config')` |  |
 | `allow_full_container` | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `True` | Disables workspace/path restrictions when true; use only inside disposable boundaries. |
-| `allow_network` | `LOCAL_SHELL_MCP_ALLOW_NETWORK` | `True` |  |
 
 ### Limits
 

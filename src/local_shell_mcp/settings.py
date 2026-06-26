@@ -91,7 +91,6 @@ if _PYDANTIC_AVAILABLE:
 
         # By default, tools are limited to workspace_root. Set true only inside a disposable container.
         allow_full_container: bool = False
-        allow_network: bool = True
 
         default_timeout_s: int = 60
         max_timeout_s: int = 3600
@@ -259,7 +258,6 @@ else:
         agent_config_dir: Path = DEFAULT_AGENT_CONFIG_DIR
 
         allow_full_container: bool = False
-        allow_network: bool = True
 
         default_timeout_s: int = 60
         max_timeout_s: int = 3600
