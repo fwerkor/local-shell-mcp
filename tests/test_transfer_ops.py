@@ -118,3 +118,16 @@ def test_mcp_exposes_remote_transfer_tools(tmp_path, monkeypatch):
         "remote_pull_dir",
         "remote_push_dir",
     } <= names
+
+
+def test_directory_pack_rejects_symlinks_before_archive_creation(tmp_path, monkeypatch):
+    root = _workspace(tmp_path, monkeypatch)
+    (root / "src").mkdir()
+    (root / "src" / "target.txt").write_text("target", encoding="utf-8")
+    try:
+        (root / "src" / "link.txt").symlink_to("target.txt")
+    except OSError:
+        pytest.skip("symlinks are not available in this test environment")
+
+    with pytest.raises(ValueError, match="does not support symlinks"):
+        transfer_pack_dir("src")

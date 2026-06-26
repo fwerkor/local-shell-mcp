@@ -191,10 +191,19 @@ def transfer_alloc_temp_path(suffix: str = ".bin") -> dict[str, Any]:
     return {"path": relative_display(path)}
 
 
+def _assert_no_symlinks(path: Path) -> None:
+    if path.is_symlink():
+        raise ValueError(f"directory transfer does not support symlinks: {relative_display(path)}")
+    for child in path.rglob("*"):
+        if child.is_symlink():
+            raise ValueError(f"directory transfer does not support symlinks: {relative_display(child)}")
+
+
 def transfer_pack_dir(path: str, compression: str = "gz") -> dict[str, Any]:
     src = resolve_path(path, must_exist=True)
     if not src.is_dir():
         raise NotADirectoryError(str(src))
+    _assert_no_symlinks(src)
     suffix = ".tar.gz" if compression == "gz" else ".tar"
     mode = "w:gz" if compression == "gz" else "w"
     archive = temp_dir() / f"transfer-pack-{uuid.uuid4().hex}{suffix}"
