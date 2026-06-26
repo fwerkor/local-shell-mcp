@@ -503,12 +503,13 @@ async def send_shell(session_id: str, input_text: str, enter: bool = True) -> di
             return await conpty_ops.send_shell(session_id, input_text, enter)
         return await _native_send_shell(session_id, input_text, enter)
 
-    args = ["send-keys", "-t", session_id, input_text]
-    if enter:
-        args.append("Enter")
-    result = await tmux(args)
+    result = await tmux(["send-keys", "-t", session_id, "-l", input_text])
     if not result.ok:
         raise RuntimeError(result.stderr or result.stdout)
+    if enter:
+        result = await tmux(["send-keys", "-t", session_id, "Enter"])
+        if not result.ok:
+            raise RuntimeError(result.stderr or result.stdout)
     audit("shell_send", session=session_id, bytes=len(input_text.encode()), enter=enter, backend="tmux")
     return {"session_id": session_id, "sent_bytes": len(input_text.encode()), "enter": enter}
 

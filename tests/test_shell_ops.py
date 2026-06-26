@@ -185,7 +185,10 @@ async def test_send_shell_invokes_tmux_promptly(monkeypatch):
 
     monkeypatch.setattr("local_shell_mcp.shell_ops.tmux", fake_tmux)
 
-    result = await asyncio.wait_for(send_shell("session-1", "echo ok", enter=True), timeout=1)
+    result = await asyncio.wait_for(send_shell("session-1", "echo $HOME && Enter", enter=True), timeout=1)
 
-    assert result == {"session_id": "session-1", "sent_bytes": 7, "enter": True}
-    assert calls == [(["send-keys", "-t", "session-1", "echo ok", "Enter"], 10)]
+    assert result == {"session_id": "session-1", "sent_bytes": 19, "enter": True}
+    assert calls == [
+        (["send-keys", "-t", "session-1", "-l", "echo $HOME && Enter"], 10),
+        (["send-keys", "-t", "session-1", "Enter"], 10),
+    ]
