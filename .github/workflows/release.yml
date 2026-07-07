@@ -396,12 +396,7 @@ jobs:
       - name: Create release notes
         run: |
           cat > RELEASE_NOTES.md <<EOF
-          Docker image:
-
-          \`\`\`bash
-          docker pull ${{ env.DOCKERHUB_IMAGE_NAME }}:${{ github.event.inputs.tag }}
-          docker pull ${{ env.GHCR_IMAGE_NAME }}:${{ github.event.inputs.tag }}
-          \`\`\`
+          Docker images are published to Docker Hub and GHCR under the release tag, the unprefixed semantic-version tag, and optionally `latest`.
 
           Docker platforms are built in parallel and published as a multi-arch manifest:
 
