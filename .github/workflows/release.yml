@@ -113,12 +113,6 @@ jobs:
           python -m pip install --upgrade pip build
           python -m build
 
-      - name: Generate checksums
-        shell: bash
-        run: |
-          cd dist
-          sha256sum ./* > SHA256SUMS.txt
-
       - uses: actions/upload-artifact@v7
         with:
           name: python-dist
@@ -217,15 +211,6 @@ jobs:
             tar -czf local-shell-mcp-${{ matrix.artifact }}.tar.gz local-shell-mcp-${{ matrix.artifact }}
           fi
 
-      - name: Generate binary checksums
-        shell: bash
-        run: |
-          cd release
-          if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum local-shell-mcp-${{ matrix.artifact }}.* > local-shell-mcp-${{ matrix.artifact }}.sha256
-          else
-            shasum -a 256 local-shell-mcp-${{ matrix.artifact }}.* > local-shell-mcp-${{ matrix.artifact }}.sha256
-          fi
 
       - uses: actions/upload-artifact@v7
         with:
@@ -268,18 +253,12 @@ jobs:
         working-directory: vscode-extension
         run: npm run package:vsix
 
-      - name: Generate VSIX checksum
-        shell: bash
-        run: |
-          cd dist
-          sha256sum local-shell-mcp-vscode-*.vsix > local-shell-mcp-vscode.sha256
 
       - uses: actions/upload-artifact@v7
         with:
           name: vscode-extension
           path: |
             dist/local-shell-mcp-vscode-*.vsix
-            dist/local-shell-mcp-vscode.sha256
           if-no-files-found: error
 
   publish-docker-platform:
@@ -413,10 +392,6 @@ jobs:
           name: vscode-extension
           path: dist
 
-      - name: Create combined checksums
-        run: |
-          cd dist
-          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
 
       - name: Create release notes
         run: |
@@ -457,7 +432,7 @@ jobs:
           local-shell-mcp-vscode-${{ needs.validate-release.outputs.version }}.vsix
           \`\`\`
 
-          Python package artifacts, executable archives, VS Code extension, and SHA256 checksums are attached below.
+          Python package artifacts, executable archives, and the VS Code extension are attached below.
 
           Python package version in \`pyproject.toml\`: \`${{ needs.validate-release.outputs.version }}\`
           EOF
