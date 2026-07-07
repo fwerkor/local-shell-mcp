@@ -1,39 +1,42 @@
 # REST API
 
-本页说明“REST API”场景，并沿用文档站统一的 Runtime/Client 结构。
+主要接口是 `/mcp` 上的 MCP。同时也提供 REST 面，用于健康检查、文件链接、连接器式 search / fetch，以及部分工具调用。
 
-## 概览
+## 健康检查
 
-Runtime 决定服务进程如何运行以及控制哪个工作区。Client 决定 ChatGPT 或其它 MCP 客户端如何连接。Docker、VS Code 扩展、独立二进制、Python/pipx/源码安装和 stdio 都是 Runtime 选择；ChatGPT 连接器、通用 HTTP MCP 客户端和 stdio MCP 客户端属于 Client 连接方式。
-
-## 适用场景
-
-- 当你选择的 Runtime 或 Client 路径与本页标题匹配时使用本页。
-- 保持工作区根目录、公开 base URL、MCP endpoint、认证模式和主机可用工具一致。
-- ChatGPT 网页或 App 需要暴露以 `/mcp` 结尾的 HTTPS MCP endpoint。
-- 本地 MCP 客户端可按客户端能力选择 HTTP localhost 或 `local-shell-mcp --mode stdio`。
-
-## 步骤
-
-1. 先选择 Runtime 安装页面。
-2. 启动 Runtime；如果使用 HTTP 模式，检查 `/healthz`。
-3. 再选择 Client 连接页面。
-4. 在 Client 中注册 MCP endpoint 或 stdio 命令。
-5. 调用 `environment_info` 检查实际工作区和设置。
-
-```text
-Runtime: Docker / VS Code extension / binary / Python / stdio
-Client:  ChatGPT connector / generic HTTP MCP / generic stdio MCP
-Endpoint: https://your-host.example.com/mcp
+```http
+GET /healthz
 ```
 
-## 验证
+返回服务健康状态和基础状态信息。
 
-- `environment_info` 确认运行时设置和工作区。
-- `tree_view` 确认可见文件。
-- `git_status_tool` 确认仓库上下文。
-- `run_shell_tool` 确认命令执行环境。
+## MCP
 
-## 说明
+```http
+POST /mcp
+```
 
-优先使用小而可验证的步骤：查看、编辑、diff、测试、扫描、提交。大型任务也应拆成可审计的工具调用。
+ChatGPT 和其它 MCP 客户端使用的 streamable HTTP MCP 端点。
+
+## 连接器发现
+
+只读连接器式操作：
+
+```text
+search
+fetch
+```
+
+这些操作用于常规 ChatGPT 连接器行为，不暴露完整 coding-agent 工具面。
+
+## 通过 REST 调用工具
+
+REST 工具调用使用一致的成功 / 错误 envelope。校验错误会返回结构化 `ok: false` payload，而不是原始框架异常。
+
+## 文件链接
+
+带 token 的文件下载由内置 HTTP app 提供。链接是 bearer URL，支持 TTL、可选最大下载次数和撤销。
+
+## 认证
+
+公开部署应使用 OAuth。开发时可以启用 localhost 绕过认证，但未认证的公网访问是不安全的。

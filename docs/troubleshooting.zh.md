@@ -1,18 +1,17 @@
 # 故障排查
 
-Check server health:
+检查服务健康状态：
 
 ```bash
-docker compose ps
-docker compose logs --tail=200 local-shell-mcp
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Common checks:
+检查日志：
 
-- Public HTTPS URL is reachable.
-- MCP endpoint ends with `/mcp`.
-- OAuth values match the current deployment.
-- Reverse proxy supports streaming requests.
-- Remote worker invite has not expired.
-- Workspace permissions allow writes to `/workspace/.local-shell-mcp`.
+```bash
+docker compose logs --tail=100 local-shell-mcp
+```
+
+如果 ChatGPT 无法连接，确认 `LOCAL_SHELL_MCP_PUBLIC_BASE_URL` 是准确的公开 HTTPS origin，并确认 `/mcp`、OAuth 元数据和 `/healthz` 可以通过隧道或反向代理访问。
+
+如果远程 worker 没有出现，确认远程模式已启用、邀请尚未过期，并且远程机器可以向控制服务发起出站 HTTPS 请求。

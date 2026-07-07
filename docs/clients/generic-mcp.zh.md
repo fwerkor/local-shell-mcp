@@ -1,39 +1,67 @@
-# 通用 MCP Client
+# 通用 MCP 客户端
 
-本页说明“通用 MCP Client”场景，并沿用文档站统一的 Runtime/Client 结构。
+`local-shell-mcp` 可供 ChatGPT 使用，也可供其它 MCP 客户端使用。客户端决定是通过 HTTP 连接，还是通过 stdio 启动服务。
 
-## 概览
+## HTTP MCP 客户端
 
-Runtime 决定服务进程如何运行以及控制哪个工作区。Client 决定 ChatGPT 或其它 MCP 客户端如何连接。Docker、VS Code 扩展、独立二进制、Python/pipx/源码安装和 stdio 都是 Runtime 选择；ChatGPT 连接器、通用 HTTP MCP 客户端和 stdio MCP 客户端属于 Client 连接方式。
+当服务已经在运行时，使用 HTTP 模式：
 
-## 适用场景
-
-- 当你选择的 Runtime 或 Client 路径与本页标题匹配时使用本页。
-- 保持工作区根目录、公开 base URL、MCP endpoint、认证模式和主机可用工具一致。
-- ChatGPT 网页或 App 需要暴露以 `/mcp` 结尾的 HTTPS MCP endpoint。
-- 本地 MCP 客户端可按客户端能力选择 HTTP localhost 或 `local-shell-mcp --mode stdio`。
-
-## 步骤
-
-1. 先选择 Runtime 安装页面。
-2. 启动 Runtime；如果使用 HTTP 模式，检查 `/healthz`。
-3. 再选择 Client 连接页面。
-4. 在 Client 中注册 MCP endpoint 或 stdio 命令。
-5. 调用 `environment_info` 检查实际工作区和设置。
-
-```text
-Runtime: Docker / VS Code extension / binary / Python / stdio
-Client:  ChatGPT connector / generic HTTP MCP / generic stdio MCP
-Endpoint: https://your-host.example.com/mcp
+```bash
+LOCAL_SHELL_MCP_WORKSPACE_ROOT=/path/to/workspace local-shell-mcp --mode mcp
 ```
 
-## 验证
+本地端点：
 
-- `environment_info` 确认运行时设置和工作区。
-- `tree_view` 确认可见文件。
-- `git_status_tool` 确认仓库上下文。
-- `run_shell_tool` 确认命令执行环境。
+```text
+http://127.0.0.1:8765/mcp
+```
 
-## 说明
+网络端点：
 
-优先使用小而可验证的步骤：查看、编辑、diff、测试、扫描、提交。大型任务也应拆成可审计的工具调用。
+```text
+https://your-public-host.example.com/mcp
+```
+
+任何超出可信 localhost 范围可访问的端点都应使用 OAuth。
+
+## Stdio MCP 客户端
+
+当客户端自己启动服务进程时，使用 stdio 模式：
+
+```bash
+LOCAL_SHELL_MCP_WORKSPACE_ROOT=/path/to/workspace local-shell-mcp --mode stdio
+```
+
+典型客户端配置结构：
+
+```json
+{
+  "mcpServers": {
+    "local-shell-mcp": {
+      "command": "local-shell-mcp",
+      "args": ["--mode", "stdio"],
+      "env": {
+        "LOCAL_SHELL_MCP_WORKSPACE_ROOT": "/path/to/workspace"
+      }
+    }
+  }
+}
+```
+
+不同客户端 schema 不完全相同。有些叫 `mcpServers`，也有些使用其它名称。
+
+## 连接器式 search / fetch
+
+服务也暴露只读的连接器式 `search` 和 `fetch` 工具。它们适合基本文件发现，但不能替代完整 MCP 工具面。
+
+使用 `/mcp` 才能获得完整的 shell、文件系统、Git、浏览器、文件链接和远程 worker 工具。
+
+## 第一次安全检查
+
+新客户端连接后，先执行：
+
+```text
+调用 environment_info，然后对工作区根目录调用 tree_view。暂时不要修改文件。
+```
+
+之后再运行带有明确编辑、测试和 Git 规则的有边界任务。

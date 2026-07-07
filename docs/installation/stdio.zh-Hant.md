@@ -1,39 +1,62 @@
-# stdio 模式
+# Stdio 運行時
 
-本頁說明「stdio 模式」情境，並沿用文件站統一的 Runtime/Client 結構。
+stdio 模式用於本地 MCP 客戶端：客戶端把 `local-shell-mcp` 作爲子進程啓動，並通過標準輸入 / 輸出通信。
 
-## 概覽
+它不是公開 HTTP 部署方式。ChatGPT 網頁或 App 不能直接使用 stdio，因爲 ChatGPT 無法在你的機器上啓動進程。
 
-Runtime 決定服務程序如何執行以及控制哪個工作區。Client 決定 ChatGPT 或其他 MCP 用戶端如何連線。Docker、VS Code 擴充、獨立二進位、Python/pipx/原始碼安裝與 stdio 都是 Runtime 選項；ChatGPT 連接器、通用 HTTP MCP 用戶端與 stdio MCP 用戶端則是 Client 連線方式。
+## 何時使用 stdio
 
-## 適用情境
+適合使用 stdio 模式的情況：
 
-- 當你選擇的 Runtime 或 Client 路徑與本頁標題相符時使用本頁。
-- 保持工作區根目錄、公開 base URL、MCP endpoint、認證模式與主機可用工具一致。
-- ChatGPT 網頁或 App 需要暴露以 `/mcp` 結尾的 HTTPS MCP endpoint。
-- 本機 MCP 用戶端可依用戶端能力選擇 HTTP localhost 或 `local-shell-mcp --mode stdio`。
+- 你的 MCP 客戶端支持基於命令的 server 定義。
+- 客戶端和受控工作區位於同一臺機器。
+- 你不需要 OAuth、公開 HTTPS、反向代理或隧道。
+- 你希望客戶端管理服務生命週期。
 
-## 步驟
+不適合使用 stdio 模式的情況：
 
-1. 先選擇 Runtime 安裝頁面。
-2. 啟動 Runtime；如果使用 HTTP 模式，檢查 `/healthz`。
-3. 再選擇 Client 連線頁面。
-4. 在 Client 中註冊 MCP endpoint 或 stdio 命令。
-5. 呼叫 `environment_info` 檢查實際工作區與設定。
+- 客戶端是 ChatGPT 網頁或 App。
+- 多個遠程客戶端需要共享同一個服務。
+- 你需要通過 HTTP 提供帶 token 的文件下載。
+- 你需要通過 HTTP 提供遠程 worker 加入路由。
 
-```text
-Runtime: Docker / VS Code extension / binary / Python / stdio
-Client:  ChatGPT connector / generic HTTP MCP / generic stdio MCP
-Endpoint: https://your-host.example.com/mcp
+## 命令
+
+```bash
+LOCAL_SHELL_MCP_WORKSPACE_ROOT=/path/to/workspace local-shell-mcp --mode stdio
 ```
 
-## 驗證
+通用 MCP 客戶端配置通常類似：
 
-- `environment_info` 確認執行階段設定與工作區。
-- `tree_view` 確認可見檔案。
-- `git_status_tool` 確認儲存庫上下文。
-- `run_shell_tool` 確認命令執行環境。
+```json
+{
+  "mcpServers": {
+    "local-shell-mcp": {
+      "command": "local-shell-mcp",
+      "args": ["--mode", "stdio"],
+      "env": {
+        "LOCAL_SHELL_MCP_WORKSPACE_ROOT": "/path/to/workspace"
+      }
+    }
+  }
+}
+```
 
-## 說明
+按你的客戶端 schema 調整。不同客戶端可能把這個區塊叫作 `servers`、`tools`、`mcpServers` 或 `contextServers`。
 
-優先使用小而可驗證的步驟：查看、編輯、diff、測試、掃描、提交。大型任務也應拆成可稽核的工具呼叫。
+## 與 HTTP 模式的行爲差異
+
+| 項目 | stdio 模式 | HTTP MCP 模式 |
+|---|---|---|
+| 傳輸 | stdin / stdout | HTTP streamable MCP 端點 |
+| 端點 | 無 | `/mcp` |
+| OAuth | 不需要 | 公網使用時建議開啓 |
+| 健康檢查端點 | 無 | `/healthz`、`/readyz` |
+| ChatGPT 公網使用 | 不支持 | 支持，需要 HTTPS |
+| 服務生命週期 | 客戶端啓動進程 | 你管理進程或運行時 |
+
+除此之外，工具面仍是同一套服務端實現，具體可用性取決於配置和客戶端支持。
+
+## 安全說明
+
+stdio 模式通常直接在宿主機上以 MCP 客戶端同一用戶身份運行。使用較窄的 workspace root，避免廣泛文件系統訪問。除非 stdio 本身運行在一次性容器或 VM 中，否則保持 full-container 模式關閉。

@@ -1,39 +1,54 @@
-# 稽核日誌
+# 審計日誌
 
-本頁說明「稽核日誌」情境，並沿用文件站統一的 Runtime/Client 結構。
+`local-shell-mcp` 會寫入結構化審計記錄，幫助還原已連接客戶端做過什麼。
 
-## 概覽
-
-Runtime 決定服務程序如何執行以及控制哪個工作區。Client 決定 ChatGPT 或其他 MCP 用戶端如何連線。Docker、VS Code 擴充、獨立二進位、Python/pipx/原始碼安裝與 stdio 都是 Runtime 選項；ChatGPT 連接器、通用 HTTP MCP 用戶端與 stdio MCP 用戶端則是 Client 連線方式。
-
-## 適用情境
-
-- 當你選擇的 Runtime 或 Client 路徑與本頁標題相符時使用本頁。
-- 保持工作區根目錄、公開 base URL、MCP endpoint、認證模式與主機可用工具一致。
-- ChatGPT 網頁或 App 需要暴露以 `/mcp` 結尾的 HTTPS MCP endpoint。
-- 本機 MCP 用戶端可依用戶端能力選擇 HTTP localhost 或 `local-shell-mcp --mode stdio`。
-
-## 步驟
-
-1. 先選擇 Runtime 安裝頁面。
-2. 啟動 Runtime；如果使用 HTTP 模式，檢查 `/healthz`。
-3. 再選擇 Client 連線頁面。
-4. 在 Client 中註冊 MCP endpoint 或 stdio 命令。
-5. 呼叫 `environment_info` 檢查實際工作區與設定。
+默認路徑：
 
 ```text
-Runtime: Docker / VS Code extension / binary / Python / stdio
-Client:  ChatGPT connector / generic HTTP MCP / generic stdio MCP
-Endpoint: https://your-host.example.com/mcp
+/workspace/.local-shell-mcp/audit.jsonl
 ```
 
-## 驗證
+## 記錄內容
 
-- `environment_info` 確認執行階段設定與工作區。
-- `tree_view` 確認可見檔案。
-- `git_status_tool` 確認儲存庫上下文。
-- `run_shell_tool` 確認命令執行環境。
+審計記錄覆蓋這些事件：
 
-## 說明
+- 工具調用開始和結束。
+- 命令執行元數據。
+- 超時和已處理錯誤。
+- 遠程 worker 註冊和任務活動。
+- 文件鏈接創建和撤銷。
+- 適用時的認證相關事件。
 
-優先使用小而可驗證的步驟：查看、編輯、diff、測試、掃描、提交。大型任務也應拆成可稽核的工具呼叫。
+服務能識別的敏感參數會被脫敏。
+
+## 讀取日誌
+
+使用 MCP 工具：
+
+```text
+audit_tail
+```
+
+也可以直接查看：
+
+```bash
+tail -n 100 /workspace/.local-shell-mcp/audit.jsonl
+```
+
+## 運維用途
+
+審計日誌主要用於：
+
+- 複查修改文件的命令。
+- 檢查是否使用過遠程 worker。
+- 調試意外失敗。
+- 發現文件鏈接的意外暴露。
+- 在公開部署配置錯誤後支持事件響應。
+
+## 保留策略
+
+日誌大小受 `LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES` 限制。如果需要長期保留，請輪轉或導出到外部系統。
+
+## 限制
+
+審計日誌不是沙箱。它能提升可追蹤性，但不能阻止已連接模型在配置權限範圍內執行操作。

@@ -1,39 +1,56 @@
-# Git 存取
+# Git 訪問
 
-本頁說明「Git 存取」情境，並沿用文件站統一的 Runtime/Client 結構。
+`local-shell-mcp` 包含面向 Git 的工具，也允許通過 shell 工具直接運行 Git 命令。
 
-## 概覽
-
-Runtime 決定服務程序如何執行以及控制哪個工作區。Client 決定 ChatGPT 或其他 MCP 用戶端如何連線。Docker、VS Code 擴充、獨立二進位、Python/pipx/原始碼安裝與 stdio 都是 Runtime 選項；ChatGPT 連接器、通用 HTTP MCP 用戶端與 stdio MCP 用戶端則是 Client 連線方式。
-
-## 適用情境
-
-- 當你選擇的 Runtime 或 Client 路徑與本頁標題相符時使用本頁。
-- 保持工作區根目錄、公開 base URL、MCP endpoint、認證模式與主機可用工具一致。
-- ChatGPT 網頁或 App 需要暴露以 `/mcp` 結尾的 HTTPS MCP endpoint。
-- 本機 MCP 用戶端可依用戶端能力選擇 HTTP localhost 或 `local-shell-mcp --mode stdio`。
-
-## 步驟
-
-1. 先選擇 Runtime 安裝頁面。
-2. 啟動 Runtime；如果使用 HTTP 模式，檢查 `/healthz`。
-3. 再選擇 Client 連線頁面。
-4. 在 Client 中註冊 MCP endpoint 或 stdio 命令。
-5. 呼叫 `environment_info` 檢查實際工作區與設定。
+## 常見任務
 
 ```text
-Runtime: Docker / VS Code extension / binary / Python / stdio
-Client:  ChatGPT connector / generic HTTP MCP / generic stdio MCP
-Endpoint: https://your-host.example.com/mcp
+克隆倉庫，檢查狀態，做一個聚焦補丁，運行測試，提交併推送。
 ```
 
-## 驗證
+推薦順序：
 
-- `environment_info` 確認執行階段設定與工作區。
-- `tree_view` 確認可見檔案。
-- `git_status_tool` 確認儲存庫上下文。
-- `run_shell_tool` 確認命令執行環境。
+1. `git_status_tool`
+2. `git_diff_tool`
+3. 編輯或 patch 文件
+4. 運行測試
+5. `secret_scan`
+6. `git_add_tool`
+7. `git_commit_tool`
+8. `git_push_tool`
 
-## 說明
+## 憑據
 
-優先使用小而可驗證的步驟：查看、編輯、diff、測試、掃描、提交。大型任務也應拆成可稽核的工具呼叫。
+Docker 部署可以在 `/persist/credentials` 下持久化常見 Git 憑據位置。把該 volume 視爲敏感資源。
+
+優先使用：
+
+- 只作用於單個倉庫的 deploy key。
+- 短期 GitHub App token。
+- 用於自動化的隔離機器用戶。
+- 推送前人工複查。
+
+避免：
+
+- 在環境變量中放長期個人訪問令牌。
+- 把宿主機 SSH 目錄掛進公開 AI 控制容器。
+- 通過文件鏈接分享憑據文件。
+
+## 提交衛生
+
+要求 AI：
+
+- 保持提交聚焦。
+- 避免生成緩存和構建產物。
+- 說明運行過的測試。
+- 當開源維護者偏好簡潔人類風格提交時，避免 AI 味樣板話。
+
+## 故障排查
+
+如果 `git push` 失敗：
+
+- 檢查 remote URL。
+- 檢查憑據持久化。
+- 如果安裝了 GitHub CLI，運行 `gh auth status`。
+- 確認分支保護規則。
+- 確認 token 或 deploy key 具有寫權限。

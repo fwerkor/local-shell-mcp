@@ -1,39 +1,54 @@
 # 审计日志
 
-本页说明“审计日志”场景，并沿用文档站统一的 Runtime/Client 结构。
+`local-shell-mcp` 会写入结构化审计记录，帮助还原已连接客户端做过什么。
 
-## 概览
-
-Runtime 决定服务进程如何运行以及控制哪个工作区。Client 决定 ChatGPT 或其它 MCP 客户端如何连接。Docker、VS Code 扩展、独立二进制、Python/pipx/源码安装和 stdio 都是 Runtime 选择；ChatGPT 连接器、通用 HTTP MCP 客户端和 stdio MCP 客户端属于 Client 连接方式。
-
-## 适用场景
-
-- 当你选择的 Runtime 或 Client 路径与本页标题匹配时使用本页。
-- 保持工作区根目录、公开 base URL、MCP endpoint、认证模式和主机可用工具一致。
-- ChatGPT 网页或 App 需要暴露以 `/mcp` 结尾的 HTTPS MCP endpoint。
-- 本地 MCP 客户端可按客户端能力选择 HTTP localhost 或 `local-shell-mcp --mode stdio`。
-
-## 步骤
-
-1. 先选择 Runtime 安装页面。
-2. 启动 Runtime；如果使用 HTTP 模式，检查 `/healthz`。
-3. 再选择 Client 连接页面。
-4. 在 Client 中注册 MCP endpoint 或 stdio 命令。
-5. 调用 `environment_info` 检查实际工作区和设置。
+默认路径：
 
 ```text
-Runtime: Docker / VS Code extension / binary / Python / stdio
-Client:  ChatGPT connector / generic HTTP MCP / generic stdio MCP
-Endpoint: https://your-host.example.com/mcp
+/workspace/.local-shell-mcp/audit.jsonl
 ```
 
-## 验证
+## 记录内容
 
-- `environment_info` 确认运行时设置和工作区。
-- `tree_view` 确认可见文件。
-- `git_status_tool` 确认仓库上下文。
-- `run_shell_tool` 确认命令执行环境。
+审计记录覆盖这些事件：
 
-## 说明
+- 工具调用开始和结束。
+- 命令执行元数据。
+- 超时和已处理错误。
+- 远程 worker 注册和任务活动。
+- 文件链接创建和撤销。
+- 适用时的认证相关事件。
 
-优先使用小而可验证的步骤：查看、编辑、diff、测试、扫描、提交。大型任务也应拆成可审计的工具调用。
+服务能识别的敏感参数会被脱敏。
+
+## 读取日志
+
+使用 MCP 工具：
+
+```text
+audit_tail
+```
+
+也可以直接查看：
+
+```bash
+tail -n 100 /workspace/.local-shell-mcp/audit.jsonl
+```
+
+## 运维用途
+
+审计日志主要用于：
+
+- 复查修改文件的命令。
+- 检查是否使用过远程 worker。
+- 调试意外失败。
+- 发现文件链接的意外暴露。
+- 在公开部署配置错误后支持事件响应。
+
+## 保留策略
+
+日志大小受 `LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES` 限制。如果需要长期保留，请轮转或导出到外部系统。
+
+## 限制
+
+审计日志不是沙箱。它能提升可追踪性，但不能阻止已连接模型在配置权限范围内执行操作。

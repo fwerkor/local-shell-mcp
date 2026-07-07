@@ -1,39 +1,46 @@
-# 檔案連結
+# 文件鏈接
 
-本頁說明「檔案連結」情境，並沿用文件站統一的 Runtime/Client 結構。
+`local-shell-mcp` 可以通過高熵 bearer URL 暴露受控工作區中的文件。當 AI 生成報告、壓縮包、PDF、截圖或其它需要從聊天中下載的產物時，這很有用。
 
-## 概覽
+## 何時使用文件鏈接
 
-Runtime 決定服務程序如何執行以及控制哪個工作區。Client 決定 ChatGPT 或其他 MCP 用戶端如何連線。Docker、VS Code 擴充、獨立二進位、Python/pipx/原始碼安裝與 stdio 都是 Runtime 選項；ChatGPT 連接器、通用 HTTP MCP 用戶端與 stdio MCP 用戶端則是 Client 連線方式。
+文件鏈接適合：
 
-## 適用情境
+- 生成的 PDF 或報告。
+- 截圖和瀏覽器產物。
+- 構建輸出。
+- 過大而不適合粘貼的日誌。
+- 準備用於人工檢查的壓縮包。
 
-- 當你選擇的 Runtime 或 Client 路徑與本頁標題相符時使用本頁。
-- 保持工作區根目錄、公開 base URL、MCP endpoint、認證模式與主機可用工具一致。
-- ChatGPT 網頁或 App 需要暴露以 `/mcp` 結尾的 HTTPS MCP endpoint。
-- 本機 MCP 用戶端可依用戶端能力選擇 HTTP localhost 或 `local-shell-mcp --mode stdio`。
+不要把文件鏈接用於密鑰、私鑰、憑據存儲或無關個人數據。
 
-## 步驟
+## 典型流程
 
-1. 先選擇 Runtime 安裝頁面。
-2. 啟動 Runtime；如果使用 HTTP 模式，檢查 `/healthz`。
-3. 再選擇 Client 連線頁面。
-4. 在 Client 中註冊 MCP endpoint 或 stdio 命令。
-5. 呼叫 `environment_info` 檢查實際工作區與設定。
+1. 在 `/workspace` 下生成或定位文件。
+2. 調用 `create_file_link`，設置 TTL 和可選下載次數限制。
+3. 分享返回的 URL。
+4. 不再需要時撤銷鏈接。
 
-```text
-Runtime: Docker / VS Code extension / binary / Python / stdio
-Client:  ChatGPT connector / generic HTTP MCP / generic stdio MCP
-Endpoint: https://your-host.example.com/mcp
-```
+## 相關工具
 
-## 驗證
+| 工具 | 用途 |
+|---|---|
+| `create_file_link` | 爲工作區文件創建帶 token 的 URL。 |
+| `list_file_links` | 顯示活動鏈接。 |
+| `revoke_file_link` | 在到期前禁用鏈接。 |
 
-- `environment_info` 確認執行階段設定與工作區。
-- `tree_view` 確認可見檔案。
-- `git_status_tool` 確認儲存庫上下文。
-- `run_shell_tool` 確認命令執行環境。
+## 控制項
 
-## 說明
+相關配置包括：
 
-優先使用小而可驗證的步驟：查看、編輯、diff、測試、掃描、提交。大型任務也應拆成可稽核的工具呼叫。
+- `LOCAL_SHELL_MCP_FILE_DOWNLOAD_ENABLED`
+- `LOCAL_SHELL_MCP_FILE_DOWNLOAD_DEFAULT_TTL_S`
+- `LOCAL_SHELL_MCP_FILE_DOWNLOAD_MAX_TTL_S`
+- `LOCAL_SHELL_MCP_FILE_DOWNLOAD_DEFAULT_MAX_DOWNLOADS`
+- `LOCAL_SHELL_MCP_FILE_DOWNLOAD_MAX_FILE_BYTES`
+
+對敏感產物使用較短 TTL；當鏈接只面向單個接收者時，設置最大下載次數。
+
+## 安全說明
+
+文件鏈接是 bearer URL。任何拿到 URL 的人都可以在鏈接過期、達到下載次數限制或被撤銷前下載文件。應把它們視爲臨時密鑰。

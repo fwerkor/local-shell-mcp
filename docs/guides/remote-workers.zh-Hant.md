@@ -1,17 +1,64 @@
-# 遠端節點
+# 遠程節點
 
-Remote workers connect outbound to the control server and expose `remote_*` tools to the MCP client.
+遠程節點讓 `local-shell-mcp` 控制那些可以主動發起 HTTP(S) 請求、但無法接收入站 SSH 連接的機器。
+
+典型場景包括：
+
+- HPC 集羣。
+- 位於 NAT 後面的 NPU/GPU 服務器。
+- 有防火牆限制的實驗室機器。
+- 臨時構建主機。
+- 配置 SSH 不方便，但允許出站 HTTPS 的機器。
+
+## 概念
 
 ```text
-ChatGPT -> local-shell-mcp -> outbound polling worker -> remote machine
+ChatGPT -> local-shell-mcp 控制服務 -> 出站輪詢 worker -> 遠程機器
 ```
 
-Basic flow:
+worker 使用一次性邀請加入，並輪詢控制服務獲取任務。控制服務會向 MCP 客戶端暴露 `remote_*` 工具。
 
-1. Create an invite with `remote_invite`.
-2. Run the generated command on the remote machine.
-3. Check `remote_list_machines`.
-4. Use remote shell, file, transfer, Git, and browser tools.
-5. Revoke the worker when done.
+## 基本流程
 
-公開部署必須啟用 OAuth；不要掛載 Docker socket、主機根目錄或長期憑證。
+1. 使用 `remote_invite` 創建邀請。
+2. 複製生成的命令。
+3. 在遠程機器上運行該命令。
+4. 通過 `remote_list_machines` 確認機器已經出現。
+5. 使用 `remote_run_shell_tool`、`remote_read_file`、`remote_push_file` 等遠程工具。
+6. 任務結束後撤銷該 worker。
+
+## 能力範圍
+
+遠程工具接近本地工具的能力面：
+
+- 一次性 shell 和持久 shell。
+- 文件系統讀取、寫入、搜索和補丁。
+- 本地與遠程工作區之間的文件傳輸。
+- Git 操作。
+- 當遠程機器具備依賴時，可使用 Playwright / 瀏覽器相關工具。
+
+## 安全模型
+
+加入後的遠程 worker 會把其配置環境交給 MCP 客戶端控制。條件允許時，應使用一次性賬號或專用目錄。
+
+推薦做法：
+
+- 使用較短的邀請碼 TTL。
+- 任務完成後撤銷 worker。
+- 不要接入帶有無關生產憑據的機器。
+- 除非整臺機器都是一次性的，否則避免以 root 身份運行。
+- 保留遠程日誌和控制服務審計日誌，便於複查。
+
+## 版本匹配
+
+遠程 worker 代碼應與控制服務版本一致。優先使用 `remote_invite` 生成的命令，因爲控制服務可以提供匹配版本的 worker 引導流程。
+
+## 故障排查
+
+如果 worker 沒有出現：
+
+- 檢查遠程機器是否能訪問出站 HTTPS。
+- 確認遠程機器可以訪問公開 base URL。
+- 確認邀請沒有過期。
+- 檢查遠程機器系統時間。
+- 查看控制服務日誌。

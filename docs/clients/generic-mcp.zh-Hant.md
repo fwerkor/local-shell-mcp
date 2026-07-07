@@ -1,39 +1,67 @@
-# 通用 MCP Client
+# 通用 MCP 客戶端
 
-本頁說明「通用 MCP Client」情境，並沿用文件站統一的 Runtime/Client 結構。
+`local-shell-mcp` 可供 ChatGPT 使用，也可供其它 MCP 客戶端使用。客戶端決定是通過 HTTP 連接，還是通過 stdio 啓動服務。
 
-## 概覽
+## HTTP MCP 客戶端
 
-Runtime 決定服務程序如何執行以及控制哪個工作區。Client 決定 ChatGPT 或其他 MCP 用戶端如何連線。Docker、VS Code 擴充、獨立二進位、Python/pipx/原始碼安裝與 stdio 都是 Runtime 選項；ChatGPT 連接器、通用 HTTP MCP 用戶端與 stdio MCP 用戶端則是 Client 連線方式。
+當服務已經在運行時，使用 HTTP 模式：
 
-## 適用情境
-
-- 當你選擇的 Runtime 或 Client 路徑與本頁標題相符時使用本頁。
-- 保持工作區根目錄、公開 base URL、MCP endpoint、認證模式與主機可用工具一致。
-- ChatGPT 網頁或 App 需要暴露以 `/mcp` 結尾的 HTTPS MCP endpoint。
-- 本機 MCP 用戶端可依用戶端能力選擇 HTTP localhost 或 `local-shell-mcp --mode stdio`。
-
-## 步驟
-
-1. 先選擇 Runtime 安裝頁面。
-2. 啟動 Runtime；如果使用 HTTP 模式，檢查 `/healthz`。
-3. 再選擇 Client 連線頁面。
-4. 在 Client 中註冊 MCP endpoint 或 stdio 命令。
-5. 呼叫 `environment_info` 檢查實際工作區與設定。
-
-```text
-Runtime: Docker / VS Code extension / binary / Python / stdio
-Client:  ChatGPT connector / generic HTTP MCP / generic stdio MCP
-Endpoint: https://your-host.example.com/mcp
+```bash
+LOCAL_SHELL_MCP_WORKSPACE_ROOT=/path/to/workspace local-shell-mcp --mode mcp
 ```
 
-## 驗證
+本地端點：
 
-- `environment_info` 確認執行階段設定與工作區。
-- `tree_view` 確認可見檔案。
-- `git_status_tool` 確認儲存庫上下文。
-- `run_shell_tool` 確認命令執行環境。
+```text
+http://127.0.0.1:8765/mcp
+```
 
-## 說明
+網絡端點：
 
-優先使用小而可驗證的步驟：查看、編輯、diff、測試、掃描、提交。大型任務也應拆成可稽核的工具呼叫。
+```text
+https://your-public-host.example.com/mcp
+```
+
+任何超出可信 localhost 範圍可訪問的端點都應使用 OAuth。
+
+## Stdio MCP 客戶端
+
+當客戶端自己啓動服務進程時，使用 stdio 模式：
+
+```bash
+LOCAL_SHELL_MCP_WORKSPACE_ROOT=/path/to/workspace local-shell-mcp --mode stdio
+```
+
+典型客戶端配置結構：
+
+```json
+{
+  "mcpServers": {
+    "local-shell-mcp": {
+      "command": "local-shell-mcp",
+      "args": ["--mode", "stdio"],
+      "env": {
+        "LOCAL_SHELL_MCP_WORKSPACE_ROOT": "/path/to/workspace"
+      }
+    }
+  }
+}
+```
+
+不同客戶端 schema 不完全相同。有些叫 `mcpServers`，也有些使用其它名稱。
+
+## 連接器式 search / fetch
+
+服務也暴露只讀的連接器式 `search` 和 `fetch` 工具。它們適合基本文件發現，但不能替代完整 MCP 工具面。
+
+使用 `/mcp` 才能獲得完整的 shell、文件系統、Git、瀏覽器、文件鏈接和遠程 worker 工具。
+
+## 第一次安全檢查
+
+新客戶端連接後，先執行：
+
+```text
+調用 environment_info，然後對工作區根目錄調用 tree_view。暫時不要修改文件。
+```
+
+之後再運行帶有明確編輯、測試和 Git 規則的有邊界任務。

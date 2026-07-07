@@ -1,39 +1,46 @@
 # 文件链接
 
-本页说明“文件链接”场景，并沿用文档站统一的 Runtime/Client 结构。
+`local-shell-mcp` 可以通过高熵 bearer URL 暴露受控工作区中的文件。当 AI 生成报告、压缩包、PDF、截图或其它需要从聊天中下载的产物时，这很有用。
 
-## 概览
+## 何时使用文件链接
 
-Runtime 决定服务进程如何运行以及控制哪个工作区。Client 决定 ChatGPT 或其它 MCP 客户端如何连接。Docker、VS Code 扩展、独立二进制、Python/pipx/源码安装和 stdio 都是 Runtime 选择；ChatGPT 连接器、通用 HTTP MCP 客户端和 stdio MCP 客户端属于 Client 连接方式。
+文件链接适合：
 
-## 适用场景
+- 生成的 PDF 或报告。
+- 截图和浏览器产物。
+- 构建输出。
+- 过大而不适合粘贴的日志。
+- 准备用于人工检查的压缩包。
 
-- 当你选择的 Runtime 或 Client 路径与本页标题匹配时使用本页。
-- 保持工作区根目录、公开 base URL、MCP endpoint、认证模式和主机可用工具一致。
-- ChatGPT 网页或 App 需要暴露以 `/mcp` 结尾的 HTTPS MCP endpoint。
-- 本地 MCP 客户端可按客户端能力选择 HTTP localhost 或 `local-shell-mcp --mode stdio`。
+不要把文件链接用于密钥、私钥、凭据存储或无关个人数据。
 
-## 步骤
+## 典型流程
 
-1. 先选择 Runtime 安装页面。
-2. 启动 Runtime；如果使用 HTTP 模式，检查 `/healthz`。
-3. 再选择 Client 连接页面。
-4. 在 Client 中注册 MCP endpoint 或 stdio 命令。
-5. 调用 `environment_info` 检查实际工作区和设置。
+1. 在 `/workspace` 下生成或定位文件。
+2. 调用 `create_file_link`，设置 TTL 和可选下载次数限制。
+3. 分享返回的 URL。
+4. 不再需要时撤销链接。
 
-```text
-Runtime: Docker / VS Code extension / binary / Python / stdio
-Client:  ChatGPT connector / generic HTTP MCP / generic stdio MCP
-Endpoint: https://your-host.example.com/mcp
-```
+## 相关工具
 
-## 验证
+| 工具 | 用途 |
+|---|---|
+| `create_file_link` | 为工作区文件创建带 token 的 URL。 |
+| `list_file_links` | 显示活动链接。 |
+| `revoke_file_link` | 在到期前禁用链接。 |
 
-- `environment_info` 确认运行时设置和工作区。
-- `tree_view` 确认可见文件。
-- `git_status_tool` 确认仓库上下文。
-- `run_shell_tool` 确认命令执行环境。
+## 控制项
 
-## 说明
+相关配置包括：
 
-优先使用小而可验证的步骤：查看、编辑、diff、测试、扫描、提交。大型任务也应拆成可审计的工具调用。
+- `LOCAL_SHELL_MCP_FILE_DOWNLOAD_ENABLED`
+- `LOCAL_SHELL_MCP_FILE_DOWNLOAD_DEFAULT_TTL_S`
+- `LOCAL_SHELL_MCP_FILE_DOWNLOAD_MAX_TTL_S`
+- `LOCAL_SHELL_MCP_FILE_DOWNLOAD_DEFAULT_MAX_DOWNLOADS`
+- `LOCAL_SHELL_MCP_FILE_DOWNLOAD_MAX_FILE_BYTES`
+
+对敏感产物使用较短 TTL；当链接只面向单个接收者时，设置最大下载次数。
+
+## 安全说明
+
+文件链接是 bearer URL。任何拿到 URL 的人都可以在链接过期、达到下载次数限制或被撤销前下载文件。应把它们视为临时密钥。

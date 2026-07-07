@@ -33,6 +33,21 @@ PLACEHOLDER_PHRASES = (
     "Common combinations",
 )
 
+CHINESE_PLACEHOLDER_PHRASES = (
+    "Clone the repository",
+    "Use this MCP endpoint",
+    "Recommended first prompt",
+    "Remote workers connect outbound",
+    "Basic flow:",
+    "Mandatory rules:",
+)
+
+FULL_TRANSLATION_LOCALES = {"zh", "zh-Hant"}
+FULL_TRANSLATION_EXCLUDES = {
+    "docs/reference/tools.zh.md",
+    "docs/reference/tools.zh-Hant.md",
+}
+
 
 def collect_nav_titles(items: Iterable[object]) -> set[str]:
     titles: set[str] = set()
@@ -77,6 +92,26 @@ def main() -> int:
                 rel = path.relative_to(REPO)
                 errors.append(f"{rel}: placeholder English phrase remains: {phrase}")
                 break
+
+        locale = parts[-2]
+        rel = path.relative_to(REPO).as_posix()
+        if locale in FULL_TRANSLATION_LOCALES:
+            for phrase in CHINESE_PLACEHOLDER_PHRASES:
+                if phrase in text:
+                    errors.append(f"{rel}: untranslated Chinese page phrase remains: {phrase}")
+                    break
+
+        if locale in FULL_TRANSLATION_LOCALES and rel not in FULL_TRANSLATION_EXCLUDES:
+            source_name = ".".join(parts[:-2] + [parts[-1]])
+            source_path = path.with_name(source_name)
+            if source_path.exists():
+                source_lines = [line for line in source_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+                localized_lines = [line for line in text.splitlines() if line.strip()]
+                if len(localized_lines) < max(4, int(len(source_lines) * 0.85)):
+                    errors.append(
+                        f"{rel}: localized page is too short "
+                        f"({len(localized_lines)} nonblank lines vs {len(source_lines)} source lines)"
+                    )
 
     if errors:
         print("Documentation i18n check failed:")

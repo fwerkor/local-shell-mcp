@@ -1,39 +1,55 @@
 # 瀏覽器自動化
 
-本頁說明「瀏覽器自動化」情境，並沿用文件站統一的 Runtime/Client 結構。
+瀏覽器工具使用 Playwright 檢查網頁、採集證據、評估頁面狀態並生成 PDF。它們適合文檔站、UI smoke test、視覺迴歸排查，以及收集可復現截圖。
 
-## 概覽
+## 工具
 
-Runtime 決定服務程序如何執行以及控制哪個工作區。Client 決定 ChatGPT 或其他 MCP 用戶端如何連線。Docker、VS Code 擴充、獨立二進位、Python/pipx/原始碼安裝與 stdio 都是 Runtime 選項；ChatGPT 連接器、通用 HTTP MCP 用戶端與 stdio MCP 用戶端則是 Client 連線方式。
+| 工具 | 用途 |
+|---|---|
+| `playwright_install_tool` | 缺少瀏覽器二進制時安裝它們。 |
+| `browser_screenshot_tool` | 在工作區內保存頁面截圖。 |
+| `browser_get_text_tool` | 從選擇器中提取可見文本。 |
+| `browser_eval_tool` | 在頁面上下文中執行 JavaScript。 |
+| `browser_pdf_tool` | 保存頁面的 Chromium PDF。 |
+| `playwright_run_script_tool` | 運行完整 Python Playwright 腳本。 |
+| `remote_browser_*` | 在已連接遠程 worker 上運行等價操作。 |
 
-## 適用情境
+## 常見流程
 
-- 當你選擇的 Runtime 或 Client 路徑與本頁標題相符時使用本頁。
-- 保持工作區根目錄、公開 base URL、MCP endpoint、認證模式與主機可用工具一致。
-- ChatGPT 網頁或 App 需要暴露以 `/mcp` 結尾的 HTTPS MCP endpoint。
-- 本機 MCP 用戶端可依用戶端能力選擇 HTTP localhost 或 `local-shell-mcp --mode stdio`。
+### 截取本本文檔站
 
-## 步驟
+1. 在持久 shell session 中啓動站點。
+2. 等待服務器輸出本地 URL。
+3. 對該 URL 調用 `browser_screenshot_tool`。
+4. 如果需要從聊天中下載截圖，使用 `create_file_link`。
+5. 關閉持久 shell session。
 
-1. 先選擇 Runtime 安裝頁面。
-2. 啟動 Runtime；如果使用 HTTP 模式，檢查 `/healthz`。
-3. 再選擇 Client 連線頁面。
-4. 在 Client 中註冊 MCP endpoint 或 stdio 命令。
-5. 呼叫 `environment_info` 檢查實際工作區與設定。
+### 提取文本做快速驗證
+
+當主要問題是頁面是否渲染了預期內容時，使用 `browser_get_text_tool`。
+
+示例任務表述：
 
 ```text
-Runtime: Docker / VS Code extension / binary / Python / stdio
-Client:  ChatGPT connector / generic HTTP MCP / generic stdio MCP
-Endpoint: https://your-host.example.com/mcp
+啓動文檔預覽，對首頁使用 browser_get_text_tool，確認導航中出現 deployment、tools 和 usage-patterns 頁面。
 ```
 
-## 驗證
+### 運行自定義 Playwright 腳本
 
-- `environment_info` 確認執行階段設定與工作區。
-- `tree_view` 確認可見檔案。
-- `git_status_tool` 確認儲存庫上下文。
-- `run_shell_tool` 確認命令執行環境。
+當內置截圖、文本、PDF 工具不夠時，使用 `playwright_run_script_tool`。例如需要點擊流程、檢查 console error，或採集多個頁面。
 
-## 說明
+腳本應有明確邊界：
 
-優先使用小而可驗證的步驟：查看、編輯、diff、測試、掃描、提交。大型任務也應拆成可稽核的工具呼叫。
+- 設置顯式超時。
+- 把產物保存到工作區。
+- 除非環境專用於該任務，否則避免輸入憑據。
+- 對公開站點優先使用只讀檢查。
+
+## 故障排查
+
+如果瀏覽器啓動失敗：
+
+- 對所需瀏覽器運行 `playwright_install_tool`。
+- 確認容器或宿主機具備所需系統依賴。
+- Docker 中優先使用項目官方鏡像，因爲它包含預期的瀏覽器和文檔工具。
+- 對遠程 worker，在遠程機器上安裝依賴，或改用控制服務上的瀏覽器工具。
