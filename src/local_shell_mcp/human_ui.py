@@ -633,6 +633,10 @@ class _UnixPtyProcess:
     def resize(self, cols: int, rows: int) -> None:
         winsize = self._struct.pack("HHHH", max(1, rows), max(1, cols), 0, 0)
         self._fcntl.ioctl(self.master_fd, self._termios.TIOCSWINSZ, winsize)
+        process = getattr(self, "process", None)
+        if process is not None and process.poll() is None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGWINCH)
 
     async def read(self) -> bytes:
         while True:
