@@ -66,7 +66,11 @@ from .shell_ops import (
     send_shell,
     start_shell,
 )
-from .skill_ops import list_installed_skills, load_installed_skill
+from .skill_ops import (
+    list_installed_skills,
+    load_installed_skill,
+    read_installed_skill_file,
+)
 from .todo_ops import todo_read, todo_write
 from .transfer_ops import (
     normalize_chunk_size,
@@ -888,6 +892,16 @@ def build_mcp() -> FastMCP:
         """Load one installed agent skill by the exact name returned from skills_list. Returns SKILL.md instructions plus related file paths; read related files separately only when needed."""
         try:
             return _ok(await _to_thread(load_installed_skill, name, settings))
+        except Exception as exc:
+            return _handled_error(exc)
+
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
+    async def skill_read_file(name: str, path: str) -> ToolResult:
+        """Read one related text file from an installed Skill. Use the exact Skill name and relative path returned by skill_load; paths are constrained to that Skill directory."""
+        try:
+            return _ok(
+                await _to_thread(read_installed_skill_file, name, path, settings)
+            )
         except Exception as exc:
             return _handled_error(exc)
 

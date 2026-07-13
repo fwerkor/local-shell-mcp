@@ -54,7 +54,11 @@ from .shell_ops import (
     send_shell,
     start_shell,
 )
-from .skill_ops import list_installed_skills, load_installed_skill
+from .skill_ops import (
+    list_installed_skills,
+    load_installed_skill,
+    read_installed_skill_file,
+)
 from .todo_ops import todo_read, todo_write
 from .version import version_info
 
@@ -137,6 +141,15 @@ def build_http_app() -> FastAPI:
     @app.post("/tools/skill_load")
     async def api_skill_load(body: dict, _: Principal = PRINCIPAL_DEP):
         return await _blocking(load_installed_skill, body["name"], settings)
+
+    @app.post("/tools/skill_read_file")
+    async def api_skill_read_file(body: dict, _: Principal = PRINCIPAL_DEP):
+        return await _blocking(
+            read_installed_skill_file,
+            body["name"],
+            body["path"],
+            settings,
+        )
 
     @app.post("/tools/run_shell")
     async def api_run_shell(body: dict, _: Principal = PRINCIPAL_DEP):

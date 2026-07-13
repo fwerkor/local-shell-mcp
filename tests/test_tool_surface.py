@@ -10,6 +10,7 @@ LOCAL_TOOL_NAMES = {
     "version_info",
     "skills_list",
     "skill_load",
+    "skill_read_file",
     "run_shell_tool",
     "run_python_tool",
     "shell_start",

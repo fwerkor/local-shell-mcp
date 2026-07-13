@@ -175,7 +175,7 @@ def scan_agent_skills(
                         )
                         continue
                     related_files.append(
-                        _relative_posix(config_root, related_path)
+                        _relative_posix(skill_root, related_path)
                     )
                 except OSError as exc:
                     try:
