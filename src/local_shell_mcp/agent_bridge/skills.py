@@ -3,8 +3,11 @@
 import os
 import re
 import stat
+import tomllib
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 from .models import SkillRecord, SkillScanResult
 
@@ -13,6 +16,7 @@ DEFAULT_MAX_RELATED_FILES = 1_000
 DEFAULT_MAX_SCAN_ENTRIES = 5_000
 DEFAULT_MAX_PATH_BYTES = 200_000
 DEFAULT_MAX_ENTRY_BYTES = 512_000
+MAX_SKILL_DESCRIPTION_CHARS = 500
 MAX_SKILL_WARNINGS = 100
 
 
@@ -71,35 +75,56 @@ def _first_sentence(value: str) -> str:
     return value
 
 
-def _description_value(line: str) -> str | None:
-    """Parse a simple front-matter description field from a Markdown skill file."""
-    key, separator, value = line.strip().partition(":")
-    if separator and key.strip().lower() == "description":
-        return value.strip().strip("'\"") or "Agent skill"
-    return None
+def _normalize_description(value: object) -> str | None:
+    """Normalize and bound a front-matter or Markdown-derived description."""
+    if not isinstance(value, str):
+        return None
+    normalized = " ".join(value.split())
+    if not normalized:
+        return None
+    if len(normalized) > MAX_SKILL_DESCRIPTION_CHARS:
+        normalized = normalized[: MAX_SKILL_DESCRIPTION_CHARS - 1].rstrip() + "…"
+    return normalized
+
+
+def _front_matter_description(lines: list[str], start: int) -> tuple[str | None, int]:
+    """Parse YAML or TOML front matter and return its description and body start."""
+    delimiter = lines[start].strip()
+    end = start + 1
+    while end < len(lines):
+        stripped = lines[end].strip()
+        if stripped == delimiter or (delimiter == "---" and stripped == "..."):
+            break
+        end += 1
+    if end >= len(lines):
+        return None, start
+
+    raw = "\n".join(lines[start + 1 : end])
+    try:
+        parsed = yaml.safe_load(raw) if delimiter == "---" else tomllib.loads(raw)
+    except (yaml.YAMLError, tomllib.TOMLDecodeError):
+        parsed = None
+    if isinstance(parsed, dict):
+        description = _normalize_description(parsed.get("description"))
+        if description is not None:
+            return description, end + 1
+    return None, end + 1
 
 
 def _skill_description(markdown: str) -> str:
-    """Derive a human-readable skill description from front matter or body prose."""
+    """Derive a bounded description from front matter, prose, or the first heading."""
     lines = markdown.splitlines()
     line_index = 0
     while line_index < len(lines) and not lines[line_index].strip():
         line_index += 1
 
     if line_index < len(lines) and lines[line_index].strip() in {"---", "+++"}:
-        delimiter = lines[line_index].strip()
-        line_index += 1
-        while line_index < len(lines):
-            stripped = lines[line_index].strip()
-            if stripped in {delimiter, "..."}:
-                line_index += 1
-                break
-            description = _description_value(lines[line_index])
-            if description is not None:
-                return description
-            line_index += 1
+        description, line_index = _front_matter_description(lines, line_index)
+        if description is not None:
+            return description
 
     in_code_fence = False
+    first_heading: str | None = None
     for line in lines[line_index:]:
         stripped = line.strip()
         if not stripped:
@@ -109,10 +134,17 @@ def _skill_description(markdown: str) -> str:
             continue
         if in_code_fence:
             continue
-        if stripped in {"---", "...", "+++"} or stripped.startswith("#"):
+        if stripped in {"---", "...", "+++"}:
             continue
-        return _first_sentence(stripped)
-    return "Agent skill"
+        if stripped.startswith("#"):
+            heading = _normalize_description(stripped.lstrip("#").strip())
+            if first_heading is None and heading is not None:
+                first_heading = heading
+            continue
+        prose = _normalize_description(_first_sentence(stripped))
+        if prose is not None:
+            return prose
+    return first_heading or "Agent skill"
 
 
 def _bounded(value: int, default: int) -> int:
