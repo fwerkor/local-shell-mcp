@@ -216,11 +216,12 @@ if _PYDANTIC_AVAILABLE:
             return Settings(**merged)
 
         def with_workspace_relative_defaults(self) -> Settings:
-            if _matches_default_path(self.workspace_root, DEFAULT_WORKSPACE_ROOT):
-                return self
-
             updates = {}
-            if _matches_default_path(self.state_dir, DEFAULT_STATE_DIR):
+            workspace_is_default = _matches_default_path(
+                self.workspace_root, DEFAULT_WORKSPACE_ROOT
+            )
+            state_is_default = _matches_default_path(self.state_dir, DEFAULT_STATE_DIR)
+            if state_is_default and not workspace_is_default:
                 updates["state_dir"] = self.workspace_root / ".local-shell-mcp"
             state_dir = updates.get("state_dir", self.state_dir)
             if _matches_default_path(self.audit_log_path, DEFAULT_AUDIT_LOG_PATH):
@@ -377,10 +378,12 @@ else:
             return Settings(**merged)
 
         def with_workspace_relative_defaults(self) -> Settings:
-            if _matches_default_path(self.workspace_root, DEFAULT_WORKSPACE_ROOT):
-                return self
             updates = {}
-            if _matches_default_path(self.state_dir, DEFAULT_STATE_DIR):
+            workspace_is_default = _matches_default_path(
+                self.workspace_root, DEFAULT_WORKSPACE_ROOT
+            )
+            state_is_default = _matches_default_path(self.state_dir, DEFAULT_STATE_DIR)
+            if state_is_default and not workspace_is_default:
                 updates["state_dir"] = self.workspace_root / ".local-shell-mcp"
             state_dir = updates.get("state_dir", self.state_dir)
             if _matches_default_path(self.audit_log_path, DEFAULT_AUDIT_LOG_PATH):

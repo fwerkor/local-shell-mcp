@@ -33,3 +33,31 @@ def test_workspace_relative_defaults_match_resolved_platform_defaults(
     assert updated.state_dir == expected_state
     assert updated.audit_log_path == expected_state / "audit.jsonl"
     assert updated.agent_config_dir == expected_state / "agent_config"
+
+
+def test_custom_state_dir_moves_default_audit_and_agent_paths(tmp_path):
+    custom_state = (tmp_path / "custom-state").resolve()
+    settings = Settings(state_dir=custom_state)
+
+    updated = settings.with_workspace_relative_defaults()
+
+    assert updated.state_dir == custom_state
+    assert updated.audit_log_path == custom_state / "audit.jsonl"
+    assert updated.agent_config_dir == custom_state / "agent_config"
+
+
+def test_explicit_agent_and_audit_paths_do_not_follow_custom_state(tmp_path):
+    custom_state = (tmp_path / "custom-state").resolve()
+    custom_audit = (tmp_path / "logs" / "audit.jsonl").resolve()
+    custom_agent = (tmp_path / "agent-config").resolve()
+    settings = Settings(
+        state_dir=custom_state,
+        audit_log_path=custom_audit,
+        agent_config_dir=custom_agent,
+    )
+
+    updated = settings.with_workspace_relative_defaults()
+
+    assert updated.state_dir == custom_state
+    assert updated.audit_log_path == custom_audit
+    assert updated.agent_config_dir == custom_agent
