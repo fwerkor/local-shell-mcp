@@ -1,12 +1,12 @@
 # check=skip=SecretsUsedInArgOrEnv
 ARG BUN_VERSION=1.3.14
+ARG PLAYWRIGHT_VERSION=1.59.0
 FROM oven/bun:${BUN_VERSION} AS ui-builder
 WORKDIR /source
 COPY ui /source/ui
 COPY src/local_shell_mcp /source/src/local_shell_mcp
 RUN cd /source/ui && bun install --frozen-lockfile && bun run build
 
-ARG PLAYWRIGHT_VERSION=1.59.0
 FROM mcr.microsoft.com/playwright/python:v${PLAYWRIGHT_VERSION}-noble
 ARG PLAYWRIGHT_VERSION
 ARG TARGETARCH
