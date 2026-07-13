@@ -67,6 +67,7 @@ function App() {
   const [machine, setMachine] = useState("local")
   const [status, setStatus] = useState("Connecting to local-shell-mcp…")
   const [help, setHelp] = useState(false)
+  const [terminalRawMode, setTerminalRawMode] = useState(false)
 
   const loadBootstrap = async () => {
     try {
@@ -86,7 +87,7 @@ function App() {
   }, [])
 
   useKeyboard((key) => {
-    if (help) return
+    if (help || terminalRawMode) return
     if (key.ctrl && key.name === "q") renderer.destroy()
     else if (key.name === "f1") setHelp(true)
     else if (key.option && /^[1-5]$/.test(key.name)) setScreen(SCREENS[Number(key.name) - 1]!)
@@ -120,6 +121,7 @@ function App() {
         width={width}
         height={contentHeight}
         setStatus={setStatus}
+        onRawModeChange={setTerminalRawMode}
       />
     )
   } else if (screen === "Todos") {
@@ -132,7 +134,13 @@ function App() {
 
   return (
     <box style={{ width: "100%", height: "100%", flexDirection: "column", backgroundColor: theme.bg, padding: 1 }}>
-      <TopNav active={screen} width={width} onSelect={setScreen} />
+      <TopNav
+        active={screen}
+        width={width}
+        onSelect={(next) => {
+          if (!terminalRawMode) setScreen(next)
+        }}
+      />
       <box style={{ flexGrow: 1, marginTop: 1 }}>{content}</box>
       <StatusLine status={status} bootstrap={bootstrap} />
       {help && <Help close={() => setHelp(false)} />}

@@ -1,5 +1,5 @@
 import { useKeyboard } from "@opentui/react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, MachineSidebar, Modal, Panel, formatAge } from "./components"
 import { theme } from "./theme"
@@ -74,6 +74,7 @@ export function TerminalsScreen({
   width,
   height,
   setStatus,
+  onRawModeChange,
 }: {
   machines: Machine[]
   machine: string
@@ -81,6 +82,7 @@ export function TerminalsScreen({
   width: number
   height: number
   setStatus: (message: string) => void
+  onRawModeChange: (enabled: boolean) => void
 }) {
   const [sessions, setSessions] = useState<TerminalSession[]>([])
   const [selected, setSelected] = useState(0)
@@ -90,16 +92,19 @@ export function TerminalsScreen({
   const [rawMode, setRawMode] = useState(false)
   const [dialog, setDialog] = useState<TerminalDialog>({ type: "none" })
   const [busy, setBusy] = useState(false)
+  const rawQueue = useRef<Promise<void>>(Promise.resolve())
   const selectedSession = sessions[selected]
   const compact = width < 96
 
-  const refreshSessions = useCallback(async () => {
+  const refreshSessions = useCallback(async (): Promise<TerminalSession[]> => {
     try {
       const payload = await api.terminals(machine)
       setSessions(payload.sessions)
       setSelected((value) => Math.min(value, Math.max(0, payload.sessions.length - 1)))
+      return payload.sessions
     } catch (error) {
       setStatus(`Terminals: ${formatError(error)}`)
+      return []
     }
   }, [machine, setStatus])
 
@@ -137,6 +142,15 @@ export function TerminalsScreen({
     if (width < 105) setShowAudit(false)
   }, [width])
 
+  useEffect(() => {
+    onRawModeChange(rawMode)
+    return () => onRawModeChange(false)
+  }, [onRawModeChange, rawMode])
+
+  useEffect(() => {
+    if (!selectedSession && rawMode) setRawMode(false)
+  }, [rawMode, selectedSession])
+
   const send = async (inputText: string, enter = true) => {
     if (!selectedSession || inputText.length === 0) return
     setBusy(true)
@@ -158,12 +172,16 @@ export function TerminalsScreen({
 
   const sendRaw = (inputText: string) => {
     if (!selectedSession || inputText.length === 0) return
-    void api
-      .terminalAction("send", {
-        machine,
-        session_id: selectedSession.session_id,
-        input_text: inputText,
-        enter: false,
+    const targetMachine = machine
+    const sessionId = selectedSession.session_id
+    rawQueue.current = rawQueue.current
+      .then(async () => {
+        await api.terminalAction("send", {
+          machine: targetMachine,
+          session_id: sessionId,
+          input_text: inputText,
+          enter: false,
+        })
       })
       .catch((error) => setStatus(`Raw input: ${formatError(error)}`))
   }
@@ -171,14 +189,15 @@ export function TerminalsScreen({
   const startSession = async (value: string) => {
     const [namePart, ...cwdParts] = value.trim().split(/\s+/)
     try {
-      await api.terminalAction("start", {
+      const created = await api.terminalAction<{ session_id: string }>("start", {
         machine,
         name: namePart || undefined,
         cwd: cwdParts.join(" ") || ".",
       })
       setDialog({ type: "none" })
-      await refreshSessions()
-      setSelected(Math.max(0, sessions.length))
+      const nextSessions = await refreshSessions()
+      const nextIndex = nextSessions.findIndex((session) => session.session_id === created.session_id)
+      setSelected(Math.max(0, nextIndex))
     } catch (error) {
       setStatus(`Start: ${formatError(error)}`)
     }
@@ -211,6 +230,8 @@ export function TerminalsScreen({
       return
     }
     if (rawMode) {
+      key.preventDefault()
+      key.stopPropagation()
       if (key.ctrl && key.name === "t") {
         setRawMode(false)
         setStatus("Raw input disabled")
