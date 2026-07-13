@@ -30,6 +30,16 @@ DEFAULT_AUDIT_LOG_PATH = DEFAULT_STATE_DIR / "audit.jsonl"
 DEFAULT_AGENT_CONFIG_DIR = DEFAULT_STATE_DIR / "agent_config"
 
 
+def _matches_default_path(value: Path, default: Path) -> bool:
+    """Match a default path before or after platform-specific normalization."""
+    if value == default:
+        return True
+    try:
+        return value == default.resolve()
+    except (OSError, RuntimeError):
+        return False
+
+
 def default_shell_executable() -> str:
     if os.name == "nt":
         return "power" + "shell.exe"
@@ -206,16 +216,16 @@ if _PYDANTIC_AVAILABLE:
             return Settings(**merged)
 
         def with_workspace_relative_defaults(self) -> Settings:
-            if self.workspace_root == DEFAULT_WORKSPACE_ROOT:
+            if _matches_default_path(self.workspace_root, DEFAULT_WORKSPACE_ROOT):
                 return self
 
             updates = {}
-            if self.state_dir == DEFAULT_STATE_DIR:
+            if _matches_default_path(self.state_dir, DEFAULT_STATE_DIR):
                 updates["state_dir"] = self.workspace_root / ".local-shell-mcp"
             state_dir = updates.get("state_dir", self.state_dir)
-            if self.audit_log_path == DEFAULT_AUDIT_LOG_PATH:
+            if _matches_default_path(self.audit_log_path, DEFAULT_AUDIT_LOG_PATH):
                 updates["audit_log_path"] = state_dir / "audit.jsonl"
-            if self.agent_config_dir == DEFAULT_AGENT_CONFIG_DIR:
+            if _matches_default_path(self.agent_config_dir, DEFAULT_AGENT_CONFIG_DIR):
                 updates["agent_config_dir"] = state_dir / "agent_config"
 
             if not updates:
@@ -367,15 +377,15 @@ else:
             return Settings(**merged)
 
         def with_workspace_relative_defaults(self) -> Settings:
-            if self.workspace_root == DEFAULT_WORKSPACE_ROOT:
+            if _matches_default_path(self.workspace_root, DEFAULT_WORKSPACE_ROOT):
                 return self
             updates = {}
-            if self.state_dir == DEFAULT_STATE_DIR:
+            if _matches_default_path(self.state_dir, DEFAULT_STATE_DIR):
                 updates["state_dir"] = self.workspace_root / ".local-shell-mcp"
             state_dir = updates.get("state_dir", self.state_dir)
-            if self.audit_log_path == DEFAULT_AUDIT_LOG_PATH:
+            if _matches_default_path(self.audit_log_path, DEFAULT_AUDIT_LOG_PATH):
                 updates["audit_log_path"] = state_dir / "audit.jsonl"
-            if self.agent_config_dir == DEFAULT_AGENT_CONFIG_DIR:
+            if _matches_default_path(self.agent_config_dir, DEFAULT_AGENT_CONFIG_DIR):
                 updates["agent_config_dir"] = state_dir / "agent_config"
             return self.model_copy(update=updates) if updates else self
 
