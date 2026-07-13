@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import hashlib
+import secrets
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -10,8 +13,14 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 
+def _pkce_challenge(verifier: str) -> str:
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
 async def oauth_token(base_url: str, pin: str) -> str:
     redirect_uri = "https://example.com/local-shell-mcp-probe"
+    verifier = secrets.token_urlsafe(48)
     async with httpx.AsyncClient(follow_redirects=False, timeout=20) as client:
         registered = await client.post(
             f"{base_url}/oauth/register",
@@ -27,6 +36,8 @@ async def oauth_token(base_url: str, pin: str) -> str:
                 "client_id": client_id,
                 "redirect_uri": redirect_uri,
                 "scope": "shell:read shell:write shell:execute git:write browser:use",
+                "code_challenge": _pkce_challenge(verifier),
+                "code_challenge_method": "S256",
                 "pin": pin,
             },
         )
@@ -41,6 +52,7 @@ async def oauth_token(base_url: str, pin: str) -> str:
                 "code": code,
                 "client_id": client_id,
                 "redirect_uri": redirect_uri,
+                "code_verifier": verifier,
             },
         )
         token.raise_for_status()
