@@ -60,6 +60,9 @@ export const api = {
   filePreview(machine: string, path: string): Promise<FilePreview> {
     return request(`/files/preview${queryString({ machine, path })}`)
   },
+  fileContent(machine: string, path: string): Promise<FilePreview> {
+    return request(`/files/content${queryString({ machine, path })}`)
+  },
   fileAction<T = unknown>(action: string, body: Record<string, unknown>): Promise<T> {
     return request(`/files/${encodeURIComponent(action)}`, {
       method: "POST",

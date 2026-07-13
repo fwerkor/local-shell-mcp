@@ -268,6 +268,58 @@ def write_text(path: str, content: str, overwrite: bool = True) -> dict:
     }
 
 
+def perform_file_action(
+    action: str,
+    path: str,
+    destination: str | None = None,
+    *,
+    exist_ok: bool = False,
+) -> dict:
+    """Perform a bounded file-manager mutation under the configured path policy."""
+
+    if action not in {"mkdir", "touch", "rename", "copy", "move"}:
+        raise ValueError(f"Unsupported file action: {action}")
+
+    source = resolve_path(path, must_exist=action in {"rename", "copy", "move"})
+    if action == "mkdir":
+        source.mkdir(parents=True, exist_ok=exist_ok)
+        return {"action": action, "path": relative_display(source)}
+    if action == "touch":
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.touch(exist_ok=exist_ok)
+        return {"action": action, "path": relative_display(source)}
+
+    if not destination:
+        raise ValueError("destination is required")
+    target = resolve_path(destination, allow_missing_parent=False)
+    if target.exists():
+        raise FileExistsError(str(target))
+    if source == target:
+        raise ValueError("Source and destination are the same path")
+    if source.is_dir():
+        try:
+            target.relative_to(source)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("Destination cannot be inside the source directory")
+
+    if action == "rename":
+        source.rename(target)
+    elif action == "copy":
+        if source.is_dir():
+            shutil.copytree(source, target)
+        else:
+            shutil.copy2(source, target)
+    else:
+        shutil.move(str(source), str(target))
+    return {
+        "action": action,
+        "path": relative_display(source),
+        "destination": relative_display(target),
+    }
+
+
 def edit_text(path: str, old: str, new: str, replace_all: bool = False) -> dict:
     settings = get_settings()
     p = resolve_path(path, must_exist=True)

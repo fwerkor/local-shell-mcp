@@ -14,6 +14,7 @@ type Dialog =
 
 interface ClipboardState {
   mode: "copy" | "move"
+  machine: string
   path: string
 }
 
@@ -204,8 +205,25 @@ export function FilesScreen({
     }
   }
 
+  const openEditor = async (entry: FileEntry) => {
+    if (entry.type === "dir") return
+    setBusy(true)
+    try {
+      const content = await api.fileContent(machine, entry.path)
+      setDialog({ type: "editor", entry, content: String(content.content || "") })
+    } catch (error) {
+      setStatus(`Edit: ${formatError(error)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const pasteClipboard = async () => {
     if (!clipboard) return
+    if (clipboard.machine !== machine) {
+      setStatus("Paste: clipboard belongs to another machine")
+      return
+    }
     const destination = joinPath(path, clipboard.path.split(/[\\/]/).filter(Boolean).at(-1) || "item")
     try {
       await api.fileAction(clipboard.mode === "copy" ? "copy" : "move", {
@@ -226,6 +244,7 @@ export function FilesScreen({
     const next = (index + delta + machines.length) % machines.length
     onMachine(machines[next]!.name)
     setPath(".")
+    setClipboard(null)
   }
 
   useKeyboard((key) => {
@@ -273,15 +292,15 @@ export function FilesScreen({
     else if (key.name === "h" || key.name === "left" || key.name === "backspace") setPath(payload?.parent || ".")
     else if (key.name === "l" || key.name === "right" || key.name === "return") {
       if (current?.type === "dir") setPath(current.path)
-      else if (current) setDialog({ type: "editor", entry: current, content: String(preview?.content || "") })
+      else if (current) void openEditor(current)
     } else if (key.name === "." || key.name === "period") setShowHidden((value) => !value)
     else if (key.name === "r" && !key.shift) current && setDialog({ type: "input", action: "rename", title: "Rename", value: current.name })
     else if (key.name === "n" && key.shift) setDialog({ type: "input", action: "new-dir", title: "New directory", value: "" })
     else if (key.name === "n") setDialog({ type: "input", action: "new-file", title: "New file", value: "" })
     else if (key.name === "d") current && setDialog({ type: "confirm-delete", entry: current })
-    else if (key.name === "e") current && current.type !== "dir" && setDialog({ type: "editor", entry: current, content: String(preview?.content || "") })
-    else if (key.name === "y") current && setClipboard({ mode: "copy", path: current.path })
-    else if (key.name === "x") current && setClipboard({ mode: "move", path: current.path })
+    else if (key.name === "e") current && current.type !== "dir" && void openEditor(current)
+    else if (key.name === "y") current && setClipboard({ mode: "copy", machine, path: current.path })
+    else if (key.name === "x") current && setClipboard({ mode: "move", machine, path: current.path })
     else if (key.name === "p") void pasteClipboard()
     else if (key.name === "[") switchMachine(-1)
     else if (key.name === "]") switchMachine(1)
@@ -301,7 +320,7 @@ export function FilesScreen({
             {clipboard && (
               <text
                 fg={clipboard.mode === "copy" ? theme.green : theme.orange}
-                content={`${clipboard.mode}: ${clipboard.path}  `}
+                content={`${clipboard.mode}: ${clipboard.machine}:${clipboard.path}  `}
               />
             )}
           </box>

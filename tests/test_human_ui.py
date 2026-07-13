@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocket
 
@@ -9,6 +10,7 @@ from local_shell_mcp.audit import audit, query_audit, suppress_audit
 from local_shell_mcp.http_app import build_http_app
 from local_shell_mcp.human_ui import _authorize_websocket
 from local_shell_mcp.oauth import public_base_url
+from local_shell_mcp.remote import execute_worker_tool
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.ui_security import UI_LOCAL_TOKEN_HEADER, get_or_create_ui_local_token
 
@@ -36,6 +38,84 @@ def test_human_file_api_has_yazi_style_directory_payload(tmp_path, monkeypatch):
     assert payload["path"] == "."
     assert [entry["name"] for entry in payload["entries"]][:2] == [".state", "folder"]
     assert any(entry["name"] == "alpha.txt" and entry["type"] == "file" for entry in payload["entries"])
+
+
+def test_editor_content_reads_the_complete_bounded_file(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    content = "\n".join(f"line-{index}" for index in range(350))
+    (tmp_path / "long.txt").write_text(content, encoding="utf-8")
+    client = TestClient(build_http_app())
+
+    response = client.get(
+        "/api/ui/files/content",
+        params={"machine": "local", "path": "long.txt"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["truncated"] is False
+    assert payload["content"] == content
+    assert "line-349" in payload["content"]
+
+
+def test_editor_refuses_files_larger_than_the_read_limit(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_FILE_READ_BYTES", "64")
+    get_settings.cache_clear()
+    original = "0123456789" * 20
+    (tmp_path / "too-large.txt").write_text(original, encoding="utf-8")
+    client = TestClient(build_http_app())
+
+    response = client.get(
+        "/api/ui/files/content",
+        params={"machine": "local", "path": "too-large.txt"},
+    )
+
+    assert response.status_code == 400
+    assert "editor read limit" in response.json()["message"]
+    assert (tmp_path / "too-large.txt").read_text(encoding="utf-8") == original
+
+
+def test_file_manager_rejects_workspace_escape_and_recursive_self_copy(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "file.txt").write_text("data", encoding="utf-8")
+    client = TestClient(build_http_app())
+
+    escaped = client.post(
+        "/api/ui/files/mkdir",
+        json={"machine": "local", "path": "../escaped"},
+    )
+    recursive = client.post(
+        "/api/ui/files/copy",
+        json={"machine": "local", "path": "source", "destination": "source/nested"},
+    )
+
+    assert escaped.status_code == 400
+    assert "escapes workspace" in escaped.json()["message"]
+    assert recursive.status_code == 400
+    assert "inside the source directory" in recursive.json()["message"]
+    assert not (tmp_path.parent / "escaped").exists()
+    assert not (source / "nested").exists()
+
+
+@pytest.mark.asyncio
+async def test_remote_human_file_action_keeps_worker_workspace_policy(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+
+    with pytest.raises(ValueError, match="escapes workspace"):
+        await execute_worker_tool(
+            "human_file_action",
+            {"_human": True, "action": "touch", "path": "../escaped.txt"},
+        )
+
+    result = await execute_worker_tool(
+        "human_file_action",
+        {"_human": True, "action": "touch", "path": "safe.txt"},
+    )
+    assert result["path"] == "safe.txt"
+    assert (tmp_path / "safe.txt").is_file()
 
 
 def test_human_file_mutations_are_not_audited(tmp_path, monkeypatch):

@@ -21,7 +21,7 @@ from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from .audit import query_audit, suppress_audit
-from .fs_ops import delete_path, list_dir, read_text, resolve_path, write_text
+from .fs_ops import delete_path, list_dir, perform_file_action, read_text, resolve_path, write_text
 from .remote import remote_manager
 from .settings import get_settings
 from .shell_ops import kill_shell, list_shells, read_shell, send_shell, start_shell
@@ -319,26 +319,29 @@ async def api_file_preview(request: Request) -> Response:
         return _json_error(exc)
 
 
-def _remote_python_for_file_action(action: str, body: dict[str, Any]) -> str:
-    payload = json.dumps(body, ensure_ascii=False)
-    return f"""import json, pathlib, shutil
-p=json.loads({payload!r})
-action={action!r}
-if action == 'mkdir':
-    pathlib.Path(p['path']).mkdir(parents=True, exist_ok=bool(p.get('exist_ok', False)))
-elif action == 'touch':
-    path=pathlib.Path(p['path']); path.parent.mkdir(parents=True, exist_ok=True); path.open('x').close()
-elif action == 'rename':
-    pathlib.Path(p['path']).rename(pathlib.Path(p['destination']))
-elif action == 'copy':
-    src=pathlib.Path(p['path']); dst=pathlib.Path(p['destination'])
-    shutil.copytree(src, dst) if src.is_dir() else shutil.copy2(src, dst)
-elif action == 'move':
-    shutil.move(p['path'], p['destination'])
-else:
-    raise ValueError(action)
-print(json.dumps({{'action': action, 'ok': True}}))
-"""
+async def api_file_content(request: Request) -> Response:
+    machine = request.query_params.get("machine", "local")
+    path = request.query_params.get("path", "")
+    try:
+        if not path:
+            raise ValueError("path is required")
+        content = await _machine_dispatch(
+            machine,
+            lambda: read_text(path),
+            "read_file",
+            {"path": path},
+        )
+        if not isinstance(content, dict):
+            raise TypeError("File read returned an invalid payload")
+        if content.get("binary"):
+            raise ValueError("Binary files cannot be edited in the built-in editor")
+        if content.get("truncated"):
+            raise ValueError(
+                "File exceeds the configured editor read limit; use a terminal or external editor"
+            )
+        return _json_ok({"kind": "text", **content})
+    except Exception as exc:
+        return _json_error(exc)
 
 
 async def api_file_action(request: Request) -> Response:
@@ -369,29 +372,18 @@ async def api_file_action(request: Request) -> Response:
         if action not in {"mkdir", "touch", "rename", "copy", "move"}:
             raise ValueError(f"Unsupported file action: {action}")
 
-        if machine == "local":
-            with suppress_audit():
-                source = resolve_path(path, must_exist=action in {"rename", "copy", "move"})
-                if action == "mkdir":
-                    source.mkdir(parents=True, exist_ok=bool(body.get("exist_ok", False)))
-                elif action == "touch":
-                    source.parent.mkdir(parents=True, exist_ok=True)
-                    source.touch(exist_ok=False)
-                else:
-                    destination = resolve_path(str(body.get("destination") or ""), must_exist=False)
-                    if action == "rename":
-                        source.rename(destination)
-                    elif action == "copy":
-                        if source.is_dir():
-                            shutil.copytree(source, destination)
-                        else:
-                            shutil.copy2(source, destination)
-                    elif action == "move":
-                        shutil.move(str(source), str(destination))
-            return _json_ok({"action": action, "path": path, "destination": body.get("destination")})
-
-        code = _remote_python_for_file_action(action, body)
-        result = await _remote_call(machine, "run_python_tool", {"code": code, "cwd": ".", "timeout_s": 60})
+        args = {
+            "action": action,
+            "path": path,
+            "destination": str(body.get("destination") or "") or None,
+            "exist_ok": bool(body.get("exist_ok", False)),
+        }
+        result = await _machine_dispatch(
+            machine,
+            lambda: perform_file_action(**args),
+            "human_file_action",
+            args,
+        )
         return _json_ok(result)
     except Exception as exc:
         return _json_error(exc)
@@ -848,6 +840,7 @@ def ui_routes() -> list[Any]:
         Route(UI_API_PREFIX + "/machines", api_machines, methods=["GET"]),
         Route(UI_API_PREFIX + "/files", api_files, methods=["GET"]),
         Route(UI_API_PREFIX + "/files/preview", api_file_preview, methods=["GET"]),
+        Route(UI_API_PREFIX + "/files/content", api_file_content, methods=["GET"]),
         Route(UI_API_PREFIX + "/files/{action}", api_file_action, methods=["POST"]),
         Route(UI_API_PREFIX + "/terminals", api_terminals, methods=["GET"]),
         Route(UI_API_PREFIX + "/terminals/read", api_terminal_read, methods=["GET"]),

@@ -30,6 +30,7 @@ from .fs_ops import (
     glob_paths,
     list_dir,
     multi_edit_text,
+    perform_file_action,
     prune_temp_dir,
     read_text,
     relative_display,
@@ -617,6 +618,7 @@ REMOTE_WORKER_TOOL_NAMES = frozenset({
     "edit_file",
     "multi_edit_file",
     "delete_file_or_dir",
+    "human_file_action",
     "transfer_stat",
     "transfer_read_chunk",
     "transfer_begin_write",
@@ -707,6 +709,14 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
         return await _to_thread(multi_edit_text, args["path"], args["edits"])
     if tool == "delete_file_or_dir":
         return await _to_thread(delete_path, args["path"], args.get("recursive", False))
+    if tool == "human_file_action":
+        return await _to_thread(
+            perform_file_action,
+            args["action"],
+            args["path"],
+            args.get("destination"),
+            exist_ok=args.get("exist_ok", False),
+        )
     if tool == "transfer_stat":
         return await _to_thread(transfer_stat, args["path"], args.get("sha256", True))
     if tool == "transfer_read_chunk":
