@@ -1,9 +1,20 @@
 import json
 
 import pytest
+from fastapi.testclient import TestClient
+from starlette.applications import Starlette
+from starlette.routing import Route
 
 from local_shell_mcp.auth import _is_mcp_discovery_request
-from local_shell_mcp.oauth import _authorize_form, issue_access_token, validate_bearer_token
+from local_shell_mcp.oauth import (
+    _CLIENTS,
+    _CODES,
+    _authorize_form,
+    issue_access_token,
+    oauth_authorize_get,
+    oauth_register,
+    validate_bearer_token,
+)
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.tools import build_mcp
 
@@ -96,6 +107,74 @@ def test_oauth_access_tokens_do_not_expire_by_default(tmp_path, monkeypatch):
 
     assert "exp" not in claims
     assert claims["client_id"] == "test-client"
+
+
+def _oauth_test_client() -> TestClient:
+    return TestClient(
+        Starlette(
+            routes=[
+                Route("/oauth/register", oauth_register, methods=["POST"]),
+                Route("/oauth/authorize", oauth_authorize_get, methods=["GET"]),
+            ]
+        )
+    )
+
+
+def test_oauth_registration_validates_redirects_and_authorize_requires_registered_s256_client(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    _CLIENTS.clear()
+    _CODES.clear()
+    client = _oauth_test_client()
+
+    invalid = client.post("/oauth/register", json={"redirect_uris": ["relative/callback"]})
+    assert invalid.status_code == 400
+
+    unknown = client.get(
+        "/oauth/authorize",
+        params={
+            "response_type": "code",
+            "client_id": "unknown",
+            "redirect_uri": "https://example.test/callback",
+            "code_challenge": "challenge",
+            "code_challenge_method": "S256",
+        },
+    )
+    assert unknown.status_code == 200
+    assert "Unknown client_id" in unknown.text
+
+    registered = client.post(
+        "/oauth/register",
+        json={"client_name": "test", "redirect_uris": ["https://example.test/callback"]},
+    )
+    assert registered.status_code == 201
+    client_id = registered.json()["client_id"]
+
+    no_pkce = client.get(
+        "/oauth/authorize",
+        params={
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": "https://example.test/callback",
+        },
+    )
+    assert "Missing code_challenge" in no_pkce.text
+
+    valid = client.get(
+        "/oauth/authorize",
+        params={
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": "https://example.test/callback",
+            "code_challenge": "challenge",
+            "code_challenge_method": "S256",
+        },
+    )
+    assert valid.status_code == 200
+    assert "Approve" in valid.text
+    assert "Unknown client_id" not in valid.text
 
 
 def test_oauth_authorize_form_escapes_reflected_fields(tmp_path, monkeypatch):

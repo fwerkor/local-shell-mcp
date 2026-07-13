@@ -8,7 +8,7 @@ import secrets
 import time
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import jwt
 from starlette.requests import Request
@@ -41,6 +41,12 @@ class AuthCode:
 
 _CLIENTS: dict[str, OAuthClient] = {}
 _CODES: dict[str, AuthCode] = {}
+MAX_OAUTH_CLIENTS = 1_024
+MAX_OAUTH_CODES = 2_048
+MAX_REDIRECT_URIS = 10
+MAX_OAUTH_URI_LENGTH = 2_048
+MAX_CLIENT_NAME_LENGTH = 200
+OAUTH_CLIENT_TTL_S = 24 * 60 * 60
 
 
 def public_base_url(request: Request | None = None) -> str:
@@ -90,7 +96,7 @@ def authorization_server_metadata(request: Request) -> dict[str, Any]:
         "registration_endpoint": f"{issuer}/oauth/register",
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code"],
-        "code_challenge_methods_supported": ["S256", "plain"],
+        "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["none"],
         "scopes_supported": _scopes(),
         "authorization_response_iss_parameter_supported": True,
@@ -110,17 +116,57 @@ async def oauth_server_metadata(request: Request) -> JSONResponse:
     return _json(authorization_server_metadata(request))
 
 
+def _prune_oauth_state(now: int | None = None) -> None:
+    now = int(time.time()) if now is None else now
+    code_ttl = max(1, get_settings().oauth_code_ttl_s)
+    for code, item in list(_CODES.items()):
+        if item.used or now - item.created_at > code_ttl:
+            _CODES.pop(code, None)
+    for client_id, item in list(_CLIENTS.items()):
+        if now - item.created_at > OAUTH_CLIENT_TTL_S:
+            _CLIENTS.pop(client_id, None)
+    while len(_CODES) > MAX_OAUTH_CODES:
+        oldest = min(_CODES, key=lambda key: _CODES[key].created_at)
+        _CODES.pop(oldest, None)
+
+
+def _validate_redirect_uri(uri: str) -> str | None:
+    if not uri or len(uri) > MAX_OAUTH_URI_LENGTH:
+        return "redirect_uri is empty or too long"
+    parsed = urlsplit(uri)
+    if not parsed.scheme or parsed.fragment:
+        return "redirect_uri must be absolute and must not contain a fragment"
+    if parsed.scheme in {"http", "https"} and not parsed.netloc:
+        return "HTTP redirect_uri must include a host"
+    return None
+
+
 async def oauth_register(request: Request) -> JSONResponse:
+    _prune_oauth_state()
+    if len(_CLIENTS) >= MAX_OAUTH_CLIENTS:
+        return _json({"error": "temporarily_unavailable", "error_description": "OAuth client registry is full"}, status_code=503)
     try:
         body = await request.json()
     except Exception:
-        body = {}
+        return _json({"error": "invalid_client_metadata", "error_description": "Request body must be JSON"}, status_code=400)
+    raw_redirects = body.get("redirect_uris", [])
+    if not isinstance(raw_redirects, list) or not raw_redirects or len(raw_redirects) > MAX_REDIRECT_URIS:
+        return _json({"error": "invalid_redirect_uri", "error_description": f"Provide 1 to {MAX_REDIRECT_URIS} redirect_uris"}, status_code=400)
+    redirect_uris = [str(x) for x in raw_redirects if isinstance(x, str)]
+    if len(redirect_uris) != len(raw_redirects):
+        return _json({"error": "invalid_redirect_uri", "error_description": "redirect_uris must contain strings"}, status_code=400)
+    for uri in redirect_uris:
+        error = _validate_redirect_uri(uri)
+        if error:
+            return _json({"error": "invalid_redirect_uri", "error_description": error}, status_code=400)
+    client_name = body.get("client_name") if isinstance(body.get("client_name"), str) else None
+    if client_name and len(client_name) > MAX_CLIENT_NAME_LENGTH:
+        return _json({"error": "invalid_client_metadata", "error_description": "client_name is too long"}, status_code=400)
     client_id = "local-shell-mcp-" + secrets.token_urlsafe(24)
-    redirect_uris = [str(x) for x in body.get("redirect_uris", []) if isinstance(x, str)]
     client = OAuthClient(
         client_id=client_id,
         redirect_uris=redirect_uris,
-        client_name=body.get("client_name") if isinstance(body.get("client_name"), str) else None,
+        client_name=client_name,
     )
     _CLIENTS[client_id] = client
     audit("oauth_client_registered", client_id=client_id, redirect_uris=redirect_uris)
@@ -145,11 +191,16 @@ def _validate_authorize_params(params: dict[str, str]) -> str | None:
         return "Missing client_id"
     if not params.get("redirect_uri"):
         return "Missing redirect_uri"
+    _prune_oauth_state()
     client = _CLIENTS.get(params["client_id"])
-    if client and client.redirect_uris and params["redirect_uri"] not in client.redirect_uris:
+    if not client:
+        return "Unknown client_id"
+    if params["redirect_uri"] not in client.redirect_uris:
         return "redirect_uri is not registered for this client"
-    if params.get("code_challenge_method") and params.get("code_challenge_method") not in {"S256", "plain"}:
-        return "Unsupported code_challenge_method"
+    if not params.get("code_challenge"):
+        return "Missing code_challenge"
+    if params.get("code_challenge_method") != "S256":
+        return "Only code_challenge_method=S256 is supported"
     return None
 
 
@@ -225,6 +276,9 @@ async def oauth_authorize_post(request: Request) -> Response:
         code_challenge=params.get("code_challenge"),
         code_challenge_method=params.get("code_challenge_method"),
     )
+    _prune_oauth_state()
+    if len(_CODES) >= MAX_OAUTH_CODES:
+        return _authorize_form(params, error="Too many pending authorization requests; try again later")
     _CODES[code] = auth_code
     audit("oauth_code_issued", client_id=auth_code.client_id, resource=auth_code.resource)
     query = {"code": code, "iss": issuer_url(request)}
@@ -277,6 +331,7 @@ async def oauth_token(request: Request) -> JSONResponse:
     client_id = str(form.get("client_id") or "")
     redirect_uri = str(form.get("redirect_uri") or "")
     verifier = str(form.get("code_verifier") or "") or None
+    _prune_oauth_state()
     code_obj = _CODES.get(code)
     if not code_obj or code_obj.used:
         return _json({"error": "invalid_grant", "error_description": "Unknown or used code"}, status_code=400)
@@ -287,6 +342,7 @@ async def oauth_token(request: Request) -> JSONResponse:
     if not _verify_pkce(code_obj, verifier):
         return _json({"error": "invalid_grant", "error_description": "PKCE verification failed"}, status_code=400)
     code_obj.used = True
+    _CODES.pop(code, None)
     token = issue_access_token(
         client_id=client_id,
         scope=code_obj.scope,
