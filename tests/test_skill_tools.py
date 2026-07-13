@@ -1,4 +1,5 @@
 import os
+import sys
 
 import pytest
 from fastapi.testclient import TestClient
@@ -186,7 +187,10 @@ def test_skill_rest_rejects_non_string_arguments(tmp_path, monkeypatch):
     assert read_response.json()["error"] == "validation_error"
 
 
-@pytest.mark.skipif(os.name == "nt", reason="surrogate filenames are POSIX-specific")
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="invalid-byte filenames rely on Linux surrogateescape behavior",
+)
 def test_non_utf8_skill_directory_names_are_skipped(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     skills_root = _skills_root(tmp_path)
