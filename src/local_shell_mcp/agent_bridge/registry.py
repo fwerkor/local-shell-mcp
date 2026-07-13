@@ -12,7 +12,6 @@ from .models import (
     AgentCapabilityRegistry,
     AgentMcpServerRecord,
     DynamicMcpToolRecord,
-    DynamicSkillToolRecord,
     SkillScanResult,
 )
 from .redaction import redact_configured_value_tree
@@ -83,9 +82,8 @@ def build_agent_registry(
     client_manager: Any | None = None,
     probe_timeout_s: float = 5,
     dynamic_mcp_tools: bool | None = None,
-    dynamic_skill_tools: bool | None = None,
 ) -> AgentCapabilityRegistry:
-    """Build a complete bridge registry by loading config, scanning skills, probing MCP servers, and assigning dynamic names."""
+    """Build a bridge registry by loading config, scanning skills, probing MCP servers, and assigning dynamic MCP names."""
     config_root = Path(config_dir)
     manifest = load_agent_manifest(config_root)
     probe_timeout = _probe_timeout_seconds(probe_timeout_s)
@@ -136,11 +134,6 @@ def build_agent_registry(
                 tools=tools,
             )
 
-    effective_dynamic_skills = (
-        manifest.data.dynamic_tools.skills
-        if dynamic_skill_tools is None
-        else dynamic_skill_tools
-    )
     effective_dynamic_mcp = (
         manifest.data.dynamic_tools.mcp
         if dynamic_mcp_tools is None
@@ -148,16 +141,6 @@ def build_agent_registry(
     )
 
     seen_names: set[str] = set()
-    skill_tool_map: dict[str, DynamicSkillToolRecord] = {}
-    if effective_dynamic_skills:
-        for skill_name in skill_scan.skills:
-            dynamic_name = make_unique_tool_name(
-                "activate_skill", skill_name, seen_names
-            )
-            skill_tool_map[dynamic_name] = DynamicSkillToolRecord(
-                dynamic_name, skill_name
-            )
-
     mcp_tool_map: dict[str, DynamicMcpToolRecord] = {}
     if effective_dynamic_mcp:
         for server_name, record in mcp_servers.items():
@@ -196,8 +179,6 @@ def build_agent_registry(
         skill_warnings=skill_scan.warnings,
         mcp_servers=mcp_servers,
         dynamic_mcp_tools=effective_dynamic_mcp,
-        dynamic_skill_tools=effective_dynamic_skills,
-        dynamic_skill_tool_map=skill_tool_map,
         dynamic_mcp_tool_map=mcp_tool_map,
         client_manager=client_manager,
     )

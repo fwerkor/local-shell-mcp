@@ -112,13 +112,12 @@ if _PYDANTIC_AVAILABLE:
         max_concurrent_commands: int = 4
         max_tmux_sessions: int = 16
 
-        # Optional agent capability bridge. When enabled, local-shell-mcp can expose
-        # externally synced MCP servers and Markdown skills from agent_config_dir.
+        # Optional agent MCP capability bridge. Skills use the fixed skills_list and
+        # skill_load tools and are read from agent_config_dir/skills.
         agent_bridge_enabled: bool = False
         agent_mcp_probe_timeout_s: float = 5.0
         agent_mcp_call_timeout_s: float = 60.0
         agent_dynamic_mcp_tools: bool = False
-        agent_dynamic_skill_tools: bool = False
 
         file_download_enabled: bool = True
         file_download_default_ttl_s: int = 3600
@@ -283,7 +282,6 @@ else:
         agent_mcp_probe_timeout_s: float = 5.0
         agent_mcp_call_timeout_s: float = 60.0
         agent_dynamic_mcp_tools: bool = False
-        agent_dynamic_skill_tools: bool = False
 
         file_download_enabled: bool = True
         file_download_default_ttl_s: int = 3600

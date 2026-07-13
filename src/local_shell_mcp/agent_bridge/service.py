@@ -30,7 +30,6 @@ def build_agent_registry_from_settings(
         client_manager_factory(active_settings.agent_mcp_call_timeout_s),
         active_settings.agent_mcp_probe_timeout_s,
         None if active_settings.agent_dynamic_mcp_tools else False,
-        None if active_settings.agent_dynamic_skill_tools else False,
     )
 
 

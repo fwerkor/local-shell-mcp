@@ -50,12 +50,10 @@ class AgentSkillsConfig(BaseModel):
 
 
 class AgentDynamicToolsConfig(BaseModel):
-    """Feature flags for exposing discovered capabilities as public tools."""
+    """Feature flags for exposing discovered upstream MCP capabilities as public tools."""
 
     mcp: bool = True
     """Whether discovered upstream MCP tools become public dynamic tools."""
-    skills: bool = True
-    """Whether discovered Markdown skills become public dynamic tools."""
 
 
 class AgentBridgeManifest(BaseModel):
@@ -139,16 +137,6 @@ class AgentMcpServerRecord:
 
 
 @dataclass(frozen=True)
-class DynamicSkillToolRecord:
-    """Association between a generated tool name and the skill it activates."""
-
-    dynamic_name: str
-    """Public dynamic tool name exposed by local-shell-mcp."""
-    skill_name: str
-    """Underlying skill name activated by the dynamic tool."""
-
-
-@dataclass(frozen=True)
 class DynamicMcpToolRecord:
     """Association between a generated public tool name and an upstream MCP server tool."""
 
@@ -180,10 +168,6 @@ class AgentCapabilityRegistry:
     """Probed upstream MCP servers keyed by manifest name."""
     dynamic_mcp_tools: bool
     """Whether dynamic MCP tool exposure is enabled."""
-    dynamic_skill_tools: bool
-    """Whether dynamic skill tool exposure is enabled."""
-    dynamic_skill_tool_map: dict[str, DynamicSkillToolRecord]
-    """Public skill tool names mapped to skill records."""
     dynamic_mcp_tool_map: dict[str, DynamicMcpToolRecord]
     """Public MCP tool names mapped to upstream tools."""
     client_manager: Any
@@ -228,8 +212,5 @@ class AgentCapabilityRegistry:
                 }
                 for name, record in self.mcp_servers.items()
             },
-            "dynamic_tools": {
-                "mcp": self.dynamic_mcp_tools,
-                "skills": self.dynamic_skill_tools,
-            },
+            "dynamic_tools": {"mcp": self.dynamic_mcp_tools},
         }
