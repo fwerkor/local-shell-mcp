@@ -242,7 +242,9 @@ def _open_regular_file(
     finally:
         os.close(descriptor)
 
-    return data.decode("utf-8", errors="replace"), len(data), resolved
+    content = data.decode("utf-8", errors="replace")
+    content = content.replace("\r\n", "\n").replace("\r", "\n")
+    return content, len(data), resolved
 
 
 def _resolve_skill_root(skills_dir: Path, name: str) -> Path:

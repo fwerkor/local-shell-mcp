@@ -154,6 +154,10 @@ def test_skill_read_file_works_when_agent_config_is_outside_workspace(
     assert related["content"] == "External reference.\n"
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows normalizes trailing spaces in directory names",
+)
 def test_invalid_skill_directory_names_are_skipped(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     _install_skill(tmp_path, "space ")
@@ -162,6 +166,22 @@ def test_invalid_skill_directory_names_are_skipped(tmp_path, monkeypatch):
 
     assert payload["skills"] == []
     assert "leading or trailing whitespace" in payload["warnings"][0]
+
+
+def test_skill_text_normalizes_newlines_across_platforms(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    skill_dir = _skills_root(tmp_path) / "crlf"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_bytes(
+        b"---\r\ndescription: CRLF skill.\r\n---\r\n# CRLF\r\n"
+    )
+    (skill_dir / "reference.md").write_bytes(b"Line one.\r\nLine two.\r")
+
+    loaded = load_installed_skill("crlf")
+    related = read_installed_skill_file("crlf", "reference.md")
+
+    assert "\r" not in loaded["content"]
+    assert related["content"] == "Line one.\nLine two.\n"
 
 
 def test_skill_load_does_not_normalize_names(tmp_path, monkeypatch):
