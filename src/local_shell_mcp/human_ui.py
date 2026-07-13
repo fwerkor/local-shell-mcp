@@ -670,14 +670,33 @@ class _WindowsPtyProcess:
             from winpty import PtyProcess
         except ImportError as exc:  # pragma: no cover - Windows-only dependency.
             raise RuntimeError("pywinpty is required for the WebUI on Windows") from exc
-        self.process = PtyProcess.spawn(command, dimensions=(max(1, rows), max(1, cols)), env=env)
+        try:
+            self.process = PtyProcess.spawn(
+                command,
+                dimensions=(max(1, rows), max(1, cols)),
+                env=env,
+            )
+        except TypeError:
+            import subprocess
+
+            self.process = PtyProcess.spawn(
+                subprocess.list2cmdline(command),
+                dimensions=(max(1, rows), max(1, cols)),
+                env=env,
+            )
 
     def resize(self, cols: int, rows: int) -> None:
         self.process.setwinsize(max(1, rows), max(1, cols))
 
     async def read(self) -> bytes:
+        def read_chunk():  # noqa: ANN202
+            try:
+                return self.process.read(65_536)
+            except TypeError:
+                return self.process.read()
+
         try:
-            data = await asyncio.to_thread(self.process.read, 65_536, True)
+            data = await asyncio.to_thread(read_chunk)
         except Exception:
             return b""
         return data.encode("utf-8", errors="replace") if isinstance(data, str) else bytes(data)
