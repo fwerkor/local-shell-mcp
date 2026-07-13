@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocket
 
 from local_shell_mcp.audit import audit, query_audit, suppress_audit
 from local_shell_mcp.http_app import build_http_app
+from local_shell_mcp.oauth import public_base_url
 from local_shell_mcp.settings import get_settings
+from local_shell_mcp.ui_security import UI_LOCAL_TOKEN_HEADER, get_or_create_ui_local_token
 
 
 def _configure(tmp_path, monkeypatch, *, auth_mode: str = "none") -> None:
@@ -100,5 +103,46 @@ def test_webui_shell_is_public_but_api_remains_oauth_protected(tmp_path, monkeyp
     api = client.get("/api/ui/bootstrap")
 
     assert page.status_code == 200
-    assert "local-shell-mcp UI" in page.text
+    assert "Human Interface" in page.text
     assert api.status_code == 401
+
+
+def test_native_tui_token_bypasses_oauth_without_weakening_browser_api(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch, auth_mode="oauth")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST", "false")
+    get_settings.cache_clear()
+    token = get_or_create_ui_local_token()
+    client = TestClient(build_http_app())
+
+    response = client.get(
+        "/api/ui/bootstrap",
+        headers={UI_LOCAL_TOKEN_HEADER: token},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["machines"]["machines"][0]["name"] == "local"
+
+
+def test_websocket_origin_maps_to_http_oauth_resource(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch, auth_mode="oauth")
+    scope = {
+        "type": "websocket",
+        "asgi": {"version": "3.0"},
+        "scheme": "wss",
+        "path": "/ui/ws",
+        "raw_path": b"/ui/ws",
+        "query_string": b"",
+        "headers": [(b"host", b"control.example.com")],
+        "client": ("203.0.113.9", 4242),
+        "server": ("control.example.com", 443),
+        "subprotocols": [],
+    }
+    async def receive():
+        return {"type": "websocket.disconnect"}
+
+    async def send(message):  # noqa: ARG001
+        return None
+
+    websocket = WebSocket(scope, receive, send)
+
+    assert public_base_url(websocket) == "https://control.example.com"

@@ -11,19 +11,21 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .audit import audit
 from .settings import Settings, get_settings
+from .ui_security import has_valid_ui_local_token
 
 PUBLIC_PATHS = {"/healthz", "/readyz", "/docs", "/openapi.json", "/join", "/remote/worker-bundle.tgz", "/remote/register", "/remote/resume", "/remote/poll", "/remote/result"}
 HUMAN_UI_API_PREFIX = "/api/ui/"
 
 
 def _is_public_path(path: str) -> bool:
+    ui_path = "/" + get_settings().ui_path.strip("/")
     return (
         path in PUBLIC_PATHS
         or path.startswith("/.well-known/")
         or path.startswith("/oauth/")
         or path.startswith("/download/")
-        or path in {"/ui", "/ui/", "/ui/callback"}
-        or path.startswith("/ui/assets/")
+        or path in {ui_path, ui_path + "/", ui_path + "/callback", ui_path + "/wallpaper"}
+        or path.startswith(ui_path + "/assets/")
     )
 
 
@@ -85,9 +87,9 @@ def verify_request(request: Request) -> Principal:
     path = str(request.url.path)
     if settings.auth_mode == "none":
         return Principal(email=None, subject="anonymous", claims={"auth": "none"})
-    if settings.auth_bypass_localhost and _is_localhost(request) and (
-        settings.mode == "http" or path.startswith(HUMAN_UI_API_PREFIX)
-    ):
+    if path.startswith(HUMAN_UI_API_PREFIX) and has_valid_ui_local_token(request):
+        return Principal(email="localhost", subject="native-tui", claims={"auth": "native-tui"})
+    if settings.auth_bypass_localhost and _is_localhost(request) and settings.mode == "http":
         return Principal(email="localhost", subject="localhost", claims={"auth": "localhost-bypass"})
     if settings.auth_mode == "oauth":
         principal = _verify_oauth(request, settings)

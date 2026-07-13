@@ -109,6 +109,11 @@ def main(argv: list[str] | None = None) -> None:
 
         print(format_version_info())
         return
+    if argv and argv[0] == "tui":
+        from .human_ui import run_tui_cli
+
+        run_tui_cli(argv[1:])
+        return
     if argv and argv[0] in {"--version", "-V"}:
         from . import __version__
 

@@ -49,6 +49,10 @@ def public_base_url(request: Request | None = None) -> str:
         return settings.public_base_url.rstrip("/")
     if request is not None:
         proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+        if proto == "ws":
+            proto = "http"
+        elif proto == "wss":
+            proto = "https"
         host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
         return f"{proto}://{host}".rstrip("/")
     return "http://127.0.0.1:8765"
@@ -241,11 +245,18 @@ def _verify_pkce(code_obj: AuthCode, verifier: str | None) -> bool:
     return hmac.compare_digest(verifier, code_obj.code_challenge)
 
 
-def issue_access_token(*, client_id: str, scope: str, resource: str, subject: str = "local-user") -> str:
+def issue_access_token(
+    *,
+    client_id: str,
+    scope: str,
+    resource: str,
+    subject: str = "local-user",
+    issuer: str | None = None,
+) -> str:
     settings = get_settings()
     now = int(time.time())
     payload = {
-        "iss": issuer_url(),
+        "iss": (issuer or issuer_url()).rstrip("/"),
         "sub": subject,
         "aud": resource,
         "iat": now,
@@ -276,7 +287,12 @@ async def oauth_token(request: Request) -> JSONResponse:
     if not _verify_pkce(code_obj, verifier):
         return _json({"error": "invalid_grant", "error_description": "PKCE verification failed"}, status_code=400)
     code_obj.used = True
-    token = issue_access_token(client_id=client_id, scope=code_obj.scope, resource=code_obj.resource)
+    token = issue_access_token(
+        client_id=client_id,
+        scope=code_obj.scope,
+        resource=code_obj.resource,
+        issuer=issuer_url(request),
+    )
     audit("oauth_token_issued", client_id=client_id, resource=code_obj.resource)
     body = {
         "access_token": token,

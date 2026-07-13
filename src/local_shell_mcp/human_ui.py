@@ -25,10 +25,12 @@ from .remote import remote_manager
 from .settings import get_settings
 from .shell_ops import kill_shell, list_shells, read_shell, send_shell, start_shell
 from .todo_ops import todo_read, todo_write
+from .ui_security import UI_LOCAL_TOKEN_ENV, get_or_create_ui_local_token
 from .version import version_info
 
 UI_API_PREFIX = "/api/ui"
 UI_SUBPROTOCOL = "lsm-ui"
+_ACTIVE_UI_TERMINALS: set[int] = set()
 
 
 def _json_ok(data: Any = None, message: str = "") -> JSONResponse:
@@ -51,9 +53,15 @@ def _assets_dir() -> Path:
 
 
 def _ui_index_html() -> str:
+    settings = get_settings()
+    ui_path = "/" + settings.ui_path.strip("/")
     path = _assets_dir() / "index.html"
     if path.exists():
-        return path.read_text(encoding="utf-8")
+        html = path.read_text(encoding="utf-8")
+        config = json.dumps({"uiPath": ui_path, "apiPrefix": UI_API_PREFIX})
+        return html.replace("__LSM_UI_PATH__", ui_path).replace(
+            "__LSM_UI_CONFIG_JSON__", config
+        )
     return """<!doctype html><html><head><meta charset=\"utf-8\"><title>local-shell-mcp UI</title></head>
 <body style=\"background:#050812;color:#dbeafe;font:16px system-ui;padding:48px\">
 <h1>local-shell-mcp UI assets are not built</h1><p>Build them with <code>cd ui &amp;&amp; bun run build</code>.</p></body></html>"""
@@ -77,6 +85,58 @@ async def ui_asset(request: Request) -> Response:
         return Response("Not found", status_code=404)
     cache = "public, max-age=31536000, immutable" if "." in path.stem else "public, max-age=3600"
     return FileResponse(path, headers={"Cache-Control": cache})
+
+
+async def ui_wallpaper(request: Request) -> Response:  # noqa: ARG001
+    settings = get_settings()
+    if settings.ui_wallpaper != "bing":
+        return Response(status_code=204)
+
+    cache_dir = settings.state_dir / "ui"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    image_path = cache_dir / "wallpaper.jpg"
+    stamp_path = cache_dir / "wallpaper-date.txt"
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    attempted_today = False
+    if stamp_path.is_file():
+        with contextlib.suppress(OSError):
+            attempted_today = stamp_path.read_text(encoding="utf-8").strip() == today
+    if attempted_today:
+        if image_path.is_file():
+            return FileResponse(
+                image_path,
+                media_type="image/jpeg",
+                headers={"Cache-Control": "public, max-age=3600"},
+            )
+        return Response(status_code=204)
+
+    stamp_path.write_text(today, encoding="utf-8")
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
+            archive = await client.get(
+                "https://www.bing.com/HPImageArchive.aspx",
+                params={"format": "js", "idx": 0, "n": 1, "mkt": "en-US"},
+            )
+            archive.raise_for_status()
+            images = archive.json().get("images") or []
+            if not images:
+                raise RuntimeError("Bing returned no wallpaper")
+            image_url = str(images[0].get("url") or "")
+            if not image_url.startswith("/"):
+                raise RuntimeError("Bing returned an invalid wallpaper URL")
+            image = await client.get("https://www.bing.com" + image_url)
+            image.raise_for_status()
+            if len(image.content) > 20_000_000:
+                raise RuntimeError("Bing wallpaper exceeds 20 MB")
+            image_path.write_bytes(image.content)
+            stamp_path.write_text(today, encoding="utf-8")
+    except Exception:
+        if not image_path.is_file():
+            return Response(status_code=204)
+
+    return FileResponse(image_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
 
 
 def _machine_rows() -> dict[str, Any]:
@@ -507,12 +567,11 @@ def _authorize_websocket(websocket: WebSocket) -> bool:
     return True
 
 
-def _tui_bundle_path() -> Path | None:
+def _tui_source_path() -> Path | None:
     candidates = [
-        Path(__file__).resolve().parent / "ui_tui" / "tui.js",
-        Path(__file__).resolve().parents[2] / "ui" / "dist" / "tui.js",
-        Path.cwd() / "ui" / "dist" / "tui.js",
-        Path("/app/ui/dist/tui.js"),
+        Path(__file__).resolve().parents[2] / "ui" / "src" / "tui.tsx",
+        Path.cwd() / "ui" / "src" / "tui.tsx",
+        Path("/app/ui/src/tui.tsx"),
     ]
     return next((path for path in candidates if path.is_file()), None)
 
@@ -523,22 +582,28 @@ def resolve_tui_command() -> list[str]:
         return shlex.split(settings.ui_tui_command)
 
     executable_dir = Path(sys.executable).resolve().parent
+    repository_root = Path(__file__).resolve().parents[2]
     sidecar_name = "local-shell-mcp-tui.exe" if os.name == "nt" else "local-shell-mcp-tui"
     sidecar_candidates = [
         executable_dir / sidecar_name,
         Path(sys.argv[0]).resolve().parent / sidecar_name,
+        repository_root / "ui" / "dist" / sidecar_name,
+        Path.cwd() / "ui" / "dist" / sidecar_name,
+        Path("/app/ui/dist") / sidecar_name,
     ]
     for candidate in sidecar_candidates:
         if candidate.is_file():
             return [str(candidate)]
 
-    bundle = _tui_bundle_path()
+    source = _tui_source_path()
     bun = shutil.which("bun")
-    if bundle and bun:
-        return [bun, str(bundle)]
-    if bundle:
-        raise RuntimeError("The OpenTUI bundle is installed, but Bun is not available in PATH")
-    raise RuntimeError("OpenTUI runtime not found; install a release bundle or run `cd ui && bun run build`")
+    if source and bun:
+        return [bun, str(source)]
+    if source:
+        raise RuntimeError("The OpenTUI source is installed, but Bun is not available in PATH")
+    raise RuntimeError(
+        "OpenTUI runtime not found; install a release bundle or run `cd ui && bun run compile:tui`"
+    )
 
 
 class _UnixPtyProcess:
@@ -630,6 +695,7 @@ def _spawn_tui_process(cols: int, rows: int):  # noqa: ANN201
             "COLORTERM": "truecolor",
             "LOCAL_SHELL_MCP_UI_API_BASE": f"http://127.0.0.1:{settings.port}{UI_API_PREFIX}",
             "LOCAL_SHELL_MCP_UI_MODE": "web",
+            UI_LOCAL_TOKEN_ENV: get_or_create_ui_local_token(),
         }
     )
     command = resolve_tui_command()
@@ -638,10 +704,43 @@ def _spawn_tui_process(cols: int, rows: int):  # noqa: ANN201
     return _UnixPtyProcess(command, env, cols, rows)
 
 
+def run_tui_cli(argv: list[str] | None = None) -> None:
+    import argparse
+    import subprocess
+
+    settings = get_settings()
+    parser = argparse.ArgumentParser(
+        prog="local-shell-mcp tui",
+        description="Launch the local-shell-mcp OpenTUI against a running service.",
+    )
+    parser.add_argument(
+        "--api-base",
+        default=f"http://127.0.0.1:{settings.port}{UI_API_PREFIX}",
+        help="Human UI API base URL (local loopback requires no authentication)",
+    )
+    args = parser.parse_args(argv)
+    env = os.environ.copy()
+    env["LOCAL_SHELL_MCP_UI_API_BASE"] = str(args.api_base).rstrip("/")
+    env["LOCAL_SHELL_MCP_UI_MODE"] = "tui"
+    env[UI_LOCAL_TOKEN_ENV] = get_or_create_ui_local_token()
+    try:
+        completed = subprocess.run(resolve_tui_command(), env=env, check=False)
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None
+    raise SystemExit(completed.returncode)
+
+
 async def ui_terminal_websocket(websocket: WebSocket) -> None:
     if not _authorize_websocket(websocket):
         await websocket.close(code=4401, reason="OAuth authentication required")
         return
+
+    settings = get_settings()
+    marker = id(websocket)
+    if len(_ACTIVE_UI_TERMINALS) >= max(1, settings.ui_terminal_max_sessions):
+        await websocket.close(code=4429, reason="Too many active WebUI terminal sessions")
+        return
+    _ACTIVE_UI_TERMINALS.add(marker)
 
     offered = [item.strip() for item in websocket.headers.get("sec-websocket-protocol", "").split(",")]
     subprotocol = UI_SUBPROTOCOL if UI_SUBPROTOCOL in offered else None
@@ -651,6 +750,7 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
         rows = int(websocket.query_params.get("rows", "36"))
         process = _spawn_tui_process(cols, rows)
     except Exception as exc:
+        _ACTIVE_UI_TERMINALS.discard(marker)
         await websocket.send_bytes(f"\r\nUnable to start the TUI: {exc}\r\n".encode())
         await websocket.close(code=1011)
         return
@@ -663,8 +763,16 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
             await websocket.send_bytes(data)
 
     async def receiver() -> None:
+        idle_timeout = max(0, settings.ui_terminal_idle_timeout_s)
         while True:
-            message = await websocket.receive()
+            if idle_timeout:
+                try:
+                    message = await asyncio.wait_for(websocket.receive(), timeout=idle_timeout)
+                except TimeoutError:
+                    await websocket.close(code=4408, reason="WebUI terminal session idle timeout")
+                    return
+            else:
+                message = await websocket.receive()
             if message["type"] == "websocket.disconnect":
                 return
             if message.get("bytes") is not None:
@@ -693,6 +801,7 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
+        _ACTIVE_UI_TERMINALS.discard(marker)
         await process.close()
         with contextlib.suppress(Exception):
             await websocket.close()
@@ -707,6 +816,7 @@ def ui_routes() -> list[Any]:
         Route(ui_path, ui_index, methods=["GET"]),
         Route(ui_path + "/", ui_index, methods=["GET"]),
         Route(ui_path + "/callback", ui_index, methods=["GET"]),
+        Route(ui_path + "/wallpaper", ui_wallpaper, methods=["GET"]),
         Route(ui_path + "/assets/{path:path}", ui_asset, methods=["GET"]),
         WebSocketRoute(ui_path + "/ws", ui_terminal_websocket),
         Route(UI_API_PREFIX + "/bootstrap", api_bootstrap, methods=["GET"]),
