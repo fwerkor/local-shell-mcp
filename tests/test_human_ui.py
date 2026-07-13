@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
@@ -244,6 +245,26 @@ def test_suppress_audit_context_excludes_manual_activity(tmp_path, monkeypatch):
         "mcp_tool_call_start",
         "mcp_tool_call_end",
     ]
+
+
+def test_audit_storage_remains_valid_under_concurrent_trim_and_append(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "3000")
+    get_settings.cache_clear()
+
+    def write(index: int) -> None:
+        audit("mcp_tool_call_end", tool="read_file", index=index, detail="x" * 80)
+
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        list(executor.map(write, range(240)))
+
+    path = tmp_path / "audit.jsonl"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    records = [json.loads(line) for line in lines]
+    assert records
+    assert all(record["event"] == "mcp_tool_call_end" for record in records)
+    assert path.stat().st_size < 5000
+    assert not list(tmp_path.glob(".audit.jsonl.*.tmp"))
 
 
 def test_query_audit_filters_node_operation_and_order(tmp_path, monkeypatch):

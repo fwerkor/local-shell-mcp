@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -11,6 +14,7 @@ from typing import Any
 from .settings import get_settings
 
 _AUDIT_ENABLED: ContextVar[bool] = ContextVar("local_shell_mcp_audit_enabled", default=True)
+_AUDIT_LOCK = threading.Lock()
 
 
 def _trim_audit_log(path: Path, max_bytes: int) -> None:
@@ -27,7 +31,13 @@ def _trim_audit_log(path: Path, max_bytes: int) -> None:
     first_newline = data.find(b"\n")
     if first_newline >= 0:
         data = data[first_newline + 1 :]
-    path.write_bytes(data)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        tmp.write_bytes(data)
+        tmp.replace(path)
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
 
 
 @contextmanager
@@ -51,10 +61,13 @@ def audit(event: str, **fields: Any) -> None:
         **fields,
     }
     path: Path = settings.audit_log_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    _trim_audit_log(path, settings.max_audit_log_bytes)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+    encoded = json.dumps(record, ensure_ascii=False, default=str) + "\n"
+    with _AUDIT_LOCK:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _trim_audit_log(path, settings.max_audit_log_bytes)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(encoded)
+            f.flush()
 
 
 def _operation_type(record: dict[str, Any]) -> str:
