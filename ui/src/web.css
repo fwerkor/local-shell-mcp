@@ -1,0 +1,111 @@
+@import "@xterm/xterm/css/xterm.css";
+
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #020711;
+  --glass: rgba(5, 13, 25, 0.72);
+  --line: rgba(127, 193, 228, 0.24);
+  --line-strong: rgba(91, 216, 255, 0.54);
+  --cyan: #57d7ff;
+  --text: #d8e9f5;
+  --muted: #7893a8;
+}
+
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+body { color: var(--text); background: #020711; }
+button { font: inherit; }
+
+.wallpaper {
+  position: fixed;
+  inset: 0;
+  background-image: linear-gradient(145deg, rgba(2, 7, 17, 0.24), rgba(2, 7, 17, 0.78));
+  background-size: cover;
+  background-position: center;
+  filter: saturate(0.85) contrast(1.05);
+  transform: scale(1.025);
+}
+
+.wallpaper::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 18% 20%, rgba(32, 175, 227, 0.18), transparent 34%),
+    radial-gradient(circle at 82% 76%, rgba(81, 85, 255, 0.18), transparent 36%),
+    linear-gradient(to bottom, rgba(1, 5, 13, 0.18), rgba(1, 5, 13, 0.65));
+}
+
+.aurora { position: fixed; inset: -25%; overflow: hidden; filter: blur(90px); opacity: 0.48; }
+.aurora i { position: absolute; width: 52vw; height: 52vw; border-radius: 50%; mix-blend-mode: screen; animation: drift 20s ease-in-out infinite alternate; }
+.aurora i:nth-child(1) { background: rgba(0, 190, 255, 0.22); left: 6%; top: 2%; }
+.aurora i:nth-child(2) { background: rgba(80, 65, 255, 0.2); right: 3%; top: 20%; animation-duration: 27s; animation-direction: alternate-reverse; }
+.aurora i:nth-child(3) { background: rgba(0, 255, 180, 0.12); left: 30%; bottom: -12%; animation-duration: 34s; }
+@keyframes drift { to { transform: translate3d(10vw, 7vh, 0) scale(1.18); } }
+
+.shell {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-rows: 46px minmax(0, 1fr) 28px;
+  width: min(1540px, calc(100vw - 34px));
+  height: min(960px, calc(100vh - 34px));
+  margin: 17px auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 18px;
+  background: var(--glass);
+  box-shadow: 0 26px 100px rgba(0, 0, 0, 0.52), inset 0 1px rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(18px) saturate(1.12);
+  overflow: hidden;
+}
+
+.chrome, .footer {
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(4, 11, 22, 0.7);
+}
+.footer { border-bottom: 0; border-top: 1px solid var(--line); justify-content: space-between; color: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.brand { display: flex; align-items: center; min-width: 230px; gap: 10px; }
+.brand-mark { display: grid; place-items: center; width: 34px; height: 24px; border: 1px solid rgba(87, 215, 255, 0.54); border-radius: 7px; color: var(--cyan); background: rgba(19, 66, 89, 0.52); font: 700 11px ui-monospace, monospace; letter-spacing: .09em; box-shadow: 0 0 18px rgba(87, 215, 255, .12); }
+.brand-name { font-size: 13px; font-weight: 650; letter-spacing: .02em; }
+.connection { display: flex; align-items: center; justify-content: center; gap: 8px; flex: 1; color: var(--muted); font-size: 12px; }
+.connection span { width: 7px; height: 7px; border-radius: 50%; background: #ffcf70; box-shadow: 0 0 12px currentColor; }
+.connection.connected span { background: #6ee7a8; }
+.connection.error span { background: #ff7b8b; }
+.connection strong { font-weight: 600; color: inherit; }
+.chrome-actions { display: flex; justify-content: flex-end; min-width: 230px; gap: 7px; }
+.chrome-actions button, .gate button { border: 1px solid var(--line); color: var(--text); background: rgba(14, 32, 54, .72); border-radius: 8px; padding: 6px 10px; cursor: pointer; transition: border-color .18s, background .18s, transform .18s; }
+.chrome-actions button:hover, .gate button:hover { border-color: var(--cyan); background: rgba(23, 61, 89, .9); transform: translateY(-1px); }
+
+.terminal-frame { position: relative; min-width: 0; min-height: 0; padding: 7px; background: linear-gradient(180deg, rgba(4, 10, 20, .68), rgba(2, 6, 14, .83)); }
+#terminal { width: 100%; height: 100%; padding: 3px; }
+#terminal .xterm { height: 100%; }
+#terminal .xterm-viewport { scrollbar-color: rgba(87, 215, 255, .36) transparent; }
+.scanline { pointer-events: none; position: absolute; inset: 7px; opacity: .11; background: repeating-linear-gradient(to bottom, transparent 0, transparent 3px, rgba(116, 203, 245, .09) 4px); mix-blend-mode: screen; }
+
+.gate { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(2, 7, 17, .76); backdrop-filter: blur(15px); }
+.gate[hidden] { display: none; }
+.gate-card { width: min(470px, 100%); padding: 34px; border: 1px solid var(--line-strong); border-radius: 18px; background: rgba(7, 17, 31, .88); box-shadow: 0 24px 80px rgba(0,0,0,.46); text-align: center; }
+.gate-icon { display: grid; place-items: center; width: 58px; height: 58px; margin: 0 auto 18px; border: 1px solid var(--cyan); border-radius: 16px; color: var(--cyan); background: rgba(19, 66, 89, .54); font: 800 16px ui-monospace, monospace; letter-spacing: .12em; box-shadow: 0 0 34px rgba(87, 215, 255, .18); }
+.eyebrow { margin: 0 0 7px; color: var(--cyan); font: 600 11px ui-monospace, monospace; letter-spacing: .16em; text-transform: uppercase; }
+.gate h1 { margin: 0; font-size: clamp(27px, 5vw, 39px); letter-spacing: -.035em; }
+.gate p:not(.eyebrow) { color: var(--muted); line-height: 1.62; }
+.gate button { width: 100%; margin: 9px 0 13px; padding: 11px 16px; border-color: rgba(87, 215, 255, .65); color: #e9f8ff; background: linear-gradient(135deg, rgba(24, 94, 126, .95), rgba(42, 70, 132, .94)); font-weight: 700; }
+.gate small { color: #58758a; line-height: 1.5; }
+
+@media (max-width: 760px) {
+  .shell { width: 100vw; height: 100dvh; margin: 0; border: 0; border-radius: 0; grid-template-rows: 42px minmax(0, 1fr) 24px; }
+  .brand { min-width: 0; }
+  .brand-name { display: none; }
+  .chrome-actions { min-width: 0; }
+  .chrome-actions button { padding: 5px 7px; font-size: 0; }
+  .chrome-actions button::first-letter { font-size: 11px; }
+  .terminal-frame { padding: 3px; }
+  .scanline { inset: 3px; }
+  .gate-card { padding: 25px 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) { .aurora i { animation: none; } .chrome-actions button, .gate button { transition: none; } }

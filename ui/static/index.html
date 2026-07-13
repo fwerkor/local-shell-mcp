@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#07111f" />
+    <title>local-shell-mcp</title>
+    <link rel="stylesheet" href="__LSM_UI_PATH__/assets/web.css" />
+  </head>
+  <body>
+    <div class="wallpaper" aria-hidden="true"></div>
+    <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+    <main class="shell">
+      <header class="chrome">
+        <div class="brand">
+          <span class="brand-mark">LSM</span>
+          <span class="brand-name">local-shell-mcp</span>
+        </div>
+        <div class="connection" id="connection-state"><span></span><strong>Starting</strong></div>
+        <div class="chrome-actions">
+          <button id="reconnect-button" type="button" title="Reconnect">Reconnect</button>
+          <button id="fullscreen-button" type="button" title="Toggle fullscreen">Fullscreen</button>
+        </div>
+      </header>
+      <section class="terminal-frame" aria-label="local-shell-mcp terminal user interface">
+        <div id="terminal"></div>
+        <div class="scanline" aria-hidden="true"></div>
+        <section class="gate" id="auth-gate" hidden>
+          <div class="gate-card">
+            <div class="gate-icon">LSM</div>
+            <p class="eyebrow">Protected control plane</p>
+            <h1>Human Interface</h1>
+            <p>Authenticate with the same OAuth service used by MCP, then the exact OpenTUI application will start inside this browser terminal.</p>
+            <button id="login-button" type="button">Authenticate</button>
+            <small id="gate-detail">No credentials are stored outside this browser session.</small>
+          </div>
+        </section>
+      </section>
+      <footer class="footer">
+        <span>OpenTUI over authenticated PTY</span>
+        <span id="terminal-size">—</span>
+      </footer>
+    </main>
+    <script>window.__LSM_UI_CONFIG__ = __LSM_UI_CONFIG_JSON__;</script>
+    <script type="module" src="__LSM_UI_PATH__/assets/web.js"></script>
+  </body>
+</html>

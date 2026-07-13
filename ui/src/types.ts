@@ -1,0 +1,116 @@
+export type ScreenName = "Files" | "Terminals" | "Todos" | "Audit" | "Remotes"
+
+export interface Machine {
+  name: string
+  status: "online" | "offline" | string
+  workdir?: string | null
+  last_seen?: number | null
+  last_seen_age_s?: number | null
+  capabilities?: string[]
+  info?: Record<string, unknown>
+}
+
+export interface MachinePayload {
+  machines: Machine[]
+  counts: Record<string, number>
+}
+
+export interface FileEntry {
+  path: string
+  name: string
+  type: "dir" | "file" | "other" | string
+  size?: number | null
+  modified?: number | null
+  hidden?: boolean
+}
+
+export interface FilesPayload {
+  machine: string
+  path: string
+  parent: string
+  entries: FileEntry[]
+  parent_entries: FileEntry[]
+}
+
+export interface FilePreview {
+  kind: "directory" | "text" | "binary"
+  content?: string
+  preview?: string
+  entries?: FileEntry[]
+  size?: number
+  path?: string
+  truncated?: boolean
+  [key: string]: unknown
+}
+
+export interface TerminalSession {
+  session_id: string
+  created?: string | number | null
+  attached?: string | number | null
+  backend?: string
+}
+
+export interface TerminalPayload {
+  machine: string
+  sessions: TerminalSession[]
+}
+
+export interface TodoItem {
+  id: string
+  content: string
+  status: "pending" | "in_progress" | "completed" | string
+  priority: "low" | "medium" | "high" | string
+}
+
+export interface TodoPayload {
+  updated_at?: number
+  todos: TodoItem[]
+}
+
+export interface AuditEntry {
+  ts: number
+  event: string
+  node: string
+  operation: string
+  tool?: string
+  session?: string
+  command?: string
+  cwd?: string
+  ok?: boolean
+  error?: string
+  [key: string]: unknown
+}
+
+export interface AuditPayload {
+  entries: AuditEntry[]
+  count: number
+  total_matched: number
+}
+
+export interface InvitePayload {
+  code: string
+  name?: string | null
+  workdir?: string | null
+  expires_at: number
+  ttl_s: number
+  join_url: string
+  command: string
+}
+
+export interface BootstrapPayload {
+  version: Record<string, unknown>
+  machines: MachinePayload
+  todos: TodoPayload
+  features: {
+    remote: boolean
+    wallpaper: "bing" | "aurora" | "none" | string
+    yazi_available: boolean
+  }
+}
+
+export interface ApiEnvelope<T> {
+  ok: boolean
+  message: string
+  data: T
+  error?: string
+}

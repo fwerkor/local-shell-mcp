@@ -1,0 +1,27 @@
+{
+  "name": "local-shell-mcp-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run build:web && bun run build:tui",
+    "build:tui": "bun run scripts/compile-tui.ts",
+    "build:web": "bun run scripts/build.ts",
+    "compile:tui": "bun run build:tui",
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@opentui/core": "0.4.3",
+    "@opentui/react": "0.4.3",
+    "@xterm/addon-fit": "0.10.0",
+    "@xterm/xterm": "5.5.0",
+    "react": "19.2.0",
+    "react-reconciler": "0.33.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "typescript": "^5.9.3"
+  }
+}
