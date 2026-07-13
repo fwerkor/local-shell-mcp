@@ -33,6 +33,17 @@ fetch
 
 REST 工具调用使用一致的成功 / 错误 envelope。校验错误会返回结构化 `ok: false` payload，而不是原始框架异常。
 
+## Agent Skills
+
+固定 Skill Registry 也通过 REST 提供：
+
+```text
+GET  /tools/skills_list
+POST /tools/skill_load   {"name": "debugging"}
+```
+
+Skill 目录修改会在下一次调用时生效，不会改变 MCP 工具列表。
+
 ## 文件链接
 
 带 token 的文件下载由内置 HTTP app 提供。链接是 bearer URL，支持 TTL、可选最大下载次数和撤销。

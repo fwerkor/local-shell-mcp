@@ -35,6 +35,15 @@
 | `todo_write_tool` | 寫入 agent todo 列表。 | `todos`：包含 id、content、status、priority 的記錄列表。 | 長任務前建立計劃。 |
 | `secret_scan` | 提交或推送前掃描工作區文本文件中的常見密鑰。 | `cwd`、`glob`、`max_results`。 | `git_diff_tool` 後、`git_commit_tool` 前。 |
 
+## Agent Skills
+
+| 工具 | 用途 | 關鍵輸入 | 注意事項 |
+|---|---|---|---|
+| `skills_list` | 重新掃描服務端 Skills 目錄，列出已安裝 Skill，不載入完整指令。 | 無。 | Skill 增刪不會改變 MCP 工具列表。 |
+| `skill_load` | 載入指定 Skill 的完整 `SKILL.md`。 | `name`：`skills_list` 返回的精確名稱。 | 關聯檔案只返回路徑，需要時再用檔案工具讀取。 |
+
+推薦使用 `skills_list` -> `skill_load` -> 現有 shell、檔案、Git、瀏覽器或遠程工具。兩個工具都是只讀工具，每次調用都會重新掃描目錄。
+
 ## 文件系統與搜索
 
 | 工具 | 用途 | 關鍵輸入 | 注意事項 |

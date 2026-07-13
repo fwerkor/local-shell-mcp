@@ -67,7 +67,6 @@ For local-only testing, `auth_bypass_localhost` is enabled by default. Do not ex
 | `agent_mcp_probe_timeout_s` | `LOCAL_SHELL_MCP_AGENT_MCP_PROBE_TIMEOUT_S` | `5.0` |  |
 | `agent_mcp_call_timeout_s` | `LOCAL_SHELL_MCP_AGENT_MCP_CALL_TIMEOUT_S` | `60.0` |  |
 | `agent_dynamic_mcp_tools` | `LOCAL_SHELL_MCP_AGENT_DYNAMIC_MCP_TOOLS` | `False` |  |
-| `agent_dynamic_skill_tools` | `LOCAL_SHELL_MCP_AGENT_DYNAMIC_SKILL_TOOLS` | `False` |  |
 
 ### File links
 

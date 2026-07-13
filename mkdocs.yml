@@ -26,6 +26,7 @@ nav:
       - Git access: guides/git-access.md
       - Browser automation: guides/browser-automation.md
       - Audit log: guides/audit-log.md
+      - Skills: guides/skills.md
   - Reference:
       - Tools: reference/tools.md
       - Configuration: reference/configuration.md
@@ -84,6 +85,7 @@ plugins:
             Git access: Git 访问
             Browser automation: 浏览器自动化
             Audit log: 审计日志
+            Skills: Agent Skills
             Reference: 参考
             Tools: 工具
             Configuration: 配置
@@ -116,6 +118,7 @@ plugins:
             Git access: Git 存取
             Browser automation: 瀏覽器自動化
             Audit log: 稽核日誌
+            Skills: Agent Skills
             Reference: 參考
             Tools: 工具
             Configuration: 設定
@@ -148,6 +151,7 @@ plugins:
             Git access: Git アクセス
             Browser automation: ブラウザー自動化
             Audit log: 監査ログ
+            Skills: Skills
             Reference: リファレンス
             Tools: ツール
             Configuration: 設定
@@ -180,6 +184,7 @@ plugins:
             Git access: Git 접근
             Browser automation: 브라우저 자동화
             Audit log: 감사 로그
+            Skills: Skills
             Reference: 참조
             Tools: 도구
             Configuration: 설정
@@ -212,6 +217,7 @@ plugins:
             Git access: Acceso a Git
             Browser automation: Automatización del navegador
             Audit log: Registro de auditoría
+            Skills: Skills
             Reference: Referencia
             Tools: Herramientas
             Configuration: Configuración
@@ -244,6 +250,7 @@ plugins:
             Git access: Accès Git
             Browser automation: Automatisation du navigateur
             Audit log: Journal d’audit
+            Skills: Skills
             Reference: Référence
             Tools: Outils
             Configuration: Configuration
@@ -276,6 +283,7 @@ plugins:
             Git access: Git-Zugriff
             Browser automation: Browser-Automatisierung
             Audit log: Audit-Log
+            Skills: Skills
             Reference: Referenz
             Tools: Tools
             Configuration: Konfiguration
@@ -308,6 +316,7 @@ plugins:
             Git access: Доступ к Git
             Browser automation: Автоматизация браузера
             Audit log: Журнал аудита
+            Skills: Skills
             Reference: Справочник
             Tools: Инструменты
             Configuration: Конфигурация
@@ -340,6 +349,7 @@ plugins:
             Git access: Acesso ao Git
             Browser automation: Automação do navegador
             Audit log: Log de auditoria
+            Skills: Skills
             Reference: Referência
             Tools: Ferramentas
             Configuration: Configuração
@@ -372,6 +382,7 @@ plugins:
             Git access: Accesso Git
             Browser automation: Automazione del browser
             Audit log: Log di audit
+            Skills: Skill
             Reference: Riferimento
             Tools: Strumenti
             Configuration: Configurazione
@@ -404,6 +415,7 @@ plugins:
             Git access: الوصول إلى Git
             Browser automation: أتمتة المتصفح
             Audit log: سجل التدقيق
+            Skills: المهارات
             Reference: المرجع
             Tools: الأدوات
             Configuration: الإعدادات
@@ -436,6 +448,7 @@ plugins:
             Git access: Git पहुँच
             Browser automation: ब्राउज़र स्वचालन
             Audit log: ऑडिट लॉग
+            Skills: Skills
             Reference: संदर्भ
             Tools: टूल
             Configuration: कॉन्फ़िगरेशन
@@ -468,6 +481,7 @@ plugins:
             Git access: Akses Git
             Browser automation: Otomasi browser
             Audit log: Log audit
+            Skills: Skills
             Reference: Referensi
             Tools: Alat
             Configuration: Konfigurasi
@@ -500,6 +514,7 @@ plugins:
             Git access: Truy cập Git
             Browser automation: Tự động hóa trình duyệt
             Audit log: Nhật ký audit
+            Skills: Skills
             Reference: Tham chiếu
             Tools: Công cụ
             Configuration: Cấu hình
@@ -532,6 +547,7 @@ plugins:
             Git access: Git erişimi
             Browser automation: Tarayıcı otomasyonu
             Audit log: Denetim günlüğü
+            Skills: Skills
             Reference: Başvuru
             Tools: Araçlar
             Configuration: Yapılandırma
@@ -564,6 +580,7 @@ plugins:
             Git access: Dostęp Git
             Browser automation: Automatyzacja przeglądarki
             Audit log: Dziennik audytu
+            Skills: Skills
             Reference: Dokumentacja referencyjna
             Tools: Narzędzia
             Configuration: Konfiguracja

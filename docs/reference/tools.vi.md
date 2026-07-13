@@ -12,6 +12,10 @@ Trang này là phần tổng quan công cụ đã bản địa hóa. Tên công 
 
 `environment_info`, `version_info`, `audit_tail`, `todo_read_tool`, `todo_write_tool`, `secret_scan`
 
+### Skills
+
+`skills_list`, `skill_load`
+
 ### Filesystem
 
 `list_files`, `read_file`, `read_many_files`, `write_file`, `edit_file`, `multi_edit_file`, `delete_file_or_dir`, `tree_view`, `glob_search`, `grep_search`

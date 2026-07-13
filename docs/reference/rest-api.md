@@ -33,6 +33,17 @@ These are intended for regular ChatGPT connector behavior and do not expose the 
 
 REST tool calls use consistent success/error envelopes. Validation errors return structured `ok: false` payloads instead of raw framework exceptions.
 
+## Agent Skills
+
+The fixed Skills registry is also available through REST:
+
+```text
+GET  /tools/skills_list
+POST /tools/skill_load   {"name": "debugging"}
+```
+
+Skill directory changes are visible on the next call and do not alter the MCP tool list.
+
 ## File links
 
 Tokenized file downloads are served by the built-in HTTP app. Links are bearer URLs with TTL, optional max-download limits, and revocation support.

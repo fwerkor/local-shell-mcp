@@ -157,6 +157,36 @@ All normal tools return a structured `ToolResult` with `ok`, `message`, and `dat
 
 - Arguments and output are also governed by runtime limits in the configuration reference.
 
+## Agent Skills
+
+### `skills_list`
+
+**Purpose.** Rescan the server-side Skills directory and list installed Skills without loading their instructions.
+
+**Use when.** Use before a specialized task to discover exact Skill names and descriptions. Adding, updating, or removing Skill directories does not change the MCP tool list.
+
+**Inputs.** None.
+
+**Returns.** Returns a `ToolResult`. `data.skills_dir` identifies the managed directory, `data.skills` contains metadata, and `data.warnings` reports invalid entries.
+
+**Common combinations.** `skills_list` -> `skill_load` -> existing shell, filesystem, Git, browser, or remote tools.
+
+### `skill_load`
+
+**Purpose.** Load the complete `SKILL.md` instructions for one installed Skill.
+
+**Use when.** Call with the exact name returned by `skills_list` before following that Skill's workflow.
+
+**Inputs.**
+
+| Name | Type | Required/default | Description |
+|---|---|---|---|
+| `name` | `str` | required | Exact installed Skill directory name returned by `skills_list`. |
+
+**Returns.** Returns a `ToolResult`. `data.content` contains `SKILL.md`; `data.related_files` contains paths that can be read separately when needed.
+
+**Notes.** Both Skills tools are read-only and rescan the directory on every call. No per-Skill MCP tools are registered.
+
 ## Shell and Python
 
 ### `run_shell_tool`

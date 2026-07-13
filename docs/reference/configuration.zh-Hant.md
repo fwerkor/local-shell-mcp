@@ -67,7 +67,6 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-long-random-secret
 | `agent_mcp_probe_timeout_s` | `LOCAL_SHELL_MCP_AGENT_MCP_PROBE_TIMEOUT_S` | `5.0` | agent MCP 探測超時時間。 |
 | `agent_mcp_call_timeout_s` | `LOCAL_SHELL_MCP_AGENT_MCP_CALL_TIMEOUT_S` | `60.0` | agent MCP 調用超時時間。 |
 | `agent_dynamic_mcp_tools` | `LOCAL_SHELL_MCP_AGENT_DYNAMIC_MCP_TOOLS` | `False` | 是否啓用動態 MCP 工具。 |
-| `agent_dynamic_skill_tools` | `LOCAL_SHELL_MCP_AGENT_DYNAMIC_SKILL_TOOLS` | `False` | 是否啓用動態 skill 工具。 |
 
 ### 文件鏈接
 

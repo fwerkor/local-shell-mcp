@@ -12,6 +12,10 @@ Questa pagina è una panoramica localizzata degli strumenti. I nomi di strumenti
 
 `environment_info`, `version_info`, `audit_tail`, `todo_read_tool`, `todo_write_tool`, `secret_scan`
 
+### Skill
+
+`skills_list`, `skill_load`
+
 ### Filesystem
 
 `list_files`, `read_file`, `read_many_files`, `write_file`, `edit_file`, `multi_edit_file`, `delete_file_or_dir`, `tree_view`, `glob_search`, `grep_search`
