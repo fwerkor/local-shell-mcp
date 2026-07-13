@@ -8,7 +8,7 @@ from starlette.websockets import WebSocket
 
 from local_shell_mcp.audit import audit, query_audit, suppress_audit
 from local_shell_mcp.http_app import build_http_app
-from local_shell_mcp.human_ui import _authorize_websocket, _bounded_int
+from local_shell_mcp.human_ui import _authorize_websocket, _bounded_int, _split_tui_command
 from local_shell_mcp.oauth import public_base_url
 from local_shell_mcp.remote import execute_worker_tool
 from local_shell_mcp.settings import get_settings
@@ -129,6 +129,17 @@ def test_terminal_api_rejects_invalid_line_count(tmp_path, monkeypatch):
 
     assert response.status_code == 400
     assert response.json()["message"] == "lines must be an integer"
+
+
+def test_windows_tui_command_parser_preserves_backslashes_and_quotes():
+    assert _split_tui_command(
+        r'D:\a\local-shell-mcp\ui\dist\local-shell-mcp-tui.exe',
+        windows=True,
+    ) == [r'D:\a\local-shell-mcp\ui\dist\local-shell-mcp-tui.exe']
+    assert _split_tui_command(
+        r'"D:\Program Files\local-shell-mcp-tui.exe" --flag',
+        windows=True,
+    ) == [r'D:\Program Files\local-shell-mcp-tui.exe', "--flag"]
 
 
 def test_terminal_dimensions_are_clamped_to_safe_limits():

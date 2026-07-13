@@ -596,10 +596,23 @@ def _tui_source_path() -> Path | None:
     return next((path for path in candidates if path.is_file()), None)
 
 
+def _split_tui_command(value: str, *, windows: bool | None = None) -> list[str]:
+    windows = os.name == "nt" if windows is None else windows
+    parts = shlex.split(value, posix=not windows)
+    if windows:
+        parts = [
+            part[1:-1] if len(part) >= 2 and part[0] == part[-1] and part[0] in {'"', "'"} else part
+            for part in parts
+        ]
+    if not parts:
+        raise ValueError("ui_tui_command is empty")
+    return parts
+
+
 def resolve_tui_command() -> list[str]:
     settings = get_settings()
     if settings.ui_tui_command:
-        return shlex.split(settings.ui_tui_command)
+        return _split_tui_command(settings.ui_tui_command)
 
     executable_dir = Path(sys.executable).resolve().parent
     repository_root = Path(__file__).resolve().parents[2]
