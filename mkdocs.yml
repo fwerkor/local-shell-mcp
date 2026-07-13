@@ -81,6 +81,7 @@ plugins:
             Network connectivity: 网络连通性
             Guides: 指南
             Usage patterns: 使用模式
+            Human interface: 人机界面
             Remote workers: 远程 worker
             File links: 文件链接
             Git access: Git 访问
@@ -114,6 +115,7 @@ plugins:
             Network connectivity: 網路連通性
             Guides: 指南
             Usage patterns: 使用模式
+            Human interface: 人機介面
             Remote workers: 遠端 worker
             File links: 檔案連結
             Git access: Git 存取
@@ -147,6 +149,7 @@ plugins:
             Network connectivity: ネットワーク接続
             Guides: ガイド
             Usage patterns: 利用パターン
+            Human interface: ヒューマンインターフェース
             Remote workers: リモート worker
             File links: ファイルリンク
             Git access: Git アクセス
@@ -180,6 +183,7 @@ plugins:
             Network connectivity: 네트워크 연결
             Guides: 가이드
             Usage patterns: 사용 패턴
+            Human interface: 사용자 인터페이스
             Remote workers: 원격 worker
             File links: 파일 링크
             Git access: Git 접근
@@ -213,6 +217,7 @@ plugins:
             Network connectivity: Conectividad de red
             Guides: Guías
             Usage patterns: Patrones de uso
+            Human interface: Interfaz humana
             Remote workers: Workers remotos
             File links: Enlaces de archivos
             Git access: Acceso a Git
@@ -246,6 +251,7 @@ plugins:
             Network connectivity: Connectivité réseau
             Guides: Guides
             Usage patterns: Modes d’utilisation
+            Human interface: Interface humaine
             Remote workers: Workers distants
             File links: Liens de fichiers
             Git access: Accès Git
@@ -279,6 +285,7 @@ plugins:
             Network connectivity: Netzwerkverbindung
             Guides: Anleitungen
             Usage patterns: Nutzungsmuster
+            Human interface: Benutzeroberfläche
             Remote workers: Remote-Worker
             File links: Dateilinks
             Git access: Git-Zugriff
@@ -312,6 +319,7 @@ plugins:
             Network connectivity: Сетевая доступность
             Guides: Руководства
             Usage patterns: Сценарии использования
+            Human interface: Пользовательский интерфейс
             Remote workers: Удалённые worker
             File links: Ссылки на файлы
             Git access: Доступ к Git
@@ -345,6 +353,7 @@ plugins:
             Network connectivity: Conectividade de rede
             Guides: Guias
             Usage patterns: Padrões de uso
+            Human interface: Interface humana
             Remote workers: Workers remotos
             File links: Links de arquivos
             Git access: Acesso ao Git
@@ -378,6 +387,7 @@ plugins:
             Network connectivity: Connettività di rete
             Guides: Guide
             Usage patterns: Modelli di utilizzo
+            Human interface: Interfaccia umana
             Remote workers: Worker remoti
             File links: Link ai file
             Git access: Accesso Git
@@ -411,6 +421,7 @@ plugins:
             Network connectivity: اتصال الشبكة
             Guides: الأدلة
             Usage patterns: أنماط الاستخدام
+            Human interface: واجهة المستخدم
             Remote workers: Workers بعيدة
             File links: روابط الملفات
             Git access: الوصول إلى Git
@@ -444,6 +455,7 @@ plugins:
             Network connectivity: नेटवर्क कनेक्टिविटी
             Guides: मार्गदर्शिकाएँ
             Usage patterns: उपयोग पैटर्न
+            Human interface: मानव इंटरफ़ेस
             Remote workers: दूरस्थ worker
             File links: फ़ाइल लिंक
             Git access: Git पहुँच
@@ -477,6 +489,7 @@ plugins:
             Network connectivity: Konektivitas jaringan
             Guides: Panduan
             Usage patterns: Pola penggunaan
+            Human interface: Antarmuka pengguna
             Remote workers: Worker jarak jauh
             File links: Tautan file
             Git access: Akses Git
@@ -510,6 +523,7 @@ plugins:
             Network connectivity: Kết nối mạng
             Guides: Hướng dẫn
             Usage patterns: Mẫu sử dụng
+            Human interface: Giao diện người dùng
             Remote workers: Worker từ xa
             File links: Liên kết tệp
             Git access: Truy cập Git
@@ -543,6 +557,7 @@ plugins:
             Network connectivity: Ağ bağlantısı
             Guides: Kılavuzlar
             Usage patterns: Kullanım kalıpları
+            Human interface: Kullanıcı arayüzü
             Remote workers: Uzak worker
             File links: Dosya bağlantıları
             Git access: Git erişimi
@@ -576,6 +591,7 @@ plugins:
             Network connectivity: Łączność sieciowa
             Guides: Przewodniki
             Usage patterns: Wzorce użycia
+            Human interface: Interfejs użytkownika
             Remote workers: Zdalne worker
             File links: Linki do plików
             Git access: Dostęp Git
