@@ -3,6 +3,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+import local_shell_mcp.skill_ops as skill_ops_module
 from local_shell_mcp.http_app import build_http_app
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.skill_ops import (
@@ -199,3 +200,94 @@ def test_non_utf8_skill_directory_names_are_skipped(tmp_path, monkeypatch):
     assert payload["skills"] == []
     assert "valid UTF-8" in payload["warnings"][0]
     assert response.status_code == 200
+
+
+def test_skill_load_does_not_scan_unrelated_skills(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    _install_skill(tmp_path, "target")
+
+    def fail_scan(*args, **kwargs):
+        raise AssertionError("skill_load must not scan the full registry")
+
+    monkeypatch.setattr(skill_ops_module, "scan_agent_skills", fail_scan)
+
+    loaded = load_installed_skill("target")
+
+    assert loaded["name"] == "target"
+
+
+def test_skill_entry_and_related_file_reads_obey_size_limit(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_FILE_READ_BYTES", "32")
+    get_settings.cache_clear()
+    skill_dir = _install_skill(tmp_path, "large")
+    (skill_dir / "SKILL.md").write_text("# Large\n\n" + "x" * 100, encoding="utf-8")
+    (skill_dir / "checklist.md").write_text("y" * 100, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="maximum is 32"):
+        load_installed_skill("large")
+    with pytest.raises(ValueError, match="maximum is 32"):
+        read_installed_skill_file("large", "checklist.md")
+
+
+def test_skill_related_file_list_is_bounded(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_SKILL_RELATED_FILES", "2")
+    get_settings.cache_clear()
+    skill_dir = _install_skill(tmp_path, "bounded")
+    for index in range(5):
+        (skill_dir / f"reference-{index}.md").write_text("x", encoding="utf-8")
+
+    loaded = load_installed_skill("bounded")
+
+    assert len(loaded["related_files"]) == 2
+    assert any("truncated at 2 files" in warning for warning in loaded["warnings"])
+
+
+def test_skill_registry_count_is_bounded(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_SKILLS", "1")
+    get_settings.cache_clear()
+    _install_skill(tmp_path, "first")
+    _install_skill(tmp_path, "second")
+
+    listed = list_installed_skills()
+
+    assert len(listed["skills"]) == 1
+    assert any("truncated at 1 directories" in warning for warning in listed["warnings"])
+
+
+def test_loading_small_skill_ignores_oversized_unrelated_skill(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_FILE_READ_BYTES", "128")
+    get_settings.cache_clear()
+    _install_skill(tmp_path, "small")
+    large_dir = _install_skill(tmp_path, "oversized")
+    (large_dir / "SKILL.md").write_text("# Large\n" + "x" * 1000, encoding="utf-8")
+
+    loaded = load_installed_skill("small")
+    listed = list_installed_skills()
+
+    assert loaded["name"] == "small"
+    assert [skill["name"] for skill in listed["skills"]] == ["small"]
+    assert any("maximum is 128" in warning for warning in listed["warnings"])
+
+
+def test_skill_read_file_rejects_path_traversal(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    _install_skill(tmp_path)
+
+    with pytest.raises(ValueError, match="relative to the skill directory"):
+        read_installed_skill_file("debugging", "../outside.md")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation requires privileges on Windows")
+def test_skill_read_file_rejects_symlinks(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    skill_dir = _install_skill(tmp_path)
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside", encoding="utf-8")
+    (skill_dir / "linked.md").symlink_to(outside)
+
+    with pytest.raises(ValueError, match="regular file"):
+        read_installed_skill_file("debugging", "linked.md")

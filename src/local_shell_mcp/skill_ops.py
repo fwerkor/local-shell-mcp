@@ -5,9 +5,9 @@ from pathlib import Path
 from typing import Any
 
 from .agent_bridge.skills import (
-    activate_skill,
+    load_agent_skill,
+    read_agent_skill_file,
     scan_agent_skills,
-    validate_skill_name,
 )
 from .settings import Settings, get_settings
 
@@ -20,10 +20,24 @@ def skills_directory(settings: Settings | None = None) -> Path:
     return active_settings.agent_config_dir / SKILLS_DIRECTORY
 
 
+def _scan_limits(settings: Settings) -> dict[str, int]:
+    return {
+        "max_skills": settings.max_skills,
+        "max_related_files": settings.max_skill_related_files,
+        "max_scan_entries": settings.max_skill_scan_entries,
+        "max_path_bytes": settings.max_skill_path_bytes,
+        "max_entry_bytes": settings.max_file_read_bytes,
+    }
+
+
 def list_installed_skills(settings: Settings | None = None) -> dict[str, Any]:
     """Scan installed skills and return compact metadata without loading instructions."""
     active_settings = settings or get_settings()
-    result = scan_agent_skills(active_settings.agent_config_dir, SKILLS_DIRECTORY)
+    result = scan_agent_skills(
+        active_settings.agent_config_dir,
+        SKILLS_DIRECTORY,
+        **_scan_limits(active_settings),
+    )
     return {
         "skills_dir": str(skills_directory(active_settings)),
         "skills": [asdict(skill) for skill in result.skills.values()],
@@ -31,26 +45,21 @@ def list_installed_skills(settings: Settings | None = None) -> dict[str, Any]:
     }
 
 
-def _installed_skill(name: str, settings: Settings):
-    validated_name = validate_skill_name(name)
-
-    result = scan_agent_skills(settings.agent_config_dir, SKILLS_DIRECTORY)
-    skill = result.skills.get(validated_name)
-    if skill is None:
-        raise ValueError(
-            f"Unknown skill: {validated_name}. Call skills_list to see installed skills."
-        )
-    return result, skill
-
-
 def load_installed_skill(name: str, settings: Settings | None = None) -> dict[str, Any]:
-    """Load one installed skill by its exact directory name."""
+    """Load one installed skill directly by its exact directory name."""
     active_settings = settings or get_settings()
-    result, skill = _installed_skill(name, active_settings)
+    payload = load_agent_skill(
+        active_settings.agent_config_dir,
+        name,
+        SKILLS_DIRECTORY,
+        max_related_files=active_settings.max_skill_related_files,
+        max_scan_entries=active_settings.max_skill_scan_entries,
+        max_path_bytes=active_settings.max_skill_path_bytes,
+        max_entry_bytes=active_settings.max_file_read_bytes,
+    )
     return {
         "skills_dir": str(skills_directory(active_settings)),
-        **activate_skill(active_settings.agent_config_dir, skill),
-        "warnings": result.warnings,
+        **payload,
     }
 
 
@@ -59,36 +68,16 @@ def read_installed_skill_file(
     path: str,
     settings: Settings | None = None,
 ) -> dict[str, Any]:
-    """Read one related file from an installed skill by its returned relative path."""
+    """Read one bounded related file from an installed Skill."""
     active_settings = settings or get_settings()
-    result, skill = _installed_skill(name, active_settings)
-    if not isinstance(path, str):
-        raise ValueError("Skill file path must be a string")
-    if not path:
-        raise ValueError("Skill file path must not be empty")
-    resource_path = Path(path)
-    if resource_path.is_absolute() or ".." in resource_path.parts:
-        raise ValueError("Skill file path must be relative to the skill directory")
-    normalized_path = resource_path.as_posix()
-    if normalized_path not in skill.related_files:
-        raise ValueError(
-            f"Unknown related file for skill {skill.name}: {normalized_path}. "
-            "Use skill_load to see related files."
-        )
-
-    skill_root = active_settings.agent_config_dir / SKILLS_DIRECTORY / skill.name
-    file_path = skill_root / resource_path
-    if file_path.is_symlink() or not file_path.is_file():
-        raise ValueError("Skill file path must be a regular file")
-    resolved = file_path.resolve()
-    if not resolved.is_relative_to(skill_root.resolve()):
-        raise ValueError("Skill file path must stay inside the skill directory")
-    content = file_path.read_text(encoding="utf-8", errors="replace")
+    payload = read_agent_skill_file(
+        active_settings.agent_config_dir,
+        name,
+        path,
+        SKILLS_DIRECTORY,
+        max_file_bytes=active_settings.max_file_read_bytes,
+    )
     return {
         "skills_dir": str(skills_directory(active_settings)),
-        "name": skill.name,
-        "path": normalized_path,
-        "content": content,
-        "bytes": len(content.encode("utf-8")),
-        "warnings": result.warnings,
+        **payload,
     }

@@ -111,6 +111,10 @@ if _PYDANTIC_AVAILABLE:
         max_directory_entries: int = 5_000
         max_glob_results: int = 5_000
         max_tree_entries: int = 5_000
+        max_skills: int = 256
+        max_skill_related_files: int = 1_000
+        max_skill_scan_entries: int = 5_000
+        max_skill_path_bytes: int = 200_000
         max_read_many_files: int = 100
         max_read_many_total_bytes: int = 5_000_000
         max_todos: int = 1_000
@@ -278,6 +282,10 @@ else:
         max_directory_entries: int = 5_000
         max_glob_results: int = 5_000
         max_tree_entries: int = 5_000
+        max_skills: int = 256
+        max_skill_related_files: int = 1_000
+        max_skill_scan_entries: int = 5_000
+        max_skill_path_bytes: int = 200_000
         max_read_many_files: int = 100
         max_read_many_total_bytes: int = 5_000_000
         max_todos: int = 1_000
