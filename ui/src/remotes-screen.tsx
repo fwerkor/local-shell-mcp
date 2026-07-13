@@ -12,13 +12,22 @@ type RemoteDialog =
   | { type: "rename"; machine: Machine }
   | { type: "revoke"; machine: Machine }
 
-export function RemotesScreen({ height, setStatus }: { height: number; setStatus: (message: string) => void }) {
+export function RemotesScreen({
+  width,
+  height,
+  setStatus,
+}: {
+  width: number
+  height: number
+  setStatus: (message: string) => void
+}) {
   const [machines, setMachines] = useState<Machine[]>([])
   const [selected, setSelected] = useState(0)
   const [dialog, setDialog] = useState<RemoteDialog>({ type: "none" })
   const [loading, setLoading] = useState(false)
   const current = machines[selected]
-  const { rows, start } = useVisibleRows(machines, selected, Math.max(5, height - 13))
+  const compact = width < 92
+  const { rows, start } = useVisibleRows(machines, selected, Math.max(5, height - (compact ? 20 : 13)))
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -99,28 +108,28 @@ export function RemotesScreen({ height, setStatus }: { height: number; setStatus
 
   return (
     <box style={{ flexGrow: 1, flexDirection: "column", gap: 1 }}>
-      <box style={{ height: 4, flexDirection: "row", gap: 1 }}>
-        <Panel title="Online" active style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
+      <box style={{ height: compact ? 2 : 4, flexDirection: "row", gap: 1 }}>
+        <Panel title={compact ? "On" : "Online"} active style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
           <text fg={theme.green} attributes={1} content={String(online)} />
         </Panel>
-        <Panel title="Offline" style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
+        <Panel title={compact ? "Off" : "Offline"} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
           <text fg={offline ? theme.orange : theme.faint} attributes={1} content={String(offline)} />
         </Panel>
         <Panel title="Total" style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
           <text fg={theme.cyan} attributes={1} content={String(machines.length)} />
         </Panel>
-        <Panel title="Controller" style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
-          <text fg={theme.blue} content={loading ? "SYNCING" : "READY"} />
+        <Panel title={compact ? "Ctl" : "Controller"} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
+          <text fg={theme.blue} content={loading ? (compact ? "SYNC" : "SYNCING") : "READY"} />
         </Panel>
       </box>
-      <box style={{ flexGrow: 1, flexDirection: "row", gap: 1 }}>
+      <box style={{ flexGrow: 1, flexDirection: compact ? "column" : "row", gap: 1 }}>
         <Panel title="Remote nodes" active style={{ flexGrow: 1, paddingTop: 1 }}>
           {machines.length === 0 ? (
             <EmptyState title="No remote nodes" detail="Press n to create a one-time join invite" />
           ) : (
             <box style={{ flexDirection: "column", flexGrow: 1 }}>
               <box style={{ height: 2, flexDirection: "row", paddingLeft: 1 }}>
-                <text fg={theme.faint} content="STATE  NAME                         WORKDIR" />
+                <text fg={theme.faint} content={compact ? "STATE  NAME" : "STATE  NAME                         WORKDIR"} />
               </box>
               {rows.map((machine, offset) => {
                 const index = start + offset
@@ -139,15 +148,26 @@ export function RemotesScreen({ height, setStatus }: { height: number; setStatus
                     }}
                   >
                     <text fg={onlineNode ? theme.green : theme.faint} attributes={1} content={onlineNode ? "● ON   " : "○ OFF  "} />
-                    <text fg={active ? theme.text : theme.muted} attributes={active ? 1 : 0} content={machine.name.padEnd(29)} />
-                    <text fg={theme.faint} content={machine.workdir || "—"} />
+                    <text
+                      fg={active ? theme.text : theme.muted}
+                      attributes={active ? 1 : 0}
+                      content={compact ? machine.name : machine.name.padEnd(29)}
+                    />
+                    {!compact && <text fg={theme.faint} content={machine.workdir || "—"} />}
                   </box>
                 )
               })}
             </box>
           )}
         </Panel>
-        <Panel title="Node details" style={{ width: "34%", padding: 1 }}>
+        <Panel
+          title="Node details"
+          style={{
+            width: compact ? "100%" : "34%",
+            height: compact ? 10 : "100%",
+            padding: 1,
+          }}
+        >
           {current ? (
             <box style={{ flexDirection: "column" }}>
               <text fg={current.status === "online" ? theme.green : theme.orange} attributes={1} content={current.name} />
@@ -174,7 +194,7 @@ export function RemotesScreen({ height, setStatus }: { height: number; setStatus
         </Modal>
       )}
       {dialog.type === "invite-result" && (
-        <Modal title="Remote join command" width={88} height={12}>
+        <Modal title="Remote join command" width={Math.max(38, Math.min(88, width - 6))} height={12}>
           <text fg={theme.green} attributes={1} content="Invite ready" />
           <text fg={theme.muted} content="Run this command on the remote node:" />
           <box style={{ flexGrow: 1, border: true, borderColor: theme.borderBright, backgroundColor: theme.bg, padding: 1 }}>

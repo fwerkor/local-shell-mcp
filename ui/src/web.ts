@@ -282,6 +282,18 @@ function connect(): void {
       loginButton.disabled = false
       return
     }
+    if ([1011, 4400, 4408, 4429].includes(event.code)) {
+      manualDisconnect = true
+      const detail = event.reason ||
+        (event.code === 4408
+          ? "The terminal session reached its idle timeout."
+          : event.code === 4429
+            ? "The server has reached its human-interface session limit."
+            : "The OpenTUI process could not be started.")
+      setConnection("error", "Disconnected")
+      terminal.write(`\r\n\x1b[38;2;255;123;139m${detail}\x1b[0m\r\nUse Reconnect after correcting the problem.\r\n`)
+      return
+    }
     if (!manualDisconnect) scheduleReconnect()
   }
 }

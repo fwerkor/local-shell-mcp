@@ -1,6 +1,6 @@
 import { createCliRenderer } from "@opentui/core"
 import { createRoot, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react"
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { api, formatError } from "./api"
 import { AuditScreen } from "./audit-screen"
 import { Modal, SCREENS, TopNav } from "./components"
@@ -69,22 +69,24 @@ function App() {
   const [help, setHelp] = useState(false)
   const [terminalRawMode, setTerminalRawMode] = useState(false)
 
-  const loadBootstrap = async () => {
+  const loadBootstrap = useCallback(async () => {
     try {
       const payload = await api.bootstrap()
       setBootstrap(payload)
-      if (!payload.machines.machines.some((item) => item.name === machine)) setMachine("local")
+      setMachine((current) =>
+        payload.machines.machines.some((item) => item.name === current) ? current : "local",
+      )
       setStatus(`Ready · ${payload.machines.counts.total || payload.machines.machines.length} machines`)
     } catch (error) {
       setStatus(`Connection failed: ${formatError(error)}`)
     }
-  }
+  }, [])
 
   useEffect(() => {
     void loadBootstrap()
     const timer = setInterval(() => void loadBootstrap(), 8_000)
     return () => clearInterval(timer)
-  }, [])
+  }, [loadBootstrap])
 
   useKeyboard((key) => {
     if (help || terminalRawMode) return
@@ -129,7 +131,7 @@ function App() {
   } else if (screen === "Audit") {
     content = <AuditScreen machines={machines} width={width} height={contentHeight} setStatus={setStatus} />
   } else {
-    content = <RemotesScreen height={contentHeight} setStatus={setStatus} />
+    content = <RemotesScreen width={width} height={contentHeight} setStatus={setStatus} />
   }
 
   return (
