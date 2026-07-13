@@ -33,7 +33,7 @@ For local-only testing, `auth_bypass_localhost` is enabled by default. Do not ex
 | `state_dir` | `LOCAL_SHELL_MCP_STATE_DIR` | `PosixPath('/workspace/.local-shell-mcp')` |  |
 | `audit_log_path` | `LOCAL_SHELL_MCP_AUDIT_LOG_PATH` | `PosixPath('/workspace/.local-shell-mcp/audit.jsonl')` |  |
 | `agent_config_dir` | `LOCAL_SHELL_MCP_AGENT_CONFIG_DIR` | `PosixPath('/workspace/.local-shell-mcp/agent_config')` |  |
-| `allow_full_container` | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `True` | Disables workspace/path restrictions when true; use only inside disposable boundaries. |
+| `allow_full_container` | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `False` | Disables workspace/path restrictions when true; use only inside disposable boundaries. |
 
 ### Limits
 
@@ -121,10 +121,10 @@ For local-only testing, `auth_bypass_localhost` is enabled by default. Do not ex
 | `auth_mode` | `LOCAL_SHELL_MCP_AUTH_MODE` | `'oauth'` | Use `oauth` for public deployments. |
 | `auth_bypass_localhost` | `LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST` | `True` |  |
 | `require_auth_for_mcp_discovery` | `LOCAL_SHELL_MCP_REQUIRE_AUTH_FOR_MCP_DISCOVERY` | `False` |  |
-| `public_base_url` | `LOCAL_SHELL_MCP_PUBLIC_BASE_URL` | `'https://local-shell-mcp.fwerkor.eu.org'` | External HTTPS origin. Do not include `/mcp`. |
+| `public_base_url` | `LOCAL_SHELL_MCP_PUBLIC_BASE_URL` | `None` | External HTTPS origin. Do not include `/mcp`. |
 | `oauth_issuer` | `LOCAL_SHELL_MCP_OAUTH_ISSUER` | `None` |  |
 | `oauth_resource` | `LOCAL_SHELL_MCP_OAUTH_RESOURCE` | `None` |  |
-| `oauth_admin_pin` | `LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN` | `'Cyh2006102'` |  |
+| `oauth_admin_pin` | `LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN` | `None` |  |
 | `oauth_jwt_secret` | `LOCAL_SHELL_MCP_OAUTH_JWT_SECRET` | <generated or configured> |  |
 | `oauth_access_token_ttl_s` | `LOCAL_SHELL_MCP_OAUTH_ACCESS_TOKEN_TTL_S` | `0` | `0` means access tokens do not expire automatically. |
 | `oauth_code_ttl_s` | `LOCAL_SHELL_MCP_OAUTH_CODE_TTL_S` | `300` |  |

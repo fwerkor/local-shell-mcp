@@ -33,7 +33,7 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-long-random-secret
 | `state_dir` | `LOCAL_SHELL_MCP_STATE_DIR` | `PosixPath('/workspace/.local-shell-mcp')` | 运行时状态目录。 |
 | `audit_log_path` | `LOCAL_SHELL_MCP_AUDIT_LOG_PATH` | `PosixPath('/workspace/.local-shell-mcp/audit.jsonl')` | 审计日志路径。 |
 | `agent_config_dir` | `LOCAL_SHELL_MCP_AGENT_CONFIG_DIR` | `PosixPath('/workspace/.local-shell-mcp/agent_config')` | agent 配置目录。 |
-| `allow_full_container` | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `True` | 为 true 时禁用工作区 / 路径限制；只在一次性边界内使用。 |
+| `allow_full_container` | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | `False` | 为 true 时禁用工作区 / 路径限制；只在一次性边界内使用。 |
 
 ### 限制
 
@@ -110,10 +110,10 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-long-random-secret
 | `auth_mode` | `LOCAL_SHELL_MCP_AUTH_MODE` | `'oauth'` | 公开部署使用 `oauth`。 |
 | `auth_bypass_localhost` | `LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST` | `True` | 是否允许 localhost 绕过认证。 |
 | `require_auth_for_mcp_discovery` | `LOCAL_SHELL_MCP_REQUIRE_AUTH_FOR_MCP_DISCOVERY` | `False` | 工具发现是否要求认证。 |
-| `public_base_url` | `LOCAL_SHELL_MCP_PUBLIC_BASE_URL` | `'https://local-shell-mcp.fwerkor.eu.org'` | 外部 HTTPS origin。不要包含 `/mcp`。 |
+| `public_base_url` | `LOCAL_SHELL_MCP_PUBLIC_BASE_URL` | `None` | 外部 HTTPS origin。不要包含 `/mcp`。 |
 | `oauth_issuer` | `LOCAL_SHELL_MCP_OAUTH_ISSUER` | `None` | OAuth issuer 覆盖值。 |
 | `oauth_resource` | `LOCAL_SHELL_MCP_OAUTH_RESOURCE` | `None` | OAuth resource 覆盖值。 |
-| `oauth_admin_pin` | `LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN` | `'Cyh2006102'` | OAuth 管理 PIN。 |
+| `oauth_admin_pin` | `LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN` | `None` | OAuth 管理 PIN。 |
 | `oauth_jwt_secret` | `LOCAL_SHELL_MCP_OAUTH_JWT_SECRET` | <generated or configured> | OAuth JWT secret。 |
 | `oauth_access_token_ttl_s` | `LOCAL_SHELL_MCP_OAUTH_ACCESS_TOKEN_TTL_S` | `0` | `0` 表示访问令牌不自动过期。 |
 | `oauth_code_ttl_s` | `LOCAL_SHELL_MCP_OAUTH_CODE_TTL_S` | `300` | OAuth code TTL。 |

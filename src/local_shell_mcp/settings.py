@@ -487,9 +487,16 @@ def validate_public_oauth_configuration(settings: Settings | None = None) -> Non
     settings = settings or get_settings()
     if settings.auth_mode != "oauth" or not settings.public_base_url:
         return
-    weak_values = {"", "dev-" + "change-me"}
-    if settings.oauth_jwt_secret in weak_values:
+    weak_secret_values = {"", "dev-" + "change-me", "change-me-64-hex-random-secret"}
+    if settings.oauth_jwt_secret in weak_secret_values or len(settings.oauth_jwt_secret.encode("utf-8")) < 32:
         raise RuntimeError(
-            "LOCAL_SHELL_MCP_OAUTH_JWT_SECRET must be set to a strong random value "
+            "LOCAL_SHELL_MCP_OAUTH_JWT_SECRET must be at least 32 bytes of strong random data "
+            "when LOCAL_SHELL_MCP_PUBLIC_BASE_URL is configured."
+        )
+    pin = (settings.oauth_admin_pin or "").strip()
+    weak_pin_values = {"", "change-me", "change-me-long-random-pin"}
+    if pin in weak_pin_values or len(pin) < 12:
+        raise RuntimeError(
+            "LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN must be set to a non-placeholder value of at least 12 characters "
             "when LOCAL_SHELL_MCP_PUBLIC_BASE_URL is configured."
         )

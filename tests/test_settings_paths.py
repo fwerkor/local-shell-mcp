@@ -1,7 +1,9 @@
 from pathlib import Path
 
+import pytest
+
 import local_shell_mcp.settings as settings_module
-from local_shell_mcp.settings import Settings
+from local_shell_mcp.settings import Settings, validate_public_oauth_configuration
 
 
 def test_workspace_relative_defaults_match_resolved_platform_defaults(
@@ -61,3 +63,33 @@ def test_explicit_agent_and_audit_paths_do_not_follow_custom_state(tmp_path):
     assert updated.state_dir == custom_state
     assert updated.audit_log_path == custom_audit
     assert updated.agent_config_dir == custom_agent
+
+
+def test_public_oauth_requires_strong_secret_and_admin_pin():
+    base = {
+        "auth_mode": "oauth",
+        "public_base_url": "https://control.example.com",
+    }
+
+    with pytest.raises(RuntimeError, match="OAUTH_JWT_SECRET"):
+        validate_public_oauth_configuration(
+            Settings(**base, oauth_jwt_secret="short", oauth_admin_pin="a-strong-admin-pin")
+        )
+
+    with pytest.raises(RuntimeError, match="OAUTH_ADMIN_PIN"):
+        validate_public_oauth_configuration(
+            Settings(**base, oauth_jwt_secret="s" * 32, oauth_admin_pin=None)
+        )
+
+    with pytest.raises(RuntimeError, match="OAUTH_ADMIN_PIN"):
+        validate_public_oauth_configuration(
+            Settings(
+                **base,
+                oauth_jwt_secret="s" * 32,
+                oauth_admin_pin="change-me-long-random-pin",
+            )
+        )
+
+    validate_public_oauth_configuration(
+        Settings(**base, oauth_jwt_secret="s" * 32, oauth_admin_pin="a-strong-admin-pin")
+    )
