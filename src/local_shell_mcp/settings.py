@@ -126,6 +126,15 @@ if _PYDANTIC_AVAILABLE:
         max_concurrent_commands: int = 4
         max_tmux_sessions: int = 16
 
+        # Human-facing OpenTUI/WebUI. The browser interface is mounted on the same
+        # ASGI service and launches the exact same TUI executable as the local CLI.
+        ui_enabled: bool = True
+        ui_path: str = "/ui"
+        ui_tui_command: str | None = None
+        ui_wallpaper: Literal["bing", "aurora", "none"] = "bing"
+        ui_terminal_idle_timeout_s: int = 3600
+        ui_terminal_max_sessions: int = 8
+
         # Optional agent MCP capability bridge. Skills use the fixed skills_list and
         # skill_load tools and are read from agent_config_dir/skills.
         agent_bridge_enabled: bool = False
@@ -296,6 +305,13 @@ else:
         max_tmp_bytes: int = 50_000_000
         max_concurrent_commands: int = 4
         max_tmux_sessions: int = 16
+
+        ui_enabled: bool = True
+        ui_path: str = "/ui"
+        ui_tui_command: str | None = None
+        ui_wallpaper: Literal["bing", "aurora", "none"] = "bing"
+        ui_terminal_idle_timeout_s: int = 3600
+        ui_terminal_max_sessions: int = 8
 
         agent_bridge_enabled: bool = False
         agent_mcp_probe_timeout_s: float = 5.0

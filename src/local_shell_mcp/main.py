@@ -13,6 +13,7 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
     from starlette.routing import Mount, Route
 
     from .downloads import download_routes
+    from .human_ui import ui_routes
     from .oauth import (
         oauth_authorize_get,
         oauth_authorize_post,
@@ -43,6 +44,7 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
     ]
     settings = get_settings()
     routes[2:2] = download_routes()
+    routes[2:2] = ui_routes()
     if settings.remote_enabled:
         routes[2:2] = remote_routes()
     return Starlette(

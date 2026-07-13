@@ -37,6 +37,7 @@ from .git_ops import (
     git_show,
     git_status,
 )
+from .human_ui import ui_routes
 from .playwright_ops import (
     browser_eval,
     browser_get_text,
@@ -355,4 +356,5 @@ def build_http_app() -> FastAPI:
     async def api_playwright_run_script(body: dict, _: Principal = PRINCIPAL_DEP):
         return await playwright_run_script(body["script"], body.get("cwd", "."), body.get("timeout_s", 60))
 
+    app.router.routes.extend(ui_routes())
     return app

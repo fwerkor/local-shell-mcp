@@ -13,6 +13,20 @@ from .audit import audit
 from .settings import Settings, get_settings
 
 PUBLIC_PATHS = {"/healthz", "/readyz", "/docs", "/openapi.json", "/join", "/remote/worker-bundle.tgz", "/remote/register", "/remote/resume", "/remote/poll", "/remote/result"}
+HUMAN_UI_API_PREFIX = "/api/ui/"
+
+
+def _is_public_path(path: str) -> bool:
+    return (
+        path in PUBLIC_PATHS
+        or path.startswith("/.well-known/")
+        or path.startswith("/oauth/")
+        or path.startswith("/download/")
+        or path in {"/ui", "/ui/", "/ui/callback"}
+        or path.startswith("/ui/assets/")
+    )
+
+
 MCP_DISCOVERY_METHODS = {
     "initialize",
     "notifications/initialized",
@@ -68,15 +82,19 @@ def _verify_oauth(request: Request, settings: Settings) -> Principal:
 
 def verify_request(request: Request) -> Principal:
     settings = get_settings()
+    path = str(request.url.path)
     if settings.auth_mode == "none":
         return Principal(email=None, subject="anonymous", claims={"auth": "none"})
-    if settings.auth_bypass_localhost and _is_localhost(request) and settings.mode == "http":
+    if settings.auth_bypass_localhost and _is_localhost(request) and (
+        settings.mode == "http" or path.startswith(HUMAN_UI_API_PREFIX)
+    ):
         return Principal(email="localhost", subject="localhost", claims={"auth": "localhost-bypass"})
     if settings.auth_mode == "oauth":
         principal = _verify_oauth(request, settings)
     else:
         raise HTTPException(status_code=500, detail=f"Unsupported auth_mode: {settings.auth_mode}")
-    audit("auth_ok", subject=principal.subject, path=str(request.url.path), ip=_client_host(request))
+    if not path.startswith(HUMAN_UI_API_PREFIX):
+        audit("auth_ok", subject=principal.subject, path=path, ip=_client_host(request))
     return principal
 
 
@@ -147,7 +165,7 @@ class AuthMiddleware:
             return
 
         path = scope.get("path", "")
-        if path in PUBLIC_PATHS or path.startswith("/.well-known/") or path.startswith("/oauth/") or path.startswith("/download/"):
+        if _is_public_path(path):
             await self.app(scope, receive, send)
             return
 

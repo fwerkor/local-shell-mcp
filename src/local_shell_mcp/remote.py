@@ -23,7 +23,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-from .audit import audit
+from .audit import audit, suppress_audit
 from .fs_ops import (
     delete_path,
     edit_text,
@@ -649,6 +649,15 @@ REMOTE_WORKER_TOOL_NAMES = frozenset({
 
 
 async def execute_worker_tool(tool: str, args: dict[str, Any]) -> Any:
+    call_args = dict(args)
+    human = bool(call_args.pop("_human", False))
+    if human:
+        with suppress_audit():
+            return await _execute_worker_tool_inner(tool, call_args)
+    return await _execute_worker_tool_inner(tool, call_args)
+
+
+async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
     if tool not in REMOTE_WORKER_TOOL_NAMES:
         raise ValueError(f"unsupported remote worker tool: {tool}")
     if tool == "environment_info":
