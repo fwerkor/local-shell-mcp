@@ -13,6 +13,38 @@ from local_shell_mcp.settings import get_settings
 
 
 @pytest.mark.asyncio
+async def test_remote_invites_use_requested_origin_prune_expired_entries_and_validate_names(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    monkeypatch.delenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL", raising=False)
+    get_settings.cache_clear()
+    manager = remote.RemoteManager()
+    manager.invites["expired"] = remote.RemoteInvite(
+        code="expired",
+        name=None,
+        workdir=None,
+        expires_at=0,
+    )
+
+    result = await manager.create_invite(
+        "worker-a",
+        "/workspace",
+        120,
+        base_url="https://control.example.test",
+    )
+
+    assert result["join_url"] == "https://control.example.test/join"
+    assert "https://control.example.test/join" in result["command"]
+    assert "expired" not in manager.invites
+    with pytest.raises(ValueError, match="unsupported characters"):
+        await manager.create_invite("bad/name")
+    with pytest.raises(ValueError, match="128 characters"):
+        await manager.create_invite("x" * 129)
+
+
+@pytest.mark.asyncio
 async def test_join_script_loads_vendored_worker_dependencies(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL", "https://local-shell-mcp.example.test")

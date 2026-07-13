@@ -544,7 +544,14 @@ async def api_remotes(request: Request) -> Response:
         if request.method == "GET":
             return _json_ok(remote_manager().list_machines())
         body = await request.json()
-        result = await remote_manager().create_invite(body.get("name"), body.get("workdir"), body.get("ttl_s"))
+        from .oauth import public_base_url
+
+        result = await remote_manager().create_invite(
+            body.get("name"),
+            body.get("workdir"),
+            body.get("ttl_s"),
+            base_url=public_base_url(request),
+        )
         return _json_ok(result)
     except Exception as exc:
         return _json_error(exc)

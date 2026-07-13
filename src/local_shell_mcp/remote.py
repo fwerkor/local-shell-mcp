@@ -95,6 +95,8 @@ REMOTE_WORKER_BUNDLE_PATH = "/remote/worker-bundle.tgz"
 REMOTE_WORKER_DISTRIBUTIONS: tuple[str, ...] = ()
 REMOTE_WORKER_REGISTRY_FILE_NAME = "remote-workers.json"
 REMOTE_WORKER_IDENTITY_FILE_NAME = "identity.json"
+MAX_REMOTE_INVITES = 1_024
+MAX_REMOTE_MACHINE_NAME_LENGTH = 128
 
 
 def _canonical_dist_name(name: str) -> str:
@@ -139,6 +141,17 @@ def _add_distribution_to_tar(tar: tarfile.TarFile, dist_name: str, seen: set[str
 
 def _utc() -> float:
     return time.time()
+
+
+def _validate_machine_name(value: str) -> str:
+    name = value.strip()
+    if not name:
+        raise ValueError("machine name is required")
+    if len(name) > MAX_REMOTE_MACHINE_NAME_LENGTH:
+        raise ValueError(f"machine name exceeds {MAX_REMOTE_MACHINE_NAME_LENGTH} characters")
+    if any(ord(character) < 32 or character in {"/", "\\"} for character in name):
+        raise ValueError("machine name contains unsupported characters")
+    return name
 
 
 def _ok(data: Any = None, message: str = "") -> dict[str, Any]:
@@ -241,25 +254,49 @@ class RemoteManager:
             tmp_path.chmod(0o600)
         tmp_path.replace(path)
 
-    def _join_url(self) -> str:
+    def _join_url(self, base_url: str | None = None) -> str:
         settings = get_settings()
-        base = settings.public_base_url or f"http://{settings.host}:{settings.port}"
+        base = base_url or settings.public_base_url or f"http://{settings.host}:{settings.port}"
         return base.rstrip("/") + REMOTE_JOIN_PATH
 
-    async def create_invite(self, name: str | None = None, workdir: str | None = None, ttl_s: int | None = None) -> dict[str, Any]:
+    async def create_invite(
+        self,
+        name: str | None = None,
+        workdir: str | None = None,
+        ttl_s: int | None = None,
+        base_url: str | None = None,
+    ) -> dict[str, Any]:
         settings = get_settings()
-        ttl = max(60, min(ttl_s or settings.remote_invite_ttl_s, 24 * 3600))
+        ttl = max(60, min(int(ttl_s or settings.remote_invite_ttl_s), 24 * 3600))
+        normalized_name = _validate_machine_name(name) if name else None
         code = "lsmcp_inv_" + secrets.token_urlsafe(24)
-        invite = RemoteInvite(code=code, name=name, workdir=workdir, expires_at=_utc() + ttl)
+        invite = RemoteInvite(code=code, name=normalized_name, workdir=workdir, expires_at=_utc() + ttl)
         async with self._lock:
             self._load_registry_unlocked()
+            now = _utc()
+            self.invites = {
+                invite_code: item
+                for invite_code, item in self.invites.items()
+                if not item.used and item.expires_at >= now
+            }
+            if len(self.invites) >= MAX_REMOTE_INVITES:
+                raise RuntimeError("Too many pending remote invites")
             self.invites[code] = invite
-        command = f"curl -fsSL {shlex.quote(self._join_url())} | bash -s -- --invite {shlex.quote(code)}"
-        if name:
-            command += f" --name {shlex.quote(name)}"
+        join_url = self._join_url(base_url)
+        command = f"curl -fsSL {shlex.quote(join_url)} | bash -s -- --invite {shlex.quote(code)}"
+        if normalized_name:
+            command += f" --name {shlex.quote(normalized_name)}"
         if workdir:
             command += f" --workdir {shlex.quote(workdir)}"
-        return {"code": code, "name": name, "workdir": workdir, "expires_at": invite.expires_at, "ttl_s": ttl, "join_url": self._join_url(), "command": command}
+        return {
+            "code": code,
+            "name": normalized_name,
+            "workdir": workdir,
+            "expires_at": invite.expires_at,
+            "ttl_s": ttl,
+            "join_url": join_url,
+            "command": command,
+        }
 
     async def register_worker(self, payload: dict[str, Any]) -> dict[str, Any]:
         code = str(payload.get("invite") or "")
@@ -273,7 +310,7 @@ class RemoteManager:
                 raise ValueError("invite code has already been used")
             if invite.expires_at < _utc():
                 raise ValueError("invite code has expired")
-            name = requested_name or invite.name or self._default_machine_name(payload)
+            name = _validate_machine_name(requested_name or invite.name or self._default_machine_name(payload))
             if invite.name and requested_name and requested_name != invite.name:
                 raise ValueError(f"invite is bound to machine name {invite.name!r}")
             if name in self.workers:
@@ -283,6 +320,7 @@ class RemoteManager:
             self.workers[name] = worker
             self.tokens[token] = name
             invite.used = True
+            self.invites.pop(code, None)
             self._save_registry_unlocked()
         audit("remote_worker_registered", machine=name)
         return {"token": token, "name": name, "poll_interval_s": 0}
@@ -401,9 +439,7 @@ class RemoteManager:
 
     def rename(self, machine: str, new_name: str) -> dict[str, Any]:
         self._load_registry_unlocked()
-        new_name = new_name.strip()
-        if not new_name:
-            raise ValueError("new_name is required")
+        new_name = _validate_machine_name(new_name)
         if new_name in self.workers:
             raise ValueError(f"machine name already exists: {new_name}")
         worker = self.workers.pop(machine, None)
