@@ -1,5 +1,5 @@
 import { useKeyboard } from "@opentui/react"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, Modal, Panel, formatAge, useVisibleRows } from "./components"
 import { theme } from "./theme"
@@ -26,14 +26,17 @@ export function RemotesScreen({
   const [selected, setSelected] = useState(0)
   const [dialog, setDialog] = useState<RemoteDialog>({ type: "none" })
   const [loading, setLoading] = useState(false)
+  const refreshRequest = useRef(0)
   const current = machines[selected]
   const compact = width < 92
   const { rows, start } = useVisibleRows(machines, selected, Math.max(5, height - (compact ? 20 : 13)))
 
   const refresh = useCallback(async () => {
+    const requestId = ++refreshRequest.current
     setLoading(true)
     try {
       const payload = await api.remotes()
+      if (requestId !== refreshRequest.current) return
       setMachines(payload.machines)
       setEnabled(payload.enabled !== false)
       setSelected((value) => Math.min(value, Math.max(0, payload.machines.length - 1)))
@@ -43,16 +46,20 @@ export function RemotesScreen({
           : `${payload.counts.online || 0} remote node(s) online`,
       )
     } catch (error) {
-      setStatus(`Remotes: ${formatError(error)}`)
+      if (requestId === refreshRequest.current) setStatus(`Remotes: ${formatError(error)}`)
     } finally {
-      setLoading(false)
+      if (requestId === refreshRequest.current) setLoading(false)
     }
   }, [setStatus])
 
   useEffect(() => {
+    refreshRequest.current += 1
     void refresh()
     const timer = setInterval(() => void refresh(), 4_000)
-    return () => clearInterval(timer)
+    return () => {
+      refreshRequest.current += 1
+      clearInterval(timer)
+    }
   }, [refresh])
 
   const createInvite = async (value: string) => {

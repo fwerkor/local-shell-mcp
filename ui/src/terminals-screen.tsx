@@ -93,12 +93,21 @@ export function TerminalsScreen({
   const [dialog, setDialog] = useState<TerminalDialog>({ type: "none" })
   const [busy, setBusy] = useState(false)
   const rawQueue = useRef<Promise<void>>(Promise.resolve())
+  const sessionsRequest = useRef(0)
+  const outputRequest = useRef(0)
+  const machineRef = useRef(machine)
   const selectedSession = sessions[selected]
+  const selectedSessionIdRef = useRef<string | null>(selectedSession?.session_id || null)
+  machineRef.current = machine
+  selectedSessionIdRef.current = selectedSession?.session_id || null
   const compact = width < 96
 
   const refreshSessions = useCallback(async (): Promise<TerminalSession[]> => {
+    const requestId = ++sessionsRequest.current
+    const targetMachine = machine
     try {
-      const payload = await api.terminals(machine)
+      const payload = await api.terminals(targetMachine)
+      if (requestId !== sessionsRequest.current || machineRef.current !== targetMachine) return []
       setSessions(payload.sessions)
       setSelected((value) => Math.min(value, Math.max(0, payload.sessions.length - 1)))
       return payload.sessions
@@ -109,16 +118,24 @@ export function TerminalsScreen({
   }, [machine, setStatus])
 
   const refreshOutput = useCallback(async () => {
-    if (!selectedSession) {
+    const requestId = ++outputRequest.current
+    const targetMachine = machine
+    const targetSession = selectedSession?.session_id || null
+    if (!targetSession) {
       setOutput("")
       setAudit([])
       return
     }
     try {
       const [terminal, records] = await Promise.all([
-        api.terminalRead(machine, selectedSession.session_id, Math.max(300, height * 8)),
-        api.audit({ session: selectedSession.session_id, limit: 80, sort: "desc" }),
+        api.terminalRead(targetMachine, targetSession, Math.max(300, height * 8)),
+        api.audit({ session: targetSession, limit: 80, sort: "desc" }),
       ])
+      if (
+        requestId !== outputRequest.current ||
+        machineRef.current !== targetMachine ||
+        selectedSessionIdRef.current !== targetSession
+      ) return
       setOutput(terminal.output)
       setAudit(records.entries)
     } catch (error) {
@@ -127,15 +144,27 @@ export function TerminalsScreen({
   }, [height, machine, selectedSession, setStatus])
 
   useEffect(() => {
+    sessionsRequest.current += 1
+    outputRequest.current += 1
+    setSelected(0)
+    setOutput("")
+    setAudit([])
     void refreshSessions()
     const timer = setInterval(() => void refreshSessions(), 4_000)
-    return () => clearInterval(timer)
+    return () => {
+      sessionsRequest.current += 1
+      clearInterval(timer)
+    }
   }, [refreshSessions])
 
   useEffect(() => {
+    outputRequest.current += 1
     void refreshOutput()
     const timer = setInterval(() => void refreshOutput(), 900)
-    return () => clearInterval(timer)
+    return () => {
+      outputRequest.current += 1
+      clearInterval(timer)
+    }
   }, [refreshOutput])
 
   useEffect(() => {

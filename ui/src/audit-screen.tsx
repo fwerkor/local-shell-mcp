@@ -1,5 +1,5 @@
 import { useKeyboard } from "@opentui/react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, Modal, Panel, useVisibleRows } from "./components"
 import { theme } from "./theme"
@@ -54,6 +54,7 @@ export function AuditScreen({
   const [session, setSession] = useState("")
   const [dialog, setDialog] = useState<AuditDialog>({ type: "none" })
   const [loading, setLoading] = useState(false)
+  const refreshRequest = useRef(0)
 
   const nodes = useMemo(() => ["", ...machines.map((machine) => machine.name)], [machines])
   const selectedNode = nodes[nodeIndex] || ""
@@ -64,6 +65,7 @@ export function AuditScreen({
   const { rows, start } = useVisibleRows(entries, selected, tableHeight)
 
   const refresh = useCallback(async () => {
+    const requestId = ++refreshRequest.current
     setLoading(true)
     try {
       const now = Date.now() / 1000
@@ -77,18 +79,23 @@ export function AuditScreen({
         start_ts: timeRange.seconds ? now - timeRange.seconds : undefined,
         sort,
       })
+      if (requestId !== refreshRequest.current) return
       setEntries(payload.entries)
       setSelected((value) => Math.min(value, Math.max(0, payload.entries.length - 1)))
       setStatus(`Audit: ${payload.total_matched} matching records`)
     } catch (error) {
-      setStatus(`Audit: ${formatError(error)}`)
+      if (requestId === refreshRequest.current) setStatus(`Audit: ${formatError(error)}`)
     } finally {
-      setLoading(false)
+      if (requestId === refreshRequest.current) setLoading(false)
     }
   }, [event, search, selectedNode, selectedOperation, session, setStatus, sort, timeRange.seconds])
 
   useEffect(() => {
+    refreshRequest.current += 1
     void refresh()
+    return () => {
+      refreshRequest.current += 1
+    }
   }, [refresh])
 
   useEffect(() => {

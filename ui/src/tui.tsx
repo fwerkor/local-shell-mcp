@@ -1,6 +1,6 @@
 import { createCliRenderer } from "@opentui/core"
 import { createRoot, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { AuditScreen } from "./audit-screen"
 import { Modal, SCREENS, TopNav } from "./components"
@@ -68,24 +68,32 @@ function App() {
   const [status, setStatus] = useState("Connecting to local-shell-mcp…")
   const [help, setHelp] = useState(false)
   const [terminalRawMode, setTerminalRawMode] = useState(false)
+  const bootstrapRequest = useRef(0)
 
   const loadBootstrap = useCallback(async () => {
+    const requestId = ++bootstrapRequest.current
     try {
       const payload = await api.bootstrap()
+      if (requestId !== bootstrapRequest.current) return
       setBootstrap(payload)
       setMachine((current) =>
         payload.machines.machines.some((item) => item.name === current) ? current : "local",
       )
       setStatus(`Ready · ${payload.machines.counts.total || payload.machines.machines.length} machines`)
     } catch (error) {
-      setStatus(`Connection failed: ${formatError(error)}`)
+      if (requestId === bootstrapRequest.current) {
+        setStatus(`Connection failed: ${formatError(error)}`)
+      }
     }
   }, [])
 
   useEffect(() => {
     void loadBootstrap()
     const timer = setInterval(() => void loadBootstrap(), 8_000)
-    return () => clearInterval(timer)
+    return () => {
+      bootstrapRequest.current += 1
+      clearInterval(timer)
+    }
   }, [loadBootstrap])
 
   useKeyboard((key) => {
