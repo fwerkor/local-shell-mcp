@@ -41,6 +41,7 @@ export interface FilePreview {
   size?: number
   path?: string
   truncated?: boolean
+  sha256?: string | null
   [key: string]: unknown
 }
 

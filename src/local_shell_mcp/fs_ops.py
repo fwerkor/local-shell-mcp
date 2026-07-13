@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
 import fnmatch
+import hashlib
 import os
 import shutil
+import tempfile
 from pathlib import Path
 
 from .settings import get_settings
@@ -13,6 +16,18 @@ BINARY_CHECK_BYTES = 8192
 BINARY_CONTROL_RATIO = 0.30
 BINARY_PREVIEW_BYTES = 256
 BINARY_MESSAGE = "Refusing to read binary file as text"
+
+
+class FileConflictError(RuntimeError):
+    pass
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def workspace_root() -> Path:
@@ -246,25 +261,52 @@ def read_text(
         "binary": False,
         "total_lines": total_lines,
         "truncated": truncated,
+        "sha256": hashlib.sha256(data).hexdigest() if not truncated else None,
         "content": text,
     }
 
 
-def write_text(path: str, content: str, overwrite: bool = True) -> dict:
+def write_text(
+    path: str,
+    content: str,
+    overwrite: bool = True,
+    expected_sha256: str | None = None,
+) -> dict:
     settings = get_settings()
     data = content.encode("utf-8")
     if len(data) > settings.max_file_write_bytes:
         raise ValueError(f"Refusing to write {len(data)} bytes; max is {settings.max_file_write_bytes}")
     p = resolve_path(path)
-    if p.exists() and not overwrite:
+    exists = p.exists()
+    if exists and not overwrite:
         raise FileExistsError(str(p))
+    if expected_sha256 is not None:
+        if not exists:
+            raise FileConflictError("File was deleted after it was opened; reload before saving")
+        current_sha256 = _sha256_file(p)
+        if current_sha256 != expected_sha256:
+            raise FileConflictError("File changed after it was opened; reload before saving")
     p.parent.mkdir(parents=True, exist_ok=True)
-    created = not p.exists()
-    p.write_text(content, encoding="utf-8")
+    created = not exists
+    previous_mode = p.stat().st_mode & 0o777 if exists else None
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{p.name}.", suffix=".tmp", dir=p.parent)
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if previous_mode is not None:
+            tmp.chmod(previous_mode)
+        tmp.replace(p)
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
     return {
         "path": relative_display(p),
         "bytes": len(data),
         "created": created,
+        "sha256": hashlib.sha256(data).hexdigest(),
     }
 
 

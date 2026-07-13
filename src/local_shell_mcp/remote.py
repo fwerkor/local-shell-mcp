@@ -738,7 +738,13 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
     if tool == "read_many_files":
         return await _to_thread(_read_many_files_sync, args["paths"], args.get("start_line"), args.get("end_line"), args.get("binary_preview"), args.get("binary_preview_bytes", 256))
     if tool == "write_file":
-        return await _to_thread(write_text, args["path"], args["content"], args.get("overwrite", True))
+        return await _to_thread(
+            write_text,
+            args["path"],
+            args["content"],
+            args.get("overwrite", True),
+            args.get("expected_sha256"),
+        )
     if tool == "edit_file":
         return await _to_thread(edit_text, args["path"], args["old"], args["new"], args.get("replace_all", False))
     if tool == "multi_edit_file":

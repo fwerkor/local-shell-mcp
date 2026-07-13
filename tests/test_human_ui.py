@@ -59,6 +59,54 @@ def test_editor_content_reads_the_complete_bounded_file(tmp_path, monkeypatch):
     assert "line-349" in payload["content"]
 
 
+def test_editor_rejects_stale_save_and_preserves_newer_file(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    path = tmp_path / "shared.txt"
+    path.write_text("opened", encoding="utf-8")
+    path.chmod(0o640)
+    client = TestClient(build_http_app())
+
+    loaded = client.get(
+        "/api/ui/files/content",
+        params={"machine": "local", "path": "shared.txt"},
+    ).json()["data"]
+    path.write_text("changed by MCP", encoding="utf-8")
+
+    conflict = client.post(
+        "/api/ui/files/write",
+        json={
+            "machine": "local",
+            "path": "shared.txt",
+            "content": "human edit",
+            "overwrite": True,
+            "expected_sha256": loaded["sha256"],
+        },
+    )
+
+    assert conflict.status_code == 409
+    assert "reload before saving" in conflict.json()["message"]
+    assert path.read_text(encoding="utf-8") == "changed by MCP"
+
+    current = client.get(
+        "/api/ui/files/content",
+        params={"machine": "local", "path": "shared.txt"},
+    ).json()["data"]
+    saved = client.post(
+        "/api/ui/files/write",
+        json={
+            "machine": "local",
+            "path": "shared.txt",
+            "content": "merged edit",
+            "overwrite": True,
+            "expected_sha256": current["sha256"],
+        },
+    )
+    assert saved.status_code == 200
+    assert path.read_text(encoding="utf-8") == "merged edit"
+    assert path.stat().st_mode & 0o777 == 0o640
+    assert not list(tmp_path.glob(".shared.txt.*.tmp"))
+
+
 def test_editor_refuses_files_larger_than_the_read_limit(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_FILE_READ_BYTES", "64")

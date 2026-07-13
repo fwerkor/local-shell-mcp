@@ -10,7 +10,7 @@ type Dialog =
   | { type: "none" }
   | { type: "input"; action: "rename" | "new-file" | "new-dir"; title: string; value: string }
   | { type: "confirm-delete"; entry: FileEntry }
-  | { type: "editor"; entry: FileEntry; content: string }
+  | { type: "editor"; entry: FileEntry; content: string; sha256: string }
 
 interface ClipboardState {
   mode: "copy" | "move"
@@ -210,7 +210,13 @@ export function FilesScreen({
     setBusy(true)
     try {
       const content = await api.fileContent(machine, entry.path)
-      setDialog({ type: "editor", entry, content: String(content.content || "") })
+      if (!content.sha256) throw new Error("The editor did not receive a file revision")
+      setDialog({
+        type: "editor",
+        entry,
+        content: String(content.content || ""),
+        sha256: content.sha256,
+      })
     } catch (error) {
       setStatus(`Edit: ${formatError(error)}`)
     } finally {
@@ -253,13 +259,26 @@ export function FilesScreen({
       if (key.ctrl && key.name === "s") {
         const content = editorRef.current?.plainText ?? dialog.content
         void api
-          .fileAction("write", { machine, path: dialog.entry.path, content, overwrite: true })
+          .fileAction("write", {
+            machine,
+            path: dialog.entry.path,
+            content,
+            overwrite: true,
+            expected_sha256: dialog.sha256,
+          })
           .then(async () => {
             closeDialog()
             await refresh()
             setStatus(`Saved ${dialog.entry.name}`)
           })
-          .catch((error) => setStatus(`Save: ${formatError(error)}`))
+          .catch((error) => {
+            const detail = formatError(error)
+            if (detail.includes("reload before saving")) {
+              setStatus(`Save conflict: ${detail}`)
+            } else {
+              setStatus(`Save: ${detail}`)
+            }
+          })
       }
       return
     }
@@ -372,7 +391,11 @@ export function FilesScreen({
         </Modal>
       )}
       {dialog.type === "editor" && (
-        <Modal title={`Edit · ${dialog.entry.name}`} width={Math.max(70, width - 12)} height={Math.max(18, height - 8)}>
+        <Modal
+          title={`Edit · ${dialog.entry.name}`}
+          width={Math.max(38, Math.min(120, width - 6))}
+          height={Math.max(12, height - 6)}
+        >
           <textarea
             ref={editorRef}
             focused

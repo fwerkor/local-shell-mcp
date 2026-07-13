@@ -21,7 +21,15 @@ from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from .audit import query_audit, suppress_audit
-from .fs_ops import delete_path, list_dir, perform_file_action, read_text, resolve_path, write_text
+from .fs_ops import (
+    FileConflictError,
+    delete_path,
+    list_dir,
+    perform_file_action,
+    read_text,
+    resolve_path,
+    write_text,
+)
 from .remote import remote_manager
 from .settings import get_settings
 from .shell_ops import kill_shell, list_shells, read_shell, send_shell, start_shell
@@ -384,11 +392,22 @@ async def api_file_action(request: Request) -> Response:
             )
             return _json_ok(result)
         if action == "write":
+            expected_sha256 = str(body.get("expected_sha256") or "") or None
             result = await _machine_dispatch(
                 machine,
-                lambda: write_text(path, str(body.get("content") or ""), bool(body.get("overwrite", True))),
+                lambda: write_text(
+                    path,
+                    str(body.get("content") or ""),
+                    bool(body.get("overwrite", True)),
+                    expected_sha256,
+                ),
                 "write_file",
-                {"path": path, "content": str(body.get("content") or ""), "overwrite": bool(body.get("overwrite", True))},
+                {
+                    "path": path,
+                    "content": str(body.get("content") or ""),
+                    "overwrite": bool(body.get("overwrite", True)),
+                    "expected_sha256": expected_sha256,
+                },
             )
             return _json_ok(result)
         if action not in {"mkdir", "touch", "rename", "copy", "move"}:
@@ -407,6 +426,8 @@ async def api_file_action(request: Request) -> Response:
             args,
         )
         return _json_ok(result)
+    except FileConflictError as exc:
+        return _json_error(exc, status_code=409)
     except Exception as exc:
         return _json_error(exc)
 
