@@ -17,6 +17,27 @@ def _is_relative_child_path(value: Path) -> bool:
     return not value.is_absolute() and ".." not in value.parts
 
 
+def validate_skill_name(name: str) -> str:
+    """Validate a portable immediate-child directory name used as a Skill identifier."""
+    if not isinstance(name, str):
+        raise ValueError("Skill name must be a string")
+    if not name:
+        raise ValueError("Skill name must not be empty")
+    if name != name.strip():
+        raise ValueError("Skill name must not have leading or trailing whitespace")
+    if name in {".", ".."} or "/" in name or "\\" in name:
+        raise ValueError("Skill name must be a single directory name")
+    if len(name) > 255:
+        raise ValueError("Skill name must be at most 255 characters")
+    if any(ord(character) < 32 or ord(character) == 127 for character in name):
+        raise ValueError("Skill name must not contain control characters")
+    try:
+        name.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError("Skill name must be valid UTF-8") from exc
+    return name
+
+
 def _first_sentence(value: str) -> str:
     """Extract the first prose sentence used as a compact skill or tool description."""
     match = re.match(r"(.+?[.!?])(?:\s|$)", value)
@@ -120,6 +141,11 @@ def scan_agent_skills(
         )
 
     for child in children:
+        try:
+            validate_skill_name(child.name)
+        except ValueError as exc:
+            warnings.append(f"Skipping skill {child.name!r}: {exc}")
+            continue
         try:
             if not child.is_dir():
                 continue

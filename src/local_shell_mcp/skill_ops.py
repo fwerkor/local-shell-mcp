@@ -4,7 +4,11 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from .agent_bridge.skills import activate_skill, scan_agent_skills
+from .agent_bridge.skills import (
+    activate_skill,
+    scan_agent_skills,
+    validate_skill_name,
+)
 from .settings import Settings, get_settings
 
 SKILLS_DIRECTORY = "skills"
@@ -28,15 +32,13 @@ def list_installed_skills(settings: Settings | None = None) -> dict[str, Any]:
 
 
 def _installed_skill(name: str, settings: Settings):
-    normalized_name = name.strip()
-    if not normalized_name:
-        raise ValueError("Skill name must not be empty")
+    validated_name = validate_skill_name(name)
 
     result = scan_agent_skills(settings.agent_config_dir, SKILLS_DIRECTORY)
-    skill = result.skills.get(normalized_name)
+    skill = result.skills.get(validated_name)
     if skill is None:
         raise ValueError(
-            f"Unknown skill: {normalized_name}. Call skills_list to see installed skills."
+            f"Unknown skill: {validated_name}. Call skills_list to see installed skills."
         )
     return result, skill
 
@@ -60,6 +62,10 @@ def read_installed_skill_file(
     """Read one related file from an installed skill by its returned relative path."""
     active_settings = settings or get_settings()
     result, skill = _installed_skill(name, active_settings)
+    if not isinstance(path, str):
+        raise ValueError("Skill file path must be a string")
+    if not path:
+        raise ValueError("Skill file path must not be empty")
     resource_path = Path(path)
     if resource_path.is_absolute() or ".." in resource_path.parts:
         raise ValueError("Skill file path must be relative to the skill directory")

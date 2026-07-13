@@ -4,6 +4,7 @@ import asyncio
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
 
 from .auth import CloudflareAccessMiddleware, Principal, verify_request
 from .downloads import (
@@ -63,6 +64,16 @@ from .todo_ops import todo_read, todo_write
 from .version import version_info
 
 PUBLIC_TOOL_TIMEOUT_S = PUBLIC_RUN_SHELL_TIMEOUT_CAP_S
+
+
+class SkillLoadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=255)
+
+
+class SkillReadFileRequest(SkillLoadRequest):
+    path: str = Field(min_length=1, max_length=4096)
 
 
 def principal_dep(request: Request) -> Principal:
@@ -139,15 +150,17 @@ def build_http_app() -> FastAPI:
         return await _blocking(list_installed_skills, settings)
 
     @app.post("/tools/skill_load")
-    async def api_skill_load(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(load_installed_skill, body["name"], settings)
+    async def api_skill_load(body: SkillLoadRequest, _: Principal = PRINCIPAL_DEP):
+        return await _blocking(load_installed_skill, body.name, settings)
 
     @app.post("/tools/skill_read_file")
-    async def api_skill_read_file(body: dict, _: Principal = PRINCIPAL_DEP):
+    async def api_skill_read_file(
+        body: SkillReadFileRequest, _: Principal = PRINCIPAL_DEP
+    ):
         return await _blocking(
             read_installed_skill_file,
-            body["name"],
-            body["path"],
+            body.name,
+            body.path,
             settings,
         )
 

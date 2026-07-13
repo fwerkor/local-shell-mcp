@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -147,3 +149,53 @@ def test_skill_read_file_works_when_agent_config_is_outside_workspace(
 
     assert loaded["related_files"] == ["reference.md"]
     assert related["content"] == "External reference.\n"
+
+
+def test_invalid_skill_directory_names_are_skipped(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    _install_skill(tmp_path, "space ")
+
+    payload = list_installed_skills()
+
+    assert payload["skills"] == []
+    assert "leading or trailing whitespace" in payload["warnings"][0]
+
+
+def test_skill_load_does_not_normalize_names(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    _install_skill(tmp_path)
+
+    with pytest.raises(ValueError, match="leading or trailing whitespace"):
+        load_installed_skill(" debugging ")
+
+
+def test_skill_rest_rejects_non_string_arguments(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    client = TestClient(build_http_app(), raise_server_exceptions=False)
+
+    load_response = client.post("/tools/skill_load", json={"name": 123})
+    read_response = client.post(
+        "/tools/skill_read_file", json={"name": "debugging", "path": 123}
+    )
+
+    assert load_response.status_code == 422
+    assert read_response.status_code == 422
+
+
+@pytest.mark.skipif(os.name == "nt", reason="surrogate filenames are POSIX-specific")
+def test_non_utf8_skill_directory_names_are_skipped(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    skills_root = _skills_root(tmp_path)
+    skills_root.mkdir(parents=True)
+    raw_name = os.fsencode(skills_root) + b"/bad-\xff"
+    os.mkdir(raw_name)
+    with open(raw_name + b"/SKILL.md", "wb") as handle:
+        handle.write(b"# Bad\n")
+
+    payload = list_installed_skills()
+    client = TestClient(build_http_app(), raise_server_exceptions=False)
+    response = client.get("/tools/skills_list")
+
+    assert payload["skills"] == []
+    assert "valid UTF-8" in payload["warnings"][0]
+    assert response.status_code == 200
