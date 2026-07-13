@@ -14,6 +14,7 @@ ARG YAZI_VERSION=26.5.6
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    VIRTUAL_ENV=/opt/local-shell-mcp-venv \
     LOCAL_SHELL_MCP_WORKSPACE_ROOT=/workspace \
     LOCAL_SHELL_MCP_HOST=0.0.0.0 \
     LOCAL_SHELL_MCP_PORT=8765 \
@@ -83,6 +84,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libreoffice-writer \
   && rm -rf /var/lib/apt/lists/*
 
+RUN python3 -m venv "${VIRTUAL_ENV}"
+ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
+
 RUN set -eux; \
   case "${TARGETARCH}" in \
     amd64) yazi_target="x86_64-unknown-linux-gnu" ;; \
@@ -95,7 +99,7 @@ RUN set -eux; \
   install -m 0755 "/tmp/yazi/yazi-${yazi_target}/ya" /usr/local/bin/ya; \
   rm -rf /tmp/yazi /tmp/yazi.zip
 
-RUN npm install -g yarn pnpm typescript ts-node
+RUN npm install -g yarn@1.22.22 pnpm@9.15.9 typescript@5.7.3 ts-node@10.9.2
 
 WORKDIR /app
 COPY requirements-agent.txt pyproject.toml README.md LICENSE /app/
