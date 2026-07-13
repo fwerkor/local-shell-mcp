@@ -13,6 +13,7 @@ export interface Machine {
 export interface MachinePayload {
   machines: Machine[]
   counts: Record<string, number>
+  enabled?: boolean
 }
 
 export interface FileEntry {

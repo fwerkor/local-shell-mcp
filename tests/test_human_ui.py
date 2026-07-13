@@ -118,6 +118,39 @@ async def test_remote_human_file_action_keeps_worker_workspace_policy(tmp_path, 
     assert (tmp_path / "safe.txt").is_file()
 
 
+def test_ui_path_rejects_reserved_and_ambiguous_mounts(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    for value in ["/", "/api/ui", "/oauth/panel", "/ui/../mcp", "ui"]:
+        monkeypatch.setenv("LOCAL_SHELL_MCP_UI_PATH", value)
+        get_settings.cache_clear()
+        with pytest.raises(ValueError):
+            get_settings()
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_UI_PATH", "/operator/console/")
+    get_settings.cache_clear()
+    assert get_settings().ui_path == "/operator/console"
+
+
+def test_remotes_api_honors_disabled_server_configuration(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
+    get_settings.cache_clear()
+    client = TestClient(build_http_app())
+
+    listing = client.get("/api/ui/remotes")
+    invite = client.post("/api/ui/remotes", json={"name": "disabled"})
+    rename = client.post(
+        "/api/ui/remotes/rename",
+        json={"machine": "missing", "new_name": "other"},
+    )
+
+    assert listing.status_code == 200
+    assert listing.json()["data"]["enabled"] is False
+    assert invite.status_code == 400
+    assert rename.status_code == 400
+    assert "disabled" in invite.json()["message"]
+
+
 def test_todo_api_rejects_stale_human_revision(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     client = TestClient(build_http_app())

@@ -46,6 +46,38 @@ def default_shell_executable() -> str:
     return "/bin/bash"
 
 
+_RESERVED_UI_PATHS = {
+    "/",
+    "/api",
+    "/mcp",
+    "/oauth",
+    "/.well-known",
+    "/download",
+    "/remote",
+    "/join",
+    "/healthz",
+    "/readyz",
+    "/docs",
+    "/openapi.json",
+}
+
+
+def normalize_ui_path(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw.startswith("/"):
+        raise ValueError("ui_path must start with '/'")
+    if any(character in raw for character in ("?", "#", "\\")):
+        raise ValueError("ui_path must be a plain URL path")
+    parts = [part for part in raw.split("/") if part]
+    if not parts or any(part in {".", ".."} for part in parts):
+        raise ValueError("ui_path must identify a non-root path without dot segments")
+    normalized = "/" + "/".join(parts)
+    for reserved in _RESERVED_UI_PATHS:
+        if normalized == reserved or normalized.startswith(reserved + "/"):
+            raise ValueError(f"ui_path conflicts with reserved service path: {reserved}")
+    return normalized
+
+
 SENSITIVE_SETTING_KEYS = {
     "cf_access_audience",
     "cf_access_allowed_emails",
@@ -204,6 +236,11 @@ if _PYDANTIC_AVAILABLE:
                 ".git/config",
             ]
         )
+
+        @field_validator("ui_path", mode="before")
+        @classmethod
+        def validate_ui_path(cls, value: str) -> str:
+            return normalize_ui_path(value)
 
         @field_validator("workspace_root", "audit_log_path", "state_dir", "agent_config_dir", mode="before")
         @classmethod
@@ -381,6 +418,7 @@ else:
                     setattr(self, item.name, _coerce_env_value(os.environ[env_name], getattr(self, item.name)))
             for attr in ("workspace_root", "audit_log_path", "state_dir", "agent_config_dir"):
                 setattr(self, attr, Path(os.path.expandvars(os.path.expanduser(str(getattr(self, attr))))).resolve())
+            self.ui_path = normalize_ui_path(self.ui_path)
             if self.allow_full_container:
                 self.command_denylist = []
                 self.path_denylist = []

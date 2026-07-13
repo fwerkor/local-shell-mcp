@@ -531,6 +531,16 @@ async def api_audit(request: Request) -> Response:
 
 async def api_remotes(request: Request) -> Response:
     try:
+        if not get_settings().remote_enabled:
+            if request.method == "GET":
+                return _json_ok(
+                    {
+                        "machines": [],
+                        "counts": {"online": 0, "offline": 0, "total": 0},
+                        "enabled": False,
+                    }
+                )
+            raise RuntimeError("Remote worker support is disabled")
         if request.method == "GET":
             return _json_ok(remote_manager().list_machines())
         body = await request.json()
@@ -543,6 +553,8 @@ async def api_remotes(request: Request) -> Response:
 async def api_remote_action(request: Request) -> Response:
     action = str(request.path_params.get("action") or "")
     try:
+        if not get_settings().remote_enabled:
+            raise RuntimeError("Remote worker support is disabled")
         body = await request.json()
         machine = str(body.get("machine") or "")
         if not machine:
@@ -556,11 +568,6 @@ async def api_remote_action(request: Request) -> Response:
         return _json_ok(result)
     except Exception as exc:
         return _json_error(exc)
-
-
-def _is_loopback_websocket(websocket: WebSocket) -> bool:
-    client = websocket.client
-    return bool(client and client.host in {"127.0.0.1", "::1", "localhost"})
 
 
 def _websocket_token(websocket: WebSocket) -> str | None:

@@ -22,6 +22,7 @@ export function RemotesScreen({
   setStatus: (message: string) => void
 }) {
   const [machines, setMachines] = useState<Machine[]>([])
+  const [enabled, setEnabled] = useState(true)
   const [selected, setSelected] = useState(0)
   const [dialog, setDialog] = useState<RemoteDialog>({ type: "none" })
   const [loading, setLoading] = useState(false)
@@ -34,8 +35,13 @@ export function RemotesScreen({
     try {
       const payload = await api.remotes()
       setMachines(payload.machines)
+      setEnabled(payload.enabled !== false)
       setSelected((value) => Math.min(value, Math.max(0, payload.machines.length - 1)))
-      setStatus(`${payload.counts.online || 0} remote node(s) online`)
+      setStatus(
+        payload.enabled === false
+          ? "Remote worker support is disabled"
+          : `${payload.counts.online || 0} remote node(s) online`,
+      )
     } catch (error) {
       setStatus(`Remotes: ${formatError(error)}`)
     } finally {
@@ -97,9 +103,9 @@ export function RemotesScreen({
     }
     if (key.name === "j" || key.name === "down") setSelected((value) => Math.min(machines.length - 1, value + 1))
     else if (key.name === "k" || key.name === "up") setSelected((value) => Math.max(0, value - 1))
-    else if (key.name === "n") setDialog({ type: "invite" })
-    else if (key.name === "e" && current) setDialog({ type: "rename", machine: current })
-    else if (key.name === "d" && current) setDialog({ type: "revoke", machine: current })
+    else if (key.name === "n" && enabled) setDialog({ type: "invite" })
+    else if (key.name === "e" && current && enabled) setDialog({ type: "rename", machine: current })
+    else if (key.name === "d" && current && enabled) setDialog({ type: "revoke", machine: current })
     else if (key.name === "r") void refresh()
   })
 
@@ -125,7 +131,10 @@ export function RemotesScreen({
       <box style={{ flexGrow: 1, flexDirection: compact ? "column" : "row", gap: 1 }}>
         <Panel title="Remote nodes" active style={{ flexGrow: 1, paddingTop: 1 }}>
           {machines.length === 0 ? (
-            <EmptyState title="No remote nodes" detail="Press n to create a one-time join invite" />
+            <EmptyState
+              title={enabled ? "No remote nodes" : "Remote workers disabled"}
+              detail={enabled ? "Press n to create a one-time join invite" : "Enable remote workers in server configuration"}
+            />
           ) : (
             <box style={{ flexDirection: "column", flexGrow: 1 }}>
               <box style={{ height: 2, flexDirection: "row", paddingLeft: 1 }}>
