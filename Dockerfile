@@ -1,7 +1,16 @@
 # check=skip=SecretsUsedInArgOrEnv
+ARG BUN_VERSION=1.3.14
+FROM oven/bun:${BUN_VERSION} AS ui-builder
+WORKDIR /source
+COPY ui /source/ui
+COPY src/local_shell_mcp /source/src/local_shell_mcp
+RUN cd /source/ui && bun install --frozen-lockfile && bun run build
+
 ARG PLAYWRIGHT_VERSION=1.59.0
 FROM mcr.microsoft.com/playwright/python:v${PLAYWRIGHT_VERSION}-noble
 ARG PLAYWRIGHT_VERSION
+ARG TARGETARCH
+ARG YAZI_VERSION=26.5.6
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -74,13 +83,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libreoffice-writer \
   && rm -rf /var/lib/apt/lists/*
 
+RUN set -eux; \
+  case "${TARGETARCH}" in \
+    amd64) yazi_target="x86_64-unknown-linux-gnu" ;; \
+    arm64) yazi_target="aarch64-unknown-linux-gnu" ;; \
+    *) echo "Unsupported Yazi architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+  esac; \
+  curl -fsSL "https://github.com/sxyazi/yazi/releases/download/v${YAZI_VERSION}/yazi-${yazi_target}.zip" -o /tmp/yazi.zip; \
+  unzip -q /tmp/yazi.zip -d /tmp/yazi; \
+  install -m 0755 "/tmp/yazi/yazi-${yazi_target}/yazi" /usr/local/bin/yazi; \
+  install -m 0755 "/tmp/yazi/yazi-${yazi_target}/ya" /usr/local/bin/ya; \
+  rm -rf /tmp/yazi /tmp/yazi.zip
+
 RUN npm install -g yarn pnpm typescript ts-node
 
 WORKDIR /app
 COPY requirements-agent.txt pyproject.toml README.md LICENSE /app/
 RUN pip install --no-cache-dir -r requirements-agent.txt
 COPY src /app/src
-RUN pip install --no-cache-dir -e ".[dev]" "playwright==${PLAYWRIGHT_VERSION}"
+COPY --from=ui-builder /source/src/local_shell_mcp/ui_static /app/src/local_shell_mcp/ui_static
+COPY --from=ui-builder /source/ui/dist/local-shell-mcp-tui /usr/local/bin/local-shell-mcp-tui
+RUN pip install --no-cache-dir -e ".[dev]" "playwright==${PLAYWRIGHT_VERSION}" \
+  && chmod 0755 /usr/local/bin/local-shell-mcp-tui
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN useradd -m -u 10001 agent \
