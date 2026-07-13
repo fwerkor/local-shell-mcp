@@ -106,9 +106,7 @@ def scan_agent_skills(
             warnings=[f"Could not scan skills directory {directory}: {exc}"]
         )
     if not skills_dir_exists:
-        return SkillScanResult(
-            warnings=[f"Skills directory not found: {directory}"]
-        )
+        return SkillScanResult()
 
     skills: dict[str, SkillRecord] = {}
     warnings: list[str] = []
@@ -163,6 +161,8 @@ def scan_agent_skills(
             for related_path in child.rglob("*"):
                 try:
                     if not related_path.is_file():
+                        continue
+                    if related_path == entry_path:
                         continue
                     if (
                         related_path.is_symlink()

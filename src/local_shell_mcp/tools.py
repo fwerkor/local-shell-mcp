@@ -66,6 +66,7 @@ from .shell_ops import (
     send_shell,
     start_shell,
 )
+from .skill_ops import list_installed_skills, load_installed_skill
 from .todo_ops import todo_read, todo_write
 from .transfer_ops import (
     normalize_chunk_size,
@@ -871,6 +872,22 @@ def build_mcp() -> FastMCP:
         """Return the local-shell-mcp version, installed package version, Python version, platform, and executable path."""
         try:
             return _ok(get_version_info())
+        except Exception as exc:
+            return _handled_error(exc)
+
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
+    async def skills_list() -> ToolResult:
+        """List installed agent skills from the server-side skills directory without loading their instructions. The MCP tool surface stays fixed; adding or removing skill directories is reflected on the next call."""
+        try:
+            return _ok(await _to_thread(list_installed_skills, settings))
+        except Exception as exc:
+            return _handled_error(exc)
+
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
+    async def skill_load(name: str) -> ToolResult:
+        """Load one installed agent skill by the exact name returned from skills_list. Returns SKILL.md instructions plus related file paths; read related files separately only when needed."""
+        try:
+            return _ok(await _to_thread(load_installed_skill, name, settings))
         except Exception as exc:
             return _handled_error(exc)
 
