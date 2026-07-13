@@ -6,6 +6,13 @@ mode: mcp
 workspace_root: /workspace
 auth_mode: oauth
 
+# Shared native OpenTUI and browser terminal interface.
+ui_enabled: true
+ui_path: /ui
+ui_wallpaper: bing
+ui_terminal_idle_timeout_s: 3600
+ui_terminal_max_sessions: 8
+
 # Environment exposed to user shell commands.
 shell_env_blocklist:
   - CLOUDFLARE_TUNNEL_TOKEN

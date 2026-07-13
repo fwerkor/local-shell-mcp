@@ -21,6 +21,7 @@ nav:
       - Network connectivity: clients/connectivity.md
   - Guides:
       - Usage patterns: guides/usage-patterns.md
+      - Human interface: guides/human-interface.md
       - Remote workers: guides/remote-workers.md
       - File links: guides/file-links.md
       - Git access: guides/git-access.md

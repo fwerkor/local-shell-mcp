@@ -82,6 +82,17 @@ For local-only testing, `auth_bypass_localhost` is enabled by default. Do not ex
 | `file_download_default_max_downloads` | `LOCAL_SHELL_MCP_FILE_DOWNLOAD_DEFAULT_MAX_DOWNLOADS` | `0` | `0` means no default download-count limit. |
 | `file_download_max_file_bytes` | `LOCAL_SHELL_MCP_FILE_DOWNLOAD_MAX_FILE_BYTES` | `0` | `0` means no configured file-size cap for download links. |
 
+### Human interface
+
+| YAML key | Environment variable | Default | Notes |
+|---|---|---|---|
+| `ui_enabled` | `LOCAL_SHELL_MCP_UI_ENABLED` | `True` | Mounts the native OpenTUI launcher, WebUI shell, PTY WebSocket, and `/api/ui/*` routes. |
+| `ui_path` | `LOCAL_SHELL_MCP_UI_PATH` | `'/ui'` | WebUI mount path on the same service. |
+| `ui_tui_command` | `LOCAL_SHELL_MCP_UI_TUI_COMMAND` | `None` | Optional command override for the OpenTUI executable. |
+| `ui_wallpaper` | `LOCAL_SHELL_MCP_UI_WALLPAPER` | `'bing'` | `bing`, `aurora`, or `none`. |
+| `ui_terminal_idle_timeout_s` | `LOCAL_SHELL_MCP_UI_TERMINAL_IDLE_TIMEOUT_S` | `3600` | Inactive browser PTY timeout; `0` disables it. |
+| `ui_terminal_max_sessions` | `LOCAL_SHELL_MCP_UI_TERMINAL_MAX_SESSIONS` | `8` | Maximum concurrent browser OpenTUI PTYs. |
+
 ### Remote workers
 
 | YAML key | Environment variable | Default | Notes |
@@ -134,6 +145,8 @@ mode: mcp
 workspace_root: /workspace
 auth_mode: oauth
 remote_enabled: true
+ui_enabled: true
+ui_path: /ui
 file_download_enabled: true
 shell_env_blocked_prefixes:
   - LOCAL_SHELL_MCP_

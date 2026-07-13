@@ -84,6 +84,28 @@ https://your-public-host.example.com/mcp
 
 Full setup instructions are in the [documentation](https://fwerkor.github.io/local-shell-mcp/). Runtime choices are documented separately from client connections.
 
+## Human interface
+
+The same service now includes a human-facing OpenTUI with Files, Terminals, Todos, Audit, and Remotes screens. The browser interface is an authenticated xterm.js/PTY shell around that exact OpenTUI application rather than a separate dashboard.
+
+Open the WebUI on the service origin:
+
+```text
+http://127.0.0.1:8765/ui
+```
+
+The WebUI uses the same OAuth flow as MCP. Its responsive terminal frame supports mouse interaction on the actual OpenTUI top bar, automatic PTY resizing, reconnects, fullscreen mode, and a cached Bing background with an animated fallback.
+
+Standalone release archives and Docker images also include the native OpenTUI sidecar. Start the service, then launch it without a human login prompt:
+
+```bash
+local-shell-mcp tui
+```
+
+Files follows a Yazi-derived three-pane interaction model and Docker images include `yazi` and `ya`. Manual actions entered through either human interface are excluded from the MCP audit log; the Audit screen and terminal audit rail show model-originated MCP activity.
+
+See the [human interface guide](https://fwerkor.github.io/local-shell-mcp/guides/human-interface/).
+
 ## ChatGPT setup
 
 For full shell, filesystem, Git, and Playwright tools, use ChatGPT Developer Mode or another full MCP client. ChatGPT is a client connection; choose and start a runtime first.
@@ -186,6 +208,9 @@ Important options:
 | `LOCAL_SHELL_MCP_AUTH_MODE` | Use `oauth` for public deployments. |
 | `LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER` | Disable workspace restrictions only in disposable containers/VMs. |
 | `LOCAL_SHELL_MCP_REMOTE_ENABLED` | Enable or disable remote worker control tools. |
+| `LOCAL_SHELL_MCP_UI_ENABLED` | Mount or disable the shared OpenTUI/WebUI human interface. |
+| `LOCAL_SHELL_MCP_UI_PATH` | WebUI mount path on the same service; default `/ui`. |
+| `LOCAL_SHELL_MCP_UI_WALLPAPER` | Select `bing`, `aurora`, or `none` for the browser shell. |
 | `LOCAL_SHELL_MCP_SHELL_ENV_BLOCKLIST` | Environment variables removed from spawned shell processes. |
 | `LOCAL_SHELL_MCP_FILE_DOWNLOAD_ENABLED` | Enable tokenized file download links. |
 
