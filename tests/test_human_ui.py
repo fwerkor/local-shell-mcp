@@ -8,7 +8,7 @@ from starlette.websockets import WebSocket
 
 from local_shell_mcp.audit import audit, query_audit, suppress_audit
 from local_shell_mcp.http_app import build_http_app
-from local_shell_mcp.human_ui import _authorize_websocket
+from local_shell_mcp.human_ui import _authorize_websocket, _bounded_int
 from local_shell_mcp.oauth import public_base_url
 from local_shell_mcp.remote import execute_worker_tool
 from local_shell_mcp.settings import get_settings
@@ -116,6 +116,26 @@ async def test_remote_human_file_action_keeps_worker_workspace_policy(tmp_path, 
     )
     assert result["path"] == "safe.txt"
     assert (tmp_path / "safe.txt").is_file()
+
+
+def test_terminal_api_rejects_invalid_line_count(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    client = TestClient(build_http_app())
+
+    response = client.get(
+        "/api/ui/terminals/read",
+        params={"machine": "local", "session_id": "missing", "lines": "many"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["message"] == "lines must be an integer"
+
+
+def test_terminal_dimensions_are_clamped_to_safe_limits():
+    assert _bounded_int("2", default=120, minimum=20, maximum=500, label="cols") == 20
+    assert _bounded_int("99999", default=120, minimum=20, maximum=500, label="cols") == 500
+    with pytest.raises(ValueError, match="cols must be an integer"):
+        _bounded_int("wide", default=120, minimum=20, maximum=500, label="cols")
 
 
 def test_human_file_mutations_are_not_audited(tmp_path, monkeypatch):

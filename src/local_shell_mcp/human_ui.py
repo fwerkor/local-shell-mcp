@@ -31,6 +31,10 @@ from .version import version_info
 
 UI_API_PREFIX = "/api/ui"
 UI_SUBPROTOCOL = "lsm-ui"
+UI_MIN_COLUMNS = 20
+UI_MAX_COLUMNS = 500
+UI_MIN_ROWS = 8
+UI_MAX_ROWS = 200
 _ACTIVE_UI_TERMINALS: set[int] = set()
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,6 +52,24 @@ def _json_error(exc: Exception, status_code: int = 400) -> JSONResponse:
         },
         status_code=status_code,
     )
+
+
+def _bounded_int(
+    raw: str | int | None,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+    label: str,
+) -> int:
+    if raw in {None, ""}:
+        value = default
+    else:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{label} must be an integer") from exc
+    return max(minimum, min(value, maximum))
 
 
 def _assets_dir() -> Path:
@@ -401,8 +423,14 @@ async def api_terminals(request: Request) -> Response:
 async def api_terminal_read(request: Request) -> Response:
     machine = request.query_params.get("machine", "local")
     session_id = request.query_params.get("session_id", "")
-    lines = int(request.query_params.get("lines", "500"))
     try:
+        lines = _bounded_int(
+            request.query_params.get("lines"),
+            default=500,
+            minimum=1,
+            maximum=5_000,
+            label="lines",
+        )
         if not session_id:
             raise ValueError("session_id is required")
         result = await _machine_dispatch(
@@ -759,10 +787,26 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
 
     offered = [item.strip() for item in websocket.headers.get("sec-websocket-protocol", "").split(",")]
     subprotocol = UI_SUBPROTOCOL if UI_SUBPROTOCOL in offered else None
-    await websocket.accept(subprotocol=subprotocol)
     try:
-        cols = int(websocket.query_params.get("cols", "120"))
-        rows = int(websocket.query_params.get("rows", "36"))
+        await websocket.accept(subprotocol=subprotocol)
+    except Exception:
+        _ACTIVE_UI_TERMINALS.discard(marker)
+        raise
+    try:
+        cols = _bounded_int(
+            websocket.query_params.get("cols"),
+            default=120,
+            minimum=UI_MIN_COLUMNS,
+            maximum=UI_MAX_COLUMNS,
+            label="cols",
+        )
+        rows = _bounded_int(
+            websocket.query_params.get("rows"),
+            default=36,
+            minimum=UI_MIN_ROWS,
+            maximum=UI_MAX_ROWS,
+            label="rows",
+        )
         process = _spawn_tui_process(cols, rows)
     except Exception as exc:
         _ACTIVE_UI_TERMINALS.discard(marker)
@@ -780,6 +824,7 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
             await websocket.send_bytes(data)
 
     async def receiver() -> None:
+        nonlocal cols, rows
         idle_timeout = max(0, settings.ui_terminal_idle_timeout_s)
         while True:
             if idle_timeout:
@@ -803,8 +848,28 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
             except json.JSONDecodeError:
                 await process.write(text.encode())
                 continue
+            if not isinstance(control, dict):
+                continue
             if control.get("type") == "resize":
-                process.resize(int(control.get("cols") or cols), int(control.get("rows") or rows))
+                try:
+                    cols = _bounded_int(
+                        control.get("cols"),
+                        default=cols,
+                        minimum=UI_MIN_COLUMNS,
+                        maximum=UI_MAX_COLUMNS,
+                        label="cols",
+                    )
+                    rows = _bounded_int(
+                        control.get("rows"),
+                        default=rows,
+                        minimum=UI_MIN_ROWS,
+                        maximum=UI_MAX_ROWS,
+                        label="rows",
+                    )
+                except ValueError as exc:
+                    await websocket.close(code=4400, reason=str(exc)[:120])
+                    return
+                process.resize(cols, rows)
 
     tasks = [asyncio.create_task(sender()), asyncio.create_task(receiver())]
     try:
