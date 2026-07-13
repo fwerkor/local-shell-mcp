@@ -7,6 +7,7 @@ from starlette.websockets import WebSocket
 
 from local_shell_mcp.audit import audit, query_audit, suppress_audit
 from local_shell_mcp.http_app import build_http_app
+from local_shell_mcp.human_ui import _authorize_websocket
 from local_shell_mcp.oauth import public_base_url
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.ui_security import UI_LOCAL_TOKEN_HEADER, get_or_create_ui_local_token
@@ -123,8 +124,10 @@ def test_native_tui_token_bypasses_oauth_without_weakening_browser_api(tmp_path,
     assert response.json()["data"]["machines"]["machines"][0]["name"] == "local"
 
 
-def test_websocket_origin_maps_to_http_oauth_resource(tmp_path, monkeypatch):
-    _configure(tmp_path, monkeypatch, auth_mode="oauth")
+def _websocket_for_test(*, client_host: str = "127.0.0.1", protocols: list[str] | None = None) -> WebSocket:
+    headers = [(b"host", b"control.example.com")]
+    if protocols:
+        headers.append((b"sec-websocket-protocol", ", ".join(protocols).encode()))
     scope = {
         "type": "websocket",
         "asgi": {"version": "3.0"},
@@ -132,17 +135,37 @@ def test_websocket_origin_maps_to_http_oauth_resource(tmp_path, monkeypatch):
         "path": "/ui/ws",
         "raw_path": b"/ui/ws",
         "query_string": b"",
-        "headers": [(b"host", b"control.example.com")],
-        "client": ("203.0.113.9", 4242),
+        "headers": headers,
+        "client": (client_host, 4242),
         "server": ("control.example.com", 443),
-        "subprotocols": [],
+        "subprotocols": protocols or [],
     }
+
     async def receive():
         return {"type": "websocket.disconnect"}
 
     async def send(message):  # noqa: ARG001
         return None
 
-    websocket = WebSocket(scope, receive, send)
+    return WebSocket(scope, receive, send)
+
+
+def test_oauth_websocket_does_not_trust_loopback_reverse_proxy(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch, auth_mode="oauth")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST", "true")
+    get_settings.cache_clear()
+
+    assert _authorize_websocket(_websocket_for_test(client_host="127.0.0.1")) is False
+
+
+def test_none_auth_mode_allows_websocket_without_token(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch, auth_mode="none")
+
+    assert _authorize_websocket(_websocket_for_test(client_host="203.0.113.9")) is True
+
+
+def test_websocket_origin_maps_to_http_oauth_resource(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch, auth_mode="oauth")
+    websocket = _websocket_for_test(client_host="203.0.113.9")
 
     assert public_base_url(websocket) == "https://control.example.com"

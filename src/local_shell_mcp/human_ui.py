@@ -4,6 +4,7 @@ import asyncio
 import base64
 import contextlib
 import json
+import logging
 import os
 import shlex
 import shutil
@@ -31,6 +32,7 @@ from .version import version_info
 UI_API_PREFIX = "/api/ui"
 UI_SUBPROTOCOL = "lsm-ui"
 _ACTIVE_UI_TERMINALS: set[int] = set()
+_LOGGER = logging.getLogger(__name__)
 
 
 def _json_ok(data: Any = None, message: str = "") -> JSONResponse:
@@ -553,8 +555,6 @@ def _authorize_websocket(websocket: WebSocket) -> bool:
     settings = get_settings()
     if settings.auth_mode == "none":
         return True
-    if settings.auth_bypass_localhost and _is_loopback_websocket(websocket):
-        return True
     token = _websocket_token(websocket)
     if not token:
         return False
@@ -774,8 +774,10 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
         process = _spawn_tui_process(cols, rows)
     except Exception as exc:
         _ACTIVE_UI_TERMINALS.discard(marker)
-        await websocket.send_bytes(f"\r\nUnable to start the TUI: {exc}\r\n".encode())
-        await websocket.close(code=1011)
+        _LOGGER.exception("Unable to start the human-interface TUI process")
+        detail = f"{type(exc).__name__}: {exc}"
+        await websocket.send_bytes(f"\r\nUnable to start the TUI: {detail}\r\n".encode())
+        await websocket.close(code=1011, reason=detail[:120])
         return
 
     async def sender() -> None:
