@@ -63,7 +63,8 @@ export interface TodoItem {
 }
 
 export interface TodoPayload {
-  updated_at?: number
+  revision: number
+  updated_at?: number | null
   todos: TodoItem[]
 }
 

@@ -118,6 +118,37 @@ async def test_remote_human_file_action_keeps_worker_workspace_policy(tmp_path, 
     assert (tmp_path / "safe.txt").is_file()
 
 
+def test_todo_api_rejects_stale_human_revision(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    client = TestClient(build_http_app())
+
+    initial = client.get("/api/ui/todos").json()["data"]
+    first = client.put(
+        "/api/ui/todos",
+        json={
+            "expected_revision": initial["revision"],
+            "todos": [{"id": "a", "content": "first", "status": "pending", "priority": "medium"}],
+        },
+    )
+    assert first.status_code == 200
+    assert first.json()["data"]["revision"] == 1
+
+    stale = client.put(
+        "/api/ui/todos",
+        json={
+            "expected_revision": initial["revision"],
+            "todos": [{"id": "b", "content": "stale", "status": "pending", "priority": "medium"}],
+        },
+    )
+    assert stale.status_code == 409
+    assert "changed from revision" in stale.json()["message"]
+
+    latest = client.get("/api/ui/todos").json()["data"]
+    assert latest["revision"] == 1
+    assert [item["id"] for item in latest["todos"]] == ["a"]
+    assert not list((tmp_path / ".state").glob(".todos.json.*.tmp"))
+
+
 def test_terminal_api_rejects_invalid_line_count(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     client = TestClient(build_http_app())

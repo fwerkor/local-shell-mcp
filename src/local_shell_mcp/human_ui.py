@@ -25,7 +25,7 @@ from .fs_ops import delete_path, list_dir, perform_file_action, read_text, resol
 from .remote import remote_manager
 from .settings import get_settings
 from .shell_ops import kill_shell, list_shells, read_shell, send_shell, start_shell
-from .todo_ops import todo_read, todo_write
+from .todo_ops import TodoConflictError, todo_read, todo_write
 from .ui_security import UI_LOCAL_TOKEN_ENV, get_or_create_ui_local_token
 from .version import version_info
 
@@ -497,9 +497,15 @@ async def api_todos(request: Request) -> Response:
         if request.method == "GET":
             return _json_ok(todo_read())
         body = await request.json()
+        expected_revision = body.get("expected_revision")
         with suppress_audit():
-            result = todo_write(list(body.get("todos") or []))
+            result = todo_write(
+                list(body.get("todos") or []),
+                int(expected_revision) if expected_revision is not None else None,
+            )
         return _json_ok(result)
+    except TodoConflictError as exc:
+        return _json_error(exc, status_code=409)
     except Exception as exc:
         return _json_error(exc)
 

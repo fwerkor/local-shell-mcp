@@ -34,6 +34,7 @@ function priorityColor(priority: string): string {
 
 export function TodosScreen({ width, height, setStatus }: { width: number; height: number; setStatus: (message: string) => void }) {
   const [todos, setTodos] = useState<TodoItem[]>([])
+  const [revision, setRevision] = useState(0)
   const [selected, setSelected] = useState(0)
   const [filter, setFilter] = useState<"all" | "open" | "completed">("all")
   const [dialog, setDialog] = useState<TodoDialog>({ type: "none" })
@@ -52,6 +53,7 @@ export function TodosScreen({ width, height, setStatus }: { width: number; heigh
     try {
       const payload = await api.todos()
       setTodos(payload.todos)
+      setRevision(payload.revision || 0)
       setSelected((value) => Math.min(value, Math.max(0, payload.todos.length - 1)))
     } catch (error) {
       setStatus(`Todos: ${formatError(error)}`)
@@ -65,11 +67,18 @@ export function TodosScreen({ width, height, setStatus }: { width: number; heigh
   const save = async (next: TodoItem[], message?: string) => {
     setSaving(true)
     try {
-      const payload = await api.writeTodos(next)
+      const payload = await api.writeTodos(next, revision)
       setTodos(payload.todos)
+      setRevision(payload.revision || revision + 1)
       if (message) setStatus(message)
     } catch (error) {
-      setStatus(`Todos: ${formatError(error)}`)
+      const detail = formatError(error)
+      if (detail.includes("changed from revision")) {
+        await load()
+        setStatus("Todos changed elsewhere; reloaded the latest list")
+      } else {
+        setStatus(`Todos: ${detail}`)
+      }
     } finally {
       setSaving(false)
     }

@@ -84,10 +84,10 @@ export const api = {
   todos(): Promise<TodoPayload> {
     return request("/todos")
   },
-  writeTodos(todos: TodoItem[]): Promise<TodoPayload> {
+  writeTodos(todos: TodoItem[], expectedRevision: number): Promise<TodoPayload> {
     return request("/todos", {
       method: "PUT",
-      body: JSON.stringify({ todos }),
+      body: JSON.stringify({ todos, expected_revision: expectedRevision }),
     })
   },
   audit(filters: Record<string, string | number | boolean | null | undefined>): Promise<AuditPayload> {
