@@ -102,7 +102,7 @@ def _front_matter_description(lines: list[str], start: int) -> tuple[str | None,
     raw = "\n".join(lines[start + 1 : end])
     try:
         parsed = yaml.safe_load(raw) if delimiter == "---" else tomllib.loads(raw)
-    except (yaml.YAMLError, tomllib.TOMLDecodeError):
+    except (yaml.YAMLError, tomllib.TOMLDecodeError, RecursionError):
         parsed = None
     if isinstance(parsed, dict):
         description = _normalize_description(parsed.get("description"))
@@ -147,8 +147,8 @@ def _skill_description(markdown: str) -> str:
     return first_heading or "Agent skill"
 
 
-def _bounded(value: int, default: int) -> int:
-    return max(1, int(value or default))
+def _bounded(value: int | None, default: int) -> int:
+    return max(1, int(default if value is None else value))
 
 
 def _append_warning(warnings: list[str], message: str) -> None:
@@ -255,9 +255,12 @@ def _scan_related_files(
 ) -> tuple[list[str], list[str]]:
     related_limit = _bounded(max_related_files, DEFAULT_MAX_RELATED_FILES)
     scan_limit = _bounded(max_scan_entries, DEFAULT_MAX_SCAN_ENTRIES)
-    path_limit = _bounded(max_path_bytes, DEFAULT_MAX_PATH_BYTES)
+    path_limit = max(0, int(max_path_bytes))
     related_files: list[str] = []
     warnings: list[str] = []
+    if path_limit == 0:
+        _append_warning(warnings, "Related file paths omitted because the path budget is exhausted")
+        return related_files, warnings
     path_bytes = 0
     scanned_entries = 0
     stack = [skill_root]
@@ -403,21 +406,29 @@ def scan_agent_skills(
                 except OSError as exc:
                     _append_warning(warnings, f"Skipping skill {entry.name!r}: {exc}")
                     continue
-                if not stat.S_ISDIR(entry_stat.st_mode):
-                    continue
-                if len(candidates) >= skill_limit:
+                if stat.S_ISLNK(entry_stat.st_mode):
                     _append_warning(
                         warnings,
-                        f"Skill list truncated at {skill_limit} directories",
+                        f"Skipping skill {entry.name!r}: skill directory is a symlink",
                     )
-                    break
+                    continue
+                if not stat.S_ISDIR(entry_stat.st_mode):
+                    continue
                 candidates.append(entry.name)
     except OSError as exc:
         return SkillScanResult(warnings=[f"Could not scan skills directory {directory}: {exc}"])
 
+    candidates.sort()
+    if len(candidates) > skill_limit:
+        _append_warning(
+            warnings,
+            f"Skill list truncated at {skill_limit} directories",
+        )
+        candidates = candidates[:skill_limit]
+
     skills: dict[str, SkillRecord] = {}
-    remaining_path_bytes = _bounded(max_path_bytes, DEFAULT_MAX_PATH_BYTES)
-    for name in sorted(candidates):
+    remaining_path_bytes = max(0, int(max_path_bytes))
+    for name in candidates:
         try:
             validate_skill_name(name)
             record, _, _, skill_warnings = _load_skill_record(
@@ -438,7 +449,7 @@ def scan_agent_skills(
         remaining_path_bytes -= sum(
             len(path.encode("utf-8")) for path in record.related_files
         )
-        remaining_path_bytes = max(1, remaining_path_bytes)
+        remaining_path_bytes = max(0, remaining_path_bytes)
 
     return SkillScanResult(skills=skills, warnings=warnings)
 

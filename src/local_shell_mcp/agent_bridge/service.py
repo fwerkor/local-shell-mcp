@@ -14,7 +14,6 @@ from .redaction import (
     redact_mapping,
 )
 from .registry import build_agent_registry
-from .skills import activate_skill
 
 AgentMcpClientManagerFactory = Callable[[float], Any]
 
@@ -119,26 +118,6 @@ def agent_config_status_payload(
 ) -> dict[str, Any]:
     """Return a public, redacted agent bridge configuration status payload."""
     return registry.config_status()
-
-
-def list_agent_skills_payload(
-    registry: AgentCapabilityRegistry,
-) -> dict[str, Any]:
-    """Return discovered agent skills and non-fatal skill warnings."""
-    return {
-        "skills": [asdict(skill) for skill in registry.skills.values()],
-        "warnings": registry.skill_warnings,
-    }
-
-
-def activate_agent_skill_payload(
-    registry: AgentCapabilityRegistry, name: str
-) -> dict[str, Any]:
-    """Load one discovered agent skill payload by name."""
-    skill = registry.skills.get(name)
-    if skill is None:
-        raise ValueError(f"Unknown agent skill: {name}")
-    return activate_skill(registry.config_dir, skill)
 
 
 def list_agent_mcp_servers_payload(

@@ -40,15 +40,6 @@ class AgentMcpServerConfig(BaseModel):
         return value
 
 
-class AgentSkillsConfig(BaseModel):
-    """Configuration for loading Markdown-based agent skills."""
-
-    enabled: bool = True
-    """Whether Markdown skill discovery is enabled."""
-    directory: str = "skills"
-    """Directory, relative to the agent config directory, containing skills."""
-
-
 class AgentDynamicToolsConfig(BaseModel):
     """Feature flags for exposing discovered upstream MCP capabilities as public tools."""
 
@@ -67,8 +58,6 @@ class AgentBridgeManifest(BaseModel):
         default_factory=dict, alias="mcpServers"
     )
     """Named upstream MCP server configurations."""
-    skills: AgentSkillsConfig = Field(default_factory=AgentSkillsConfig)
-    """Markdown skill discovery configuration."""
     dynamic_tools: AgentDynamicToolsConfig = Field(
         default_factory=AgentDynamicToolsConfig, alias="dynamicTools"
     )
@@ -153,17 +142,13 @@ class AgentCapabilityRegistry:
     """Snapshot of discovered agent bridge capabilities."""
 
     config_dir: Path
-    """Directory containing bridge configuration and skills."""
+    """Directory containing the bridge configuration."""
     config_path: Path
     """Path to the bridge manifest file."""
     manifest_status: str
     """Load status for the current manifest."""
     manifest_errors: list[str]
     """Validation or parse errors collected while loading."""
-    skills: dict[str, SkillRecord]
-    """Discovered skills keyed by skill name."""
-    skill_warnings: list[str]
-    """Non-fatal skill discovery warnings."""
     mcp_servers: dict[str, AgentMcpServerRecord]
     """Probed upstream MCP servers keyed by manifest name."""
     dynamic_mcp_tools: bool
@@ -182,10 +167,6 @@ class AgentCapabilityRegistry:
             "config_path": str(self.config_path),
             "manifest_status": self.manifest_status,
             "manifest_errors": self.manifest_errors,
-            "skills": {
-                "count": len(self.skills),
-                "warnings": self.skill_warnings,
-            },
             "mcp_servers": {
                 name: {
                     "type": record.config.type,

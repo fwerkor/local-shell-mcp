@@ -1,4 +1,4 @@
-"""Build agent bridge capability registries from manifests, skills, and MCP probes."""
+"""Build agent bridge capability registries from manifests and MCP probes."""
 
 import asyncio
 import hashlib
@@ -12,10 +12,8 @@ from .models import (
     AgentCapabilityRegistry,
     AgentMcpServerRecord,
     DynamicMcpToolRecord,
-    SkillScanResult,
 )
 from .redaction import redact_configured_value_tree
-from .skills import scan_agent_skills
 from .state import load_agent_manifest
 
 
@@ -83,7 +81,7 @@ def build_agent_registry(
     probe_timeout_s: float = 5,
     dynamic_mcp_tools: bool | None = None,
 ) -> AgentCapabilityRegistry:
-    """Build a bridge registry by loading config, scanning skills, probing MCP servers, and assigning dynamic MCP names."""
+    """Build a bridge registry by loading config, probing MCP servers, and assigning dynamic names."""
     config_root = Path(config_dir)
     manifest = load_agent_manifest(config_root)
     probe_timeout = _probe_timeout_seconds(probe_timeout_s)
@@ -92,14 +90,8 @@ def build_agent_registry(
 
         client_manager = AgentMcpClientManager(call_timeout_s=probe_timeout)
 
-    skill_scan = SkillScanResult()
     mcp_servers: dict[str, AgentMcpServerRecord] = {}
     if manifest.status == "loaded":
-        if manifest.data.skills.enabled:
-            skill_scan = scan_agent_skills(
-                config_root, manifest.data.skills.directory
-            )
-
         for name, server in manifest.data.mcp_servers.items():
             if not server.enabled:
                 mcp_servers[name] = AgentMcpServerRecord(
@@ -175,8 +167,6 @@ def build_agent_registry(
         config_path=manifest.config_path,
         manifest_status=manifest.status,
         manifest_errors=manifest.errors,
-        skills=skill_scan.skills,
-        skill_warnings=skill_scan.warnings,
         mcp_servers=mcp_servers,
         dynamic_mcp_tools=effective_dynamic_mcp,
         dynamic_mcp_tool_map=mcp_tool_map,

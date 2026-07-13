@@ -179,8 +179,10 @@ def test_skill_rest_rejects_non_string_arguments(tmp_path, monkeypatch):
         "/tools/skill_read_file", json={"name": "debugging", "path": 123}
     )
 
-    assert load_response.status_code == 422
-    assert read_response.status_code == 422
+    assert load_response.status_code == 400
+    assert read_response.status_code == 400
+    assert load_response.json()["error"] == "validation_error"
+    assert read_response.json()["error"] == "validation_error"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="surrogate filenames are POSIX-specific")
@@ -291,3 +293,36 @@ def test_skill_read_file_rejects_symlinks(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="regular file"):
         read_installed_skill_file("debugging", "linked.md")
+
+
+def test_skill_path_budget_is_strict_across_registry(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_SKILL_PATH_BYTES", "1")
+    get_settings.cache_clear()
+    for name in ("alpha", "beta"):
+        skill_dir = _skills_root(tmp_path) / name
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+        (skill_dir / "x").write_text("x", encoding="utf-8")
+
+    listed = list_installed_skills()
+    returned_paths = [
+        path
+        for skill in listed["skills"]
+        for path in skill["related_files"]
+    ]
+
+    assert sum(len(path.encode("utf-8")) for path in returned_paths) <= 1
+    assert any("path budget is exhausted" in warning for warning in listed["warnings"])
+
+
+def test_bounded_skill_registry_keeps_sorted_names(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_SKILLS", "1")
+    get_settings.cache_clear()
+    _install_skill(tmp_path, "z-last")
+    _install_skill(tmp_path, "a-first")
+
+    listed = list_installed_skills()
+
+    assert [skill["name"] for skill in listed["skills"]] == ["a-first"]

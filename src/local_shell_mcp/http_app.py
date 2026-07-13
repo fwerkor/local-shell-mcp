@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -103,6 +104,24 @@ def build_http_app() -> FastAPI:
         return JSONResponse(
             status_code=400,
             content={"ok": False, "error": "validation_error", "message": f"Missing required argument: {missing}"},
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error_handler(
+        request: Request, exc: RequestValidationError  # noqa: ARG001
+    ):
+        messages = []
+        for error in exc.errors():
+            location = ".".join(str(part) for part in error.get("loc", [])[1:])
+            message = str(error.get("msg", "Invalid request"))
+            messages.append(f"{location}: {message}" if location else message)
+        return JSONResponse(
+            status_code=400,
+            content={
+                "ok": False,
+                "error": "validation_error",
+                "message": "; ".join(messages) or "Invalid request",
+            },
         )
 
     @app.exception_handler(HTTPException)
