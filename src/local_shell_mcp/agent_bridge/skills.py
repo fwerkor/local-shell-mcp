@@ -4,7 +4,7 @@ import os
 import re
 import stat
 import tomllib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
@@ -17,6 +17,7 @@ DEFAULT_MAX_SCAN_ENTRIES = 5_000
 DEFAULT_MAX_PATH_BYTES = 200_000
 DEFAULT_MAX_ENTRY_BYTES = 512_000
 MAX_SKILL_DESCRIPTION_CHARS = 500
+MAX_SKILL_FILE_PATH_CHARS = 4_096
 MAX_SKILL_WARNINGS = 100
 
 
@@ -52,19 +53,30 @@ def validate_skill_name(name: str) -> str:
 
 
 def validate_skill_file_path(path: str) -> Path:
-    """Validate a relative file path inside one Skill directory."""
+    """Validate a canonical portable POSIX path inside one Skill directory."""
     if not isinstance(path, str):
         raise ValueError("Skill file path must be a string")
     if not path:
         raise ValueError("Skill file path must not be empty")
+    if len(path) > MAX_SKILL_FILE_PATH_CHARS:
+        raise ValueError(
+            f"Skill file path must be at most {MAX_SKILL_FILE_PATH_CHARS} characters"
+        )
+    if "\\" in path or ":" in path:
+        raise ValueError("Skill file path must use portable POSIX separators")
+    if any(ord(character) < 32 or ord(character) == 127 for character in path):
+        raise ValueError("Skill file path must not contain control characters")
     try:
         path.encode("utf-8")
     except UnicodeEncodeError as exc:
         raise ValueError("Skill file path must be valid UTF-8") from exc
-    relative = Path(path)
-    if not _is_relative_child_path(relative) or relative == Path("."):
+
+    relative = PurePosixPath(path)
+    if relative.is_absolute() or ".." in relative.parts or relative == PurePosixPath("."):
         raise ValueError("Skill file path must be relative to the skill directory")
-    return relative
+    if relative.as_posix() != path:
+        raise ValueError("Skill file path must be canonical")
+    return Path(*relative.parts)
 
 
 def _first_sentence(value: str) -> str:
@@ -187,39 +199,46 @@ def _open_regular_file(
         raise ValueError(f"Skill file must be a readable regular file: {exc}") from exc
 
     try:
-        opened_stat = os.fstat(descriptor)
-        if not stat.S_ISREG(opened_stat.st_mode):
-            raise ValueError("Skill file path must be a regular file")
-        if opened_stat.st_size > limit:
+        try:
+            opened_stat = os.fstat(descriptor)
+            if not stat.S_ISREG(opened_stat.st_mode):
+                raise ValueError("Skill file path must be a regular file")
+            if opened_stat.st_size > limit:
+                raise ValueError(
+                    f"Skill file is {opened_stat.st_size} bytes; maximum is {limit}"
+                )
+
+            resolved = path.resolve(strict=True)
+            if not resolved.is_relative_to(root):
+                raise ValueError("Skill file path must stay inside the skill directory")
+            current_stat = path.stat(follow_symlinks=False)
+            if stat.S_ISLNK(current_stat.st_mode):
+                raise ValueError("Skill file path must not be a symlink")
+            if (
+                opened_stat.st_ino
+                and current_stat.st_ino
+                and (opened_stat.st_dev, opened_stat.st_ino)
+                != (current_stat.st_dev, current_stat.st_ino)
+            ):
+                raise ValueError("Skill file changed while it was being opened")
+
+            chunks: list[bytes] = []
+            total = 0
+            while True:
+                chunk = os.read(descriptor, min(64 * 1024, limit + 1 - total))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > limit:
+                    raise ValueError(
+                        f"Skill file exceeds maximum size of {limit} bytes"
+                    )
+            data = b"".join(chunks)
+        except OSError as exc:
             raise ValueError(
-                f"Skill file is {opened_stat.st_size} bytes; maximum is {limit}"
-            )
-
-        resolved = path.resolve(strict=True)
-        if not resolved.is_relative_to(root):
-            raise ValueError("Skill file path must stay inside the skill directory")
-        current_stat = path.stat(follow_symlinks=False)
-        if stat.S_ISLNK(current_stat.st_mode):
-            raise ValueError("Skill file path must not be a symlink")
-        if (
-            opened_stat.st_ino
-            and current_stat.st_ino
-            and (opened_stat.st_dev, opened_stat.st_ino)
-            != (current_stat.st_dev, current_stat.st_ino)
-        ):
-            raise ValueError("Skill file changed while it was being opened")
-
-        chunks: list[bytes] = []
-        total = 0
-        while True:
-            chunk = os.read(descriptor, min(64 * 1024, limit + 1 - total))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            total += len(chunk)
-            if total > limit:
-                raise ValueError(f"Skill file exceeds maximum size of {limit} bytes")
-        data = b"".join(chunks)
+                f"Skill file changed or became unavailable while reading: {exc}"
+            ) from exc
     finally:
         os.close(descriptor)
 
@@ -252,17 +271,26 @@ def _scan_related_files(
     max_related_files: int,
     max_scan_entries: int,
     max_path_bytes: int,
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], int]:
     related_limit = _bounded(max_related_files, DEFAULT_MAX_RELATED_FILES)
-    scan_limit = _bounded(max_scan_entries, DEFAULT_MAX_SCAN_ENTRIES)
+    scan_limit = max(0, int(max_scan_entries))
     path_limit = max(0, int(max_path_bytes))
     related_files: list[str] = []
     warnings: list[str] = []
-    if path_limit == 0:
-        _append_warning(warnings, "Related file paths omitted because the path budget is exhausted")
-        return related_files, warnings
-    path_bytes = 0
     scanned_entries = 0
+    if scan_limit == 0:
+        _append_warning(
+            warnings,
+            "Related file scan omitted because the scan budget is exhausted",
+        )
+        return related_files, warnings, scanned_entries
+    if path_limit == 0:
+        _append_warning(
+            warnings,
+            "Related file paths omitted because the path budget is exhausted",
+        )
+        return related_files, warnings, scanned_entries
+    path_bytes = 0
     stack = [skill_root]
 
     while stack:
@@ -271,13 +299,13 @@ def _scan_related_files(
             with os.scandir(current) as iterator:
                 entries = []
                 for entry in iterator:
-                    scanned_entries += 1
-                    if scanned_entries > scan_limit:
+                    if scanned_entries >= scan_limit:
                         _append_warning(
                             warnings,
                             f"Related file scan stopped after {scan_limit} entries",
                         )
-                        return sorted(related_files), warnings
+                        return sorted(related_files), warnings, scanned_entries
+                    scanned_entries += 1
                     entries.append(entry)
         except OSError as exc:
             _append_warning(warnings, f"Could not scan related files in {current}: {exc}")
@@ -309,19 +337,20 @@ def _scan_related_files(
                 if resolved == entry_path or not resolved.is_relative_to(skill_root):
                     continue
                 relative = _relative_posix(skill_root, resolved)
+                validate_skill_file_path(relative)
                 encoded_bytes = len(relative.encode("utf-8"))
                 if len(related_files) >= related_limit:
                     _append_warning(
                         warnings,
                         f"Related file list truncated at {related_limit} files",
                     )
-                    return sorted(related_files), warnings
+                    return sorted(related_files), warnings, scanned_entries
                 if path_bytes + encoded_bytes > path_limit:
                     _append_warning(
                         warnings,
                         f"Related file paths truncated at {path_limit} UTF-8 bytes",
                     )
-                    return sorted(related_files), warnings
+                    return sorted(related_files), warnings, scanned_entries
                 related_files.append(relative)
                 path_bytes += encoded_bytes
             except (OSError, ValueError) as exc:
@@ -330,7 +359,7 @@ def _scan_related_files(
                     f"Skipping related path {path.name}: {exc}",
                 )
 
-    return sorted(related_files), warnings
+    return sorted(related_files), warnings, scanned_entries
 
 
 def _load_skill_record(
@@ -342,7 +371,7 @@ def _load_skill_record(
     max_related_files: int,
     max_scan_entries: int,
     max_path_bytes: int,
-) -> tuple[SkillRecord, str, int, list[str]]:
+) -> tuple[SkillRecord, str, int, list[str], int]:
     skill_root = _resolve_skill_root(skills_dir, name)
     entry_path = skill_root / "SKILL.md"
     if not entry_path.exists():
@@ -350,7 +379,7 @@ def _load_skill_record(
     content, content_bytes, resolved_entry = _open_regular_file(
         entry_path, skill_root, max_entry_bytes
     )
-    related_files, warnings = _scan_related_files(
+    related_files, warnings, scanned_entries = _scan_related_files(
         skill_root,
         resolved_entry,
         max_related_files=max_related_files,
@@ -363,7 +392,7 @@ def _load_skill_record(
         description=_skill_description(content),
         related_files=related_files,
     )
-    return record, content, content_bytes, warnings
+    return record, content, content_bytes, warnings, scanned_entries
 
 
 def scan_agent_skills(
@@ -394,13 +423,13 @@ def scan_agent_skills(
     try:
         with os.scandir(skills_dir) as iterator:
             for entry in iterator:
-                scanned_entries += 1
-                if scanned_entries > scan_limit:
+                if scanned_entries >= scan_limit:
                     _append_warning(
                         warnings,
                         f"Skill directory scan stopped after {scan_limit} entries",
                     )
                     break
+                scanned_entries += 1
                 try:
                     entry_stat = entry.stat(follow_symlinks=False)
                 except OSError as exc:
@@ -427,23 +456,25 @@ def scan_agent_skills(
         candidates = candidates[:skill_limit]
 
     skills: dict[str, SkillRecord] = {}
+    remaining_scan_entries = max(0, scan_limit - scanned_entries)
     remaining_path_bytes = max(0, int(max_path_bytes))
     for name in candidates:
         try:
             validate_skill_name(name)
-            record, _, _, skill_warnings = _load_skill_record(
+            record, _, _, skill_warnings, related_scanned = _load_skill_record(
                 config_root,
                 skills_dir,
                 name,
                 max_entry_bytes=max_entry_bytes,
                 max_related_files=max_related_files,
-                max_scan_entries=max_scan_entries,
+                max_scan_entries=remaining_scan_entries,
                 max_path_bytes=remaining_path_bytes,
             )
         except (OSError, RuntimeError, ValueError) as exc:
             _append_warning(warnings, f"Skipping skill {name!r}: {exc}")
             continue
         skills[name] = record
+        remaining_scan_entries = max(0, remaining_scan_entries - related_scanned)
         for warning in skill_warnings:
             _append_warning(warnings, f"Skill {name}: {warning}")
         remaining_path_bytes -= sum(
@@ -466,7 +497,7 @@ def load_agent_skill(
 ) -> dict[str, Any]:
     """Load one Skill directly without scanning or reading every installed Skill."""
     config_root, skills_dir = _resolved_skills_directory(config_dir, directory)
-    record, content, content_bytes, warnings = _load_skill_record(
+    record, content, content_bytes, warnings, _ = _load_skill_record(
         config_root,
         skills_dir,
         validate_skill_name(name),

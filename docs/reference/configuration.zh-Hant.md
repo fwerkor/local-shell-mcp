@@ -50,7 +50,7 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-long-random-secret
 | `max_tree_entries` | `LOCAL_SHELL_MCP_MAX_TREE_ENTRIES` | `5000` | tree 視圖最大條目數。 |
 | `max_skills` | `LOCAL_SHELL_MCP_MAX_SKILLS` | `256` | 單次註冊表掃描最多返回的 Skill 目錄數。 |
 | `max_skill_related_files` | `LOCAL_SHELL_MCP_MAX_SKILL_RELATED_FILES` | `1000` | 單個 Skill 最多返回的關聯檔案數。 |
-| `max_skill_scan_entries` | `LOCAL_SHELL_MCP_MAX_SKILL_SCAN_ENTRIES` | `5000` | 單次 Skill 掃描最多檢查的檔案系統條目數。 |
+| `max_skill_scan_entries` | `LOCAL_SHELL_MCP_MAX_SKILL_SCAN_ENTRIES` | `5000` | 單次 `skills_list` 註冊表掃描或單次指定 Skill 載入最多檢查的檔案系統條目數。 |
 | `max_skill_path_bytes` | `LOCAL_SHELL_MCP_MAX_SKILL_PATH_BYTES` | `200000` | 返回的關聯檔案路徑可佔用的最大 UTF-8 位元組數。 |
 | `max_read_many_files` | `LOCAL_SHELL_MCP_MAX_READ_MANY_FILES` | `100` | 批量讀取最大文件數。 |
 | `max_read_many_total_bytes` | `LOCAL_SHELL_MCP_MAX_READ_MANY_TOTAL_BYTES` | `5000000` | 批量讀取總字節上限。 |

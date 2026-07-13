@@ -3,6 +3,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+import local_shell_mcp.agent_bridge.skills as skills_module
 import local_shell_mcp.skill_ops as skill_ops_module
 from local_shell_mcp.http_app import build_http_app
 from local_shell_mcp.settings import get_settings
@@ -326,3 +327,43 @@ def test_bounded_skill_registry_keeps_sorted_names(tmp_path, monkeypatch):
     listed = list_installed_skills()
 
     assert [skill["name"] for skill in listed["skills"]] == ["a-first"]
+
+
+def test_skill_file_paths_reject_windows_and_noncanonical_forms(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    _install_skill(tmp_path)
+
+    for path in (r"sub\\file.md", "C:checklist.md", "./checklist.md"):
+        with pytest.raises(ValueError, match="portable POSIX|canonical"):
+            read_installed_skill_file("debugging", path)
+
+
+def test_skill_file_race_errors_are_normalized(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    _install_skill(tmp_path)
+
+    def fail_read(descriptor, size):  # noqa: ARG001
+        raise FileNotFoundError("replaced during read")
+
+    monkeypatch.setattr(skills_module.os, "read", fail_read)
+
+    with pytest.raises(ValueError, match="changed or became unavailable"):
+        read_installed_skill_file("debugging", "checklist.md")
+
+
+def test_skill_registry_uses_one_global_scan_budget(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_SKILL_SCAN_ENTRIES", "4")
+    get_settings.cache_clear()
+    for name in ("alpha", "beta"):
+        skill_dir = _skills_root(tmp_path) / name
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+        (skill_dir / "reference.md").write_text("x", encoding="utf-8")
+
+    listed = list_installed_skills()
+    by_name = {skill["name"]: skill for skill in listed["skills"]}
+
+    assert by_name["alpha"]["related_files"] == ["reference.md"]
+    assert by_name["beta"]["related_files"] == []
+    assert any("scan budget is exhausted" in warning for warning in listed["warnings"])
