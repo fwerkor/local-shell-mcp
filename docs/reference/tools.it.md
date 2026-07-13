@@ -14,7 +14,7 @@ Questa pagina è una panoramica localizzata degli strumenti. I nomi di strumenti
 
 ### Skill
 
-`skills_list`, `skill_load`
+`skills_list`, `skill_load`, `skill_read_file`
 
 ### Filesystem
 

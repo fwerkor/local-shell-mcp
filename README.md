@@ -38,7 +38,7 @@ The intended safety boundary is the container or VM, not the host.
 | Git workflow support | Clone, diff, commit, push, and inspect history from inside the AI-assisted environment. |
 | Browser automation | Capture screenshots, extract page text, evaluate JavaScript, and save PDFs with Playwright. |
 | Remote workers | Control NAT, firewall, HPC, NPU, or lab machines that can only connect outward. |
-| Agent Skills | Discover and load reusable `SKILL.md` workflows through two fixed tools without changing the MCP tool list. |
+| Agent Skills | Discover, load, and read reusable `SKILL.md` workflows through three fixed tools without changing the MCP tool list. |
 | ChatGPT connector support | OAuth 2.1, `/mcp`, discovery controls, and ChatGPT-compatible tool schemas. |
 | Safer operations | Workspace scoping, shell timeouts, output limits, environment filtering, audit logs, and secret scanning. |
 
@@ -129,7 +129,7 @@ Place externally managed Skill directories under:
 /workspace/.local-shell-mcp/agent_config/skills/<skill-name>/SKILL.md
 ```
 
-Use `skills_list` to discover installed Skills and `skill_load` to load one instruction set. Skill changes are detected on the next call; no per-Skill MCP tools are registered and no client reconnect is required. The runtime intentionally leaves installation, updates, and removal to ordinary file or Git operations.
+Use `skills_list` to discover installed Skills, `skill_load` to load one instruction set, and `skill_read_file` to read a related file by the returned Skill-relative path. Skill changes are detected on the next call; no per-Skill MCP tools are registered and no client reconnect is required. The runtime intentionally leaves installation, updates, and removal to ordinary file or Git operations.
 
 See the [Agent Skills guide](https://fwerkor.github.io/local-shell-mcp/guides/skills/).
 
@@ -143,7 +143,7 @@ The public MCP surface includes:
 - Browser: `playwright_install_tool`, `browser_screenshot_tool`, `browser_get_text_tool`, `browser_eval_tool`, `browser_pdf_tool`, `playwright_run_script_tool`.
 - File links: `create_file_link`, `list_file_links`, `revoke_file_link`.
 - Remote workers: `remote_invite`, `remote_list_machines`, `remote_run_shell_tool`, `remote_*` filesystem/Git/browser/transfer tools.
-- Agent Skills: `skills_list`, `skill_load`.
+- Agent Skills: `skills_list`, `skill_load`, `skill_read_file`.
 - Diagnostics: `environment_info`, `audit_tail`, `todo_read_tool`, `todo_write_tool`.
 
 The detailed tool reference, including purpose, inputs, returns, combinations, and notes for every tool, is available in the [docs](https://fwerkor.github.io/local-shell-mcp/reference/tools/).

@@ -40,9 +40,10 @@
 | 工具 | 用途 | 關鍵輸入 | 注意事項 |
 |---|---|---|---|
 | `skills_list` | 重新掃描服務端 Skills 目錄，列出已安裝 Skill，不載入完整指令。 | 無。 | Skill 增刪不會改變 MCP 工具列表。 |
-| `skill_load` | 載入指定 Skill 的完整 `SKILL.md`。 | `name`：`skills_list` 返回的精確名稱。 | 關聯檔案只返回路徑，需要時再用檔案工具讀取。 |
+| `skill_load` | 載入指定 Skill 的完整 `SKILL.md`。 | `name`：`skills_list` 返回的精確名稱。 | 關聯檔案返回 Skill 內相對路徑。 |
+| `skill_read_file` | 安全讀取指定 Skill 的一個關聯文字檔案。 | `name`、`path`：均使用 `skill_load` 返回的信息。 | 即使 Skill 目錄位於工作區外也可讀取；大小受運行時限制。 |
 
-推薦使用 `skills_list` -> `skill_load` -> 現有 shell、檔案、Git、瀏覽器或遠程工具。兩個工具都是只讀工具，每次調用都會重新掃描目錄。
+推薦使用 `skills_list` -> `skill_load` -> 按需 `skill_read_file` -> 現有 shell、Git、瀏覽器或遠程工具。三個工具都是固定的只讀工具；只有 `skills_list` 掃描註冊表，另外兩個只訪問指定 Skill。
 
 ## 文件系統與搜索
 

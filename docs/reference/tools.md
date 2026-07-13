@@ -169,7 +169,7 @@ All normal tools return a structured `ToolResult` with `ok`, `message`, and `dat
 
 **Returns.** Returns a `ToolResult`. `data.skills_dir` identifies the managed directory, `data.skills` contains metadata, and `data.warnings` reports invalid entries.
 
-**Common combinations.** `skills_list` -> `skill_load` -> existing shell, filesystem, Git, browser, or remote tools.
+**Common combinations.** `skills_list` -> `skill_load` -> `skill_read_file` for a related file when needed -> existing shell, Git, browser, or remote tools.
 
 ### `skill_load`
 
@@ -183,9 +183,24 @@ All normal tools return a structured `ToolResult` with `ok`, `message`, and `dat
 |---|---|---|---|
 | `name` | `str` | required | Exact installed Skill directory name returned by `skills_list`. |
 
-**Returns.** Returns a `ToolResult`. `data.content` contains `SKILL.md`; `data.related_files` contains paths that can be read separately when needed.
+**Returns.** Returns a `ToolResult`. `data.content` contains `SKILL.md`; `data.related_files` contains Skill-relative paths for `skill_read_file`.
 
-**Notes.** Both Skills tools are read-only and rescan the directory on every call. No per-Skill MCP tools are registered.
+### `skill_read_file`
+
+**Purpose.** Read one bounded UTF-8 related file from an installed Skill without exposing its directory through general workspace file tools.
+
+**Use when.** Call only for a path returned by `skill_load`, especially when `agent_config_dir` is outside the workspace.
+
+**Inputs.**
+
+| Name | Type | Required/default | Description |
+|---|---|---|---|
+| `name` | `str` | required | Exact installed Skill directory name returned by `skills_list`. |
+| `path` | `str` | required | Skill-relative related file path returned by `skill_load`. |
+
+**Returns.** Returns a `ToolResult`. `data.content` contains the bounded text content and `data.bytes` records its encoded size.
+
+**Notes.** All three Skill tools are fixed and read-only. `skills_list` performs a bounded registry scan; `skill_load` and `skill_read_file` access only the requested Skill. No per-Skill MCP tools are registered.
 
 ## Shell and Python
 

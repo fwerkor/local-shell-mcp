@@ -39,7 +39,8 @@ REST 工具调用使用一致的成功 / 错误 envelope。校验错误会返回
 
 ```text
 GET  /tools/skills_list
-POST /tools/skill_load   {"name": "debugging"}
+POST /tools/skill_load       {"name": "debugging"}
+POST /tools/skill_read_file  {"name": "debugging", "path": "checklist.md"}
 ```
 
 Skill 目录修改会在下一次调用时生效，不会改变 MCP 工具列表。

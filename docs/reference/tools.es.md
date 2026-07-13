@@ -14,7 +14,7 @@ Esta página es una vista general localizada de las herramientas. Los nombres de
 
 ### Skills
 
-`skills_list`, `skill_load`
+`skills_list`, `skill_load`, `skill_read_file`
 
 ### Filesystem
 

@@ -39,7 +39,8 @@ The fixed Skills registry is also available through REST:
 
 ```text
 GET  /tools/skills_list
-POST /tools/skill_load   {"name": "debugging"}
+POST /tools/skill_load       {"name": "debugging"}
+POST /tools/skill_read_file  {"name": "debugging", "path": "checklist.md"}
 ```
 
 Skill directory changes are visible on the next call and do not alter the MCP tool list.

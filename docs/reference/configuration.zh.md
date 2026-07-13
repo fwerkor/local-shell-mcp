@@ -48,6 +48,10 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-long-random-secret
 | `max_directory_entries` | `LOCAL_SHELL_MCP_MAX_DIRECTORY_ENTRIES` | `5000` | 目录列表最大条目数。 |
 | `max_glob_results` | `LOCAL_SHELL_MCP_MAX_GLOB_RESULTS` | `5000` | glob 搜索最大结果数。 |
 | `max_tree_entries` | `LOCAL_SHELL_MCP_MAX_TREE_ENTRIES` | `5000` | tree 视图最大条目数。 |
+| `max_skills` | `LOCAL_SHELL_MCP_MAX_SKILLS` | `256` | 单次注册表扫描最多返回的 Skill 目录数。 |
+| `max_skill_related_files` | `LOCAL_SHELL_MCP_MAX_SKILL_RELATED_FILES` | `1000` | 单个 Skill 最多返回的关联文件数。 |
+| `max_skill_scan_entries` | `LOCAL_SHELL_MCP_MAX_SKILL_SCAN_ENTRIES` | `5000` | 单次 Skill 扫描最多检查的文件系统条目数。 |
+| `max_skill_path_bytes` | `LOCAL_SHELL_MCP_MAX_SKILL_PATH_BYTES` | `200000` | 返回的关联文件路径可占用的最大 UTF-8 字节数。 |
 | `max_read_many_files` | `LOCAL_SHELL_MCP_MAX_READ_MANY_FILES` | `100` | 批量读取最大文件数。 |
 | `max_read_many_total_bytes` | `LOCAL_SHELL_MCP_MAX_READ_MANY_TOTAL_BYTES` | `5000000` | 批量读取总字节上限。 |
 | `max_todos` | `LOCAL_SHELL_MCP_MAX_TODOS` | `1000` | todo 记录最大数量。 |

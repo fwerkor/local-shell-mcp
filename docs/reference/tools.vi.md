@@ -14,7 +14,7 @@ Trang này là phần tổng quan công cụ đã bản địa hóa. Tên công 
 
 ### Skills
 
-`skills_list`, `skill_load`
+`skills_list`, `skill_load`, `skill_read_file`
 
 ### Filesystem
 

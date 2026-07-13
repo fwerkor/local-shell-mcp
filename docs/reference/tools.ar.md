@@ -14,7 +14,7 @@
 
 ### المهارات
 
-`skills_list`, `skill_load`
+`skills_list`, `skill_load`, `skill_read_file`
 
 ### Filesystem
 

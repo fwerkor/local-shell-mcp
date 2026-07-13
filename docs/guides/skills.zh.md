@@ -30,7 +30,8 @@ Skill 从以下目录读取：
 | 工具 | 用途 |
 |---|---|
 | `skills_list` | 重新扫描目录并列出已安装 Skill 的名称、描述、入口路径、关联文件和非致命警告，不加载完整指令。 |
-| `skill_load` | 按 `skills_list` 返回的精确名称加载完整 `SKILL.md`。关联文件只返回路径，需要时再单独读取。 |
+| `skill_load` | 按 `skills_list` 返回的精确名称加载完整 `SKILL.md`。关联文件返回 Skill 内相对路径。 |
+| `skill_read_file` | 使用 `skill_load` 返回的 Skill 名称和相对路径，读取一个受大小限制的关联文本文件。 |
 
 推荐流程：
 
@@ -38,10 +39,11 @@ Skill 从以下目录读取：
 skills_list
   -> 选择相关 Skill
   -> skill_load(name)
-  -> 按 Skill 指令调用已有 shell、文件、Git、浏览器或远程工具
+  -> 仅在需要关联文件时调用 skill_read_file(name, path)
+  -> 按 Skill 指令调用已有 shell、Git、浏览器或远程工具
 ```
 
-两个工具都是只读工具。每次调用都会重新扫描目录，因此磁盘上的修改会在下一次调用时生效。
+三个工具都是固定的只读工具。`skills_list` 执行有界注册表扫描；`skill_load` 和 `skill_read_file` 只访问指定 Skill。磁盘修改会在下一次调用时生效。
 
 ## 安装和更新 Skill
 
@@ -67,8 +69,9 @@ cp -R /tmp/team-skills/debugging /workspace/.local-shell-mcp/agent_config/skills
 - 拒绝逃逸出配置目录的 Skill 目录和 `SKILL.md`；
 - 拒绝符号链接形式的 Skill 目录、入口文件和关联文件；
 - 跳过缺少 `SKILL.md` 的目录并返回警告；
-- 从 front matter 或首个正文段落提取简短描述；
-- 只返回关联文件路径，不把所有关联内容一次性塞进模型上下文。
+- 解析有长度上限的 YAML 或 TOML front matter 描述，并支持正文和标题回退；
+- 限制入口文件大小、Skill 数量、扫描条目数、关联文件数和路径输出总量；
+- 返回 Skill 内相对路径，并通过 `skill_read_file` 读取，避免向普通文件工具暴露工作区外配置目录。
 
 应把 Skill 视为发布者提供的指令和代码。放入服务端目录前，先审查 `SKILL.md` 和其中脚本。
 
@@ -78,5 +81,6 @@ cp -R /tmp/team-skills/debugging /workspace/.local-shell-mcp/agent_config/skills
 
 ```text
 GET  /tools/skills_list
-POST /tools/skill_load   {"name": "debugging"}
+POST /tools/skill_load       {"name": "debugging"}
+POST /tools/skill_read_file  {"name": "debugging", "path": "checklist.md"}
 ```
