@@ -131,3 +131,25 @@ async def test_conpty_list_closes_naturally_exited_session(tmp_path, monkeypatch
     assert await conpty_ops.list_shells() == {"sessions": []}
     assert session["session_id"] not in conpty_ops._CONPTY_SHELL_SESSIONS
     assert process.close_calls == [False]
+
+
+@pytest.mark.asyncio
+async def test_conpty_cleanup_tolerates_reader_from_closed_event_loop():
+    class ClosedLoop:
+        def is_closed(self):
+            return True
+
+    class StaleReader:
+        _log_destroy_pending = True
+
+        def get_loop(self):
+            return ClosedLoop()
+
+        def done(self):
+            return False
+
+    reader = StaleReader()
+
+    await conpty_ops._cleanup_reader(reader)
+
+    assert reader._log_destroy_pending is False

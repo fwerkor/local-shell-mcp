@@ -32,7 +32,6 @@ def test_public_tool_watchdog_allows_shell_timeout_cleanup():
 @pytest.mark.asyncio
 async def test_run_shell_tool_returns_output_after_command_timeout(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
-    monkeypatch.setattr(tools_module, "PUBLIC_TOOL_TIMEOUT_S", 2)
     get_settings.cache_clear()
 
     response = await build_mcp().call_tool(
@@ -58,7 +57,9 @@ async def test_run_shell_tool_rejects_timeout_above_public_cap(tmp_path, monkeyp
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     get_settings.cache_clear()
 
-    response = await build_mcp().call_tool("run_shell_tool", {"command": "echo ok", "timeout_s": 3600})
+    response = await build_mcp().call_tool(
+        "run_shell_tool", {"command": "echo ok", "timeout_s": 3600}
+    )
     payload = response[0][0].text
 
     assert "timeout_s must be <= 120 seconds for public run_shell" in payload
@@ -234,7 +235,9 @@ async def test_run_shell_timeout_marks_result_and_cleans_up(tmp_path, monkeypatc
 @pytest.mark.asyncio
 async def test_send_shell_invokes_tmux_promptly(monkeypatch):
     calls = []
-    monkeypatch.setattr("local_shell_mcp.shell_ops._use_windows_persistent_shell_backend", lambda: False)
+    monkeypatch.setattr(
+        "local_shell_mcp.shell_ops._use_windows_persistent_shell_backend", lambda: False
+    )
 
     async def fake_tmux(args: list[str], timeout_s: int = 10):
         calls.append((args, timeout_s))
@@ -249,7 +252,9 @@ async def test_send_shell_invokes_tmux_promptly(monkeypatch):
 
     monkeypatch.setattr("local_shell_mcp.shell_ops.tmux", fake_tmux)
 
-    result = await asyncio.wait_for(send_shell("session-1", "echo $HOME && Enter", enter=True), timeout=1)
+    result = await asyncio.wait_for(
+        send_shell("session-1", "echo $HOME && Enter", enter=True), timeout=1
+    )
 
     assert result == {"session_id": "session-1", "sent_bytes": 19, "enter": True}
     assert calls == [

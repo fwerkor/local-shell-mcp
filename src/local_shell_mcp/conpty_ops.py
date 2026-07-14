@@ -143,15 +143,47 @@ def _close_pty_process(process: Any, force: bool) -> None:
             terminate()
 
 
+async def _cleanup_reader(reader: asyncio.Task[None] | None) -> None:
+    if reader is None:
+        return
+    try:
+        owner_loop = reader.get_loop()
+    except Exception:
+        return
+
+    current_loop = asyncio.get_running_loop()
+    if owner_loop is current_loop:
+        if not reader.done():
+            reader.cancel()
+        await asyncio.gather(reader, return_exceptions=True)
+        return
+
+    if reader.done():
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            reader.result()
+        return
+
+    if not owner_loop.is_closed():
+        with contextlib.suppress(RuntimeError):
+            owner_loop.call_soon_threadsafe(reader.cancel)
+        return
+
+    # A persistent session can outlive a short-lived caller event loop. There is
+    # no safe way to await or cancel a task after its owner loop is closed; the
+    # PTY close below releases the blocking read, and dropping this reference is
+    # the only remaining cleanup available.
+    with contextlib.suppress(Exception):
+        reader._log_destroy_pending = False  # type: ignore[attr-defined]
+
+
 async def _cleanup_session(session: ConPtyShellSession, *, force: bool) -> str:
     error = ""
     try:
         await asyncio.to_thread(_close_pty_process, session.process, force)
     except Exception as exc:
         error = repr(exc)
-    if session.reader is not None:
-        session.reader.cancel()
-        await asyncio.gather(session.reader, return_exceptions=True)
+    await _cleanup_reader(session.reader)
+    session.reader = None
     return error
 
 
