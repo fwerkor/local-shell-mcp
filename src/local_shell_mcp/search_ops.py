@@ -6,6 +6,7 @@ from contextlib import suppress
 
 from .fs_ops import missing_path_context, resolve_path
 from .settings import get_settings
+from .shell_ops import _close_process_transport
 
 
 async def grep(query: str, cwd: str = ".", glob: str | None = None, regex: bool = True, case_sensitive: bool = True, max_results: int | None = None) -> dict:
@@ -75,8 +76,8 @@ async def grep(query: str, cwd: str = ".", glob: str | None = None, regex: bool 
     finally:
         if not stderr_task.done():
             stderr_task.cancel()
-        with suppress(Exception):
-            await stderr_task
+        await asyncio.gather(stderr_task, return_exceptions=True)
+        await _close_process_transport(proc)
 
     stderr_bytes = b"".join(stderr_parts)
     stderr_truncated = len(stderr_bytes) > settings.max_output_bytes
