@@ -11,6 +11,7 @@ import tempfile
 import threading
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from .settings import get_settings
@@ -26,7 +27,15 @@ class FileConflictError(RuntimeError):
 
 
 _PATH_LOCKS_GUARD = threading.Lock()
-_PATH_LOCKS: dict[str, threading.RLock] = {}
+
+
+@dataclass
+class _ThreadPathLock:
+    lock: threading.RLock
+    users: int = 0
+
+
+_PATH_LOCKS: dict[str, _ThreadPathLock] = {}
 
 
 def _sha256_file(path: Path) -> str:
@@ -37,47 +46,65 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _thread_lock_for(path: Path) -> threading.RLock:
+def _thread_lock_for(path: Path) -> tuple[str, _ThreadPathLock]:
     key = str(path)
     with _PATH_LOCKS_GUARD:
-        return _PATH_LOCKS.setdefault(key, threading.RLock())
+        entry = _PATH_LOCKS.get(key)
+        if entry is None:
+            entry = _ThreadPathLock(threading.RLock())
+            _PATH_LOCKS[key] = entry
+        entry.users += 1
+        return key, entry
+
+
+def _release_thread_lock(key: str, entry: _ThreadPathLock) -> None:
+    with _PATH_LOCKS_GUARD:
+        entry.users -= 1
+        if entry.users <= 0 and _PATH_LOCKS.get(key) is entry:
+            _PATH_LOCKS.pop(key, None)
 
 
 @contextmanager
 def _path_lock(path: Path) -> Iterator[None]:
-    """Serialize mutations to a path across threads and cooperating processes."""
+    """Serialize mutations using bounded process-lock shards and transient thread locks."""
 
-    thread_lock = _thread_lock_for(path)
-    with thread_lock:
-        lock_dir = get_settings().state_dir / "locks"
-        lock_dir.mkdir(parents=True, exist_ok=True)
-        lock_name = hashlib.sha256(str(path).encode("utf-8")).hexdigest() + ".lock"
-        lock_path = lock_dir / lock_name
-        with lock_path.open("a+b") as handle:
-            if handle.tell() == 0 and handle.seek(0, os.SEEK_END) == 0:
-                handle.write(b"\0")
-                handle.flush()
-            handle.seek(0)
-            if os.name == "nt":
-                import msvcrt
-
-                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
+    key, entry = _thread_lock_for(path)
+    try:
+        with entry.lock:
+            lock_dir = get_settings().state_dir / "locks"
+            lock_dir.mkdir(parents=True, exist_ok=True)
+            digest = hashlib.sha256(str(path).encode("utf-8")).hexdigest()
+            lock_path = lock_dir / f"shard-{digest[:2]}.lock"
+            with lock_path.open("a+b") as handle:
+                with contextlib.suppress(OSError):
+                    lock_path.chmod(0o600)
+                handle.seek(0, os.SEEK_END)
+                if handle.tell() == 0:
+                    handle.write(b"\0")
+                    handle.flush()
                 handle.seek(0)
                 if os.name == "nt":
                     import msvcrt
 
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
                 else:
                     import fcntl
 
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    handle.seek(0)
+                    if os.name == "nt":
+                        import msvcrt
+
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                    else:
+                        import fcntl
+
+                        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        _release_thread_lock(key, entry)
 
 
 @contextmanager

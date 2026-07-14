@@ -251,3 +251,20 @@ def test_read_text_handles_truncated_utf8_sequence(tmp_path, monkeypatch):
     assert result["truncated"] is True
     assert result["bytes_read"] == 4
     assert result["content"] == "你�"
+
+
+def test_path_lock_state_and_lock_files_are_bounded(tmp_path, monkeypatch):
+    from local_shell_mcp.fs_ops import _PATH_LOCKS, _path_lock
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+
+    for index in range(600):
+        with _path_lock(tmp_path / f"file-{index}.txt"):
+            pass
+
+    assert _PATH_LOCKS == {}
+    lock_files = list((tmp_path / ".state" / "locks").glob("*.lock"))
+    assert len(lock_files) <= 256
+    assert all(path.name.startswith("shard-") for path in lock_files)
