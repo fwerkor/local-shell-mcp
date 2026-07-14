@@ -14,6 +14,7 @@ import socket
 import subprocess
 import sys
 import tarfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -209,6 +210,7 @@ class RemoteManager:
         self.pending_machines: dict[str, str] = {}
         self.cancelled_jobs: set[str] = set()
         self._lock = asyncio.Lock()
+        self._state_lock = threading.RLock()
         self._registry_loaded = False
 
     def _registry_path(self) -> Path:
@@ -286,18 +288,24 @@ class RemoteManager:
         ttl = max(60, min(int(ttl_s or settings.remote_invite_ttl_s), 24 * 3600))
         normalized_name = _validate_machine_name(name) if name else None
         code = "lsmcp_inv_" + secrets.token_urlsafe(24)
-        invite = RemoteInvite(code=code, name=normalized_name, workdir=workdir, expires_at=_utc() + ttl)
+        invite = RemoteInvite(
+            code=code,
+            name=normalized_name,
+            workdir=workdir,
+            expires_at=_utc() + ttl,
+        )
         async with self._lock:
-            self._load_registry_unlocked()
-            now = _utc()
-            self.invites = {
-                invite_code: item
-                for invite_code, item in self.invites.items()
-                if not item.used and item.expires_at >= now
-            }
-            if len(self.invites) >= MAX_REMOTE_INVITES:
-                raise RuntimeError("Too many pending remote invites")
-            self.invites[code] = invite
+            with self._state_lock:
+                self._load_registry_unlocked()
+                now = _utc()
+                self.invites = {
+                    invite_code: item
+                    for invite_code, item in self.invites.items()
+                    if not item.used and item.expires_at >= now
+                }
+                if len(self.invites) >= MAX_REMOTE_INVITES:
+                    raise RuntimeError("Too many pending remote invites")
+                self.invites[code] = invite
         join_url = self._join_url(base_url)
         command = f"curl -fsSL {shlex.quote(join_url)} | bash -s -- --invite {shlex.quote(code)}"
         if normalized_name:
@@ -318,26 +326,35 @@ class RemoteManager:
         code = str(payload.get("invite") or "")
         requested_name = str(payload.get("name") or "").strip() or None
         async with self._lock:
-            self._load_registry_unlocked()
-            invite = self.invites.get(code)
-            if not invite:
-                raise ValueError("invalid invite code")
-            if invite.used:
-                raise ValueError("invite code has already been used")
-            if invite.expires_at < _utc():
-                raise ValueError("invite code has expired")
-            name = _validate_machine_name(requested_name or invite.name or self._default_machine_name(payload))
-            if invite.name and requested_name and requested_name != invite.name:
-                raise ValueError(f"invite is bound to machine name {invite.name!r}")
-            if name in self.workers:
-                raise ValueError(f"machine name already exists: {name}")
-            token = "lsmcp_wk_" + secrets.token_urlsafe(32)
-            worker = RemoteWorker(name=name, token=token, workdir=str(payload.get("workdir") or invite.workdir or ""), capabilities=list(payload.get("capabilities") or []), info=dict(payload.get("info") or {}))
-            self.workers[name] = worker
-            self.tokens[token] = name
-            invite.used = True
-            self.invites.pop(code, None)
-            self._save_registry_unlocked()
+            with self._state_lock:
+                self._load_registry_unlocked()
+                invite = self.invites.get(code)
+                if not invite:
+                    raise ValueError("invalid invite code")
+                if invite.used:
+                    raise ValueError("invite code has already been used")
+                if invite.expires_at < _utc():
+                    raise ValueError("invite code has expired")
+                name = _validate_machine_name(
+                    requested_name or invite.name or self._default_machine_name(payload)
+                )
+                if invite.name and requested_name and requested_name != invite.name:
+                    raise ValueError(f"invite is bound to machine name {invite.name!r}")
+                if name in self.workers:
+                    raise ValueError(f"machine name already exists: {name}")
+                token = "lsmcp_wk_" + secrets.token_urlsafe(32)
+                worker = RemoteWorker(
+                    name=name,
+                    token=token,
+                    workdir=str(payload.get("workdir") or invite.workdir or ""),
+                    capabilities=list(payload.get("capabilities") or []),
+                    info=dict(payload.get("info") or {}),
+                )
+                self.workers[name] = worker
+                self.tokens[token] = name
+                invite.used = True
+                self.invites.pop(code, None)
+                self._save_registry_unlocked()
         audit("remote_worker_registered", machine=name)
         return {
             "token": token,
@@ -346,25 +363,25 @@ class RemoteManager:
             "heartbeat_interval_s": _remote_heartbeat_interval_s(),
         }
 
-
     async def resume_worker(self, access: str, payload: dict[str, Any]) -> dict[str, Any]:
         async with self._lock:
-            self._load_registry_unlocked()
-            name = self.tokens.get(access)
-            if not name:
-                raise PermissionError("invalid worker identity")
-            worker = self.workers.get(name)
-            if not worker:
-                raise PermissionError("worker identity is no longer valid")
-            requested_name = str(payload.get("name") or "").strip()
-            if requested_name and requested_name != name:
-                raise ValueError(f"worker identity belongs to machine {name!r}")
-            worker.status = "online"
-            worker.last_seen = _utc()
-            worker.workdir = str(payload.get("workdir") or worker.workdir or "")
-            worker.capabilities = list(payload.get("capabilities") or worker.capabilities)
-            worker.info = dict(payload.get("info") or worker.info)
-            self._save_registry_unlocked()
+            with self._state_lock:
+                self._load_registry_unlocked()
+                name = self.tokens.get(access)
+                if not name:
+                    raise PermissionError("invalid worker identity")
+                worker = self.workers.get(name)
+                if not worker:
+                    raise PermissionError("worker identity is no longer valid")
+                requested_name = str(payload.get("name") or "").strip()
+                if requested_name and requested_name != name:
+                    raise ValueError(f"worker identity belongs to machine {name!r}")
+                worker.status = "online"
+                worker.last_seen = _utc()
+                worker.workdir = str(payload.get("workdir") or worker.workdir or "")
+                worker.capabilities = list(payload.get("capabilities") or worker.capabilities)
+                worker.info = dict(payload.get("info") or worker.info)
+                self._save_registry_unlocked()
         audit("remote_worker_resumed", machine=name)
         return {
             "token": access,
@@ -372,6 +389,7 @@ class RemoteManager:
             "poll_interval_s": 0,
             "heartbeat_interval_s": _remote_heartbeat_interval_s(),
         }
+
     def _default_machine_name(self, payload: dict[str, Any]) -> str:
         self._load_registry_unlocked()
         info = payload.get("info") if isinstance(payload.get("info"), dict) else {}
@@ -386,16 +404,18 @@ class RemoteManager:
         return f"{base}-{index}"
 
     def _cancel_job(self, job_id: str) -> None:
-        future = self.pending.pop(job_id, None)
-        self.pending_machines.pop(job_id, None)
-        self.cancelled_jobs.add(job_id)
-        if future and not future.done():
-            future.cancel()
+        with self._state_lock:
+            future = self.pending.pop(job_id, None)
+            self.pending_machines.pop(job_id, None)
+            self.cancelled_jobs.add(job_id)
+            if future and not future.done():
+                future.cancel()
 
     async def poll(self, token: str) -> dict[str, Any]:
         worker = self._worker_by_token(token)
-        worker.status = "online"
-        worker.last_seen = _utc()
+        with self._state_lock:
+            worker.status = "online"
+            worker.last_seen = _utc()
         loop = asyncio.get_running_loop()
         deadline = loop.time() + get_settings().remote_poll_timeout_s
         while True:
@@ -407,57 +427,67 @@ class RemoteManager:
             except TimeoutError:
                 return {"job": None, "heartbeat": True}
             job_id = str(job.get("id") or "")
-            if job_id in self.cancelled_jobs:
-                self.cancelled_jobs.discard(job_id)
-                continue
+            with self._state_lock:
+                if job_id in self.cancelled_jobs:
+                    self.cancelled_jobs.discard(job_id)
+                    continue
             return {"job": job}
 
     async def heartbeat(self, token: str) -> dict[str, Any]:
         worker = self._worker_by_token(token)
-        worker.status = "online"
-        worker.last_seen = _utc()
-        return {"accepted": True, "name": worker.name}
-
+        with self._state_lock:
+            worker.status = "online"
+            worker.last_seen = _utc()
+            name = worker.name
+        return {"accepted": True, "name": name}
 
     async def submit_result(self, token: str, payload: dict[str, Any]) -> dict[str, Any]:
         worker = self._worker_by_token(token)
-        worker.status = "online"
-        worker.last_seen = _utc()
         job_id = str(payload.get("job_id") or "")
-        self.pending_machines.pop(job_id, None)
-        self.cancelled_jobs.discard(job_id)
-        future = self.pending.pop(job_id, None)
-        if future and not future.done():
-            future.set_result(payload)
+        with self._state_lock:
+            worker.status = "online"
+            worker.last_seen = _utc()
+            self.pending_machines.pop(job_id, None)
+            self.cancelled_jobs.discard(job_id)
+            future = self.pending.pop(job_id, None)
+            if future and not future.done():
+                future.set_result(payload)
         return {"accepted": bool(future)}
 
-    async def call(self, machine: str, tool: str, args: dict[str, Any], timeout_s: int | None = None) -> dict[str, Any]:
-        self._load_registry_unlocked()
-        worker = self.workers.get(machine)
-        if not worker:
-            raise ValueError(f"unknown remote machine: {machine}")
+    async def call(
+        self,
+        machine: str,
+        tool: str,
+        args: dict[str, Any],
+        timeout_s: int | None = None,
+    ) -> dict[str, Any]:
         settings = get_settings()
-        if _utc() - worker.last_seen > max(2 * settings.remote_poll_timeout_s, 60):
-            worker.status = "offline"
-            raise RuntimeError(f"remote machine is offline: {machine}")
-        max_pending = max(1, settings.remote_max_pending_jobs)
-        machine_pending = sum(1 for value in self.pending_machines.values() if value == machine)
-        if worker.queue.qsize() >= max_pending or machine_pending >= max_pending:
-            raise RuntimeError(f"remote machine queue is full: {machine}")
         effective_timeout = timeout_s or settings.remote_job_timeout_s
         job_id = "job_" + uuid.uuid4().hex
         loop = asyncio.get_running_loop()
         future: asyncio.Future[dict[str, Any]] = loop.create_future()
-        self.pending[job_id] = future
-        self.pending_machines[job_id] = machine
-        await worker.queue.put(
-            {
-                "id": job_id,
-                "tool": tool,
-                "args": args,
-                "expires_at": _utc() + effective_timeout,
-            }
-        )
+        with self._state_lock:
+            self._load_registry_unlocked()
+            worker = self.workers.get(machine)
+            if not worker:
+                raise ValueError(f"unknown remote machine: {machine}")
+            if _utc() - worker.last_seen > max(2 * settings.remote_poll_timeout_s, 60):
+                worker.status = "offline"
+                raise RuntimeError(f"remote machine is offline: {machine}")
+            max_pending = max(1, settings.remote_max_pending_jobs)
+            machine_pending = sum(1 for value in self.pending_machines.values() if value == machine)
+            if worker.queue.qsize() >= max_pending or machine_pending >= max_pending:
+                raise RuntimeError(f"remote machine queue is full: {machine}")
+            self.pending[job_id] = future
+            self.pending_machines[job_id] = machine
+            worker.queue.put_nowait(
+                {
+                    "id": job_id,
+                    "tool": tool,
+                    "args": args,
+                    "expires_at": _utc() + effective_timeout,
+                }
+            )
         try:
             result = await asyncio.wait_for(future, timeout=effective_timeout)
         except TimeoutError as exc:
@@ -467,81 +497,99 @@ class RemoteManager:
             self._cancel_job(job_id)
             raise
         finally:
-            self.pending.pop(job_id, None)
-            self.pending_machines.pop(job_id, None)
+            with self._state_lock:
+                self.pending.pop(job_id, None)
+                self.pending_machines.pop(job_id, None)
         if not result.get("ok", False):
-            return _ok({"status": "error", "error_type": result.get("error", "remote_error"), "message": result.get("message", "remote job failed")})
+            return _ok(
+                {
+                    "status": "error",
+                    "error_type": result.get("error", "remote_error"),
+                    "message": result.get("message", "remote job failed"),
+                }
+            )
         return _ok(result.get("data"))
 
     def list_machines(self) -> dict[str, Any]:
-        self._load_registry_unlocked()
-        now = _utc()
-        offline_after_s = max(2 * get_settings().remote_poll_timeout_s, 60)
-        rows = []
-        counts = {"online": 0, "offline": 0}
-        for worker in self.workers.values():
-            last_seen_age_s = None if not worker.last_seen else max(0.0, now - worker.last_seen)
-            status = "online" if last_seen_age_s is not None and last_seen_age_s <= offline_after_s else "offline"
-            worker.status = status
-            counts[status] += 1
-            rows.append(
-                {
-                    "name": worker.name,
-                    "status": status,
-                    "workdir": worker.workdir,
-                    "last_seen": worker.last_seen,
-                    "last_seen_age_s": last_seen_age_s,
-                    "offline_after_s": offline_after_s,
-                    "queue_depth": worker.queue.qsize(),
-                    "capabilities": worker.capabilities,
-                    "info": worker.info,
-                }
-            )
+        with self._state_lock:
+            self._load_registry_unlocked()
+            now = _utc()
+            offline_after_s = max(2 * get_settings().remote_poll_timeout_s, 60)
+            rows = []
+            counts = {"online": 0, "offline": 0}
+            for worker in self.workers.values():
+                last_seen_age_s = None if not worker.last_seen else max(0.0, now - worker.last_seen)
+                status = (
+                    "online"
+                    if last_seen_age_s is not None and last_seen_age_s <= offline_after_s
+                    else "offline"
+                )
+                worker.status = status
+                counts[status] += 1
+                rows.append(
+                    {
+                        "name": worker.name,
+                        "status": status,
+                        "workdir": worker.workdir,
+                        "last_seen": worker.last_seen,
+                        "last_seen_age_s": last_seen_age_s,
+                        "offline_after_s": offline_after_s,
+                        "queue_depth": worker.queue.qsize(),
+                        "capabilities": list(worker.capabilities),
+                        "info": dict(worker.info),
+                    }
+                )
         rows.sort(key=lambda item: (item["status"] != "online", item["name"]))
-        return {"machines": rows, "counts": {**counts, "total": len(rows)}}
+        return {
+            "machines": rows,
+            "counts": {**counts, "total": len(rows)},
+        }
 
     def revoke(self, machine: str) -> dict[str, Any]:
-        self._load_registry_unlocked()
-        worker = self.workers.pop(machine, None)
-        if not worker:
-            raise ValueError(f"unknown remote machine: {machine}")
-        self.tokens.pop(worker.token, None)
-        for job_id, pending_machine in list(self.pending_machines.items()):
-            if pending_machine == machine:
-                self._cancel_job(job_id)
-        while not worker.queue.empty():
-            with contextlib.suppress(asyncio.QueueEmpty):
-                queued = worker.queue.get_nowait()
-                self.cancelled_jobs.discard(str(queued.get("id") or ""))
-        self._save_registry_unlocked()
+        with self._state_lock:
+            self._load_registry_unlocked()
+            worker = self.workers.pop(machine, None)
+            if not worker:
+                raise ValueError(f"unknown remote machine: {machine}")
+            self.tokens.pop(worker.token, None)
+            for job_id, pending_machine in list(self.pending_machines.items()):
+                if pending_machine == machine:
+                    self._cancel_job(job_id)
+            while not worker.queue.empty():
+                with contextlib.suppress(asyncio.QueueEmpty):
+                    queued = worker.queue.get_nowait()
+                    self.cancelled_jobs.discard(str(queued.get("id") or ""))
+            self._save_registry_unlocked()
         return {"machine": machine, "revoked": True}
 
     def rename(self, machine: str, new_name: str) -> dict[str, Any]:
-        self._load_registry_unlocked()
-        new_name = _validate_machine_name(new_name)
-        if new_name in self.workers:
-            raise ValueError(f"machine name already exists: {new_name}")
-        worker = self.workers.pop(machine, None)
-        if not worker:
-            raise ValueError(f"unknown remote machine: {machine}")
-        worker.name = new_name
-        self.workers[new_name] = worker
-        self.tokens[worker.token] = new_name
-        for job_id, pending_machine in list(self.pending_machines.items()):
-            if pending_machine == machine:
-                self.pending_machines[job_id] = new_name
-        self._save_registry_unlocked()
+        with self._state_lock:
+            self._load_registry_unlocked()
+            new_name = _validate_machine_name(new_name)
+            if new_name in self.workers:
+                raise ValueError(f"machine name already exists: {new_name}")
+            worker = self.workers.pop(machine, None)
+            if not worker:
+                raise ValueError(f"unknown remote machine: {machine}")
+            worker.name = new_name
+            self.workers[new_name] = worker
+            self.tokens[worker.token] = new_name
+            for job_id, pending_machine in list(self.pending_machines.items()):
+                if pending_machine == machine:
+                    self.pending_machines[job_id] = new_name
+            self._save_registry_unlocked()
         return {"old_name": machine, "new_name": new_name}
 
     def _worker_by_token(self, token: str) -> RemoteWorker:
-        self._load_registry_unlocked()
-        name = self.tokens.get(token)
-        if not name:
-            raise PermissionError("invalid worker token")
-        worker = self.workers.get(name)
-        if not worker:
-            raise PermissionError("worker token is no longer valid")
-        return worker
+        with self._state_lock:
+            self._load_registry_unlocked()
+            name = self.tokens.get(token)
+            if not name:
+                raise PermissionError("invalid worker token")
+            worker = self.workers.get(name)
+            if not worker:
+                raise PermissionError("worker token is no longer valid")
+            return worker
 
 
 REMOTE_MANAGER = RemoteManager()
@@ -577,7 +625,7 @@ async def join_script(request: Any):  # noqa: ARG001, ANN201
 
     settings = get_settings()
     server = (settings.public_base_url or f"http://{settings.host}:{settings.port}").rstrip("/")
-    script = f'''#!/usr/bin/env bash
+    script = f"""#!/usr/bin/env bash
 set -euo pipefail
 SERVER={shlex.quote(server)}
 BUNDLE_URL="$SERVER{REMOTE_WORKER_BUNDLE_PATH}"
@@ -620,7 +668,7 @@ if [ "$BACKGROUND" = "1" ]; then
 else
   exec python3 -m local_shell_mcp.remote_worker "${{ARGS[@]}}"
 fi
-'''
+"""
     return PlainTextResponse(script, media_type="text/x-shellscript")
 
 
@@ -637,7 +685,9 @@ async def resume_endpoint(request: Any):  # noqa: ANN201
     from starlette.responses import JSONResponse
 
     try:
-        return JSONResponse(_ok(await remote_manager().resume_worker(_bearer_token(request), await request.json())))
+        return JSONResponse(
+            _ok(await remote_manager().resume_worker(_bearer_token(request), await request.json()))
+        )
     except Exception as exc:
         return _error(str(exc), type(exc).__name__, 401)
 
@@ -664,7 +714,9 @@ async def result_endpoint(request: Any):  # noqa: ANN201
     from starlette.responses import JSONResponse
 
     try:
-        return JSONResponse(_ok(await remote_manager().submit_result(_bearer_token(request), await request.json())))
+        return JSONResponse(
+            _ok(await remote_manager().submit_result(_bearer_token(request), await request.json()))
+        )
     except Exception as exc:
         return _error(str(exc), type(exc).__name__, 401)
 
@@ -701,9 +753,23 @@ def _handled_remote_exception(exc: Exception) -> dict[str, Any]:
     return {"ok": False, "error": type(exc).__name__, "message": str(exc)}
 
 
-def _read_many_files_sync(paths: list[str], start_line: int | None = None, end_line: int | None = None, binary_preview: str | None = None, binary_preview_bytes: int = 256) -> dict[str, Any]:
-    files = [read_text(path, start_line, end_line, binary_preview, binary_preview_bytes) for path in paths]
-    return {"files": files, "total_content_bytes": sum(len(str(item.get("content") or item.get("preview") or "").encode()) for item in files)}
+def _read_many_files_sync(
+    paths: list[str],
+    start_line: int | None = None,
+    end_line: int | None = None,
+    binary_preview: str | None = None,
+    binary_preview_bytes: int = 256,
+) -> dict[str, Any]:
+    files = [
+        read_text(path, start_line, end_line, binary_preview, binary_preview_bytes)
+        for path in paths
+    ]
+    return {
+        "files": files,
+        "total_content_bytes": sum(
+            len(str(item.get("content") or item.get("preview") or "").encode()) for item in files
+        ),
+    }
 
 
 async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
@@ -712,7 +778,12 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
     patch_path = temp_dir() / f"remote-patch-{uuid.uuid4().hex}.diff"
     patch_path.parent.mkdir(parents=True, exist_ok=True)
     await _to_thread(patch_path.write_text, patch, encoding="utf-8")
-    result = await run_shell(f"git apply --check {shlex.quote(str(patch_path))} && git apply {shlex.quote(str(patch_path))}", cwd=cwd, timeout_s=60, max_output_bytes=500_000)
+    result = await run_shell(
+        f"git apply --check {shlex.quote(str(patch_path))} && git apply {shlex.quote(str(patch_path))}",
+        cwd=cwd,
+        timeout_s=60,
+        max_output_bytes=500_000,
+    )
     return {**result.model_dump(), "patch_path": relative_display(patch_path)}
 
 
@@ -722,65 +793,73 @@ async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict[st
     script = temp_dir() / f"remote-script-{uuid.uuid4().hex}.py"
     script.parent.mkdir(parents=True, exist_ok=True)
     await _to_thread(script.write_text, code, encoding="utf-8")
-    result = await run_shell(f"python3 {shlex.quote(str(script))}", cwd=cwd, timeout_s=public_run_shell_timeout(timeout_s), max_output_bytes=1_000_000)
+    result = await run_shell(
+        f"python3 {shlex.quote(str(script))}",
+        cwd=cwd,
+        timeout_s=public_run_shell_timeout(timeout_s),
+        max_output_bytes=1_000_000,
+    )
     return {**result.model_dump(), "script_path": relative_display(script)}
 
-REMOTE_WORKER_TOOL_NAMES = frozenset({
-    "environment_info",
-    "run_shell_tool",
-    "run_python_tool",
-    "shell_start",
-    "shell_send",
-    "shell_read",
-    "shell_kill",
-    "shell_list",
-    "job_start",
-    "job_list",
-    "job_tail",
-    "job_stop",
-    "job_retry",
-    "list_files",
-    "tree_view",
-    "glob_search",
-    "grep_search",
-    "read_file",
-    "read_many_files",
-    "write_file",
-    "edit_file",
-    "multi_edit_file",
-    "delete_file_or_dir",
-    "human_file_action",
-    "transfer_stat",
-    "transfer_read_chunk",
-    "transfer_begin_write",
-    "transfer_write_chunk",
-    "transfer_finish_write",
-    "transfer_abort_write",
-    "transfer_alloc_temp_path",
-    "transfer_pack_dir",
-    "transfer_unpack_archive",
-    "transfer_upload_url",
-    "transfer_download_url",
-    "apply_patch",
-    "git_clone_tool",
-    "git_status_tool",
-    "git_diff_tool",
-    "git_log_tool",
-    "git_checkout_tool",
-    "git_fetch_tool",
-    "git_pull_tool",
-    "git_add_tool",
-    "git_commit_tool",
-    "git_push_tool",
-    "git_show_tool",
-    "git_reset_tool",
-    "playwright_install_tool",
-    "browser_screenshot_tool",
-    "browser_get_text_tool",
-    "browser_eval_tool",
-    "browser_pdf_tool",
-    "playwright_run_script_tool",
-})
+
+REMOTE_WORKER_TOOL_NAMES = frozenset(
+    {
+        "environment_info",
+        "run_shell_tool",
+        "run_python_tool",
+        "shell_start",
+        "shell_send",
+        "shell_read",
+        "shell_kill",
+        "shell_list",
+        "job_start",
+        "job_list",
+        "job_tail",
+        "job_stop",
+        "job_retry",
+        "list_files",
+        "tree_view",
+        "glob_search",
+        "grep_search",
+        "read_file",
+        "read_many_files",
+        "write_file",
+        "edit_file",
+        "multi_edit_file",
+        "delete_file_or_dir",
+        "human_file_action",
+        "transfer_stat",
+        "transfer_read_chunk",
+        "transfer_begin_write",
+        "transfer_write_chunk",
+        "transfer_finish_write",
+        "transfer_abort_write",
+        "transfer_alloc_temp_path",
+        "transfer_pack_dir",
+        "transfer_unpack_archive",
+        "transfer_upload_url",
+        "transfer_download_url",
+        "apply_patch",
+        "git_clone_tool",
+        "git_status_tool",
+        "git_diff_tool",
+        "git_log_tool",
+        "git_checkout_tool",
+        "git_fetch_tool",
+        "git_pull_tool",
+        "git_add_tool",
+        "git_commit_tool",
+        "git_push_tool",
+        "git_show_tool",
+        "git_reset_tool",
+        "playwright_install_tool",
+        "browser_screenshot_tool",
+        "browser_get_text_tool",
+        "browser_eval_tool",
+        "browser_pdf_tool",
+        "playwright_run_script_tool",
+    }
+)
 
 
 def _worker_validate_transfer_url(url: str) -> None:
@@ -817,9 +896,7 @@ def _worker_upload_url(
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {path}")
     if stat["size"] != int(expected_bytes):
-        raise ValueError(
-            f"size mismatch: expected {expected_bytes}, got {stat['size']}"
-        )
+        raise ValueError(f"size mismatch: expected {expected_bytes}, got {stat['size']}")
     if str(stat.get("sha256") or "").lower() != str(expected_sha256).lower():
         raise ValueError("file sha256 mismatch before upload")
     curl = shutil.which("curl")
@@ -847,9 +924,7 @@ def _worker_upload_url(
     )
     if completed.returncode != 0:
         detail = completed.stderr.strip() or completed.stdout.strip()
-        raise RuntimeError(
-            f"stream upload failed with curl exit {completed.returncode}: {detail}"
-        )
+        raise RuntimeError(f"stream upload failed with curl exit {completed.returncode}: {detail}")
     try:
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
@@ -927,10 +1002,21 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
     if tool not in REMOTE_WORKER_TOOL_NAMES:
         raise ValueError(f"unsupported remote worker tool: {tool}")
     if tool == "environment_info":
-        result = await run_shell("uname -a; echo '---'; id; echo '---'; pwd; echo '---'; python3 --version; git --version", cwd=".", timeout_s=10)
+        result = await run_shell(
+            "uname -a; echo '---'; id; echo '---'; pwd; echo '---'; python3 --version; git --version",
+            cwd=".",
+            timeout_s=10,
+        )
         return {"settings": safe_settings_dump(), "probe": result.model_dump()}
     if tool == "run_shell_tool":
-        return (await public_run_shell(args["command"], args.get("cwd", "."), args.get("timeout_s"), args.get("max_output_bytes"))).model_dump()
+        return (
+            await public_run_shell(
+                args["command"],
+                args.get("cwd", "."),
+                args.get("timeout_s"),
+                args.get("max_output_bytes"),
+            )
+        ).model_dump()
     if tool == "run_python_tool":
         return await _run_python(args["code"], args.get("cwd", "."), args.get("timeout_s", 60))
     if tool == "shell_start":
@@ -954,17 +1040,47 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
     if tool == "job_retry":
         return await retry_job(args["job_id"])
     if tool == "list_files":
-        return await _to_thread(list_dir, args.get("path", "."), args.get("recursive", False), args.get("max_entries", 500))
+        return await _to_thread(
+            list_dir,
+            args.get("path", "."),
+            args.get("recursive", False),
+            args.get("max_entries", 500),
+        )
     if tool == "tree_view":
         return await tree(args.get("cwd", "."), args.get("depth", 3), args.get("max_entries", 500))
     if tool == "glob_search":
-        return {"paths": await _to_thread(glob_paths, args["pattern"], args.get("cwd", "."), args.get("max_results", 500))}
+        return {
+            "paths": await _to_thread(
+                glob_paths, args["pattern"], args.get("cwd", "."), args.get("max_results", 500)
+            )
+        }
     if tool == "grep_search":
-        return await grep(args["query"], args.get("cwd", "."), args.get("glob"), args.get("regex", True), args.get("case_sensitive", True), args.get("max_results"))
+        return await grep(
+            args["query"],
+            args.get("cwd", "."),
+            args.get("glob"),
+            args.get("regex", True),
+            args.get("case_sensitive", True),
+            args.get("max_results"),
+        )
     if tool == "read_file":
-        return await _to_thread(read_text, args["path"], args.get("start_line"), args.get("end_line"), args.get("binary_preview"), args.get("binary_preview_bytes", 256))
+        return await _to_thread(
+            read_text,
+            args["path"],
+            args.get("start_line"),
+            args.get("end_line"),
+            args.get("binary_preview"),
+            args.get("binary_preview_bytes", 256),
+        )
     if tool == "read_many_files":
-        return await _to_thread(_read_many_files_sync, args["paths"], args.get("start_line"), args.get("end_line"), args.get("binary_preview"), args.get("binary_preview_bytes", 256))
+        return await _to_thread(
+            _read_many_files_sync,
+            args["paths"],
+            args.get("start_line"),
+            args.get("end_line"),
+            args.get("binary_preview"),
+            args.get("binary_preview_bytes", 256),
+        )
     if tool == "write_file":
         return await _to_thread(
             write_text,
@@ -974,7 +1090,9 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
             args.get("expected_sha256"),
         )
     if tool == "edit_file":
-        return await _to_thread(edit_text, args["path"], args["old"], args["new"], args.get("replace_all", False))
+        return await _to_thread(
+            edit_text, args["path"], args["old"], args["new"], args.get("replace_all", False)
+        )
     if tool == "multi_edit_file":
         return await _to_thread(multi_edit_text, args["path"], args["edits"])
     if tool == "delete_file_or_dir":
@@ -990,13 +1108,33 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
     if tool == "transfer_stat":
         return await _to_thread(transfer_stat, args["path"], args.get("sha256", True))
     if tool == "transfer_read_chunk":
-        return await _to_thread(transfer_read_chunk, args["path"], args.get("offset", 0), args.get("chunk_size"))
+        return await _to_thread(
+            transfer_read_chunk, args["path"], args.get("offset", 0), args.get("chunk_size")
+        )
     if tool == "transfer_begin_write":
-        return await _to_thread(transfer_begin_write, args["path"], args.get("overwrite", True), args.get("expected_bytes"))
+        return await _to_thread(
+            transfer_begin_write,
+            args["path"],
+            args.get("overwrite", True),
+            args.get("expected_bytes"),
+        )
     if tool == "transfer_write_chunk":
-        return await _to_thread(transfer_write_chunk, args["path"], args["transfer_id"], args["offset"], args["data_b64"], args.get("expected_sha256"))
+        return await _to_thread(
+            transfer_write_chunk,
+            args["path"],
+            args["transfer_id"],
+            args["offset"],
+            args["data_b64"],
+            args.get("expected_sha256"),
+        )
     if tool == "transfer_finish_write":
-        return await _to_thread(transfer_finish_write, args["path"], args["transfer_id"], args.get("expected_bytes"), args.get("expected_sha256"))
+        return await _to_thread(
+            transfer_finish_write,
+            args["path"],
+            args["transfer_id"],
+            args.get("expected_bytes"),
+            args.get("expected_sha256"),
+        )
     if tool == "transfer_abort_write":
         return await _to_thread(transfer_abort_write, args["path"], args["transfer_id"])
     if tool == "transfer_alloc_temp_path":
@@ -1004,7 +1142,13 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
     if tool == "transfer_pack_dir":
         return await _to_thread(transfer_pack_dir, args["path"], args.get("compression", "gz"))
     if tool == "transfer_unpack_archive":
-        return await _to_thread(transfer_unpack_archive, args["archive_path"], args["dst_path"], args.get("overwrite", True), args.get("cleanup_archive", True))
+        return await _to_thread(
+            transfer_unpack_archive,
+            args["archive_path"],
+            args["dst_path"],
+            args.get("overwrite", True),
+            args.get("cleanup_archive", True),
+        )
     if tool == "transfer_upload_url":
         return await _to_thread(
             _worker_upload_url,
@@ -1027,17 +1171,26 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
     if tool == "apply_patch":
         return await _apply_patch_text(args["patch"], args.get("cwd", "."))
     if tool == "git_clone_tool":
-        return await git_clone(args["repo_url"], args.get("dest"), args.get("branch"), args.get("cwd", "."))
+        return await git_clone(
+            args["repo_url"], args.get("dest"), args.get("branch"), args.get("cwd", ".")
+        )
     if tool == "git_status_tool":
         return await git_status(args.get("cwd", "."))
     if tool == "git_diff_tool":
-        return await git_diff(args.get("cwd", "."), args.get("staged", False), args.get("path"), args.get("stat", False))
+        return await git_diff(
+            args.get("cwd", "."),
+            args.get("staged", False),
+            args.get("path"),
+            args.get("stat", False),
+        )
     if tool == "git_log_tool":
         return await git_log(args.get("cwd", "."), args.get("max_count", 20))
     if tool == "git_checkout_tool":
         return await git_checkout(args["cwd"], args["ref"], args.get("create", False))
     if tool == "git_fetch_tool":
-        return await git_fetch(args.get("cwd", "."), args.get("remote", "origin"), args.get("prune", True))
+        return await git_fetch(
+            args.get("cwd", "."), args.get("remote", "origin"), args.get("prune", True)
+        )
     if tool == "git_pull_tool":
         return await git_pull(args.get("cwd", "."), args.get("ff_only", True))
     if tool == "git_add_tool":
@@ -1045,32 +1198,84 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
     if tool == "git_commit_tool":
         return await git_commit(args["cwd"], args["message"], args.get("all_changes", False))
     if tool == "git_push_tool":
-        return await git_push(args["cwd"], args.get("remote", "origin"), args.get("branch"), args.get("set_upstream", True))
+        return await git_push(
+            args["cwd"],
+            args.get("remote", "origin"),
+            args.get("branch"),
+            args.get("set_upstream", True),
+        )
     if tool == "git_show_tool":
         return await git_show(args.get("cwd", "."), args.get("ref", "HEAD"), args.get("path"))
     if tool == "git_reset_tool":
-        return await git_reset(args.get("cwd", "."), args.get("mode", "soft"), args.get("ref", "HEAD"))
+        return await git_reset(
+            args.get("cwd", "."), args.get("mode", "soft"), args.get("ref", "HEAD")
+        )
     if tool == "playwright_install_tool":
-        return await playwright_install(args.get("browser", "chromium"), args.get("with_deps", False))
+        return await playwright_install(
+            args.get("browser", "chromium"), args.get("with_deps", False)
+        )
     if tool == "browser_screenshot_tool":
-        return await browser_screenshot(args["url"], args.get("output_path", "screenshots/page.png"), args.get("browser", "chromium"), args.get("full_page", True), args.get("width", 1440), args.get("height", 1000), args.get("wait_until", "networkidle"))
+        return await browser_screenshot(
+            args["url"],
+            args.get("output_path", "screenshots/page.png"),
+            args.get("browser", "chromium"),
+            args.get("full_page", True),
+            args.get("width", 1440),
+            args.get("height", 1000),
+            args.get("wait_until", "networkidle"),
+        )
     if tool == "browser_get_text_tool":
-        return await browser_get_text(args["url"], args.get("browser", "chromium"), args.get("wait_until", "networkidle"), args.get("selector", "body"))
+        return await browser_get_text(
+            args["url"],
+            args.get("browser", "chromium"),
+            args.get("wait_until", "networkidle"),
+            args.get("selector", "body"),
+        )
     if tool == "browser_eval_tool":
-        return await browser_eval(args["url"], args["javascript"], args.get("browser", "chromium"), args.get("wait_until", "networkidle"))
+        return await browser_eval(
+            args["url"],
+            args["javascript"],
+            args.get("browser", "chromium"),
+            args.get("wait_until", "networkidle"),
+        )
     if tool == "browser_pdf_tool":
-        return await browser_pdf(args["url"], args.get("output_path", "screenshots/page.pdf"), args.get("width", 1440), args.get("height", 1000), args.get("wait_until", "networkidle"))
+        return await browser_pdf(
+            args["url"],
+            args.get("output_path", "screenshots/page.pdf"),
+            args.get("width", 1440),
+            args.get("height", 1000),
+            args.get("wait_until", "networkidle"),
+        )
     if tool == "playwright_run_script_tool":
-        return await playwright_run_script(args["script"], args.get("cwd", "."), args.get("timeout_s", 60))
+        return await playwright_run_script(
+            args["script"], args.get("cwd", "."), args.get("timeout_s", 60)
+        )
     raise ValueError(f"unsupported remote worker tool: {tool}")
 
 
 def worker_capabilities() -> list[str]:
-    return ["shell", "persistent_shell", "jobs", "files", "file_transfer", "search", "git", "python", "playwright"]
+    return [
+        "shell",
+        "persistent_shell",
+        "jobs",
+        "files",
+        "file_transfer",
+        "search",
+        "git",
+        "python",
+        "playwright",
+    ]
 
 
 def worker_info(workdir: str) -> dict[str, Any]:
-    return {"hostname": socket.gethostname(), "user": os.getenv("USER") or os.getenv("USERNAME") or "unknown", "cwd": os.getcwd(), "workdir": workdir, "python": sys.version.split()[0], "platform": sys.platform}
+    return {
+        "hostname": socket.gethostname(),
+        "user": os.getenv("USER") or os.getenv("USERNAME") or "unknown",
+        "cwd": os.getcwd(),
+        "workdir": workdir,
+        "python": sys.version.split()[0],
+        "platform": sys.platform,
+    }
 
 
 def _parse_worker_http_json(url: str, status_code: int, response_body: str) -> dict[str, Any]:
@@ -1083,11 +1288,15 @@ def _parse_worker_http_json(url: str, status_code: int, response_body: str) -> d
         detail = response_body.strip() or "<empty response body>"
         raise RuntimeError(f"worker HTTP POST {url} returned invalid JSON: {detail}") from exc
     if not isinstance(parsed, dict):
-        raise RuntimeError(f"worker HTTP POST {url} returned JSON {type(parsed).__name__}, expected object")
+        raise RuntimeError(
+            f"worker HTTP POST {url} returned JSON {type(parsed).__name__}, expected object"
+        )
     return parsed
 
 
-def _worker_post_json_with_curl(url: str, body: bytes, headers: dict[str, str], timeout: float | None = None) -> dict[str, Any]:
+def _worker_post_json_with_curl(
+    url: str, body: bytes, headers: dict[str, str], timeout: float | None = None
+) -> dict[str, Any]:
     curl = shutil.which("curl")
     if not curl:
         raise FileNotFoundError("curl is not available")
@@ -1124,11 +1333,15 @@ def _worker_post_json_with_curl(url: str, body: bytes, headers: dict[str, str], 
     if completed.returncode != 0:
         detail_parts = [part for part in (stderr, response_body.strip()) if part]
         detail = "\n".join(detail_parts) or "curl exited without a response body"
-        raise RuntimeError(f"worker HTTP POST {url} failed with curl exit {completed.returncode} (HTTP {status_code}): {detail}")
+        raise RuntimeError(
+            f"worker HTTP POST {url} failed with curl exit {completed.returncode} (HTTP {status_code}): {detail}"
+        )
     return _parse_worker_http_json(url, status_code, response_body)
 
 
-def _worker_post_json_with_urllib(url: str, body: bytes, headers: dict[str, str], timeout: float | None = None) -> dict[str, Any]:
+def _worker_post_json_with_urllib(
+    url: str, body: bytes, headers: dict[str, str], timeout: float | None = None
+) -> dict[str, Any]:
     request = urllib.request.Request(
         url,
         data=body,
@@ -1145,7 +1358,12 @@ def _worker_post_json_with_urllib(url: str, body: bytes, headers: dict[str, str]
     return _parse_worker_http_json(url, status_code, response_body)
 
 
-def _worker_post_json(url: str, payload: dict[str, Any], headers: dict[str, str] | None = None, timeout: float | None = None) -> dict[str, Any]:
+def _worker_post_json(
+    url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str] | None = None,
+    timeout: float | None = None,
+) -> dict[str, Any]:
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("worker server URL must use absolute HTTP(S)")
@@ -1165,7 +1383,11 @@ def _worker_retry_delay(attempt: int) -> float:
 
 
 def _worker_log_retry(operation: str, exc: Exception, delay_s: float) -> None:
-    print(f"Status: {operation} failed: {exc}. Retrying in {delay_s:g}s...", file=sys.stderr, flush=True)
+    print(
+        f"Status: {operation} failed: {exc}. Retrying in {delay_s:g}s...",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def _worker_error_is_retryable(exc: Exception) -> bool:
@@ -1241,7 +1463,11 @@ def _delete_worker_identity() -> None:
 
 def _worker_identity_rejected(exc: Exception) -> bool:
     message = str(exc).lower()
-    return "failed with 401" in message or "invalid worker identity" in message or "identity is no longer valid" in message
+    return (
+        "failed with 401" in message
+        or "invalid worker identity" in message
+        or "identity is no longer valid" in message
+    )
 
 
 async def _worker_resume_or_none(
@@ -1256,7 +1482,11 @@ async def _worker_resume_or_none(
             return await asyncio.to_thread(_worker_post_json, url, payload, headers, timeout)
         except Exception as exc:  # noqa: BLE001
             if _worker_identity_rejected(exc):
-                print("Status: stored worker identity rejected; falling back to invite registration.", file=sys.stderr, flush=True)
+                print(
+                    "Status: stored worker identity rejected; falling back to invite registration.",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 _delete_worker_identity()
                 return None
             if not _worker_error_is_retryable(exc):
@@ -1273,9 +1503,7 @@ async def _execute_worker_job_with_heartbeat(
     headers: dict[str, str],
     heartbeat_interval_s: float,
 ) -> Any:
-    task = asyncio.create_task(
-        execute_worker_tool(job["tool"], dict(job.get("args") or {}))
-    )
+    task = asyncio.create_task(execute_worker_tool(job["tool"], dict(job.get("args") or {})))
 
     async def heartbeat_loop() -> None:
         interval = max(0.01, heartbeat_interval_s)
@@ -1304,7 +1532,13 @@ async def _execute_worker_job_with_heartbeat(
         await asyncio.gather(heartbeat, return_exceptions=True)
 
 
-async def run_worker(server: str, invite: str, name: str | None = None, workdir: str | None = None, persist: bool = False) -> None:  # noqa: ARG001
+async def run_worker(
+    server: str,
+    invite: str,
+    name: str | None = None,
+    workdir: str | None = None,
+    persist: bool = False,
+) -> None:  # noqa: ARG001
     workdir = str(Path(workdir or os.getcwd()).expanduser().resolve())
     os.environ.setdefault("LOCAL_SHELL_MCP_WORKSPACE_ROOT", workdir)
     os.environ.setdefault("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "true")
@@ -1312,7 +1546,13 @@ async def run_worker(server: str, invite: str, name: str | None = None, workdir:
 
     _get_settings.cache_clear()
     server = server.rstrip("/")
-    register_payload = {"invite": invite, "name": name, "workdir": workdir, "capabilities": worker_capabilities(), "info": worker_info(workdir)}
+    register_payload = {
+        "invite": invite,
+        "name": name,
+        "workdir": workdir,
+        "capabilities": worker_capabilities(),
+        "info": worker_info(workdir),
+    }
     identity = _read_worker_identity(server, name)
     body: dict[str, Any] | None = None
     access = ""
@@ -1320,9 +1560,13 @@ async def run_worker(server: str, invite: str, name: str | None = None, workdir:
         access = str(identity["access"])
         resume_payload = {**register_payload, "name": str(identity["name"])}
         resume_headers = {"Author" + "ization": "B" + "earer " + access}
-        body = await _worker_resume_or_none(f"{server}{REMOTE_API_PREFIX}/res" + "ume", resume_payload, resume_headers, 30)
+        body = await _worker_resume_or_none(
+            f"{server}{REMOTE_API_PREFIX}/res" + "ume", resume_payload, resume_headers, 30
+        )
     if body is None:
-        body = await _worker_post_json_forever(f"{server}{REMOTE_API_PREFIX}/register", register_payload, None, 30, "register")
+        body = await _worker_post_json_forever(
+            f"{server}{REMOTE_API_PREFIX}/register", register_payload, None, 30, "register"
+        )
         if not body.get("ok"):
             raise RuntimeError(body.get("message") or body)
         data = body["data"]
@@ -1333,19 +1577,24 @@ async def run_worker(server: str, invite: str, name: str | None = None, workdir:
             raise RuntimeError(body.get("message") or body)
         data = body["data"]
         machine_name = data["name"]
-    heartbeat_interval_s = float(
-        data.get("heartbeat_interval_s") or _remote_heartbeat_interval_s()
+    heartbeat_interval_s = float(data.get("heartbeat_interval_s") or _remote_heartbeat_interval_s())
+    _write_worker_identity(
+        {"server": server, "name": machine_name, "access": access, "workdir": workdir}
     )
-    _write_worker_identity({"server": server, "name": machine_name, "access": access, "workdir": workdir})
     print("local-shell-mcp worker")
     print(f"Server:  {server}")
     print(f"Name:    {machine_name}")
     print(f"Workdir: {workdir}")
     print("Status: connected")
-    print("Keep this process running while ChatGPT should access this machine. Press Ctrl-C to disconnect.", flush=True)
+    print(
+        "Keep this process running while ChatGPT should access this machine. Press Ctrl-C to disconnect.",
+        flush=True,
+    )
     headers = {"Author" + "ization": "B" + "earer " + access}
     while True:
-        poll_body = await _worker_post_json_forever(f"{server}{REMOTE_API_PREFIX}/poll", {}, headers, None, "poll")
+        poll_body = await _worker_post_json_forever(
+            f"{server}{REMOTE_API_PREFIX}/poll", {}, headers, None, "poll"
+        )
         payload = poll_body.get("data", {})
         job = payload.get("job")
         if not job:
@@ -1369,15 +1618,22 @@ async def run_worker(server: str, invite: str, name: str | None = None, workdir:
             out = {"job_id": job["id"], "ok": True, "data": result}
         except Exception as exc:  # noqa: BLE001
             out = {"job_id": job.get("id"), **_handled_remote_exception(exc)}
-        await _worker_post_json_forever(f"{server}{REMOTE_API_PREFIX}/result", out, headers, 30, "submit result")
+        await _worker_post_json_forever(
+            f"{server}{REMOTE_API_PREFIX}/result", out, headers, 30, "submit result"
+        )
+
 
 def run_worker_cli(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Connect this machine to a local-shell-mcp control server")
+    parser = argparse.ArgumentParser(
+        description="Connect this machine to a local-shell-mcp control server"
+    )
     parser.add_argument("--server", required=True)
     parser.add_argument("--invite", required=True)
     parser.add_argument("--name", default=None)
     parser.add_argument("--workdir", default=None)
-    parser.add_argument("--persist", action="store_true", help="Reserved for future user-service installation")
+    parser.add_argument(
+        "--persist", action="store_true", help="Reserved for future user-service installation"
+    )
     args = parser.parse_args(argv)
     try:
         asyncio.run(run_worker(args.server, args.invite, args.name, args.workdir, args.persist))
