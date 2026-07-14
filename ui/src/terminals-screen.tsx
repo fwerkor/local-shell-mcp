@@ -261,7 +261,7 @@ export function TerminalsScreen({
     if (rawMode) {
       key.preventDefault()
       key.stopPropagation()
-      if (key.ctrl && key.name === "t") {
+      if (key.name === "f8") {
         setRawMode(false)
         setStatus("Raw input disabled")
         return
@@ -271,10 +271,10 @@ export function TerminalsScreen({
       return
     }
 
-    if (key.ctrl && key.name === "t") {
+    if (key.name === "f8") {
       if (selectedSession) {
         setRawMode(true)
-        setStatus("Raw input enabled · Ctrl+T to leave")
+        setStatus("Raw input enabled · F8 to leave")
       }
     } else if (key.option && key.name === "[") switchMachine(-1)
     else if (key.option && key.name === "]") switchMachine(1)
@@ -376,7 +376,7 @@ export function TerminalsScreen({
           ["Ctrl+N", "new"],
           ["Ctrl+W", "kill"],
           ["Ctrl+A", "audit"],
-          ["Ctrl+T", "raw mode"],
+          ["F8", "raw mode"],
           ["Alt+[ / ]", "machine"],
           ["Ctrl+R", "refresh"],
         ]}

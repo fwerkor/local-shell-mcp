@@ -8,6 +8,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from contextlib import suppress
 from pathlib import Path
 
 from playwright.sync_api import Page, sync_playwright
@@ -74,60 +75,119 @@ def run_browser(port: int) -> None:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1440, "height": 900})
-        page.goto(f"{origin}/ui", wait_until="networkidle")
+        session_id: str | None = None
+        try:
+            page.goto(f"{origin}/ui", wait_until="networkidle")
 
-        assert page.locator("#auth-gate").is_visible()
-        unauthenticated = page.evaluate("fetch('/api/ui/bootstrap').then(response => response.status)")
-        assert unauthenticated == 401
+            assert page.locator("#auth-gate").is_visible()
+            unauthenticated = page.evaluate(
+                "fetch('/api/ui/bootstrap').then(response => response.status)"
+            )
+            assert unauthenticated == 401
 
-        page.locator("#login-button").click()
-        page.wait_for_url("**/oauth/authorize**")
-        page.get_by_role("button", name="Approve").click()
-        page.wait_for_url("**/ui")
-        page.locator("#connection-state").get_by_text("Connected").wait_for(timeout=15_000)
-        assert page.locator("#auth-gate").is_hidden()
+            page.locator("#login-button").click()
+            page.wait_for_url("**/oauth/authorize**")
+            page.get_by_role("button", name="Approve").click()
+            page.wait_for_url("**/ui")
+            page.locator("#connection-state").get_by_text("Connected").wait_for(timeout=15_000)
+            assert page.locator("#auth-gate").is_hidden()
 
-        authenticated = page.evaluate(
-            """fetch('/api/ui/bootstrap', {
-                headers: {Authorization: 'Bearer ' + sessionStorage.getItem('lsm.ui.access_token')}
-            }).then(response => response.status)"""
-        )
-        assert authenticated == 200
-        wait_for_terminal_text(page, "Alt+1 Files")
+            authenticated = page.evaluate(
+                """fetch('/api/ui/bootstrap', {
+                    headers: {Authorization: 'Bearer ' + sessionStorage.getItem('lsm.ui.access_token')}
+                }).then(response => response.status)"""
+            )
+            assert authenticated == 200
+            wait_for_terminal_text(page, "Alt+1 Files")
 
-        expectations = [
-            ("Alt+2 Terminals", "MCP audit · manual input excluded"),
-            ("Alt+3 Todos", "Todos ·"),
-            ("Alt+4 Audit", "Audit records"),
-            ("Alt+5 Remotes", "Remote nodes"),
-            ("Alt+1 Files", "Preview"),
-        ]
-        for label, expected in expectations:
-            click_tui_label(page, label)
-            wait_for_terminal_text(page, expected)
+            session_name = f"ui-smoke-{os.getpid()}"
+            created = page.evaluate(
+                """name => fetch('/api/ui/terminals/start', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: 'Bearer ' + sessionStorage.getItem('lsm.ui.access_token')
+                    },
+                    body: JSON.stringify({machine: 'local', name, cwd: '.'})
+                }).then(async response => ({status: response.status, body: await response.json()}))""",
+                session_name,
+            )
+            assert created["status"] == 200, created
+            session_id = created["body"]["data"]["session_id"]
+            click_tui_label(page, "Alt+2 Terminals")
+            wait_for_terminal_text(page, "MCP audit · manual input excluded")
+            wait_for_terminal_text(page, session_name, timeout_s=8)
+            page.locator(".xterm-helper-textarea").focus()
+            page.keyboard.press("F8")
+            wait_for_terminal_text(page, "RAW INPUT")
+            page.keyboard.press("Alt+1")
+            page.wait_for_timeout(500)
+            assert "MCP audit · manual input excluded" in page.locator("body").inner_text()
+            page.keyboard.press("F8")
+            wait_for_terminal_text(page, "F8 raw mode")
 
-        page.set_viewport_size({"width": 390, "height": 844})
-        page.wait_for_timeout(600)
-        metrics = page.evaluate(
-            """({
-                width: innerWidth,
-                height: innerHeight,
-                scrollWidth: document.documentElement.scrollWidth,
-                scrollHeight: document.documentElement.scrollHeight,
-                shell: (() => {
-                    const box = document.querySelector('.shell').getBoundingClientRect()
-                    return {width: box.width, height: box.height}
-                })(),
-                size: document.querySelector('#terminal-size').textContent
-            })"""
-        )
-        assert metrics["scrollWidth"] <= metrics["width"]
-        assert metrics["scrollHeight"] <= metrics["height"]
-        assert metrics["shell"]["width"] <= metrics["width"]
-        assert metrics["shell"]["height"] <= metrics["height"]
-        wait_for_terminal_text(page, "A1:Fil")
-        wait_for_terminal_text(page, "A5:Rem")
-        browser.close()
+            expectations = [
+                ("Alt+2 Terminals", "MCP audit · manual input excluded"),
+                ("Alt+3 Todos", "Todos ·"),
+                ("Alt+4 Audit", "Audit records"),
+                ("Alt+5 Remotes", "Remote nodes"),
+                ("Alt+1 Files", "Preview"),
+            ]
+            for label, expected in expectations:
+                click_tui_label(page, label)
+                wait_for_terminal_text(page, expected)
+
+            page.set_viewport_size({"width": 390, "height": 844})
+            page.wait_for_timeout(600)
+            metrics = page.evaluate(
+                """({
+                    width: innerWidth,
+                    height: innerHeight,
+                    scrollWidth: document.documentElement.scrollWidth,
+                    scrollHeight: document.documentElement.scrollHeight,
+                    shell: (() => {
+                        const box = document.querySelector('.shell').getBoundingClientRect()
+                        return {width: box.width, height: box.height}
+                    })(),
+                    size: document.querySelector('#terminal-size').textContent
+                })"""
+            )
+            assert metrics["scrollWidth"] <= metrics["width"]
+            assert metrics["scrollHeight"] <= metrics["height"]
+            assert metrics["shell"]["width"] <= metrics["width"]
+            assert metrics["shell"]["height"] <= metrics["height"]
+            wait_for_terminal_text(page, "A1:Fil")
+            wait_for_terminal_text(page, "A5:Rem")
+
+            killed = page.evaluate(
+                """sessionId => fetch('/api/ui/terminals/kill', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: 'Bearer ' + sessionStorage.getItem('lsm.ui.access_token')
+                    },
+                    body: JSON.stringify({machine: 'local', session_id: sessionId})
+                }).then(async response => ({status: response.status, body: await response.json()}))""",
+                session_id,
+            )
+            assert killed["status"] == 200, killed
+            assert killed["body"]["data"]["killed"] is True, killed
+            session_id = None
+        finally:
+            if session_id and not page.is_closed():
+                with suppress(Exception):
+                    page.evaluate(
+                        """sessionId => fetch('/api/ui/terminals/kill', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                Authorization: 'Bearer ' + sessionStorage.getItem('lsm.ui.access_token')
+                            },
+                            body: JSON.stringify({machine: 'local', session_id: sessionId})
+                        })""",
+                        session_id,
+                    )
+            browser.close()
 
 
 def main() -> int:
