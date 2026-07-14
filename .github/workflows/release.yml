@@ -236,8 +236,8 @@ jobs:
             LOCAL_SHELL_MCP_WORKSPACE_ROOT=/path/to/workspace
             LOCAL_SHELL_MCP_AUTH_MODE=oauth
             LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
-            LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me
-            LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
+            Generate and export LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN as at least 12 random characters.
+            Generate and export LOCAL_SHELL_MCP_OAUTH_JWT_SECRET as at least 32 random bytes.
           EOF
           cd release
           if [[ "${{ matrix.archive }}" == "zip" ]]; then
