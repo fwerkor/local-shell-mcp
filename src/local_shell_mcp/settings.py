@@ -261,6 +261,7 @@ if _PYDANTIC_AVAILABLE:
         max_read_many_total_bytes: int = 5_000_000
         max_todos: int = 1_000
         max_todo_bytes: int = 1_000_000
+        max_http_request_bytes: int = 16_000_000
         max_job_log_bytes: int = 10_000_000
         max_jobs: int = 1_000
         max_audit_tail_bytes: int = 1_000_000
@@ -452,6 +453,7 @@ else:
         max_read_many_total_bytes: int = 5_000_000
         max_todos: int = 1_000
         max_todo_bytes: int = 1_000_000
+        max_http_request_bytes: int = 16_000_000
         max_job_log_bytes: int = 10_000_000
         max_jobs: int = 1_000
         max_audit_tail_bytes: int = 1_000_000

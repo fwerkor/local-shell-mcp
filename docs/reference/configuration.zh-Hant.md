@@ -56,6 +56,7 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-long-random-secret
 | `max_read_many_total_bytes` | `LOCAL_SHELL_MCP_MAX_READ_MANY_TOTAL_BYTES` | `5000000` | 批量讀取總字節上限。 |
 | `max_todos` | `LOCAL_SHELL_MCP_MAX_TODOS` | `1000` | todo 記錄最大數量。 |
 | `max_todo_bytes` | `LOCAL_SHELL_MCP_MAX_TODO_BYTES` | `1000000` | todo 數據最大字節數。 |
+| `max_http_request_bytes` | `LOCAL_SHELL_MCP_MAX_HTTP_REQUEST_BYTES` | `16000000` | MCP、REST、OAuth、UI 與遠端 worker 端點允許緩衝的最大 HTTP 請求體位元組數。 |
 | `max_job_log_bytes` | `LOCAL_SHELL_MCP_MAX_JOB_LOG_BYTES` | `10000000` | 每次長任務運行保留的最大輸出字節數。 |
 | `max_jobs` | `LOCAL_SHELL_MCP_MAX_JOBS` | `1000` | 最多保留的長任務記錄數；執行中的任務不會被清理。 |
 | `max_audit_tail_bytes` | `LOCAL_SHELL_MCP_MAX_AUDIT_TAIL_BYTES` | `1000000` | `audit_tail` 最大返回字節數。 |

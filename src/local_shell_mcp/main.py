@@ -56,7 +56,7 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
 def run_mcp() -> None:
     import uvicorn
 
-    from .auth import AuthMiddleware
+    from .auth import AuthMiddleware, RequestBodyLimitMiddleware
     from .settings import get_settings, validate_public_oauth_configuration
     from .tools import build_mcp
 
@@ -74,6 +74,7 @@ def run_mcp() -> None:
             app = _with_oauth_routes(inner)
             if settings.auth_mode != "none":
                 app.add_middleware(AuthMiddleware)
+            app.add_middleware(RequestBodyLimitMiddleware)
             uvicorn.run(app, host=settings.host, port=settings.port)
             return
 

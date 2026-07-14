@@ -56,6 +56,7 @@ For local-only testing, `auth_bypass_localhost` is enabled by default. Do not ex
 | `max_read_many_total_bytes` | `LOCAL_SHELL_MCP_MAX_READ_MANY_TOTAL_BYTES` | `5000000` |  |
 | `max_todos` | `LOCAL_SHELL_MCP_MAX_TODOS` | `1000` |  |
 | `max_todo_bytes` | `LOCAL_SHELL_MCP_MAX_TODO_BYTES` | `1000000` |  |
+| `max_http_request_bytes` | `LOCAL_SHELL_MCP_MAX_HTTP_REQUEST_BYTES` | `16000000` | Maximum buffered HTTP request body across MCP, REST, OAuth, UI, and remote-worker endpoints. |
 | `max_job_log_bytes` | `LOCAL_SHELL_MCP_MAX_JOB_LOG_BYTES` | `10000000` | Maximum retained output bytes for each long-running job attempt. |
 | `max_jobs` | `LOCAL_SHELL_MCP_MAX_JOBS` | `1000` | Maximum retained long-running job records; active jobs are never pruned. |
 | `max_audit_tail_bytes` | `LOCAL_SHELL_MCP_MAX_AUDIT_TAIL_BYTES` | `1000000` |  |
