@@ -10,7 +10,12 @@ import local_shell_mcp.tools as tools_module
 from local_shell_mcp.http_app import build_http_app
 from local_shell_mcp.models import CommandResult
 from local_shell_mcp.settings import get_settings
-from local_shell_mcp.shell_ops import public_run_shell_timeout, run_shell, send_shell
+from local_shell_mcp.shell_ops import (
+    _close_process_transport,
+    public_run_shell_timeout,
+    run_shell,
+    send_shell,
+)
 from local_shell_mcp.tools import build_mcp
 
 
@@ -108,6 +113,30 @@ def test_public_run_shell_timeout_allows_explicit_cap(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
     assert public_run_shell_timeout(120) == 120
+
+
+@pytest.mark.asyncio
+async def test_close_process_transport_closes_stdin_and_transport():
+    events = []
+
+    class FakeStdin:
+        def close(self):
+            events.append("stdin-close")
+
+        async def wait_closed(self):
+            events.append("stdin-wait-closed")
+
+    class FakeTransport:
+        def close(self):
+            events.append("transport-close")
+
+    class FakeProcess:
+        stdin = FakeStdin()
+        _transport = FakeTransport()
+
+    await _close_process_transport(FakeProcess())  # type: ignore[arg-type]
+
+    assert events == ["stdin-close", "stdin-wait-closed", "transport-close"]
 
 
 @pytest.mark.asyncio

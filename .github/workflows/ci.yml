@@ -218,8 +218,8 @@ jobs:
           HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
         run: |
           set -euxo pipefail
-          brew untap aws/tap || true
-          brew untap azure/bicep || true
+          brew untap --force aws/tap || true
+          brew untap --force azure/bicep || true
 
       - name: Install macOS runtime tools
         if: runner.os == 'macOS'
@@ -318,8 +318,8 @@ jobs:
           HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
         run: |
           set -euxo pipefail
-          brew untap aws/tap || true
-          brew untap azure/bicep || true
+          brew untap --force aws/tap || true
+          brew untap --force azure/bicep || true
 
       - name: Install macOS runtime tools
         if: runner.os == 'macOS'

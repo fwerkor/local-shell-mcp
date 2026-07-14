@@ -8,6 +8,7 @@ import signal
 import sys
 import time
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -196,6 +197,25 @@ async def _finish_reader_tasks(tasks: list[asyncio.Task[None]], timeout_s: float
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
+async def _close_process_transport(proc: asyncio.subprocess.Process) -> None:
+    """Close subprocess pipes before the owning event loop shuts down.
+
+    Windows Proactor transports can otherwise survive until garbage collection and emit an
+    unraisable ``Event loop is closed`` exception after an otherwise successful call. The
+    private transport fallback is isolated here because asyncio Process has no public close.
+    """
+
+    if proc.stdin is not None:
+        proc.stdin.close()
+        with suppress(OSError, TimeoutError):
+            await asyncio.wait_for(proc.stdin.wait_closed(), timeout=1)
+    transport = getattr(proc, "_transport", None)
+    if transport is not None:
+        transport.close()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+
 async def run_shell(command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None) -> CommandResult:
     check_command_policy(command)
     resolved_cwd = resolve_path(cwd, must_exist=True)
@@ -247,8 +267,12 @@ async def run_shell(command: str, cwd: str = ".", timeout_s: int | None = None, 
         if acquired:
             semaphore.release()
 
-    if reader_tasks:
-        await _finish_reader_tasks(reader_tasks)
+    try:
+        if reader_tasks:
+            await _finish_reader_tasks(reader_tasks)
+    finally:
+        if proc is not None:
+            await _close_process_transport(proc)
 
     if termination_error:
         stderr_tail.append(termination_error.encode())
@@ -436,6 +460,7 @@ async def _native_kill_shell(session_id: str) -> dict:
         reader.cancel()
     if session.readers:
         await asyncio.gather(*session.readers, return_exceptions=True)
+    await _close_process_transport(session.process)
     audit("shell_kill", session=session_id, ok=not stderr, backend="native")
     return {"session_id": session_id, "killed": not stderr, "stderr": stderr}
 
