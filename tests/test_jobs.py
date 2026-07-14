@@ -1,6 +1,10 @@
 import asyncio
+import json
 import os
 import shutil
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -110,9 +114,7 @@ async def test_completed_job_retains_output_and_exit_code(tmp_path, monkeypatch)
     if os.name != "nt" and not shutil.which("tmux"):
         pytest.skip("tmux is required for the Unix persistent shell backend")
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
-    monkeypatch.setenv(
-        "LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp")
-    )
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
     get_settings.cache_clear()
 
     job = await start_job("printf 'completed-output\n'; exit 3")
@@ -135,13 +137,11 @@ async def test_job_log_is_bounded_and_reports_truncation(tmp_path, monkeypatch):
     if os.name != "nt" and not shutil.which("tmux"):
         pytest.skip("tmux is required for the Unix persistent shell backend")
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
-    monkeypatch.setenv(
-        "LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp")
-    )
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_JOB_LOG_BYTES", "32")
     get_settings.cache_clear()
 
-    job = await start_job('python3 -c "print(\'x\' * 200)"')
+    job = await start_job("python3 -c \"print('x' * 200)\"")
     row = job
     for _ in range(50):
         await asyncio.sleep(0.1)
@@ -153,3 +153,91 @@ async def test_job_log_is_bounded_and_reports_truncation(tmp_path, monkeypatch):
     assert row["log_truncated"] is True
     tail = await tail_job(job["job_id"])
     assert len(tail["output"].encode()) <= 32
+
+
+def test_concurrent_job_starts_preserve_every_record(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
+    get_settings.cache_clear()
+
+    sessions: set[str] = set()
+    sessions_lock = threading.Lock()
+
+    async def fake_start_shell(cwd=".", name=None, command=None):
+        session_id = str(name)
+        with sessions_lock:
+            sessions.add(session_id)
+        return {
+            "session_id": session_id,
+            "cwd": cwd,
+            "command": command,
+            "backend": "fake",
+        }
+
+    async def fake_list_shells():
+        with sessions_lock:
+            current = sorted(sessions)
+        return {"sessions": [{"session_id": item} for item in current]}
+
+    original_load = jobs_module._load_store
+
+    def slow_load():
+        store = original_load()
+        time.sleep(0.02)
+        return store
+
+    monkeypatch.setattr(jobs_module, "start_shell", fake_start_shell)
+    monkeypatch.setattr(jobs_module, "list_shells", fake_list_shells)
+    monkeypatch.setattr(jobs_module, "_load_store", slow_load)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [executor.submit(asyncio.run, start_job(f"printf {index}")) for index in range(8)]
+        started = [future.result() for future in futures]
+
+    listed = asyncio.run(list_jobs())
+    assert {job["job_id"] for job in listed["jobs"]} == {job["job_id"] for job in started}
+    assert listed["counts"] == {"running": 8}
+
+
+def test_finished_job_history_and_attempt_files_are_bounded(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".local-shell-mcp"
+    runtime_dir = state_dir / "jobs"
+    runtime_dir.mkdir(parents=True)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_JOBS", "2")
+    get_settings.cache_clear()
+
+    rows = []
+    for index in range(4):
+        job_id = f"job_{index}"
+        rows.append(
+            {
+                "job_id": job_id,
+                "name": job_id,
+                "status": "succeeded",
+                "command": "true",
+                "cwd": ".",
+                "created_at": float(index),
+                "updated_at": float(index),
+                "attempts": 1,
+            }
+        )
+        for suffix in ("command", "log", "status.json"):
+            (runtime_dir / f"{job_id}-attempt-1.{suffix}").write_text("data", encoding="utf-8")
+    (state_dir / "jobs.json").write_text(
+        json.dumps({"version": jobs_module.JOB_STORE_VERSION, "jobs": rows}),
+        encoding="utf-8",
+    )
+
+    async def no_shells():
+        return {"sessions": []}
+
+    monkeypatch.setattr(jobs_module, "list_shells", no_shells)
+    listed = asyncio.run(list_jobs())
+
+    assert [job["job_id"] for job in listed["jobs"]] == ["job_3", "job_2"]
+    assert not list(runtime_dir.glob("job_0-attempt-*"))
+    assert not list(runtime_dir.glob("job_1-attempt-*"))
+    assert list(runtime_dir.glob("job_2-attempt-*"))
+    assert list(runtime_dir.glob("job_3-attempt-*"))

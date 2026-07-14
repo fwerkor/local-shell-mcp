@@ -8,6 +8,7 @@ import re
 import shlex
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -27,6 +28,7 @@ from .shell_ops import (
 JOB_STORE_FILE_NAME = "jobs.json"
 JOB_STORE_VERSION = 2
 TERMINAL_STATUSES = {"succeeded", "failed", "exited", "stopped", "lost"}
+_JOB_STORE_THREAD_LOCK = threading.RLock()
 
 
 def _utc() -> float:
@@ -41,6 +43,40 @@ def _job_runtime_dir() -> Path:
     path = get_settings().state_dir / "jobs"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _job_store_lock_path() -> Path:
+    path = get_settings().state_dir / "jobs.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _lock_store_file(handle: BinaryIO) -> None:
+    handle.seek(0, os.SEEK_END)
+    if handle.tell() == 0:
+        handle.write(b"\0")
+        handle.flush()
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock_store_file(handle: BinaryIO) -> None:
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _load_store() -> dict[str, Any]:
@@ -62,7 +98,36 @@ def _load_store() -> dict[str, Any]:
     }
 
 
+def _remove_attempt_files(job_id: str, keep_attempt: int | None = None) -> None:
+    if not job_id:
+        return
+    keep_stem = f"{job_id}-attempt-{keep_attempt}." if keep_attempt is not None else None
+    for path in _job_runtime_dir().glob(f"{job_id}-attempt-*"):
+        if keep_stem is not None and path.name.startswith(keep_stem):
+            continue
+        with contextlib.suppress(OSError):
+            path.unlink()
+
+
+def _prune_store(store: dict[str, Any]) -> None:
+    jobs = [job for job in store.get("jobs", []) if isinstance(job, dict)]
+    max_jobs = max(0, int(get_settings().max_jobs))
+    active = [job for job in jobs if job.get("status") not in TERMINAL_STATUSES]
+    finished = sorted(
+        (job for job in jobs if job.get("status") in TERMINAL_STATUSES),
+        key=lambda job: float(job.get("created_at") or 0),
+        reverse=True,
+    )
+    keep_finished = finished[: max(0, max_jobs - len(active))]
+    keep_ids = {id(job) for job in [*active, *keep_finished]}
+    removed = [job for job in jobs if id(job) not in keep_ids]
+    store["jobs"] = [job for job in jobs if id(job) in keep_ids]
+    for job in removed:
+        _remove_attempt_files(str(job.get("job_id") or ""))
+
+
 def _save_store(store: dict[str, Any]) -> None:
+    _prune_store(store)
     path = _job_store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(path.name + ".tmp")
@@ -70,6 +135,22 @@ def _save_store(store: dict[str, Any]) -> None:
     with contextlib.suppress(OSError):
         tmp_path.chmod(0o600)
     tmp_path.replace(path)
+
+
+@contextlib.contextmanager
+def _store_transaction():  # noqa: ANN201
+    with _JOB_STORE_THREAD_LOCK:
+        lock_path = _job_store_lock_path()
+        with lock_path.open("a+b") as handle:
+            with contextlib.suppress(OSError):
+                lock_path.chmod(0o600)
+            _lock_store_file(handle)
+            try:
+                store = _load_store()
+                yield store
+                _save_store(store)
+            finally:
+                _unlock_store_file(handle)
 
 
 def _new_job_id() -> str:
@@ -83,9 +164,7 @@ def _shell_safe_name(value: str) -> str:
 
 def _active_session_ids(shells: dict[str, Any]) -> set[str]:
     return {
-        str(item.get("session_id"))
-        for item in shells.get("sessions", [])
-        if item.get("session_id")
+        str(item.get("session_id")) for item in shells.get("sessions", []) if item.get("session_id")
     }
 
 
@@ -254,9 +333,7 @@ def _read_log_tail(path: str | None, lines: int) -> str:
     return text
 
 
-async def start_job(
-    command: str, cwd: str = ".", name: str | None = None
-) -> dict[str, Any]:
+async def start_job(command: str, cwd: str = ".", name: str | None = None) -> dict[str, Any]:
     job_id = _new_job_id()
     display_name = name or job_id
     paths, runner_command = _prepare_attempt(job_id, 1, command, cwd)
@@ -281,120 +358,170 @@ async def start_job(
         "exit_code": None,
         "attempts": 1,
     }
-    store = _load_store()
-    store["jobs"].append(job)
-    _save_store(store)
+    try:
+        with _store_transaction() as store:
+            store["jobs"].append(job)
+    except Exception:
+        with contextlib.suppress(Exception):
+            await kill_shell(str(shell["session_id"]))
+        _remove_attempt_files(job_id)
+        raise
     audit("job_start", job_id=job_id, session=shell["session_id"], cwd=cwd)
     return _public_job(job)
 
 
 async def list_jobs(include_finished: bool = True) -> dict[str, Any]:
-    store = _load_store()
     active = _active_session_ids(await list_shells())
     now = _utc()
-    jobs = [_refresh_job_status(job, active, now) for job in store.get("jobs", [])]
-    _save_store(store)
-    rows = [
-        _public_job(job)
-        for job in jobs
-        if include_finished or job.get("status") not in TERMINAL_STATUSES
-    ]
+    with _store_transaction() as store:
+        jobs = [_refresh_job_status(job, active, now) for job in store.get("jobs", [])]
+        store["jobs"] = jobs
+        _prune_store(store)
+        jobs = store["jobs"]
+        rows = [
+            _public_job(job)
+            for job in jobs
+            if include_finished or job.get("status") not in TERMINAL_STATUSES
+        ]
+        counts: dict[str, int] = {}
+        for job in jobs:
+            status = str(job.get("status") or "unknown")
+            counts[status] = counts.get(status, 0) + 1
     rows.sort(key=lambda item: float(item.get("created_at") or 0), reverse=True)
-    counts: dict[str, int] = {}
-    for job in jobs:
-        status = str(job.get("status") or "unknown")
-        counts[status] = counts.get(status, 0) + 1
     return {"jobs": rows, "counts": counts}
 
 
 async def tail_job(job_id: str, lines: int = 200) -> dict[str, Any]:
-    store = _load_store()
     active = _active_session_ids(await list_shells())
-    job = _refresh_job_status(_find_job(store, job_id), active)
-    _save_store(store)
-    output = _read_log_tail(job.get("log_path"), lines)
-    if not output and job.get("status") == "running":
+    with _store_transaction() as store:
+        job = _refresh_job_status(_find_job(store, job_id), active)
+        public_job = _public_job(job)
+        log_path = job.get("log_path")
+        session_id = str(job.get("session_id") or "")
+        status = str(job.get("status") or "")
+    output = _read_log_tail(log_path, lines)
+    if not output and status == "running":
         try:
-            tail = await read_shell(str(job["session_id"]), lines)
+            tail = await read_shell(session_id, lines)
             output = str(tail.get("output", ""))
         except Exception as exc:
-            job["status"] = "lost"
-            job["updated_at"] = _utc()
-            job["completed_at"] = job["updated_at"]
-            job["error"] = str(exc)
-            _save_store(store)
-    result = {"job": _public_job(job), "output": output}
-    if job.get("status") in TERMINAL_STATUSES:
+            with _store_transaction() as store:
+                current = _find_job(store, job_id)
+                if (
+                    current.get("status") == "running"
+                    and str(current.get("session_id") or "") == session_id
+                ):
+                    current["status"] = "lost"
+                    current["updated_at"] = _utc()
+                    current["completed_at"] = current["updated_at"]
+                    current["error"] = str(exc)
+                public_job = _public_job(current)
+    result = {"job": public_job, "output": output}
+    if public_job.get("status") in TERMINAL_STATUSES:
         result["message"] = (
-            f"job completed with exit code {job.get('exit_code')}"
-            if job.get("exit_code") is not None
-            else f"job is {job.get('status')}"
+            f"job completed with exit code {public_job.get('exit_code')}"
+            if public_job.get("exit_code") is not None
+            else f"job is {public_job.get('status')}"
         )
     return result
 
 
 async def stop_job(job_id: str) -> dict[str, Any]:
-    store = _load_store()
     active = _active_session_ids(await list_shells())
-    job = _refresh_job_status(_find_job(store, job_id), active)
-    killed = False
-    stderr = ""
-    if job.get("status") == "running":
-        result = await kill_shell(str(job["session_id"]))
-        killed = bool(result.get("killed"))
-        stderr = str(result.get("stderr") or "")
-        job["status"] = "stopped" if killed else "lost"
-        job["updated_at"] = _utc()
-        job["completed_at"] = job["updated_at"]
-        job["exit_code"] = None
-    _save_store(store)
-    audit("job_stop", job_id=job_id, session=job.get("session_id"), killed=killed)
-    return {"job": _public_job(job), "killed": killed, "stderr": stderr}
+    session_id = ""
+    with _store_transaction() as store:
+        job = _refresh_job_status(_find_job(store, job_id), active)
+        if job.get("status") == "running":
+            session_id = str(job.get("session_id") or "")
+            job["status"] = "stopping"
+            job["updated_at"] = _utc()
+        else:
+            return {
+                "job": _public_job(job),
+                "killed": False,
+                "stderr": "",
+            }
+
+    result = await kill_shell(session_id)
+    killed = bool(result.get("killed"))
+    stderr = str(result.get("stderr") or "")
+    with _store_transaction() as store:
+        job = _find_job(store, job_id)
+        if job.get("status") == "stopping" and str(job.get("session_id") or "") == session_id:
+            job["status"] = "stopped" if killed else "lost"
+            job["updated_at"] = _utc()
+            job["completed_at"] = job["updated_at"]
+            job["exit_code"] = None
+        public_job = _public_job(job)
+    audit("job_stop", job_id=job_id, session=session_id, killed=killed)
+    return {"job": public_job, "killed": killed, "stderr": stderr}
 
 
 async def retry_job(job_id: str) -> dict[str, Any]:
-    store = _load_store()
     active = _active_session_ids(await list_shells())
-    job = _refresh_job_status(_find_job(store, job_id), active)
-    if job.get("status") == "running":
-        raise RuntimeError(f"job is still running: {job_id}")
-    attempts = int(job.get("attempts") or 1) + 1
-    paths, runner_command = _prepare_attempt(
-        job_id, attempts, str(job["command"]), str(job.get("cwd") or ".")
-    )
-    shell_name = _shell_safe_name(
-        f"{job.get('name') or job_id}-{job_id}-{attempts}"
-    )
-    shell = await start_shell(
-        str(job.get("cwd") or "."), shell_name, runner_command
-    )
+    with _store_transaction() as store:
+        job = _refresh_job_status(_find_job(store, job_id), active)
+        if job.get("status") in {"running", "stopping", "retrying"}:
+            raise RuntimeError(f"job is still active: {job_id}")
+        attempts = int(job.get("attempts") or 1) + 1
+        command = str(job["command"])
+        cwd = str(job.get("cwd") or ".")
+        display_name = str(job.get("name") or job_id)
+        job["status"] = "retrying"
+        job["updated_at"] = _utc()
+
+    try:
+        paths, runner_command = _prepare_attempt(job_id, attempts, command, cwd)
+        shell_name = _shell_safe_name(f"{display_name}-{job_id}-{attempts}")
+        shell = await start_shell(cwd, shell_name, runner_command)
+    except Exception as exc:
+        with _store_transaction() as store:
+            job = _find_job(store, job_id)
+            if job.get("status") == "retrying":
+                job["status"] = "failed"
+                job["updated_at"] = _utc()
+                job["completed_at"] = job["updated_at"]
+                job["error"] = f"retry failed: {type(exc).__name__}: {exc}"
+        raise
+
     now = _utc()
-    job.update(
-        {
-            "status": "running",
-            "session_id": shell["session_id"],
-            "backend": shell.get("backend"),
-            "command_path": str(paths["command"]),
-            "log_path": str(paths["log"]),
-            "status_path": str(paths["status"]),
-            "updated_at": now,
-            "last_started_at": now,
-            "completed_at": None,
-            "exit_code": None,
-            "error": None,
-            "log_truncated": False,
-            "output_bytes": 0,
-            "attempts": attempts,
-        }
-    )
-    _save_store(store)
+    changed_while_retrying = False
+    with _store_transaction() as store:
+        job = _find_job(store, job_id)
+        if job.get("status") != "retrying":
+            changed_while_retrying = True
+        else:
+            job.update(
+                {
+                    "status": "running",
+                    "session_id": shell["session_id"],
+                    "backend": shell.get("backend"),
+                    "command_path": str(paths["command"]),
+                    "log_path": str(paths["log"]),
+                    "status_path": str(paths["status"]),
+                    "updated_at": now,
+                    "last_started_at": now,
+                    "completed_at": None,
+                    "exit_code": None,
+                    "error": None,
+                    "log_truncated": False,
+                    "output_bytes": 0,
+                    "attempts": attempts,
+                }
+            )
+        public_job = _public_job(job)
+    if changed_while_retrying:
+        with contextlib.suppress(Exception):
+            await kill_shell(str(shell["session_id"]))
+        raise RuntimeError(f"job changed while retrying: {job_id}")
+    _remove_attempt_files(job_id, keep_attempt=attempts)
     audit(
         "job_retry",
         job_id=job_id,
         session=shell["session_id"],
         attempts=attempts,
     )
-    return _public_job(job)
+    return public_job
 
 
 def _runner_shell_args(shell: str, command: str) -> list[str]:

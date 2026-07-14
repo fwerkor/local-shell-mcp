@@ -57,6 +57,7 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-long-random-secret
 | `max_todos` | `LOCAL_SHELL_MCP_MAX_TODOS` | `1000` | todo 記錄最大數量。 |
 | `max_todo_bytes` | `LOCAL_SHELL_MCP_MAX_TODO_BYTES` | `1000000` | todo 數據最大字節數。 |
 | `max_job_log_bytes` | `LOCAL_SHELL_MCP_MAX_JOB_LOG_BYTES` | `10000000` | 每次長任務運行保留的最大輸出字節數。 |
+| `max_jobs` | `LOCAL_SHELL_MCP_MAX_JOBS` | `1000` | 最多保留的長任務記錄數；執行中的任務不會被清理。 |
 | `max_audit_tail_bytes` | `LOCAL_SHELL_MCP_MAX_AUDIT_TAIL_BYTES` | `1000000` | `audit_tail` 最大返回字節數。 |
 | `max_audit_log_bytes` | `LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES` | `20000000` | 審計日誌文件大小上限。 |
 | `max_tmp_files` | `LOCAL_SHELL_MCP_MAX_TMP_FILES` | `500` | 臨時文件最大數量。 |

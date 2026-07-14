@@ -216,6 +216,7 @@ if _PYDANTIC_AVAILABLE:
         max_todos: int = 1_000
         max_todo_bytes: int = 1_000_000
         max_job_log_bytes: int = 10_000_000
+        max_jobs: int = 1_000
         max_audit_tail_bytes: int = 1_000_000
         max_audit_log_bytes: int = 20_000_000
         max_tmp_files: int = 500
@@ -406,6 +407,7 @@ else:
         max_todos: int = 1_000
         max_todo_bytes: int = 1_000_000
         max_job_log_bytes: int = 10_000_000
+        max_jobs: int = 1_000
         max_audit_tail_bytes: int = 1_000_000
         max_audit_log_bytes: int = 20_000_000
         max_tmp_files: int = 500
