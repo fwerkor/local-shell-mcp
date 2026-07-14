@@ -62,3 +62,31 @@ async def test_mcp_audit_extracts_session_context(tmp_path, monkeypatch):
     records = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines()]
     starts = [record for record in records if record["event"] == "mcp_tool_call_start"]
     assert starts[-1]["session"] == "missing-session"
+
+
+def test_audit_redacts_lower_level_commands_and_embedded_tokens(tmp_path, monkeypatch):
+    from local_shell_mcp.audit import audit
+
+    audit_path = tmp_path / "audit.jsonl"
+    secret = "configured-secret-value-which-is-long"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUDIT_LOG_PATH", str(audit_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET", secret)
+    get_settings.cache_clear()
+
+    audit(
+        "run_shell_start",
+        command="curl -H 'Authorization: Bearer bearer-value' example.test",
+        error=f"failed with ghp_{'A' * 36} and {secret}",
+        token_id="safe-identifier",
+        nested={"access_token": "nested-secret", "path": "safe.txt"},
+    )
+    record = json.loads(audit_path.read_text(encoding="utf-8"))
+
+    assert record["command"] == "<redacted>"
+    assert "bearer-value" not in json.dumps(record)
+    assert "ghp_" not in json.dumps(record)
+    assert secret not in json.dumps(record)
+    assert record["token_id"] == "safe-identifier"
+    assert record["nested"]["access_token"] == "<redacted>"
+    assert record["nested"]["path"] == "safe.txt"
