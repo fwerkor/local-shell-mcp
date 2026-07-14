@@ -100,6 +100,14 @@ MAX_REMOTE_INVITES = 1_024
 MAX_REMOTE_MACHINE_NAME_LENGTH = 128
 
 
+class WorkerHttpError(RuntimeError):
+    def __init__(self, url: str, status_code: int, detail: str):
+        self.url = url
+        self.status_code = status_code
+        self.detail = detail
+        super().__init__(f"worker HTTP POST {url} failed with {status_code}: {detail}")
+
+
 def _canonical_dist_name(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
@@ -142,6 +150,10 @@ def _add_distribution_to_tar(tar: tarfile.TarFile, dist_name: str, seen: set[str
 
 def _utc() -> float:
     return time.time()
+
+
+def _remote_heartbeat_interval_s() -> int:
+    return max(5, min(get_settings().remote_poll_timeout_s // 2, 30))
 
 
 def _validate_machine_name(value: str) -> str:
@@ -326,7 +338,12 @@ class RemoteManager:
             self.invites.pop(code, None)
             self._save_registry_unlocked()
         audit("remote_worker_registered", machine=name)
-        return {"token": token, "name": name, "poll_interval_s": 0}
+        return {
+            "token": token,
+            "name": name,
+            "poll_interval_s": 0,
+            "heartbeat_interval_s": _remote_heartbeat_interval_s(),
+        }
 
 
     async def resume_worker(self, access: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -348,7 +365,12 @@ class RemoteManager:
             worker.info = dict(payload.get("info") or worker.info)
             self._save_registry_unlocked()
         audit("remote_worker_resumed", machine=name)
-        return {"token": access, "name": name, "poll_interval_s": 0}
+        return {
+            "token": access,
+            "name": name,
+            "poll_interval_s": 0,
+            "heartbeat_interval_s": _remote_heartbeat_interval_s(),
+        }
     def _default_machine_name(self, payload: dict[str, Any]) -> str:
         self._load_registry_unlocked()
         info = payload.get("info") if isinstance(payload.get("info"), dict) else {}
@@ -388,6 +410,13 @@ class RemoteManager:
                 self.cancelled_jobs.discard(job_id)
                 continue
             return {"job": job}
+
+    async def heartbeat(self, token: str) -> dict[str, Any]:
+        worker = self._worker_by_token(token)
+        worker.status = "online"
+        worker.last_seen = _utc()
+        return {"accepted": True, "name": worker.name}
+
 
     async def submit_result(self, token: str, payload: dict[str, Any]) -> dict[str, Any]:
         worker = self._worker_by_token(token)
@@ -621,6 +650,15 @@ async def poll_endpoint(request: Any):  # noqa: ANN201
         return _error(str(exc), type(exc).__name__, 401)
 
 
+async def heartbeat_endpoint(request: Any):  # noqa: ANN201
+    from starlette.responses import JSONResponse
+
+    try:
+        return JSONResponse(_ok(await remote_manager().heartbeat(_bearer_token(request))))
+    except Exception as exc:
+        return _error(str(exc), type(exc).__name__, 401)
+
+
 async def result_endpoint(request: Any):  # noqa: ANN201
     from starlette.responses import JSONResponse
 
@@ -639,6 +677,7 @@ def remote_routes() -> list[Any]:
         Route(f"{REMOTE_API_PREFIX}/register", register_endpoint, methods=["POST"]),
         Route(f"{REMOTE_API_PREFIX}/res" + "ume", resume_endpoint, methods=["POST"]),
         Route(f"{REMOTE_API_PREFIX}/poll", poll_endpoint, methods=["POST"]),
+        Route(f"{REMOTE_API_PREFIX}/heartbeat", heartbeat_endpoint, methods=["POST"]),
         Route(f"{REMOTE_API_PREFIX}/result", result_endpoint, methods=["POST"]),
     ]
 
@@ -881,7 +920,7 @@ def worker_info(workdir: str) -> dict[str, Any]:
 def _parse_worker_http_json(url: str, status_code: int, response_body: str) -> dict[str, Any]:
     if not 200 <= status_code < 300:
         detail = response_body.strip() or "<empty response body>"
-        raise RuntimeError(f"worker HTTP POST {url} failed with {status_code}: {detail}")
+        raise WorkerHttpError(url, status_code, detail)
     try:
         parsed = json.loads(response_body)
     except json.JSONDecodeError as exc:
@@ -973,6 +1012,12 @@ def _worker_log_retry(operation: str, exc: Exception, delay_s: float) -> None:
     print(f"Status: {operation} failed: {exc}. Retrying in {delay_s:g}s...", file=sys.stderr, flush=True)
 
 
+def _worker_error_is_retryable(exc: Exception) -> bool:
+    if isinstance(exc, WorkerHttpError):
+        return exc.status_code in {408, 425, 429} or exc.status_code >= 500
+    return not isinstance(exc, ValueError)
+
+
 async def _worker_post_json_forever(
     url: str,
     payload: dict[str, Any],
@@ -985,6 +1030,8 @@ async def _worker_post_json_forever(
         try:
             return await asyncio.to_thread(_worker_post_json, url, payload, headers, timeout)
         except Exception as exc:  # noqa: BLE001
+            if not _worker_error_is_retryable(exc):
+                raise
             delay_s = _worker_retry_delay(attempt)
             attempt += 1
             _worker_log_retry(operation, exc, delay_s)
@@ -1056,10 +1103,49 @@ async def _worker_resume_or_none(
                 print("Status: stored worker identity rejected; falling back to invite registration.", file=sys.stderr, flush=True)
                 _delete_worker_identity()
                 return None
+            if not _worker_error_is_retryable(exc):
+                raise
             delay_s = _worker_retry_delay(attempt)
             attempt += 1
             _worker_log_retry("resume", exc, delay_s)
             await asyncio.sleep(delay_s)
+
+
+async def _execute_worker_job_with_heartbeat(
+    job: dict[str, Any],
+    server: str,
+    headers: dict[str, str],
+    heartbeat_interval_s: float,
+) -> Any:
+    task = asyncio.create_task(
+        execute_worker_tool(job["tool"], dict(job.get("args") or {}))
+    )
+
+    async def heartbeat_loop() -> None:
+        interval = max(0.01, heartbeat_interval_s)
+        while not task.done():
+            await asyncio.sleep(interval)
+            if task.done():
+                return
+            try:
+                await asyncio.to_thread(
+                    _worker_post_json,
+                    f"{server}{REMOTE_API_PREFIX}/heartbeat",
+                    {},
+                    headers,
+                    30,
+                )
+            except Exception as exc:  # noqa: BLE001
+                if not _worker_error_is_retryable(exc):
+                    return
+                _worker_log_retry("heartbeat", exc, interval)
+
+    heartbeat = asyncio.create_task(heartbeat_loop())
+    try:
+        return await task
+    finally:
+        heartbeat.cancel()
+        await asyncio.gather(heartbeat, return_exceptions=True)
 
 
 async def run_worker(server: str, invite: str, name: str | None = None, workdir: str | None = None, persist: bool = False) -> None:  # noqa: ARG001
@@ -1091,6 +1177,9 @@ async def run_worker(server: str, invite: str, name: str | None = None, workdir:
             raise RuntimeError(body.get("message") or body)
         data = body["data"]
         machine_name = data["name"]
+    heartbeat_interval_s = float(
+        data.get("heartbeat_interval_s") or _remote_heartbeat_interval_s()
+    )
     _write_worker_identity({"server": server, "name": machine_name, "access": access, "workdir": workdir})
     print("local-shell-mcp worker")
     print(f"Server:  {server}")
@@ -1118,7 +1207,9 @@ async def run_worker(server: str, invite: str, name: str | None = None, workdir:
             )
             continue
         try:
-            result = await execute_worker_tool(job["tool"], dict(job.get("args") or {}))
+            result = await _execute_worker_job_with_heartbeat(
+                job, server, headers, heartbeat_interval_s
+            )
             out = {"job_id": job["id"], "ok": True, "data": result}
         except Exception as exc:  # noqa: BLE001
             out = {"job_id": job.get("id"), **_handled_remote_exception(exc)}
@@ -1137,3 +1228,6 @@ def run_worker_cli(argv: list[str] | None = None) -> None:
     except KeyboardInterrupt:
         print("\nStatus: disconnected by user.", file=sys.stderr, flush=True)
         raise SystemExit(130) from None
+    except Exception as exc:  # noqa: BLE001
+        print(f"Status: connection failed: {exc}", file=sys.stderr, flush=True)
+        raise SystemExit(1) from None

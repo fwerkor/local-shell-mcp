@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import os
+import secrets
+import threading
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -28,6 +31,13 @@ DEFAULT_WORKSPACE_ROOT = Path("/workspace")
 DEFAULT_STATE_DIR = DEFAULT_WORKSPACE_ROOT / ".local-shell-mcp"
 DEFAULT_AUDIT_LOG_PATH = DEFAULT_STATE_DIR / "audit.jsonl"
 DEFAULT_AGENT_CONFIG_DIR = DEFAULT_STATE_DIR / "agent_config"
+OAUTH_JWT_SECRET_FILE_NAME = "oauth-jwt-secret"
+_WEAK_OAUTH_SECRET_VALUES = {
+    "",
+    "dev-" + "change-me",
+    "change-me-64-hex-random-secret",
+}
+_OAUTH_SECRET_THREAD_LOCK = threading.Lock()
 
 
 def _matches_default_path(value: Path, default: Path) -> bool:
@@ -44,6 +54,106 @@ def default_shell_executable() -> str:
     if os.name == "nt":
         return "power" + "shell.exe"
     return "/bin/bash"
+
+
+def _replace_settings(settings: Settings, **updates: Any) -> Settings:
+    if hasattr(settings, "model_copy"):
+        return settings.model_copy(update=updates)
+    from dataclasses import replace
+
+    return replace(settings, **updates)
+
+
+def _read_oauth_secret(path: Path) -> str | None:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            value = handle.read().strip()
+    except OSError:
+        return None
+    return value if len(value.encode("utf-8")) >= 32 else None
+
+
+@contextlib.contextmanager
+def _oauth_secret_file_lock(state_dir: Path):  # noqa: ANN201
+    lock_path = state_dir / f"{OAUTH_JWT_SECRET_FILE_NAME}.lock"
+    with lock_path.open("a+b") as handle:
+        with contextlib.suppress(OSError):
+            lock_path.chmod(0o600)
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _get_or_create_oauth_secret(state_dir: Path) -> str:
+    path = state_dir / OAUTH_JWT_SECRET_FILE_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _OAUTH_SECRET_THREAD_LOCK, _oauth_secret_file_lock(state_dir):
+        existing = _read_oauth_secret(path)
+        if existing:
+            return existing
+        if path.exists():
+            raise RuntimeError(
+                f"OAuth secret file exists but is invalid: {path}. "
+                "Remove it or replace it with at least 32 bytes of random data."
+            )
+
+        generated = secrets.token_urlsafe(48)
+        temporary = path.with_name(
+            f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        )
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(generated)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+        except Exception:
+            with contextlib.suppress(OSError):
+                temporary.unlink(missing_ok=True)
+            raise
+        with contextlib.suppress(OSError):
+            path.chmod(0o600)
+        return generated
+
+
+def _ensure_oauth_jwt_secret(settings: Settings) -> Settings:
+    if settings.auth_mode != "oauth":
+        return settings
+    current = str(settings.oauth_jwt_secret or "")
+    if current not in _WEAK_OAUTH_SECRET_VALUES:
+        return settings
+    return _replace_settings(
+        settings,
+        oauth_jwt_secret=_get_or_create_oauth_secret(settings.state_dir),
+    )
 
 
 _RESERVED_UI_PATHS = {
@@ -151,7 +261,9 @@ if _PYDANTIC_AVAILABLE:
         max_read_many_total_bytes: int = 5_000_000
         max_todos: int = 1_000
         max_todo_bytes: int = 1_000_000
+        max_http_request_bytes: int = 16_000_000
         max_job_log_bytes: int = 10_000_000
+        max_jobs: int = 1_000
         max_audit_tail_bytes: int = 1_000_000
         max_audit_log_bytes: int = 20_000_000
         max_tmp_files: int = 500
@@ -341,7 +453,9 @@ else:
         max_read_many_total_bytes: int = 5_000_000
         max_todos: int = 1_000
         max_todo_bytes: int = 1_000_000
+        max_http_request_bytes: int = 16_000_000
         max_job_log_bytes: int = 10_000_000
+        max_jobs: int = 1_000
         max_audit_tail_bytes: int = 1_000_000
         max_audit_log_bytes: int = 20_000_000
         max_tmp_files: int = 500
@@ -474,6 +588,7 @@ def get_settings() -> Settings:
     settings = settings.with_workspace_relative_defaults()
     settings.workspace_root.mkdir(parents=True, exist_ok=True)
     settings.state_dir.mkdir(parents=True, exist_ok=True)
+    settings = _ensure_oauth_jwt_secret(settings)
     settings.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
     settings.agent_config_dir.mkdir(parents=True, exist_ok=True)
     return settings
@@ -495,14 +610,18 @@ def safe_settings_dump(settings: Settings | None = None) -> dict:
 
 def validate_public_oauth_configuration(settings: Settings | None = None) -> None:
     settings = settings or get_settings()
-    if settings.auth_mode != "oauth" or not settings.public_base_url:
+    if settings.auth_mode != "oauth":
         return
-    weak_secret_values = {"", "dev-" + "change-me", "change-me-64-hex-random-secret"}
-    if settings.oauth_jwt_secret in weak_secret_values or len(settings.oauth_jwt_secret.encode("utf-8")) < 32:
+    if (
+        settings.oauth_jwt_secret in _WEAK_OAUTH_SECRET_VALUES
+        or len(settings.oauth_jwt_secret.encode("utf-8")) < 32
+    ):
         raise RuntimeError(
             "LOCAL_SHELL_MCP_OAUTH_JWT_SECRET must be at least 32 bytes of strong random data "
-            "when LOCAL_SHELL_MCP_PUBLIC_BASE_URL is configured."
+            "when OAuth authentication is enabled."
         )
+    if not settings.public_base_url:
+        return
     pin = (settings.oauth_admin_pin or "").strip()
     weak_pin_values = {"", "change-me", "change-me-long-random-pin"}
     if pin in weak_pin_values or len(pin) < 12:

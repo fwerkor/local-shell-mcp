@@ -13,7 +13,14 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .fs_ops import _path_lock, _path_locks, relative_display, resolve_path, temp_dir
+from .fs_ops import (
+    _path_lock,
+    _path_locks,
+    prune_temp_dir,
+    relative_display,
+    resolve_path,
+    temp_dir,
+)
 from .settings import get_settings
 
 DEFAULT_TRANSFER_CHUNK_BYTES = 1024 * 1024
@@ -260,6 +267,7 @@ def transfer_abort_write(path: str, transfer_id: str) -> dict[str, Any]:
 
 
 def transfer_alloc_temp_path(suffix: str = ".bin") -> dict[str, Any]:
+    prune_temp_dir()
     safe_suffix = suffix if suffix.startswith(".") and "/" not in suffix and "\\" not in suffix else ".bin"
     path = temp_dir() / f"remote-transfer-{uuid.uuid4().hex}{safe_suffix}"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -275,6 +283,7 @@ def _assert_no_symlinks(path: Path) -> None:
 
 
 def transfer_pack_dir(path: str, compression: str = "gz") -> dict[str, Any]:
+    prune_temp_dir()
     src = resolve_path(path, must_exist=True)
     if not src.is_dir():
         raise NotADirectoryError(str(src))
@@ -283,10 +292,14 @@ def transfer_pack_dir(path: str, compression: str = "gz") -> dict[str, Any]:
     mode = "w:gz" if compression == "gz" else "w"
     archive = temp_dir() / f"transfer-pack-{uuid.uuid4().hex}{suffix}"
     archive.parent.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(archive, mode) as tar:
-        for child in src.iterdir():
-            tar.add(child, arcname=child.name, recursive=True)
-    size = archive.stat().st_size
+    try:
+        with tarfile.open(archive, mode) as tar:
+            for child in src.iterdir():
+                tar.add(child, arcname=child.name, recursive=True)
+        size = archive.stat().st_size
+    except Exception:
+        archive.unlink(missing_ok=True)
+        raise
     return {
         "path": relative_display(src),
         "archive_path": relative_display(archive),

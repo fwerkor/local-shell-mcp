@@ -5,10 +5,12 @@ import tarfile
 
 import pytest
 
+import local_shell_mcp.transfer_ops as transfer_module
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.tools import build_mcp
 from local_shell_mcp.transfer_ops import (
     transfer_abort_write,
+    transfer_alloc_temp_path,
     transfer_begin_write,
     transfer_finish_write,
     transfer_pack_dir,
@@ -199,3 +201,18 @@ def test_unpack_enforces_expanded_size_limit_before_replacement(tmp_path, monkey
         )
 
     assert (destination / "important.txt").read_text(encoding="utf-8") == "keep"
+
+
+def test_transfer_temp_entrypoints_trigger_unified_pruning(tmp_path, monkeypatch):
+    root = _workspace(tmp_path, monkeypatch)
+    (root / "src").mkdir()
+    (root / "src" / "file.txt").write_text("data", encoding="utf-8")
+    calls = []
+
+    monkeypatch.setattr(transfer_module, "prune_temp_dir", lambda: calls.append(True))
+
+    transfer_alloc_temp_path(".bin")
+    pack = transfer_pack_dir("src")
+
+    assert calls == [True, True]
+    (root / pack["archive_path"]).unlink()

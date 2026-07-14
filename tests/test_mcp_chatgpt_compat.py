@@ -5,7 +5,12 @@ from fastapi.testclient import TestClient
 from starlette.applications import Starlette
 from starlette.routing import Route
 
-from local_shell_mcp.auth import _CURRENT_PRINCIPAL, Principal, _is_mcp_discovery_request
+from local_shell_mcp.auth import (
+    _CURRENT_PRINCIPAL,
+    Principal,
+    RequestBodyLimitMiddleware,
+    _is_mcp_discovery_request,
+)
 from local_shell_mcp.oauth import (
     _CLIENTS,
     _CODES,
@@ -28,6 +33,49 @@ def test_mcp_discovery_methods_are_unauthenticated():
     assert _is_mcp_discovery_request(scope, initialize)
     assert _is_mcp_discovery_request(scope, tools_list)
     assert not _is_mcp_discovery_request(scope, tools_call)
+
+
+@pytest.mark.asyncio
+async def test_request_body_limit_counts_chunked_payloads(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_HTTP_REQUEST_BYTES", "8")
+    get_settings.cache_clear()
+    called = False
+
+    async def inner(scope, receive, send):  # noqa: ANN001, ARG001
+        nonlocal called
+        called = True
+
+    app = RequestBodyLimitMiddleware(inner)
+    messages = iter(
+        [
+            {"type": "http.request", "body": b"12345", "more_body": True},
+            {"type": "http.request", "body": b"6789", "more_body": False},
+        ]
+    )
+    sent = []
+
+    async def receive():
+        return next(messages)
+
+    async def send(message):  # noqa: ANN001
+        sent.append(message)
+
+    await app(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "method": "POST",
+            "path": "/mcp",
+            "headers": [],
+        },
+        receive,
+        send,
+    )
+
+    assert called is False
+    assert sent[0]["type"] == "http.response.start"
+    assert sent[0]["status"] == 413
 
 
 @pytest.mark.asyncio
@@ -121,7 +169,7 @@ async def test_tool_annotations_are_conservative_and_mode_independent(
 
 def test_oauth_access_tokens_do_not_expire_by_default(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
-    monkeypatch.setenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET", "test-secret")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET", "test-secret-that-is-at-least-32-bytes")
     monkeypatch.delenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL", raising=False)
     monkeypatch.delenv("LOCAL_SHELL_MCP_OAUTH_ISSUER", raising=False)
     monkeypatch.delenv("LOCAL_SHELL_MCP_OAUTH_RESOURCE", raising=False)

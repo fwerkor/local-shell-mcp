@@ -15,8 +15,9 @@ from .audit import audit
 from .settings import Settings, get_settings
 from .ui_security import has_valid_ui_local_token, is_loopback_connection
 
-PUBLIC_PATHS = {"/healthz", "/readyz", "/docs", "/openapi.json", "/join", "/remote/worker-bundle.tgz", "/remote/register", "/remote/resume", "/remote/poll", "/remote/result"}
+PUBLIC_PATHS = {"/healthz", "/readyz", "/docs", "/openapi.json", "/join", "/remote/worker-bundle.tgz", "/remote/register", "/remote/resume", "/remote/poll", "/remote/heartbeat", "/remote/result"}
 HUMAN_UI_API_PREFIX = "/api/ui/"
+_REQUEST_BODY_SCOPE_KEY = "local_shell_mcp.request_body"
 
 
 def _is_public_path(path: str) -> bool:
@@ -255,13 +256,24 @@ def verify_request(request: Request) -> Principal:
     return principal
 
 
-async def _read_body(receive: Receive) -> bytes:
+class RequestBodyTooLarge(RuntimeError):
+    pass
+
+
+async def _read_body(receive: Receive, max_bytes: int | None = None) -> bytes:
     chunks = []
+    total = 0
     while True:
         message = await receive()
         if message["type"] == "http.disconnect":
             break
-        chunks.append(message.get("body", b""))
+        chunk = message.get("body", b"")
+        total += len(chunk)
+        if max_bytes is not None and total > max_bytes:
+            raise RequestBodyTooLarge(
+                f"Request body exceeds the configured {max_bytes} byte limit"
+            )
+        chunks.append(chunk)
         if not message.get("more_body", False):
             break
     return b"".join(chunks)
@@ -326,10 +338,25 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        body = None
+        body = scope.get(_REQUEST_BODY_SCOPE_KEY)
         downstream_receive = receive
         if path == "/mcp" and scope.get("method", "").upper() == "POST":
-            body = await _read_body(receive)
+            if body is None:
+                try:
+                    body = await _read_body(
+                        receive, max(1, get_settings().max_http_request_bytes)
+                    )
+                except RequestBodyTooLarge as exc:
+                    response = JSONResponse(
+                        {
+                            "ok": False,
+                            "error": "request_too_large",
+                            "message": str(exc),
+                        },
+                        status_code=413,
+                    )
+                    await response(scope, receive, send)
+                    return
             downstream_receive = _body_receive(body, receive)
 
         settings = get_settings()
@@ -355,6 +382,61 @@ class AuthMiddleware:
             await self.app(scope, downstream_receive, send)
         finally:
             _CURRENT_PRINCIPAL.reset(token)
+
+
+class RequestBodyLimitMiddleware:
+    """Bound HTTP request buffering before auth, routing, or JSON parsing."""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope.get("method", "").upper() in {
+            "GET",
+            "HEAD",
+            "OPTIONS",
+        }:
+            await self.app(scope, receive, send)
+            return
+
+        limit = max(1, get_settings().max_http_request_bytes)
+        headers = {key.lower(): value for key, value in scope.get("headers", [])}
+        raw_content_length = headers.get(b"content-length")
+        if raw_content_length:
+            try:
+                content_length = int(raw_content_length)
+            except ValueError:
+                content_length = None
+            if content_length is not None and content_length > limit:
+                response = JSONResponse(
+                    {
+                        "ok": False,
+                        "error": "request_too_large",
+                        "message": (
+                            f"Request body exceeds the configured {limit} byte limit"
+                        ),
+                    },
+                    status_code=413,
+                )
+                await response(scope, receive, send)
+                return
+
+        try:
+            body = await _read_body(receive, limit)
+        except RequestBodyTooLarge as exc:
+            response = JSONResponse(
+                {
+                    "ok": False,
+                    "error": "request_too_large",
+                    "message": str(exc),
+                },
+                status_code=413,
+            )
+            await response(scope, receive, send)
+            return
+
+        scope[_REQUEST_BODY_SCOPE_KEY] = body
+        await self.app(scope, _body_receive(body, receive), send)
 
 
 # Backwards-compatible alias.

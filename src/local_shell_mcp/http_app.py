@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .auth import (
     CloudflareAccessMiddleware,
     Principal,
+    RequestBodyLimitMiddleware,
     require_scopes,
     required_scopes_for_http_tool,
     verify_request,
@@ -102,6 +103,7 @@ def build_http_app() -> FastAPI:
     settings = get_settings()
     if settings.auth_mode != "none":
         app.add_middleware(CloudflareAccessMiddleware)
+    app.add_middleware(RequestBodyLimitMiddleware)
 
     @app.exception_handler(ValueError)
     async def value_error_handler(request: Request, exc: ValueError):  # noqa: ARG001

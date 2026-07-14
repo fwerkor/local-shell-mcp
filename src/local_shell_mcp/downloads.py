@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import mimetypes
 import os
 import secrets
+import shutil
 import stat
 import threading
 import time
@@ -21,7 +23,7 @@ from .fs_ops import relative_display, resolve_path
 from .settings import get_settings
 
 _DOWNLOAD_PREFIX = "/download"
-_DOWNLOAD_STORE_VERSION = 2
+_DOWNLOAD_STORE_VERSION = 3
 _STORE_LOCK = threading.RLock()
 
 
@@ -33,6 +35,78 @@ def _store_path() -> Path:
     settings = get_settings()
     settings.state_dir.mkdir(parents=True, exist_ok=True)
     return settings.state_dir / "downloads.json"
+
+
+def _snapshot_dir() -> Path:
+    path = get_settings().state_dir / "downloads"
+    path.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(OSError):
+        path.chmod(0o700)
+    return path
+
+
+def _snapshot_name(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest() + ".bin"
+
+
+def _snapshot_path(link: dict[str, Any]) -> Path:
+    name = str(link.get("snapshot_name") or "")
+    if not name or Path(name).name != name:
+        raise ValueError("download snapshot metadata is invalid")
+    return _snapshot_dir() / name
+
+
+def _remove_snapshot(link: dict[str, Any]) -> None:
+    with contextlib.suppress(OSError, ValueError):
+        _snapshot_path(link).unlink(missing_ok=True)
+
+
+def _create_snapshot(
+    source: Path, token: str
+) -> tuple[Path, os.stat_result, os.stat_result]:
+    settings = get_settings()
+    destination = _snapshot_dir() / _snapshot_name(token)
+    temporary = destination.with_name(
+        destination.name + f".{secrets.token_hex(8)}.tmp"
+    )
+    try:
+        with _open_download_file(source) as source_handle:
+            before = os.fstat(source_handle.fileno())
+            if (
+                settings.file_download_max_file_bytes > 0
+                and before.st_size > settings.file_download_max_file_bytes
+            ):
+                raise ValueError(f"File is too large: {before.st_size}")
+            with temporary.open("xb") as output:
+                shutil.copyfileobj(source_handle, output, length=1024 * 1024)
+                output.flush()
+                os.fsync(output.fileno())
+            after = os.fstat(source_handle.fileno())
+            before_identity = (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+                before.st_ctime_ns,
+            )
+            after_identity = (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ctime_ns,
+            )
+            if before_identity != after_identity:
+                raise RuntimeError(
+                    "File changed while the download link was being created"
+                )
+        with contextlib.suppress(OSError):
+            temporary.chmod(0o600)
+        os.replace(temporary, destination)
+        snapshot_stat = destination.stat()
+        return destination, before, snapshot_stat
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _empty_store() -> dict[str, Any]:
@@ -139,6 +213,7 @@ def _prune_locked(store: dict[str, Any], now: float | None = None) -> bool:
         max_downloads = int(link.get("max_downloads", 0))
         downloads = int(link.get("downloads", 0))
         if expires_at <= now or (max_downloads > 0 and downloads >= max_downloads):
+            _remove_snapshot(link)
             links.pop(token, None)
             changed = True
     return changed
@@ -155,38 +230,37 @@ def create_share_link(
         raise PermissionError("disabled")
 
     resolved = resolve_path(path, must_exist=True)
-    try:
-        with _open_download_file(resolved) as handle:
-            source_stat = os.fstat(handle.fileno())
-    except (OSError, ValueError) as exc:
-        raise ValueError(f"Not a regular file: {path}") from exc
-
-    size = source_stat.st_size
-    if settings.file_download_max_file_bytes > 0 and size > settings.file_download_max_file_bytes:
-        raise ValueError(f"File is too large: {size}")
-
     ttl = _coerce_ttl(ttl_s)
     limit = _coerce_max_downloads(max_downloads)
     token = secrets.token_urlsafe(32)
     now = _now()
-    link = {
-        "path": str(resolved),
-        "display_path": relative_display(resolved),
-        "filename": _safe_filename(filename, resolved),
-        "bytes": size,
-        "device": int(source_stat.st_dev),
-        "inode": int(source_stat.st_ino),
-        "created_at": now,
-        "expires_at": now + ttl,
-        "downloads": 0,
-        "max_downloads": limit,
-    }
 
     with _STORE_LOCK:
-        store = _read_store_locked()
-        _prune_locked(store, now)
-        store["links"][token] = link
-        _write_store_locked(store)
+        try:
+            snapshot, source_stat, snapshot_stat = _create_snapshot(resolved, token)
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"Not a regular shareable file: {path}") from exc
+        link = {
+            "path": str(resolved),
+            "display_path": relative_display(resolved),
+            "filename": _safe_filename(filename, resolved),
+            "bytes": source_stat.st_size,
+            "snapshot_name": snapshot.name,
+            "device": int(snapshot_stat.st_dev),
+            "inode": int(snapshot_stat.st_ino),
+            "created_at": now,
+            "expires_at": now + ttl,
+            "downloads": 0,
+            "max_downloads": limit,
+        }
+        try:
+            store = _read_store_locked()
+            _prune_locked(store, now)
+            store["links"][token] = link
+            _write_store_locked(store)
+        except Exception:
+            snapshot.unlink(missing_ok=True)
+            raise
 
     audit(
         "download_link_created",
@@ -213,6 +287,7 @@ def revoke_share_link(token: str) -> dict[str, Any]:
         store = _read_store_locked()
         removed = store.get("links", {}).pop(token, None)
         if removed is not None:
+            _remove_snapshot(removed)
             _write_store_locked(store)
     if removed is not None:
         audit("download_link_revoked", path=removed.get("display_path"), token_id=_token_id(token))
@@ -255,6 +330,7 @@ def _claim_download(
 
         now = _now()
         if float(link.get("expires_at", 0)) <= now:
+            _remove_snapshot(link)
             store.get("links", {}).pop(token, None)
             _write_store_locked(store)
             return _error_response(410, "download_expired", "Link has expired")
@@ -262,17 +338,22 @@ def _claim_download(
         max_downloads = int(link.get("max_downloads", 0))
         downloads = int(link.get("downloads", 0))
         if max_downloads > 0 and downloads >= max_downloads:
+            _remove_snapshot(link)
             store.get("links", {}).pop(token, None)
             _write_store_locked(store)
             return _error_response(410, "download_exhausted", "Link has reached its use limit")
 
         try:
-            path = resolve_path(str(link.get("path", "")), must_exist=True)
+            path = _snapshot_path(link)
             handle = _open_download_file(path)
         except (FileNotFoundError, OSError, PermissionError, ValueError):
             store.get("links", {}).pop(token, None)
             _write_store_locked(store)
-            return _error_response(404, "download_missing", "The target file no longer exists")
+            return _error_response(
+                404,
+                "download_missing",
+                "The shared file snapshot no longer exists",
+            )
 
         opened_stat = os.fstat(handle.fileno())
         if (
@@ -300,17 +381,22 @@ def _claim_download(
                 "The target file exceeds the configured size limit",
             )
 
+        claimed_link = dict(link)
         if consume:
-            link["downloads"] = downloads + 1
+            new_downloads = downloads + 1
+            link["downloads"] = new_downloads
             link["last_download_at"] = now
             store["links"][token] = link
+            claimed_link = dict(link)
+            if max_downloads > 0 and new_downloads >= max_downloads:
+                claimed_link["delete_snapshot_after_stream"] = True
             try:
                 _write_store_locked(store)
             except Exception:
                 handle.close()
                 raise
 
-    return handle, path, link
+    return handle, path, claimed_link
 
 
 def _content_disposition(filename: str) -> str:
@@ -324,12 +410,19 @@ def _content_disposition(filename: str) -> str:
     return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
 
 
-def _file_chunks(handle: BinaryIO, chunk_size: int = 64 * 1024):  # noqa: ANN201
+def _file_chunks(
+    handle: BinaryIO,
+    chunk_size: int = 64 * 1024,
+    cleanup_path: Path | None = None,
+):  # noqa: ANN201
     try:
         while chunk := handle.read(chunk_size):
             yield chunk
     finally:
         handle.close()
+        if cleanup_path is not None:
+            with contextlib.suppress(OSError):
+                cleanup_path.unlink(missing_ok=True)
 
 
 async def download_endpoint(request: Request) -> Response:
@@ -358,7 +451,12 @@ async def download_endpoint(request: Request) -> Response:
     if request.method.upper() == "HEAD":
         handle.close()
         return Response(status_code=200, media_type=media_type, headers=headers)
-    return StreamingResponse(_file_chunks(handle), media_type=media_type, headers=headers)
+    cleanup_path = path if link.get("delete_snapshot_after_stream") else None
+    return StreamingResponse(
+        _file_chunks(handle, cleanup_path=cleanup_path),
+        media_type=media_type,
+        headers=headers,
+    )
 
 
 def download_routes() -> list[Route]:

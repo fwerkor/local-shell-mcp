@@ -9,7 +9,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.applications import Starlette
 from starlette.requests import Request
+from starlette.routing import Route
 from starlette.websockets import WebSocket
 
 from local_shell_mcp.audit import audit, query_audit, suppress_audit
@@ -20,8 +22,11 @@ from local_shell_mcp.human_ui import (
     _bounded_int,
     _idle_timeout_remaining,
     _split_tui_command,
+    _UnixPtyProcess,
     _validate_tui_api_base,
+    _WindowsPtyProcess,
     api_files,
+    ui_asset,
 )
 from local_shell_mcp.oauth import issue_access_token, public_base_url
 from local_shell_mcp.remote import execute_worker_tool
@@ -37,6 +42,25 @@ def _configure(tmp_path, monkeypatch, *, auth_mode: str = "none") -> None:
     monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
     get_settings.cache_clear()
 
+
+
+def test_ui_assets_reject_symlinks_outside_asset_root(tmp_path, monkeypatch):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside-secret", encoding="utf-8")
+    link = assets / "escape.txt"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlinks are not available in this environment")
+    monkeypatch.setattr("local_shell_mcp.human_ui._assets_dir", lambda: assets)
+
+    app = Starlette(routes=[Route("/assets/{path:path}", ui_asset)])
+    response = TestClient(app).get("/assets/escape.txt")
+
+    assert response.status_code == 404
+    assert "outside-secret" not in response.text
 
 
 @pytest.mark.asyncio
@@ -630,3 +654,48 @@ def test_terminal_idle_timeout_uses_latest_input_or_output_activity():
     assert _idle_timeout_remaining(100.0, 60.0, 130.0) == 30.0
     assert _idle_timeout_remaining(100.0, 60.0, 160.0) == 0.0
     assert _idle_timeout_remaining(150.0, 60.0, 160.0) == 50.0
+
+
+@pytest.mark.asyncio
+async def test_unix_pty_write_retries_short_writes(monkeypatch):
+    process = _UnixPtyProcess.__new__(_UnixPtyProcess)
+    process.master_fd = 123
+    written = bytearray()
+
+    attempts = 0
+    waits = []
+
+    def short_write(fd, data):
+        nonlocal attempts
+        assert fd == 123
+        attempts += 1
+        if attempts == 2:
+            raise BlockingIOError
+        count = min(2, len(data))
+        written.extend(bytes(data[:count]))
+        return count
+
+    monkeypatch.setattr("local_shell_mcp.human_ui.os.write", short_write)
+    monkeypatch.setattr(
+        "local_shell_mcp.human_ui.select.select",
+        lambda read, write, error, timeout: waits.append((read, write, error, timeout)),
+    )
+    await process.write(b"abcdef")
+    assert bytes(written) == b"abcdef"
+    assert waits == [([], [123], [], 0.1)]
+
+
+@pytest.mark.asyncio
+async def test_windows_pty_write_accepts_zero_from_async_pywinpty():
+    process = _WindowsPtyProcess.__new__(_WindowsPtyProcess)
+    calls = []
+
+    class FakeProcess:
+        def write(self, text):
+            calls.append(text)
+            return 0
+
+    process.process = FakeProcess()
+    await process.write(b"\x1bOR")
+
+    assert calls == ["\x1bOR"]

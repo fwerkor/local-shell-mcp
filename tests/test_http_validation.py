@@ -33,3 +33,23 @@ def test_http_exception_uses_consistent_error_envelope(tmp_path, monkeypatch):
     assert response.json()["ok"] is False
     assert response.json()["error"] == "http_error"
     assert "timeout_s must be <= 120 seconds" in response.json()["message"]
+
+
+def test_http_request_body_limit_rejects_oversized_payload(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_HTTP_REQUEST_BYTES", "64")
+    get_settings.cache_clear()
+
+    response = TestClient(build_http_app()).post(
+        "/tools/write_file",
+        content=b"x" * 65,
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 413
+    assert response.json() == {
+        "ok": False,
+        "error": "request_too_large",
+        "message": "Request body exceeds the configured 64 byte limit",
+    }

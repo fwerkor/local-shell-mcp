@@ -6,6 +6,7 @@ import contextlib
 import json
 import logging
 import os
+import select
 import shlex
 import shutil
 import signal
@@ -141,10 +142,11 @@ async def ui_asset(request: Request) -> Response:
     relative = PurePosixPath(str(raw))
     if relative.is_absolute() or ".." in relative.parts:
         return Response("Not found", status_code=404)
-    path = _assets_dir().joinpath(*relative.parts)
+    assets_dir = _assets_dir().resolve()
     try:
-        path.relative_to(_assets_dir())
-    except ValueError:
+        path = assets_dir.joinpath(*relative.parts).resolve(strict=True)
+        path.relative_to(assets_dir)
+    except (OSError, ValueError):
         return Response("Not found", status_code=404)
     if not path.is_file():
         return Response("Not found", status_code=404)
@@ -789,9 +791,21 @@ class _UnixPtyProcess:
             except OSError:
                 return b""
 
+    def _write_all(self, data: bytes) -> None:
+        remaining = memoryview(data)
+        while remaining:
+            try:
+                written = os.write(self.master_fd, remaining)
+            except BlockingIOError:
+                select.select([], [self.master_fd], [], 0.1)
+                continue
+            if written <= 0:
+                raise OSError("PTY write made no progress")
+            remaining = remaining[written:]
+
     async def write(self, data: bytes) -> None:
         if data:
-            await asyncio.to_thread(os.write, self.master_fd, data)
+            await asyncio.to_thread(self._write_all, data)
 
     async def close(self) -> None:
         with contextlib.suppress(OSError):
@@ -843,8 +857,15 @@ class _WindowsPtyProcess:
             return b""
         return data.encode("utf-8", errors="replace") if isinstance(data, str) else bytes(data)
 
+    def _write_once(self, text: str) -> None:
+        result = self.process.write(text)
+        if result is not None and not isinstance(result, int):
+            raise OSError(f"Unexpected ConPTY write result: {type(result).__name__}")
+
     async def write(self, data: bytes) -> None:
-        await asyncio.to_thread(self.process.write, data.decode("utf-8", errors="replace"))
+        if data:
+            text = data.decode("utf-8", errors="replace")
+            await asyncio.to_thread(self._write_once, text)
 
     async def close(self) -> None:
         with contextlib.suppress(Exception):
