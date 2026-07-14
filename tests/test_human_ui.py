@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -44,7 +45,7 @@ def test_human_file_api_has_yazi_style_directory_payload(tmp_path, monkeypatch):
 def test_editor_content_reads_the_complete_bounded_file(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     content = "\n".join(f"line-{index}" for index in range(350))
-    (tmp_path / "long.txt").write_text(content, encoding="utf-8")
+    (tmp_path / "long.txt").write_bytes(content.encode("utf-8"))
     client = TestClient(build_http_app())
 
     response = client.get(
@@ -103,7 +104,8 @@ def test_editor_rejects_stale_save_and_preserves_newer_file(tmp_path, monkeypatc
     )
     assert saved.status_code == 200
     assert path.read_text(encoding="utf-8") == "merged edit"
-    assert path.stat().st_mode & 0o777 == 0o640
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o777 == 0o640
     assert not list(tmp_path.glob(".shared.txt.*.tmp"))
 
 
