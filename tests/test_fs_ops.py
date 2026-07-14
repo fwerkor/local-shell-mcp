@@ -1,10 +1,23 @@
 
 import json
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
-from local_shell_mcp.fs_ops import edit_text, multi_edit_text, read_text, resolve_path, write_text
+from local_shell_mcp.fs_ops import (
+    FileConflictError,
+    delete_path,
+    edit_text,
+    list_dir,
+    multi_edit_text,
+    perform_file_action,
+    read_text,
+    resolve_path,
+    write_text,
+)
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.shell_ops import check_command_policy
 from local_shell_mcp.tools import build_mcp
@@ -94,6 +107,64 @@ def test_write_text_does_not_read_existing_file_before_overwrite(tmp_path, monke
     assert result["created"] is False
     assert (tmp_path / "existing.txt").read_bytes().decode("utf-8") == "new"
 
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation requires privileges on Windows")
+def test_file_mutations_operate_on_symlink_instead_of_target(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "important.txt").write_text("keep", encoding="utf-8")
+    link = tmp_path / "link"
+    link.symlink_to(target, target_is_directory=True)
+
+    entries = {entry["path"]: entry for entry in list_dir(".")}
+    assert entries["link"]["type"] == "link"
+    assert entries["link"]["target"] == str(target)
+    assert entries["target"]["type"] == "dir"
+
+    copied = perform_file_action("copy", "link", "link-copy")
+    assert copied["destination"] == "link-copy"
+    assert (tmp_path / "link-copy").is_symlink()
+    assert os.readlink(tmp_path / "link-copy") == str(target)
+
+    result = delete_path("link", recursive=True)
+    assert result == {"path": "link", "deleted": "link"}
+    assert not link.exists()
+    assert not link.is_symlink()
+    assert (target / "important.txt").read_text(encoding="utf-8") == "keep"
+
+
+def test_expected_revision_write_is_serialized(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    path = tmp_path / "shared.txt"
+    path.write_text("opened", encoding="utf-8")
+    expected_sha256 = read_text("shared.txt")["sha256"]
+    barrier = threading.Barrier(2)
+
+    def writer(content: str):
+        barrier.wait(timeout=5)
+        return write_text(
+            "shared.txt",
+            content,
+            overwrite=True,
+            expected_sha256=expected_sha256,
+        )
+
+    outcomes = []
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(writer, "first"), pool.submit(writer, "second")]
+        for future in futures:
+            try:
+                outcomes.append(("success", future.result()))
+            except FileConflictError as exc:
+                outcomes.append(("conflict", str(exc)))
+
+    assert [kind for kind, _ in outcomes].count("success") == 1
+    assert [kind for kind, _ in outcomes].count("conflict") == 1
+    assert path.read_text(encoding="utf-8") in {"first", "second"}
 
 def test_edit_refuses_files_above_write_limit(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))

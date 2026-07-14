@@ -8,6 +8,9 @@ import hashlib
 import os
 import shutil
 import tempfile
+import threading
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from .settings import get_settings
@@ -22,12 +25,68 @@ class FileConflictError(RuntimeError):
     pass
 
 
+_PATH_LOCKS_GUARD = threading.Lock()
+_PATH_LOCKS: dict[str, threading.RLock] = {}
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _thread_lock_for(path: Path) -> threading.RLock:
+    key = str(path)
+    with _PATH_LOCKS_GUARD:
+        return _PATH_LOCKS.setdefault(key, threading.RLock())
+
+
+@contextmanager
+def _path_lock(path: Path) -> Iterator[None]:
+    """Serialize mutations to a path across threads and cooperating processes."""
+
+    thread_lock = _thread_lock_for(path)
+    with thread_lock:
+        lock_dir = get_settings().state_dir / "locks"
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        lock_name = hashlib.sha256(str(path).encode("utf-8")).hexdigest() + ".lock"
+        lock_path = lock_dir / lock_name
+        with lock_path.open("a+b") as handle:
+            if handle.tell() == 0 and handle.seek(0, os.SEEK_END) == 0:
+                handle.write(b"\0")
+                handle.flush()
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def _path_locks(paths: list[Path]) -> Iterator[None]:
+    unique = sorted({str(path): path for path in paths}.values(), key=str)
+    with ExitStack() as stack:
+        for path in unique:
+            stack.enter_context(_path_lock(path))
+        yield
 
 
 def workspace_root() -> Path:
@@ -68,22 +127,35 @@ def prune_temp_dir() -> None:
             continue
 
 
-def resolve_path(path: str | Path, *, must_exist: bool = False, allow_missing_parent: bool = True) -> Path:
-    """Resolve a path, optionally restricting it to workspace_root.
+def resolve_path(
+    path: str | Path,
+    *,
+    must_exist: bool = False,
+    allow_missing_parent: bool = True,
+    follow_final_symlink: bool = True,
+) -> Path:
+    """Resolve a path while optionally preserving the final symlink itself.
 
-    In normal mode, absolute paths outside workspace are rejected. In full-container mode,
-    any absolute path inside the container is allowed.
+    Parent symlinks are always resolved before the workspace boundary check. Read operations
+    normally follow the final symlink; mutations such as delete, rename, copy, and move pass
+    follow_final_symlink=False so they operate on the directory entry the user selected.
     """
+
     settings = get_settings()
     root = settings.workspace_root.resolve()
     raw = Path(os.path.expandvars(os.path.expanduser(str(path))))
     if not raw.is_absolute():
         raw = root / raw
-    resolved = raw.resolve(strict=False)
+    if follow_final_symlink:
+        resolved = raw.resolve(strict=False)
+    else:
+        resolved_parent = raw.parent.resolve(strict=False)
+        resolved = resolved_parent / raw.name if raw.name else resolved_parent
 
     if not settings.allow_full_container:
+        boundary_path = resolved if follow_final_symlink else resolved.parent
         try:
-            resolved.relative_to(root)
+            boundary_path.relative_to(root)
         except ValueError as exc:
             raise ValueError(f"Path escapes workspace: {path}") from exc
 
@@ -92,7 +164,8 @@ def resolve_path(path: str | Path, *, must_exist: bool = False, allow_missing_pa
         if denied and denied.lower() in lower:
             raise PermissionError(f"Path is denylisted: {path}")
 
-    if must_exist and not resolved.exists():
+    exists = resolved.exists() if follow_final_symlink else os.path.lexists(resolved)
+    if must_exist and not exists:
         raise FileNotFoundError(str(resolved))
     if not allow_missing_parent and not resolved.parent.exists():
         raise FileNotFoundError(str(resolved.parent))
@@ -101,10 +174,12 @@ def resolve_path(path: str | Path, *, must_exist: bool = False, allow_missing_pa
 
 def relative_display(path: Path) -> str:
     root = workspace_root()
+    candidate = path if path.is_absolute() else root / path
+    lexical = Path(os.path.abspath(candidate))
     try:
-        return str(path.resolve().relative_to(root))
+        return str(lexical.relative_to(root))
     except ValueError:
-        return str(path)
+        return str(lexical)
 
 
 def missing_path_context(path: str | Path, *, max_entries: int = 50) -> dict:
@@ -144,17 +219,29 @@ def list_dir(path: str = ".", recursive: bool = False, max_entries: int = 500) -
         if len(out) >= limit:
             break
         try:
-            stat = item.stat()
+            stat = item.lstat()
+            is_link = item.is_symlink()
         except OSError:
             continue
-        out.append(
-            {
-                "path": relative_display(item),
-                "type": "dir" if item.is_dir() else "file" if item.is_file() else "other",
-                "size": stat.st_size if item.is_file() else None,
-                "modified": stat.st_mtime,
-            }
+        item_type = (
+            "link"
+            if is_link
+            else "dir"
+            if item.is_dir()
+            else "file"
+            if item.is_file()
+            else "other"
         )
+        row = {
+            "path": relative_display(item),
+            "type": item_type,
+            "size": stat.st_size if item_type in {"file", "link"} else None,
+            "modified": stat.st_mtime,
+        }
+        if is_link:
+            with contextlib.suppress(OSError):
+                row["target"] = os.readlink(item)
+        out.append(row)
     return out
 
 
@@ -277,31 +364,35 @@ def write_text(
     if len(data) > settings.max_file_write_bytes:
         raise ValueError(f"Refusing to write {len(data)} bytes; max is {settings.max_file_write_bytes}")
     p = resolve_path(path)
-    exists = p.exists()
-    if exists and not overwrite:
-        raise FileExistsError(str(p))
-    if expected_sha256 is not None:
-        if not exists:
-            raise FileConflictError("File was deleted after it was opened; reload before saving")
-        current_sha256 = _sha256_file(p)
-        if current_sha256 != expected_sha256:
-            raise FileConflictError("File changed after it was opened; reload before saving")
-    p.parent.mkdir(parents=True, exist_ok=True)
-    created = not exists
-    previous_mode = p.stat().st_mode & 0o777 if exists else None
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{p.name}.", suffix=".tmp", dir=p.parent)
-    tmp = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        if previous_mode is not None:
-            tmp.chmod(previous_mode)
-        tmp.replace(p)
-    finally:
-        with contextlib.suppress(OSError):
-            tmp.unlink(missing_ok=True)
+    with _path_lock(p):
+        exists = p.exists()
+        if exists and not overwrite:
+            raise FileExistsError(str(p))
+        if expected_sha256 is not None:
+            if not exists:
+                raise FileConflictError("File was deleted after it was opened; reload before saving")
+            if _sha256_file(p) != expected_sha256:
+                raise FileConflictError("File changed after it was opened; reload before saving")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        created = not exists
+        previous_mode = p.stat().st_mode & 0o777 if exists else None
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{p.name}.", suffix=".tmp", dir=p.parent)
+        tmp = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if previous_mode is not None:
+                tmp.chmod(previous_mode)
+            if expected_sha256 is not None and (
+                not p.exists() or _sha256_file(p) != expected_sha256
+            ):
+                raise FileConflictError("File changed while it was being saved; reload before saving")
+            tmp.replace(p)
+        finally:
+            with contextlib.suppress(OSError):
+                tmp.unlink(missing_ok=True)
     return {
         "path": relative_display(p),
         "bytes": len(data),
@@ -322,39 +413,62 @@ def perform_file_action(
     if action not in {"mkdir", "touch", "rename", "copy", "move"}:
         raise ValueError(f"Unsupported file action: {action}")
 
-    source = resolve_path(path, must_exist=action in {"rename", "copy", "move"})
-    if action == "mkdir":
-        source.mkdir(parents=True, exist_ok=exist_ok)
-        return {"action": action, "path": relative_display(source)}
-    if action == "touch":
-        source.parent.mkdir(parents=True, exist_ok=True)
-        source.touch(exist_ok=exist_ok)
+    source = resolve_path(
+        path,
+        must_exist=action in {"rename", "copy", "move"},
+        follow_final_symlink=False,
+    )
+    if action in {"mkdir", "touch"}:
+        with _path_lock(source):
+            if os.path.lexists(source):
+                if not exist_ok:
+                    raise FileExistsError(str(source))
+                return {"action": action, "path": relative_display(source)}
+            if action == "mkdir":
+                source.mkdir(parents=True)
+            else:
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.touch(exist_ok=False)
         return {"action": action, "path": relative_display(source)}
 
     if not destination:
         raise ValueError("destination is required")
-    target = resolve_path(destination, allow_missing_parent=False)
-    if target.exists():
-        raise FileExistsError(str(target))
-    if source == target:
-        raise ValueError("Source and destination are the same path")
-    if source.is_dir():
-        try:
-            target.relative_to(source)
-        except ValueError:
-            pass
-        else:
-            raise ValueError("Destination cannot be inside the source directory")
+    target = resolve_path(
+        destination,
+        allow_missing_parent=False,
+        follow_final_symlink=False,
+    )
+    with _path_locks([source, target]):
+        if not os.path.lexists(source):
+            raise FileNotFoundError(str(source))
+        if os.path.lexists(target):
+            raise FileExistsError(str(target))
+        if source == target:
+            raise ValueError("Source and destination are the same path")
+        source_is_directory = source.is_dir() and not source.is_symlink()
+        if source_is_directory:
+            try:
+                target.relative_to(source)
+            except ValueError:
+                pass
+            else:
+                raise ValueError("Destination cannot be inside the source directory")
 
-    if action == "rename":
-        source.rename(target)
-    elif action == "copy":
-        if source.is_dir():
-            shutil.copytree(source, target)
+        if action == "rename":
+            source.rename(target)
+        elif action == "copy":
+            if source.is_symlink():
+                os.symlink(
+                    os.readlink(source),
+                    target,
+                    target_is_directory=source.is_dir(),
+                )
+            elif source_is_directory:
+                shutil.copytree(source, target, symlinks=True)
+            else:
+                shutil.copy2(source, target, follow_symlinks=False)
         else:
-            shutil.copy2(source, target)
-    else:
-        shutil.move(str(source), str(target))
+            shutil.move(str(source), str(target))
     return {
         "action": action,
         "path": relative_display(source),
@@ -368,6 +482,7 @@ def edit_text(path: str, old: str, new: str, replace_all: bool = False) -> dict:
     if p.stat().st_size > settings.max_file_write_bytes:
         raise ValueError(f"Refusing to edit {p.stat().st_size} bytes; max is {settings.max_file_write_bytes}")
     _assert_text_file(p)
+    expected_sha256 = _sha256_file(p)
     text = p.read_text(encoding="utf-8")
     count = text.count(old)
     if count == 0:
@@ -378,7 +493,7 @@ def edit_text(path: str, old: str, new: str, replace_all: bool = False) -> dict:
     updated_bytes = len(updated.encode("utf-8"))
     if updated_bytes > settings.max_file_write_bytes:
         raise ValueError(f"Refusing to write {updated_bytes} bytes; max is {settings.max_file_write_bytes}")
-    p.write_text(updated, encoding="utf-8")
+    write_text(path, updated, overwrite=True, expected_sha256=expected_sha256)
     return {"path": relative_display(p), "replacements": count if replace_all else 1}
 
 
@@ -388,6 +503,7 @@ def multi_edit_text(path: str, edits: list[dict]) -> dict:
     if p.stat().st_size > settings.max_file_write_bytes:
         raise ValueError(f"Refusing to edit {p.stat().st_size} bytes; max is {settings.max_file_write_bytes}")
     _assert_text_file(p)
+    expected_sha256 = _sha256_file(p)
     text = p.read_text(encoding="utf-8")
     total = 0
     for edit in edits:
@@ -404,16 +520,23 @@ def multi_edit_text(path: str, edits: list[dict]) -> dict:
     updated_bytes = len(text.encode("utf-8"))
     if updated_bytes > settings.max_file_write_bytes:
         raise ValueError(f"Refusing to write {updated_bytes} bytes; max is {settings.max_file_write_bytes}")
-    p.write_text(text, encoding="utf-8")
+    write_text(path, text, overwrite=True, expected_sha256=expected_sha256)
     return {"path": relative_display(p), "replacements": total}
 
 
 def delete_path(path: str, recursive: bool = False) -> dict:
-    p = resolve_path(path, must_exist=True)
-    if p.is_dir():
-        if not recursive:
-            raise IsADirectoryError("Set recursive=true to delete a directory")
-        shutil.rmtree(p)
-        return {"path": relative_display(p), "deleted": "directory"}
-    p.unlink()
-    return {"path": relative_display(p), "deleted": "file"}
+    p = resolve_path(path, must_exist=True, follow_final_symlink=False)
+    with _path_lock(p):
+        if not os.path.lexists(p):
+            raise FileNotFoundError(str(p))
+        if p.is_symlink():
+            p.unlink()
+            return {"path": relative_display(p), "deleted": "link"}
+        if p.is_dir():
+            if not recursive:
+                raise IsADirectoryError("Set recursive=true to delete a directory")
+            shutil.rmtree(p)
+            return {"path": relative_display(p), "deleted": "directory"}
+        p.unlink()
+        return {"path": relative_display(p), "deleted": "file"}
+
