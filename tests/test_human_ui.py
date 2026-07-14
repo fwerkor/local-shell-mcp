@@ -9,7 +9,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.applications import Starlette
 from starlette.requests import Request
+from starlette.routing import Route
 from starlette.websockets import WebSocket
 
 from local_shell_mcp.audit import audit, query_audit, suppress_audit
@@ -22,6 +24,7 @@ from local_shell_mcp.human_ui import (
     _split_tui_command,
     _validate_tui_api_base,
     api_files,
+    ui_asset,
 )
 from local_shell_mcp.oauth import issue_access_token, public_base_url
 from local_shell_mcp.remote import execute_worker_tool
@@ -37,6 +40,25 @@ def _configure(tmp_path, monkeypatch, *, auth_mode: str = "none") -> None:
     monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
     get_settings.cache_clear()
 
+
+
+def test_ui_assets_reject_symlinks_outside_asset_root(tmp_path, monkeypatch):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside-secret", encoding="utf-8")
+    link = assets / "escape.txt"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlinks are not available in this environment")
+    monkeypatch.setattr("local_shell_mcp.human_ui._assets_dir", lambda: assets)
+
+    app = Starlette(routes=[Route("/assets/{path:path}", ui_asset)])
+    response = TestClient(app).get("/assets/escape.txt")
+
+    assert response.status_code == 404
+    assert "outside-secret" not in response.text
 
 
 @pytest.mark.asyncio

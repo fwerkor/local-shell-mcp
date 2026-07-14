@@ -141,10 +141,11 @@ async def ui_asset(request: Request) -> Response:
     relative = PurePosixPath(str(raw))
     if relative.is_absolute() or ".." in relative.parts:
         return Response("Not found", status_code=404)
-    path = _assets_dir().joinpath(*relative.parts)
+    assets_dir = _assets_dir().resolve()
     try:
-        path.relative_to(_assets_dir())
-    except ValueError:
+        path = assets_dir.joinpath(*relative.parts).resolve(strict=True)
+        path.relative_to(assets_dir)
+    except (OSError, ValueError):
         return Response("Not found", status_code=404)
     if not path.is_file():
         return Response("Not found", status_code=404)

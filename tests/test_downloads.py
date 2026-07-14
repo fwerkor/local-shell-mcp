@@ -84,7 +84,8 @@ def test_share_link_cannot_be_retargeted_outside_workspace(tmp_path, monkeypatch
 
     response = TestClient(Starlette(routes=download_routes())).get(link["url"])
 
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.text == "hello"
     assert "outside-secret" not in response.text
 
 
@@ -117,9 +118,23 @@ def test_share_link_is_bound_to_original_file_identity(tmp_path, monkeypatch):
 
     response = TestClient(Starlette(routes=download_routes())).get(link["url"])
 
-    assert response.status_code == 410
-    assert response.json()["error"] == "download_changed"
+    assert response.status_code == 200
+    assert response.text == "original"
     assert "replacement-secret" not in response.text
+
+
+def test_share_link_serves_creation_snapshot_after_in_place_rewrite(tmp_path, monkeypatch):
+    _reset(tmp_path, monkeypatch)
+    source = tmp_path / "hello.txt"
+    source.write_text("original", encoding="utf-8")
+    link = create_share_link("hello.txt", ttl_s=60)
+
+    source.write_text("new-secret", encoding="utf-8")
+    response = TestClient(Starlette(routes=download_routes())).get(link["url"])
+
+    assert response.status_code == 200
+    assert response.text == "original"
+    assert "new-secret" not in response.text
 
 
 def test_download_filename_strips_header_control_characters(tmp_path, monkeypatch):

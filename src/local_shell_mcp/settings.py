@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import os
+import secrets
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -28,6 +30,12 @@ DEFAULT_WORKSPACE_ROOT = Path("/workspace")
 DEFAULT_STATE_DIR = DEFAULT_WORKSPACE_ROOT / ".local-shell-mcp"
 DEFAULT_AUDIT_LOG_PATH = DEFAULT_STATE_DIR / "audit.jsonl"
 DEFAULT_AGENT_CONFIG_DIR = DEFAULT_STATE_DIR / "agent_config"
+OAUTH_JWT_SECRET_FILE_NAME = "oauth-jwt-secret"
+_WEAK_OAUTH_SECRET_VALUES = {
+    "",
+    "dev-" + "change-me",
+    "change-me-64-hex-random-secret",
+}
 
 
 def _matches_default_path(value: Path, default: Path) -> bool:
@@ -44,6 +52,62 @@ def default_shell_executable() -> str:
     if os.name == "nt":
         return "power" + "shell.exe"
     return "/bin/bash"
+
+
+def _replace_settings(settings: Settings, **updates: Any) -> Settings:
+    if hasattr(settings, "model_copy"):
+        return settings.model_copy(update=updates)
+    from dataclasses import replace
+
+    return replace(settings, **updates)
+
+
+def _read_oauth_secret(path: Path) -> str | None:
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return value if len(value.encode("utf-8")) >= 32 else None
+
+
+def _get_or_create_oauth_secret(state_dir: Path) -> str:
+    path = state_dir / OAUTH_JWT_SECRET_FILE_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    for _attempt in range(2):
+        existing = _read_oauth_secret(path)
+        if existing:
+            return existing
+        generated = secrets.token_urlsafe(48)
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            try:
+                path.unlink()
+            except OSError as exc:
+                raise RuntimeError(f"Unable to replace invalid OAuth secret: {path}") from exc
+            continue
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(generated)
+            handle.write("\n")
+        with contextlib.suppress(OSError):
+            path.chmod(0o600)
+        return generated
+    existing = _read_oauth_secret(path)
+    if existing:
+        return existing
+    raise RuntimeError(f"Unable to initialize OAuth secret: {path}")
+
+
+def _ensure_oauth_jwt_secret(settings: Settings) -> Settings:
+    if settings.auth_mode != "oauth":
+        return settings
+    current = str(settings.oauth_jwt_secret or "")
+    if current not in _WEAK_OAUTH_SECRET_VALUES:
+        return settings
+    return _replace_settings(
+        settings,
+        oauth_jwt_secret=_get_or_create_oauth_secret(settings.state_dir),
+    )
 
 
 _RESERVED_UI_PATHS = {
@@ -474,6 +538,7 @@ def get_settings() -> Settings:
     settings = settings.with_workspace_relative_defaults()
     settings.workspace_root.mkdir(parents=True, exist_ok=True)
     settings.state_dir.mkdir(parents=True, exist_ok=True)
+    settings = _ensure_oauth_jwt_secret(settings)
     settings.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
     settings.agent_config_dir.mkdir(parents=True, exist_ok=True)
     return settings
@@ -495,14 +560,18 @@ def safe_settings_dump(settings: Settings | None = None) -> dict:
 
 def validate_public_oauth_configuration(settings: Settings | None = None) -> None:
     settings = settings or get_settings()
-    if settings.auth_mode != "oauth" or not settings.public_base_url:
+    if settings.auth_mode != "oauth":
         return
-    weak_secret_values = {"", "dev-" + "change-me", "change-me-64-hex-random-secret"}
-    if settings.oauth_jwt_secret in weak_secret_values or len(settings.oauth_jwt_secret.encode("utf-8")) < 32:
+    if (
+        settings.oauth_jwt_secret in _WEAK_OAUTH_SECRET_VALUES
+        or len(settings.oauth_jwt_secret.encode("utf-8")) < 32
+    ):
         raise RuntimeError(
             "LOCAL_SHELL_MCP_OAUTH_JWT_SECRET must be at least 32 bytes of strong random data "
-            "when LOCAL_SHELL_MCP_PUBLIC_BASE_URL is configured."
+            "when OAuth authentication is enabled."
         )
+    if not settings.public_base_url:
+        return
     pin = (settings.oauth_admin_pin or "").strip()
     weak_pin_values = {"", "change-me", "change-me-long-random-pin"}
     if pin in weak_pin_values or len(pin) < 12:

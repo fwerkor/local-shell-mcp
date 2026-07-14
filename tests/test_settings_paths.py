@@ -3,7 +3,11 @@ from pathlib import Path
 import pytest
 
 import local_shell_mcp.settings as settings_module
-from local_shell_mcp.settings import Settings, validate_public_oauth_configuration
+from local_shell_mcp.settings import (
+    Settings,
+    get_settings,
+    validate_public_oauth_configuration,
+)
 
 
 def test_workspace_relative_defaults_match_resolved_platform_defaults(
@@ -93,3 +97,21 @@ def test_public_oauth_requires_strong_secret_and_admin_pin():
     validate_public_oauth_configuration(
         Settings(**base, oauth_jwt_secret="s" * 32, oauth_admin_pin="a-strong-admin-pin")
     )
+
+
+def test_default_oauth_secret_is_random_and_persisted(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "oauth")
+    monkeypatch.delenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET", raising=False)
+    get_settings.cache_clear()
+
+    first = get_settings().oauth_jwt_secret
+    get_settings.cache_clear()
+    second = get_settings().oauth_jwt_secret
+
+    assert first == second
+    assert first != "dev-change-me"
+    assert len(first.encode("utf-8")) >= 32
+    secret_path = tmp_path / ".state" / "oauth-jwt-secret"
+    assert secret_path.read_text(encoding="utf-8").strip() == first
