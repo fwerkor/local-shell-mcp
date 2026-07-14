@@ -22,6 +22,7 @@ from local_shell_mcp.human_ui import (
     _bounded_int,
     _idle_timeout_remaining,
     _split_tui_command,
+    _UnixPtyProcess,
     _validate_tui_api_base,
     api_files,
     ui_asset,
@@ -652,3 +653,20 @@ def test_terminal_idle_timeout_uses_latest_input_or_output_activity():
     assert _idle_timeout_remaining(100.0, 60.0, 130.0) == 30.0
     assert _idle_timeout_remaining(100.0, 60.0, 160.0) == 0.0
     assert _idle_timeout_remaining(150.0, 60.0, 160.0) == 50.0
+
+
+@pytest.mark.asyncio
+async def test_unix_pty_write_retries_short_writes(monkeypatch):
+    process = _UnixPtyProcess.__new__(_UnixPtyProcess)
+    process.master_fd = 123
+    written = bytearray()
+
+    def short_write(fd, data):
+        assert fd == 123
+        count = min(2, len(data))
+        written.extend(bytes(data[:count]))
+        return count
+
+    monkeypatch.setattr("local_shell_mcp.human_ui.os.write", short_write)
+    await process.write(b"abcdef")
+    assert bytes(written) == b"abcdef"

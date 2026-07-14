@@ -1,4 +1,5 @@
 
+import hashlib
 import json
 import os
 import threading
@@ -268,3 +269,42 @@ def test_path_lock_state_and_lock_files_are_bounded(tmp_path, monkeypatch):
     lock_files = list((tmp_path / ".state" / "locks").glob("*.lock"))
     assert len(lock_files) <= 256
     assert all(path.name.startswith("shard-") for path in lock_files)
+
+
+def test_multi_path_lock_deduplicates_colliding_file_shards(tmp_path, monkeypatch):
+    from local_shell_mcp.fs_ops import _path_locks
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+
+    seen: dict[str, Path] = {}
+    collision: tuple[Path, Path] | None = None
+    for index in range(2_000):
+        path = tmp_path / f"collision-{index}"
+        shard = hashlib.sha256(str(path).encode("utf-8")).hexdigest()[:2]
+        previous = seen.get(shard)
+        if previous is not None:
+            collision = (previous, path)
+            break
+        seen[shard] = path
+    assert collision is not None
+
+    completed = threading.Event()
+    errors: list[BaseException] = []
+
+    def acquire():
+        try:
+            with _path_locks(list(collision)):
+                pass
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+        finally:
+            completed.set()
+
+    thread = threading.Thread(target=acquire, daemon=True)
+    thread.start()
+    thread.join(timeout=2)
+
+    assert completed.is_set(), "colliding lock shards deadlocked"
+    assert errors == []

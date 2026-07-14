@@ -64,55 +64,69 @@ def _release_thread_lock(key: str, entry: _ThreadPathLock) -> None:
             _PATH_LOCKS.pop(key, None)
 
 
+def _lock_shard_path(path: Path) -> Path:
+    lock_dir = get_settings().state_dir / "locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256(str(path).encode("utf-8")).hexdigest()
+    return lock_dir / f"shard-{digest[:2]}.lock"
+
+
 @contextmanager
-def _path_lock(path: Path) -> Iterator[None]:
-    """Serialize mutations using bounded process-lock shards and transient thread locks."""
+def _file_lock(path: Path) -> Iterator[None]:
+    with path.open("a+b") as handle:
+        with contextlib.suppress(OSError):
+            path.chmod(0o600)
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
 
-    key, entry = _thread_lock_for(path)
-    try:
-        with entry.lock:
-            lock_dir = get_settings().state_dir / "locks"
-            lock_dir.mkdir(parents=True, exist_ok=True)
-            digest = hashlib.sha256(str(path).encode("utf-8")).hexdigest()
-            lock_path = lock_dir / f"shard-{digest[:2]}.lock"
-            with lock_path.open("a+b") as handle:
-                with contextlib.suppress(OSError):
-                    lock_path.chmod(0o600)
-                handle.seek(0, os.SEEK_END)
-                if handle.tell() == 0:
-                    handle.write(b"\0")
-                    handle.flush()
-                handle.seek(0)
-                if os.name == "nt":
-                    import msvcrt
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
 
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-                else:
-                    import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
 
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-                try:
-                    yield
-                finally:
-                    handle.seek(0)
-                    if os.name == "nt":
-                        import msvcrt
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
 
-                        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-                    else:
-                        import fcntl
-
-                        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    finally:
-        _release_thread_lock(key, entry)
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 @contextmanager
 def _path_locks(paths: list[Path]) -> Iterator[None]:
     unique = sorted({str(path): path for path in paths}.values(), key=str)
-    with ExitStack() as stack:
+    entries: list[tuple[str, _ThreadPathLock]] = []
+    try:
         for path in unique:
-            stack.enter_context(_path_lock(path))
+            entries.append(_thread_lock_for(path))
+        with ExitStack() as stack:
+            for _key, entry in entries:
+                stack.enter_context(entry.lock)
+            shards = sorted({_lock_shard_path(path) for path in unique}, key=str)
+            for shard in shards:
+                stack.enter_context(_file_lock(shard))
+            yield
+    finally:
+        for key, entry in reversed(entries):
+            _release_thread_lock(key, entry)
+
+
+@contextmanager
+def _path_lock(path: Path) -> Iterator[None]:
+    """Serialize one mutation using the shared multi-path lock implementation."""
+
+    with _path_locks([path]):
         yield
 
 
