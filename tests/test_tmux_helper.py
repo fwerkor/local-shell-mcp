@@ -38,7 +38,7 @@ def test_resolve_tmux_uses_bundled_helper_when_system_binary_is_missing(tmp_path
 
     selection = tmux_helper.resolve_tmux()
 
-    assert selection == tmux_helper.TmuxSelection("/bundled/tmux", "bundled")
+    assert selection == tmux_helper.TmuxSelection(str(Path("/bundled/tmux")), "bundled")
 
 
 def test_backend_info_reports_native_fallback(tmp_path, monkeypatch):

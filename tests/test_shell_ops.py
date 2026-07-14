@@ -19,6 +19,7 @@ from local_shell_mcp.shell_ops import (
     run_shell,
     send_shell,
 )
+from local_shell_mcp.tmux_helper import TmuxSelection
 from local_shell_mcp.tools import build_mcp
 
 
@@ -237,6 +238,10 @@ async def test_send_shell_invokes_tmux_promptly(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "local_shell_mcp.shell_ops._use_windows_persistent_shell_backend", lambda: False
+    )
+    monkeypatch.setattr(
+        "local_shell_mcp.shell_ops.resolve_tmux",
+        lambda: TmuxSelection("tmux", "system"),
     )
 
     async def fake_tmux(args: list[str], timeout_s: int = 10):
