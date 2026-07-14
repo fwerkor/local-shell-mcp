@@ -857,20 +857,15 @@ class _WindowsPtyProcess:
             return b""
         return data.encode("utf-8", errors="replace") if isinstance(data, str) else bytes(data)
 
-    def _write_all(self, text: str) -> None:
-        remaining = text
-        while remaining:
-            written = self.process.write(remaining)
-            if written is None:
-                return
-            if not isinstance(written, int) or written <= 0:
-                raise OSError("ConPTY write made no progress")
-            remaining = remaining[written:]
+    def _write_once(self, text: str) -> None:
+        result = self.process.write(text)
+        if result is not None and not isinstance(result, int):
+            raise OSError(f"Unexpected ConPTY write result: {type(result).__name__}")
 
     async def write(self, data: bytes) -> None:
         if data:
             text = data.decode("utf-8", errors="replace")
-            await asyncio.to_thread(self._write_all, text)
+            await asyncio.to_thread(self._write_once, text)
 
     async def close(self) -> None:
         with contextlib.suppress(Exception):

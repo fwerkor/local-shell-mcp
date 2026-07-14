@@ -24,6 +24,7 @@ from local_shell_mcp.human_ui import (
     _split_tui_command,
     _UnixPtyProcess,
     _validate_tui_api_base,
+    _WindowsPtyProcess,
     api_files,
     ui_asset,
 )
@@ -682,3 +683,19 @@ async def test_unix_pty_write_retries_short_writes(monkeypatch):
     await process.write(b"abcdef")
     assert bytes(written) == b"abcdef"
     assert waits == [([], [123], [], 0.1)]
+
+
+@pytest.mark.asyncio
+async def test_windows_pty_write_accepts_zero_from_async_pywinpty():
+    process = _WindowsPtyProcess.__new__(_WindowsPtyProcess)
+    calls = []
+
+    class FakeProcess:
+        def write(self, text):
+            calls.append(text)
+            return 0
+
+    process.process = FakeProcess()
+    await process.write(b"\x1bOR")
+
+    assert calls == ["\x1bOR"]
