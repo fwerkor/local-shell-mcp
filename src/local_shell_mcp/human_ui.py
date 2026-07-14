@@ -6,6 +6,7 @@ import contextlib
 import json
 import logging
 import os
+import select
 import shlex
 import shutil
 import signal
@@ -793,7 +794,11 @@ class _UnixPtyProcess:
     def _write_all(self, data: bytes) -> None:
         remaining = memoryview(data)
         while remaining:
-            written = os.write(self.master_fd, remaining)
+            try:
+                written = os.write(self.master_fd, remaining)
+            except BlockingIOError:
+                select.select([], [self.master_fd], [], 0.1)
+                continue
             if written <= 0:
                 raise OSError("PTY write made no progress")
             remaining = remaining[written:]

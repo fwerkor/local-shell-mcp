@@ -661,12 +661,24 @@ async def test_unix_pty_write_retries_short_writes(monkeypatch):
     process.master_fd = 123
     written = bytearray()
 
+    attempts = 0
+    waits = []
+
     def short_write(fd, data):
+        nonlocal attempts
         assert fd == 123
+        attempts += 1
+        if attempts == 2:
+            raise BlockingIOError
         count = min(2, len(data))
         written.extend(bytes(data[:count]))
         return count
 
     monkeypatch.setattr("local_shell_mcp.human_ui.os.write", short_write)
+    monkeypatch.setattr(
+        "local_shell_mcp.human_ui.select.select",
+        lambda read, write, error, timeout: waits.append((read, write, error, timeout)),
+    )
     await process.write(b"abcdef")
     assert bytes(written) == b"abcdef"
+    assert waits == [([], [123], [], 0.1)]
