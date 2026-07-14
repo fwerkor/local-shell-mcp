@@ -1,3 +1,7 @@
+import asyncio
+import os
+import shutil
+
 import pytest
 
 import local_shell_mcp.jobs as jobs_module
@@ -45,7 +49,8 @@ async def test_jobs_track_tail_stop_and_retry(tmp_path, monkeypatch):
 
     tail = await tail_job(job["job_id"], lines=20)
     assert tail["job"]["status"] == "running"
-    assert "python -m http.server" in tail["output"]
+    assert "job-runner" in tail["output"]
+    assert tail["job"]["command"] == "python -m http.server"
 
     stopped = await stop_job(job["job_id"])
     assert stopped["killed"] is True
@@ -58,7 +63,7 @@ async def test_jobs_track_tail_stop_and_retry(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_job_list_marks_missing_running_session_exited(tmp_path, monkeypatch):
+async def test_job_list_marks_missing_running_session_lost(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
     get_settings.cache_clear()
@@ -76,5 +81,56 @@ async def test_job_list_marks_missing_running_session_exited(tmp_path, monkeypat
     assert job["status"] == "running"
 
     listed = await list_jobs()
-    assert listed["counts"] == {"exited": 1}
-    assert listed["jobs"][0]["status"] == "exited"
+    assert listed["counts"] == {"lost": 1}
+    assert listed["jobs"][0]["status"] == "lost"
+    assert listed["jobs"][0]["exit_code"] is None
+
+
+@pytest.mark.asyncio
+async def test_completed_job_retains_output_and_exit_code(tmp_path, monkeypatch):
+    if os.name != "nt" and not shutil.which("tmux"):
+        pytest.skip("tmux is required for the Unix persistent shell backend")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv(
+        "LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp")
+    )
+    get_settings.cache_clear()
+
+    job = await start_job("printf 'completed-output\n'; exit 3")
+    row = job
+    for _ in range(50):
+        await asyncio.sleep(0.1)
+        row = (await list_jobs())["jobs"][0]
+        if row["status"] != "running":
+            break
+
+    assert row["status"] == "failed"
+    assert row["exit_code"] == 3
+    tail = await tail_job(job["job_id"])
+    assert tail["output"] == "completed-output\n"
+    assert tail["message"] == "job completed with exit code 3"
+
+
+@pytest.mark.asyncio
+async def test_job_log_is_bounded_and_reports_truncation(tmp_path, monkeypatch):
+    if os.name != "nt" and not shutil.which("tmux"):
+        pytest.skip("tmux is required for the Unix persistent shell backend")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv(
+        "LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp")
+    )
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_JOB_LOG_BYTES", "32")
+    get_settings.cache_clear()
+
+    job = await start_job('python3 -c "print(\'x\' * 200)"')
+    row = job
+    for _ in range(50):
+        await asyncio.sleep(0.1)
+        row = (await list_jobs())["jobs"][0]
+        if row["status"] != "running":
+            break
+
+    assert row["status"] == "succeeded"
+    assert row["log_truncated"] is True
+    tail = await tail_job(job["job_id"])
+    assert len(tail["output"].encode()) <= 32
