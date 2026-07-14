@@ -225,7 +225,12 @@ def _machine_rows() -> dict[str, Any]:
 
 
 async def _remote_call(machine: str, tool: str, args: dict[str, Any]) -> Any:
-    result = await remote_manager().call(machine, tool, {**args, "_human": True})
+    result = await remote_manager().call(
+        machine,
+        tool,
+        {**args, "_human": True},
+        timeout_s=max(1, get_settings().ui_remote_request_timeout_s),
+    )
     if not result.get("ok", False):
         raise RuntimeError(result.get("message") or f"Remote operation failed: {tool}")
     data = result.get("data")
@@ -242,7 +247,7 @@ async def _machine_dispatch(
 ) -> Any:
     if machine == "local":
         with suppress_audit():
-            result = local_call()
+            result = await asyncio.to_thread(local_call)
             if asyncio.iscoroutine(result):
                 return await result
             return result
@@ -285,11 +290,15 @@ async def api_bootstrap(request: Request) -> Response:
     if settings.remote_enabled:
         required.append("remote:use")
     _require_ui_scopes(request, *required)
+    machines, todos = await asyncio.gather(
+        asyncio.to_thread(_machine_rows),
+        asyncio.to_thread(todo_read),
+    )
     return _json_ok(
         {
             "version": version_info(),
-            "machines": _machine_rows(),
-            "todos": todo_read(),
+            "machines": machines,
+            "todos": todos,
             "features": {
                 "remote": settings.remote_enabled,
                 "wallpaper": settings.ui_wallpaper,
@@ -304,7 +313,7 @@ async def api_machines(request: Request) -> Response:
     if get_settings().remote_enabled:
         required.append("remote:use")
     _require_ui_scopes(request, *required)
-    return _json_ok(_machine_rows())
+    return _json_ok(await asyncio.to_thread(_machine_rows))
 
 
 async def api_files(request: Request) -> Response:
@@ -347,8 +356,8 @@ async def api_file_preview(request: Request) -> Response:
     try:
         _require_ui_scopes(request, "shell:read", machine=machine)
         if machine == "local":
-            resolved = resolve_path(path, must_exist=True)
-            if resolved.is_dir():
+            resolved = await asyncio.to_thread(resolve_path, path, must_exist=True)
+            if await asyncio.to_thread(resolved.is_dir):
                 return _json_ok(
                     {
                         "kind": "directory",
@@ -565,12 +574,13 @@ async def api_todos(request: Request) -> Response:
     try:
         if request.method == "GET":
             _require_ui_scopes(request, "shell:read")
-            return _json_ok(todo_read())
+            return _json_ok(await asyncio.to_thread(todo_read))
         _require_ui_scopes(request, "shell:read", "shell:write")
         body = await request.json()
         expected_revision = body.get("expected_revision")
         with suppress_audit():
-            result = todo_write(
+            result = await asyncio.to_thread(
+                todo_write,
                 list(body.get("todos") or []),
                 int(expected_revision) if expected_revision is not None else None,
             )
@@ -585,7 +595,8 @@ async def api_audit(request: Request) -> Response:
     params = request.query_params
     try:
         _require_ui_scopes(request, "shell:read")
-        result = query_audit(
+        result = await asyncio.to_thread(
+            query_audit,
             limit=int(params.get("limit", "300")),
             node=params.get("node"),
             event=params.get("event"),

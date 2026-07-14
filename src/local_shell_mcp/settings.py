@@ -166,6 +166,7 @@ if _PYDANTIC_AVAILABLE:
         ui_wallpaper: Literal["bing", "aurora", "none"] = "bing"
         ui_terminal_idle_timeout_s: int = 3600
         ui_terminal_max_sessions: int = 8
+        ui_remote_request_timeout_s: int = 30
 
         # Optional agent MCP capability bridge. Skills use the fixed skills_list and
         # skill_load tools and are read from agent_config_dir/skills.
@@ -186,6 +187,7 @@ if _PYDANTIC_AVAILABLE:
         remote_invite_ttl_s: int = 600
         remote_poll_timeout_s: int = 25
         remote_job_timeout_s: int = 3600
+        remote_max_pending_jobs: int = 256
 
         shell_executable: str = Field(default_factory=default_shell_executable)
         shell_env_blocklist: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["CLOUDFLARE_TUNNEL_TOKEN"])
@@ -349,6 +351,7 @@ else:
         ui_wallpaper: Literal["bing", "aurora", "none"] = "bing"
         ui_terminal_idle_timeout_s: int = 3600
         ui_terminal_max_sessions: int = 8
+        ui_remote_request_timeout_s: int = 30
 
         agent_bridge_enabled: bool = False
         agent_mcp_probe_timeout_s: float = 5.0
@@ -365,6 +368,7 @@ else:
         remote_invite_ttl_s: int = 600
         remote_poll_timeout_s: int = 25
         remote_job_timeout_s: int = 3600
+        remote_max_pending_jobs: int = 256
 
         shell_executable: str = field(default_factory=default_shell_executable)
         shell_env_blocklist: list[str] = field(default_factory=lambda: ["CLOUDFLARE_TUNNEL_TOKEN"])

@@ -44,6 +44,45 @@ async def test_remote_invites_use_requested_origin_prune_expired_entries_and_val
         await manager.create_invite("x" * 129)
 
 
+
+@pytest.mark.asyncio
+async def test_timed_out_remote_job_is_skipped_on_next_poll(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    manager = remote.RemoteManager()
+    worker = remote.RemoteWorker(name="worker-a", token="token-a")
+    manager.workers[worker.name] = worker
+    manager.tokens[worker.token] = worker.name
+
+    with pytest.raises(TimeoutError, match="remote job timed out"):
+        await manager.call("worker-a", "list_files", {"path": "."}, timeout_s=0.01)
+
+    cancelled_job = await worker.queue.get()
+    worker.queue.put_nowait(cancelled_job)
+    worker.queue.put_nowait({"id": "job-valid", "tool": "list_files", "args": {}})
+    result = await manager.poll(worker.token)
+
+    assert result["job"]["id"] == "job-valid"
+    assert cancelled_job["id"] not in manager.cancelled_jobs
+    assert cancelled_job["id"] not in manager.pending
+
+
+@pytest.mark.asyncio
+async def test_remote_queue_is_bounded_per_worker(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_MAX_PENDING_JOBS", "1")
+    get_settings.cache_clear()
+    manager = remote.RemoteManager()
+    worker = remote.RemoteWorker(name="worker-a", token="token-a")
+    manager.workers[worker.name] = worker
+    manager.tokens[worker.token] = worker.name
+    worker.queue.put_nowait({"id": "already-queued"})
+
+    with pytest.raises(RuntimeError, match="queue is full"):
+        await manager.call("worker-a", "list_files", {"path": "."}, timeout_s=1)
+
 @pytest.mark.asyncio
 async def test_join_script_loads_vendored_worker_dependencies(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))

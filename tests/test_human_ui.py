@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 from starlette.websockets import WebSocket
 
 from local_shell_mcp.audit import audit, query_audit, suppress_audit
@@ -17,6 +20,7 @@ from local_shell_mcp.human_ui import (
     _bounded_int,
     _split_tui_command,
     _validate_tui_api_base,
+    api_files,
 )
 from local_shell_mcp.oauth import issue_access_token, public_base_url
 from local_shell_mcp.remote import execute_worker_tool
@@ -32,6 +36,38 @@ def _configure(tmp_path, monkeypatch, *, auth_mode: str = "none") -> None:
     monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
     get_settings.cache_clear()
 
+
+
+@pytest.mark.asyncio
+async def test_local_file_api_does_not_block_event_loop(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+
+    def slow_list(*args, **kwargs):  # noqa: ANN002, ANN003
+        time.sleep(0.25)
+        return []
+
+    monkeypatch.setattr("local_shell_mcp.human_ui.list_dir", slow_list)
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/api/ui/files",
+        "raw_path": b"/api/ui/files",
+        "query_string": b"machine=local&path=.",
+        "headers": [],
+        "client": ("127.0.0.1", 4242),
+        "server": ("127.0.0.1", 8765),
+    }
+    request = Request(scope)
+    started = time.perf_counter()
+    task = asyncio.create_task(api_files(request))
+    await asyncio.sleep(0.05)
+
+    assert time.perf_counter() - started < 0.15
+    response = await task
+    assert response.status_code == 200
 
 def test_human_file_api_has_yazi_style_directory_payload(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)

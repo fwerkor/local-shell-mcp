@@ -192,6 +192,8 @@ class RemoteManager:
         self.workers: dict[str, RemoteWorker] = {}
         self.tokens: dict[str, str] = {}
         self.pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        self.pending_machines: dict[str, str] = {}
+        self.cancelled_jobs: set[str] = set()
         self._lock = asyncio.Lock()
         self._registry_loaded = False
 
@@ -359,21 +361,40 @@ class RemoteManager:
             index += 1
         return f"{base}-{index}"
 
+    def _cancel_job(self, job_id: str) -> None:
+        future = self.pending.pop(job_id, None)
+        self.pending_machines.pop(job_id, None)
+        self.cancelled_jobs.add(job_id)
+        if future and not future.done():
+            future.cancel()
+
     async def poll(self, token: str) -> dict[str, Any]:
         worker = self._worker_by_token(token)
         worker.status = "online"
         worker.last_seen = _utc()
-        try:
-            job = await asyncio.wait_for(worker.queue.get(), timeout=get_settings().remote_poll_timeout_s)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + get_settings().remote_poll_timeout_s
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return {"job": None, "heartbeat": True}
+            try:
+                job = await asyncio.wait_for(worker.queue.get(), timeout=remaining)
+            except TimeoutError:
+                return {"job": None, "heartbeat": True}
+            job_id = str(job.get("id") or "")
+            if job_id in self.cancelled_jobs:
+                self.cancelled_jobs.discard(job_id)
+                continue
             return {"job": job}
-        except TimeoutError:
-            return {"job": None, "heartbeat": True}
 
     async def submit_result(self, token: str, payload: dict[str, Any]) -> dict[str, Any]:
         worker = self._worker_by_token(token)
         worker.status = "online"
         worker.last_seen = _utc()
         job_id = str(payload.get("job_id") or "")
+        self.pending_machines.pop(job_id, None)
+        self.cancelled_jobs.discard(job_id)
         future = self.pending.pop(job_id, None)
         if future and not future.done():
             future.set_result(payload)
@@ -384,19 +405,39 @@ class RemoteManager:
         worker = self.workers.get(machine)
         if not worker:
             raise ValueError(f"unknown remote machine: {machine}")
-        if _utc() - worker.last_seen > max(2 * get_settings().remote_poll_timeout_s, 60):
+        settings = get_settings()
+        if _utc() - worker.last_seen > max(2 * settings.remote_poll_timeout_s, 60):
             worker.status = "offline"
             raise RuntimeError(f"remote machine is offline: {machine}")
+        max_pending = max(1, settings.remote_max_pending_jobs)
+        machine_pending = sum(1 for value in self.pending_machines.values() if value == machine)
+        if worker.queue.qsize() >= max_pending or machine_pending >= max_pending:
+            raise RuntimeError(f"remote machine queue is full: {machine}")
+        effective_timeout = timeout_s or settings.remote_job_timeout_s
         job_id = "job_" + uuid.uuid4().hex
         loop = asyncio.get_running_loop()
         future: asyncio.Future[dict[str, Any]] = loop.create_future()
         self.pending[job_id] = future
-        await worker.queue.put({"id": job_id, "tool": tool, "args": args})
+        self.pending_machines[job_id] = machine
+        await worker.queue.put(
+            {
+                "id": job_id,
+                "tool": tool,
+                "args": args,
+                "expires_at": _utc() + effective_timeout,
+            }
+        )
         try:
-            result = await asyncio.wait_for(future, timeout=timeout_s or get_settings().remote_job_timeout_s)
+            result = await asyncio.wait_for(future, timeout=effective_timeout)
         except TimeoutError as exc:
-            self.pending.pop(job_id, None)
+            self._cancel_job(job_id)
             raise TimeoutError(f"remote job timed out: {tool} on {machine}") from exc
+        except asyncio.CancelledError:
+            self._cancel_job(job_id)
+            raise
+        finally:
+            self.pending.pop(job_id, None)
+            self.pending_machines.pop(job_id, None)
         if not result.get("ok", False):
             return _ok({"status": "error", "error_type": result.get("error", "remote_error"), "message": result.get("message", "remote job failed")})
         return _ok(result.get("data"))
@@ -434,6 +475,13 @@ class RemoteManager:
         if not worker:
             raise ValueError(f"unknown remote machine: {machine}")
         self.tokens.pop(worker.token, None)
+        for job_id, pending_machine in list(self.pending_machines.items()):
+            if pending_machine == machine:
+                self._cancel_job(job_id)
+        while not worker.queue.empty():
+            with contextlib.suppress(asyncio.QueueEmpty):
+                queued = worker.queue.get_nowait()
+                self.cancelled_jobs.discard(str(queued.get("id") or ""))
         self._save_registry_unlocked()
         return {"machine": machine, "revoked": True}
 
@@ -448,6 +496,9 @@ class RemoteManager:
         worker.name = new_name
         self.workers[new_name] = worker
         self.tokens[worker.token] = new_name
+        for job_id, pending_machine in list(self.pending_machines.items()):
+            if pending_machine == machine:
+                self.pending_machines[job_id] = new_name
         self._save_registry_unlocked()
         return {"old_name": machine, "new_name": new_name}
 
@@ -1049,6 +1100,18 @@ async def run_worker(server: str, invite: str, name: str | None = None, workdir:
         payload = poll_body.get("data", {})
         job = payload.get("job")
         if not job:
+            continue
+        expires_at = float(job.get("expires_at") or 0)
+        if expires_at and expires_at < _utc():
+            out = {
+                "job_id": job.get("id"),
+                "ok": False,
+                "error": "TimeoutError",
+                "message": "remote job expired before execution",
+            }
+            await _worker_post_json_forever(
+                f"{server}{REMOTE_API_PREFIX}/result", out, headers, 30, "submit result"
+            )
             continue
         try:
             result = await execute_worker_tool(job["tool"], dict(job.get("args") or {}))
