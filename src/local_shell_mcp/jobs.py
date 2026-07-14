@@ -26,6 +26,7 @@ from .shell_ops import (
 )
 
 JOB_STORE_FILE_NAME = "jobs.json"
+JOB_STORE_BACKUP_FILE_NAME = "jobs.json.bak"
 JOB_STORE_VERSION = 2
 TERMINAL_STATUSES = {"succeeded", "failed", "exited", "stopped", "lost"}
 _JOB_STORE_THREAD_LOCK = threading.RLock()
@@ -37,6 +38,14 @@ def _utc() -> float:
 
 def _job_store_path() -> Path:
     return get_settings().state_dir / JOB_STORE_FILE_NAME
+
+
+def _job_store_backup_path() -> Path:
+    return get_settings().state_dir / JOB_STORE_BACKUP_FILE_NAME
+
+
+def _empty_store() -> dict[str, Any]:
+    return {"version": JOB_STORE_VERSION, "jobs": []}
 
 
 def _job_runtime_dir() -> Path:
@@ -79,23 +88,47 @@ def _unlock_store_file(handle: BinaryIO) -> None:
         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
-def _load_store() -> dict[str, Any]:
-    path = _job_store_path()
-    if not path.exists():
-        return {"version": JOB_STORE_VERSION, "jobs": []}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {"version": JOB_STORE_VERSION, "jobs": []}
-    if not isinstance(data, dict):
-        return {"version": JOB_STORE_VERSION, "jobs": []}
-    jobs = data.get("jobs")
-    if not isinstance(jobs, list):
-        jobs = []
+def _load_store_file(path: Path) -> dict[str, Any]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or data.get("version") != JOB_STORE_VERSION:
+        raise ValueError(f"unsupported or invalid job store: {path}")
+    rows = data.get("jobs")
+    if not isinstance(rows, list):
+        raise ValueError(f"job store jobs field is invalid: {path}")
     return {
         "version": JOB_STORE_VERSION,
-        "jobs": [job for job in jobs if isinstance(job, dict)],
+        "jobs": [job for job in rows if isinstance(job, dict)],
     }
+
+
+def _load_store() -> dict[str, Any]:
+    path = _job_store_path()
+    backup_path = _job_store_backup_path()
+    if not path.exists() and not backup_path.exists():
+        return _empty_store()
+
+    main_error: Exception | None = None
+    if path.exists():
+        try:
+            return _load_store_file(path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            main_error = exc
+            audit("job_store_unreadable", path=str(path), error=repr(exc))
+
+    if backup_path.exists():
+        try:
+            store = _load_store_file(backup_path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            audit("job_store_backup_unreadable", path=str(backup_path), error=repr(exc))
+        else:
+            audit("job_store_recovered", path=str(path), backup_path=str(backup_path))
+            return store
+
+    if main_error is not None or path.exists() or backup_path.exists():
+        raise RuntimeError(
+            "Job store is unreadable and no valid backup is available; refusing to reset it"
+        ) from main_error
+    return _empty_store()
 
 
 def _remove_attempt_paths(paths: dict[str, Path] | None) -> None:
@@ -137,12 +170,21 @@ def _prune_store(store: dict[str, Any]) -> None:
 def _save_store(store: dict[str, Any]) -> None:
     _prune_store(store)
     path = _job_store_path()
+    backup_path = _job_store_backup_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(path.name + ".tmp")
-    tmp_path.write_text(json.dumps(store, indent=2, sort_keys=True), encoding="utf-8")
-    with contextlib.suppress(OSError):
-        tmp_path.chmod(0o600)
-    tmp_path.replace(path)
+    payload = json.dumps(store, indent=2, sort_keys=True)
+    tmp_path = path.with_name(path.name + f".{uuid.uuid4().hex}.tmp")
+    backup_tmp_path = backup_path.with_name(backup_path.name + f".{uuid.uuid4().hex}.tmp")
+    try:
+        for temporary in (tmp_path, backup_tmp_path):
+            temporary.write_text(payload, encoding="utf-8")
+            with contextlib.suppress(OSError):
+                temporary.chmod(0o600)
+        os.replace(tmp_path, path)
+        os.replace(backup_tmp_path, backup_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+        backup_tmp_path.unlink(missing_ok=True)
 
 
 @contextlib.contextmanager
@@ -242,8 +284,7 @@ def _prepare_attempt(
     return paths, _runner_command(argv, get_settings().shell_executable)
 
 
-def _read_status(job: dict[str, Any]) -> dict[str, Any] | None:
-    raw_path = job.get("status_path")
+def _read_status_path(raw_path: Any) -> dict[str, Any] | None:
     if not raw_path:
         return None
     try:
@@ -253,30 +294,13 @@ def _read_status(job: dict[str, Any]) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _refresh_job_status(
-    job: dict[str, Any], active_sessions: set[str], now: float | None = None
+def _read_status(job: dict[str, Any]) -> dict[str, Any] | None:
+    return _read_status_path(job.get("status_path"))
+
+
+def _apply_status_payload(
+    job: dict[str, Any], status_payload: dict[str, Any], updated: float
 ) -> dict[str, Any]:
-    status = str(job.get("status") or "unknown")
-    if status != "running":
-        return job
-    status_payload = _read_status(job)
-    session_id = str(job.get("session_id") or "")
-    if status_payload is None and session_id in active_sessions:
-        return job
-
-    updated = now or _utc()
-    if status_payload is None:
-        job.update(
-            {
-                "status": "lost",
-                "updated_at": updated,
-                "completed_at": updated,
-                "exit_code": None,
-                "error": "job session exited without a completion record",
-            }
-        )
-        return job
-
     exit_code = status_payload.get("exit_code")
     job.update(
         {
@@ -287,6 +311,114 @@ def _refresh_job_status(
             "error": status_payload.get("error"),
             "log_truncated": bool(status_payload.get("log_truncated", False)),
             "output_bytes": int(status_payload.get("output_bytes") or 0),
+        }
+    )
+    return job
+
+
+def _clear_pending_retry(job: dict[str, Any]) -> None:
+    for key in (
+        "pending_attempt",
+        "pending_session_name",
+        "pending_command_path",
+        "pending_log_path",
+        "pending_status_path",
+    ):
+        job.pop(key, None)
+
+
+def _adopt_pending_retry(job: dict[str, Any]) -> None:
+    attempt = job.get("pending_attempt")
+    if attempt is not None:
+        job["attempts"] = int(attempt)
+    for pending_key, active_key in (
+        ("pending_session_name", "session_id"),
+        ("pending_command_path", "command_path"),
+        ("pending_log_path", "log_path"),
+        ("pending_status_path", "status_path"),
+    ):
+        value = job.get(pending_key)
+        if value:
+            job[active_key] = value
+
+
+def _refresh_job_status(
+    job: dict[str, Any], active_sessions: set[str], now: float | None = None
+) -> dict[str, Any]:
+    status = str(job.get("status") or "unknown")
+    if status not in {"running", "stopping", "retrying"}:
+        return job
+
+    updated = now or _utc()
+    if status == "retrying":
+        pending_session = str(job.get("pending_session_name") or "")
+        status_payload = _read_status_path(job.get("pending_status_path"))
+        if status_payload is not None:
+            _adopt_pending_retry(job)
+            _clear_pending_retry(job)
+            return _apply_status_payload(job, status_payload, updated)
+        if pending_session and pending_session in active_sessions:
+            _adopt_pending_retry(job)
+            _clear_pending_retry(job)
+            job.update(
+                {
+                    "status": "running",
+                    "updated_at": updated,
+                    "completed_at": None,
+                    "exit_code": None,
+                    "error": "recovered retry attempt after an interrupted state commit",
+                }
+            )
+            return job
+        if job.get("pending_attempt") is not None:
+            _adopt_pending_retry(job)
+        _clear_pending_retry(job)
+        job.update(
+            {
+                "status": "failed",
+                "updated_at": updated,
+                "completed_at": updated,
+                "exit_code": None,
+                "error": "retry was interrupted before a recoverable shell session was committed",
+            }
+        )
+        return job
+
+    status_payload = _read_status(job)
+    session_id = str(job.get("session_id") or "")
+    if status_payload is not None:
+        return _apply_status_payload(job, status_payload, updated)
+
+    if status == "stopping":
+        if session_id in active_sessions:
+            job.update(
+                {
+                    "status": "running",
+                    "updated_at": updated,
+                    "error": "recovered an interrupted stop request; the shell is still active",
+                }
+            )
+        else:
+            job.update(
+                {
+                    "status": "stopped",
+                    "updated_at": updated,
+                    "completed_at": updated,
+                    "exit_code": None,
+                    "error": None,
+                }
+            )
+        return job
+
+    if session_id in active_sessions:
+        return job
+    job.update(
+        {
+            "status": "lost",
+            "updated_at": updated,
+            "completed_at": updated,
+            "exit_code": None,
+            "error": "job session exited without a completion record",
         }
     )
     return job
@@ -458,10 +590,7 @@ async def stop_job(job_id: str) -> dict[str, Any]:
             still_active = session_id in _active_session_ids(await list_shells())
         with _store_transaction() as store:
             job = _find_job(store, job_id)
-            if (
-                job.get("status") == "stopping"
-                and str(job.get("session_id") or "") == session_id
-            ):
+            if job.get("status") == "stopping" and str(job.get("session_id") or "") == session_id:
                 job["status"] = "running" if still_active else "lost"
                 job["updated_at"] = _utc()
                 job["error"] = f"stop failed: {type(exc).__name__}: {exc}"
@@ -492,19 +621,37 @@ async def retry_job(job_id: str) -> dict[str, Any]:
         command = str(job["command"])
         cwd = str(job.get("cwd") or ".")
         display_name = str(job.get("name") or job_id)
-        job["status"] = "retrying"
-        job["updated_at"] = _utc()
+        shell_name = _shell_safe_name(f"{display_name}-{job_id}-{attempts}")
+        job.update(
+            {
+                "status": "retrying",
+                "updated_at": _utc(),
+                "pending_attempt": attempts,
+                "pending_session_name": shell_name,
+            }
+        )
 
     paths: dict[str, Path] | None = None
     try:
         paths, runner_command = _prepare_attempt(job_id, attempts, command, cwd)
-        shell_name = _shell_safe_name(f"{display_name}-{job_id}-{attempts}")
+        with _store_transaction() as store:
+            job = _find_job(store, job_id)
+            if job.get("status") != "retrying":
+                raise RuntimeError(f"job changed while preparing retry: {job_id}")
+            job.update(
+                {
+                    "pending_command_path": str(paths["command"]),
+                    "pending_log_path": str(paths["log"]),
+                    "pending_status_path": str(paths["status"]),
+                }
+            )
         shell = await start_shell(cwd, shell_name, runner_command)
     except Exception as exc:
         _remove_attempt_paths(paths)
         with _store_transaction() as store:
             job = _find_job(store, job_id)
             if job.get("status") == "retrying":
+                _clear_pending_retry(job)
                 job["status"] = "failed"
                 job["updated_at"] = _utc()
                 job["completed_at"] = job["updated_at"]
@@ -519,6 +666,7 @@ async def retry_job(job_id: str) -> dict[str, Any]:
             if job.get("status") != "retrying":
                 changed_while_retrying = True
             else:
+                _clear_pending_retry(job)
                 job.update(
                     {
                         "status": "running",
@@ -545,6 +693,7 @@ async def retry_job(job_id: str) -> dict[str, Any]:
         with contextlib.suppress(Exception), _store_transaction() as store:
             job = _find_job(store, job_id)
             if job.get("status") == "retrying":
+                _clear_pending_retry(job)
                 job["status"] = "failed"
                 job["updated_at"] = _utc()
                 job["completed_at"] = job["updated_at"]

@@ -271,3 +271,149 @@ async def test_stop_failure_restores_retryable_job_state(tmp_path, monkeypatch):
     listed = await list_jobs()
     assert listed["jobs"][0]["status"] == "running"
     assert "stop failed" in listed["jobs"][0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_job_list_recovers_interrupted_stopping_and_retrying_states(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".state"
+    runtime_dir = state_dir / "jobs"
+    runtime_dir.mkdir(parents=True)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    now = time.time()
+    rows = [
+        {
+            "job_id": "job_stop_gone",
+            "name": "stop-gone",
+            "status": "stopping",
+            "command": "sleep 10",
+            "cwd": ".",
+            "session_id": "gone-session",
+            "created_at": now,
+            "updated_at": now,
+            "attempts": 1,
+        },
+        {
+            "job_id": "job_stop_live",
+            "name": "stop-live",
+            "status": "stopping",
+            "command": "sleep 10",
+            "cwd": ".",
+            "session_id": "live-session",
+            "created_at": now - 1,
+            "updated_at": now,
+            "attempts": 1,
+        },
+        {
+            "job_id": "job_retry_gone",
+            "name": "retry-gone",
+            "status": "retrying",
+            "command": "true",
+            "cwd": ".",
+            "session_id": "old-session",
+            "created_at": now - 2,
+            "updated_at": now,
+            "attempts": 1,
+            "pending_attempt": 2,
+            "pending_session_name": "missing-retry-session",
+        },
+        {
+            "job_id": "job_retry_live",
+            "name": "retry-live",
+            "status": "retrying",
+            "command": "true",
+            "cwd": ".",
+            "session_id": "old-session-2",
+            "created_at": now - 3,
+            "updated_at": now,
+            "attempts": 1,
+            "pending_attempt": 2,
+            "pending_session_name": "live-retry-session",
+            "pending_command_path": str(runtime_dir / "retry.command"),
+            "pending_log_path": str(runtime_dir / "retry.log"),
+            "pending_status_path": str(runtime_dir / "retry.status.json"),
+        },
+    ]
+    (state_dir / jobs_module.JOB_STORE_FILE_NAME).write_text(
+        json.dumps({"version": jobs_module.JOB_STORE_VERSION, "jobs": rows}),
+        encoding="utf-8",
+    )
+
+    async def active_shells():
+        return {
+            "sessions": [
+                {"session_id": "live-session"},
+                {"session_id": "live-retry-session"},
+            ]
+        }
+
+    monkeypatch.setattr(jobs_module, "list_shells", active_shells)
+
+    listed = await list_jobs()
+    recovered = {job["job_id"]: job for job in listed["jobs"]}
+
+    assert recovered["job_stop_gone"]["status"] == "stopped"
+    assert recovered["job_stop_live"]["status"] == "running"
+    assert "interrupted stop" in recovered["job_stop_live"]["error"]
+    assert recovered["job_retry_gone"]["status"] == "failed"
+    assert "retry was interrupted" in recovered["job_retry_gone"]["error"]
+    assert recovered["job_retry_live"]["status"] == "running"
+    assert recovered["job_retry_live"]["session_id"] == "live-retry-session"
+    assert recovered["job_retry_live"]["attempts"] == 2
+
+
+@pytest.mark.asyncio
+async def test_job_store_recovers_from_atomic_backup(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".state"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    state_dir.mkdir(parents=True)
+    row = {
+        "job_id": "job_saved",
+        "name": "saved",
+        "status": "succeeded",
+        "command": "true",
+        "cwd": ".",
+        "created_at": 1.0,
+        "updated_at": 2.0,
+        "completed_at": 2.0,
+        "exit_code": 0,
+        "attempts": 1,
+    }
+    jobs_module._save_store({"version": jobs_module.JOB_STORE_VERSION, "jobs": [row]})
+    store_path = state_dir / jobs_module.JOB_STORE_FILE_NAME
+    backup_path = state_dir / jobs_module.JOB_STORE_BACKUP_FILE_NAME
+    assert backup_path.is_file()
+    store_path.write_text("{broken", encoding="utf-8")
+
+    async def no_shells():
+        return {"sessions": []}
+
+    monkeypatch.setattr(jobs_module, "list_shells", no_shells)
+    listed = await list_jobs()
+
+    assert [job["job_id"] for job in listed["jobs"]] == ["job_saved"]
+    assert json.loads(store_path.read_text(encoding="utf-8"))["jobs"][0]["job_id"] == "job_saved"
+
+
+@pytest.mark.asyncio
+async def test_job_store_refuses_to_overwrite_unrecoverable_corruption(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".state"
+    state_dir.mkdir()
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    store_path = state_dir / jobs_module.JOB_STORE_FILE_NAME
+    store_path.write_text("{broken", encoding="utf-8")
+
+    async def no_shells():
+        return {"sessions": []}
+
+    monkeypatch.setattr(jobs_module, "list_shells", no_shells)
+
+    with pytest.raises(RuntimeError, match="refusing to reset"):
+        await list_jobs()
+    assert store_path.read_text(encoding="utf-8") == "{broken"
+    assert not (state_dir / jobs_module.JOB_STORE_BACKUP_FILE_NAME).exists()
