@@ -289,9 +289,10 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 }
 
-export function deactivate(): void {
-  if (serverProcess) {
-    void stopProcessTree(serverProcess);
-    serverProcess = undefined;
+export async function deactivate(): Promise<void> {
+  const proc = serverProcess;
+  serverProcess = undefined;
+  if (proc) {
+    await stopProcessTree(proc);
   }
 }
