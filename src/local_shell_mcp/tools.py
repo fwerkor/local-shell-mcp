@@ -54,6 +54,11 @@ from .playwright_ops import (
     playwright_run_script,
 )
 from .remote import remote_manager
+from .remote_transfer import (
+    create_download_ticket,
+    create_upload_ticket,
+    revoke_transfer_ticket,
+)
 from .search_ops import grep, tree
 from .settings import get_settings, safe_settings_dump
 from .shell_ops import (
@@ -74,16 +79,10 @@ from .skill_ops import (
 )
 from .todo_ops import todo_read, todo_write
 from .transfer_ops import (
-    normalize_chunk_size,
-    transfer_abort_write,
     transfer_alloc_temp_path,
-    transfer_begin_write,
-    transfer_finish_write,
     transfer_pack_dir,
-    transfer_read_chunk,
     transfer_stat,
     transfer_unpack_archive,
-    transfer_write_chunk,
 )
 from .version import version_info as get_version_info
 
@@ -574,57 +573,39 @@ async def _copy_local_file_to_remote(
     overwrite: bool = True,
     chunk_size: int | None = None,
 ) -> dict:
-    chunk_bytes = normalize_chunk_size(chunk_size)
+    del chunk_size
     stat = await _to_thread(transfer_stat, source_path, True)
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {source_path}")
-    begin = await _remote_transfer_data(
-        dst_machine,
-        "transfer_begin_write",
-        {"path": dst_path, "overwrite": overwrite, "expected_bytes": stat["size"]},
+    ticket = create_download_ticket(
+        source_path,
+        stat["size"],
+        stat["sha256"],
     )
-    transfer_id = begin["transfer_id"]
-    chunks = 0
-    offset = 0
     try:
-        while offset < stat["size"]:
-            chunk = await _to_thread(transfer_read_chunk, source_path, offset, chunk_bytes)
-            if chunk["bytes"] == 0:
-                break
-            await _remote_transfer_data(
-                dst_machine,
-                "transfer_write_chunk",
-                {
-                    "path": dst_path,
-                    "transfer_id": transfer_id,
-                    "offset": offset,
-                    "data_b64": chunk["data_b64"],
-                    "expected_sha256": chunk["sha256"],
-                },
-            )
-            offset += chunk["bytes"]
-            chunks += 1
         finish = await _remote_transfer_data(
             dst_machine,
-            "transfer_finish_write",
+            "transfer_download_url",
             {
+                "url": ticket["url"],
                 "path": dst_path,
-                "transfer_id": transfer_id,
+                "overwrite": overwrite,
                 "expected_bytes": stat["size"],
-                "expected_sha256": stat.get("sha256"),
+                "expected_sha256": stat["sha256"],
+                "timeout_s": get_settings().remote_job_timeout_s,
             },
+            get_settings().remote_job_timeout_s,
         )
-    except Exception:
-        with suppress(Exception):
-            await _remote_transfer_data(dst_machine, "transfer_abort_write", {"path": dst_path, "transfer_id": transfer_id})
-        raise
+    finally:
+        revoke_transfer_ticket(ticket["token"])
     return {
         "source": {"machine": "controller", "path": stat["path"]},
         "destination": {"machine": dst_machine, "path": finish["path"]},
         "bytes": stat["size"],
         "sha256": stat.get("sha256"),
-        "chunks": chunks,
-        "chunk_size": chunk_bytes,
+        "chunks": 1,
+        "chunk_size": stat["size"],
+        "transport": "http-stream",
     }
 
 
@@ -635,51 +616,41 @@ async def _copy_remote_file_to_local(
     overwrite: bool = True,
     chunk_size: int | None = None,
 ) -> dict:
-    chunk_bytes = normalize_chunk_size(chunk_size)
-    stat = await _remote_transfer_data(src_machine, "transfer_stat", {"path": src_path, "sha256": True})
+    del chunk_size
+    stat = await _remote_transfer_data(
+        src_machine, "transfer_stat", {"path": src_path, "sha256": True}
+    )
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {src_path}")
-    begin = await _to_thread(transfer_begin_write, destination_path, overwrite, stat["size"])
-    transfer_id = begin["transfer_id"]
-    chunks = 0
-    offset = 0
+    ticket = create_upload_ticket(
+        destination_path,
+        stat["size"],
+        stat["sha256"],
+        overwrite,
+    )
     try:
-        while offset < stat["size"]:
-            chunk = await _remote_transfer_data(
-                src_machine,
-                "transfer_read_chunk",
-                {"path": src_path, "offset": offset, "chunk_size": chunk_bytes},
-            )
-            if chunk["bytes"] == 0:
-                break
-            await _to_thread(
-                transfer_write_chunk,
-                destination_path,
-                transfer_id,
-                offset,
-                chunk["data_b64"],
-                chunk["sha256"],
-            )
-            offset += chunk["bytes"]
-            chunks += 1
-        finish = await _to_thread(
-            transfer_finish_write,
-            destination_path,
-            transfer_id,
-            stat["size"],
-            stat.get("sha256"),
+        finish = await _remote_transfer_data(
+            src_machine,
+            "transfer_upload_url",
+            {
+                "path": src_path,
+                "url": ticket["url"],
+                "expected_bytes": stat["size"],
+                "expected_sha256": stat["sha256"],
+                "timeout_s": get_settings().remote_job_timeout_s,
+            },
+            get_settings().remote_job_timeout_s,
         )
-    except Exception:
-        with suppress(Exception):
-            await _to_thread(transfer_abort_write, destination_path, transfer_id)
-        raise
+    finally:
+        revoke_transfer_ticket(ticket["token"])
     return {
         "source": {"machine": src_machine, "path": stat["path"]},
         "destination": {"machine": "controller", "path": finish["path"]},
         "bytes": stat["size"],
         "sha256": stat.get("sha256"),
-        "chunks": chunks,
-        "chunk_size": chunk_bytes,
+        "chunks": 1,
+        "chunk_size": stat["size"],
+        "transport": "http-stream",
     }
 
 
@@ -691,61 +662,33 @@ async def _copy_remote_file_to_remote(
     overwrite: bool = True,
     chunk_size: int | None = None,
 ) -> dict:
-    chunk_bytes = normalize_chunk_size(chunk_size)
-    stat = await _remote_transfer_data(src_machine, "transfer_stat", {"path": src_path, "sha256": True})
-    if stat.get("type") != "file":
-        raise ValueError(f"source is not a file: {src_path}")
-    begin = await _remote_transfer_data(
-        dst_machine,
-        "transfer_begin_write",
-        {"path": dst_path, "overwrite": overwrite, "expected_bytes": stat["size"]},
-    )
-    transfer_id = begin["transfer_id"]
-    chunks = 0
-    offset = 0
+    temporary = await _to_thread(transfer_alloc_temp_path, ".bin")
     try:
-        while offset < stat["size"]:
-            chunk = await _remote_transfer_data(
-                src_machine,
-                "transfer_read_chunk",
-                {"path": src_path, "offset": offset, "chunk_size": chunk_bytes},
-            )
-            if chunk["bytes"] == 0:
-                break
-            await _remote_transfer_data(
-                dst_machine,
-                "transfer_write_chunk",
-                {
-                    "path": dst_path,
-                    "transfer_id": transfer_id,
-                    "offset": offset,
-                    "data_b64": chunk["data_b64"],
-                    "expected_sha256": chunk["sha256"],
-                },
-            )
-            offset += chunk["bytes"]
-            chunks += 1
-        finish = await _remote_transfer_data(
-            dst_machine,
-            "transfer_finish_write",
-            {
-                "path": dst_path,
-                "transfer_id": transfer_id,
-                "expected_bytes": stat["size"],
-                "expected_sha256": stat.get("sha256"),
-            },
+        pull = await _copy_remote_file_to_local(
+            src_machine,
+            src_path,
+            temporary["path"],
+            True,
+            chunk_size,
         )
-    except Exception:
+        push = await _copy_local_file_to_remote(
+            temporary["path"],
+            dst_machine,
+            dst_path,
+            overwrite,
+            chunk_size,
+        )
+    finally:
         with suppress(Exception):
-            await _remote_transfer_data(dst_machine, "transfer_abort_write", {"path": dst_path, "transfer_id": transfer_id})
-        raise
+            delete_path(temporary["path"], False)
     return {
-        "source": {"machine": src_machine, "path": stat["path"]},
-        "destination": {"machine": dst_machine, "path": finish["path"]},
-        "bytes": stat["size"],
-        "sha256": stat.get("sha256"),
-        "chunks": chunks,
-        "chunk_size": chunk_bytes,
+        "source": pull["source"],
+        "destination": push["destination"],
+        "bytes": pull["bytes"],
+        "sha256": pull["sha256"],
+        "chunks": pull["chunks"] + push["chunks"],
+        "chunk_size": pull["chunk_size"],
+        "transport": "http-stream-via-controller",
     }
 
 

@@ -211,6 +211,40 @@ def transfer_write_chunk(
     }
 
 
+def transfer_write_bytes(
+    path: str,
+    transfer_id: str,
+    offset: int,
+    data: bytes,
+) -> dict[str, Any]:
+    """Write an already-decoded binary chunk into a transactional transfer."""
+
+    dst = resolve_path(path, follow_final_symlink=False)
+    tmp = _transfer_temp_path(dst, transfer_id)
+    start = int(offset)
+    if start < 0:
+        raise ValueError("offset must be >= 0")
+    payload = bytes(data)
+    with _path_lock(tmp):
+        if not tmp.exists():
+            raise FileNotFoundError(str(tmp))
+        metadata = _read_transfer_metadata(tmp)
+        expected = metadata.get("expected_bytes")
+        if expected is not None and start + len(payload) > int(expected):
+            raise ValueError("chunk exceeds expected transfer size")
+        with tmp.open("r+b") as fh:
+            fh.seek(start)
+            fh.write(payload)
+            fh.flush()
+    return {
+        "path": relative_display(dst),
+        "temp_path": relative_display(tmp),
+        "offset": start,
+        "bytes": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
 def transfer_finish_write(
     path: str,
     transfer_id: str,

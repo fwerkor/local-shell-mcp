@@ -18,12 +18,14 @@ from .ui_security import has_valid_ui_local_token, is_loopback_connection
 PUBLIC_PATHS = {"/healthz", "/readyz", "/docs", "/openapi.json", "/join", "/remote/worker-bundle.tgz", "/remote/register", "/remote/resume", "/remote/poll", "/remote/heartbeat", "/remote/result"}
 HUMAN_UI_API_PREFIX = "/api/ui/"
 _REQUEST_BODY_SCOPE_KEY = "local_shell_mcp.request_body"
+_REMOTE_TRANSFER_PREFIX = "/remote/transfer/"
 
 
 def _is_public_path(path: str) -> bool:
     ui_path = "/" + get_settings().ui_path.strip("/")
     return (
         path in PUBLIC_PATHS
+        or path.startswith(_REMOTE_TRANSFER_PREFIX)
         or path.startswith("/.well-known/")
         or path.startswith("/oauth/")
         or path.startswith("/download/")
@@ -396,6 +398,12 @@ class RequestBodyLimitMiddleware:
             "HEAD",
             "OPTIONS",
         }:
+            await self.app(scope, receive, send)
+            return
+
+        if scope.get("path", "").startswith("/remote/transfer/upload/"):
+            # Upload tickets validate an exact byte count and SHA-256 while streaming.
+            # Buffering here would turn the transfer back into a memory-bound request.
             await self.app(scope, receive, send)
             return
 

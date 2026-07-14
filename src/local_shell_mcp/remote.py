@@ -35,6 +35,7 @@ from .fs_ops import (
     prune_temp_dir,
     read_text,
     relative_display,
+    resolve_path,
     temp_dir,
     write_text,
 )
@@ -671,6 +672,8 @@ async def result_endpoint(request: Any):  # noqa: ANN201
 def remote_routes() -> list[Any]:
     from starlette.routing import Route
 
+    from .remote_transfer import remote_transfer_routes
+
     return [
         Route(REMOTE_JOIN_PATH, join_script, methods=["GET"]),
         Route(REMOTE_WORKER_BUNDLE_PATH, worker_bundle, methods=["GET"]),
@@ -679,6 +682,7 @@ def remote_routes() -> list[Any]:
         Route(f"{REMOTE_API_PREFIX}/poll", poll_endpoint, methods=["POST"]),
         Route(f"{REMOTE_API_PREFIX}/heartbeat", heartbeat_endpoint, methods=["POST"]),
         Route(f"{REMOTE_API_PREFIX}/result", result_endpoint, methods=["POST"]),
+        *remote_transfer_routes(),
     ]
 
 
@@ -755,6 +759,8 @@ REMOTE_WORKER_TOOL_NAMES = frozenset({
     "transfer_alloc_temp_path",
     "transfer_pack_dir",
     "transfer_unpack_archive",
+    "transfer_upload_url",
+    "transfer_download_url",
     "apply_patch",
     "git_clone_tool",
     "git_status_tool",
@@ -775,6 +781,137 @@ REMOTE_WORKER_TOOL_NAMES = frozenset({
     "browser_pdf_tool",
     "playwright_run_script_tool",
 })
+
+
+def _worker_validate_transfer_url(url: str) -> None:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("transfer URL must use absolute HTTP(S)")
+    identity = json.loads(_worker_identity_path().read_text(encoding="utf-8"))
+    server = urllib.parse.urlsplit(str(identity.get("server") or ""))
+    if (parsed.scheme.lower(), parsed.netloc.lower()) != (
+        server.scheme.lower(),
+        server.netloc.lower(),
+    ):
+        raise ValueError("transfer URL does not belong to the configured controller")
+    if not parsed.path.startswith("/remote/transfer/"):
+        raise ValueError("transfer URL path is not permitted")
+
+
+def _worker_curl_timeout(timeout_s: int | None) -> int:
+    maximum = max(30, int(get_settings().remote_job_timeout_s))
+    requested = maximum if timeout_s is None else int(timeout_s)
+    return max(30, min(requested, maximum))
+
+
+def _worker_upload_url(
+    path: str,
+    url: str,
+    expected_bytes: int,
+    expected_sha256: str,
+    timeout_s: int | None = None,
+) -> dict[str, Any]:
+    _worker_validate_transfer_url(url)
+    source = resolve_path(path, must_exist=True)
+    stat = transfer_stat(str(source), True)
+    if stat.get("type") != "file":
+        raise ValueError(f"source is not a file: {path}")
+    if stat["size"] != int(expected_bytes):
+        raise ValueError(
+            f"size mismatch: expected {expected_bytes}, got {stat['size']}"
+        )
+    if str(stat.get("sha256") or "").lower() != str(expected_sha256).lower():
+        raise ValueError("file sha256 mismatch before upload")
+    curl = shutil.which("curl")
+    if not curl:
+        raise FileNotFoundError("curl is required for remote file streaming")
+    completed = subprocess.run(  # noqa: S603
+        [
+            curl,
+            "-fsS",
+            "--connect-timeout",
+            "15",
+            "--max-time",
+            str(_worker_curl_timeout(timeout_s)),
+            "-H",
+            "Expect:",
+            "-H",
+            "Content-Type: application/octet-stream",
+            "--upload-file",
+            str(source),
+            url,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        raise RuntimeError(
+            f"stream upload failed with curl exit {completed.returncode}: {detail}"
+        )
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("stream upload returned invalid JSON") from exc
+    if not isinstance(payload, dict) or not payload.get("ok"):
+        raise RuntimeError(f"stream upload failed: {payload}")
+    return dict(payload.get("data") or {})
+
+
+def _worker_download_url(
+    url: str,
+    path: str,
+    overwrite: bool,
+    expected_bytes: int,
+    expected_sha256: str,
+    timeout_s: int | None = None,
+) -> dict[str, Any]:
+    _worker_validate_transfer_url(url)
+    begin = transfer_begin_write(path, overwrite, expected_bytes)
+    temporary = resolve_path(begin["temp_path"], follow_final_symlink=False)
+    curl = shutil.which("curl")
+    if not curl:
+        transfer_abort_write(path, begin["transfer_id"])
+        raise FileNotFoundError("curl is required for remote file streaming")
+    try:
+        completed = subprocess.run(  # noqa: S603
+            [
+                curl,
+                "-fsSL",
+                "--connect-timeout",
+                "15",
+                "--max-time",
+                str(_worker_curl_timeout(timeout_s)),
+                "-o",
+                str(temporary),
+                url,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            detail = completed.stderr.strip() or completed.stdout.strip()
+            raise RuntimeError(
+                f"stream download failed with curl exit {completed.returncode}: {detail}"
+            )
+        finish = transfer_finish_write(
+            path,
+            begin["transfer_id"],
+            expected_bytes,
+            expected_sha256,
+        )
+        return {
+            "path": finish["path"],
+            "bytes": finish["bytes"],
+            "sha256": finish["sha256"],
+            "transport": "http-stream",
+        }
+    except BaseException:
+        with contextlib.suppress(Exception):
+            transfer_abort_write(path, begin["transfer_id"])
+        raise
 
 
 async def execute_worker_tool(tool: str, args: dict[str, Any]) -> Any:
@@ -868,6 +1005,25 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
         return await _to_thread(transfer_pack_dir, args["path"], args.get("compression", "gz"))
     if tool == "transfer_unpack_archive":
         return await _to_thread(transfer_unpack_archive, args["archive_path"], args["dst_path"], args.get("overwrite", True), args.get("cleanup_archive", True))
+    if tool == "transfer_upload_url":
+        return await _to_thread(
+            _worker_upload_url,
+            args["path"],
+            args["url"],
+            args["expected_bytes"],
+            args["expected_sha256"],
+            args.get("timeout_s"),
+        )
+    if tool == "transfer_download_url":
+        return await _to_thread(
+            _worker_download_url,
+            args["url"],
+            args["path"],
+            args.get("overwrite", True),
+            args["expected_bytes"],
+            args["expected_sha256"],
+            args.get("timeout_s"),
+        )
     if tool == "apply_patch":
         return await _apply_patch_text(args["patch"], args.get("cwd", "."))
     if tool == "git_clone_tool":
