@@ -48,13 +48,25 @@ def get_or_create_ui_local_token() -> str:
         token = secrets.token_urlsafe(48)
         try:
             descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError:
+        except OSError as exc:
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                raise RuntimeError(
+                    f"Unable to create UI local token: {path}"
+                ) from exc
+            except OSError:
+                pass
+
+            existing = _read_token(path)
+            if existing:
+                return existing
             try:
                 path.unlink()
-            except OSError as exc:
+            except OSError as replace_exc:
                 raise RuntimeError(
                     f"Unable to replace invalid UI local token path: {path}"
-                ) from exc
+                ) from replace_exc
             continue
 
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:

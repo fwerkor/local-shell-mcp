@@ -128,6 +128,20 @@ def _runner_argv(paths: dict[str, Path], cwd: Path) -> list[str]:
     return [sys.executable, "-m", "local_shell_mcp.main", *arguments]
 
 
+def _powershell_quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _runner_command(argv: list[str], shell: str) -> str:
+    name = Path(shell).name.lower()
+    powershell = "power" + "shell"
+    if name in {powershell + ".exe", powershell, "pwsh.exe", "pwsh"}:
+        return "& " + " ".join(_powershell_quote(value) for value in argv)
+    if name in {"cmd.exe", "cmd"}:
+        return subprocess.list2cmdline(argv)
+    return shlex.join(argv)
+
+
 def _prepare_attempt(
     job_id: str, attempt: int, command: str, cwd: str
 ) -> tuple[dict[str, Path], str]:
@@ -137,7 +151,8 @@ def _prepare_attempt(
     _private_write_text(paths["command"], command)
     paths["log"].unlink(missing_ok=True)
     paths["status"].unlink(missing_ok=True)
-    return paths, shlex.join(_runner_argv(paths, resolved_cwd))
+    argv = _runner_argv(paths, resolved_cwd)
+    return paths, _runner_command(argv, get_settings().shell_executable)
 
 
 def _read_status(job: dict[str, Any]) -> dict[str, Any] | None:

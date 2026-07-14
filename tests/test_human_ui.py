@@ -609,6 +609,23 @@ def test_invalid_ui_token_path_fails_without_recursion(tmp_path, monkeypatch):
         get_or_create_ui_local_token()
 
 
+def test_permission_error_for_existing_ui_token_path_is_reported(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    token_path = tmp_path / ".state" / "ui" / "local-token"
+    token_path.mkdir(parents=True)
+    real_open = os.open
+
+    def permission_denied(path, flags, mode=0o777):  # noqa: ANN001
+        if os.fspath(path) == os.fspath(token_path):
+            raise PermissionError(13, "Permission denied", os.fspath(path))
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(os, "open", permission_denied)
+
+    with pytest.raises(RuntimeError, match="invalid UI local token path"):
+        get_or_create_ui_local_token()
+
+
 def test_terminal_idle_timeout_uses_latest_input_or_output_activity():
     assert _idle_timeout_remaining(100.0, 60.0, 130.0) == 30.0
     assert _idle_timeout_remaining(100.0, 60.0, 160.0) == 0.0

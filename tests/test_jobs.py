@@ -9,6 +9,25 @@ from local_shell_mcp.jobs import list_jobs, retry_job, start_job, stop_job, tail
 from local_shell_mcp.settings import get_settings
 
 
+def test_runner_command_invokes_powershell_executable_and_quotes_arguments():
+    command = jobs_module._runner_command(
+        [
+            r"C:\Program Files\Python\python.exe",
+            "-m",
+            "local_shell_mcp.main",
+            "--status-file",
+            r"C:\state dir\job's-status.json",
+        ],
+        "powershell.exe",
+    )
+
+    assert command == (
+        "& 'C:\\Program Files\\Python\\python.exe' '-m' "
+        "'local_shell_mcp.main' '--status-file' "
+        "'C:\\state dir\\job''s-status.json'"
+    )
+
+
 @pytest.mark.asyncio
 async def test_jobs_track_tail_stop_and_retry(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
