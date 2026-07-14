@@ -14,13 +14,16 @@ import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path, PurePosixPath
 from typing import Any
+from urllib.parse import urlsplit
 
+from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from .audit import query_audit, suppress_audit
+from .auth import Principal, require_scopes, verify_request
 from .fs_ops import (
     FileConflictError,
     delete_path,
@@ -39,6 +42,15 @@ from .version import version_info
 
 UI_API_PREFIX = "/api/ui"
 UI_SUBPROTOCOL = "lsm-ui"
+UI_FULL_SCOPES = (
+    "shell:read",
+    "shell:write",
+    "shell:execute",
+    "git:write",
+    "browser:use",
+    "file:share",
+    "remote:use",
+)
 UI_MIN_COLUMNS = 20
 UI_MAX_COLUMNS = 500
 UI_MIN_ROWS = 8
@@ -52,14 +64,35 @@ def _json_ok(data: Any = None, message: str = "") -> JSONResponse:
 
 
 def _json_error(exc: Exception, status_code: int = 400) -> JSONResponse:
+    headers = None
+    message = str(exc)
+    if isinstance(exc, HTTPException):
+        status_code = exc.status_code
+        message = str(exc.detail)
+        headers = exc.headers
     return JSONResponse(
         {
             "ok": False,
             "error": type(exc).__name__,
-            "message": str(exc),
+            "message": message,
         },
         status_code=status_code,
+        headers=headers,
     )
+
+
+def _request_principal(request: Request) -> Principal:
+    principal = getattr(request.state, "principal", None)
+    return principal if isinstance(principal, Principal) else verify_request(request)
+
+
+def _require_ui_scopes(
+    request: Request, *scopes: str, machine: str | None = None
+) -> None:
+    required = list(scopes)
+    if machine and machine != "local":
+        required.append("remote:use")
+    require_scopes(_request_principal(request), required)
 
 
 def _bounded_int(
@@ -246,8 +279,12 @@ def _normalize_file_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any
     return rows
 
 
-async def api_bootstrap(request: Request) -> Response:  # noqa: ARG001
+async def api_bootstrap(request: Request) -> Response:
     settings = get_settings()
+    required = ["shell:read"]
+    if settings.remote_enabled:
+        required.append("remote:use")
+    _require_ui_scopes(request, *required)
     return _json_ok(
         {
             "version": version_info(),
@@ -262,7 +299,11 @@ async def api_bootstrap(request: Request) -> Response:  # noqa: ARG001
     )
 
 
-async def api_machines(request: Request) -> Response:  # noqa: ARG001
+async def api_machines(request: Request) -> Response:
+    required = ["shell:read"]
+    if get_settings().remote_enabled:
+        required.append("remote:use")
+    _require_ui_scopes(request, *required)
     return _json_ok(_machine_rows())
 
 
@@ -270,6 +311,7 @@ async def api_files(request: Request) -> Response:
     machine = request.query_params.get("machine", "local")
     path = request.query_params.get("path", ".")
     try:
+        _require_ui_scopes(request, "shell:read", machine=machine)
         entries = await _machine_dispatch(
             machine,
             lambda: list_dir(path, False, 1_000),
@@ -303,6 +345,7 @@ async def api_file_preview(request: Request) -> Response:
     machine = request.query_params.get("machine", "local")
     path = request.query_params.get("path", ".")
     try:
+        _require_ui_scopes(request, "shell:read", machine=machine)
         if machine == "local":
             resolved = resolve_path(path, must_exist=True)
             if resolved.is_dir():
@@ -353,6 +396,7 @@ async def api_file_content(request: Request) -> Response:
     machine = request.query_params.get("machine", "local")
     path = request.query_params.get("path", "")
     try:
+        _require_ui_scopes(request, "shell:read", machine=machine)
         if not path:
             raise ValueError("path is required")
         content = await _machine_dispatch(
@@ -379,6 +423,7 @@ async def api_file_action(request: Request) -> Response:
     try:
         body = await request.json()
         machine = str(body.get("machine") or "local")
+        _require_ui_scopes(request, "shell:read", "shell:write", machine=machine)
         path = str(body.get("path") or "")
         if not path:
             raise ValueError("path is required")
@@ -435,6 +480,7 @@ async def api_file_action(request: Request) -> Response:
 async def api_terminals(request: Request) -> Response:
     machine = request.query_params.get("machine", "local")
     try:
+        _require_ui_scopes(request, "shell:read", machine=machine)
         result = await _machine_dispatch(machine, list_shells, "shell_list", {})
         return _json_ok({"machine": machine, **(result or {"sessions": []})})
     except Exception as exc:
@@ -445,6 +491,7 @@ async def api_terminal_read(request: Request) -> Response:
     machine = request.query_params.get("machine", "local")
     session_id = request.query_params.get("session_id", "")
     try:
+        _require_ui_scopes(request, "shell:read", machine=machine)
         lines = _bounded_int(
             request.query_params.get("lines"),
             default=500,
@@ -470,6 +517,7 @@ async def api_terminal_action(request: Request) -> Response:
     try:
         body = await request.json()
         machine = str(body.get("machine") or "local")
+        _require_ui_scopes(request, "shell:read", "shell:execute", machine=machine)
         if action == "start":
             args = {
                 "cwd": str(body.get("cwd") or "."),
@@ -516,7 +564,9 @@ async def api_terminal_action(request: Request) -> Response:
 async def api_todos(request: Request) -> Response:
     try:
         if request.method == "GET":
+            _require_ui_scopes(request, "shell:read")
             return _json_ok(todo_read())
+        _require_ui_scopes(request, "shell:read", "shell:write")
         body = await request.json()
         expected_revision = body.get("expected_revision")
         with suppress_audit():
@@ -534,6 +584,7 @@ async def api_todos(request: Request) -> Response:
 async def api_audit(request: Request) -> Response:
     params = request.query_params
     try:
+        _require_ui_scopes(request, "shell:read")
         result = query_audit(
             limit=int(params.get("limit", "300")),
             node=params.get("node"),
@@ -552,6 +603,7 @@ async def api_audit(request: Request) -> Response:
 
 async def api_remotes(request: Request) -> Response:
     try:
+        _require_ui_scopes(request, "remote:use")
         if not get_settings().remote_enabled:
             if request.method == "GET":
                 return _json_ok(
@@ -581,6 +633,7 @@ async def api_remotes(request: Request) -> Response:
 async def api_remote_action(request: Request) -> Response:
     action = str(request.path_params.get("action") or "")
     try:
+        _require_ui_scopes(request, "remote:use")
         if not get_settings().remote_enabled:
             raise RuntimeError("Remote worker support is disabled")
         body = await request.json()
@@ -622,7 +675,11 @@ def _authorize_websocket(websocket: WebSocket) -> bool:
     try:
         from .oauth import validate_bearer_token
 
-        validate_bearer_token(token, websocket)  # type: ignore[arg-type]
+        claims = validate_bearer_token(token, websocket)  # type: ignore[arg-type]
+        require_scopes(
+            Principal(email=None, subject=claims.get("sub"), claims=claims),
+            UI_FULL_SCOPES,
+        )
     except Exception:
         return False
     return True
@@ -801,6 +858,18 @@ def _spawn_tui_process(cols: int, rows: int):  # noqa: ANN201
     return _UnixPtyProcess(command, env, cols, rows)
 
 
+def _validate_tui_api_base(value: str) -> str:
+    normalized = str(value).rstrip("/")
+    parsed = urlsplit(normalized)
+    if parsed.scheme not in {"http", "https"} or parsed.hostname not in {
+        "127.0.0.1",
+        "::1",
+        "localhost",
+    }:
+        raise ValueError("Native TUI --api-base must use a loopback HTTP(S) URL")
+    return normalized
+
+
 def run_tui_cli(argv: list[str] | None = None) -> None:
     import argparse
     import subprocess
@@ -817,7 +886,11 @@ def run_tui_cli(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
     env = os.environ.copy()
-    env["LOCAL_SHELL_MCP_UI_API_BASE"] = str(args.api_base).rstrip("/")
+    try:
+        api_base = _validate_tui_api_base(args.api_base)
+    except ValueError as exc:
+        parser.error(str(exc))
+    env["LOCAL_SHELL_MCP_UI_API_BASE"] = api_base
     env["LOCAL_SHELL_MCP_UI_MODE"] = "tui"
     env[UI_LOCAL_TOKEN_ENV] = get_or_create_ui_local_token()
     try:

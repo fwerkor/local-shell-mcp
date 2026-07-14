@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from starlette.applications import Starlette
 from starlette.routing import Route
 
-from local_shell_mcp.auth import _is_mcp_discovery_request
+from local_shell_mcp.auth import _CURRENT_PRINCIPAL, Principal, _is_mcp_discovery_request
 from local_shell_mcp.oauth import (
     _CLIENTS,
     _CODES,
@@ -61,6 +61,28 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
     assert content
     assert structured["ok"] is True
 
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_execution_enforces_advertised_scopes(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "oauth")
+    get_settings.cache_clear()
+    (tmp_path / "readable.txt").write_text("content", encoding="utf-8")
+    mcp = build_mcp()
+    principal_token = _CURRENT_PRINCIPAL.set(
+        Principal(email=None, subject="read-only", claims={"scope": "shell:read"})
+    )
+    try:
+        content, structured = await mcp.call_tool("read_file", {"path": "readable.txt"})
+        assert content
+        assert structured["ok"] is True
+        with pytest.raises(Exception, match="shell:write"):
+            await mcp.call_tool("write_file", {"path": "blocked.txt", "content": "no"})
+    finally:
+        _CURRENT_PRINCIPAL.reset(principal_token)
+
+    assert not (tmp_path / "blocked.txt").exists()
 
 @pytest.mark.asyncio
 async def test_full_container_mode_marks_command_tools_for_auto_approval(tmp_path, monkeypatch):
@@ -175,6 +197,19 @@ def test_oauth_registration_validates_redirects_and_authorize_requires_registere
     assert valid.status_code == 200
     assert "Approve" in valid.text
     assert "Unknown client_id" not in valid.text
+
+    unsupported_scope = client.get(
+        "/oauth/authorize",
+        params={
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": "https://example.test/callback",
+            "code_challenge": "challenge",
+            "code_challenge_method": "S256",
+            "scope": "shell:read unknown:scope",
+        },
+    )
+    assert "Unsupported OAuth scope" in unsupported_scope.text
 
 
 def test_oauth_authorize_form_escapes_reflected_fields(tmp_path, monkeypatch):

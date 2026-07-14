@@ -14,6 +14,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 
 from .audit import audit
+from .auth import require_current_scopes
 from .fs_ops import (
     delete_path,
     edit_text,
@@ -291,20 +292,61 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
     for tool in mcp._tool_manager._tools.values():  # noqa: SLF001
         original = tool.fn
         tool_name = tool.name
+        required_scopes: list[str] = []
+        for scheme in (tool.meta or {}).get("securitySchemes", []):
+            if scheme.get("type") == "oauth2":
+                required_scopes.extend(str(scope) for scope in scheme.get("scopes", []))
+                break
+        tool_required_scopes = tuple(dict.fromkeys(required_scopes))
 
-        async def wrapped(*args, __original=original, __tool_name=tool_name, **kwargs):  # noqa: ANN002, ANN003
-            audit("mcp_tool_call_start", tool=__tool_name, arguments=_audit_tool_arguments(args, kwargs))
+        async def wrapped(  # noqa: ANN202
+            *args,
+            __original=original,
+            __tool_name=tool_name,
+            __required_scopes=tool_required_scopes,
+            **kwargs,
+        ):
+            require_current_scopes(__required_scopes)
+            arguments = _audit_tool_arguments(args, kwargs)
+            audit_context = {}
+            if isinstance(arguments, dict):
+                if arguments.get("machine"):
+                    audit_context["machine"] = arguments["machine"]
+                if arguments.get("session_id"):
+                    audit_context["session"] = arguments["session_id"]
+            audit(
+                "mcp_tool_call_start",
+                tool=__tool_name,
+                arguments=arguments,
+                **audit_context,
+            )
             try:
-                result = await asyncio.wait_for(__original(*args, **kwargs), timeout=PUBLIC_TOOL_TIMEOUT_S)
-                audit("mcp_tool_call_end", tool=__tool_name, ok=True)
+                result = await asyncio.wait_for(
+                    __original(*args, **kwargs), timeout=PUBLIC_TOOL_TIMEOUT_S
+                )
+                audit("mcp_tool_call_end", tool=__tool_name, ok=True, **audit_context)
                 return result
             except TimeoutError:
-                exc = PublicToolTimeoutError(f"{__tool_name} exceeded {PUBLIC_TOOL_TIMEOUT_S} second public tool timeout")
+                exc = PublicToolTimeoutError(
+                    f"{__tool_name} exceeded {PUBLIC_TOOL_TIMEOUT_S} second public tool timeout"
+                )
                 audit("tool_timeout", tool=__tool_name, timeout_s=PUBLIC_TOOL_TIMEOUT_S)
-                audit("mcp_tool_call_end", tool=__tool_name, ok=False, error=type(exc).__name__)
+                audit(
+                    "mcp_tool_call_end",
+                    tool=__tool_name,
+                    ok=False,
+                    error=type(exc).__name__,
+                    **audit_context,
+                )
                 return _timeout_payload_for_tool(__tool_name, exc)
             except Exception as exc:
-                audit("mcp_tool_call_end", tool=__tool_name, ok=False, error=type(exc).__name__)
+                audit(
+                    "mcp_tool_call_end",
+                    tool=__tool_name,
+                    ok=False,
+                    error=type(exc).__name__,
+                    **audit_context,
+                )
                 raise
 
         tool.fn = wrapped

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,7 +12,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .audit import audit
 from .settings import Settings, get_settings
-from .ui_security import has_valid_ui_local_token
+from .ui_security import has_valid_ui_local_token, is_loopback_connection
 
 PUBLIC_PATHS = {"/healthz", "/readyz", "/docs", "/openapi.json", "/join", "/remote/worker-bundle.tgz", "/remote/register", "/remote/resume", "/remote/poll", "/remote/result"}
 HUMAN_UI_API_PREFIX = "/api/ui/"
@@ -45,6 +46,112 @@ class Principal:
     email: str | None
     subject: str | None
     claims: dict[str, Any]
+
+
+_CURRENT_PRINCIPAL: ContextVar[Principal | None] = ContextVar(
+    "local_shell_mcp_current_principal", default=None
+)
+
+
+def current_principal() -> Principal | None:
+    return _CURRENT_PRINCIPAL.get()
+
+
+def principal_scopes(principal: Principal) -> set[str]:
+    raw = principal.claims.get("scope", "")
+    if isinstance(raw, str):
+        return {item for item in raw.split() if item}
+    if isinstance(raw, (list, tuple, set)):
+        return {str(item) for item in raw if str(item)}
+    return set()
+
+
+def require_scopes(
+    principal: Principal, required: list[str] | tuple[str, ...] | set[str]
+) -> None:
+    required_set = {str(scope) for scope in required if str(scope)}
+    if not required_set:
+        return
+    if principal.claims.get("auth") in {"none", "native-tui", "localhost-bypass"}:
+        return
+    missing = sorted(required_set - principal_scopes(principal))
+    if not missing:
+        return
+    required_value = " ".join(sorted(required_set))
+    raise HTTPException(
+        status_code=403,
+        detail=f"OAuth token is missing required scope(s): {', '.join(missing)}",
+        headers={
+            "WWW-Authenticate": (
+                f'Bearer error="insufficient_scope", scope="{required_value}"'
+            )
+        },
+    )
+
+
+def require_current_scopes(required: list[str] | tuple[str, ...] | set[str]) -> None:
+    """Enforce scopes for an authenticated HTTP MCP call.
+
+    Stdio and direct in-process calls have no HTTP principal. auth_mode=none and the
+    explicit localhost/native bypasses are intentionally unrestricted.
+    """
+
+    principal = current_principal()
+    if principal is not None:
+        require_scopes(principal, required)
+
+
+def required_scopes_for_http_tool(path: str) -> tuple[str, ...]:
+    """Map the compatibility REST tool surface to the scopes declared by MCP tools."""
+
+    read = ("shell:read",)
+    write = ("shell:read", "shell:write")
+    execute = ("shell:read", "shell:execute")
+    git_write = ("shell:read", "git:write")
+    browser = ("browser:use",)
+    browser_write = ("browser:use", "shell:write")
+    browser_execute = ("browser:use", "shell:execute")
+    file_share = ("shell:read", "file:share")
+
+    if path.startswith("/tools/download/"):
+        return file_share
+    if path in {
+        "/tools/write_file",
+        "/tools/edit_file",
+        "/tools/multi_edit_file",
+        "/tools/delete",
+        "/tools/todo",
+    }:
+        return write
+    if path in {
+        "/tools/run_shell",
+        "/tools/shell_start",
+        "/tools/shell_send",
+        "/tools/shell_kill",
+    }:
+        return execute
+    if path.startswith("/tools/git/"):
+        if path in {
+            "/tools/git/status",
+            "/tools/git/diff",
+            "/tools/git/log",
+            "/tools/git/show",
+        }:
+            return read
+        return git_write
+    if path in {"/tools/browser/text", "/tools/browser/eval"}:
+        return browser
+    if path in {
+        "/tools/browser/screenshot",
+        "/tools/browser/pdf",
+        "/tools/playwright/install",
+    }:
+        return browser_write
+    if path == "/tools/playwright/run_script":
+        return browser_execute
+    if path.startswith("/tools/"):
+        return read
+    return ()
 
 
 def _client_host(request: Request) -> str:
@@ -87,7 +194,11 @@ def verify_request(request: Request) -> Principal:
     path = str(request.url.path)
     if settings.auth_mode == "none":
         return Principal(email=None, subject="anonymous", claims={"auth": "none"})
-    if path.startswith(HUMAN_UI_API_PREFIX) and has_valid_ui_local_token(request):
+    if (
+        path.startswith(HUMAN_UI_API_PREFIX)
+        and is_loopback_connection(request)
+        and has_valid_ui_local_token(request)
+    ):
         return Principal(email="localhost", subject="native-tui", claims={"auth": "native-tui"})
     if settings.auth_bypass_localhost and _is_localhost(request) and settings.mode == "http":
         return Principal(email="localhost", subject="localhost", claims={"auth": "localhost-bypass"})
@@ -195,7 +306,11 @@ class AuthMiddleware:
             await response(scope, downstream_receive, send)
             return
 
-        await self.app(scope, downstream_receive, send)
+        token = _CURRENT_PRINCIPAL.set(request.state.principal)
+        try:
+            await self.app(scope, downstream_receive, send)
+        finally:
+            _CURRENT_PRINCIPAL.reset(token)
 
 
 # Backwards-compatible alias.

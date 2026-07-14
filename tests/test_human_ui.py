@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -10,8 +11,14 @@ from starlette.websockets import WebSocket
 
 from local_shell_mcp.audit import audit, query_audit, suppress_audit
 from local_shell_mcp.http_app import build_http_app
-from local_shell_mcp.human_ui import _authorize_websocket, _bounded_int, _split_tui_command
-from local_shell_mcp.oauth import public_base_url
+from local_shell_mcp.human_ui import (
+    UI_FULL_SCOPES,
+    _authorize_websocket,
+    _bounded_int,
+    _split_tui_command,
+    _validate_tui_api_base,
+)
+from local_shell_mcp.oauth import issue_access_token, public_base_url
 from local_shell_mcp.remote import execute_worker_tool
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.ui_security import UI_LOCAL_TOKEN_HEADER, get_or_create_ui_local_token
@@ -46,7 +53,7 @@ def test_editor_content_reads_the_complete_bounded_file(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     content = "\n".join(f"line-{index}" for index in range(350))
     (tmp_path / "long.txt").write_bytes(content.encode("utf-8"))
-    client = TestClient(build_http_app())
+    client = TestClient(build_http_app(), client=("127.0.0.1", 4242))
 
     response = client.get(
         "/api/ui/files/content",
@@ -359,7 +366,7 @@ def test_native_tui_token_bypasses_oauth_without_weakening_browser_api(tmp_path,
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST", "false")
     get_settings.cache_clear()
     token = get_or_create_ui_local_token()
-    client = TestClient(build_http_app())
+    client = TestClient(build_http_app(), client=("127.0.0.1", 4242))
 
     response = client.get(
         "/api/ui/bootstrap",
@@ -369,6 +376,58 @@ def test_native_tui_token_bypasses_oauth_without_weakening_browser_api(tmp_path,
     assert response.status_code == 200
     assert response.json()["data"]["machines"]["machines"][0]["name"] == "local"
 
+
+
+def test_native_tui_token_is_rejected_from_non_loopback_peer(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch, auth_mode="oauth")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST", "false")
+    get_settings.cache_clear()
+    token = get_or_create_ui_local_token()
+    client = TestClient(build_http_app(), client=("203.0.113.9", 4242))
+
+    response = client.get(
+        "/api/ui/bootstrap",
+        headers={UI_LOCAL_TOKEN_HEADER: token},
+    )
+
+    assert response.status_code == 401
+
+
+def test_human_ui_rejects_destructive_action_without_write_scope(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch, auth_mode="oauth")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST", "false")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET", "scope-test-secret-which-is-at-least-32-bytes")
+    get_settings.cache_clear()
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep", encoding="utf-8")
+    token = issue_access_token(
+        client_id="read-only",
+        scope="shell:read",
+        resource="http://testserver",
+        issuer="http://testserver",
+    )
+    client = TestClient(build_http_app(), client=("203.0.113.9", 4242))
+
+    response = client.post(
+        "/api/ui/files/delete",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"machine": "local", "path": "victim.txt"},
+    )
+
+    assert response.status_code == 403
+    assert response.headers["www-authenticate"].startswith('Bearer error="insufficient_scope"')
+    assert victim.read_text(encoding="utf-8") == "keep"
+
+
+def test_native_tui_api_base_must_be_loopback():
+    assert _validate_tui_api_base("http://127.0.0.1:8765/api/ui/") == (
+        "http://127.0.0.1:8765/api/ui"
+    )
+    assert _validate_tui_api_base("https://localhost:8765/api/ui") == (
+        "https://localhost:8765/api/ui"
+    )
+    with pytest.raises(ValueError, match="loopback"):
+        _validate_tui_api_base("https://control.example.com/api/ui")
 
 def _websocket_for_test(*, client_host: str = "127.0.0.1", protocols: list[str] | None = None) -> WebSocket:
     headers = [(b"host", b"control.example.com")]
@@ -395,6 +454,50 @@ def _websocket_for_test(*, client_host: str = "127.0.0.1", protocols: list[str] 
 
     return WebSocket(scope, receive, send)
 
+
+
+def _bearer_protocol(token: str) -> str:
+    encoded = base64.urlsafe_b64encode(token.encode()).decode().rstrip("=")
+    return f"bearer.{encoded}"
+
+
+def test_websocket_requires_full_human_ui_scope_set(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch, auth_mode="oauth")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET", "scope-test-secret-which-is-at-least-32-bytes")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL", "https://control.example.com")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN", "long-random-test-pin")
+    get_settings.cache_clear()
+    read_only = issue_access_token(
+        client_id="read-only",
+        scope="shell:read",
+        resource="https://control.example.com",
+        issuer="https://control.example.com",
+    )
+    full = issue_access_token(
+        client_id="full-ui",
+        scope=" ".join(UI_FULL_SCOPES),
+        resource="https://control.example.com",
+        issuer="https://control.example.com",
+    )
+
+    assert (
+        _authorize_websocket(
+            _websocket_for_test(
+                client_host="203.0.113.9",
+                protocols=["lsm-ui", _bearer_protocol(read_only)],
+            )
+        )
+        is False
+    )
+    assert (
+        _authorize_websocket(
+            _websocket_for_test(
+                client_host="203.0.113.9",
+                protocols=["lsm-ui", _bearer_protocol(full)],
+            )
+        )
+        is True
+    )
 
 def test_oauth_websocket_does_not_trust_loopback_reverse_proxy(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth_mode="oauth")

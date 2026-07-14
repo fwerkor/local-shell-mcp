@@ -201,6 +201,10 @@ def _validate_authorize_params(params: dict[str, str]) -> str | None:
         return "Missing code_challenge"
     if params.get("code_challenge_method") != "S256":
         return "Only code_challenge_method=S256 is supported"
+    requested_scopes = {item for item in (params.get("scope") or " ".join(_scopes())).split() if item}
+    unsupported = sorted(requested_scopes - set(_scopes()))
+    if unsupported:
+        return f"Unsupported OAuth scope(s): {', '.join(unsupported)}"
     return None
 
 

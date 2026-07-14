@@ -7,7 +7,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from .auth import CloudflareAccessMiddleware, Principal, verify_request
+from .auth import (
+    CloudflareAccessMiddleware,
+    Principal,
+    require_scopes,
+    required_scopes_for_http_tool,
+    verify_request,
+)
 from .downloads import (
     create_download_link,
     download_endpoint,
@@ -79,7 +85,9 @@ class SkillReadFileRequest(SkillLoadRequest):
 
 
 def principal_dep(request: Request) -> Principal:
-    return verify_request(request)
+    principal = verify_request(request)
+    require_scopes(principal, required_scopes_for_http_tool(str(request.url.path)))
+    return principal
 
 
 PRINCIPAL_DEP = Depends(principal_dep)

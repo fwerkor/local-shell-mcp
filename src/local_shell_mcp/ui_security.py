@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import os
 import secrets
 from contextlib import suppress
@@ -68,3 +69,20 @@ def has_valid_ui_local_token(connection: HTTPConnection) -> bool:
         return False
     expected = get_or_create_ui_local_token()
     return hmac.compare_digest(submitted, expected)
+
+
+def is_loopback_connection(connection: HTTPConnection) -> bool:
+    """Return whether the transport peer itself is a loopback address.
+
+    Forwarded headers are intentionally ignored. A reverse proxy connected over loopback
+    must not inherit the native TUI bypass on behalf of a remote browser.
+    """
+
+    host = connection.client.host if connection.client else ""
+    if host.lower() == "localhost":
+        return True
+    candidate = host.split("%", 1)[0].strip("[]")
+    try:
+        return ipaddress.ip_address(candidate).is_loopback
+    except ValueError:
+        return False
