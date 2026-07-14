@@ -911,6 +911,12 @@ def run_tui_cli(argv: list[str] | None = None) -> None:
     raise SystemExit(completed.returncode)
 
 
+def _idle_timeout_remaining(
+    last_activity: float, idle_timeout: float, now: float
+) -> float:
+    return max(0.0, idle_timeout - max(0.0, now - last_activity))
+
+
 async def ui_terminal_websocket(websocket: WebSocket) -> None:
     if not _authorize_websocket(websocket):
         await websocket.close(code=4401, reason="OAuth authentication required")
@@ -954,25 +960,47 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
         await websocket.close(code=1011, reason=detail[:120])
         return
 
+    loop = asyncio.get_running_loop()
+    last_activity = loop.time()
+
     async def sender() -> None:
+        nonlocal last_activity
         while True:
             data = await process.read()
             if not data:
                 return
+            last_activity = loop.time()
             await websocket.send_bytes(data)
 
     async def receiver() -> None:
-        nonlocal cols, rows
+        nonlocal cols, rows, last_activity
         idle_timeout = max(0, settings.ui_terminal_idle_timeout_s)
         while True:
             if idle_timeout:
+                remaining = _idle_timeout_remaining(
+                    last_activity, idle_timeout, loop.time()
+                )
+                if remaining <= 0:
+                    await websocket.close(
+                        code=4408, reason="WebUI terminal session idle timeout"
+                    )
+                    return
                 try:
-                    message = await asyncio.wait_for(websocket.receive(), timeout=idle_timeout)
+                    message = await asyncio.wait_for(
+                        websocket.receive(), timeout=remaining
+                    )
                 except TimeoutError:
-                    await websocket.close(code=4408, reason="WebUI terminal session idle timeout")
+                    if _idle_timeout_remaining(
+                        last_activity, idle_timeout, loop.time()
+                    ) > 0:
+                        continue
+                    await websocket.close(
+                        code=4408, reason="WebUI terminal session idle timeout"
+                    )
                     return
             else:
                 message = await websocket.receive()
+            last_activity = loop.time()
             if message["type"] == "websocket.disconnect":
                 return
             if message.get("bytes") is not None:

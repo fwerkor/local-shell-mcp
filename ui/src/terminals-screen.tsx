@@ -2,14 +2,14 @@ import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, MachineSidebar, Modal, Panel, formatAge } from "./components"
-import { clampIndex } from "./state-utils"
+import { clampIndex, scopedItems } from "./state-utils"
 import { theme } from "./theme"
 import type { AuditEntry, Machine, TerminalSession } from "./types"
 
 type TerminalDialog =
   | { type: "none" }
-  | { type: "start"; name: string; cwd: string }
-  | { type: "kill"; session: TerminalSession }
+  | { type: "start"; machine: string; name: string; cwd: string }
+  | { type: "kill"; machine: string; session: TerminalSession }
 
 function encodeRawKey(key: {
   name: string
@@ -90,6 +90,7 @@ export function TerminalsScreen({
   onInteractionLockChange: (locked: boolean) => void
 }) {
   const [sessions, setSessions] = useState<TerminalSession[]>([])
+  const [sessionsMachine, setSessionsMachine] = useState<string | null>(null)
   const [selected, setSelected] = useState(0)
   const [output, setOutput] = useState("")
   const [audit, setAudit] = useState<AuditEntry[]>([])
@@ -103,7 +104,8 @@ export function TerminalsScreen({
   const sessionsController = useRef<AbortController | null>(null)
   const outputController = useRef<AbortController | null>(null)
   const machineRef = useRef(machine)
-  const selectedSession = sessions[selected]
+  const activeSessions = scopedItems(sessionsMachine, machine, sessions)
+  const selectedSession = activeSessions[selected]
   const selectedSessionIdRef = useRef<string | null>(selectedSession?.session_id || null)
   machineRef.current = machine
   selectedSessionIdRef.current = selectedSession?.session_id || null
@@ -124,6 +126,7 @@ export function TerminalsScreen({
         controller.signal.aborted
       ) return []
       setSessions(payload.sessions)
+      setSessionsMachine(targetMachine)
       setSelected((value) => clampIndex(value, payload.sessions.length))
       return payload.sessions
     } catch (error) {
@@ -179,9 +182,13 @@ export function TerminalsScreen({
   useEffect(() => {
     sessionsRequest.current += 1
     outputRequest.current += 1
+    setSessions([])
+    setSessionsMachine(machine)
     setSelected(0)
     setOutput("")
     setAudit([])
+    setDialog({ type: "none" })
+    setRawMode(false)
     void refreshSessions()
     const timer = setInterval(() => void refreshSessions(), 4_000)
     return () => {
@@ -190,7 +197,7 @@ export function TerminalsScreen({
       sessionsController.current = null
       clearInterval(timer)
     }
-  }, [refreshSessions])
+  }, [machine, refreshSessions])
 
   useEffect(() => {
     outputRequest.current += 1
@@ -258,10 +265,14 @@ export function TerminalsScreen({
   }
 
   const startSession = async (value: string) => {
+    if (dialog.type !== "start" || dialog.machine !== machine) {
+      setDialog({ type: "none" })
+      return
+    }
     const [namePart, ...cwdParts] = value.trim().split(/\s+/)
     try {
       const created = await api.terminalAction<{ session_id: string }>("start", {
-        machine,
+        machine: dialog.machine,
         name: namePart || undefined,
         cwd: cwdParts.join(" ") || ".",
       })
@@ -278,12 +289,22 @@ export function TerminalsScreen({
     if (!machines.length) return
     const index = Math.max(0, machines.findIndex((item) => item.name === machine))
     const next = (index + delta + machines.length) % machines.length
-    onMachine(machines[next]!.name)
+    setSessions([])
+    setSessionsMachine(null)
     setSelected(0)
+    setOutput("")
+    setAudit([])
+    setDialog({ type: "none" })
+    setRawMode(false)
+    onMachine(machines[next]!.name)
   }
 
   useKeyboard((key) => {
     if (!keyboardEnabled) return
+    if (dialog.type !== "none" && dialog.machine !== machine) {
+      setDialog({ type: "none" })
+      return
+    }
     if (dialog.type === "start") {
       if (key.name === "escape") setDialog({ type: "none" })
       return
@@ -292,7 +313,10 @@ export function TerminalsScreen({
       if (key.name === "escape" || key.name === "n") setDialog({ type: "none" })
       if (key.name === "y" || key.name === "return") {
         void api
-          .terminalAction("kill", { machine, session_id: dialog.session.session_id })
+          .terminalAction("kill", {
+            machine: dialog.machine,
+            session_id: dialog.session.session_id,
+          })
           .then(async () => {
             setDialog({ type: "none" })
             await refreshSessions(true)
@@ -323,10 +347,10 @@ export function TerminalsScreen({
     else if (key.option && key.name === "]") switchMachine(1)
     else if (key.option && key.name === "left") setSelected((value) => Math.max(0, value - 1))
     else if (key.option && key.name === "right") {
-      setSelected((value) => clampIndex(value + 1, sessions.length))
+      setSelected((value) => clampIndex(value + 1, activeSessions.length))
     }
-    else if (key.ctrl && key.name === "n") setDialog({ type: "start", name: "", cwd: "." })
-    else if (key.ctrl && key.name === "w" && selectedSession) setDialog({ type: "kill", session: selectedSession })
+    else if (key.ctrl && key.name === "n") setDialog({ type: "start", machine, name: "", cwd: "." })
+    else if (key.ctrl && key.name === "w" && selectedSession) setDialog({ type: "kill", machine, session: selectedSession })
     else if (key.ctrl && key.name === "a") setShowAudit((value) => !value)
     else if (key.ctrl && key.name === "r") void refreshOutput(true)
   })
@@ -343,8 +367,15 @@ export function TerminalsScreen({
             machines={machines}
             selected={machine}
             onSelect={(nextMachine) => {
-              if (nextMachine !== machine) onMachine(nextMachine)
+              if (nextMachine === machine) return
+              setSessions([])
+              setSessionsMachine(null)
               setSelected(0)
+              setOutput("")
+              setAudit([])
+              setDialog({ type: "none" })
+              setRawMode(false)
+              onMachine(nextMachine)
             }}
           />
         )}
@@ -398,7 +429,7 @@ export function TerminalsScreen({
               paddingRight: 1,
             }}
           >
-            {sessions.map((session, index) => (
+            {activeSessions.map((session, index) => (
               <box
                 key={session.session_id}
                 style={{
@@ -416,7 +447,7 @@ export function TerminalsScreen({
                 />
               </box>
             ))}
-            {sessions.length === 0 && <text fg={theme.faint} content="No sessions" />}
+            {activeSessions.length === 0 && <text fg={theme.faint} content="No sessions" />}
             <box style={{ flexGrow: 1 }} />
             {selectedSession?.created && (
               <text fg={theme.faint} content={formatAge(Number(selectedSession.created))} />

@@ -3,15 +3,23 @@ import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, MachineSidebar, Modal, Panel, formatBytes, useVisibleRows } from "./components"
-import { clampIndex } from "./state-utils"
+import { clampIndex, payloadMatches } from "./state-utils"
 import { theme } from "./theme"
 import type { FileEntry, FilePreview, FilesPayload, Machine } from "./types"
 
 type Dialog =
   | { type: "none" }
-  | { type: "input"; action: "rename" | "new-file" | "new-dir"; title: string; value: string }
-  | { type: "confirm-delete"; entry: FileEntry }
-  | { type: "editor"; entry: FileEntry; content: string; sha256: string }
+  | {
+      type: "input"
+      action: "rename" | "new-file" | "new-dir"
+      title: string
+      value: string
+      machine: string
+      directory: string
+      entry?: FileEntry
+    }
+  | { type: "confirm-delete"; machine: string; entry: FileEntry }
+  | { type: "editor"; machine: string; entry: FileEntry; content: string; sha256: string }
 
 interface ClipboardState {
   mode: "copy" | "move"
@@ -132,14 +140,17 @@ export function FilesScreen({
   const editorRef = useRef<TextareaRenderable>(null)
   const refreshRequest = useRef(0)
   const refreshController = useRef<AbortController | null>(null)
+  const machineRef = useRef(machine)
+  machineRef.current = machine
+  const activePayload = payloadMatches(payload, machine, path) ? payload : null
 
   const entries = useMemo(
-    () => (payload?.entries || []).filter((entry) => showHidden || !entry.hidden),
-    [payload, showHidden],
+    () => (activePayload?.entries || []).filter((entry) => showHidden || !entry.hidden),
+    [activePayload, showHidden],
   )
   const parentEntries = useMemo(
-    () => (payload?.parent_entries || []).filter((entry) => showHidden || !entry.hidden),
-    [payload, showHidden],
+    () => (activePayload?.parent_entries || []).filter((entry) => showHidden || !entry.hidden),
+    [activePayload, showHidden],
   )
   const current = entries[selected]
   const listHeight = Math.max(4, height - 10)
@@ -172,6 +183,14 @@ export function FilesScreen({
       }
     }
   }, [machine, path, setStatus])
+
+  useEffect(() => {
+    setPayload(null)
+    setPreview(null)
+    setSelected(0)
+    setDialog({ type: "none" })
+    setClipboard(null)
+  }, [machine])
 
   useEffect(() => {
     setSelected(0)
@@ -213,18 +232,28 @@ export function FilesScreen({
   const performInputAction = async (value: string) => {
     const trimmed = value.trim()
     if (!trimmed || dialog.type !== "input") return
+    if (dialog.machine !== machine) {
+      closeDialog()
+      return
+    }
     try {
       if (dialog.action === "rename") {
-        if (!current) return
+        if (!dialog.entry) return
         await api.fileAction("rename", {
-          machine,
-          path: current.path,
-          destination: joinPath(path, trimmed),
+          machine: dialog.machine,
+          path: dialog.entry.path,
+          destination: joinPath(dialog.directory, trimmed),
         })
       } else if (dialog.action === "new-file") {
-        await api.fileAction("touch", { machine, path: joinPath(path, trimmed) })
+        await api.fileAction("touch", {
+          machine: dialog.machine,
+          path: joinPath(dialog.directory, trimmed),
+        })
       } else {
-        await api.fileAction("mkdir", { machine, path: joinPath(path, trimmed) })
+        await api.fileAction("mkdir", {
+          machine: dialog.machine,
+          path: joinPath(dialog.directory, trimmed),
+        })
       }
       closeDialog()
       await refresh()
@@ -235,12 +264,15 @@ export function FilesScreen({
 
   const openEditor = async (entry: FileEntry) => {
     if (entry.type === "dir") return
+    const targetMachine = machine
     setBusy(true)
     try {
-      const content = await api.fileContent(machine, entry.path)
+      const content = await api.fileContent(targetMachine, entry.path)
+      if (machineRef.current !== targetMachine) return
       if (!content.sha256) throw new Error("The editor did not receive a file revision")
       setDialog({
         type: "editor",
+        machine: targetMachine,
         entry,
         content: String(content.content || ""),
         sha256: content.sha256,
@@ -276,20 +308,27 @@ export function FilesScreen({
     if (!machines.length) return
     const index = Math.max(0, machines.findIndex((item) => item.name === machine))
     const next = (index + delta + machines.length) % machines.length
-    onMachine(machines[next]!.name)
-    setPath(".")
+    setPayload(null)
+    setPreview(null)
+    setDialog({ type: "none" })
     setClipboard(null)
+    setPath(".")
+    onMachine(machines[next]!.name)
   }
 
   useKeyboard((key) => {
     if (!keyboardEnabled) return
+    if (dialog.type !== "none" && dialog.machine !== machine) {
+      closeDialog()
+      return
+    }
     if (dialog.type === "editor") {
       if (key.name === "escape") closeDialog()
       if (key.ctrl && key.name === "s") {
         const content = editorRef.current?.plainText ?? dialog.content
         void api
           .fileAction("write", {
-            machine,
+            machine: dialog.machine,
             path: dialog.entry.path,
             content,
             overwrite: true,
@@ -320,7 +359,7 @@ export function FilesScreen({
       if (key.name === "y" || key.name === "return") {
         void api
           .fileAction("delete", {
-            machine,
+            machine: dialog.machine,
             path: dialog.entry.path,
             recursive: dialog.entry.type === "dir",
           })
@@ -339,15 +378,37 @@ export function FilesScreen({
     else if (key.name === "k" || key.name === "up") setSelected((value) => Math.max(0, value - 1))
     else if (key.name === "g" && key.shift) setSelected(Math.max(0, entries.length - 1))
     else if (key.name === "g") setSelected(0)
-    else if (key.name === "h" || key.name === "left" || key.name === "backspace") setPath(payload?.parent || ".")
+    else if (key.name === "h" || key.name === "left" || key.name === "backspace") setPath(activePayload?.parent || ".")
     else if (key.name === "l" || key.name === "right" || key.name === "return") {
       if (current?.type === "dir") setPath(current.path)
       else if (current) void openEditor(current)
     } else if (key.name === "." || key.name === "period") setShowHidden((value) => !value)
-    else if (key.name === "r" && !key.shift) current && setDialog({ type: "input", action: "rename", title: "Rename", value: current.name })
-    else if (key.name === "n" && key.shift) setDialog({ type: "input", action: "new-dir", title: "New directory", value: "" })
-    else if (key.name === "n") setDialog({ type: "input", action: "new-file", title: "New file", value: "" })
-    else if (key.name === "d") current && setDialog({ type: "confirm-delete", entry: current })
+    else if (key.name === "r" && !key.shift) current && setDialog({
+      type: "input",
+      action: "rename",
+      title: "Rename",
+      value: current.name,
+      machine,
+      directory: path,
+      entry: current,
+    })
+    else if (key.name === "n" && key.shift) setDialog({
+      type: "input",
+      action: "new-dir",
+      title: "New directory",
+      value: "",
+      machine,
+      directory: path,
+    })
+    else if (key.name === "n") setDialog({
+      type: "input",
+      action: "new-file",
+      title: "New file",
+      value: "",
+      machine,
+      directory: path,
+    })
+    else if (key.name === "d") current && setDialog({ type: "confirm-delete", machine, entry: current })
     else if (key.name === "e") current && current.type !== "dir" && void openEditor(current)
     else if (key.name === "y") current && setClipboard({ mode: "copy", machine, path: current.path })
     else if (key.name === "x") current && setClipboard({ mode: "move", machine, path: current.path })
@@ -366,9 +427,12 @@ export function FilesScreen({
             selected={machine}
             onSelect={(nextMachine) => {
               if (nextMachine === machine) return
-              onMachine(nextMachine)
-              setPath(".")
+              setPayload(null)
+              setPreview(null)
+              setDialog({ type: "none" })
               setClipboard(null)
+              setPath(".")
+              onMachine(nextMachine)
             }}
           />
         )}

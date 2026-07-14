@@ -18,6 +18,7 @@ from local_shell_mcp.human_ui import (
     UI_FULL_SCOPES,
     _authorize_websocket,
     _bounded_int,
+    _idle_timeout_remaining,
     _split_tui_command,
     _validate_tui_api_base,
     api_files,
@@ -606,3 +607,9 @@ def test_invalid_ui_token_path_fails_without_recursion(tmp_path, monkeypatch):
 
     with pytest.raises(RuntimeError, match="invalid UI local token path"):
         get_or_create_ui_local_token()
+
+
+def test_terminal_idle_timeout_uses_latest_input_or_output_activity():
+    assert _idle_timeout_remaining(100.0, 60.0, 130.0) == 30.0
+    assert _idle_timeout_remaining(100.0, 60.0, 160.0) == 0.0
+    assert _idle_timeout_remaining(150.0, 60.0, 160.0) == 50.0
