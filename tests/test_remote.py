@@ -93,7 +93,9 @@ async def test_join_script_loads_vendored_worker_dependencies(tmp_path, monkeypa
     response = await join_script(None)  # type: ignore[arg-type]
     script = response.body.decode("utf-8")
 
-    assert 'export PYTHONPATH="$TMPDIR:$TMPDIR/vendor:${PYTHONPATH:-}"' in script
+    assert 'export PYTHONPATH="$RUNTIME_ROOT:$RUNTIME_ROOT/vendor:${PYTHONPATH:-}"' in script
+    assert 'RUNTIME_ROOT="$STATE_HOME/runtime"' in script
+    assert 'mv "$RUNTIME_NEXT" "$RUNTIME_ROOT"' in script
 
 
 @pytest.mark.asyncio

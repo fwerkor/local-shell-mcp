@@ -75,6 +75,7 @@ from .shell_ops import (
     send_shell,
     start_shell,
 )
+from .tmux_helper import persistent_shell_backend_info
 from .transfer_ops import (
     transfer_abort_write,
     transfer_alloc_temp_path,
@@ -612,8 +613,16 @@ async def worker_bundle(request: Any):  # noqa: ARG001, ANN201
     package_root = Path(__file__).resolve().parent
     buffer = BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
-        for path in package_root.rglob("*.py"):
-            tar.add(path, arcname=str(path.relative_to(package_root.parent)))
+        for path in package_root.rglob("*"):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(package_root)
+            is_python = path.suffix == ".py"
+            is_helper = relative.parts[:1] == ("helpers",) and (
+                path.name == "tmux" or path.name == "tmux.LICENSE"
+            )
+            if is_python or is_helper:
+                tar.add(path, arcname=str(path.relative_to(package_root.parent)))
         seen: set[str] = set()
         for dist_name in REMOTE_WORKER_DISTRIBUTIONS:
             _add_distribution_to_tar(tar, dist_name, seen)
@@ -654,10 +663,24 @@ cleanup() {{ rm -rf "$TMPDIR"; }}
 trap cleanup EXIT
 echo "Downloading worker bundle..." >&2
 curl -fL --progress-bar "$BUNDLE_URL" -o "$TMPDIR/worker.tgz"
-echo "Extracting worker bundle..." >&2
-tar -xzf "$TMPDIR/worker.tgz" -C "$TMPDIR"
+RUNTIME_ROOT="$TMPDIR/runtime"
+if [ "$BACKGROUND" = "1" ] || [ "$PERSIST" = "1" ]; then
+  STATE_HOME="${{XDG_STATE_HOME:-$HOME/.local/state}}/local-shell-mcp-worker"
+  RUNTIME_ROOT="$STATE_HOME/runtime"
+  RUNTIME_NEXT="$STATE_HOME/runtime.next.$$"
+  rm -rf "$RUNTIME_NEXT"
+  mkdir -p "$RUNTIME_NEXT"
+  echo "Installing worker bundle..." >&2
+  tar -xzf "$TMPDIR/worker.tgz" -C "$RUNTIME_NEXT"
+  rm -rf "$RUNTIME_ROOT"
+  mv "$RUNTIME_NEXT" "$RUNTIME_ROOT"
+else
+  mkdir -p "$RUNTIME_ROOT"
+  echo "Extracting worker bundle..." >&2
+  tar -xzf "$TMPDIR/worker.tgz" -C "$RUNTIME_ROOT"
+fi
 echo "Starting worker..." >&2
-export PYTHONPATH="$TMPDIR:$TMPDIR/vendor:${{PYTHONPATH:-}}"
+export PYTHONPATH="$RUNTIME_ROOT:$RUNTIME_ROOT/vendor:${{PYTHONPATH:-}}"
 ARGS=(--server "$SERVER" --invite "$INVITE" --workdir "$WORKDIR")
 if [ -n "$NAME" ]; then ARGS+=(--name "$NAME"); fi
 if [ "$PERSIST" = "1" ]; then ARGS+=(--persist); fi
@@ -1007,7 +1030,7 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
             cwd=".",
             timeout_s=10,
         )
-        return {"settings": safe_settings_dump(), "probe": result.model_dump()}
+        return {"settings": safe_settings_dump(), "persistent_shell": persistent_shell_backend_info(), "probe": result.model_dump()}
     if tool == "run_shell_tool":
         return (
             await public_run_shell(
@@ -1275,6 +1298,7 @@ def worker_info(workdir: str) -> dict[str, Any]:
         "workdir": workdir,
         "python": sys.version.split()[0],
         "platform": sys.platform,
+        "persistent_shell": persistent_shell_backend_info(),
     }
 
 

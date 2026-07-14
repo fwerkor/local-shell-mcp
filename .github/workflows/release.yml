@@ -139,11 +139,15 @@ jobs:
         include:
           - artifact: linux-x86_64
             runner: ubuntu-latest
+            helper_platform: linux/amd64
+            helper_tag: linux-x86_64
             binary: local-shell-mcp
             tui_binary: local-shell-mcp-tui
             archive: tar.gz
           - artifact: linux-aarch64
             runner: ubuntu-24.04-arm
+            helper_platform: linux/arm64
+            helper_tag: linux-aarch64
             binary: local-shell-mcp
             tui_binary: local-shell-mcp-tui
             archive: tar.gz
@@ -174,6 +178,15 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Set up Docker Buildx
+        if: runner.os == 'Linux'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build bundled tmux helper
+        if: runner.os == 'Linux'
+        shell: bash
+        run: scripts/build-tmux-helper.sh "src/local_shell_mcp/helpers/${{ matrix.helper_tag }}/tmux" "${{ matrix.helper_platform }}"
 
       - name: Build OpenTUI sidecar and embedded WebUI
         working-directory: ui

@@ -19,3 +19,5 @@ node_modules/
 vscode-extension/node_modules/
 vscode-extension/out/
 dist/
+
+src/local_shell_mcp/helpers/*/tmux

@@ -405,6 +405,37 @@ jobs:
           if-no-files-found: error
 
 
+  bundled-tmux:
+    name: Bundled tmux / ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-x86_64
+            runner: ubuntu-24.04
+            platform: linux/amd64
+          - label: linux-aarch64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and smoke test helper
+        shell: bash
+        run: |
+          set -euxo pipefail
+          scripts/build-tmux-helper.sh /tmp/local-shell-mcp-tmux "${{ matrix.platform }}"
+          /tmp/local-shell-mcp-tmux -L local-shell-mcp-ci new-session -d -s smoke "sh -lc 'printf ready; sleep 5'"
+          sleep 1
+          /tmp/local-shell-mcp-tmux -L local-shell-mcp-ci capture-pane -p -t smoke | grep ready
+          /tmp/local-shell-mcp-tmux -L local-shell-mcp-ci kill-server
+
+
   docker:
     name: Docker / ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}

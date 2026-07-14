@@ -66,7 +66,7 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-long-random-secret
 | `max_transfer_archive_entries` | `LOCAL_SHELL_MCP_MAX_TRANSFER_ARCHIVE_ENTRIES` | `100000` | 解包目錄傳輸歸檔時允許的最大成員數量。 |
 | `max_transfer_unpacked_bytes` | `LOCAL_SHELL_MCP_MAX_TRANSFER_UNPACKED_BYTES` | `10000000000` | 目錄傳輸歸檔允許聲明的最大解壓後總字節數。 |
 | `max_concurrent_commands` | `LOCAL_SHELL_MCP_MAX_CONCURRENT_COMMANDS` | `4` | 併發命令數量上限。 |
-| `max_tmux_sessions` | `LOCAL_SHELL_MCP_MAX_TMUX_SESSIONS` | `16` | tmux session 數量上限。 |
+| `max_tmux_sessions` | `LOCAL_SHELL_MCP_MAX_TMUX_SESSIONS` | `16` | tmux、ConPTY 與 native fallback 共用的持久 shell session 數量上限。 |
 
 ### 文件鏈接
 
@@ -94,7 +94,7 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-long-random-secret
 | `shell_executable` | `LOCAL_SHELL_MCP_SHELL_EXECUTABLE` | `'/bin/bash'` | shell 可執行文件。 |
 | `shell_env_blocklist` | `LOCAL_SHELL_MCP_SHELL_ENV_BLOCKLIST` | `['CLOUDFLARE_TUNNEL_TOKEN']` | 傳給 shell 前需要屏蔽的環境變量。 |
 | `shell_env_blocked_prefixes` | `LOCAL_SHELL_MCP_SHELL_ENV_BLOCKED_PREFIXES` | `['LOCAL_SHELL_MCP_', 'DOCKER_']` | 環境變量中用逗號分隔，YAML 中用列表。 |
-| `tmux_bin` | `LOCAL_SHELL_MCP_TMUX_BIN` | `'tmux'` | tmux 可執行文件。 |
+| `tmux_bin` | `LOCAL_SHELL_MCP_TMUX_BIN` | `'tmux'` | 首選 tmux 可執行文件；不可用時 Linux 發行包和 Docker 使用內置 helper，其餘情況退回 native backend。 |
 | `rg_bin` | `LOCAL_SHELL_MCP_RG_BIN` | `'rg'` | ripgrep 可執行文件。 |
 | `git_bin` | `LOCAL_SHELL_MCP_GIT_BIN` | `'git'` | git 可執行文件。 |
 | `python_bin` | `LOCAL_SHELL_MCP_PYTHON_BIN` | `'python3'` | Python 可執行文件。 |

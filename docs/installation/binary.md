@@ -95,7 +95,7 @@ Install what your tasks need:
 
 | Capability | Host packages to consider |
 |---|---|
-| Search and shell ergonomics | `ripgrep`, `tmux`, `tree`, `jq`, `curl`, `wget` |
+| Search and shell ergonomics | `ripgrep`, `tree`, `jq`, `curl`, `wget`; Linux releases already include a static tmux helper |
 | Git workflows | `git`, `gh`, OpenSSH client, credential helpers |
 | Python projects | Python, pip, venv, project-specific compilers and headers |
 | Node projects | Node.js, npm, pnpm, yarn |

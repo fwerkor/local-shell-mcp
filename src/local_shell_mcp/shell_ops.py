@@ -18,6 +18,7 @@ from .fs_ops import relative_display, resolve_path
 from .models import CommandResult
 from .settings import get_settings
 from .shell_environment import subprocess_env
+from .tmux_helper import resolve_tmux, tmux_socket_name
 
 PUBLIC_RUN_SHELL_DEFAULT_TIMEOUT_S = 10
 PUBLIC_RUN_SHELL_TIMEOUT_CAP_S = 120
@@ -348,7 +349,13 @@ def _tmux_session_name(name: str | None = None) -> str:
 
 
 async def tmux(args: list[str], timeout_s: int = 10) -> CommandResult:
-    cmd = " ".join(shlex.quote(x) for x in [get_settings().tmux_bin, *args])
+    selection = resolve_tmux()
+    if selection.path is None:
+        raise RuntimeError("tmux is unavailable and no bundled helper matches this platform")
+    cmd = " ".join(
+        shlex.quote(x)
+        for x in [selection.path, "-L", tmux_socket_name(), *args]
+    )
     return await run_shell(cmd, cwd=".", timeout_s=timeout_s)
 
 
@@ -514,17 +521,23 @@ async def _native_list_shells() -> dict:
     return {"sessions": sessions}
 
 
-async def start_shell(cwd: str = ".", name: str | None = None, command: str | None = None) -> dict:
+async def start_shell(
+    cwd: str = ".", name: str | None = None, command: str | None = None
+) -> dict:
     if _use_windows_persistent_shell_backend():
         if conpty_ops.is_available():
             return await conpty_ops.start_shell(cwd, name, command, check_command_policy)
+        return await _native_start_shell(cwd, name, command)
+
+    selection = resolve_tmux()
+    if selection.path is None:
         return await _native_start_shell(cwd, name, command)
 
     resolved_cwd = resolve_path(cwd, must_exist=True)
     sessions = await list_shells()
     max_sessions = max(1, get_settings().max_tmux_sessions)
     if len(sessions.get("sessions", [])) >= max_sessions:
-        raise RuntimeError(f"Refusing to start more than {max_sessions} tmux sessions")
+        raise RuntimeError(f"Refusing to start more than {max_sessions} persistent shell sessions")
     session = _tmux_session_name(name)
     initial = command or get_settings().shell_executable
     check_command_policy(initial)
@@ -540,14 +553,22 @@ async def start_shell(cwd: str = ".", name: str | None = None, command: str | No
     result = await tmux(cmd)
     if not result.ok:
         raise RuntimeError(result.stderr or result.stdout)
-    audit("shell_start", session=session, cwd=str(resolved_cwd), command=initial, backend="tmux")
-    return {"session_id": session, "cwd": relative_display(resolved_cwd), "command": initial, "backend": "tmux"}
+    backend = f"tmux-{selection.source}"
+    audit("shell_start", session=session, cwd=str(resolved_cwd), command=initial, backend=backend)
+    return {
+        "session_id": session,
+        "cwd": relative_display(resolved_cwd),
+        "command": initial,
+        "backend": backend,
+    }
 
 
 async def send_shell(session_id: str, input_text: str, enter: bool = True) -> dict:
     if _use_windows_persistent_shell_backend():
         if conpty_ops.has_session(session_id):
             return await conpty_ops.send_shell(session_id, input_text, enter)
+        return await _native_send_shell(session_id, input_text, enter)
+    if session_id in _NATIVE_SHELL_SESSIONS or resolve_tmux().path is None:
         return await _native_send_shell(session_id, input_text, enter)
 
     result = await tmux(["send-keys", "-t", session_id, "-l", input_text])
@@ -557,7 +578,13 @@ async def send_shell(session_id: str, input_text: str, enter: bool = True) -> di
         result = await tmux(["send-keys", "-t", session_id, "Enter"])
         if not result.ok:
             raise RuntimeError(result.stderr or result.stdout)
-    audit("shell_send", session=session_id, bytes=len(input_text.encode()), enter=enter, backend="tmux")
+    audit(
+        "shell_send",
+        session=session_id,
+        bytes=len(input_text.encode()),
+        enter=enter,
+        backend="tmux",
+    )
     return {"session_id": session_id, "sent_bytes": len(input_text.encode()), "enter": enter}
 
 
@@ -566,8 +593,12 @@ async def read_shell(session_id: str, lines: int = 200) -> dict:
         if conpty_ops.has_session(session_id):
             return await conpty_ops.read_shell(session_id, lines)
         return await _native_read_shell(session_id, lines)
+    if session_id in _NATIVE_SHELL_SESSIONS or resolve_tmux().path is None:
+        return await _native_read_shell(session_id, lines)
 
-    result = await tmux(["capture-pane", "-p", "-t", session_id, "-S", f"-{max(1, lines)}"])
+    result = await tmux(
+        ["capture-pane", "-p", "-t", session_id, "-S", f"-{max(1, lines)}"]
+    )
     if not result.ok:
         raise RuntimeError(result.stderr or result.stdout)
     audit("shell_read", session=session_id, lines=lines, backend="tmux")
@@ -579,25 +610,49 @@ async def kill_shell(session_id: str) -> dict:
         if conpty_ops.has_session(session_id):
             return await conpty_ops.kill_shell(session_id)
         return await _native_kill_shell(session_id)
+    if session_id in _NATIVE_SHELL_SESSIONS or resolve_tmux().path is None:
+        return await _native_kill_shell(session_id)
 
     result = await tmux(["kill-session", "-t", session_id])
     audit("shell_kill", session=session_id, ok=result.ok, backend="tmux")
     return {"session_id": session_id, "killed": result.ok, "stderr": result.stderr}
 
 
-async def list_shells() -> dict:
-    if _use_windows_persistent_shell_backend():
-        conpty_sessions = await conpty_ops.list_shells()
-        native_sessions = await _native_list_shells()
-        return {"sessions": [*conpty_sessions.get("sessions", []), *native_sessions.get("sessions", [])]}
-
-    result = await tmux(["list-sessions", "-F", "#{session_name}\t#{session_created}\t#{session_attached}"], timeout_s=5)
+async def _tmux_list_shells() -> list[dict]:
+    if resolve_tmux().path is None:
+        return []
+    result = await tmux(
+        [
+            "list-sessions",
+            "-F",
+            "#{session_name}\t#{session_created}\t#{session_attached}",
+        ],
+        timeout_s=5,
+    )
     if not result.ok:
-        # tmux exits nonzero when no server/sessions exist.
-        return {"sessions": []}
+        # tmux exits nonzero when no server or sessions exist.
+        return []
     sessions = []
     for line in result.stdout.splitlines():
         parts = line.split("\t")
         if parts:
-            sessions.append({"session_id": parts[0], "created": parts[1] if len(parts) > 1 else None, "attached": parts[2] if len(parts) > 2 else None, "backend": "tmux"})
+            sessions.append(
+                {
+                    "session_id": parts[0],
+                    "created": parts[1] if len(parts) > 1 else None,
+                    "attached": parts[2] if len(parts) > 2 else None,
+                    "backend": f"tmux-{resolve_tmux().source}",
+                }
+            )
+    return sessions
+
+
+async def list_shells() -> dict:
+    native_sessions = await _native_list_shells()
+    sessions = list(native_sessions.get("sessions", []))
+    if _use_windows_persistent_shell_backend():
+        conpty_sessions = await conpty_ops.list_shells()
+        sessions[0:0] = conpty_sessions.get("sessions", [])
+    else:
+        sessions[0:0] = await _tmux_list_shells()
     return {"sessions": sessions}

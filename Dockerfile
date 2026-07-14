@@ -7,6 +7,37 @@ COPY ui /source/ui
 COPY src/local_shell_mcp /source/src/local_shell_mcp
 RUN cd /source/ui && bun install --frozen-lockfile && bun run build
 
+FROM alpine:3.22 AS tmux-builder
+ARG TMUX_VERSION=3.5a
+ARG TMUX_SHA256=16216bd0877170dfcc64157085ba9013610b12b082548c7c9542cc0103198951
+RUN apk add --no-cache \
+    build-base \
+    bison \
+    ca-certificates \
+    curl \
+    libevent-dev \
+    libevent-static \
+    linux-headers \
+    ncurses-dev \
+    ncurses-static \
+    pkgconf
+WORKDIR /build
+RUN curl -fsSL "https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz" -o tmux.tar.gz \
+  && echo "${TMUX_SHA256}  tmux.tar.gz" | sha256sum -c - \
+  && tar -xzf tmux.tar.gz
+WORKDIR /build/tmux-${TMUX_VERSION}
+RUN LIBEVENT_CFLAGS="$(pkg-config --cflags libevent)" \
+    LIBEVENT_LIBS="$(pkg-config --static --libs libevent)" \
+    LIBTINFO_CFLAGS="$(pkg-config --cflags ncursesw)" \
+    LIBTINFO_LIBS="$(pkg-config --static --libs ncursesw)" \
+    LDFLAGS="-static" \
+    ./configure \
+  && make -j"$(getconf _NPROCESSORS_ONLN)" \
+  && strip tmux \
+  && ./tmux -V \
+  && mkdir -p /out \
+  && install -m 0755 tmux /out/tmux
+
 FROM mcr.microsoft.com/playwright/python:v${PLAYWRIGHT_VERSION}-noble
 ARG PLAYWRIGHT_VERSION
 ARG TARGETARCH
@@ -105,6 +136,16 @@ WORKDIR /app
 COPY requirements-agent.txt pyproject.toml README.md LICENSE /app/
 RUN pip install --no-cache-dir -r requirements-agent.txt
 COPY src /app/src
+COPY --from=tmux-builder /out/tmux /tmp/local-shell-mcp-tmux
+RUN set -eux; \
+  case "${TARGETARCH}" in \
+    amd64) helper_arch="x86_64" ;; \
+    arm64) helper_arch="aarch64" ;; \
+    *) echo "Unsupported tmux helper architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+  esac; \
+  install -d "/app/src/local_shell_mcp/helpers/linux-${helper_arch}"; \
+  install -m 0755 /tmp/local-shell-mcp-tmux "/app/src/local_shell_mcp/helpers/linux-${helper_arch}/tmux"; \
+  rm -f /tmp/local-shell-mcp-tmux
 COPY --from=ui-builder /source/src/local_shell_mcp/ui_static /app/src/local_shell_mcp/ui_static
 COPY --from=ui-builder /source/ui/dist/local-shell-mcp-tui /usr/local/bin/local-shell-mcp-tui
 RUN pip install --no-cache-dir -e ".[dev]" "playwright==${PLAYWRIGHT_VERSION}" \

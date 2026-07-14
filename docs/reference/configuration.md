@@ -66,7 +66,7 @@ For local-only testing, `auth_bypass_localhost` is enabled by default. Do not ex
 | `max_transfer_archive_entries` | `LOCAL_SHELL_MCP_MAX_TRANSFER_ARCHIVE_ENTRIES` | `100000` | Maximum entries accepted while unpacking a transferred directory archive. |
 | `max_transfer_unpacked_bytes` | `LOCAL_SHELL_MCP_MAX_TRANSFER_UNPACKED_BYTES` | `10000000000` | Maximum declared expanded bytes accepted for a transferred directory archive. |
 | `max_concurrent_commands` | `LOCAL_SHELL_MCP_MAX_CONCURRENT_COMMANDS` | `4` |  |
-| `max_tmux_sessions` | `LOCAL_SHELL_MCP_MAX_TMUX_SESSIONS` | `16` |  |
+| `max_tmux_sessions` | `LOCAL_SHELL_MCP_MAX_TMUX_SESSIONS` | `16` | Maximum persistent shell sessions across tmux, ConPTY, and native fallback backends. |
 
 ### File links
 
@@ -105,7 +105,7 @@ For local-only testing, `auth_bypass_localhost` is enabled by default. Do not ex
 | `shell_executable` | `LOCAL_SHELL_MCP_SHELL_EXECUTABLE` | `'/bin/bash'` |  |
 | `shell_env_blocklist` | `LOCAL_SHELL_MCP_SHELL_ENV_BLOCKLIST` | `['CLOUDFLARE_TUNNEL_TOKEN']` |  |
 | `shell_env_blocked_prefixes` | `LOCAL_SHELL_MCP_SHELL_ENV_BLOCKED_PREFIXES` | `['LOCAL_SHELL_MCP_', 'DOCKER_']` | Comma-separated in environment variables; list in YAML. |
-| `tmux_bin` | `LOCAL_SHELL_MCP_TMUX_BIN` | `'tmux'` |  |
+| `tmux_bin` | `LOCAL_SHELL_MCP_TMUX_BIN` | `'tmux'` | Preferred tmux executable. If it is unavailable, Linux release and Docker builds use the bundled helper; otherwise persistent shells fall back to the native backend. |
 | `rg_bin` | `LOCAL_SHELL_MCP_RG_BIN` | `'rg'` |  |
 | `git_bin` | `LOCAL_SHELL_MCP_GIT_BIN` | `'git'` |  |
 | `python_bin` | `LOCAL_SHELL_MCP_PYTHON_BIN` | `'python3'` |  |

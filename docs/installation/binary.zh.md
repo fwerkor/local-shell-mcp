@@ -95,7 +95,7 @@ local-shell-mcp --config /path/to/config.yaml
 
 | 能力 | 可考虑的宿主机包 |
 |---|---|
-| 搜索与 shell 易用性 | `ripgrep`、`tmux`、`tree`、`jq`、`curl`、`wget` |
+| 搜索与 shell 易用性 | `ripgrep`、`tree`、`jq`、`curl`、`wget`；Linux 发行包已内置静态 tmux helper |
 | Git 工作流 | `git`、`gh`、OpenSSH client、credential helper |
 | Python 项目 | Python、pip、venv、项目特定编译器和头文件 |
 | Node 项目 | Node.js、npm、pnpm、yarn |

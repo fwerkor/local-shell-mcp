@@ -77,6 +77,7 @@ from .skill_ops import (
     load_installed_skill,
     read_installed_skill_file,
 )
+from .tmux_helper import persistent_shell_backend_info
 from .todo_ops import todo_read, todo_write
 from .transfer_ops import (
     transfer_alloc_temp_path,
@@ -913,7 +914,7 @@ def build_mcp() -> FastMCP:
         """Return workspace, auth, policy, and basic environment information."""
         try:
             result = await run_shell("uname -a; echo '---'; id; echo '---'; pwd; echo '---'; python3 --version; git --version", cwd=".", timeout_s=10)
-            return _ok({"settings": safe_settings_dump(settings), "probe": result.model_dump()})
+            return _ok({"settings": safe_settings_dump(settings), "persistent_shell": persistent_shell_backend_info(), "probe": result.model_dump()})
         except Exception as exc:
             return _handled_error(exc)
 
@@ -971,7 +972,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def shell_start(cwd: str = ".", name: str | None = None, command: str | None = None, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Start a persistent shell session using tmux on Unix-like platforms, ConPTY on Windows when pywinpty is available, and native process fallback on Windows. Use for interactive programs, development servers, REPLs, long-running watches, or commands whose output must be read incrementally. For one-shot commands, use run_shell_tool. Optional purpose/explanation fields let agents state why the session is being started."""
+        """Start a persistent shell session using system or bundled tmux on Unix-like platforms, with native process fallback when tmux is unavailable; Windows uses ConPTY when available and otherwise the native fallback. Use for interactive programs, development servers, REPLs, long-running watches, or commands whose output must be read incrementally. For one-shot commands, use run_shell_tool. Optional purpose/explanation fields let agents state why the session is being started."""
         try:
             _audit_tool_purpose("shell_start", purpose, explanation)
             return _ok(await start_shell(cwd, name, command))

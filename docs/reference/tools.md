@@ -251,7 +251,7 @@ All normal tools return a structured `ToolResult` with `ok`, `message`, and `dat
 
 ### `shell_start`
 
-**Purpose.** Start a persistent tmux-backed shell session. Use for interactive programs, development servers, REPLs, long-running watches, or commands whose output must be read incrementally. For one-shot commands, use run_shell_tool.
+**Purpose.** Start a persistent shell session. Unix-like systems prefer configured or system tmux, then a bundled helper, and finally a process-local fallback. Windows prefers ConPTY and otherwise uses the native fallback. Use for interactive programs, development servers, REPLs, long-running watches, or commands whose output must be read incrementally. For one-shot commands, use run_shell_tool.
 
 **Use when.** Use for long-running or interactive terminal workflows where output must be read incrementally.
 

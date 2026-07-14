@@ -298,3 +298,64 @@ async def test_run_shell_shares_total_budget_between_streams(tmp_path, monkeypat
     assert len(result.stdout.encode()) == 500
     assert len(result.stderr.encode()) == 500
     assert len(result.stdout.encode()) + len(result.stderr.encode()) == 1000
+
+
+@pytest.mark.asyncio
+async def test_tmux_command_uses_selected_binary_and_private_socket(monkeypatch):
+    from local_shell_mcp import shell_ops
+    from local_shell_mcp.tmux_helper import TmuxSelection
+
+    calls = []
+
+    async def fake_run_shell(command, cwd=".", timeout_s=None, max_output_bytes=None):
+        calls.append((command, cwd, timeout_s, max_output_bytes))
+        return CommandResult(
+            ok=True,
+            exit_code=0,
+            timed_out=False,
+            duration_ms=1,
+            cwd=cwd,
+            command=command,
+        )
+
+    monkeypatch.setattr(shell_ops, "resolve_tmux", lambda: TmuxSelection("/opt/lsm/tmux", "bundled"))
+    monkeypatch.setattr(shell_ops, "tmux_socket_name", lambda: "lsm-test")
+    monkeypatch.setattr(shell_ops, "run_shell", fake_run_shell)
+
+    result = await shell_ops.tmux(["list-sessions"], timeout_s=5)
+
+    assert result.ok is True
+    assert calls == [("/opt/lsm/tmux -L lsm-test list-sessions", ".", 5, None)]
+
+
+@pytest.mark.asyncio
+async def test_unix_persistent_shell_falls_back_when_tmux_is_missing(tmp_path, monkeypatch):
+    import os
+
+    if os.name == "nt":
+        pytest.skip("Unix fallback test")
+
+    from local_shell_mcp import shell_ops
+    from local_shell_mcp.tmux_helper import TmuxSelection
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    monkeypatch.setattr(shell_ops, "resolve_tmux", lambda: TmuxSelection(None, "native"))
+
+    session = await shell_ops.start_shell(cwd=".", name="native-fallback")
+    try:
+        assert session["backend"] == "native"
+        await shell_ops.send_shell(session["session_id"], "printf 'fallback-ready\\n'")
+        deadline = time.monotonic() + 2
+        output = ""
+        while time.monotonic() < deadline:
+            output = (await shell_ops.read_shell(session["session_id"], 20))["output"]
+            if "fallback-ready" in output:
+                break
+            await asyncio.sleep(0.05)
+        assert "fallback-ready" in output
+        listed = await shell_ops.list_shells()
+        assert any(row["session_id"] == session["session_id"] for row in listed["sessions"])
+    finally:
+        await shell_ops.kill_shell(session["session_id"])
