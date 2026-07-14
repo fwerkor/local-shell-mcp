@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 
+import pytest
 from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
@@ -110,9 +111,7 @@ def test_worker_upload_uses_raw_stream_endpoint(tmp_path, monkeypatch):
 
     monkeypatch.setattr(remote.subprocess, "run", fake_run)
 
-    result = remote._worker_upload_url(
-        "source.bin", ticket["url"], len(data), digest, 60
-    )
+    result = remote._worker_upload_url("source.bin", ticket["url"], len(data), digest, 60)
 
     assert result["transport"] == "http-stream"
     assert (tmp_path / "destination.bin").read_bytes() == data
@@ -155,3 +154,53 @@ def test_worker_download_is_transactional_and_verified(tmp_path, monkeypatch):
     assert result["transport"] == "http-stream"
     assert (tmp_path / "destination.bin").read_bytes() == data
     assert not list(tmp_path.glob(".destination.bin.local-shell-mcp-transfer-*.tmp"))
+
+
+def test_stream_download_interruption_releases_ticket_for_retry(tmp_path, monkeypatch):
+    import local_shell_mcp.remote_transfer as remote_transfer
+
+    _client(tmp_path, monkeypatch)
+    data = b"interrupted-download" * 131072
+    source = tmp_path / "source.bin"
+    source.write_bytes(data)
+    digest = hashlib.sha256(data).hexdigest()
+    ticket_info = create_download_ticket("source.bin", len(data), digest)
+    token = ticket_info["token"]
+    ticket = remote_transfer._claim_ticket(token, "download")
+    _, handle = remote_transfer._open_download(ticket)
+    iterator = remote_transfer._download_iterator(token, ticket, handle)
+
+    assert next(iterator)
+    iterator.close()
+
+    response = TestClient(Starlette(routes=remote_transfer_routes())).get(ticket_info["url"])
+    assert response.status_code == 200
+    assert response.content == data
+    assert (
+        TestClient(Starlette(routes=remote_transfer_routes())).get(ticket_info["url"]).status_code
+        == 404
+    )
+
+
+@pytest.mark.parametrize(
+    ("filename", "encoded"),
+    [
+        ("中文.bin", "%E4%B8%AD%E6%96%87.bin"),
+        ('quote"name.bin', "quote%22name.bin"),
+    ],
+)
+def test_stream_download_encodes_non_ascii_and_quoted_filenames(
+    tmp_path, monkeypatch, filename, encoded
+):
+    client = _client(tmp_path, monkeypatch)
+    data = b"payload"
+    (tmp_path / filename).write_bytes(data)
+    ticket = create_download_ticket(filename, len(data), hashlib.sha256(data).hexdigest())
+
+    response = client.get(ticket["url"])
+
+    assert response.status_code == 200
+    assert response.content == data
+    disposition = response.headers["content-disposition"]
+    assert f"filename*=UTF-8''{encoded}" in disposition
+    assert '\\"name.bin' not in disposition

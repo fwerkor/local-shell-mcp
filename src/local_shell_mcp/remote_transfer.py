@@ -11,6 +11,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
@@ -137,9 +138,7 @@ def create_upload_ticket(
     overwrite: bool = True,
 ) -> dict[str, Any]:
     destination = resolve_path(destination_path, follow_final_symlink=False)
-    return _create_ticket(
-        "upload", destination, expected_bytes, expected_sha256, overwrite
-    )
+    return _create_ticket("upload", destination, expected_bytes, expected_sha256, overwrite)
 
 
 def create_download_ticket(
@@ -150,9 +149,7 @@ def create_download_ticket(
     source = resolve_path(source_path, must_exist=True)
     if not source.is_file():
         raise ValueError(f"source is not a file: {source_path}")
-    return _create_ticket(
-        "download", source, expected_bytes, expected_sha256, False
-    )
+    return _create_ticket("download", source, expected_bytes, expected_sha256, False)
 
 
 def revoke_transfer_ticket(token: str) -> dict[str, Any]:
@@ -208,6 +205,15 @@ def _error_response(status_code: int, error: str, message: str) -> JSONResponse:
     )
 
 
+def _content_disposition(filename: str) -> str:
+    fallback = (
+        filename.encode("ascii", errors="ignore").decode("ascii").replace('"', "").replace("\\", "")
+        or "download"
+    )
+    encoded = quote(filename, safe="")
+    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
+
+
 async def upload_endpoint(request: Request) -> JSONResponse:
     token = request.path_params["token"]
     try:
@@ -257,9 +263,7 @@ async def upload_endpoint(request: Request) -> JSONResponse:
             )
             offset += len(chunk)
         if offset != ticket.expected_bytes:
-            raise ValueError(
-                f"size mismatch: expected {ticket.expected_bytes}, got {offset}"
-            )
+            raise ValueError(f"size mismatch: expected {ticket.expected_bytes}, got {offset}")
         actual_sha256 = digest.hexdigest()
         if actual_sha256 != ticket.expected_sha256:
             raise ValueError("file sha256 mismatch")
@@ -316,24 +320,25 @@ def _open_download(ticket: _TransferTicket):  # noqa: ANN202
     stat = os.fstat(handle.fileno())
     if stat.st_size != ticket.expected_bytes:
         handle.close()
-        raise ValueError(
-            f"size mismatch: expected {ticket.expected_bytes}, got {stat.st_size}"
-        )
+        raise ValueError(f"size mismatch: expected {ticket.expected_bytes}, got {stat.st_size}")
     return path, handle
 
 
-def _download_iterator(
-    token: str, ticket: _TransferTicket, handle
-) -> Iterator[bytes]:  # noqa: ANN001
+def _download_iterator(token: str, ticket: _TransferTicket, handle) -> Iterator[bytes]:  # noqa: ANN001
+    completed = False
     try:
         while True:
             chunk = handle.read(_TRANSFER_CHUNK_BYTES)
             if not chunk:
+                completed = True
                 break
             yield chunk
     finally:
         handle.close()
-        _complete_ticket(token)
+        if completed:
+            _complete_ticket(token)
+        else:
+            _release_ticket(token)
 
 
 async def download_endpoint(request: Request):  # noqa: ANN201
@@ -357,7 +362,7 @@ async def download_endpoint(request: Request):  # noqa: ANN201
         headers={
             "Content-Length": str(ticket.expected_bytes),
             "X-Content-SHA256": ticket.expected_sha256,
-            "Content-Disposition": f'attachment; filename="{path.name}"',
+            "Content-Disposition": _content_disposition(path.name),
             "Cache-Control": "no-store",
         },
     )
