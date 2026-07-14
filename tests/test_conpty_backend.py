@@ -18,6 +18,7 @@ class FakePtyProcess:
         self.alive = True
         self.output = [b"ready\r\n"]
         self.writes = []
+        self.close_calls = []
         FakePtyProcess.spawned.append(self)
 
     @classmethod
@@ -37,6 +38,10 @@ class FakePtyProcess:
         self.output.append(f"wrote:{data}\r\n".encode())
 
     def terminate(self, force=False):  # noqa: ARG002
+        self.alive = False
+
+    def close(self, force=False):
+        self.close_calls.append(force)
         self.alive = False
 
 
@@ -91,6 +96,7 @@ async def test_windows_prefers_conpty_and_supports_session_ops(tmp_path, monkeyp
 
     killed = await ops.kill_shell(session["session_id"])
     assert killed == {"session_id": session["session_id"], "killed": True, "stderr": ""}
+    assert FakePtyProcess.spawned[0].close_calls == [True]
     assert await ops.list_shells() == {"sessions": []}
 
 
@@ -110,3 +116,18 @@ async def test_windows_falls_back_to_native_when_pywinpty_unavailable(tmp_path, 
 
     assert session["session_id"] == "native-fallback"
     assert session["backend"] == "native"
+
+
+@pytest.mark.asyncio
+async def test_conpty_list_closes_naturally_exited_session(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    monkeypatch.setattr(conpty_ops, "winpty", SimpleNamespace(PtyProcess=FakePtyProcess))
+
+    session = await conpty_ops.start_shell(name="natural-exit")
+    process = FakePtyProcess.spawned[0]
+    process.alive = False
+
+    assert await conpty_ops.list_shells() == {"sessions": []}
+    assert session["session_id"] not in conpty_ops._CONPTY_SHELL_SESSIONS
+    assert process.close_calls == [False]

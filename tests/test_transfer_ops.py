@@ -149,9 +149,7 @@ def test_unpack_failure_preserves_existing_destination(tmp_path, monkeypatch):
         tar.addfile(info)
 
     with pytest.raises(ValueError, match="unsupported archive member type"):
-        transfer_unpack_archive(
-            "bad-link.tar", "dst", overwrite=True, cleanup_archive=False
-        )
+        transfer_unpack_archive("bad-link.tar", "dst", overwrite=True, cleanup_archive=False)
 
     assert important.read_text(encoding="utf-8") == "keep"
     assert not list(root.glob(".dst.unpack-*"))
@@ -196,9 +194,7 @@ def test_unpack_enforces_expanded_size_limit_before_replacement(tmp_path, monkey
         tar.addfile(info, io.BytesIO(payload))
 
     with pytest.raises(ValueError, match="expands to more than 3 bytes"):
-        transfer_unpack_archive(
-            "large.tar", "dst", overwrite=True, cleanup_archive=False
-        )
+        transfer_unpack_archive("large.tar", "dst", overwrite=True, cleanup_archive=False)
 
     assert (destination / "important.txt").read_text(encoding="utf-8") == "keep"
 
@@ -216,3 +212,33 @@ def test_transfer_temp_entrypoints_trigger_unified_pruning(tmp_path, monkeypatch
 
     assert calls == [True, True]
     (root / pack["archive_path"]).unlink()
+
+
+def test_unpack_reports_post_commit_cleanup_failure_without_rolling_back(tmp_path, monkeypatch):
+    root = _workspace(tmp_path, monkeypatch)
+    destination = root / "dst"
+    destination.mkdir()
+    (destination / "old.txt").write_text("old", encoding="utf-8")
+    source = root / "new.txt"
+    source.write_text("new", encoding="utf-8")
+    archive = root / "payload.tar"
+    with tarfile.open(archive, "w") as tar:
+        tar.add(source, arcname="new.txt")
+
+    original_remove = transfer_module._remove_existing_path
+
+    def fail_backup_cleanup(path):
+        if ".backup-" in path.name:
+            raise PermissionError("simulated backup cleanup failure")
+        return original_remove(path)
+
+    monkeypatch.setattr(transfer_module, "_remove_existing_path", fail_backup_cleanup)
+
+    result = transfer_unpack_archive("payload.tar", "dst", overwrite=True, cleanup_archive=False)
+
+    assert result["completed"] is True
+    assert result["backup_deleted"] is False
+    assert "simulated backup cleanup failure" in result["cleanup_errors"][0]
+    assert (destination / "new.txt").read_text(encoding="utf-8") == "new"
+    assert not (destination / "old.txt").exists()
+    assert list(root.glob(".dst.backup-*"))

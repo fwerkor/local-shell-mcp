@@ -61,14 +61,16 @@ def _remove_snapshot(link: dict[str, Any]) -> None:
         _snapshot_path(link).unlink(missing_ok=True)
 
 
-def _create_snapshot(
-    source: Path, token: str
-) -> tuple[Path, os.stat_result, os.stat_result]:
+def _remove_all_snapshots_locked() -> None:
+    for path in _snapshot_dir().glob("*.bin"):
+        with contextlib.suppress(OSError):
+            path.unlink(missing_ok=True)
+
+
+def _create_snapshot(source: Path, token: str) -> tuple[Path, os.stat_result, os.stat_result]:
     settings = get_settings()
     destination = _snapshot_dir() / _snapshot_name(token)
-    temporary = destination.with_name(
-        destination.name + f".{secrets.token_hex(8)}.tmp"
-    )
+    temporary = destination.with_name(destination.name + f".{secrets.token_hex(8)}.tmp")
     try:
         with _open_download_file(source) as source_handle:
             before = os.fstat(source_handle.fileno())
@@ -97,9 +99,7 @@ def _create_snapshot(
                 after.st_ctime_ns,
             )
             if before_identity != after_identity:
-                raise RuntimeError(
-                    "File changed while the download link was being created"
-                )
+                raise RuntimeError("File changed while the download link was being created")
         with contextlib.suppress(OSError):
             temporary.chmod(0o600)
         os.replace(temporary, destination)
@@ -121,8 +121,11 @@ def _read_store_locked() -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         audit("download_store_unreadable", path=str(path))
+        _remove_all_snapshots_locked()
         return _empty_store()
     if not isinstance(data, dict) or not isinstance(data.get("links"), dict):
+        audit("download_store_invalid", path=str(path))
+        _remove_all_snapshots_locked()
         return _empty_store()
     if data.get("version") != _DOWNLOAD_STORE_VERSION:
         audit(
@@ -131,6 +134,7 @@ def _read_store_locked() -> dict[str, Any]:
             stored_version=data.get("version"),
             expected_version=_DOWNLOAD_STORE_VERSION,
         )
+        _remove_all_snapshots_locked()
         return _empty_store()
     return data
 
@@ -139,7 +143,9 @@ def _write_store_locked(store: dict[str, Any]) -> None:
     path = _store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".tmp-{os.getpid()}-{secrets.token_hex(4)}")
-    tmp.write_text(json.dumps(store, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.write_text(
+        json.dumps(store, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
+    )
     with contextlib.suppress(OSError):
         tmp.chmod(0o600)
     os.replace(tmp, path)
@@ -167,7 +173,11 @@ def _coerce_ttl(ttl_s: int | None) -> int:
 
 def _coerce_max_downloads(max_downloads: int | None) -> int:
     settings = get_settings()
-    requested = settings.file_download_default_max_downloads if max_downloads is None else int(max_downloads)
+    requested = (
+        settings.file_download_default_max_downloads
+        if max_downloads is None
+        else int(max_downloads)
+    )
     if requested < 0:
         raise ValueError("max_downloads must be >= 0; use 0 for unlimited")
     return requested
@@ -219,6 +229,24 @@ def _prune_locked(store: dict[str, Any], now: float | None = None) -> bool:
     return changed
 
 
+def _prune_orphan_snapshots_locked(store: dict[str, Any]) -> bool:
+    referenced = {
+        str(link.get("snapshot_name") or "")
+        for link in store.get("links", {}).values()
+        if isinstance(link, dict) and str(link.get("snapshot_name") or "")
+    }
+    changed = False
+    for path in _snapshot_dir().glob("*.bin"):
+        if path.name in referenced:
+            continue
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            continue
+        changed = True
+    return changed
+
+
 def create_share_link(
     path: str,
     ttl_s: int | None = None,
@@ -236,6 +264,9 @@ def create_share_link(
     now = _now()
 
     with _STORE_LOCK:
+        store = _read_store_locked()
+        _prune_locked(store, now)
+        _prune_orphan_snapshots_locked(store)
         try:
             snapshot, source_stat, snapshot_stat = _create_snapshot(resolved, token)
         except (OSError, ValueError) as exc:
@@ -254,8 +285,6 @@ def create_share_link(
             "max_downloads": limit,
         }
         try:
-            store = _read_store_locked()
-            _prune_locked(store, now)
             store["links"][token] = link
             _write_store_locked(store)
         except Exception:
@@ -275,6 +304,7 @@ def list_share_links(include_expired: bool = False) -> dict[str, Any]:
     with _STORE_LOCK:
         store = _read_store_locked()
         changed = False if include_expired else _prune_locked(store)
+        changed = _prune_orphan_snapshots_locked(store) or changed
         if changed:
             _write_store_locked(store)
         links = [_link_summary(token, link) for token, link in store.get("links", {}).items()]
@@ -285,9 +315,12 @@ def list_share_links(include_expired: bool = False) -> dict[str, Any]:
 def revoke_share_link(token: str) -> dict[str, Any]:
     with _STORE_LOCK:
         store = _read_store_locked()
+        changed = _prune_orphan_snapshots_locked(store)
         removed = store.get("links", {}).pop(token, None)
         if removed is not None:
             _remove_snapshot(removed)
+            changed = True
+        if changed:
             _write_store_locked(store)
     if removed is not None:
         audit("download_link_revoked", path=removed.get("display_path"), token_id=_token_id(token))
@@ -356,10 +389,9 @@ def _claim_download(
             )
 
         opened_stat = os.fstat(handle.fileno())
-        if (
-            int(link.get("device", -1)) != int(opened_stat.st_dev)
-            or int(link.get("inode", -1)) != int(opened_stat.st_ino)
-        ):
+        if int(link.get("device", -1)) != int(opened_stat.st_dev) or int(
+            link.get("inode", -1)
+        ) != int(opened_stat.st_ino):
             handle.close()
             store.get("links", {}).pop(token, None)
             _write_store_locked(store)
@@ -401,10 +433,7 @@ def _claim_download(
 
 def _content_disposition(filename: str) -> str:
     fallback = (
-        filename.encode("ascii", errors="ignore")
-        .decode("ascii")
-        .replace('"', "")
-        or "download"
+        filename.encode("ascii", errors="ignore").decode("ascii").replace('"', "") or "download"
     )
     encoded = quote(filename, safe="")
     return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
@@ -433,8 +462,7 @@ async def download_endpoint(request: Request) -> Response:
 
     handle, path, link = claimed
     media_type = (
-        mimetypes.guess_type(link.get("filename") or path.name)[0]
-        or "application/octet-stream"
+        mimetypes.guess_type(link.get("filename") or path.name)[0] or "application/octet-stream"
     )
     filename = link.get("filename") or path.name
     headers = {

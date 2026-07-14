@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 import subprocess
 import time
@@ -119,6 +120,41 @@ def _read_pty(process: Any) -> str | bytes:
         return process.read()
 
 
+def _close_pty_process(process: Any, force: bool) -> None:
+    close = getattr(process, "close", None)
+    if callable(close):
+        if getattr(process, "closed", False):
+            # pywinpty marks naturally exited processes as closed before its
+            # socket resources have necessarily been released. Re-enable the
+            # idempotent close path so fileobj and the listener are closed.
+            with contextlib.suppress(Exception):
+                process.closed = False
+        try:
+            close(force=force)
+        except TypeError:
+            close()
+        return
+
+    terminate = getattr(process, "terminate", None)
+    if callable(terminate):
+        try:
+            terminate(force=force)
+        except TypeError:
+            terminate()
+
+
+async def _cleanup_session(session: ConPtyShellSession, *, force: bool) -> str:
+    error = ""
+    try:
+        await asyncio.to_thread(_close_pty_process, session.process, force)
+    except Exception as exc:
+        error = repr(exc)
+    if session.reader is not None:
+        session.reader.cancel()
+        await asyncio.gather(session.reader, return_exceptions=True)
+    return error
+
+
 async def _read_conpty_shell(session: ConPtyShellSession) -> None:
     try:
         while _pty_is_alive(session.process):
@@ -135,12 +171,13 @@ async def _read_conpty_shell(session: ConPtyShellSession) -> None:
         session.output.append(f"\n<conpty shell reader stopped: {exc!r}>\n".encode())
 
 
-def _get_session(session_id: str) -> ConPtyShellSession:
+async def _get_session(session_id: str) -> ConPtyShellSession:
     session = _CONPTY_SHELL_SESSIONS.get(session_id)
     if session is None:
         raise RuntimeError(f"Persistent shell session not found: {session_id}")
     if not _pty_is_alive(session.process):
         _CONPTY_SHELL_SESSIONS.pop(session_id, None)
+        await _cleanup_session(session, force=False)
         raise RuntimeError(f"Persistent shell session exited: {session_id}")
     return session
 
@@ -153,14 +190,16 @@ async def start_shell(
 ) -> dict:
     resolved_cwd = resolve_path(cwd, must_exist=True)
     max_sessions = max(1, get_settings().max_tmux_sessions)
-    active = [
-        session_id
-        for session_id, session in list(_CONPTY_SHELL_SESSIONS.items())
-        if _pty_is_alive(session.process)
-    ]
-    for session_id in list(_CONPTY_SHELL_SESSIONS):
-        if session_id not in active:
+    active = []
+    stale_sessions = []
+    for session_id, session in list(_CONPTY_SHELL_SESSIONS.items()):
+        if _pty_is_alive(session.process):
+            active.append(session_id)
+        else:
             _CONPTY_SHELL_SESSIONS.pop(session_id, None)
+            stale_sessions.append(session)
+    for stale in stale_sessions:
+        await _cleanup_session(stale, force=False)
     if len(active) >= max_sessions:
         raise RuntimeError(f"Refusing to start more than {max_sessions} persistent shell sessions")
 
@@ -184,7 +223,9 @@ async def start_shell(
     )
     session.reader = asyncio.create_task(_read_conpty_shell(session))
     _CONPTY_SHELL_SESSIONS[session_id] = session
-    audit("shell_start", session=session_id, cwd=str(resolved_cwd), command=initial, backend="conpty")
+    audit(
+        "shell_start", session=session_id, cwd=str(resolved_cwd), command=initial, backend="conpty"
+    )
     return {
         "session_id": session_id,
         "cwd": relative_display(resolved_cwd),
@@ -194,11 +235,17 @@ async def start_shell(
 
 
 async def send_shell(session_id: str, input_text: str, enter: bool = True) -> dict:
-    session = _get_session(session_id)
+    session = await _get_session(session_id)
     data = input_text + ("\r" if enter else "")
     async with session.lock:
         await asyncio.to_thread(session.process.write, data)
-    audit("shell_send", session=session_id, bytes=len(input_text.encode()), enter=enter, backend="conpty")
+    audit(
+        "shell_send",
+        session=session_id,
+        bytes=len(input_text.encode()),
+        enter=enter,
+        backend="conpty",
+    )
     return {"session_id": session_id, "sent_bytes": len(input_text.encode()), "enter": enter}
 
 
@@ -210,7 +257,7 @@ async def read_shell(session_id: str, lines: int = 200) -> dict:
     if lines > 0:
         split = output.splitlines()
         if split:
-            output = "\n".join(split[-max(1, lines):])
+            output = "\n".join(split[-max(1, lines) :])
             if bytes(session.output.data).endswith((b"\n", b"\r")):
                 output += "\n"
         else:
@@ -222,29 +269,24 @@ async def read_shell(session_id: str, lines: int = 200) -> dict:
 async def kill_shell(session_id: str) -> dict:
     session = _CONPTY_SHELL_SESSIONS.pop(session_id, None)
     if session is None:
-        return {"session_id": session_id, "killed": False, "stderr": "Persistent shell session not found"}
+        return {
+            "session_id": session_id,
+            "killed": False,
+            "stderr": "Persistent shell session not found",
+        }
 
-    stderr = ""
-    try:
-        try:
-            await asyncio.to_thread(session.process.terminate, force=True)
-        except TypeError:
-            await asyncio.to_thread(session.process.terminate)
-    except Exception as exc:
-        stderr = repr(exc)
-
-    if session.reader is not None:
-        session.reader.cancel()
-        await asyncio.gather(session.reader, return_exceptions=True)
+    stderr = await _cleanup_session(session, force=True)
     audit("shell_kill", session=session_id, ok=not stderr, backend="conpty")
     return {"session_id": session_id, "killed": not stderr, "stderr": stderr}
 
 
 async def list_shells() -> dict:
     sessions = []
+    stale_sessions = []
     for session_id, session in list(_CONPTY_SHELL_SESSIONS.items()):
         if not _pty_is_alive(session.process):
             _CONPTY_SHELL_SESSIONS.pop(session_id, None)
+            stale_sessions.append(session)
             continue
         sessions.append(
             {
@@ -254,4 +296,6 @@ async def list_shells() -> dict:
                 "backend": "conpty",
             }
         )
+    for stale in stale_sessions:
+        await _cleanup_session(stale, force=False)
     return {"sessions": sessions}

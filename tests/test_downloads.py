@@ -153,9 +153,7 @@ def test_share_link_serves_creation_snapshot_after_in_place_rewrite(tmp_path, mo
 def test_download_filename_strips_header_control_characters(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
     (tmp_path / "hello.txt").write_text("hello", encoding="utf-8")
-    link = create_share_link(
-        "hello.txt", ttl_s=60, filename="safe\r\nInjected: value.txt"
-    )
+    link = create_share_link("hello.txt", ttl_s=60, filename="safe\r\nInjected: value.txt")
 
     response = TestClient(Starlette(routes=download_routes())).get(link["url"])
     disposition = response.headers["content-disposition"]
@@ -164,3 +162,34 @@ def test_download_filename_strips_header_control_characters(tmp_path, monkeypatc
     assert "\r" not in disposition
     assert "\n" not in disposition
     assert "Injected: value.txt" in disposition
+
+
+def test_corrupt_download_store_removes_unreachable_snapshots(tmp_path, monkeypatch):
+    _reset(tmp_path, monkeypatch)
+    (tmp_path / "hello.txt").write_text("hello", encoding="utf-8")
+    create_share_link("hello.txt", ttl_s=60)
+    snapshot_dir = tmp_path / ".state" / "downloads"
+    store_path = tmp_path / ".state" / "downloads.json"
+    assert list(snapshot_dir.glob("*.bin"))
+    store_path.write_text("{broken", encoding="utf-8")
+
+    from local_shell_mcp.downloads import list_share_links
+
+    assert list_share_links()["links"] == []
+    assert not list(snapshot_dir.glob("*.bin"))
+
+
+def test_missing_download_store_prunes_orphan_snapshots(tmp_path, monkeypatch):
+    _reset(tmp_path, monkeypatch)
+    (tmp_path / "hello.txt").write_text("hello", encoding="utf-8")
+    create_share_link("hello.txt", ttl_s=60)
+    snapshot_dir = tmp_path / ".state" / "downloads"
+    store_path = tmp_path / ".state" / "downloads.json"
+    assert list(snapshot_dir.glob("*.bin"))
+    store_path.unlink()
+
+    from local_shell_mcp.downloads import list_share_links
+
+    assert list_share_links()["links"] == []
+    assert not list(snapshot_dir.glob("*.bin"))
+    assert store_path.is_file()
