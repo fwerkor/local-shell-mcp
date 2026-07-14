@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import os
 import secrets
+import threading
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -36,6 +37,7 @@ _WEAK_OAUTH_SECRET_VALUES = {
     "dev-" + "change-me",
     "change-me-64-hex-random-secret",
 }
+_OAUTH_SECRET_THREAD_LOCK = threading.Lock()
 
 
 def _matches_default_path(value: Path, default: Path) -> bool:
@@ -71,32 +73,75 @@ def _read_oauth_secret(path: Path) -> str | None:
     return value if len(value.encode("utf-8")) >= 32 else None
 
 
+@contextlib.contextmanager
+def _oauth_secret_file_lock(state_dir: Path):  # noqa: ANN201
+    lock_path = state_dir / f"{OAUTH_JWT_SECRET_FILE_NAME}.lock"
+    with lock_path.open("a+b") as handle:
+        with contextlib.suppress(OSError):
+            lock_path.chmod(0o600)
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def _get_or_create_oauth_secret(state_dir: Path) -> str:
     path = state_dir / OAUTH_JWT_SECRET_FILE_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
-    for _attempt in range(2):
+    with _OAUTH_SECRET_THREAD_LOCK, _oauth_secret_file_lock(state_dir):
         existing = _read_oauth_secret(path)
         if existing:
             return existing
+        if path.exists():
+            raise RuntimeError(
+                f"OAuth secret file exists but is invalid: {path}. "
+                "Remove it or replace it with at least 32 bytes of random data."
+            )
+
         generated = secrets.token_urlsafe(48)
+        temporary = path.with_name(
+            f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        )
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
         try:
-            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError:
-            try:
-                path.unlink()
-            except OSError as exc:
-                raise RuntimeError(f"Unable to replace invalid OAuth secret: {path}") from exc
-            continue
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(generated)
-            handle.write("\n")
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(generated)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+        except Exception:
+            with contextlib.suppress(OSError):
+                temporary.unlink(missing_ok=True)
+            raise
         with contextlib.suppress(OSError):
             path.chmod(0o600)
         return generated
-    existing = _read_oauth_secret(path)
-    if existing:
-        return existing
-    raise RuntimeError(f"Unable to initialize OAuth secret: {path}")
 
 
 def _ensure_oauth_jwt_secret(settings: Settings) -> Settings:

@@ -50,6 +50,19 @@ def test_share_link_expires_and_can_be_revoked(tmp_path, monkeypatch):
     assert TestClient(app).get(link["url"]).status_code == 410
 
 
+def test_final_download_removes_snapshot(tmp_path, monkeypatch):
+    _reset(tmp_path, monkeypatch)
+    (tmp_path / "hello.txt").write_text("hello", encoding="utf-8")
+    link = create_share_link("hello.txt", ttl_s=60, max_downloads=1)
+    client = TestClient(Starlette(routes=download_routes()))
+    snapshot_dir = tmp_path / ".state" / "downloads"
+
+    assert list(snapshot_dir.glob("*.bin"))
+    assert client.get(link["url"]).text == "hello"
+    assert not list(snapshot_dir.glob("*.bin"))
+    assert client.get(link["url"]).status_code == 410
+
+
 def test_share_link_download_limit(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
     (tmp_path / "hello.txt").write_text("hello", encoding="utf-8")

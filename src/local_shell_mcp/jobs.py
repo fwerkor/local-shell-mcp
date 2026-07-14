@@ -98,6 +98,14 @@ def _load_store() -> dict[str, Any]:
     }
 
 
+def _remove_attempt_paths(paths: dict[str, Path] | None) -> None:
+    if not paths:
+        return
+    for path in paths.values():
+        with contextlib.suppress(OSError):
+            path.unlink(missing_ok=True)
+
+
 def _remove_attempt_files(job_id: str, keep_attempt: int | None = None) -> None:
     if not job_id:
         return
@@ -442,7 +450,24 @@ async def stop_job(job_id: str) -> dict[str, Any]:
                 "stderr": "",
             }
 
-    result = await kill_shell(session_id)
+    try:
+        result = await kill_shell(session_id)
+    except Exception as exc:
+        still_active = True
+        with contextlib.suppress(Exception):
+            still_active = session_id in _active_session_ids(await list_shells())
+        with _store_transaction() as store:
+            job = _find_job(store, job_id)
+            if (
+                job.get("status") == "stopping"
+                and str(job.get("session_id") or "") == session_id
+            ):
+                job["status"] = "running" if still_active else "lost"
+                job["updated_at"] = _utc()
+                job["error"] = f"stop failed: {type(exc).__name__}: {exc}"
+                if not still_active:
+                    job["completed_at"] = job["updated_at"]
+        raise
     killed = bool(result.get("killed"))
     stderr = str(result.get("stderr") or "")
     with _store_transaction() as store:
@@ -470,11 +495,13 @@ async def retry_job(job_id: str) -> dict[str, Any]:
         job["status"] = "retrying"
         job["updated_at"] = _utc()
 
+    paths: dict[str, Path] | None = None
     try:
         paths, runner_command = _prepare_attempt(job_id, attempts, command, cwd)
         shell_name = _shell_safe_name(f"{display_name}-{job_id}-{attempts}")
         shell = await start_shell(cwd, shell_name, runner_command)
     except Exception as exc:
+        _remove_attempt_paths(paths)
         with _store_transaction() as store:
             job = _find_job(store, job_id)
             if job.get("status") == "retrying":
@@ -486,33 +513,47 @@ async def retry_job(job_id: str) -> dict[str, Any]:
 
     now = _utc()
     changed_while_retrying = False
-    with _store_transaction() as store:
-        job = _find_job(store, job_id)
-        if job.get("status") != "retrying":
-            changed_while_retrying = True
-        else:
-            job.update(
-                {
-                    "status": "running",
-                    "session_id": shell["session_id"],
-                    "backend": shell.get("backend"),
-                    "command_path": str(paths["command"]),
-                    "log_path": str(paths["log"]),
-                    "status_path": str(paths["status"]),
-                    "updated_at": now,
-                    "last_started_at": now,
-                    "completed_at": None,
-                    "exit_code": None,
-                    "error": None,
-                    "log_truncated": False,
-                    "output_bytes": 0,
-                    "attempts": attempts,
-                }
-            )
-        public_job = _public_job(job)
+    try:
+        with _store_transaction() as store:
+            job = _find_job(store, job_id)
+            if job.get("status") != "retrying":
+                changed_while_retrying = True
+            else:
+                job.update(
+                    {
+                        "status": "running",
+                        "session_id": shell["session_id"],
+                        "backend": shell.get("backend"),
+                        "command_path": str(paths["command"]),
+                        "log_path": str(paths["log"]),
+                        "status_path": str(paths["status"]),
+                        "updated_at": now,
+                        "last_started_at": now,
+                        "completed_at": None,
+                        "exit_code": None,
+                        "error": None,
+                        "log_truncated": False,
+                        "output_bytes": 0,
+                        "attempts": attempts,
+                    }
+                )
+            public_job = _public_job(job)
+    except Exception as exc:
+        with contextlib.suppress(Exception):
+            await kill_shell(str(shell["session_id"]))
+        _remove_attempt_paths(paths)
+        with contextlib.suppress(Exception), _store_transaction() as store:
+            job = _find_job(store, job_id)
+            if job.get("status") == "retrying":
+                job["status"] = "failed"
+                job["updated_at"] = _utc()
+                job["completed_at"] = job["updated_at"]
+                job["error"] = f"retry commit failed: {type(exc).__name__}: {exc}"
+        raise
     if changed_while_retrying:
         with contextlib.suppress(Exception):
             await kill_shell(str(shell["session_id"]))
+        _remove_attempt_paths(paths)
         raise RuntimeError(f"job changed while retrying: {job_id}")
     _remove_attempt_files(job_id, keep_attempt=attempts)
     audit(

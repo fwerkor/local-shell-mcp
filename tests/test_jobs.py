@@ -241,3 +241,33 @@ def test_finished_job_history_and_attempt_files_are_bounded(tmp_path, monkeypatc
     assert not list(runtime_dir.glob("job_1-attempt-*"))
     assert list(runtime_dir.glob("job_2-attempt-*"))
     assert list(runtime_dir.glob("job_3-attempt-*"))
+
+
+@pytest.mark.asyncio
+async def test_stop_failure_restores_retryable_job_state(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    active = {"session-a"}
+
+    async def fake_start_shell(cwd=".", name=None, command=None):
+        return {"session_id": "session-a", "cwd": cwd, "command": command, "backend": "fake"}
+
+    async def fake_list_shells():
+        return {"sessions": [{"session_id": item} for item in active]}
+
+    async def failing_kill_shell(session_id):
+        assert session_id == "session-a"
+        raise RuntimeError("kill failed")
+
+    monkeypatch.setattr(jobs_module, "start_shell", fake_start_shell)
+    monkeypatch.setattr(jobs_module, "list_shells", fake_list_shells)
+    monkeypatch.setattr(jobs_module, "kill_shell", failing_kill_shell)
+
+    job = await start_job("sleep 10")
+    with pytest.raises(RuntimeError, match="kill failed"):
+        await stop_job(job["job_id"])
+
+    listed = await list_jobs()
+    assert listed["jobs"][0]["status"] == "running"
+    assert "stop failed" in listed["jobs"][0]["error"]

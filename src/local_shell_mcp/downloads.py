@@ -330,6 +330,7 @@ def _claim_download(
 
         now = _now()
         if float(link.get("expires_at", 0)) <= now:
+            _remove_snapshot(link)
             store.get("links", {}).pop(token, None)
             _write_store_locked(store)
             return _error_response(410, "download_expired", "Link has expired")
@@ -337,6 +338,7 @@ def _claim_download(
         max_downloads = int(link.get("max_downloads", 0))
         downloads = int(link.get("downloads", 0))
         if max_downloads > 0 and downloads >= max_downloads:
+            _remove_snapshot(link)
             store.get("links", {}).pop(token, None)
             _write_store_locked(store)
             return _error_response(410, "download_exhausted", "Link has reached its use limit")
@@ -379,17 +381,22 @@ def _claim_download(
                 "The target file exceeds the configured size limit",
             )
 
+        claimed_link = dict(link)
         if consume:
-            link["downloads"] = downloads + 1
+            new_downloads = downloads + 1
+            link["downloads"] = new_downloads
             link["last_download_at"] = now
             store["links"][token] = link
+            claimed_link = dict(link)
+            if max_downloads > 0 and new_downloads >= max_downloads:
+                claimed_link["delete_snapshot_after_stream"] = True
             try:
                 _write_store_locked(store)
             except Exception:
                 handle.close()
                 raise
 
-    return handle, path, link
+    return handle, path, claimed_link
 
 
 def _content_disposition(filename: str) -> str:
@@ -403,12 +410,19 @@ def _content_disposition(filename: str) -> str:
     return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
 
 
-def _file_chunks(handle: BinaryIO, chunk_size: int = 64 * 1024):  # noqa: ANN201
+def _file_chunks(
+    handle: BinaryIO,
+    chunk_size: int = 64 * 1024,
+    cleanup_path: Path | None = None,
+):  # noqa: ANN201
     try:
         while chunk := handle.read(chunk_size):
             yield chunk
     finally:
         handle.close()
+        if cleanup_path is not None:
+            with contextlib.suppress(OSError):
+                cleanup_path.unlink(missing_ok=True)
 
 
 async def download_endpoint(request: Request) -> Response:
@@ -437,7 +451,12 @@ async def download_endpoint(request: Request) -> Response:
     if request.method.upper() == "HEAD":
         handle.close()
         return Response(status_code=200, media_type=media_type, headers=headers)
-    return StreamingResponse(_file_chunks(handle), media_type=media_type, headers=headers)
+    cleanup_path = path if link.get("delete_snapshot_after_stream") else None
+    return StreamingResponse(
+        _file_chunks(handle, cleanup_path=cleanup_path),
+        media_type=media_type,
+        headers=headers,
+    )
 
 
 def download_routes() -> list[Route]:
