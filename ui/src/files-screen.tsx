@@ -3,6 +3,7 @@ import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, MachineSidebar, Modal, Panel, formatBytes, useVisibleRows } from "./components"
+import { clampIndex } from "./state-utils"
 import { theme } from "./theme"
 import type { FileEntry, FilePreview, FilesPayload, Machine } from "./types"
 
@@ -25,6 +26,7 @@ function joinPath(parent: string, name: string): string {
 }
 
 function icon(entry: FileEntry): string {
+  if (entry.type === "link") return "↗"
   if (entry.type === "dir") return "▰"
   const lower = entry.name.toLowerCase()
   if (/\.(png|jpe?g|gif|webp|svg)$/.test(lower)) return "▧"
@@ -107,6 +109,8 @@ export function FilesScreen({
   width,
   height,
   setStatus,
+  keyboardEnabled,
+  onInteractionLockChange,
 }: {
   machines: Machine[]
   machine: string
@@ -114,6 +118,8 @@ export function FilesScreen({
   width: number
   height: number
   setStatus: (message: string) => void
+  keyboardEnabled: boolean
+  onInteractionLockChange: (locked: boolean) => void
 }) {
   const [path, setPath] = useState(".")
   const [payload, setPayload] = useState<FilesPayload | null>(null)
@@ -124,6 +130,8 @@ export function FilesScreen({
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null)
   const [busy, setBusy] = useState(false)
   const editorRef = useRef<TextareaRenderable>(null)
+  const refreshRequest = useRef(0)
+  const refreshController = useRef<AbortController | null>(null)
 
   const entries = useMemo(
     () => (payload?.entries || []).filter((entry) => showHidden || !entry.hidden),
@@ -137,27 +145,42 @@ export function FilesScreen({
   const listHeight = Math.max(4, height - 10)
 
   useEffect(() => {
-    setSelected((value) => Math.min(value, Math.max(0, entries.length - 1)))
+    setSelected((value) => clampIndex(value, entries.length))
   }, [entries.length])
   const compact = width < 105
 
   const refresh = useCallback(async () => {
+    const requestId = ++refreshRequest.current
+    refreshController.current?.abort()
+    const controller = new AbortController()
+    refreshController.current = controller
     setBusy(true)
     try {
-      const next = await api.files(machine, path)
+      const next = await api.files(machine, path, controller.signal)
+      if (requestId !== refreshRequest.current || controller.signal.aborted) return
       setPayload(next)
-      setSelected((value) => Math.min(value, Math.max(0, next.entries.length - 1)))
+      setSelected((value) => clampIndex(value, next.entries.length))
       setStatus(`${machine}:${path}`)
     } catch (error) {
-      setStatus(`Files: ${formatError(error)}`)
+      if (requestId === refreshRequest.current && !controller.signal.aborted) {
+        setStatus(`Files: ${formatError(error)}`)
+      }
     } finally {
-      setBusy(false)
+      if (requestId === refreshRequest.current) {
+        refreshController.current = null
+        setBusy(false)
+      }
     }
   }, [machine, path, setStatus])
 
   useEffect(() => {
     setSelected(0)
     void refresh()
+    return () => {
+      refreshRequest.current += 1
+      refreshController.current?.abort()
+      refreshController.current = null
+    }
   }, [refresh])
 
   useEffect(() => {
@@ -179,6 +202,11 @@ export function FilesScreen({
       clearTimeout(timer)
     }
   }, [current?.path, machine, setStatus])
+
+  useEffect(() => {
+    onInteractionLockChange(dialog.type !== "none")
+    return () => onInteractionLockChange(false)
+  }, [dialog.type, onInteractionLockChange])
 
   const closeDialog = () => setDialog({ type: "none" })
 
@@ -254,6 +282,7 @@ export function FilesScreen({
   }
 
   useKeyboard((key) => {
+    if (!keyboardEnabled) return
     if (dialog.type === "editor") {
       if (key.name === "escape") closeDialog()
       if (key.ctrl && key.name === "s") {
@@ -304,7 +333,9 @@ export function FilesScreen({
       return
     }
 
-    if (key.name === "j" || key.name === "down") setSelected((value) => Math.min(entries.length - 1, value + 1))
+    if (key.name === "j" || key.name === "down") {
+      setSelected((value) => clampIndex(value + 1, entries.length))
+    }
     else if (key.name === "k" || key.name === "up") setSelected((value) => Math.max(0, value - 1))
     else if (key.name === "g" && key.shift) setSelected(Math.max(0, entries.length - 1))
     else if (key.name === "g") setSelected(0)
@@ -329,7 +360,18 @@ export function FilesScreen({
   return (
     <box style={{ flexGrow: 1, flexDirection: "column" }}>
       <box style={{ flexGrow: 1, flexDirection: "row", gap: 1 }}>
-        {!compact && <MachineSidebar machines={machines} selected={machine} />}
+        {!compact && (
+          <MachineSidebar
+            machines={machines}
+            selected={machine}
+            onSelect={(nextMachine) => {
+              if (nextMachine === machine) return
+              onMachine(nextMachine)
+              setPath(".")
+              setClipboard(null)
+            }}
+          />
+        )}
         <box style={{ flexGrow: 1, flexDirection: "column" }}>
           <box style={{ height: 2, flexDirection: "row", alignItems: "center", paddingLeft: 1 }}>
             <text fg={theme.faint} content={`${machine} / `} />

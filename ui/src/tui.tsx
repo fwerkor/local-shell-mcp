@@ -24,7 +24,7 @@ function Help({ close }: { close: () => void }) {
       <text fg={theme.muted} content="F1        show this guide" />
       <text fg={theme.borderBright} content="\nScreen conventions" />
       <text fg={theme.muted} content="j/k or arrows move selection · Enter activates · Esc closes dialogs" />
-      <text fg={theme.muted} content="[ / ] switches machines in Files and Terminals" />
+      <text fg={theme.muted} content="[ / ] switches Files machines · Alt+[ / ] switches Terminal machines" />
       <text fg={theme.muted} content="The footer on every screen lists its contextual commands." />
       <text fg={theme.borderBright} content="\nAudit policy" />
       <text fg={theme.muted} content="Audit contains MCP-originated operations. Actions typed by a human in this TUI or the WebUI are intentionally excluded." />
@@ -68,6 +68,7 @@ function App() {
   const [status, setStatus] = useState("Connecting to local-shell-mcp…")
   const [help, setHelp] = useState(false)
   const [terminalRawMode, setTerminalRawMode] = useState(false)
+  const [interactionLocked, setInteractionLocked] = useState(false)
   const bootstrapRequest = useRef(0)
 
   const loadBootstrap = useCallback(async () => {
@@ -97,9 +98,13 @@ function App() {
   }, [loadBootstrap])
 
   useKeyboard((key) => {
-    if (help || terminalRawMode) return
-    if (key.ctrl && key.name === "q") renderer.destroy()
-    else if (key.name === "f1") setHelp(true)
+    if (terminalRawMode) return
+    if (key.ctrl && key.name === "q") {
+      renderer.destroy()
+      return
+    }
+    if (help || interactionLocked) return
+    if (key.name === "f1") setHelp(true)
     else if (key.option && /^[1-5]$/.test(key.name)) setScreen(SCREENS[Number(key.name) - 1]!)
     else if (/^f[2-6]$/.test(key.name)) setScreen(SCREENS[Number(key.name.slice(1)) - 2]!)
     else if (key.name === "f7") void loadBootstrap()
@@ -120,6 +125,8 @@ function App() {
         width={width}
         height={contentHeight}
         setStatus={setStatus}
+        keyboardEnabled={!help}
+        onInteractionLockChange={setInteractionLocked}
       />
     )
   } else if (screen === "Terminals") {
@@ -132,14 +139,41 @@ function App() {
         height={contentHeight}
         setStatus={setStatus}
         onRawModeChange={setTerminalRawMode}
+        keyboardEnabled={!help}
+        onInteractionLockChange={setInteractionLocked}
       />
     )
   } else if (screen === "Todos") {
-    content = <TodosScreen width={width} height={contentHeight} setStatus={setStatus} />
+    content = (
+      <TodosScreen
+        width={width}
+        height={contentHeight}
+        setStatus={setStatus}
+        keyboardEnabled={!help}
+        onInteractionLockChange={setInteractionLocked}
+      />
+    )
   } else if (screen === "Audit") {
-    content = <AuditScreen machines={machines} width={width} height={contentHeight} setStatus={setStatus} />
+    content = (
+      <AuditScreen
+        machines={machines}
+        width={width}
+        height={contentHeight}
+        setStatus={setStatus}
+        keyboardEnabled={!help}
+        onInteractionLockChange={setInteractionLocked}
+      />
+    )
   } else {
-    content = <RemotesScreen width={width} height={contentHeight} setStatus={setStatus} />
+    content = (
+      <RemotesScreen
+        width={width}
+        height={contentHeight}
+        setStatus={setStatus}
+        keyboardEnabled={!help}
+        onInteractionLockChange={setInteractionLocked}
+      />
+    )
   }
 
   return (
@@ -148,7 +182,7 @@ function App() {
         active={screen}
         width={width}
         onSelect={(next) => {
-          if (!terminalRawMode) setScreen(next)
+          if (!terminalRawMode && !help && !interactionLocked) setScreen(next)
         }}
       />
       <box style={{ flexGrow: 1, marginTop: 1 }}>{content}</box>

@@ -383,6 +383,27 @@ def test_query_audit_filters_node_operation_and_order(tmp_path, monkeypatch):
     assert all(entry["node"] == "worker-b" for entry in result["entries"])
 
 
+
+def test_audit_node_and_session_filters_are_exact(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    path = get_settings().audit_log_path
+    path.write_text(
+        "\n".join(
+            [
+                json.dumps({"ts": 1, "event": "shell_send", "machine": "worker-a", "session": "term"}),
+                json.dumps({"ts": 2, "event": "shell_send", "machine": "worker-a2", "session": "term"}),
+                json.dumps({"ts": 3, "event": "shell_send", "machine": "worker-a", "session": "term-extra"}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = query_audit(node="worker-a", session="term")
+
+    assert result["total_matched"] == 1
+    assert result["entries"][0]["ts"] == 1
+
 def test_webui_shell_is_public_but_api_remains_oauth_protected(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth_mode="oauth")
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST", "false")

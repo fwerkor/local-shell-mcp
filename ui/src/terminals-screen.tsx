@@ -2,6 +2,7 @@ import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, MachineSidebar, Modal, Panel, formatAge } from "./components"
+import { clampIndex } from "./state-utils"
 import { theme } from "./theme"
 import type { AuditEntry, Machine, TerminalSession } from "./types"
 
@@ -75,6 +76,8 @@ export function TerminalsScreen({
   height,
   setStatus,
   onRawModeChange,
+  keyboardEnabled,
+  onInteractionLockChange,
 }: {
   machines: Machine[]
   machine: string
@@ -83,6 +86,8 @@ export function TerminalsScreen({
   height: number
   setStatus: (message: string) => void
   onRawModeChange: (enabled: boolean) => void
+  keyboardEnabled: boolean
+  onInteractionLockChange: (locked: boolean) => void
 }) {
   const [sessions, setSessions] = useState<TerminalSession[]>([])
   const [selected, setSelected] = useState(0)
@@ -95,6 +100,8 @@ export function TerminalsScreen({
   const rawQueue = useRef<Promise<void>>(Promise.resolve())
   const sessionsRequest = useRef(0)
   const outputRequest = useRef(0)
+  const sessionsController = useRef<AbortController | null>(null)
+  const outputController = useRef<AbortController | null>(null)
   const machineRef = useRef(machine)
   const selectedSession = sessions[selected]
   const selectedSessionIdRef = useRef<string | null>(selectedSession?.session_id || null)
@@ -102,44 +109,70 @@ export function TerminalsScreen({
   selectedSessionIdRef.current = selectedSession?.session_id || null
   const compact = width < 96
 
-  const refreshSessions = useCallback(async (): Promise<TerminalSession[]> => {
+  const refreshSessions = useCallback(async (force = false): Promise<TerminalSession[]> => {
+    if (sessionsController.current && !force) return []
+    sessionsController.current?.abort()
+    const controller = new AbortController()
+    sessionsController.current = controller
     const requestId = ++sessionsRequest.current
     const targetMachine = machine
     try {
-      const payload = await api.terminals(targetMachine)
-      if (requestId !== sessionsRequest.current || machineRef.current !== targetMachine) return []
+      const payload = await api.terminals(targetMachine, controller.signal)
+      if (
+        requestId !== sessionsRequest.current ||
+        machineRef.current !== targetMachine ||
+        controller.signal.aborted
+      ) return []
       setSessions(payload.sessions)
-      setSelected((value) => Math.min(value, Math.max(0, payload.sessions.length - 1)))
+      setSelected((value) => clampIndex(value, payload.sessions.length))
       return payload.sessions
     } catch (error) {
-      setStatus(`Terminals: ${formatError(error)}`)
+      if (!controller.signal.aborted) setStatus(`Terminals: ${formatError(error)}`)
       return []
+    } finally {
+      if (sessionsController.current === controller) sessionsController.current = null
     }
   }, [machine, setStatus])
 
-  const refreshOutput = useCallback(async () => {
+  const refreshOutput = useCallback(async (force = false) => {
+    if (outputController.current && !force) return
+    outputController.current?.abort()
+    const controller = new AbortController()
+    outputController.current = controller
     const requestId = ++outputRequest.current
     const targetMachine = machine
     const targetSession = selectedSession?.session_id || null
     if (!targetSession) {
+      outputController.current = null
       setOutput("")
       setAudit([])
       return
     }
     try {
       const [terminal, records] = await Promise.all([
-        api.terminalRead(targetMachine, targetSession, Math.max(300, height * 8)),
-        api.audit({ session: targetSession, limit: 80, sort: "desc" }),
+        api.terminalRead(
+          targetMachine,
+          targetSession,
+          Math.max(300, height * 8),
+          controller.signal,
+        ),
+        api.audit(
+          { node: targetMachine, session: targetSession, limit: 80, sort: "desc" },
+          controller.signal,
+        ),
       ])
       if (
         requestId !== outputRequest.current ||
         machineRef.current !== targetMachine ||
-        selectedSessionIdRef.current !== targetSession
+        selectedSessionIdRef.current !== targetSession ||
+        controller.signal.aborted
       ) return
       setOutput(terminal.output)
       setAudit(records.entries)
     } catch (error) {
-      setStatus(`Terminal: ${formatError(error)}`)
+      if (!controller.signal.aborted) setStatus(`Terminal: ${formatError(error)}`)
+    } finally {
+      if (outputController.current === controller) outputController.current = null
     }
   }, [height, machine, selectedSession, setStatus])
 
@@ -153,6 +186,8 @@ export function TerminalsScreen({
     const timer = setInterval(() => void refreshSessions(), 4_000)
     return () => {
       sessionsRequest.current += 1
+      sessionsController.current?.abort()
+      sessionsController.current = null
       clearInterval(timer)
     }
   }, [refreshSessions])
@@ -163,6 +198,8 @@ export function TerminalsScreen({
     const timer = setInterval(() => void refreshOutput(), 900)
     return () => {
       outputRequest.current += 1
+      outputController.current?.abort()
+      outputController.current = null
       clearInterval(timer)
     }
   }, [refreshOutput])
@@ -170,6 +207,11 @@ export function TerminalsScreen({
   useEffect(() => {
     if (width < 105) setShowAudit(false)
   }, [width])
+
+  useEffect(() => {
+    onInteractionLockChange(dialog.type !== "none")
+    return () => onInteractionLockChange(false)
+  }, [dialog.type, onInteractionLockChange])
 
   useEffect(() => {
     onRawModeChange(rawMode)
@@ -191,7 +233,7 @@ export function TerminalsScreen({
         enter,
       })
       await new Promise((resolve) => setTimeout(resolve, 80))
-      await refreshOutput()
+      await refreshOutput(true)
     } catch (error) {
       setStatus(`Send: ${formatError(error)}`)
     } finally {
@@ -224,7 +266,7 @@ export function TerminalsScreen({
         cwd: cwdParts.join(" ") || ".",
       })
       setDialog({ type: "none" })
-      const nextSessions = await refreshSessions()
+      const nextSessions = await refreshSessions(true)
       const nextIndex = nextSessions.findIndex((session) => session.session_id === created.session_id)
       setSelected(Math.max(0, nextIndex))
     } catch (error) {
@@ -241,6 +283,7 @@ export function TerminalsScreen({
   }
 
   useKeyboard((key) => {
+    if (!keyboardEnabled) return
     if (dialog.type === "start") {
       if (key.name === "escape") setDialog({ type: "none" })
       return
@@ -252,7 +295,7 @@ export function TerminalsScreen({
           .terminalAction("kill", { machine, session_id: dialog.session.session_id })
           .then(async () => {
             setDialog({ type: "none" })
-            await refreshSessions()
+            await refreshSessions(true)
           })
           .catch((error) => setStatus(`Kill: ${formatError(error)}`))
       }
@@ -279,11 +322,13 @@ export function TerminalsScreen({
     } else if (key.option && key.name === "[") switchMachine(-1)
     else if (key.option && key.name === "]") switchMachine(1)
     else if (key.option && key.name === "left") setSelected((value) => Math.max(0, value - 1))
-    else if (key.option && key.name === "right") setSelected((value) => Math.min(sessions.length - 1, value + 1))
+    else if (key.option && key.name === "right") {
+      setSelected((value) => clampIndex(value + 1, sessions.length))
+    }
     else if (key.ctrl && key.name === "n") setDialog({ type: "start", name: "", cwd: "." })
     else if (key.ctrl && key.name === "w" && selectedSession) setDialog({ type: "kill", session: selectedSession })
     else if (key.ctrl && key.name === "a") setShowAudit((value) => !value)
-    else if (key.ctrl && key.name === "r") void refreshOutput()
+    else if (key.ctrl && key.name === "r") void refreshOutput(true)
   })
 
   const outputLines = useMemo(() => output.split("\n"), [output])
@@ -293,7 +338,16 @@ export function TerminalsScreen({
   return (
     <box style={{ flexGrow: 1, flexDirection: "column" }}>
       <box style={{ flexGrow: 1, flexDirection: "row", gap: 1 }}>
-        {!compact && <MachineSidebar machines={machines} selected={machine} />}
+        {!compact && (
+          <MachineSidebar
+            machines={machines}
+            selected={machine}
+            onSelect={(nextMachine) => {
+              if (nextMachine !== machine) onMachine(nextMachine)
+              setSelected(0)
+            }}
+          />
+        )}
         <box style={{ flexGrow: 1, flexDirection: "column", gap: 1 }}>
           <box style={{ height: 2, flexDirection: "row", alignItems: "center", paddingLeft: 1 }}>
             <text fg={theme.faint} content={`${machine} / `} />

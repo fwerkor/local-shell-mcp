@@ -129,7 +129,7 @@ def query_audit(
         if end_ts is not None and ts > end_ts:
             continue
         record_node = str(record.get("machine") or record.get("node") or "local")
-        if node_filter and node_filter not in record_node.casefold():
+        if node_filter and node_filter != record_node.casefold():
             continue
         record_event = str(record.get("event") or "")
         if event_filter and event_filter not in record_event.casefold():
@@ -138,7 +138,7 @@ def query_audit(
         if operation_filter and operation_filter not in record_operation.casefold():
             continue
         record_session = str(record.get("session") or "")
-        if session_filter and session_filter not in record_session.casefold():
+        if session_filter and session_filter != record_session.casefold():
             continue
         if needle and needle not in json.dumps(record, ensure_ascii=False, default=str).casefold():
             continue

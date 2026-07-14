@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { useMemo } from "react"
+import { clampIndex } from "./state-utils"
 import type { Machine, ScreenName } from "./types"
 import { theme } from "./theme"
 
@@ -62,11 +63,13 @@ export function MachineSidebar({
   selected,
   title = "Machines",
   width = 23,
+  onSelect,
 }: {
   machines: Machine[]
   selected: string
   title?: string
   width?: number
+  onSelect?: (machine: string) => void
 }) {
   return (
     <box
@@ -88,6 +91,7 @@ export function MachineSidebar({
         return (
           <box
             key={machine.name}
+            onMouseDown={() => onSelect?.(machine.name)}
             style={{
               height: 2,
               paddingLeft: 1,
@@ -236,7 +240,11 @@ export function formatAge(timestamp?: number | null): string {
 export function useVisibleRows<T>(items: T[], selected: number, height: number): { rows: T[]; start: number } {
   return useMemo(() => {
     const windowSize = Math.max(1, height)
-    const start = Math.max(0, Math.min(selected - Math.floor(windowSize / 2), Math.max(0, items.length - windowSize)))
+    const safeSelected = clampIndex(selected, items.length)
+    const start = Math.max(
+      0,
+      Math.min(safeSelected - Math.floor(windowSize / 2), Math.max(0, items.length - windowSize)),
+    )
     return { rows: items.slice(start, start + windowSize), start }
   }, [items, selected, height])
 }

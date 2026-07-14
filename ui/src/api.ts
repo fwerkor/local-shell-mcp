@@ -25,26 +25,40 @@ function queryString(params: Record<string, string | number | boolean | null | u
   return encoded ? `?${encoded}` : ""
 }
 
+const REQUEST_TIMEOUT_MS = 45_000
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...(localToken ? { "X-Local-Shell-MCP-UI-Token": localToken } : {}),
-      ...init?.headers,
-    },
-  })
-  let payload: ApiEnvelope<T>
+  const controller = new AbortController()
+  const externalSignal = init?.signal
+  const abortFromExternal = () => controller.abort(externalSignal?.reason)
+  if (externalSignal?.aborted) abortFromExternal()
+  else externalSignal?.addEventListener("abort", abortFromExternal, { once: true })
+  const timeout = setTimeout(() => controller.abort(new Error("Request timed out")), REQUEST_TIMEOUT_MS)
   try {
-    payload = (await response.json()) as ApiEnvelope<T>
-  } catch {
-    throw new Error(`${response.status} ${response.statusText}`)
+    const response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        ...(localToken ? { "X-Local-Shell-MCP-UI-Token": localToken } : {}),
+        ...init?.headers,
+      },
+    })
+    let payload: ApiEnvelope<T>
+    try {
+      payload = (await response.json()) as ApiEnvelope<T>
+    } catch {
+      throw new Error(`${response.status} ${response.statusText}`)
+    }
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.message || payload.error || `${response.status} ${response.statusText}`)
+    }
+    return payload.data
+  } finally {
+    clearTimeout(timeout)
+    externalSignal?.removeEventListener("abort", abortFromExternal)
   }
-  if (!response.ok || !payload.ok) {
-    throw new Error(payload.message || payload.error || `${response.status} ${response.statusText}`)
-  }
-  return payload.data
 }
 
 export const api = {
@@ -54,8 +68,8 @@ export const api = {
   machines(): Promise<MachinePayload> {
     return request("/machines")
   },
-  files(machine: string, path: string): Promise<FilesPayload> {
-    return request(`/files${queryString({ machine, path })}`)
+  files(machine: string, path: string, signal?: AbortSignal): Promise<FilesPayload> {
+    return request(`/files${queryString({ machine, path })}`, { signal })
   },
   filePreview(machine: string, path: string): Promise<FilePreview> {
     return request(`/files/preview${queryString({ machine, path })}`)
@@ -69,11 +83,11 @@ export const api = {
       body: JSON.stringify(body),
     })
   },
-  terminals(machine: string): Promise<TerminalPayload> {
-    return request(`/terminals${queryString({ machine })}`)
+  terminals(machine: string, signal?: AbortSignal): Promise<TerminalPayload> {
+    return request(`/terminals${queryString({ machine })}`, { signal })
   },
-  terminalRead(machine: string, sessionId: string, lines = 500): Promise<{ session_id: string; output: string }> {
-    return request(`/terminals/read${queryString({ machine, session_id: sessionId, lines })}`)
+  terminalRead(machine: string, sessionId: string, lines = 500, signal?: AbortSignal): Promise<{ session_id: string; output: string }> {
+    return request(`/terminals/read${queryString({ machine, session_id: sessionId, lines })}`, { signal })
   },
   terminalAction<T = unknown>(action: string, body: Record<string, unknown>): Promise<T> {
     return request(`/terminals/${encodeURIComponent(action)}`, {
@@ -90,11 +104,11 @@ export const api = {
       body: JSON.stringify({ todos, expected_revision: expectedRevision }),
     })
   },
-  audit(filters: Record<string, string | number | boolean | null | undefined>): Promise<AuditPayload> {
-    return request(`/audit${queryString(filters)}`)
+  audit(filters: Record<string, string | number | boolean | null | undefined>, signal?: AbortSignal): Promise<AuditPayload> {
+    return request(`/audit${queryString(filters)}`, { signal })
   },
-  remotes(): Promise<MachinePayload> {
-    return request("/remotes")
+  remotes(signal?: AbortSignal): Promise<MachinePayload> {
+    return request("/remotes", { signal })
   },
   invite(body: { name?: string; workdir?: string; ttl_s?: number }): Promise<InvitePayload> {
     return request("/remotes", {

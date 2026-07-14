@@ -2,6 +2,7 @@ import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, Modal, Panel, useVisibleRows } from "./components"
+import { clampIndex } from "./state-utils"
 import { theme } from "./theme"
 import type { AuditEntry, Machine } from "./types"
 
@@ -37,11 +38,15 @@ export function AuditScreen({
   width,
   height,
   setStatus,
+  keyboardEnabled,
+  onInteractionLockChange,
 }: {
   machines: Machine[]
   width: number
   height: number
   setStatus: (message: string) => void
+  keyboardEnabled: boolean
+  onInteractionLockChange: (locked: boolean) => void
 }) {
   const [entries, setEntries] = useState<AuditEntry[]>([])
   const [selected, setSelected] = useState(0)
@@ -55,6 +60,7 @@ export function AuditScreen({
   const [dialog, setDialog] = useState<AuditDialog>({ type: "none" })
   const [loading, setLoading] = useState(false)
   const refreshRequest = useRef(0)
+  const refreshController = useRef<AbortController | null>(null)
 
   const nodes = useMemo(() => ["", ...machines.map((machine) => machine.name)], [machines])
   const selectedNode = nodes[nodeIndex] || ""
@@ -64,28 +70,38 @@ export function AuditScreen({
   const tableHeight = Math.max(6, height - 15)
   const { rows, start } = useVisibleRows(entries, selected, tableHeight)
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
+    if (refreshController.current && !force) return
+    refreshController.current?.abort()
+    const controller = new AbortController()
+    refreshController.current = controller
     const requestId = ++refreshRequest.current
     setLoading(true)
     try {
       const now = Date.now() / 1000
-      const payload = await api.audit({
-        limit: 800,
-        node: selectedNode,
-        operation: selectedOperation,
-        event,
-        session,
-        search,
-        start_ts: timeRange.seconds ? now - timeRange.seconds : undefined,
-        sort,
-      })
-      if (requestId !== refreshRequest.current) return
+      const payload = await api.audit(
+        {
+          limit: 800,
+          node: selectedNode,
+          operation: selectedOperation,
+          event,
+          session,
+          search,
+          start_ts: timeRange.seconds ? now - timeRange.seconds : undefined,
+          sort,
+        },
+        controller.signal,
+      )
+      if (requestId !== refreshRequest.current || controller.signal.aborted) return
       setEntries(payload.entries)
-      setSelected((value) => Math.min(value, Math.max(0, payload.entries.length - 1)))
+      setSelected((value) => clampIndex(value, payload.entries.length))
       setStatus(`Audit: ${payload.total_matched} matching records`)
     } catch (error) {
-      if (requestId === refreshRequest.current) setStatus(`Audit: ${formatError(error)}`)
+      if (requestId === refreshRequest.current && !controller.signal.aborted) {
+        setStatus(`Audit: ${formatError(error)}`)
+      }
     } finally {
+      if (refreshController.current === controller) refreshController.current = null
       if (requestId === refreshRequest.current) setLoading(false)
     }
   }, [event, search, selectedNode, selectedOperation, session, setStatus, sort, timeRange.seconds])
@@ -95,8 +111,15 @@ export function AuditScreen({
     void refresh()
     return () => {
       refreshRequest.current += 1
+      refreshController.current?.abort()
+      refreshController.current = null
     }
   }, [refresh])
+
+  useEffect(() => {
+    onInteractionLockChange(dialog.type !== "none")
+    return () => onInteractionLockChange(false)
+  }, [dialog.type, onInteractionLockChange])
 
   useEffect(() => {
     const timer = setInterval(() => void refresh(), 5_000)
@@ -104,11 +127,14 @@ export function AuditScreen({
   }, [refresh])
 
   useKeyboard((key) => {
+    if (!keyboardEnabled) return
     if (dialog.type !== "none") {
       if (key.name === "escape") setDialog({ type: "none" })
       return
     }
-    if (key.name === "j" || key.name === "down") setSelected((value) => Math.min(entries.length - 1, value + 1))
+    if (key.name === "j" || key.name === "down") {
+      setSelected((value) => clampIndex(value + 1, entries.length))
+    }
     else if (key.name === "k" || key.name === "up") setSelected((value) => Math.max(0, value - 1))
     else if (key.name === "n") setNodeIndex((value) => (value + 1) % nodes.length)
     else if (key.name === "o") setOperationIndex((value) => (value + 1) % OPERATIONS.length)
@@ -124,7 +150,7 @@ export function AuditScreen({
       setNodeIndex(0)
       setOperationIndex(0)
       setTimeIndex(2)
-    } else if (key.name === "r") void refresh()
+    } else if (key.name === "r") void refresh(true)
   })
 
   const applyDialog = (value: unknown) => {

@@ -2,6 +2,7 @@ import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, Modal, Panel, formatAge, useVisibleRows } from "./components"
+import { clampIndex } from "./state-utils"
 import { theme } from "./theme"
 import type { InvitePayload, Machine } from "./types"
 
@@ -16,10 +17,14 @@ export function RemotesScreen({
   width,
   height,
   setStatus,
+  keyboardEnabled,
+  onInteractionLockChange,
 }: {
   width: number
   height: number
   setStatus: (message: string) => void
+  keyboardEnabled: boolean
+  onInteractionLockChange: (locked: boolean) => void
 }) {
   const [machines, setMachines] = useState<Machine[]>([])
   const [enabled, setEnabled] = useState(true)
@@ -27,27 +32,35 @@ export function RemotesScreen({
   const [dialog, setDialog] = useState<RemoteDialog>({ type: "none" })
   const [loading, setLoading] = useState(false)
   const refreshRequest = useRef(0)
+  const refreshController = useRef<AbortController | null>(null)
   const current = machines[selected]
   const compact = width < 92
   const { rows, start } = useVisibleRows(machines, selected, Math.max(5, height - (compact ? 20 : 13)))
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
+    if (refreshController.current && !force) return
+    refreshController.current?.abort()
+    const controller = new AbortController()
+    refreshController.current = controller
     const requestId = ++refreshRequest.current
     setLoading(true)
     try {
-      const payload = await api.remotes()
-      if (requestId !== refreshRequest.current) return
+      const payload = await api.remotes(controller.signal)
+      if (requestId !== refreshRequest.current || controller.signal.aborted) return
       setMachines(payload.machines)
       setEnabled(payload.enabled !== false)
-      setSelected((value) => Math.min(value, Math.max(0, payload.machines.length - 1)))
+      setSelected((value) => clampIndex(value, payload.machines.length))
       setStatus(
         payload.enabled === false
           ? "Remote worker support is disabled"
           : `${payload.counts.online || 0} remote node(s) online`,
       )
     } catch (error) {
-      if (requestId === refreshRequest.current) setStatus(`Remotes: ${formatError(error)}`)
+      if (requestId === refreshRequest.current && !controller.signal.aborted) {
+        setStatus(`Remotes: ${formatError(error)}`)
+      }
     } finally {
+      if (refreshController.current === controller) refreshController.current = null
       if (requestId === refreshRequest.current) setLoading(false)
     }
   }, [setStatus])
@@ -58,9 +71,16 @@ export function RemotesScreen({
     const timer = setInterval(() => void refresh(), 4_000)
     return () => {
       refreshRequest.current += 1
+      refreshController.current?.abort()
+      refreshController.current = null
       clearInterval(timer)
     }
   }, [refresh])
+
+  useEffect(() => {
+    onInteractionLockChange(dialog.type !== "none")
+    return () => onInteractionLockChange(false)
+  }, [dialog.type, onInteractionLockChange])
 
   const createInvite = async (value: string) => {
     const [name, ...workdirParts] = value.trim().split(/\s+/)
@@ -80,13 +100,14 @@ export function RemotesScreen({
     try {
       await api.remoteAction("rename", { machine: dialog.machine.name, new_name: newName.trim() })
       setDialog({ type: "none" })
-      await refresh()
+      await refresh(true)
     } catch (error) {
       setStatus(`Rename: ${formatError(error)}`)
     }
   }
 
   useKeyboard((key) => {
+    if (!keyboardEnabled) return
     if (dialog.type === "invite" || dialog.type === "rename") {
       if (key.name === "escape") setDialog({ type: "none" })
       return
@@ -102,18 +123,20 @@ export function RemotesScreen({
           .remoteAction("revoke", { machine: dialog.machine.name })
           .then(async () => {
             setDialog({ type: "none" })
-            await refresh()
+            await refresh(true)
           })
           .catch((error) => setStatus(`Revoke: ${formatError(error)}`))
       }
       return
     }
-    if (key.name === "j" || key.name === "down") setSelected((value) => Math.min(machines.length - 1, value + 1))
+    if (key.name === "j" || key.name === "down") {
+      setSelected((value) => clampIndex(value + 1, machines.length))
+    }
     else if (key.name === "k" || key.name === "up") setSelected((value) => Math.max(0, value - 1))
     else if (key.name === "n" && enabled) setDialog({ type: "invite" })
     else if (key.name === "e" && current && enabled) setDialog({ type: "rename", machine: current })
     else if (key.name === "d" && current && enabled) setDialog({ type: "revoke", machine: current })
-    else if (key.name === "r") void refresh()
+    else if (key.name === "r") void refresh(true)
   })
 
   const online = machines.filter((machine) => machine.status === "online").length

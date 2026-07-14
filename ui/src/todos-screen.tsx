@@ -1,9 +1,10 @@
 import { useKeyboard } from "@opentui/react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, Modal, Panel, useVisibleRows } from "./components"
+import { clampIndex, nextValue, updateTodo } from "./state-utils"
 import { theme } from "./theme"
-import type { TodoItem } from "./types"
+import type { TodoItem, TodoPayload } from "./types"
 
 type TodoDialog =
   | { type: "none" }
@@ -32,85 +33,131 @@ function priorityColor(priority: string): string {
   return theme.blue
 }
 
-export function TodosScreen({ width, height, setStatus }: { width: number; height: number; setStatus: (message: string) => void }) {
+export function TodosScreen({
+  width,
+  height,
+  setStatus,
+  keyboardEnabled,
+  onInteractionLockChange,
+}: {
+  width: number
+  height: number
+  setStatus: (message: string) => void
+  keyboardEnabled: boolean
+  onInteractionLockChange: (locked: boolean) => void
+}) {
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [revision, setRevision] = useState(0)
   const [selected, setSelected] = useState(0)
   const [filter, setFilter] = useState<"all" | "open" | "completed">("all")
   const [dialog, setDialog] = useState<TodoDialog>({ type: "none" })
   const [saving, setSaving] = useState(false)
+  const stateRef = useRef<{ todos: TodoItem[]; revision: number }>({ todos: [], revision: 0 })
+  const mutationQueue = useRef<Promise<void>>(Promise.resolve())
+  const pendingMutations = useRef(0)
+  const mounted = useRef(true)
 
   const visible = useMemo(() => {
     if (filter === "open") return todos.filter((todo) => todo.status !== "completed")
     if (filter === "completed") return todos.filter((todo) => todo.status === "completed")
     return todos
   }, [filter, todos])
-  const current = visible[selected]
+  const current = visible[clampIndex(selected, visible.length)]
   const listHeight = Math.max(5, height - 13)
   const { rows, start } = useVisibleRows(visible, selected, listHeight)
 
+  const applyPayload = useCallback((payload: TodoPayload) => {
+    const nextRevision = payload.revision || 0
+    stateRef.current = { todos: payload.todos, revision: nextRevision }
+    if (!mounted.current) return
+    setTodos(payload.todos)
+    setRevision(nextRevision)
+    setSelected((value) => clampIndex(value, payload.todos.length))
+  }, [])
+
   const load = useCallback(async () => {
     try {
-      const payload = await api.todos()
-      setTodos(payload.todos)
-      setRevision(payload.revision || 0)
-      setSelected((value) => Math.min(value, Math.max(0, payload.todos.length - 1)))
+      applyPayload(await api.todos())
     } catch (error) {
-      setStatus(`Todos: ${formatError(error)}`)
+      if (mounted.current) setStatus(`Todos: ${formatError(error)}`)
     }
-  }, [setStatus])
+  }, [applyPayload, setStatus])
 
   useEffect(() => {
+    mounted.current = true
     void load()
+    return () => {
+      mounted.current = false
+    }
   }, [load])
 
-  const save = async (next: TodoItem[], message?: string) => {
-    setSaving(true)
-    try {
-      const payload = await api.writeTodos(next, revision)
-      setTodos(payload.todos)
-      setRevision(payload.revision || revision + 1)
-      if (message) setStatus(message)
-    } catch (error) {
-      const detail = formatError(error)
-      if (detail.includes("changed from revision")) {
-        await load()
-        setStatus("Todos changed elsewhere; reloaded the latest list")
-      } else {
-        setStatus(`Todos: ${detail}`)
-      }
-    } finally {
-      setSaving(false)
-    }
-  }
+  useEffect(() => {
+    onInteractionLockChange(dialog.type !== "none")
+    return () => onInteractionLockChange(false)
+  }, [dialog.type, onInteractionLockChange])
 
-  const replaceItem = (id: string, update: Partial<TodoItem>) => {
-    const next = todos.map((todo) => (todo.id === id ? { ...todo, ...update } : todo))
-    void save(next)
+  const enqueueMutation = useCallback((
+    mutate: (items: TodoItem[]) => TodoItem[],
+    message?: string,
+  ) => {
+    pendingMutations.current += 1
+    setSaving(true)
+    const run = async () => {
+      try {
+        let base = stateRef.current
+        let next = mutate(base.todos)
+        let payload: TodoPayload
+        try {
+          payload = await api.writeTodos(next, base.revision)
+        } catch (error) {
+          const detail = formatError(error)
+          if (!detail.includes("changed from revision")) throw error
+          const latest = await api.todos()
+          applyPayload(latest)
+          base = stateRef.current
+          next = mutate(base.todos)
+          payload = await api.writeTodos(next, base.revision)
+        }
+        applyPayload(payload)
+        if (message && mounted.current) setStatus(message)
+      } catch (error) {
+        if (mounted.current) setStatus(`Todos: ${formatError(error)}`)
+      } finally {
+        pendingMutations.current = Math.max(0, pendingMutations.current - 1)
+        if (mounted.current) setSaving(pendingMutations.current > 0)
+      }
+    }
+    mutationQueue.current = mutationQueue.current.then(run, run)
+  }, [applyPayload, setStatus])
+
+  const replaceItem = (id: string, update: Partial<TodoItem> | ((todo: TodoItem) => Partial<TodoItem>)) => {
+    enqueueMutation((items) => updateTodo(items, id, update))
   }
 
   const addTodo = (content: string) => {
     const trimmed = content.trim()
     if (!trimmed) return
     const item: TodoItem = {
-      id: `todo-${Date.now().toString(36)}`,
+      id: `todo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       content: trimmed,
       status: "pending",
       priority: "medium",
     }
     setDialog({ type: "none" })
-    void save([...todos, item], "Todo added")
+    enqueueMutation((items) => [...items, item], "Todo added")
   }
 
   const editTodo = (content: string) => {
     if (dialog.type !== "edit") return
     const trimmed = content.trim()
     if (!trimmed) return
+    const id = dialog.item.id
     setDialog({ type: "none" })
-    replaceItem(dialog.item.id, { content: trimmed })
+    replaceItem(id, { content: trimmed })
   }
 
   useKeyboard((key) => {
+    if (!keyboardEnabled) return
     if (dialog.type === "add" || dialog.type === "edit") {
       if (key.name === "escape") setDialog({ type: "none" })
       return
@@ -118,27 +165,27 @@ export function TodosScreen({ width, height, setStatus }: { width: number; heigh
     if (dialog.type === "delete") {
       if (key.name === "escape" || key.name === "n") setDialog({ type: "none" })
       if (key.name === "y" || key.name === "return") {
-        const next = todos.filter((todo) => todo.id !== dialog.item.id)
+        const id = dialog.item.id
         setDialog({ type: "none" })
-        void save(next, "Todo deleted")
+        enqueueMutation((items) => items.filter((todo) => todo.id !== id), "Todo deleted")
       }
       return
     }
-    if (key.name === "j" || key.name === "down") setSelected((value) => Math.min(visible.length - 1, value + 1))
-    else if (key.name === "k" || key.name === "up") setSelected((value) => Math.max(0, value - 1))
-    else if (key.name === "n") setDialog({ type: "add" })
+    if (key.name === "j" || key.name === "down") {
+      setSelected((value) => clampIndex(value + 1, visible.length))
+    } else if (key.name === "k" || key.name === "up") {
+      setSelected((value) => clampIndex(value - 1, visible.length))
+    } else if (key.name === "n") setDialog({ type: "add" })
     else if (key.name === "e" && current) setDialog({ type: "edit", item: current })
     else if (key.name === "d" && current) setDialog({ type: "delete", item: current })
     else if ((key.name === "return" || key.name === "space") && current) {
-      const index = STATUS_ORDER.indexOf(current.status as (typeof STATUS_ORDER)[number])
-      replaceItem(current.id, { status: STATUS_ORDER[(index + 1 + STATUS_ORDER.length) % STATUS_ORDER.length] })
+      replaceItem(current.id, (todo) => ({ status: nextValue(todo.status, STATUS_ORDER) }))
     } else if (key.name === "p" && current) {
-      const index = PRIORITY_ORDER.indexOf(current.priority as (typeof PRIORITY_ORDER)[number])
-      replaceItem(current.id, { priority: PRIORITY_ORDER[(index + 1 + PRIORITY_ORDER.length) % PRIORITY_ORDER.length] })
+      replaceItem(current.id, (todo) => ({ priority: nextValue(todo.priority, PRIORITY_ORDER) }))
     } else if (key.name === "f") {
       setFilter((value) => (value === "all" ? "open" : value === "open" ? "completed" : "all"))
       setSelected(0)
-    } else if (key.name === "r") void load()
+    } else if (key.name === "r" && pendingMutations.current === 0) void load()
   })
 
   const counts = {
