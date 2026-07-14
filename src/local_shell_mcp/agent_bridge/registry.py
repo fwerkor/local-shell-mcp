@@ -28,7 +28,7 @@ def make_unique_tool_name(prefix: str, raw_name: str, seen: set[str]) -> str:
     base_name = f"{_sanitize_name(prefix)}__{_sanitize_name(raw_name)}"
     candidate = base_name
     if candidate in seen:
-        digest = hashlib.sha1(raw_name.encode("utf-8")).hexdigest()[:8]
+        digest = hashlib.sha1(raw_name.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
         candidate = f"{base_name}__{digest}"
         counter = 2
         while candidate in seen:

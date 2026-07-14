@@ -268,3 +268,8 @@ async def test_worker_post_json_forever_retries_until_success(monkeypatch, capsy
     assert len(calls) == 3
     assert sleeps == [1.0, 2.0]
     assert "Status: poll failed: temporary failure 1. Retrying in 1s..." in capsys.readouterr().err
+
+
+def test_worker_post_json_rejects_non_http_server_url():
+    with pytest.raises(ValueError, match=r"absolute HTTP\(S\)"):
+        remote._worker_post_json("file:///tmp/worker", {"invite": "abc"})  # noqa: SLF001
