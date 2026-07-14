@@ -131,3 +131,71 @@ def test_directory_pack_rejects_symlinks_before_archive_creation(tmp_path, monke
 
     with pytest.raises(ValueError, match="does not support symlinks"):
         transfer_pack_dir("src")
+
+
+def test_unpack_failure_preserves_existing_destination(tmp_path, monkeypatch):
+    root = _workspace(tmp_path, monkeypatch)
+    destination = root / "dst"
+    destination.mkdir()
+    important = destination / "important.txt"
+    important.write_text("keep", encoding="utf-8")
+    archive = root / "bad-link.tar"
+    info = tarfile.TarInfo("link")
+    info.type = tarfile.SYMTYPE
+    info.linkname = "target"
+    with tarfile.open(archive, "w") as tar:
+        tar.addfile(info)
+
+    with pytest.raises(ValueError, match="unsupported archive member type"):
+        transfer_unpack_archive(
+            "bad-link.tar", "dst", overwrite=True, cleanup_archive=False
+        )
+
+    assert important.read_text(encoding="utf-8") == "keep"
+    assert not list(root.glob(".dst.unpack-*"))
+
+
+def test_transfer_overwrite_false_rechecks_destination_at_finish(tmp_path, monkeypatch):
+    root = _workspace(tmp_path, monkeypatch)
+    begin = transfer_begin_write("dest.txt", overwrite=False, expected_bytes=3)
+    transfer_write_chunk("dest.txt", begin["transfer_id"], 0, "bmV3")
+    destination = root / "dest.txt"
+    destination.write_text("important", encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        transfer_finish_write("dest.txt", begin["transfer_id"], expected_bytes=3)
+
+    assert destination.read_text(encoding="utf-8") == "important"
+    transfer_abort_write("dest.txt", begin["transfer_id"])
+
+
+def test_transfer_chunk_cannot_exceed_declared_size(tmp_path, monkeypatch):
+    _workspace(tmp_path, monkeypatch)
+    begin = transfer_begin_write("dest.txt", expected_bytes=2)
+
+    with pytest.raises(ValueError, match="exceeds expected transfer size"):
+        transfer_write_chunk("dest.txt", begin["transfer_id"], 0, "dG9vLWxvbmc=")
+
+    transfer_abort_write("dest.txt", begin["transfer_id"])
+
+
+def test_unpack_enforces_expanded_size_limit_before_replacement(tmp_path, monkeypatch):
+    root = _workspace(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_TRANSFER_UNPACKED_BYTES", "3")
+    get_settings.cache_clear()
+    destination = root / "dst"
+    destination.mkdir()
+    (destination / "important.txt").write_text("keep", encoding="utf-8")
+    archive = root / "large.tar"
+    info = tarfile.TarInfo("payload.txt")
+    payload = b"four"
+    info.size = len(payload)
+    with tarfile.open(archive, "w") as tar:
+        tar.addfile(info, io.BytesIO(payload))
+
+    with pytest.raises(ValueError, match="expands to more than 3 bytes"):
+        transfer_unpack_archive(
+            "large.tar", "dst", overwrite=True, cleanup_archive=False
+        )
+
+    assert (destination / "important.txt").read_text(encoding="utf-8") == "keep"
