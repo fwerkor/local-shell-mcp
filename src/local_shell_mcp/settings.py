@@ -120,9 +120,7 @@ def _get_or_create_oauth_secret(state_dir: Path) -> str:
             )
 
         generated = secrets.token_urlsafe(48)
-        temporary = path.with_name(
-            f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
-        )
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
         descriptor = os.open(
             temporary,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL,
@@ -283,12 +281,8 @@ if _PYDANTIC_AVAILABLE:
         ui_terminal_max_sessions: int = 8
         ui_remote_request_timeout_s: int = 30
 
-        # Optional agent MCP capability bridge. Skills use the fixed skills_list and
-        # skill_load tools and are read from agent_config_dir/skills.
-        agent_bridge_enabled: bool = False
-        agent_mcp_probe_timeout_s: float = 5.0
-        agent_mcp_call_timeout_s: float = 60.0
-        agent_dynamic_mcp_tools: bool = False
+        # Skills use the fixed skills_list and skill_load tools and are read
+        # from agent_config_dir/skills. The MCP tool surface remains static.
 
         file_download_enabled: bool = True
         file_download_default_ttl_s: int = 3600
@@ -305,8 +299,12 @@ if _PYDANTIC_AVAILABLE:
         remote_max_pending_jobs: int = 256
 
         shell_executable: str = Field(default_factory=default_shell_executable)
-        shell_env_blocklist: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["CLOUDFLARE_TUNNEL_TOKEN"])
-        shell_env_blocked_prefixes: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["LOCAL_SHELL_MCP_", "DOCKER_"])
+        shell_env_blocklist: Annotated[list[str], NoDecode] = Field(
+            default_factory=lambda: ["CLOUDFLARE_TUNNEL_TOKEN"]
+        )
+        shell_env_blocked_prefixes: Annotated[list[str], NoDecode] = Field(
+            default_factory=lambda: ["LOCAL_SHELL_MCP_", "DOCKER_"]
+        )
         tmux_bin: str = "tmux"
         rg_bin: str = "rg"
         git_bin: str = "git"
@@ -323,7 +321,9 @@ if _PYDANTIC_AVAILABLE:
         oauth_issuer: str | None = None
         oauth_resource: str | None = None
         oauth_admin_pin: str | None = None
-        oauth_jwt_secret: str = Field(default_factory=lambda: os.getenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET") or "dev-change-me")
+        oauth_jwt_secret: str = Field(
+            default_factory=lambda: os.getenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET") or "dev-change-me"
+        )
         # 0 means access tokens never expire.
         oauth_access_token_ttl_s: int = 0
         oauth_code_ttl_s: int = 300
@@ -359,12 +359,20 @@ if _PYDANTIC_AVAILABLE:
         def validate_ui_path(cls, value: str) -> str:
             return normalize_ui_path(value)
 
-        @field_validator("workspace_root", "audit_log_path", "state_dir", "agent_config_dir", mode="before")
+        @field_validator(
+            "workspace_root", "audit_log_path", "state_dir", "agent_config_dir", mode="before"
+        )
         @classmethod
         def expand_path(cls, value: str | Path) -> Path:
             return Path(os.path.expandvars(os.path.expanduser(str(value)))).resolve()
 
-        @field_validator("command_denylist", "path_denylist", "shell_env_blocklist", "shell_env_blocked_prefixes", mode="before")
+        @field_validator(
+            "command_denylist",
+            "path_denylist",
+            "shell_env_blocklist",
+            "shell_env_blocked_prefixes",
+            mode="before",
+        )
         @classmethod
         def split_csv_fields(cls, value):  # noqa: ANN001
             return _split_csv(value)
@@ -473,11 +481,6 @@ else:
         ui_terminal_max_sessions: int = 8
         ui_remote_request_timeout_s: int = 30
 
-        agent_bridge_enabled: bool = False
-        agent_mcp_probe_timeout_s: float = 5.0
-        agent_mcp_call_timeout_s: float = 60.0
-        agent_dynamic_mcp_tools: bool = False
-
         file_download_enabled: bool = True
         file_download_default_ttl_s: int = 3600
         file_download_max_ttl_s: int = 604800
@@ -492,7 +495,9 @@ else:
 
         shell_executable: str = field(default_factory=default_shell_executable)
         shell_env_blocklist: list[str] = field(default_factory=lambda: ["CLOUDFLARE_TUNNEL_TOKEN"])
-        shell_env_blocked_prefixes: list[str] = field(default_factory=lambda: ["LOCAL_SHELL_MCP_", "DOCKER_"])
+        shell_env_blocked_prefixes: list[str] = field(
+            default_factory=lambda: ["LOCAL_SHELL_MCP_", "DOCKER_"]
+        )
         tmux_bin: str = "tmux"
         rg_bin: str = "rg"
         git_bin: str = "git"
@@ -506,7 +511,9 @@ else:
         oauth_issuer: str | None = None
         oauth_resource: str | None = None
         oauth_admin_pin: str | None = None
-        oauth_jwt_secret: str = field(default_factory=lambda: os.getenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET") or "dev-change-me")
+        oauth_jwt_secret: str = field(
+            default_factory=lambda: os.getenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET") or "dev-change-me"
+        )
         oauth_access_token_ttl_s: int = 0
         oauth_code_ttl_s: int = 300
 
@@ -539,9 +546,19 @@ else:
             for item in fields(self):
                 env_name = "LOCAL_SHELL_MCP_" + item.name.upper()
                 if env_name in os.environ:
-                    setattr(self, item.name, _coerce_env_value(os.environ[env_name], getattr(self, item.name)))
+                    setattr(
+                        self,
+                        item.name,
+                        _coerce_env_value(os.environ[env_name], getattr(self, item.name)),
+                    )
             for attr in ("workspace_root", "audit_log_path", "state_dir", "agent_config_dir"):
-                setattr(self, attr, Path(os.path.expandvars(os.path.expanduser(str(getattr(self, attr))))).resolve())
+                setattr(
+                    self,
+                    attr,
+                    Path(
+                        os.path.expandvars(os.path.expanduser(str(getattr(self, attr))))
+                    ).resolve(),
+                )
             self.ui_path = normalize_ui_path(self.ui_path)
             if self.allow_full_container:
                 self.command_denylist = []

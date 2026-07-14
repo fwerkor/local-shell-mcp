@@ -68,15 +68,6 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-long-random-secret
 | `max_concurrent_commands` | `LOCAL_SHELL_MCP_MAX_CONCURRENT_COMMANDS` | `4` | 并发命令数量上限。 |
 | `max_tmux_sessions` | `LOCAL_SHELL_MCP_MAX_TMUX_SESSIONS` | `16` | tmux session 数量上限。 |
 
-### Agent bridge
-
-| YAML key | 环境变量 | 默认值 | 说明 |
-|---|---|---|---|
-| `agent_bridge_enabled` | `LOCAL_SHELL_MCP_AGENT_BRIDGE_ENABLED` | `False` | 是否启用 agent bridge。 |
-| `agent_mcp_probe_timeout_s` | `LOCAL_SHELL_MCP_AGENT_MCP_PROBE_TIMEOUT_S` | `5.0` | agent MCP 探测超时时间。 |
-| `agent_mcp_call_timeout_s` | `LOCAL_SHELL_MCP_AGENT_MCP_CALL_TIMEOUT_S` | `60.0` | agent MCP 调用超时时间。 |
-| `agent_dynamic_mcp_tools` | `LOCAL_SHELL_MCP_AGENT_DYNAMIC_MCP_TOOLS` | `False` | 是否启用动态 MCP 工具。 |
-
 ### 文件链接
 
 | YAML key | 环境变量 | 默认值 | 说明 |

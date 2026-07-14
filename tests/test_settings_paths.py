@@ -11,9 +11,7 @@ from local_shell_mcp.settings import (
 )
 
 
-def test_workspace_relative_defaults_match_resolved_platform_defaults(
-    tmp_path, monkeypatch
-):
+def test_workspace_relative_defaults_match_resolved_platform_defaults(tmp_path, monkeypatch):
     lexical_workspace = Path("platform-default-workspace")
     lexical_state = lexical_workspace / ".local-shell-mcp"
     lexical_audit = lexical_state / "audit.jsonl"
@@ -22,9 +20,7 @@ def test_workspace_relative_defaults_match_resolved_platform_defaults(
     monkeypatch.setattr(settings_module, "DEFAULT_WORKSPACE_ROOT", lexical_workspace)
     monkeypatch.setattr(settings_module, "DEFAULT_STATE_DIR", lexical_state)
     monkeypatch.setattr(settings_module, "DEFAULT_AUDIT_LOG_PATH", lexical_audit)
-    monkeypatch.setattr(
-        settings_module, "DEFAULT_AGENT_CONFIG_DIR", lexical_agent_config
-    )
+    monkeypatch.setattr(settings_module, "DEFAULT_AGENT_CONFIG_DIR", lexical_agent_config)
 
     workspace = (tmp_path / "custom-workspace").resolve()
     settings = Settings(
@@ -148,3 +144,15 @@ def test_invalid_persisted_oauth_secret_is_not_silently_replaced(tmp_path, monke
         get_settings()
 
     assert secret_path.read_text(encoding="utf-8") == "short"
+
+
+def test_removed_dynamic_agent_bridge_settings_are_not_exposed():
+    settings = Settings()
+
+    for name in (
+        "agent_bridge_enabled",
+        "agent_mcp_probe_timeout_s",
+        "agent_mcp_call_timeout_s",
+        "agent_dynamic_mcp_tools",
+    ):
+        assert not hasattr(settings, name)

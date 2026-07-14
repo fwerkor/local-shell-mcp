@@ -68,15 +68,6 @@ For local-only testing, `auth_bypass_localhost` is enabled by default. Do not ex
 | `max_concurrent_commands` | `LOCAL_SHELL_MCP_MAX_CONCURRENT_COMMANDS` | `4` |  |
 | `max_tmux_sessions` | `LOCAL_SHELL_MCP_MAX_TMUX_SESSIONS` | `16` |  |
 
-### Agent bridge
-
-| YAML key | Environment variable | Default | Notes |
-|---|---|---|---|
-| `agent_bridge_enabled` | `LOCAL_SHELL_MCP_AGENT_BRIDGE_ENABLED` | `False` |  |
-| `agent_mcp_probe_timeout_s` | `LOCAL_SHELL_MCP_AGENT_MCP_PROBE_TIMEOUT_S` | `5.0` |  |
-| `agent_mcp_call_timeout_s` | `LOCAL_SHELL_MCP_AGENT_MCP_CALL_TIMEOUT_S` | `60.0` |  |
-| `agent_dynamic_mcp_tools` | `LOCAL_SHELL_MCP_AGENT_DYNAMIC_MCP_TOOLS` | `False` |  |
-
 ### File links
 
 | YAML key | Environment variable | Default | Notes |
