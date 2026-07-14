@@ -1,4 +1,5 @@
 import asyncio
+import json
 import time
 
 import pytest
@@ -11,12 +12,45 @@ from local_shell_mcp.http_app import build_http_app
 from local_shell_mcp.models import CommandResult
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.shell_ops import (
+    PUBLIC_RUN_SHELL_TIMEOUT_CAP_S,
+    PUBLIC_TOOL_WATCHDOG_TIMEOUT_S,
     _close_process_transport,
     public_run_shell_timeout,
     run_shell,
     send_shell,
 )
 from local_shell_mcp.tools import build_mcp
+
+
+def test_public_tool_watchdog_allows_shell_timeout_cleanup():
+    assert PUBLIC_RUN_SHELL_TIMEOUT_CAP_S == 120
+    assert PUBLIC_TOOL_WATCHDOG_TIMEOUT_S == 130
+    assert tools_module.PUBLIC_TOOL_TIMEOUT_S == 130
+    assert http_app_module.PUBLIC_TOOL_TIMEOUT_S == 130
+
+
+@pytest.mark.asyncio
+async def test_run_shell_tool_returns_output_after_command_timeout(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(tools_module, "PUBLIC_TOOL_TIMEOUT_S", 2)
+    get_settings.cache_clear()
+
+    response = await build_mcp().call_tool(
+        "run_shell_tool",
+        {
+            "command": python_shell_command(
+                'import sys, time; print("partial-out", flush=True); '
+                'print("partial-err", file=sys.stderr, flush=True); time.sleep(5)'
+            ),
+            "timeout_s": 1,
+        },
+    )
+    payload = json.loads(response[0][0].text)
+    result = payload["data"]
+
+    assert result["timed_out"] is True
+    assert "partial-out" in result["stdout"]
+    assert "partial-err" in result["stderr"]
 
 
 @pytest.mark.asyncio

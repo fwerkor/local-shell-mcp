@@ -62,7 +62,7 @@ from .remote_transfer import (
 from .search_ops import grep, tree
 from .settings import get_settings, safe_settings_dump
 from .shell_ops import (
-    PUBLIC_RUN_SHELL_TIMEOUT_CAP_S,
+    PUBLIC_TOOL_WATCHDOG_TIMEOUT_S,
     kill_shell,
     list_shells,
     public_run_shell,
@@ -168,7 +168,7 @@ def _oauth_security_scheme(scopes: list[str]) -> dict[str, Any]:
 
 OAUTH_SECURITY_SCHEMES = [_oauth_security_scheme(ALL_OAUTH_SCOPES)]
 NOAUTH_SECURITY_SCHEMES = [{"type": "noauth"}]
-PUBLIC_TOOL_TIMEOUT_S = PUBLIC_RUN_SHELL_TIMEOUT_CAP_S
+PUBLIC_TOOL_TIMEOUT_S = PUBLIC_TOOL_WATCHDOG_TIMEOUT_S
 SENSITIVE_TOOL_ARG_FRAGMENTS = ("token", "secret", "password", "passwd", "pin", "jwt", "key")
 OPAQUE_AUDIT_TOOL_ARGS = {
     "code",

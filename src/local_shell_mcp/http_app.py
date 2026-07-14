@@ -56,7 +56,7 @@ from .playwright_ops import (
 from .search_ops import grep, tree
 from .settings import get_settings
 from .shell_ops import (
-    PUBLIC_RUN_SHELL_TIMEOUT_CAP_S,
+    PUBLIC_TOOL_WATCHDOG_TIMEOUT_S,
     kill_shell,
     list_shells,
     public_run_shell,
@@ -72,7 +72,7 @@ from .skill_ops import (
 from .todo_ops import todo_read, todo_write
 from .version import version_info
 
-PUBLIC_TOOL_TIMEOUT_S = PUBLIC_RUN_SHELL_TIMEOUT_CAP_S
+PUBLIC_TOOL_TIMEOUT_S = PUBLIC_TOOL_WATCHDOG_TIMEOUT_S
 
 
 class SkillLoadRequest(BaseModel):
