@@ -64,7 +64,8 @@ def _replace_settings(settings: Settings, **updates: Any) -> Settings:
 
 def _read_oauth_secret(path: Path) -> str | None:
     try:
-        value = path.read_text(encoding="utf-8").strip()
+        with path.open("r", encoding="utf-8") as handle:
+            value = handle.read().strip()
     except OSError:
         return None
     return value if len(value.encode("utf-8")) >= 32 else None
