@@ -32,3 +32,33 @@ def test_audit_tool_arguments_redacts_sensitive_keys():
 
     assert payload["keyword_args"]["token"] == "<redacted>"
     assert payload["keyword_args"]["normal"] == "value"
+
+
+def test_audit_tool_arguments_redacts_opaque_payloads():
+    payload = _audit_tool_arguments(
+        (),
+        {
+            "command": "curl -H 'Authorization: Bearer secret-value' example.test",
+            "content": "API_TOKEN=secret-value",
+            "path": "safe.txt",
+        },
+    )
+
+    assert payload["keyword_args"]["command"] == "<redacted>"
+    assert payload["keyword_args"]["content"] == "<redacted>"
+    assert payload["keyword_args"]["path"] == "safe.txt"
+
+
+@pytest.mark.asyncio
+async def test_mcp_audit_extracts_session_context(tmp_path, monkeypatch):
+    audit_path = tmp_path / "audit.jsonl"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUDIT_LOG_PATH", str(audit_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
+    get_settings.cache_clear()
+
+    await build_mcp().call_tool("shell_read", {"session_id": "missing-session"})
+
+    records = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines()]
+    starts = [record for record in records if record["event"] == "mcp_tool_call_start"]
+    assert starts[-1]["session"] == "missing-session"

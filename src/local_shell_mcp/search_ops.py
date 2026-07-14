@@ -142,10 +142,11 @@ def tree_sync(cwd: str = ".", depth: int = 3, max_entries: int = 500) -> dict:
                 return
             rel = path.relative_to(base)
             indent = "  " * (len(rel.parts) - 1)
-            suffix = "/" if path.is_dir() else ""
+            is_directory = path.is_dir() and not path.is_symlink()
+            suffix = "/" if is_directory else ""
             rows.append(f"{indent}{path.name}{suffix}")
             count += 1
-            if path.is_dir():
+            if is_directory:
                 walk(path, current_depth + 1)
             if count >= limit:
                 truncated = True

@@ -575,3 +575,34 @@ def test_websocket_origin_maps_to_http_oauth_resource(tmp_path, monkeypatch):
     websocket = _websocket_for_test(client_host="203.0.113.9")
 
     assert public_base_url(websocket) == "https://control.example.com"
+
+
+def test_http_localhost_bypass_is_not_inherited_by_reverse_proxy(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch, auth_mode="oauth")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MODE", "http")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST", "true")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET", "x" * 32)
+    get_settings.cache_clear()
+    client = TestClient(build_http_app(), client=("127.0.0.1", 4242))
+
+    direct = client.get("/tools/version", headers={"Host": "127.0.0.1:8765"})
+    proxied = client.get(
+        "/tools/version",
+        headers={
+            "Host": "public.example.test",
+            "X-Forwarded-For": "203.0.113.9",
+            "X-Forwarded-Proto": "https",
+        },
+    )
+
+    assert direct.status_code == 200
+    assert proxied.status_code == 401
+
+
+def test_invalid_ui_token_path_fails_without_recursion(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    token_path = tmp_path / ".state" / "ui" / "local-token"
+    token_path.mkdir(parents=True)
+
+    with pytest.raises(RuntimeError, match="invalid UI local token path"):
+        get_or_create_ui_local_token()

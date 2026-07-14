@@ -171,6 +171,19 @@ OAUTH_SECURITY_SCHEMES = [_oauth_security_scheme(ALL_OAUTH_SCOPES)]
 NOAUTH_SECURITY_SCHEMES = [{"type": "noauth"}]
 PUBLIC_TOOL_TIMEOUT_S = PUBLIC_RUN_SHELL_TIMEOUT_CAP_S
 SENSITIVE_TOOL_ARG_FRAGMENTS = ("token", "secret", "password", "passwd", "pin", "jwt", "key")
+OPAQUE_AUDIT_TOOL_ARGS = {
+    "code",
+    "command",
+    "content",
+    "data_b64",
+    "explanation",
+    "input_text",
+    "javascript",
+    "patch",
+    "purpose",
+    "repo_url",
+    "script",
+}
 MAX_AUDIT_TOOL_ARG_STRING = 500
 
 
@@ -237,7 +250,11 @@ def _redact_audit_value(value: Any) -> Any:
         out: dict[str, Any] = {}
         for name, item in list(value.items())[:50]:
             name_s = str(name)
-            if any(fragment in name_s.lower() for fragment in SENSITIVE_TOOL_ARG_FRAGMENTS):
+            name_lower = name_s.lower()
+            if (
+                name_lower in OPAQUE_AUDIT_TOOL_ARGS
+                or any(fragment in name_lower for fragment in SENSITIVE_TOOL_ARG_FRAGMENTS)
+            ):
                 out[name_s] = "<redacted>"
             else:
                 out[name_s] = _redact_audit_value(item)
@@ -309,11 +326,16 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
             require_current_scopes(__required_scopes)
             arguments = _audit_tool_arguments(args, kwargs)
             audit_context = {}
-            if isinstance(arguments, dict):
-                if arguments.get("machine"):
-                    audit_context["machine"] = arguments["machine"]
-                if arguments.get("session_id"):
-                    audit_context["session"] = arguments["session_id"]
+            keyword_args = (
+                arguments.get("keyword_args", {})
+                if isinstance(arguments, dict)
+                else {}
+            )
+            if isinstance(keyword_args, dict):
+                if keyword_args.get("machine"):
+                    audit_context["machine"] = keyword_args["machine"]
+                if keyword_args.get("session_id"):
+                    audit_context["session"] = keyword_args["session_id"]
             audit(
                 "mcp_tool_call_start",
                 tool=__tool_name,

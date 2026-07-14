@@ -154,3 +154,22 @@ async def test_grep_returns_first_matches_when_output_is_large(tmp_path, monkeyp
     assert result["ok"] is True
     assert result["truncated"] is True
     assert [item["line"] for item in result["matches"]] == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_tree_does_not_follow_directory_symlinks(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    (outside / "secret-name.txt").write_text("secret", encoding="utf-8")
+    link = tmp_path / "escape"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are not available in this environment")
+
+    result = await tree(".", depth=3)
+
+    assert "escape" in result["entries"]
+    assert not any("secret-name.txt" in entry for entry in result["entries"])

@@ -34,6 +34,8 @@ def _trim_audit_log(path: Path, max_bytes: int) -> None:
     tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     try:
         tmp.write_bytes(data)
+        with contextlib.suppress(OSError):
+            tmp.chmod(0o600)
         tmp.replace(path)
     finally:
         with contextlib.suppress(OSError):
@@ -65,9 +67,12 @@ def audit(event: str, **fields: Any) -> None:
     with _AUDIT_LOCK:
         path.parent.mkdir(parents=True, exist_ok=True)
         _trim_audit_log(path, settings.max_audit_log_bytes)
-        with path.open("a", encoding="utf-8") as f:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(descriptor, "a", encoding="utf-8") as f:
             f.write(encoded)
             f.flush()
+        with contextlib.suppress(OSError):
+            path.chmod(0o600)
 
 
 def _operation_type(record: dict[str, Any]) -> str:
