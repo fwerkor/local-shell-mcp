@@ -15,7 +15,7 @@ from .audit import audit
 from .settings import Settings, get_settings
 from .ui_security import has_valid_ui_local_token, is_loopback_connection
 
-PUBLIC_PATHS = {"/healthz", "/readyz", "/docs", "/openapi.json", "/join", "/remote/worker-bundle.tgz", "/remote/register", "/remote/resume", "/remote/poll", "/remote/result"}
+PUBLIC_PATHS = {"/healthz", "/readyz", "/docs", "/openapi.json", "/join", "/remote/worker-bundle.tgz", "/remote/register", "/remote/resume", "/remote/poll", "/remote/heartbeat", "/remote/result"}
 HUMAN_UI_API_PREFIX = "/api/ui/"
 
 

@@ -1,5 +1,6 @@
 
 
+import asyncio
 import subprocess
 import sys
 import urllib.error
@@ -273,3 +274,80 @@ async def test_worker_post_json_forever_retries_until_success(monkeypatch, capsy
 def test_worker_post_json_rejects_non_http_server_url():
     with pytest.raises(ValueError, match=r"absolute HTTP\(S\)"):
         remote._worker_post_json("file:///tmp/worker", {"invite": "abc"})  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_worker_post_json_forever_stops_on_permanent_http_error(monkeypatch):
+    calls = []
+    sleeps = []
+
+    def fake_post(url, payload, headers=None, timeout=None):
+        calls.append((url, payload, headers, timeout))
+        raise remote.WorkerHttpError(url, 400, "invalid invite code")
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(remote, "_worker_post_json", fake_post)
+    monkeypatch.setattr(remote.asyncio, "sleep", fake_sleep)
+
+    with pytest.raises(remote.WorkerHttpError, match="invalid invite code"):
+        await remote._worker_post_json_forever(  # noqa: SLF001
+            "https://example.test/remote/register",
+            {"invite": "expired"},
+            None,
+            30,
+            "register",
+        )
+
+    assert len(calls) == 1
+    assert sleeps == []
+
+
+@pytest.mark.asyncio
+async def test_remote_heartbeat_refreshes_worker_last_seen(monkeypatch):
+    manager = remote.RemoteManager()
+    worker = remote.RemoteWorker(
+        name="worker-a", token="token-a", last_seen=1, status="offline"
+    )
+    manager.workers[worker.name] = worker
+    manager.tokens[worker.token] = worker.name
+    monkeypatch.setattr(remote, "_utc", lambda: 123.0)
+
+    result = await manager.heartbeat(worker.token)
+
+    assert result == {"accepted": True, "name": "worker-a"}
+    assert worker.last_seen == 123.0
+    assert worker.status == "online"
+
+
+@pytest.mark.asyncio
+async def test_worker_job_sends_heartbeats_while_running(monkeypatch):
+    posted_urls = []
+
+    async def fake_execute(tool, args):
+        assert tool == "slow_tool"
+        assert args == {"value": 1}
+        await asyncio.sleep(0.05)
+        return {"done": True}
+
+    def fake_post(url, payload, headers=None, timeout=None):
+        posted_urls.append(url)
+        assert payload == {}
+        assert headers == {"Authorization": "Bearer token"}
+        assert timeout == 30
+        return {"ok": True, "data": {"accepted": True}}
+
+    monkeypatch.setattr(remote, "execute_worker_tool", fake_execute)
+    monkeypatch.setattr(remote, "_worker_post_json", fake_post)
+
+    result = await remote._execute_worker_job_with_heartbeat(  # noqa: SLF001
+        {"tool": "slow_tool", "args": {"value": 1}},
+        "https://example.test",
+        {"Authorization": "Bearer token"},
+        0.01,
+    )
+
+    assert result == {"done": True}
+    assert posted_urls
+    assert set(posted_urls) == {"https://example.test/remote/heartbeat"}
