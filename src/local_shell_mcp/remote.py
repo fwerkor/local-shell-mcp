@@ -16,6 +16,7 @@ import sys
 import tarfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass, field
@@ -940,7 +941,7 @@ def _worker_post_json_with_urllib(url: str, body: bytes, headers: dict[str, str]
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310  # URL validated by _worker_post_json.
             response_body = response.read().decode("utf-8", errors="replace")
             status_code = response.status
     except urllib.error.HTTPError as exc:
@@ -950,6 +951,9 @@ def _worker_post_json_with_urllib(url: str, body: bytes, headers: dict[str, str]
 
 
 def _worker_post_json(url: str, payload: dict[str, Any], headers: dict[str, str] | None = None, timeout: float | None = None) -> dict[str, Any]:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("worker server URL must use absolute HTTP(S)")
     body = json.dumps(payload).encode("utf-8")
     request_headers = headers or {}
     if shutil.which("curl"):

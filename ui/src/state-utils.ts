@@ -5,6 +5,19 @@ export function clampIndex(value: number, length: number): number {
   return Math.max(0, Math.min(value, length - 1))
 }
 
+
+export function scopedItems<T>(owner: string | null, current: string, items: T[]): T[] {
+  return owner === current ? items : []
+}
+
+export function payloadMatches(
+  payload: { machine: string; path?: string } | null,
+  machine: string,
+  path?: string,
+): boolean {
+  return Boolean(payload && payload.machine === machine && (path === undefined || payload.path === path))
+}
+
 export function nextValue<T extends string>(current: string, order: readonly T[]): T {
   const index = order.indexOf(current as T)
   return order[(index + 1 + order.length) % order.length]!

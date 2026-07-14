@@ -151,10 +151,13 @@ if _PYDANTIC_AVAILABLE:
         max_read_many_total_bytes: int = 5_000_000
         max_todos: int = 1_000
         max_todo_bytes: int = 1_000_000
+        max_job_log_bytes: int = 10_000_000
         max_audit_tail_bytes: int = 1_000_000
         max_audit_log_bytes: int = 20_000_000
         max_tmp_files: int = 500
         max_tmp_bytes: int = 50_000_000
+        max_transfer_archive_entries: int = 100_000
+        max_transfer_unpacked_bytes: int = 10_000_000_000
         max_concurrent_commands: int = 4
         max_tmux_sessions: int = 16
 
@@ -338,10 +341,13 @@ else:
         max_read_many_total_bytes: int = 5_000_000
         max_todos: int = 1_000
         max_todo_bytes: int = 1_000_000
+        max_job_log_bytes: int = 10_000_000
         max_audit_tail_bytes: int = 1_000_000
         max_audit_log_bytes: int = 20_000_000
         max_tmp_files: int = 500
         max_tmp_bytes: int = 50_000_000
+        max_transfer_archive_entries: int = 100_000
+        max_transfer_unpacked_bytes: int = 10_000_000_000
         max_concurrent_commands: int = 4
         max_tmux_sessions: int = 16
 

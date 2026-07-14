@@ -39,28 +39,35 @@ def get_or_create_ui_local_token() -> str:
         return inherited
 
     path = _token_path()
-    existing = _read_token(path)
-    if existing:
-        return existing
-
     path.parent.mkdir(parents=True, exist_ok=True)
-    token = secrets.token_urlsafe(48)
-    try:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
+    for _attempt in range(2):
         existing = _read_token(path)
         if existing:
             return existing
-        with suppress(OSError):
-            path.unlink()
-        return get_or_create_ui_local_token()
 
-    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-        handle.write(token)
-        handle.write("\n")
-    with suppress(OSError):
-        path.chmod(0o600)
-    return token
+        token = secrets.token_urlsafe(48)
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            try:
+                path.unlink()
+            except OSError as exc:
+                raise RuntimeError(
+                    f"Unable to replace invalid UI local token path: {path}"
+                ) from exc
+            continue
+
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(token)
+            handle.write("\n")
+        with suppress(OSError):
+            path.chmod(0o600)
+        return token
+
+    existing = _read_token(path)
+    if existing:
+        return existing
+    raise RuntimeError(f"Unable to initialize UI local token: {path}")
 
 
 def has_valid_ui_local_token(connection: HTTPConnection) -> bool:

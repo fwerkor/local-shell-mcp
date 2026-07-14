@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -163,6 +164,45 @@ def _is_localhost(request: Request) -> bool:
     return host in {"127.0.0.1", "::1", "localhost"}
 
 
+def _host_header_is_loopback(request: Request) -> bool:
+    value = request.headers.get("host", "").strip()
+    if not value:
+        return False
+    if value.startswith("["):
+        end = value.find("]")
+        host = value[1:end] if end >= 0 else value.strip("[]")
+    else:
+        host = value.split(":", 1)[0]
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_direct_localhost_request(request: Request) -> bool:
+    """Return whether an HTTP request came directly from a loopback client.
+
+    Reverse proxies commonly connect to the service over loopback. Requiring a loopback
+    Host header and rejecting forwarding metadata prevents that proxy hop from inheriting
+    the local development bypass for a public client.
+    """
+
+    forwarded_headers = (
+        "forwarded",
+        "x-forwarded-for",
+        "x-forwarded-host",
+        "x-forwarded-proto",
+        "x-real-ip",
+    )
+    return (
+        _is_localhost(request)
+        and _host_header_is_loopback(request)
+        and not any(request.headers.get(name) for name in forwarded_headers)
+    )
+
+
 def _extract_token(request: Request) -> str | None:
     auth = request.headers.get("authorization")
     if auth and auth.lower().startswith("bearer "):
@@ -200,7 +240,11 @@ def verify_request(request: Request) -> Principal:
         and has_valid_ui_local_token(request)
     ):
         return Principal(email="localhost", subject="native-tui", claims={"auth": "native-tui"})
-    if settings.auth_bypass_localhost and _is_localhost(request) and settings.mode == "http":
+    if (
+        settings.auth_bypass_localhost
+        and settings.mode == "http"
+        and _is_direct_localhost_request(request)
+    ):
         return Principal(email="localhost", subject="localhost", claims={"auth": "localhost-bypass"})
     if settings.auth_mode == "oauth":
         principal = _verify_oauth(request, settings)

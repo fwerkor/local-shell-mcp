@@ -171,6 +171,19 @@ OAUTH_SECURITY_SCHEMES = [_oauth_security_scheme(ALL_OAUTH_SCOPES)]
 NOAUTH_SECURITY_SCHEMES = [{"type": "noauth"}]
 PUBLIC_TOOL_TIMEOUT_S = PUBLIC_RUN_SHELL_TIMEOUT_CAP_S
 SENSITIVE_TOOL_ARG_FRAGMENTS = ("token", "secret", "password", "passwd", "pin", "jwt", "key")
+OPAQUE_AUDIT_TOOL_ARGS = {
+    "code",
+    "command",
+    "content",
+    "data_b64",
+    "explanation",
+    "input_text",
+    "javascript",
+    "patch",
+    "purpose",
+    "repo_url",
+    "script",
+}
 MAX_AUDIT_TOOL_ARG_STRING = 500
 
 
@@ -237,7 +250,11 @@ def _redact_audit_value(value: Any) -> Any:
         out: dict[str, Any] = {}
         for name, item in list(value.items())[:50]:
             name_s = str(name)
-            if any(fragment in name_s.lower() for fragment in SENSITIVE_TOOL_ARG_FRAGMENTS):
+            name_lower = name_s.lower()
+            if (
+                name_lower in OPAQUE_AUDIT_TOOL_ARGS
+                or any(fragment in name_lower for fragment in SENSITIVE_TOOL_ARG_FRAGMENTS)
+            ):
                 out[name_s] = "<redacted>"
             else:
                 out[name_s] = _redact_audit_value(item)
@@ -309,11 +326,16 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
             require_current_scopes(__required_scopes)
             arguments = _audit_tool_arguments(args, kwargs)
             audit_context = {}
-            if isinstance(arguments, dict):
-                if arguments.get("machine"):
-                    audit_context["machine"] = arguments["machine"]
-                if arguments.get("session_id"):
-                    audit_context["session"] = arguments["session_id"]
+            keyword_args = (
+                arguments.get("keyword_args", {})
+                if isinstance(arguments, dict)
+                else {}
+            )
+            if isinstance(keyword_args, dict):
+                if keyword_args.get("machine"):
+                    audit_context["machine"] = keyword_args["machine"]
+                if keyword_args.get("session_id"):
+                    audit_context["session"] = keyword_args["session_id"]
             audit(
                 "mcp_tool_call_start",
                 tool=__tool_name,
@@ -362,17 +384,56 @@ def _remove_remote_tools_when_disabled(mcp: FastMCP) -> None:
             tools.pop(name, None)
 
 
-def _install_full_container_auto_approval_hints(mcp: FastMCP) -> None:
-    if not get_settings().allow_full_container:
-        return
-    for tool in mcp._tool_manager._tools.values():  # noqa: SLF001
-        if tool.annotations and tool.annotations.readOnlyHint:
-            continue
+OPEN_WORLD_TOOL_NAMES = {
+    "browser_eval_tool",
+    "browser_get_text_tool",
+    "browser_pdf_tool",
+    "browser_screenshot_tool",
+    "create_file_link",
+    "git_clone_tool",
+    "git_fetch_tool",
+    "git_pull_tool",
+    "git_push_tool",
+    "playwright_install_tool",
+    "playwright_run_script_tool",
+    "revoke_file_link",
+    "run_python_tool",
+    "run_shell_tool",
+    "shell_send",
+    "shell_start",
+    "job_start",
+    "job_retry",
+}
+
+READ_ONLY_OPEN_WORLD_TOOL_NAMES = {
+    "browser_get_text_tool",
+    "remote_browser_get_text_tool",
+}
+
+NON_DESTRUCTIVE_MUTATION_TOOL_NAMES = {
+    "create_file_link",
+    "git_clone_tool",
+    "git_commit_tool",
+    "remote_invite",
+}
+
+
+def _install_tool_annotations(mcp: FastMCP) -> None:
+    """Attach conservative, semantically accurate MCP safety annotations."""
+
+    for name, tool in mcp._tool_manager._tools.items():  # noqa: SLF001
+        existing_read_only = bool(
+            tool.annotations and tool.annotations.readOnlyHint
+        )
+        read_only = existing_read_only or name in READ_ONLY_OPEN_WORLD_TOOL_NAMES
+        open_world = name.startswith("remote_") or name in OPEN_WORLD_TOOL_NAMES
         tool.annotations = ToolAnnotations(
-            readOnlyHint=False,
-            destructiveHint=False,
-            idempotentHint=False,
-            openWorldHint=False,
+            readOnlyHint=read_only,
+            destructiveHint=not (
+                read_only or name in NON_DESTRUCTIVE_MUTATION_TOOL_NAMES
+            ),
+            idempotentHint=read_only,
+            openWorldHint=open_world,
         )
 
 
@@ -1666,6 +1727,6 @@ def build_mcp() -> FastMCP:
         return await _remote_call(machine, "playwright_run_script_tool", {"script": script, "cwd": cwd, "timeout_s": timeout_s}, timeout_s)
 
     _remove_remote_tools_when_disabled(mcp)
-    _install_full_container_auto_approval_hints(mcp)
+    _install_tool_annotations(mcp)
     _install_mcp_tool_watchdogs(mcp)
     return mcp

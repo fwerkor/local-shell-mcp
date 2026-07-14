@@ -99,6 +99,11 @@ def run_http() -> None:
 
 def main(argv: list[str] | None = None) -> None:
     argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == "job-runner":
+        from .jobs import run_job_runner_cli
+
+        run_job_runner_cli(argv[1:])
+        return
     if argv and argv[0] == "worker":
         from .remote import run_worker_cli
 

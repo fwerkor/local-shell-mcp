@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
 import hashlib
+import json
 import os
 import shutil
 import tarfile
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
 
-from .fs_ops import relative_display, resolve_path, temp_dir
+from .fs_ops import _path_lock, _path_locks, relative_display, resolve_path, temp_dir
+from .settings import get_settings
 
 DEFAULT_TRANSFER_CHUNK_BYTES = 1024 * 1024
 MAX_TRANSFER_CHUNK_BYTES = 4 * 1024 * 1024
@@ -89,30 +93,75 @@ def transfer_read_chunk(path: str, offset: int = 0, chunk_size: int | None = Non
 
 def _transfer_temp_path(dst: Path, transfer_id: str) -> Path:
     safe_id = "".join(ch for ch in transfer_id if ch.isalnum() or ch in "-_")
-    if not safe_id:
-        raise ValueError("transfer_id is empty")
+    if not safe_id or safe_id != transfer_id:
+        raise ValueError("transfer_id contains unsupported characters")
     return dst.parent / f".{dst.name}.{_TRANSFER_TMP_MARKER}-{safe_id}.tmp"
 
 
-def transfer_begin_write(path: str, overwrite: bool = True, expected_bytes: int | None = None) -> dict[str, Any]:
-    dst = resolve_path(path)
-    if dst.exists() and dst.is_dir():
-        raise IsADirectoryError(str(dst))
-    if dst.exists() and not overwrite:
-        raise FileExistsError(str(dst))
-    if expected_bytes is not None and int(expected_bytes) < 0:
+def _transfer_metadata_path(tmp: Path) -> Path:
+    return tmp.with_name(tmp.name + ".json")
+
+
+def _write_transfer_metadata(tmp: Path, metadata: dict[str, Any]) -> None:
+    path = _transfer_metadata_path(tmp)
+    temporary = path.with_name(path.name + f".{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8"
+        )
+        with contextlib.suppress(OSError):
+            temporary.chmod(0o600)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _read_transfer_metadata(tmp: Path) -> dict[str, Any]:
+    path = _transfer_metadata_path(tmp)
+    try:
+        metadata = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"transfer metadata is missing or invalid: {path}") from exc
+    if not isinstance(metadata, dict):
+        raise ValueError(f"transfer metadata is invalid: {path}")
+    return metadata
+
+
+def transfer_begin_write(
+    path: str, overwrite: bool = True, expected_bytes: int | None = None
+) -> dict[str, Any]:
+    dst = resolve_path(path, follow_final_symlink=False)
+    expected = None if expected_bytes is None else int(expected_bytes)
+    if expected is not None and expected < 0:
         raise ValueError("expected_bytes must be >= 0")
     dst.parent.mkdir(parents=True, exist_ok=True)
-    transfer_id = uuid.uuid4().hex
-    tmp = _transfer_temp_path(dst, transfer_id)
-    with tmp.open("wb"):
-        pass
+    with _path_lock(dst):
+        if os.path.lexists(dst) and dst.is_dir() and not dst.is_symlink():
+            raise IsADirectoryError(str(dst))
+        if os.path.lexists(dst) and not overwrite:
+            raise FileExistsError(str(dst))
+        transfer_id = uuid.uuid4().hex
+        tmp = _transfer_temp_path(dst, transfer_id)
+        with tmp.open("xb"):
+            pass
+        try:
+            _write_transfer_metadata(
+                tmp,
+                {
+                    "destination": str(dst),
+                    "overwrite": bool(overwrite),
+                    "expected_bytes": expected,
+                },
+            )
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            raise
     return {
         "path": relative_display(dst),
         "temp_path": relative_display(tmp),
         "transfer_id": transfer_id,
-        "created": not dst.exists(),
-        "expected_bytes": expected_bytes,
+        "created": not os.path.lexists(dst),
+        "expected_bytes": expected,
     }
 
 
@@ -123,10 +172,8 @@ def transfer_write_chunk(
     data_b64: str,
     expected_sha256: str | None = None,
 ) -> dict[str, Any]:
-    dst = resolve_path(path)
+    dst = resolve_path(path, follow_final_symlink=False)
     tmp = _transfer_temp_path(dst, transfer_id)
-    if not tmp.exists():
-        raise FileNotFoundError(str(tmp))
     start = int(offset)
     if start < 0:
         raise ValueError("offset must be >= 0")
@@ -137,9 +184,17 @@ def transfer_write_chunk(
     digest = hashlib.sha256(data).hexdigest()
     if expected_sha256 and digest != expected_sha256:
         raise ValueError("chunk sha256 mismatch")
-    with tmp.open("r+b") as fh:
-        fh.seek(start)
-        fh.write(data)
+    with _path_lock(tmp):
+        if not tmp.exists():
+            raise FileNotFoundError(str(tmp))
+        metadata = _read_transfer_metadata(tmp)
+        expected = metadata.get("expected_bytes")
+        if expected is not None and start + len(data) > int(expected):
+            raise ValueError("chunk exceeds expected transfer size")
+        with tmp.open("r+b") as fh:
+            fh.seek(start)
+            fh.write(data)
+            fh.flush()
     return {
         "path": relative_display(dst),
         "temp_path": relative_display(tmp),
@@ -155,17 +210,30 @@ def transfer_finish_write(
     expected_bytes: int | None = None,
     expected_sha256: str | None = None,
 ) -> dict[str, Any]:
-    dst = resolve_path(path)
+    dst = resolve_path(path, follow_final_symlink=False)
     tmp = _transfer_temp_path(dst, transfer_id)
-    if not tmp.exists():
-        raise FileNotFoundError(str(tmp))
-    size = tmp.stat().st_size
-    if expected_bytes is not None and size != int(expected_bytes):
-        raise ValueError(f"size mismatch: expected {expected_bytes}, got {size}")
-    digest = _sha256_file(tmp) if expected_sha256 else None
-    if expected_sha256 and digest != expected_sha256:
-        raise ValueError("file sha256 mismatch")
-    os.replace(tmp, dst)
+    metadata_path = _transfer_metadata_path(tmp)
+    with _path_locks([dst, tmp]):
+        if not tmp.exists():
+            raise FileNotFoundError(str(tmp))
+        metadata = _read_transfer_metadata(tmp)
+        expected = (
+            int(expected_bytes)
+            if expected_bytes is not None
+            else metadata.get("expected_bytes")
+        )
+        if expected is not None:
+            expected = int(expected)
+        size = tmp.stat().st_size
+        if expected is not None and size != expected:
+            raise ValueError(f"size mismatch: expected {expected}, got {size}")
+        digest = _sha256_file(tmp) if expected_sha256 else None
+        if expected_sha256 and digest != expected_sha256:
+            raise ValueError("file sha256 mismatch")
+        if not bool(metadata.get("overwrite", True)) and os.path.lexists(dst):
+            raise FileExistsError(str(dst))
+        os.replace(tmp, dst)
+        metadata_path.unlink(missing_ok=True)
     return {
         "path": relative_display(dst),
         "bytes": size,
@@ -175,13 +243,20 @@ def transfer_finish_write(
 
 
 def transfer_abort_write(path: str, transfer_id: str) -> dict[str, Any]:
-    dst = resolve_path(path)
+    dst = resolve_path(path, follow_final_symlink=False)
     tmp = _transfer_temp_path(dst, transfer_id)
+    metadata_path = _transfer_metadata_path(tmp)
     deleted = False
-    if tmp.exists():
-        tmp.unlink()
-        deleted = True
-    return {"path": relative_display(dst), "temp_path": relative_display(tmp), "deleted": deleted}
+    with _path_lock(tmp):
+        if tmp.exists():
+            tmp.unlink()
+            deleted = True
+        metadata_path.unlink(missing_ok=True)
+    return {
+        "path": relative_display(dst),
+        "temp_path": relative_display(tmp),
+        "deleted": deleted,
+    }
 
 
 def transfer_alloc_temp_path(suffix: str = ".bin") -> dict[str, Any]:
@@ -222,21 +297,50 @@ def transfer_pack_dir(path: str, compression: str = "gz") -> dict[str, Any]:
 
 
 def _safe_members(tar: tarfile.TarFile, dst: Path) -> list[tarfile.TarInfo]:
+    settings = get_settings()
     base = dst.resolve(strict=False)
-    members: list[tarfile.TarInfo] = []
-    for member in tar.getmembers():
+    members = tar.getmembers()
+    max_entries = max(1, settings.max_transfer_archive_entries)
+    if len(members) > max_entries:
+        raise ValueError(
+            f"archive contains {len(members)} entries; max is {max_entries}"
+        )
+    total_bytes = 0
+    seen_paths: set[str] = set()
+    safe: list[tarfile.TarInfo] = []
+    for member in members:
         member_path = Path(member.name)
         if member_path.is_absolute() or ".." in member_path.parts:
             raise ValueError(f"unsafe archive member path: {member.name}")
         if member.issym() or member.islnk() or member.isdev():
             raise ValueError(f"unsupported archive member type: {member.name}")
+        if getattr(member, "sparse", None):
+            raise ValueError(f"sparse archive members are not supported: {member.name}")
+        normalized_name = str(member_path)
+        if normalized_name in seen_paths:
+            raise ValueError(f"duplicate archive member path: {member.name}")
+        seen_paths.add(normalized_name)
+        if member.isfile():
+            total_bytes += max(0, int(member.size))
+            max_bytes = max(1, settings.max_transfer_unpacked_bytes)
+            if total_bytes > max_bytes:
+                raise ValueError(
+                    f"archive expands to more than {max_bytes} bytes"
+                )
         target = (dst / member.name).resolve(strict=False)
         try:
             target.relative_to(base)
         except ValueError as exc:
             raise ValueError(f"archive member escapes destination: {member.name}") from exc
-        members.append(member)
-    return members
+        safe.append(member)
+    return safe
+
+
+def _remove_existing_path(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
 
 
 def transfer_unpack_archive(
@@ -248,43 +352,77 @@ def transfer_unpack_archive(
     archive = resolve_path(archive_path, must_exist=True)
     if not archive.is_file():
         raise FileNotFoundError(str(archive))
-    dst = resolve_path(dst_path)
-    if dst.exists():
-        if dst.is_file():
-            if not overwrite:
-                raise FileExistsError(str(dst))
-            dst.unlink()
-        elif dst.is_dir():
-            if not overwrite and any(dst.iterdir()):
-                raise FileExistsError(f"destination directory is not empty: {dst}")
-            if overwrite:
-                shutil.rmtree(dst)
-        else:
-            raise FileExistsError(str(dst))
-    dst.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(archive, "r:*") as tar:
-        members = _safe_members(tar, dst)
-        for member in members:
-            target = dst / member.name
-            if member.isdir():
-                target.mkdir(parents=True, exist_ok=True)
-                continue
-            if member.isfile():
-                target.parent.mkdir(parents=True, exist_ok=True)
-                source = tar.extractfile(member)
-                if source is None:
-                    raise ValueError(f"archive member has no file data: {member.name}")
-                with source, target.open("wb") as out:
-                    shutil.copyfileobj(source, out)
-                os.chmod(target, member.mode & 0o777)
-                continue
-            raise ValueError(f"unsupported archive member type: {member.name}")
-    if cleanup_archive:
-        archive.unlink(missing_ok=True)
-    return {
-        "path": relative_display(dst),
-        "archive_path": relative_display(archive),
-        "entries": len(members),
-        "completed": True,
-        "archive_deleted": cleanup_archive,
-    }
+    dst = resolve_path(dst_path, follow_final_symlink=False)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(
+        tempfile.mkdtemp(prefix=f".{dst.name}.unpack-", dir=str(dst.parent))
+    )
+    backup: Path | None = None
+    members: list[tarfile.TarInfo] = []
+    committed = False
+    try:
+        with tarfile.open(archive, "r:*") as tar:
+            members = _safe_members(tar, staging)
+            for member in members:
+                target = staging / member.name
+                if member.isdir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                if member.isfile():
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    source = tar.extractfile(member)
+                    if source is None:
+                        raise ValueError(
+                            f"archive member has no file data: {member.name}"
+                        )
+                    with source, target.open("xb") as out:
+                        shutil.copyfileobj(source, out)
+                    os.chmod(target, member.mode & 0o777)
+                    continue
+                raise ValueError(f"unsupported archive member type: {member.name}")
+
+        with _path_lock(dst):
+            exists = os.path.lexists(dst)
+            if (
+                exists
+                and not overwrite
+                and not (
+                    dst.is_dir()
+                    and not dst.is_symlink()
+                    and not any(dst.iterdir())
+                )
+            ):
+                raise FileExistsError(f"destination already exists: {dst}")
+            if exists:
+                backup = dst.parent / f".{dst.name}.backup-{uuid.uuid4().hex}"
+                os.replace(dst, backup)
+            try:
+                os.replace(staging, dst)
+                committed = True
+            except Exception:
+                if backup is not None and os.path.lexists(backup):
+                    os.replace(backup, dst)
+                    backup = None
+                raise
+
+        if backup is not None and os.path.lexists(backup):
+            _remove_existing_path(backup)
+        if cleanup_archive:
+            archive.unlink(missing_ok=True)
+        return {
+            "path": relative_display(dst),
+            "archive_path": relative_display(archive),
+            "entries": len(members),
+            "completed": True,
+            "archive_deleted": cleanup_archive,
+        }
+    finally:
+        if not committed and staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+        if backup is not None and os.path.lexists(backup):
+            if not os.path.lexists(dst):
+                with contextlib.suppress(OSError):
+                    os.replace(backup, dst)
+            if os.path.lexists(backup):
+                with contextlib.suppress(OSError):
+                    _remove_existing_path(backup)

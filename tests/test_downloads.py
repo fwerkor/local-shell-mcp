@@ -1,3 +1,4 @@
+import os
 import time
 
 import pytest
@@ -65,3 +66,73 @@ async def test_file_link_tools_are_registered(tmp_path, monkeypatch):
     names = {tool.name for tool in await build_mcp().list_tools()}
 
     assert {"create_file_link", "list_file_links", "revoke_file_link"} <= names
+
+
+def test_share_link_cannot_be_retargeted_outside_workspace(tmp_path, monkeypatch):
+    _reset(tmp_path, monkeypatch)
+    source = tmp_path / "hello.txt"
+    source.write_text("hello", encoding="utf-8")
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.txt"
+    outside.write_text("outside-secret", encoding="utf-8")
+    link = create_share_link("hello.txt", ttl_s=60)
+
+    source.unlink()
+    try:
+        source.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlinks are not available in this environment")
+
+    response = TestClient(Starlette(routes=download_routes())).get(link["url"])
+
+    assert response.status_code == 404
+    assert "outside-secret" not in response.text
+
+
+def test_download_audit_does_not_store_bearer_token(tmp_path, monkeypatch):
+    _reset(tmp_path, monkeypatch)
+    audit_path = tmp_path / "audit.jsonl"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUDIT_LOG_PATH", str(audit_path))
+    get_settings.cache_clear()
+    (tmp_path / "hello.txt").write_text("hello", encoding="utf-8")
+
+    link = create_share_link("hello.txt", ttl_s=60)
+    TestClient(Starlette(routes=download_routes())).get(link["url"])
+    raw = audit_path.read_text(encoding="utf-8")
+
+    assert link["token"] not in raw
+    assert "token_id" in raw
+    if os.name != "nt":
+        assert audit_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_share_link_is_bound_to_original_file_identity(tmp_path, monkeypatch):
+    _reset(tmp_path, monkeypatch)
+    source = tmp_path / "hello.txt"
+    source.write_text("original", encoding="utf-8")
+    link = create_share_link("hello.txt", ttl_s=60)
+
+    replacement = tmp_path / "replacement.txt"
+    replacement.write_text("replacement-secret", encoding="utf-8")
+    os.replace(replacement, source)
+
+    response = TestClient(Starlette(routes=download_routes())).get(link["url"])
+
+    assert response.status_code == 410
+    assert response.json()["error"] == "download_changed"
+    assert "replacement-secret" not in response.text
+
+
+def test_download_filename_strips_header_control_characters(tmp_path, monkeypatch):
+    _reset(tmp_path, monkeypatch)
+    (tmp_path / "hello.txt").write_text("hello", encoding="utf-8")
+    link = create_share_link(
+        "hello.txt", ttl_s=60, filename="safe\r\nInjected: value.txt"
+    )
+
+    response = TestClient(Starlette(routes=download_routes())).get(link["url"])
+    disposition = response.headers["content-disposition"]
+
+    assert response.status_code == 200
+    assert "\r" not in disposition
+    assert "\n" not in disposition
+    assert "Injected: value.txt" in disposition

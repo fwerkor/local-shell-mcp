@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import mimetypes
 import os
 import secrets
+import stat
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
+from urllib.parse import quote
 
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, Response
+from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from .audit import audit
@@ -18,7 +21,7 @@ from .fs_ops import relative_display, resolve_path
 from .settings import get_settings
 
 _DOWNLOAD_PREFIX = "/download"
-_DOWNLOAD_STORE_VERSION = 1
+_DOWNLOAD_STORE_VERSION = 2
 _STORE_LOCK = threading.RLock()
 
 
@@ -47,7 +50,14 @@ def _read_store_locked() -> dict[str, Any]:
         return _empty_store()
     if not isinstance(data, dict) or not isinstance(data.get("links"), dict):
         return _empty_store()
-    data.setdefault("version", _DOWNLOAD_STORE_VERSION)
+    if data.get("version") != _DOWNLOAD_STORE_VERSION:
+        audit(
+            "download_store_version_reset",
+            path=str(path),
+            stored_version=data.get("version"),
+            expected_version=_DOWNLOAD_STORE_VERSION,
+        )
+        return _empty_store()
     return data
 
 
@@ -56,6 +66,8 @@ def _write_store_locked(store: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".tmp-{os.getpid()}-{secrets.token_hex(4)}")
     tmp.write_text(json.dumps(store, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    with contextlib.suppress(OSError):
+        tmp.chmod(0o600)
     os.replace(tmp, path)
 
 
@@ -89,8 +101,12 @@ def _coerce_max_downloads(max_downloads: int | None) -> int:
 
 def _safe_filename(filename: str | None, source: Path) -> str:
     candidate = Path(filename).name if filename else source.name
-    candidate = candidate.strip().replace("\x00", "")
-    return candidate or "download"
+    candidate = "".join(
+        character
+        for character in candidate.strip()
+        if ord(character) >= 32 and ord(character) != 127
+    )
+    return candidate[:255] or "download"
 
 
 def _link_summary(token: str, link: dict[str, Any]) -> dict[str, Any]:
@@ -106,6 +122,12 @@ def _link_summary(token: str, link: dict[str, Any]) -> dict[str, Any]:
         "downloads": link.get("downloads", 0),
         "max_downloads": link.get("max_downloads", 0),
     }
+
+
+def _token_id(token: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
 
 
 def _prune_locked(store: dict[str, Any], now: float | None = None) -> bool:
@@ -133,10 +155,13 @@ def create_share_link(
         raise PermissionError("disabled")
 
     resolved = resolve_path(path, must_exist=True)
-    if not resolved.is_file():
-        raise ValueError(f"Not a regular file: {path}")
+    try:
+        with _open_download_file(resolved) as handle:
+            source_stat = os.fstat(handle.fileno())
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Not a regular file: {path}") from exc
 
-    size = resolved.stat().st_size
+    size = source_stat.st_size
     if settings.file_download_max_file_bytes > 0 and size > settings.file_download_max_file_bytes:
         raise ValueError(f"File is too large: {size}")
 
@@ -149,6 +174,8 @@ def create_share_link(
         "display_path": relative_display(resolved),
         "filename": _safe_filename(filename, resolved),
         "bytes": size,
+        "device": int(source_stat.st_dev),
+        "inode": int(source_stat.st_ino),
         "created_at": now,
         "expires_at": now + ttl,
         "downloads": 0,
@@ -161,7 +188,12 @@ def create_share_link(
         store["links"][token] = link
         _write_store_locked(store)
 
-    audit("download_link_created", path=link["display_path"], token=token, expires_at=link["expires_at"])
+    audit(
+        "download_link_created",
+        path=link["display_path"],
+        token_id=_token_id(token),
+        expires_at=link["expires_at"],
+    )
     return _link_summary(token, link)
 
 
@@ -183,7 +215,7 @@ def revoke_share_link(token: str) -> dict[str, Any]:
         if removed is not None:
             _write_store_locked(store)
     if removed is not None:
-        audit("download_link_revoked", path=removed.get("display_path"), token=token)
+        audit("download_link_revoked", path=removed.get("display_path"), token_id=_token_id(token))
     return {"revoked": removed is not None, "token": token}
 
 
@@ -191,7 +223,26 @@ def _error_response(status_code: int, error: str, message: str) -> JSONResponse:
     return JSONResponse({"ok": False, "error": error, "message": message}, status_code=status_code)
 
 
-def _claim_download(token: str, *, consume: bool) -> tuple[Path, dict[str, Any]] | Response:
+def _open_download_file(path: Path) -> BinaryIO:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags)
+    try:
+        file_stat = os.fstat(descriptor)
+        if not stat.S_ISREG(file_stat.st_mode):
+            raise ValueError("download target is not a regular file")
+        return os.fdopen(descriptor, "rb")
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def _claim_download(
+    token: str, *, consume: bool
+) -> tuple[BinaryIO, Path, dict[str, Any]] | Response:
     settings = get_settings()
     if not settings.file_download_enabled:
         return _error_response(404, "download_disabled", "File downloads are disabled")
@@ -215,22 +266,70 @@ def _claim_download(token: str, *, consume: bool) -> tuple[Path, dict[str, Any]]
             _write_store_locked(store)
             return _error_response(410, "download_exhausted", "Link has reached its use limit")
 
-        path = Path(str(link.get("path", ""))).resolve(strict=False)
-        if not path.exists() or not path.is_file():
+        try:
+            path = resolve_path(str(link.get("path", "")), must_exist=True)
+            handle = _open_download_file(path)
+        except (FileNotFoundError, OSError, PermissionError, ValueError):
             store.get("links", {}).pop(token, None)
             _write_store_locked(store)
             return _error_response(404, "download_missing", "The target file no longer exists")
 
-        if settings.file_download_max_file_bytes > 0 and path.stat().st_size > settings.file_download_max_file_bytes:
-            return _error_response(403, "download_too_large", "The target file exceeds the configured size limit")
+        opened_stat = os.fstat(handle.fileno())
+        if (
+            int(link.get("device", -1)) != int(opened_stat.st_dev)
+            or int(link.get("inode", -1)) != int(opened_stat.st_ino)
+        ):
+            handle.close()
+            store.get("links", {}).pop(token, None)
+            _write_store_locked(store)
+            return _error_response(
+                410,
+                "download_changed",
+                "The target file changed after the link was created",
+            )
+
+        size = opened_stat.st_size
+        if (
+            settings.file_download_max_file_bytes > 0
+            and size > settings.file_download_max_file_bytes
+        ):
+            handle.close()
+            return _error_response(
+                403,
+                "download_too_large",
+                "The target file exceeds the configured size limit",
+            )
 
         if consume:
             link["downloads"] = downloads + 1
             link["last_download_at"] = now
             store["links"][token] = link
-            _write_store_locked(store)
+            try:
+                _write_store_locked(store)
+            except Exception:
+                handle.close()
+                raise
 
-    return path, link
+    return handle, path, link
+
+
+def _content_disposition(filename: str) -> str:
+    fallback = (
+        filename.encode("ascii", errors="ignore")
+        .decode("ascii")
+        .replace('"', "")
+        or "download"
+    )
+    encoded = quote(filename, safe="")
+    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
+
+
+def _file_chunks(handle: BinaryIO, chunk_size: int = 64 * 1024):  # noqa: ANN201
+    try:
+        while chunk := handle.read(chunk_size):
+            yield chunk
+    finally:
+        handle.close()
 
 
 async def download_endpoint(request: Request) -> Response:
@@ -239,15 +338,27 @@ async def download_endpoint(request: Request) -> Response:
     if isinstance(claimed, Response):
         return claimed
 
-    path, link = claimed
-    media_type = mimetypes.guess_type(link.get("filename") or path.name)[0] or "application/octet-stream"
-    audit("download_link_served", path=link.get("display_path"), token=token, method=request.method)
-    return FileResponse(
-        path,
-        media_type=media_type,
-        filename=link.get("filename") or path.name,
-        headers={"Cache-Control": "private, no-store"},
+    handle, path, link = claimed
+    media_type = (
+        mimetypes.guess_type(link.get("filename") or path.name)[0]
+        or "application/octet-stream"
     )
+    filename = link.get("filename") or path.name
+    headers = {
+        "Cache-Control": "private, no-store",
+        "Content-Disposition": _content_disposition(filename),
+        "Content-Length": str(os.fstat(handle.fileno()).st_size),
+    }
+    audit(
+        "download_link_served",
+        path=link.get("display_path"),
+        token_id=_token_id(token),
+        method=request.method,
+    )
+    if request.method.upper() == "HEAD":
+        handle.close()
+        return Response(status_code=200, media_type=media_type, headers=headers)
+    return StreamingResponse(_file_chunks(handle), media_type=media_type, headers=headers)
 
 
 def download_routes() -> list[Route]:

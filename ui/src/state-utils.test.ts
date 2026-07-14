@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { clampIndex, nextValue, updateTodo } from "./state-utils"
+import { clampIndex, nextValue, payloadMatches, scopedItems, updateTodo } from "./state-utils"
 
 describe("clampIndex", () => {
   test("never produces a negative selection for an empty list", () => {
@@ -24,5 +24,20 @@ describe("todo mutations", () => {
   test("applies updates to the latest matching item", () => {
     expect(updateTodo(todos, "a", (todo) => ({ content: `${todo.content}!` }))[0]!.content).toBe("A!")
     expect(updateTodo(todos, "missing", { content: "ignored" })).toEqual(todos)
+  })
+})
+
+
+describe("machine-scoped state", () => {
+  test("hides items from a previous machine immediately", () => {
+    expect(scopedItems("worker-a", "worker-b", ["stale"])).toEqual([])
+    expect(scopedItems("worker-a", "worker-a", ["current"])).toEqual(["current"])
+  })
+
+  test("accepts file payloads only for the current machine and path", () => {
+    const payload = { machine: "worker-a", path: "src" }
+    expect(payloadMatches(payload, "worker-a", "src")).toBe(true)
+    expect(payloadMatches(payload, "worker-b", "src")).toBe(false)
+    expect(payloadMatches(payload, "worker-a", ".")).toBe(false)
   })
 })

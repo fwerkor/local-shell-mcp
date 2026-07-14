@@ -182,7 +182,8 @@ async def test_run_shell_streams_and_bounds_large_output(tmp_path, monkeypatch):
 
     assert result.ok is True
     assert result.truncated is True
-    assert len(result.stdout.encode()) <= 500
+    assert len(result.stdout.encode()) == 1000
+    assert result.stderr == ""
 
 
 @pytest.mark.asyncio
@@ -221,3 +222,40 @@ async def test_send_shell_invokes_tmux_promptly(monkeypatch):
         (["send-keys", "-t", "session-1", "-l", "echo $HOME && Enter"], 10),
         (["send-keys", "-t", "session-1", "Enter"], 10),
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_shell_uses_unused_stderr_budget_for_stdout(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+
+    result = await run_shell(
+        python_shell_command('import sys; sys.stdout.write("x" * 1500)'),
+        timeout_s=5,
+        max_output_bytes=2000,
+    )
+
+    assert result.ok is True
+    assert result.truncated is False
+    assert len(result.stdout.encode()) == 1500
+    assert result.stderr == ""
+
+
+@pytest.mark.asyncio
+async def test_run_shell_shares_total_budget_between_streams(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+
+    result = await run_shell(
+        python_shell_command(
+            'import sys; sys.stdout.write("o" * 900); sys.stderr.write("e" * 900)'
+        ),
+        timeout_s=5,
+        max_output_bytes=1000,
+    )
+
+    assert result.ok is True
+    assert result.truncated is True
+    assert len(result.stdout.encode()) == 500
+    assert len(result.stderr.encode()) == 500
+    assert len(result.stdout.encode()) + len(result.stderr.encode()) == 1000
