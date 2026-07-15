@@ -8,7 +8,7 @@
     "build:web": "bun run scripts/build.ts",
     "compile:tui": "bun run build:tui",
     "typecheck": "bunx tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test --coverage"
   },
   "dependencies": {
     "@opentui/core": "0.4.3",

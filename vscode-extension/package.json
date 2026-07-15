@@ -127,7 +127,8 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package:vsix": "node scripts/package-vsix.cjs"
+    "package:vsix": "node scripts/package-vsix.cjs",
+    "test": "npm run compile && node --test test/*.test.cjs"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

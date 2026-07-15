@@ -7,7 +7,7 @@ import * as vscode from 'vscode';
 let output: vscode.OutputChannel;
 let serverProcess: cp.ChildProcessWithoutNullStreams | undefined;
 
-function waitForExit(proc: cp.ChildProcessWithoutNullStreams, timeoutMs: number): Promise<boolean> {
+export function waitForExit(proc: cp.ChildProcessWithoutNullStreams, timeoutMs: number): Promise<boolean> {
   if (proc.exitCode !== null || proc.signalCode !== null) {
     return Promise.resolve(true);
   }
@@ -23,44 +23,58 @@ function waitForExit(proc: cp.ChildProcessWithoutNullStreams, timeoutMs: number)
   });
 }
 
-function signalPosixProcessTree(proc: cp.ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
+export function signalPosixProcessTree(
+  proc: cp.ChildProcessWithoutNullStreams,
+  signal: NodeJS.Signals,
+  killProcess: typeof process.kill = process.kill,
+): void {
   if (!proc.pid) {
     proc.kill(signal);
     return;
   }
   try {
-    process.kill(-proc.pid, signal);
+    killProcess(-proc.pid, signal);
   } catch {
     proc.kill(signal);
   }
 }
 
-async function stopProcessTree(proc: cp.ChildProcessWithoutNullStreams): Promise<void> {
+type ExecFile = typeof cp.execFile;
+type WaitForExit = typeof waitForExit;
+type SignalPosixProcessTree = typeof signalPosixProcessTree;
+
+export async function stopProcessTree(
+  proc: cp.ChildProcessWithoutNullStreams,
+  platform: NodeJS.Platform = process.platform,
+  execFile: ExecFile = cp.execFile,
+  wait: WaitForExit = waitForExit,
+  signalTree: SignalPosixProcessTree = signalPosixProcessTree,
+): Promise<void> {
   if (proc.exitCode !== null || proc.signalCode !== null) {
     return;
   }
-  if (process.platform === 'win32' && proc.pid) {
+  if (platform === 'win32' && proc.pid) {
     await new Promise<void>((resolve) => {
-      cp.execFile('taskkill', ['/PID', String(proc.pid), '/T', '/F'], (error) => {
+      execFile('taskkill', ['/PID', String(proc.pid), '/T', '/F'], (error) => {
         if (error) {
           proc.kill();
         }
         resolve();
       });
     });
-    await waitForExit(proc, 2000);
+    await wait(proc, 2000);
     return;
   }
 
-  signalPosixProcessTree(proc, 'SIGTERM');
-  if (await waitForExit(proc, 2000)) {
+  signalTree(proc, 'SIGTERM');
+  if (await wait(proc, 2000)) {
     return;
   }
-  signalPosixProcessTree(proc, 'SIGKILL');
-  await waitForExit(proc, 1000);
+  signalTree(proc, 'SIGKILL');
+  await wait(proc, 1000);
 }
 
-interface ExtensionConfig {
+export interface ExtensionConfig {
   executablePath: string;
   host: string;
   port: number;
@@ -101,19 +115,19 @@ function getConfig(): ExtensionConfig {
   };
 }
 
-function normalizeBaseUrl(value: string): string {
+export function normalizeBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, '');
 }
 
-function localBaseUrl(config: ExtensionConfig): string {
+export function localBaseUrl(config: ExtensionConfig): string {
   return `http://${config.host}:${config.port}`;
 }
 
-function mcpBaseUrl(config: ExtensionConfig): string {
+export function mcpBaseUrl(config: ExtensionConfig): string {
   return config.publicBaseUrl || localBaseUrl(config);
 }
 
-function mcpUrl(config: ExtensionConfig): string {
+export function mcpUrl(config: ExtensionConfig): string {
   return `${mcpBaseUrl(config)}/mcp`;
 }
 
@@ -128,7 +142,7 @@ async function getOrCreateJwtSecret(context: vscode.ExtensionContext): Promise<s
   return generated;
 }
 
-function stringifyExtraEnv(extraEnv: Record<string, unknown>): Record<string, string> {
+export function stringifyExtraEnv(extraEnv: Record<string, unknown>): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(extraEnv)) {
     if (!key || value === undefined || value === null) {
