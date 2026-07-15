@@ -384,7 +384,8 @@ def test_resolve_spawn_and_tui_cli_branches(tmp_path, monkeypatch):
 
     monkeypatch.delenv("LOCAL_SHELL_MCP_UI_TUI_COMMAND")
     get_settings.cache_clear()
-    candidate = tmp_path / "local-shell-mcp-tui"
+    sidecar_name = "local-shell-mcp-tui.exe" if ui.os.name == "nt" else "local-shell-mcp-tui"
+    candidate = tmp_path / sidecar_name
     candidate.write_text("x", encoding="utf-8")
     monkeypatch.setattr(ui.sys, "executable", str(tmp_path / "python"))
     assert ui.resolve_tui_command() == [str(candidate)]
