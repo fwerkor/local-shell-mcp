@@ -116,6 +116,11 @@ def test_job_runner_filters_service_environment(tmp_path, monkeypatch):
         return FakeProcess()
 
     monkeypatch.setattr(jobs_module.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        jobs_module,
+        "get_settings",
+        lambda: (_ for _ in ()).throw(AssertionError("runner must not reload settings")),
+    )
     with pytest.raises(SystemExit) as raised:
         jobs_module.run_job_runner_cli(
             [
