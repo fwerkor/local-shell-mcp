@@ -538,5 +538,8 @@ async def test_wallpaper_retries_after_transient_failure(tmp_path, monkeypatch):
 def test_vscode_extension_uses_posix_process_group_shutdown():
     source = Path("vscode-extension/src/extension.ts").read_text(encoding="utf-8")
     assert "detached: process.platform !== 'win32'" in source
-    assert "process.kill(-proc.pid, signal)" in source
-    assert "await waitForExit(proc, 2000)" in source
+    assert "killProcess(-proc.pid, signal)" in source
+    assert "await wait(proc, 2000)" in source
+    assert '"test": "npm run compile && node --test test/*.test.cjs"' in Path(
+        "vscode-extension/package.json"
+    ).read_text(encoding="utf-8")

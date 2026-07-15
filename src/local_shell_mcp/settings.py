@@ -487,7 +487,7 @@ if _PYDANTIC_AVAILABLE:
             return self.model_copy(update=updates)
 
 else:
-    from dataclasses import asdict, dataclass, field, fields, replace
+    from dataclasses import InitVar, asdict, dataclass, field, fields, replace
 
     def _env_bool(value: str) -> bool:
         return value.strip().lower() in {"1", "true", "yes", "on"}
@@ -622,16 +622,20 @@ else:
                 ".git/config",
             ]
         )
+        _load_environment: InitVar[bool] = True
 
-        def __post_init__(self) -> None:
-            for item in fields(self):
-                env_name = "LOCAL_SHELL_MCP_" + item.name.upper()
-                if env_name in os.environ:
-                    setattr(
-                        self,
-                        item.name,
-                        _coerce_env_value(os.environ[env_name], getattr(self, item.name)),
-                    )
+        def __post_init__(self, _load_environment: bool) -> None:
+            if _load_environment:
+                for item in fields(self):
+                    env_name = "LOCAL_SHELL_MCP_" + item.name.upper()
+                    if env_name in os.environ:
+                        setattr(
+                            self,
+                            item.name,
+                            _coerce_env_value(
+                                os.environ[env_name], getattr(self, item.name)
+                            ),
+                        )
             for attr in ("workspace_root", "audit_log_path", "state_dir", "agent_config_dir"):
                 setattr(
                     self,
@@ -655,12 +659,12 @@ else:
             return data
 
         def model_copy(self, update: dict[str, Any] | None = None) -> Settings:
-            return replace(self, **(update or {}))
+            return replace(self, _load_environment=False, **(update or {}))
 
         def apply_yaml(self, path: Path) -> Settings:
             merged = self.model_dump()
             merged.update(_flatten_yaml(path))
-            return Settings(**merged)
+            return Settings(**merged, _load_environment=False)
 
         def with_workspace_relative_defaults(self) -> Settings:
             updates = {}

@@ -2,6 +2,7 @@
 .vscode-test/**
 node_modules/**
 src/**
-*.map
+**/*.map
+test/**
 tsconfig.json
 package-lock.json
