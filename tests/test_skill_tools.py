@@ -68,6 +68,18 @@ def test_skill_load_returns_instructions_and_related_paths(tmp_path, monkeypatch
     assert loaded["related_files"] == ["checklist.md"]
 
 
+def test_mcp_instructions_describe_the_fixed_skill_flow(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+
+    instructions = build_mcp().instructions
+
+    assert "skills_list first" in instructions
+    assert "skill_load with that exact name" in instructions
+    assert "skill_read_file only when" in instructions
+    assert "do not expect per-Skill MCP tools" in instructions
+    assert "activate_skill__" not in instructions
+
+
 @pytest.mark.asyncio
 async def test_skill_changes_are_visible_without_mcp_tool_list_changes(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)

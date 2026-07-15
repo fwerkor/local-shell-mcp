@@ -185,6 +185,13 @@ OPAQUE_AUDIT_TOOL_ARGS = {
     "script",
 }
 MAX_AUDIT_TOOL_ARG_STRING = 500
+MCP_INSTRUCTIONS = (
+    "When a task may benefit from an installed Agent Skill, call skills_list first "
+    "to discover the exact Skill name and description. Before following a Skill's "
+    "workflow, call skill_load with that exact name. Call skill_read_file only when "
+    "a related file returned by skill_load is needed. Skills use this fixed tool "
+    "surface; do not expect per-Skill MCP tools."
+)
 
 
 class PublicToolTimeoutError(TimeoutError):
@@ -825,7 +832,11 @@ def _read_audit_tail_entries(lines: int = 100) -> dict:
 
 def build_mcp() -> FastMCP:
     settings = get_settings()
-    mcp = FastMCP("local-shell-mcp", transport_security=_transport_security_settings())
+    mcp = FastMCP(
+        "local-shell-mcp",
+        instructions=MCP_INSTRUCTIONS,
+        transport_security=_transport_security_settings(),
+    )
     read_only_tool = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
     read_only_meta = _public_read_meta()
     shell_read_meta = _oauth_meta(["shell:read"])
