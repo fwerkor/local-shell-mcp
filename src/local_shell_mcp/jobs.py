@@ -211,8 +211,8 @@ def _new_job_id() -> str:
 
 
 def _shell_safe_name(value: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9_.-]", "-", value.strip())
-    return cleaned[:48] or "job"
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]", "-", value.strip())[:48].strip(".-")
+    return cleaned or "job"
 
 
 def _active_session_ids(shells: dict[str, Any]) -> set[str]:
