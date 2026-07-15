@@ -99,16 +99,17 @@ async def main() -> None:
             print(f"{path}: {response.status_code}")
             response.raise_for_status()
 
-    tools = await list_tools(mcp_url)
-    print(f"unauthenticated initialize/list_tools: ok ({len(tools)} tools)")
-    print("first tools:", ", ".join(tools[:8]))
-
     if args.pin:
         token = await oauth_token(base_url, args.pin)
         tools = await list_tools(mcp_url, token)
         print(f"authenticated initialize/list_tools: ok ({len(tools)} tools)")
+        print("first tools:", ", ".join(tools[:8]))
         ok = await call_environment_info(mcp_url, token)
         print(f"authenticated environment_info call: {'ok' if ok else 'failed'}")
+    else:
+        tools = await list_tools(mcp_url)
+        print(f"unauthenticated initialize/list_tools: ok ({len(tools)} tools)")
+        print("first tools:", ", ".join(tools[:8]))
 
 
 if __name__ == "__main__":
