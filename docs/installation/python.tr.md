@@ -31,7 +31,6 @@ Endpoint: https://your-host.example.com/mcp
 
 - `environment_info` Runtime ayarlarını ve workspace’i doğrular.
 - `tree_view` görünen dosyaları doğrular.
-- `git_status_tool` repository bağlamını doğrular.
 - `run_shell_tool` komut ortamını doğrular.
 
 ## Notlar

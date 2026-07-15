@@ -66,7 +66,7 @@ Every runtime launches the same server code and exposes the same MCP tool famili
 - Browser automation through Playwright.
 - Audit log and task-state tools.
 - Tokenized file links.
-- Optional remote-worker lifecycle and remote tools.
+- Optional remote-worker lifecycle and machine-routed tools.
 
 The difference is not the abstract API. The difference is the **operating environment** behind that API.
 

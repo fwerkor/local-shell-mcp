@@ -31,7 +31,6 @@ Endpoint: https://your-host.example.com/mcp
 
 - `environment_info` xác nhận cấu hình Runtime và workspace.
 - `tree_view` xác nhận các tệp nhìn thấy được.
-- `git_status_tool` xác nhận ngữ cảnh repository.
 - `run_shell_tool` xác nhận môi trường lệnh.
 
 ## Ghi chú

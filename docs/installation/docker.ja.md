@@ -31,7 +31,6 @@ Endpoint: https://your-host.example.com/mcp
 
 - `environment_info` は Runtime 設定とワークスペースを確認します。
 - `tree_view` は見えているファイルを確認します。
-- `git_status_tool` はリポジトリの文脈を確認します。
 - `run_shell_tool` はコマンド実行環境を確認します。
 
 ## 注記

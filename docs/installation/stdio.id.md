@@ -31,7 +31,6 @@ Endpoint: https://your-host.example.com/mcp
 
 - `environment_info` mengonfirmasi pengaturan Runtime dan workspace.
 - `tree_view` mengonfirmasi file yang terlihat.
-- `git_status_tool` mengonfirmasi konteks repositori.
 - `run_shell_tool` mengonfirmasi lingkungan perintah.
 
 ## Catatan
