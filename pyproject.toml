@@ -77,7 +77,7 @@ sigterm = true
 source = ["local_shell_mcp"]
 
 [tool.coverage.report]
-fail_under = 90
+fail_under = 93
 precision = 1
 show_missing = true
 skip_covered = true
@@ -89,3 +89,6 @@ exclude_also = [
 
 [tool.coverage.xml]
 output = "coverage.xml"
+
+[tool.coverage.json]
+output = "coverage.json"
