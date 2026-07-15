@@ -24,12 +24,20 @@ def test_remote_worker_allowlist_covers_core_capabilities():
         "job_list",
         "transfer_read_chunk",
         "transfer_write_chunk",
-        "git_status_tool",
-        "browser_screenshot_tool",
+        "browser_capture_tool",
     } <= REMOTE_WORKER_TOOL_NAMES
 
+
+    assert {
+        "git_status_tool",
+        "read_many_files",
+        "multi_edit_file",
+        "browser_screenshot_tool",
+        "browser_pdf_tool",
+    }.isdisjoint(REMOTE_WORKER_TOOL_NAMES)
+
     capabilities = set(worker_capabilities())
-    assert {"shell", "jobs", "files", "file_transfer", "git", "python", "playwright"} <= capabilities
+    assert {"shell", "jobs", "files", "file_transfer", "python", "playwright"} <= capabilities
 
 
 @pytest.mark.asyncio

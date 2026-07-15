@@ -103,7 +103,7 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
     assert "shell:read" in scopes("audit_tail")
     assert "shell:read" in scopes("apply_patch")
     assert scopes("browser_get_text_tool")
-    assert scopes("browser_screenshot_tool")
+    assert scopes("browser_capture_tool")
     assert all(tool.outputSchema is not None for tool in tools.values())
     assert tools["run_shell_tool"].outputSchema["title"] == "ToolResult"
     assert set(tools["run_shell_tool"].outputSchema["properties"]) == {"ok", "message", "data"}
@@ -136,6 +136,23 @@ async def test_mcp_tool_execution_enforces_advertised_scopes(tmp_path, monkeypat
 
     assert not (tmp_path / "blocked.txt").exists()
 
+
+@pytest.mark.asyncio
+async def test_machine_argument_requires_remote_scope(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "oauth")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "true")
+    get_settings.cache_clear()
+    mcp = build_mcp()
+    principal_token = _CURRENT_PRINCIPAL.set(
+        Principal(email=None, subject="local-only", claims={"scope": "shell:read"})
+    )
+    try:
+        with pytest.raises(Exception, match="remote:use"):
+            await mcp.call_tool("environment_info", {"machine": "worker"})
+    finally:
+        _CURRENT_PRINCIPAL.reset(principal_token)
+
 @pytest.mark.asyncio
 async def test_tool_annotations_are_conservative_and_mode_independent(
     tmp_path, monkeypatch
@@ -153,14 +170,14 @@ async def test_tool_annotations_are_conservative_and_mode_independent(
     assert command.openWorldHint is True
 
     assert tools["delete_file_or_dir"].annotations.destructiveHint is True
-    assert tools["git_reset_tool"].annotations.destructiveHint is True
-    assert tools["write_file"].annotations.openWorldHint is False
+    assert tools["transfer_path"].annotations.destructiveHint is True
+    assert tools["write_file"].annotations.openWorldHint is True
     assert tools["create_file_link"].annotations.destructiveHint is False
     assert tools["create_file_link"].annotations.openWorldHint is True
     assert tools["browser_get_text_tool"].annotations.readOnlyHint is True
     assert tools["browser_get_text_tool"].annotations.openWorldHint is True
-    assert tools["remote_read_file"].annotations.readOnlyHint is True
-    assert tools["remote_read_file"].annotations.openWorldHint is True
+    assert tools["read_file"].annotations.readOnlyHint is True
+    assert tools["read_file"].annotations.openWorldHint is True
     assert tools["search"].annotations.readOnlyHint is True
     assert tools["search"].annotations.openWorldHint is False
     assert all(tool.annotations is not None for tool in tools.values())
@@ -299,17 +316,22 @@ async def test_read_only_tools_have_read_only_hint(tmp_path, monkeypatch):
 
     tools = {tool.name: tool for tool in await build_mcp().list_tools()}
     names = {
-        "environment_info", "version_info",
-        "shell_read", "shell_list", "job_list", "job_tail",
-        "list_files", "tree_view", "glob_search", "grep_search", "read_file", "read_many_files",
+        "environment_info",
+        "shell_read",
+        "shell_list",
+        "job_list",
+        "job_tail",
+        "list_files",
+        "tree_view",
+        "glob_search",
+        "grep_search",
+        "read_file",
         "list_file_links",
-        "git_status_tool", "git_diff_tool", "git_log_tool", "git_show_tool",
-        "secret_scan", "todo_read_tool", "audit_tail",
-        "remote_list_machines", "remote_environment_info", "remote_shell_read", "remote_shell_list",
-        "remote_job_list", "remote_job_tail",
-        "remote_list_files", "remote_tree_view", "remote_glob_search", "remote_grep_search",
-        "remote_read_file", "remote_read_many_files",
-        "remote_git_status_tool", "remote_git_diff_tool", "remote_git_log_tool", "remote_git_show_tool",
+        "secret_scan",
+        "todo_read_tool",
+        "audit_tail",
+        "browser_get_text_tool",
+        "remote_list_machines",
     }
 
     for name in names:

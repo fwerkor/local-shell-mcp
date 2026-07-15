@@ -72,15 +72,15 @@ async def test_mcp_tool_watchdog_returns_handled_timeout(tmp_path, monkeypatch):
     monkeypatch.setattr(tools_module, "PUBLIC_TOOL_TIMEOUT_S", 0.01)
     get_settings.cache_clear()
 
-    async def hanging_git_status(cwd: str = "."):  # noqa: ARG001
+    async def hanging_tree(cwd: str = ".", depth: int = 3, max_entries: int = 500):  # noqa: ARG001
         await asyncio.sleep(5)
 
-    monkeypatch.setattr(tools_module, "git_status", hanging_git_status)
+    monkeypatch.setattr(tools_module, "tree", hanging_tree)
 
-    response = await build_mcp().call_tool("git_status_tool", {"cwd": "."})
+    response = await build_mcp().call_tool("tree_view", {"cwd": "."})
     payload = response[0][0].text
 
-    assert "git_status_tool exceeded 0.01 second public tool timeout" in payload
+    assert "tree_view exceeded 0.01 second public tool timeout" in payload
 
 
 def test_rest_tool_watchdog_returns_timeout(tmp_path, monkeypatch):
@@ -89,12 +89,12 @@ def test_rest_tool_watchdog_returns_timeout(tmp_path, monkeypatch):
     monkeypatch.setattr(http_app_module, "PUBLIC_TOOL_TIMEOUT_S", 0.01)
     get_settings.cache_clear()
 
-    async def hanging_git_status(cwd: str = "."):  # noqa: ARG001
+    async def hanging_tree(cwd: str = ".", depth: int = 3, max_entries: int = 500):  # noqa: ARG001
         await asyncio.sleep(5)
 
-    monkeypatch.setattr(http_app_module, "git_status", hanging_git_status)
+    monkeypatch.setattr(http_app_module, "tree", hanging_tree)
 
-    response = TestClient(build_http_app()).post("/tools/git/status", json={"cwd": "."})
+    response = TestClient(build_http_app()).post("/tools/tree", json={"cwd": "."})
 
     assert response.status_code == 504
     assert response.json()["error"] == "tool_timeout"

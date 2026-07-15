@@ -21,7 +21,7 @@ import local_shell_mcp.playwright_ops as playwright_module
 import local_shell_mcp.remote as remote_module
 import local_shell_mcp.tools as tools_module
 from local_shell_mcp.auth import required_scopes_for_http_tool
-from local_shell_mcp.fs_ops import edit_text, multi_edit_text, resolve_path
+from local_shell_mcp.fs_ops import edit_text, resolve_path
 from local_shell_mcp.http_app import build_http_app
 from local_shell_mcp.models import CommandResult
 from local_shell_mcp.remote import RemoteManager, RemoteWorker
@@ -76,9 +76,9 @@ def test_path_policy_uses_components_and_edit_rejects_empty_search(tmp_path, mon
         resolve_path("secrets/value.txt")
 
     with pytest.raises(ValueError, match="must not be empty"):
-        edit_text("README.md", "", "Z", True)
+        edit_text("README.md", [{"old": "", "new": "Z", "replace_all": True}])
     with pytest.raises(ValueError, match="must not be empty"):
-        multi_edit_text("README.md", [{"old": "", "new": "Z"}])
+        edit_text("README.md", [{"old": "", "new": "Z"}])
     assert (workspace / "README.md").read_text(encoding="utf-8") == "abc"
 
 
@@ -372,11 +372,11 @@ async def test_python_and_playwright_tools_honor_configured_interpreter_and_clea
     stale.parent.mkdir()
     stale.write_bytes(b"old")
     monkeypatch.setattr(playwright_module, "run_shell", fake_run)
-    result = await playwright_module.browser_screenshot(
-        "https://invalid.test", "screenshots/page.png"
+    result = await playwright_module.browser_capture(
+        "https://invalid.test", "screenshots/page.png", capture_format="png"
     )
     assert commands[-1].startswith("'/opt/custom python' ")
-    assert result["screenshot_path"] is None
+    assert result["capture_path"] is None
     assert not stale.exists()
 
 

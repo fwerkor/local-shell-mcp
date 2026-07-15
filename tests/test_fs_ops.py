@@ -13,7 +13,6 @@ from local_shell_mcp.fs_ops import (
     delete_path,
     edit_text,
     list_dir,
-    multi_edit_text,
     perform_file_action,
     read_text,
     resolve_path,
@@ -29,7 +28,7 @@ def test_write_read_edit(tmp_path, monkeypatch):
     get_settings.cache_clear()
     write_text("a.txt", "hello world")
     assert read_text("a.txt")["content"] == "hello world"
-    edit_text("a.txt", "world", "mcp")
+    edit_text("a.txt", [{"old": "world", "new": "mcp"}])
     assert read_text("a.txt")["content"] == "hello mcp"
 
 
@@ -174,7 +173,7 @@ def test_edit_refuses_files_above_write_limit(tmp_path, monkeypatch):
     (tmp_path / "large.txt").write_text("hello world", encoding="utf-8")
 
     with pytest.raises(ValueError, match="Refusing to edit"):
-        edit_text("large.txt", "world", "mcp")
+        edit_text("large.txt", [{"old": "world", "new": "mcp"}])
 
 
 def test_edits_refuse_binary_files(tmp_path, monkeypatch):
@@ -184,9 +183,9 @@ def test_edits_refuse_binary_files(tmp_path, monkeypatch):
     (tmp_path / "blob.bin").write_bytes(original)
 
     with pytest.raises(ValueError, match="Refusing to read binary file as text"):
-        edit_text("blob.bin", "world", "mcp")
+        edit_text("blob.bin", [{"old": "world", "new": "mcp"}])
     with pytest.raises(ValueError, match="Refusing to read binary file as text"):
-        multi_edit_text("blob.bin", [{"old": "world", "new": "mcp"}])
+        edit_text("blob.bin", [{"old": "world", "new": "mcp"}])
 
     assert (tmp_path / "blob.bin").read_bytes() == original
 
@@ -206,14 +205,14 @@ async def test_fetch_omits_binary_content_from_text_field(tmp_path, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_read_many_files_rejects_too_many_files(tmp_path, monkeypatch):
+async def test_read_file_rejects_too_many_files(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_READ_MANY_FILES", "1")
     get_settings.cache_clear()
     (tmp_path / "a.txt").write_text("a", encoding="utf-8")
     (tmp_path / "b.txt").write_text("b", encoding="utf-8")
 
-    response = await build_mcp().call_tool("read_many_files", {"paths": ["a.txt", "b.txt"]})
+    response = await build_mcp().call_tool("read_file", {"path": ["a.txt", "b.txt"]})
     payload = response[0][0].text
 
     assert "Refusing to read 2 files; max is 1" in payload
