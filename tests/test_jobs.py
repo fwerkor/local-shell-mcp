@@ -32,6 +32,40 @@ def test_runner_command_invokes_powershell_executable_and_quotes_arguments():
     )
 
 
+def test_runner_environment_policy_is_shell_neutral_and_round_trips(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
+    monkeypatch.setenv(
+        "LOCAL_SHELL_MCP_SHELL_ENV_BLOCKLIST", "TOKEN_ONE,TOKEN_TWO"
+    )
+    monkeypatch.setenv(
+        "LOCAL_SHELL_MCP_SHELL_ENV_BLOCKED_PREFIXES", "PRIVATE_,SERVICE_"
+    )
+    get_settings.cache_clear()
+
+    paths = jobs_module._attempt_paths("job_test", 1)
+    argv = jobs_module._runner_argv(paths, tmp_path)
+    blocklist_index = argv.index("--env-blocklist-b64") + 1
+    prefixes_index = argv.index("--env-blocked-prefixes-b64") + 1
+    blocklist_payload = argv[blocklist_index]
+    prefixes_payload = argv[prefixes_index]
+
+    assert '"' not in blocklist_payload
+    assert "'" not in blocklist_payload
+    assert '"' not in prefixes_payload
+    assert "'" not in prefixes_payload
+    assert jobs_module._parse_runner_env_policy(
+        blocklist_payload, "env blocklist"
+    ) == ["TOKEN_ONE", "TOKEN_TWO"]
+    assert jobs_module._parse_runner_env_policy(
+        prefixes_payload, "env blocked prefixes"
+    ) == ["PRIVATE_", "SERVICE_"]
+
+    powershell_command = jobs_module._runner_command(argv, "powershell.exe")
+    assert blocklist_payload in powershell_command
+    assert prefixes_payload in powershell_command
+
+
 @pytest.mark.asyncio
 async def test_jobs_track_tail_stop_and_retry(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
