@@ -53,10 +53,31 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
     )
 
 
+def _build_mcp_http_app(mcp):  # noqa: ANN001
+    from .auth import AuthMiddleware, McpSessionLimitMiddleware, RequestBodyLimitMiddleware
+    from .settings import get_settings
+
+    settings = get_settings()
+    inner = mcp.streamable_http_app()
+    session_manager = getattr(mcp, "_session_manager", None)
+    if session_manager is not None and hasattr(session_manager, "session_idle_timeout"):
+        session_manager.session_idle_timeout = max(1, settings.mcp_session_idle_timeout_s)
+
+    app = _with_oauth_routes(inner)
+    if session_manager is not None:
+        app.add_middleware(
+            McpSessionLimitMiddleware,
+            session_manager=session_manager,
+        )
+    if settings.auth_mode != "none":
+        app.add_middleware(AuthMiddleware)
+    app.add_middleware(RequestBodyLimitMiddleware)
+    return app
+
+
 def run_mcp() -> None:
     import uvicorn
 
-    from .auth import AuthMiddleware, RequestBodyLimitMiddleware
     from .settings import get_settings, validate_public_oauth_configuration
     from .tools import build_mcp
 
@@ -68,15 +89,18 @@ def run_mcp() -> None:
         mcp.run(transport="stdio")
         return
 
-    for attr in ("streamable_http_app", "sse_app"):
-        if hasattr(mcp, attr):
-            inner = getattr(mcp, attr)()
-            app = _with_oauth_routes(inner)
-            if settings.auth_mode != "none":
-                app.add_middleware(AuthMiddleware)
-            app.add_middleware(RequestBodyLimitMiddleware)
-            uvicorn.run(app, host=settings.host, port=settings.port)
-            return
+    if hasattr(mcp, "streamable_http_app"):
+        uvicorn.run(_build_mcp_http_app(mcp), host=settings.host, port=settings.port)
+        return
+    if hasattr(mcp, "sse_app"):
+        from .auth import AuthMiddleware, RequestBodyLimitMiddleware
+
+        app = _with_oauth_routes(mcp.sse_app())
+        if settings.auth_mode != "none":
+            app.add_middleware(AuthMiddleware)
+        app.add_middleware(RequestBodyLimitMiddleware)
+        uvicorn.run(app, host=settings.host, port=settings.port)
+        return
 
     # Fallback for older MCP SDKs. OAuth metadata cannot be attached in this mode, so this is
     # suitable only for localhost/stdio-style testing.

@@ -11,6 +11,7 @@ from local_shell_mcp.auth import (
     RequestBodyLimitMiddleware,
     _is_mcp_discovery_request,
 )
+from local_shell_mcp.main import _build_mcp_http_app
 from local_shell_mcp.oauth import (
     _CLIENTS,
     _CODES,
@@ -24,7 +25,7 @@ from local_shell_mcp.settings import get_settings
 from local_shell_mcp.tools import build_mcp
 
 
-def test_mcp_discovery_methods_are_unauthenticated():
+def test_mcp_discovery_request_classification():
     scope = {"type": "http", "path": "/mcp", "method": "POST"}
     initialize = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize"}).encode()
     tools_list = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}).encode()
@@ -33,6 +34,9 @@ def test_mcp_discovery_methods_are_unauthenticated():
     assert _is_mcp_discovery_request(scope, initialize)
     assert _is_mcp_discovery_request(scope, tools_list)
     assert not _is_mcp_discovery_request(scope, tools_call)
+    assert not _is_mcp_discovery_request({**scope, "method": "GET"}, None)
+    assert not _is_mcp_discovery_request({**scope, "method": "DELETE"}, None)
+    assert _is_mcp_discovery_request({**scope, "method": "OPTIONS"}, None)
 
 
 @pytest.mark.asyncio
@@ -311,3 +315,107 @@ async def test_read_only_tools_have_read_only_hint(tmp_path, monkeypatch):
     for name in names:
         assert tools[name].annotations is not None, name
         assert tools[name].annotations.readOnlyHint is True, name
+
+
+
+def _mcp_initialize_payload() -> dict:
+    return {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "test-client", "version": "1"},
+        },
+    }
+
+
+def _mcp_headers(**extra: str) -> dict[str, str]:
+    return {
+        "accept": "application/json, text/event-stream",
+        "content-type": "application/json",
+        **extra,
+    }
+
+
+def test_mcp_requires_auth_for_initialize_and_delete_by_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "oauth")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST", "false")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL", "http://testserver")
+    monkeypatch.setenv(
+        "LOCAL_SHELL_MCP_OAUTH_JWT_SECRET",
+        "test-secret-that-is-definitely-at-least-32-bytes",
+    )
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
+    monkeypatch.delenv("LOCAL_SHELL_MCP_REQUIRE_AUTH_FOR_MCP_DISCOVERY", raising=False)
+    get_settings.cache_clear()
+
+    token = issue_access_token(
+        client_id="test-client",
+        scope="shell:read",
+        resource="http://testserver",
+        issuer="http://testserver",
+    )
+    mcp = build_mcp()
+    with TestClient(_build_mcp_http_app(mcp), base_url="http://testserver") as client:
+        anonymous = client.post("/mcp", json=_mcp_initialize_payload(), headers=_mcp_headers())
+        assert anonymous.status_code == 401
+
+        initialized = client.post(
+            "/mcp",
+            json=_mcp_initialize_payload(),
+            headers=_mcp_headers(authorization=f"Bearer {token}"),
+        )
+        assert initialized.status_code == 200
+        session_id = initialized.headers["mcp-session-id"]
+
+        unauthenticated_delete = client.delete(
+            "/mcp",
+            headers={
+                "accept": "application/json",
+                "mcp-session-id": session_id,
+                "mcp-protocol-version": "2025-06-18",
+            },
+        )
+        assert unauthenticated_delete.status_code == 401
+
+        ping = client.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "id": 2, "method": "ping"},
+            headers=_mcp_headers(
+                authorization=f"Bearer {token}",
+                **{
+                    "mcp-session-id": session_id,
+                    "mcp-protocol-version": "2025-06-18",
+                },
+            ),
+        )
+        assert ping.status_code == 200
+
+
+def test_mcp_sessions_have_idle_timeout_and_hard_limit(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL", "http://testserver")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MCP_SESSION_IDLE_TIMEOUT_S", "7")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MCP_MAX_SESSIONS", "2")
+    get_settings.cache_clear()
+
+    mcp = build_mcp()
+    app = _build_mcp_http_app(mcp)
+    assert mcp._session_manager.session_idle_timeout == 7
+
+    with TestClient(app, base_url="http://testserver") as client:
+        first = client.post("/mcp", json=_mcp_initialize_payload(), headers=_mcp_headers())
+        second = client.post("/mcp", json=_mcp_initialize_payload(), headers=_mcp_headers())
+        rejected = client.post("/mcp", json=_mcp_initialize_payload(), headers=_mcp_headers())
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert rejected.status_code == 429
+    assert rejected.json()["error"] == "mcp_session_limit"

@@ -297,6 +297,7 @@ if _PYDANTIC_AVAILABLE:
         remote_poll_timeout_s: int = 25
         remote_job_timeout_s: int = 3600
         remote_max_pending_jobs: int = 256
+        remote_cancelled_job_ttl_s: int = 3600
 
         shell_executable: str = Field(default_factory=default_shell_executable)
         shell_env_blocklist: Annotated[list[str], NoDecode] = Field(
@@ -313,7 +314,9 @@ if _PYDANTIC_AVAILABLE:
         # Authentication. OAuth is the default for ChatGPT custom connectors.
         auth_mode: Literal["none", "oauth"] = "oauth"
         auth_bypass_localhost: bool = True
-        require_auth_for_mcp_discovery: bool = False
+        require_auth_for_mcp_discovery: bool = True
+        mcp_session_idle_timeout_s: int = 1800
+        mcp_max_sessions: int = 128
 
         # Built-in OAuth 2.1 authorization server for ChatGPT MCP connectors.
         # Set public_base_url to the externally reachable HTTPS origin, e.g. https://local-shell-mcp.example.com
@@ -492,6 +495,7 @@ else:
         remote_poll_timeout_s: int = 25
         remote_job_timeout_s: int = 3600
         remote_max_pending_jobs: int = 256
+        remote_cancelled_job_ttl_s: int = 3600
 
         shell_executable: str = field(default_factory=default_shell_executable)
         shell_env_blocklist: list[str] = field(default_factory=lambda: ["CLOUDFLARE_TUNNEL_TOKEN"])
@@ -505,7 +509,9 @@ else:
 
         auth_mode: Literal["none", "oauth"] = "oauth"
         auth_bypass_localhost: bool = True
-        require_auth_for_mcp_discovery: bool = False
+        require_auth_for_mcp_discovery: bool = True
+        mcp_session_idle_timeout_s: int = 1800
+        mcp_max_sessions: int = 128
 
         public_base_url: str | None = None
         oauth_issuer: str | None = None

@@ -209,7 +209,7 @@ class RemoteManager:
         self.tokens: dict[str, str] = {}
         self.pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self.pending_machines: dict[str, str] = {}
-        self.cancelled_jobs: set[str] = set()
+        self.cancelled_jobs: dict[str, float] = {}
         self._lock = asyncio.Lock()
         self._state_lock = threading.RLock()
         self._registry_loaded = False
@@ -404,11 +404,25 @@ class RemoteManager:
             index += 1
         return f"{base}-{index}"
 
+    def _prune_cancelled_jobs_locked(self, now: float | None = None) -> None:
+        now = _utc() if now is None else now
+        settings = get_settings()
+        ttl = max(1, settings.remote_cancelled_job_ttl_s)
+        for job_id, cancelled_at in list(self.cancelled_jobs.items()):
+            if now - cancelled_at >= ttl:
+                self.cancelled_jobs.pop(job_id, None)
+        cap = max(64, settings.remote_max_pending_jobs * 4)
+        while len(self.cancelled_jobs) > cap:
+            oldest = next(iter(self.cancelled_jobs))
+            self.cancelled_jobs.pop(oldest, None)
+
     def _cancel_job(self, job_id: str) -> None:
         with self._state_lock:
             future = self.pending.pop(job_id, None)
             self.pending_machines.pop(job_id, None)
-            self.cancelled_jobs.add(job_id)
+            now = _utc()
+            self.cancelled_jobs[job_id] = now
+            self._prune_cancelled_jobs_locked(now)
             if future and not future.done():
                 future.cancel()
 
@@ -429,8 +443,9 @@ class RemoteManager:
                 return {"job": None, "heartbeat": True}
             job_id = str(job.get("id") or "")
             with self._state_lock:
+                self._prune_cancelled_jobs_locked()
                 if job_id in self.cancelled_jobs:
-                    self.cancelled_jobs.discard(job_id)
+                    self.cancelled_jobs.pop(job_id, None)
                     continue
             return {"job": job}
 
@@ -448,8 +463,23 @@ class RemoteManager:
         with self._state_lock:
             worker.status = "online"
             worker.last_seen = _utc()
+            self._prune_cancelled_jobs_locked()
+            assigned_machine = self.pending_machines.get(job_id)
+            if assigned_machine is not None and assigned_machine != worker.name:
+                audit(
+                    "remote_result_machine_mismatch",
+                    job_id=job_id,
+                    assigned_machine=assigned_machine,
+                    submitting_machine=worker.name,
+                )
+                raise PermissionError(
+                    f"remote job {job_id!r} belongs to machine {assigned_machine!r}"
+                )
+            if assigned_machine is None:
+                self.cancelled_jobs.pop(job_id, None)
+                return {"accepted": False}
             self.pending_machines.pop(job_id, None)
-            self.cancelled_jobs.discard(job_id)
+            self.cancelled_jobs.pop(job_id, None)
             future = self.pending.pop(job_id, None)
             if future and not future.done():
                 future.set_result(payload)
@@ -559,7 +589,7 @@ class RemoteManager:
             while not worker.queue.empty():
                 with contextlib.suppress(asyncio.QueueEmpty):
                     queued = worker.queue.get_nowait()
-                    self.cancelled_jobs.discard(str(queued.get("id") or ""))
+                    self.cancelled_jobs.pop(str(queued.get("id") or ""), None)
             self._save_registry_unlocked()
         return {"machine": machine, "revoked": True}
 

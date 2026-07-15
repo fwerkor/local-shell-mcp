@@ -353,3 +353,53 @@ async def test_worker_job_sends_heartbeats_while_running(monkeypatch):
     assert result == {"done": True}
     assert posted_urls
     assert set(posted_urls) == {"https://example.test/remote/heartbeat"}
+
+
+@pytest.mark.asyncio
+async def test_remote_result_must_come_from_assigned_worker(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    manager = remote.RemoteManager()
+    manager._registry_loaded = True
+    worker_a = remote.RemoteWorker(name="worker-a", token="token-a")
+    worker_b = remote.RemoteWorker(name="worker-b", token="token-b")
+    manager.workers = {worker_a.name: worker_a, worker_b.name: worker_b}
+    manager.tokens = {worker_a.token: worker_a.name, worker_b.token: worker_b.name}
+    future = asyncio.get_running_loop().create_future()
+    manager.pending["job-owned"] = future
+    manager.pending_machines["job-owned"] = worker_a.name
+
+    with pytest.raises(PermissionError, match="belongs to machine"):
+        await manager.submit_result(
+            worker_b.token,
+            {"job_id": "job-owned", "ok": True, "data": {"forged": True}},
+        )
+
+    assert not future.done()
+    assert manager.pending["job-owned"] is future
+    assert manager.pending_machines["job-owned"] == worker_a.name
+
+    accepted = await manager.submit_result(
+        worker_a.token,
+        {"job_id": "job-owned", "ok": True, "data": {"valid": True}},
+    )
+    assert accepted == {"accepted": True}
+    assert future.result()["data"] == {"valid": True}
+
+
+def test_remote_cancelled_job_tombstones_are_pruned_and_bounded(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_CANCELLED_JOB_TTL_S", "10")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_MAX_PENDING_JOBS", "1")
+    get_settings.cache_clear()
+    manager = remote.RemoteManager()
+    manager.cancelled_jobs = {f"old-{index}": 0.0 for index in range(80)}
+    monkeypatch.setattr(remote, "_utc", lambda: 100.0)
+
+    manager._cancel_job("new-job")
+
+    assert "new-job" in manager.cancelled_jobs
+    assert all(not job_id.startswith("old-") for job_id in manager.cancelled_jobs)
+    assert len(manager.cancelled_jobs) <= 64

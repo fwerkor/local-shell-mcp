@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import json
 from contextvars import ContextVar
@@ -315,13 +316,64 @@ def _is_mcp_discovery_request(scope: Scope, body: bytes | None) -> bool:
         return False
 
     method = scope.get("method", "").upper()
-    if method in {"GET", "DELETE", "OPTIONS"}:
+    if method == "OPTIONS":
         return True
     if method != "POST" or body is None:
         return False
 
     methods = _mcp_methods_from_body(body)
     return bool(methods) and methods <= MCP_DISCOVERY_METHODS
+
+
+class McpSessionLimitMiddleware:
+    """Bound stateful Streamable HTTP sessions created by the MCP SDK."""
+
+    def __init__(self, app: ASGIApp, session_manager: Any):
+        self.app = app
+        self.session_manager = session_manager
+        self._creation_lock = asyncio.Lock()
+
+    @staticmethod
+    def _is_new_session(scope: Scope) -> bool:
+        if scope.get("type") != "http":
+            return False
+        if scope.get("path") != "/mcp" or scope.get("method", "").upper() != "POST":
+            return False
+        headers = {key.lower(): value for key, value in scope.get("headers", [])}
+        return b"mcp-session-id" not in headers
+
+    def _active_session_count(self) -> int:
+        instances = getattr(self.session_manager, "_server_instances", None)
+        if not isinstance(instances, dict):
+            return 0
+        owners = getattr(self.session_manager, "_session_owners", None)
+        for session_id, transport in list(instances.items()):
+            if not bool(getattr(transport, "is_terminated", False)):
+                continue
+            instances.pop(session_id, None)
+            if isinstance(owners, dict):
+                owners.pop(session_id, None)
+        return len(instances)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if not self._is_new_session(scope):
+            await self.app(scope, receive, send)
+            return
+
+        async with self._creation_lock:
+            limit = max(1, get_settings().mcp_max_sessions)
+            if self._active_session_count() >= limit:
+                response = JSONResponse(
+                    {
+                        "ok": False,
+                        "error": "mcp_session_limit",
+                        "message": f"MCP session limit reached: {limit}",
+                    },
+                    status_code=429,
+                )
+                await response(scope, receive, send)
+                return
+            await self.app(scope, receive, send)
 
 
 class AuthMiddleware:
