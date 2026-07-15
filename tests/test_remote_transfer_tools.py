@@ -17,9 +17,11 @@ from local_shell_mcp.transfer_ops import (
     transfer_begin_write,
     transfer_finish_write,
     transfer_pack_dir,
+    transfer_read_chunk,
     transfer_stat,
     transfer_unpack_archive,
     transfer_write_bytes,
+    transfer_write_chunk,
 )
 
 
@@ -38,6 +40,33 @@ class FakeRemoteManager:
         try:
             if tool == "transfer_stat":
                 data = transfer_stat(args["path"], args.get("sha256", True))
+            elif tool == "transfer_read_chunk":
+                data = transfer_read_chunk(
+                    args["path"], args.get("offset", 0), args.get("chunk_size")
+                )
+            elif tool == "transfer_begin_write":
+                data = transfer_begin_write(
+                    args["path"],
+                    args.get("overwrite", True),
+                    args.get("expected_bytes"),
+                )
+            elif tool == "transfer_write_chunk":
+                data = transfer_write_chunk(
+                    args["path"],
+                    args["transfer_id"],
+                    args["offset"],
+                    args["data_b64"],
+                    args.get("expected_sha256"),
+                )
+            elif tool == "transfer_finish_write":
+                data = transfer_finish_write(
+                    args["path"],
+                    args["transfer_id"],
+                    args.get("expected_bytes"),
+                    args.get("expected_sha256"),
+                )
+            elif tool == "transfer_abort_write":
+                data = transfer_abort_write(args["path"], args["transfer_id"])
             elif tool == "transfer_upload_url":
                 source = resolve_path(args["path"], must_exist=True)
                 response = self.client.put(
@@ -115,8 +144,8 @@ async def test_remote_copy_file_streams_between_workers(tmp_path, monkeypatch):
         "src", "src-machine/payload.bin", "dst", "dst-machine/payload.bin", True, 128
     )
 
-    assert result["chunks"] == 2
-    assert result["transport"] == "http-stream-via-controller"
+    assert result["chunks"] > 2
+    assert result["transport"] == "mcp-chunks-via-controller"
     assert result["bytes"] == len(data)
     assert (root / "dst-machine" / "payload.bin").read_bytes() == data
 

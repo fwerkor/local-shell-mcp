@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shlex
 import subprocess
 import uuid
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
+from pathspec.gitignore import GitIgnoreSpec
 
 from .audit import audit
 from .auth import require_current_scopes
@@ -67,6 +68,7 @@ from .shell_ops import (
     list_shells,
     public_run_shell,
     public_run_shell_timeout,
+    quote_shell_argument,
     read_shell,
     run_shell,
     send_shell,
@@ -80,10 +82,16 @@ from .skill_ops import (
 from .tmux_helper import persistent_shell_backend_info
 from .todo_ops import todo_read, todo_write
 from .transfer_ops import (
+    normalize_chunk_size,
+    transfer_abort_write,
     transfer_alloc_temp_path,
+    transfer_begin_write,
+    transfer_finish_write,
     transfer_pack_dir,
+    transfer_read_chunk,
     transfer_stat,
     transfer_unpack_archive,
+    transfer_write_chunk,
 )
 from .version import version_info as get_version_info
 
@@ -138,8 +146,14 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict:
     patch_path = temp_dir() / f"patch-{uuid.uuid4().hex}.diff"
     patch_path.parent.mkdir(parents=True, exist_ok=True)
     await _to_thread(patch_path.write_text, patch, encoding="utf-8")
-    quoted = shlex.quote(str(patch_path))
-    result = await run_shell(f"git apply --check {quoted} && git apply {quoted}", cwd=cwd, timeout_s=60, max_output_bytes=500_000)
+    quoted = quote_shell_argument(str(patch_path))
+    git = quote_shell_argument(get_settings().git_bin)
+    result = await run_shell(
+        f"{git} apply --check {quoted} && {git} apply {quoted}",
+        cwd=cwd,
+        timeout_s=60,
+        max_output_bytes=500_000,
+    )
     return {**result.model_dump(), "patch_path": relative_display(patch_path)}
 
 
@@ -149,7 +163,13 @@ async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict:
     path = temp_dir() / f"script-{uuid.uuid4().hex}.py"
     path.parent.mkdir(parents=True, exist_ok=True)
     await _to_thread(path.write_text, code, encoding="utf-8")
-    result = await run_shell(f"python3 {shlex.quote(str(path))}", cwd=cwd, timeout_s=public_run_shell_timeout(timeout_s), max_output_bytes=1_000_000)
+    python = quote_shell_argument(get_settings().python_bin)
+    result = await run_shell(
+        f"{python} {quote_shell_argument(str(path))}",
+        cwd=cwd,
+        timeout_s=public_run_shell_timeout(timeout_s),
+        max_output_bytes=1_000_000,
+    )
     return {**result.model_dump(), "script_path": relative_display(path)}
 
 
@@ -196,6 +216,31 @@ MCP_INSTRUCTIONS = (
 
 class PublicToolTimeoutError(TimeoutError):
     pass
+
+
+NON_CANCELLABLE_TOOL_NAMES = frozenset(
+    {
+        "create_file_link",
+        "revoke_file_link",
+        "write_file",
+        "edit_file",
+        "multi_edit_file",
+        "delete_file_or_dir",
+        "apply_patch",
+        "todo_write_tool",
+        "remote_write_file",
+        "remote_edit_file",
+        "remote_multi_edit_file",
+        "remote_delete_file_or_dir",
+        "remote_copy_file",
+        "remote_copy_dir",
+        "remote_pull_file",
+        "remote_push_file",
+        "remote_pull_dir",
+        "remote_push_dir",
+        "remote_apply_patch",
+    }
+)
 
 
 def _security_meta(schemes: list[dict[str, Any]]) -> dict[str, Any]:
@@ -350,9 +395,12 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                 **audit_context,
             )
             try:
-                result = await asyncio.wait_for(
-                    __original(*args, **kwargs), timeout=PUBLIC_TOOL_TIMEOUT_S
-                )
+                if __tool_name in NON_CANCELLABLE_TOOL_NAMES:
+                    result = await __original(*args, **kwargs)
+                else:
+                    result = await asyncio.wait_for(
+                        __original(*args, **kwargs), timeout=PUBLIC_TOOL_TIMEOUT_S
+                    )
                 audit("mcp_tool_call_end", tool=__tool_name, ok=True, **audit_context)
                 return result
             except TimeoutError:
@@ -474,6 +522,41 @@ def _read_many_files_sync(
     return {"files": files, "total_content_bytes": total_content_bytes}
 
 
+def _gitignore_spec(
+    directory: Path, cache: dict[Path, GitIgnoreSpec | None]
+) -> GitIgnoreSpec | None:
+    if directory in cache:
+        return cache[directory]
+    path = directory / ".gitignore"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        spec = None
+    else:
+        spec = GitIgnoreSpec.from_lines(lines)
+    cache[directory] = spec
+    return spec
+
+
+def _fallback_path_is_ignored(
+    path: Path, base: Path, cache: dict[Path, GitIgnoreSpec | None]
+) -> bool:
+    ignored: bool | None = None
+    directories = [base]
+    current = base
+    for part in path.parent.relative_to(base).parts:
+        current = current / part
+        directories.append(current)
+    for directory in directories:
+        spec = _gitignore_spec(directory, cache)
+        if spec is None:
+            continue
+        include = spec.check_file(path.relative_to(directory).as_posix()).include
+        if include is not None:
+            ignored = bool(include)
+    return bool(ignored)
+
+
 def _secret_scan_candidates(base: Any, glob: str | None = None) -> list[Any]:
     settings = get_settings()
     args = [settings.rg_bin, "--files", "--hidden", "--glob", "!.git/**"]
@@ -490,8 +573,11 @@ def _secret_scan_candidates(base: Any, glob: str | None = None) -> list[Any]:
         return [base / line for line in result.stdout.splitlines() if line.strip()]
 
     candidates = []
+    ignore_cache: dict[Path, GitIgnoreSpec | None] = {}
     for path in base.rglob("*"):
         if ".git" in path.parts or not path.is_file():
+            continue
+        if _fallback_path_is_ignored(path, base, ignore_cache):
             continue
         if glob and not path.match(glob):
             continue
@@ -581,39 +667,92 @@ async def _copy_local_file_to_remote(
     overwrite: bool = True,
     chunk_size: int | None = None,
 ) -> dict:
-    del chunk_size
     stat = await _to_thread(transfer_stat, source_path, True)
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {source_path}")
-    ticket = create_download_ticket(
-        source_path,
-        stat["size"],
-        stat["sha256"],
-    )
-    try:
-        finish = await _remote_transfer_data(
+    if chunk_size is None:
+        ticket = create_download_ticket(
+            source_path,
+            stat["size"],
+            stat["sha256"],
+        )
+        try:
+            finish = await _remote_transfer_data(
+                dst_machine,
+                "transfer_download_url",
+                {
+                    "url": ticket["url"],
+                    "path": dst_path,
+                    "overwrite": overwrite,
+                    "expected_bytes": stat["size"],
+                    "expected_sha256": stat["sha256"],
+                    "timeout_s": get_settings().remote_job_timeout_s,
+                },
+                get_settings().remote_job_timeout_s,
+            )
+        finally:
+            revoke_transfer_ticket(ticket["token"])
+        chunks = 1
+        effective_chunk_size = stat["size"]
+        transport = "http-stream"
+    else:
+        effective_chunk_size = normalize_chunk_size(chunk_size)
+        begin = await _remote_transfer_data(
             dst_machine,
-            "transfer_download_url",
+            "transfer_begin_write",
             {
-                "url": ticket["url"],
                 "path": dst_path,
                 "overwrite": overwrite,
                 "expected_bytes": stat["size"],
-                "expected_sha256": stat["sha256"],
-                "timeout_s": get_settings().remote_job_timeout_s,
             },
-            get_settings().remote_job_timeout_s,
         )
-    finally:
-        revoke_transfer_ticket(ticket["token"])
+        offset = 0
+        chunks = 0
+        try:
+            while offset < stat["size"]:
+                chunk = await _to_thread(
+                    transfer_read_chunk, source_path, offset, effective_chunk_size
+                )
+                await _remote_transfer_data(
+                    dst_machine,
+                    "transfer_write_chunk",
+                    {
+                        "path": dst_path,
+                        "transfer_id": begin["transfer_id"],
+                        "offset": offset,
+                        "data_b64": chunk["data_b64"],
+                        "expected_sha256": chunk["sha256"],
+                    },
+                )
+                offset += chunk["bytes"]
+                chunks += 1
+            finish = await _remote_transfer_data(
+                dst_machine,
+                "transfer_finish_write",
+                {
+                    "path": dst_path,
+                    "transfer_id": begin["transfer_id"],
+                    "expected_bytes": stat["size"],
+                    "expected_sha256": stat["sha256"],
+                },
+            )
+        except BaseException:
+            with suppress(Exception):
+                await _remote_transfer_data(
+                    dst_machine,
+                    "transfer_abort_write",
+                    {"path": dst_path, "transfer_id": begin["transfer_id"]},
+                )
+            raise
+        transport = "mcp-chunks"
     return {
         "source": {"machine": "controller", "path": stat["path"]},
         "destination": {"machine": dst_machine, "path": finish["path"]},
         "bytes": stat["size"],
         "sha256": stat.get("sha256"),
-        "chunks": 1,
-        "chunk_size": stat["size"],
-        "transport": "http-stream",
+        "chunks": chunks,
+        "chunk_size": effective_chunk_size,
+        "transport": transport,
     }
 
 
@@ -624,41 +763,86 @@ async def _copy_remote_file_to_local(
     overwrite: bool = True,
     chunk_size: int | None = None,
 ) -> dict:
-    del chunk_size
     stat = await _remote_transfer_data(
         src_machine, "transfer_stat", {"path": src_path, "sha256": True}
     )
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {src_path}")
-    ticket = create_upload_ticket(
-        destination_path,
-        stat["size"],
-        stat["sha256"],
-        overwrite,
-    )
-    try:
-        finish = await _remote_transfer_data(
-            src_machine,
-            "transfer_upload_url",
-            {
-                "path": src_path,
-                "url": ticket["url"],
-                "expected_bytes": stat["size"],
-                "expected_sha256": stat["sha256"],
-                "timeout_s": get_settings().remote_job_timeout_s,
-            },
-            get_settings().remote_job_timeout_s,
+    if chunk_size is None:
+        ticket = create_upload_ticket(
+            destination_path,
+            stat["size"],
+            stat["sha256"],
+            overwrite,
         )
-    finally:
-        revoke_transfer_ticket(ticket["token"])
+        try:
+            finish = await _remote_transfer_data(
+                src_machine,
+                "transfer_upload_url",
+                {
+                    "path": src_path,
+                    "url": ticket["url"],
+                    "expected_bytes": stat["size"],
+                    "expected_sha256": stat["sha256"],
+                    "timeout_s": get_settings().remote_job_timeout_s,
+                },
+                get_settings().remote_job_timeout_s,
+            )
+        finally:
+            revoke_transfer_ticket(ticket["token"])
+        chunks = 1
+        effective_chunk_size = stat["size"]
+        transport = "http-stream"
+    else:
+        effective_chunk_size = normalize_chunk_size(chunk_size)
+        begin = await _to_thread(
+            transfer_begin_write, destination_path, overwrite, stat["size"]
+        )
+        offset = 0
+        chunks = 0
+        try:
+            while offset < stat["size"]:
+                chunk = await _remote_transfer_data(
+                    src_machine,
+                    "transfer_read_chunk",
+                    {
+                        "path": src_path,
+                        "offset": offset,
+                        "chunk_size": effective_chunk_size,
+                    },
+                )
+                await _to_thread(
+                    transfer_write_chunk,
+                    destination_path,
+                    begin["transfer_id"],
+                    offset,
+                    chunk["data_b64"],
+                    chunk["sha256"],
+                )
+                offset += chunk["bytes"]
+                chunks += 1
+            finish = await _to_thread(
+                transfer_finish_write,
+                destination_path,
+                begin["transfer_id"],
+                stat["size"],
+                stat["sha256"],
+            )
+        except BaseException:
+            with suppress(Exception):
+                await _to_thread(
+                    transfer_abort_write, destination_path, begin["transfer_id"]
+                )
+            raise
+        transport = "mcp-chunks"
     return {
         "source": {"machine": src_machine, "path": stat["path"]},
         "destination": {"machine": "controller", "path": finish["path"]},
         "bytes": stat["size"],
         "sha256": stat.get("sha256"),
-        "chunks": 1,
-        "chunk_size": stat["size"],
-        "transport": "http-stream",
+        "chunks": chunks,
+        "chunk_size": effective_chunk_size,
+        "transport": transport,
     }
 
 
@@ -696,7 +880,11 @@ async def _copy_remote_file_to_remote(
         "sha256": pull["sha256"],
         "chunks": pull["chunks"] + push["chunks"],
         "chunk_size": pull["chunk_size"],
-        "transport": "http-stream-via-controller",
+        "transport": (
+            "mcp-chunks-via-controller"
+            if pull["transport"] == "mcp-chunks" or push["transport"] == "mcp-chunks"
+            else "http-stream-via-controller"
+        ),
     }
 
 
@@ -752,8 +940,12 @@ async def _copy_remote_dir_to_local(
         copy_result = await _copy_remote_file_to_local(
             src_machine, pack["archive_path"], archive["path"], True, chunk_size
         )
-        unpack = await _to_thread(transfer_unpack_archive, archive["path"], destination_path, overwrite, True)
+        unpack = await _to_thread(
+            transfer_unpack_archive, archive["path"], destination_path, overwrite, True
+        )
     finally:
+        with suppress(Exception):
+            delete_path(archive.get("path", ""), False)
         await _remote_cleanup_file(src_machine, pack.get("archive_path", ""))
     return {
         "source": {"machine": src_machine, "path": pack["path"]},
@@ -874,11 +1066,12 @@ def build_mcp() -> FastMCP:
                 seen.add(path)
                 line = match.get("line")
                 suffix = f":{line}" if line else ""
+                resolved = resolve_path(path, must_exist=True)
                 rows.append(
                     {
                         "id": path,
                         "title": f"{path}{suffix}",
-                        "url": f"file:///workspace/{path}",
+                        "url": resolved.as_uri(),
                     }
                 )
             return json.dumps({"results": rows}, ensure_ascii=False)
@@ -893,16 +1086,20 @@ def build_mcp() -> FastMCP:
             data = await _to_thread(read_text, id)
             path = data.get("path") or id
             binary = bool(data.get("binary"))
+            resolved = resolve_path(id, must_exist=True)
             return json.dumps(
                 {
                     "id": path,
                     "title": path,
                     "text": data.get("content") if not binary else data.get("message", "Binary file omitted"),
-                    "url": f"file:///workspace/{path}",
+                    "url": resolved.as_uri(),
                     "metadata": {
                         "source": "workspace",
                         "binary": binary,
                         "bytes": data.get("bytes"),
+                        "bytes_read": data.get("bytes_read"),
+                        "truncated": bool(data.get("truncated", False)),
+                        "truncated_bytes": data.get("truncated_bytes", 0),
                     },
                 },
                 ensure_ascii=False,
@@ -924,7 +1121,14 @@ def build_mcp() -> FastMCP:
     async def environment_info() -> ToolResult:
         """Return workspace, auth, policy, and basic environment information."""
         try:
-            result = await run_shell("uname -a; echo '---'; id; echo '---'; pwd; echo '---'; python3 --version; git --version", cwd=".", timeout_s=10)
+            python = quote_shell_argument(settings.python_bin)
+            git = quote_shell_argument(settings.git_bin)
+            result = await run_shell(
+                f"uname -a; echo '---'; id; echo '---'; pwd; echo '---'; "
+                f"{python} --version; {git} --version",
+                cwd=".",
+                timeout_s=10,
+            )
             return _ok({"settings": safe_settings_dump(settings), "persistent_shell": persistent_shell_backend_info(), "probe": result.model_dump()})
         except Exception as exc:
             return _handled_error(exc)

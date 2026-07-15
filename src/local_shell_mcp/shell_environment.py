@@ -26,10 +26,12 @@ def _restore_or_remove_loader_var(env: dict[str, str], name: str) -> None:
         env.pop(name, None)
 
 
-def subprocess_env() -> dict[str, str]:
-    settings = get_settings()
-    blocked = set(settings.shell_env_blocklist)
-    prefixes = tuple(settings.shell_env_blocked_prefixes)
+def filtered_subprocess_env(
+    blocked_names: list[str] | tuple[str, ...],
+    blocked_prefixes: list[str] | tuple[str, ...],
+) -> dict[str, str]:
+    blocked = set(blocked_names)
+    prefixes = tuple(blocked_prefixes)
     env = {
         key: value
         for key, value in os.environ.items()
@@ -39,3 +41,11 @@ def subprocess_env() -> dict[str, str]:
         for name in FROZEN_LOADER_ENV_VARS:
             _restore_or_remove_loader_var(env, name)
     return env
+
+
+def subprocess_env() -> dict[str, str]:
+    settings = get_settings()
+    return filtered_subprocess_env(
+        settings.shell_env_blocklist,
+        settings.shell_env_blocked_prefixes,
+    )

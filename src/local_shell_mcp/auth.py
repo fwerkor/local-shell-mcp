@@ -106,7 +106,7 @@ def require_current_scopes(required: list[str] | tuple[str, ...] | set[str]) -> 
         require_scopes(principal, required)
 
 
-def required_scopes_for_http_tool(path: str) -> tuple[str, ...]:
+def required_scopes_for_http_tool(path: str, method: str | None = None) -> tuple[str, ...]:
     """Map the compatibility REST tool surface to the scopes declared by MCP tools."""
 
     read = ("shell:read",)
@@ -120,12 +120,13 @@ def required_scopes_for_http_tool(path: str) -> tuple[str, ...]:
 
     if path.startswith("/tools/download/"):
         return file_share
+    if path == "/tools/todo":
+        return read if str(method or "").upper() == "GET" else write
     if path in {
         "/tools/write_file",
         "/tools/edit_file",
         "/tools/multi_edit_file",
         "/tools/delete",
-        "/tools/todo",
     }:
         return write
     if path in {

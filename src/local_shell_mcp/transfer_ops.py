@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import tarfile
 import tempfile
 import uuid
@@ -134,6 +135,44 @@ def _read_transfer_metadata(tmp: Path) -> dict[str, Any]:
     return metadata
 
 
+def _received_ranges(metadata: dict[str, Any]) -> list[list[int]]:
+    raw = metadata.get("received_ranges", [])
+    if not isinstance(raw, list):
+        raise ValueError("transfer metadata received_ranges is invalid")
+    ranges: list[list[int]] = []
+    for item in raw:
+        if (
+            not isinstance(item, list)
+            or len(item) != 2
+            or not all(isinstance(value, int) for value in item)
+            or item[0] < 0
+            or item[1] < item[0]
+        ):
+            raise ValueError("transfer metadata received_ranges is invalid")
+        ranges.append([item[0], item[1]])
+    return ranges
+
+
+def _record_received_range(metadata: dict[str, Any], start: int, end: int) -> None:
+    if end < start:
+        raise ValueError("transfer range is invalid")
+    if end == start:
+        return
+    ranges = _received_ranges(metadata)
+    for existing_start, existing_end in ranges:
+        if start < existing_end and end > existing_start:
+            raise ValueError("transfer chunk overlaps previously received data")
+    ranges.append([start, end])
+    ranges.sort()
+    merged: list[list[int]] = []
+    for range_start, range_end in ranges:
+        if merged and merged[-1][1] == range_start:
+            merged[-1][1] = range_end
+        else:
+            merged.append([range_start, range_end])
+    metadata["received_ranges"] = merged
+
+
 def transfer_begin_write(
     path: str, overwrite: bool = True, expected_bytes: int | None = None
 ) -> dict[str, Any]:
@@ -158,6 +197,7 @@ def transfer_begin_write(
                     "destination": str(dst),
                     "overwrite": bool(overwrite),
                     "expected_bytes": expected,
+                    "received_ranges": [],
                 },
             )
         except Exception:
@@ -198,10 +238,12 @@ def transfer_write_chunk(
         expected = metadata.get("expected_bytes")
         if expected is not None and start + len(data) > int(expected):
             raise ValueError("chunk exceeds expected transfer size")
+        _record_received_range(metadata, start, start + len(data))
         with tmp.open("r+b") as fh:
             fh.seek(start)
             fh.write(data)
             fh.flush()
+        _write_transfer_metadata(tmp, metadata)
     return {
         "path": relative_display(dst),
         "temp_path": relative_display(tmp),
@@ -232,16 +274,40 @@ def transfer_write_bytes(
         expected = metadata.get("expected_bytes")
         if expected is not None and start + len(payload) > int(expected):
             raise ValueError("chunk exceeds expected transfer size")
+        _record_received_range(metadata, start, start + len(payload))
         with tmp.open("r+b") as fh:
             fh.seek(start)
             fh.write(payload)
             fh.flush()
+        _write_transfer_metadata(tmp, metadata)
     return {
         "path": relative_display(dst),
         "temp_path": relative_display(tmp),
         "offset": start,
         "bytes": len(payload),
         "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
+def transfer_mark_complete_write(path: str, transfer_id: str) -> dict[str, Any]:
+    """Record that an external sequential writer populated the whole transfer temp file."""
+
+    dst = resolve_path(path, follow_final_symlink=False)
+    tmp = _transfer_temp_path(dst, transfer_id)
+    with _path_lock(tmp):
+        if not tmp.exists():
+            raise FileNotFoundError(str(tmp))
+        metadata = _read_transfer_metadata(tmp)
+        expected = metadata.get("expected_bytes")
+        size = tmp.stat().st_size
+        if expected is not None and size != int(expected):
+            raise ValueError(f"size mismatch: expected {expected}, got {size}")
+        metadata["received_ranges"] = [] if size == 0 else [[0, size]]
+        _write_transfer_metadata(tmp, metadata)
+    return {
+        "path": relative_display(dst),
+        "temp_path": relative_display(tmp),
+        "bytes": size,
     }
 
 
@@ -266,6 +332,11 @@ def transfer_finish_write(
         size = tmp.stat().st_size
         if expected is not None and size != expected:
             raise ValueError(f"size mismatch: expected {expected}, got {size}")
+        received = _received_ranges(metadata)
+        required_size = size if expected is None else expected
+        complete = received == [] if required_size == 0 else received == [[0, required_size]]
+        if not complete:
+            raise ValueError("transfer has missing or non-contiguous data ranges")
         digest = _sha256_file(tmp) if expected_sha256 else None
         if expected_sha256 and digest != expected_sha256:
             raise ValueError("file sha256 mismatch")
@@ -308,7 +379,7 @@ def transfer_alloc_temp_path(suffix: str = ".bin") -> dict[str, Any]:
     return {"path": relative_display(path)}
 
 
-def _assert_no_symlinks(path: Path) -> None:
+def _assert_transferable_tree(path: Path) -> None:
     if path.is_symlink():
         raise ValueError(f"directory transfer does not support symlinks: {relative_display(path)}")
     for child in path.rglob("*"):
@@ -316,14 +387,21 @@ def _assert_no_symlinks(path: Path) -> None:
             raise ValueError(
                 f"directory transfer does not support symlinks: {relative_display(child)}"
             )
+        mode = child.lstat().st_mode
+        if not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
+            raise ValueError(
+                f"directory transfer does not support special files: {relative_display(child)}"
+            )
 
 
 def transfer_pack_dir(path: str, compression: str = "gz") -> dict[str, Any]:
     prune_temp_dir()
+    if compression not in {"gz", "none"}:
+        raise ValueError("compression must be 'gz' or 'none'")
     src = resolve_path(path, must_exist=True)
     if not src.is_dir():
         raise NotADirectoryError(str(src))
-    _assert_no_symlinks(src)
+    _assert_transferable_tree(src)
     suffix = ".tar.gz" if compression == "gz" else ".tar"
     mode = "w:gz" if compression == "gz" else "w"
     archive = temp_dir() / f"transfer-pack-{uuid.uuid4().hex}{suffix}"

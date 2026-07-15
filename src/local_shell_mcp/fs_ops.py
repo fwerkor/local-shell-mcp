@@ -200,9 +200,25 @@ def resolve_path(
         except ValueError as exc:
             raise ValueError(f"Path escapes workspace: {path}") from exc
 
-    lower = str(resolved).lower()
+    candidates: list[tuple[str, ...]] = [tuple(part.casefold() for part in resolved.parts)]
+    with contextlib.suppress(ValueError):
+        relative = resolved.relative_to(root)
+        candidates.insert(0, tuple(part.casefold() for part in relative.parts))
     for denied in settings.path_denylist:
-        if denied and denied.lower() in lower:
+        normalized = tuple(
+            part.casefold()
+            for part in str(denied).replace("\\", "/").strip("/").split("/")
+            if part
+        )
+        if not normalized:
+            continue
+        matched = any(
+            len(parts) >= len(normalized) and parts[-len(normalized) :] == normalized
+            for parts in candidates
+        )
+        if len(normalized) == 1:
+            matched = matched or any(normalized[0] in parts for parts in candidates)
+        if matched:
             raise PermissionError(f"Path is denylisted: {path}")
 
     exists = resolved.exists() if follow_final_symlink else os.path.lexists(resolved)
@@ -522,6 +538,8 @@ def perform_file_action(
 
 
 def edit_text(path: str, old: str, new: str, replace_all: bool = False) -> dict:
+    if old == "":
+        raise ValueError("old text must not be empty")
     settings = get_settings()
     p = resolve_path(path, must_exist=True)
     if p.stat().st_size > settings.max_file_write_bytes:
@@ -554,6 +572,8 @@ def multi_edit_text(path: str, edits: list[dict]) -> dict:
     for edit in edits:
         old = str(edit["old"])
         new = str(edit["new"])
+        if old == "":
+            raise ValueError("old text must not be empty")
         replace_all = bool(edit.get("replace_all", False))
         count = text.count(old)
         if count == 0:

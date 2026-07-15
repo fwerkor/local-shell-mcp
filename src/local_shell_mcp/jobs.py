@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import json
 import os
@@ -17,6 +18,7 @@ from typing import Any, BinaryIO
 from .audit import audit
 from .fs_ops import resolve_path
 from .settings import get_settings
+from .shell_environment import filtered_subprocess_env
 from .shell_ops import (
     check_command_policy,
     kill_shell,
@@ -252,6 +254,10 @@ def _runner_argv(paths: dict[str, Path], cwd: Path) -> list[str]:
         settings.shell_executable,
         "--max-log-bytes",
         str(max(1, settings.max_job_log_bytes)),
+        "--env-blocklist-b64",
+        _encode_runner_env_policy(settings.shell_env_blocklist),
+        "--env-blocked-prefixes-b64",
+        _encode_runner_env_policy(settings.shell_env_blocked_prefixes),
     ]
     if getattr(sys, "frozen", False):
         return [sys.executable, *arguments]
@@ -815,6 +821,24 @@ def _compact_log(handle: BinaryIO, max_bytes: int) -> bool:
     return True
 
 
+def _encode_runner_env_policy(values: list[str]) -> str:
+    payload = json.dumps(values, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii")
+
+
+def _parse_runner_env_policy(raw: str, label: str) -> list[str]:
+    try:
+        decoded = base64.b64decode(
+            raw.encode("ascii"), altchars=b"-_", validate=True
+        ).decode("utf-8")
+        value = json.loads(decoded)
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} must be a URL-safe Base64 JSON string list") from exc
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{label} must be a URL-safe Base64 JSON string list")
+    return value
+
+
 def _write_runner_status(path: Path, payload: dict[str, Any]) -> None:
     temporary = path.with_name(path.name + f".{uuid.uuid4().hex}.tmp")
     try:
@@ -832,6 +856,14 @@ def run_job_runner_cli(argv: list[str] | None = None) -> None:
     parser.add_argument("--cwd", required=True)
     parser.add_argument("--shell", required=True)
     parser.add_argument("--max-log-bytes", type=int, required=True)
+    parser.add_argument(
+        "--env-blocklist-b64",
+        default=_encode_runner_env_policy(["CLOUDFLARE_TUNNEL_TOKEN"]),
+    )
+    parser.add_argument(
+        "--env-blocked-prefixes-b64",
+        default=_encode_runner_env_policy(["LOCAL_SHELL_MCP_", "DOCKER_"]),
+    )
     args = parser.parse_args(argv)
 
     command_path = Path(args.command_file)
@@ -845,10 +877,16 @@ def run_job_runner_cli(argv: list[str] | None = None) -> None:
     error: str | None = None
     try:
         command = command_path.read_text(encoding="utf-8")
+        blocked_names = _parse_runner_env_policy(
+            args.env_blocklist_b64, "env blocklist"
+        )
+        blocked_prefixes = _parse_runner_env_policy(
+            args.env_blocked_prefixes_b64, "env blocked prefixes"
+        )
         process = subprocess.Popen(  # noqa: S603
             _runner_shell_args(args.shell, command),
             cwd=args.cwd,
-            env=os.environ.copy(),
+            env=filtered_subprocess_env(blocked_names, blocked_prefixes),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
