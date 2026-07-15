@@ -7,24 +7,57 @@ import * as vscode from 'vscode';
 let output: vscode.OutputChannel;
 let serverProcess: cp.ChildProcessWithoutNullStreams | undefined;
 
-function stopProcessTree(proc: cp.ChildProcessWithoutNullStreams): Promise<void> {
+function waitForExit(proc: cp.ChildProcessWithoutNullStreams, timeoutMs: number): Promise<boolean> {
+  if (proc.exitCode !== null || proc.signalCode !== null) {
+    return Promise.resolve(true);
+  }
   return new Promise((resolve) => {
-    if (proc.exitCode !== null || proc.signalCode !== null) {
-      resolve();
-      return;
-    }
-    if (process.platform === 'win32' && proc.pid) {
+    const finish = (exited: boolean) => {
+      clearTimeout(timer);
+      proc.off('exit', onExit);
+      resolve(exited);
+    };
+    const onExit = () => finish(true);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    proc.once('exit', onExit);
+  });
+}
+
+function signalPosixProcessTree(proc: cp.ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
+  if (!proc.pid) {
+    proc.kill(signal);
+    return;
+  }
+  try {
+    process.kill(-proc.pid, signal);
+  } catch {
+    proc.kill(signal);
+  }
+}
+
+async function stopProcessTree(proc: cp.ChildProcessWithoutNullStreams): Promise<void> {
+  if (proc.exitCode !== null || proc.signalCode !== null) {
+    return;
+  }
+  if (process.platform === 'win32' && proc.pid) {
+    await new Promise<void>((resolve) => {
       cp.execFile('taskkill', ['/PID', String(proc.pid), '/T', '/F'], (error) => {
         if (error) {
           proc.kill();
         }
         resolve();
       });
-      return;
-    }
-    proc.kill();
-    resolve();
-  });
+    });
+    await waitForExit(proc, 2000);
+    return;
+  }
+
+  signalPosixProcessTree(proc, 'SIGTERM');
+  if (await waitForExit(proc, 2000)) {
+    return;
+  }
+  signalPosixProcessTree(proc, 'SIGKILL');
+  await waitForExit(proc, 1000);
 }
 
 interface ExtensionConfig {
@@ -184,6 +217,7 @@ async function startServer(context: vscode.ExtensionContext): Promise<void> {
     cwd: config.workspaceRoot,
     env,
     shell: process.platform === 'win32',
+    detached: process.platform !== 'win32',
   });
 
   serverProcess = child;

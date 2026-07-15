@@ -5,6 +5,7 @@ import os
 import re
 import shlex
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -72,8 +73,9 @@ class NativeShellSession:
 
 def check_command_policy(command: str) -> None:
     settings = get_settings()
+    normalized = command.casefold()
     for denied in settings.command_denylist:
-        if denied and denied in command:
+        if denied and denied.casefold() in normalized:
             raise PermissionError(f"Command contains denylisted fragment: {denied!r}")
 
 
@@ -156,6 +158,16 @@ def _shell_start_lock() -> asyncio.Lock:
 
 def _shell_program_name(shell: str) -> str:
     return Path(shell).name.lower()
+
+
+def quote_shell_argument(value: str) -> str:
+    name = _shell_program_name(get_settings().shell_executable)
+    powershell = "power" + "shell"
+    if name in {powershell + ".exe", powershell, "pwsh.exe", "pwsh"}:
+        return "'" + value.replace("'", "''") + "'"
+    if name in {"cmd.exe", "cmd"}:
+        return subprocess.list2cmdline([value])
+    return shlex.quote(value)
 
 
 def _shell_command_args(command: str) -> list[str]:
@@ -361,7 +373,8 @@ async def public_run_shell(command: str, cwd: str = ".", timeout_s: int | None =
 
 def _tmux_session_name(name: str | None = None) -> str:
     base = name or f"mcp-{uuid.uuid4().hex[:8]}"
-    return re.sub(r"[^A-Za-z0-9_.-]", "-", base)[:64]
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]", "-", base.strip())[:64].strip(".-")
+    return cleaned or f"mcp-{uuid.uuid4().hex[:8]}"
 
 
 async def tmux(args: list[str], timeout_s: int = 10) -> CommandResult:

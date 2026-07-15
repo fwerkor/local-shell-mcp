@@ -39,6 +39,76 @@ _WEAK_OAUTH_SECRET_VALUES = {
 }
 _OAUTH_SECRET_THREAD_LOCK = threading.Lock()
 
+_POSITIVE_INTEGER_SETTINGS = (
+    "port",
+    "default_timeout_s",
+    "max_timeout_s",
+    "max_output_bytes",
+    "max_file_read_bytes",
+    "max_file_write_bytes",
+    "max_grep_results",
+    "max_directory_entries",
+    "max_glob_results",
+    "max_tree_entries",
+    "max_skills",
+    "max_skill_related_files",
+    "max_skill_scan_entries",
+    "max_skill_path_bytes",
+    "max_read_many_files",
+    "max_read_many_total_bytes",
+    "max_todos",
+    "max_todo_bytes",
+    "max_http_request_bytes",
+    "max_job_log_bytes",
+    "max_audit_tail_bytes",
+    "max_audit_log_bytes",
+    "max_tmp_files",
+    "max_tmp_bytes",
+    "max_transfer_archive_entries",
+    "max_transfer_unpacked_bytes",
+    "max_concurrent_commands",
+    "max_tmux_sessions",
+    "ui_terminal_idle_timeout_s",
+    "ui_terminal_max_sessions",
+    "ui_remote_request_timeout_s",
+    "file_download_default_ttl_s",
+    "file_download_max_ttl_s",
+    "remote_invite_ttl_s",
+    "remote_poll_timeout_s",
+    "remote_job_timeout_s",
+    "remote_max_pending_jobs",
+    "remote_cancelled_job_ttl_s",
+    "mcp_session_idle_timeout_s",
+    "mcp_max_sessions",
+    "oauth_code_ttl_s",
+)
+
+_NONNEGATIVE_INTEGER_SETTINGS = (
+    "max_jobs",
+    "file_download_default_max_downloads",
+    "file_download_max_file_bytes",
+    "oauth_access_token_ttl_s",
+)
+
+
+def _validate_numeric_settings(settings: Settings) -> None:
+    for name in _POSITIVE_INTEGER_SETTINGS:
+        value = int(getattr(settings, name))
+        if value <= 0:
+            raise ValueError(f"{name} must be greater than zero")
+    for name in _NONNEGATIVE_INTEGER_SETTINGS:
+        value = int(getattr(settings, name))
+        if value < 0:
+            raise ValueError(f"{name} must be greater than or equal to zero")
+    if int(settings.port) > 65535:
+        raise ValueError("port must be <= 65535")
+    if settings.max_timeout_s < settings.default_timeout_s:
+        raise ValueError("max_timeout_s must be >= default_timeout_s")
+    if settings.file_download_max_ttl_s < settings.file_download_default_ttl_s:
+        raise ValueError(
+            "file_download_max_ttl_s must be >= file_download_default_ttl_s"
+        )
+
 
 def _matches_default_path(value: Path, default: Path) -> bool:
     """Match a default path before or after platform-specific normalization."""
@@ -54,6 +124,10 @@ def default_shell_executable() -> str:
     if os.name == "nt":
         return "power" + "shell.exe"
     return "/bin/bash"
+
+
+def default_python_executable() -> str:
+    return "python.exe" if os.name == "nt" else "python3"
 
 
 def _replace_settings(settings: Settings, **updates: Any) -> Settings:
@@ -309,7 +383,7 @@ if _PYDANTIC_AVAILABLE:
         tmux_bin: str = "tmux"
         rg_bin: str = "rg"
         git_bin: str = "git"
-        python_bin: str = "python3"
+        python_bin: str = Field(default_factory=default_python_executable)
 
         # Authentication. OAuth is the default for ChatGPT custom connectors.
         auth_mode: Literal["none", "oauth"] = "oauth"
@@ -382,6 +456,7 @@ if _PYDANTIC_AVAILABLE:
 
         @model_validator(mode="after")
         def disable_builtin_restrictions_in_full_container_mode(self) -> Settings:
+            _validate_numeric_settings(self)
             if self.allow_full_container:
                 self.command_denylist = []
                 self.path_denylist = []
@@ -505,7 +580,7 @@ else:
         tmux_bin: str = "tmux"
         rg_bin: str = "rg"
         git_bin: str = "git"
-        python_bin: str = "python3"
+        python_bin: str = field(default_factory=default_python_executable)
 
         auth_mode: Literal["none", "oauth"] = "oauth"
         auth_bypass_localhost: bool = True
@@ -566,6 +641,7 @@ else:
                     ).resolve(),
                 )
             self.ui_path = normalize_ui_path(self.ui_path)
+            _validate_numeric_settings(self)
             if self.allow_full_container:
                 self.command_denylist = []
                 self.path_denylist = []

@@ -177,7 +177,6 @@ async def ui_wallpaper(request: Request) -> Response:  # noqa: ARG001
             )
         return Response(status_code=204)
 
-    stamp_path.write_text(today, encoding="utf-8")
     try:
         import httpx
 
@@ -202,6 +201,7 @@ async def ui_wallpaper(request: Request) -> Response:  # noqa: ARG001
     except Exception:
         if not image_path.is_file():
             return Response(status_code=204)
+        stamp_path.write_text(today, encoding="utf-8")
 
     return FileResponse(image_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
 

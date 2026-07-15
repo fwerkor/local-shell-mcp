@@ -8,7 +8,7 @@ import uuid
 
 from .fs_ops import prune_temp_dir, relative_display, resolve_path, temp_dir
 from .settings import get_settings
-from .shell_ops import public_run_shell_timeout, run_shell
+from .shell_ops import public_run_shell_timeout, quote_shell_argument, run_shell
 
 
 def _assert_script_size(script: str) -> None:
@@ -21,7 +21,7 @@ def _assert_script_size(script: str) -> None:
 async def playwright_install(browser: str = "chromium", with_deps: bool = False) -> dict:
     if browser not in {"chromium", "firefox", "webkit", "all"}:
         raise ValueError("browser must be chromium, firefox, webkit, or all")
-    cmd = "python3 -m playwright install"
+    cmd = f"{quote_shell_argument(get_settings().python_bin)} -m playwright install"
     if with_deps:
         cmd += " --with-deps"
     if browser != "all":
@@ -45,6 +45,7 @@ async def browser_screenshot(
         raise ValueError("invalid wait_until")
     out = resolve_path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
+    out.unlink(missing_ok=True)
     await asyncio.to_thread(prune_temp_dir)
     script_path = temp_dir() / f"playwright-{uuid.uuid4().hex}.py"
     script_path.parent.mkdir(parents=True, exist_ok=True)
@@ -59,8 +60,8 @@ with sync_playwright() as p:
     browser.close()
 '''
     await asyncio.to_thread(script_path.write_text, textwrap.dedent(script), encoding="utf-8")
-    result = await run_shell(f"python3 {shlex.quote(str(script_path))}", timeout_s=60, max_output_bytes=200_000)
-    return {**result.model_dump(), "screenshot_path": relative_display(out)}
+    result = await run_shell(f"{quote_shell_argument(get_settings().python_bin)} {quote_shell_argument(str(script_path))}", timeout_s=60, max_output_bytes=200_000)
+    return {**result.model_dump(), "screenshot_path": relative_display(out) if result.ok and out.is_file() else None}
 
 
 async def browser_get_text(
@@ -87,7 +88,7 @@ with sync_playwright() as p:
     browser.close()
 '''
     await asyncio.to_thread(script_path.write_text, textwrap.dedent(script), encoding="utf-8")
-    result = await run_shell(f"python3 {shlex.quote(str(script_path))}", timeout_s=60, max_output_bytes=500_000)
+    result = await run_shell(f"{quote_shell_argument(get_settings().python_bin)} {quote_shell_argument(str(script_path))}", timeout_s=60, max_output_bytes=500_000)
     return result.model_dump()
 
 
@@ -118,7 +119,7 @@ with sync_playwright() as p:
     browser.close()
 '''
     await asyncio.to_thread(script_path.write_text, textwrap.dedent(script), encoding="utf-8")
-    result = await run_shell(f"python3 {shlex.quote(str(script_path))}", timeout_s=60, max_output_bytes=500_000)
+    result = await run_shell(f"{quote_shell_argument(get_settings().python_bin)} {quote_shell_argument(str(script_path))}", timeout_s=60, max_output_bytes=500_000)
     parsed = None
     if result.ok and result.stdout.strip():
         try:
@@ -137,6 +138,7 @@ async def browser_pdf(
 ) -> dict:
     out = resolve_path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
+    out.unlink(missing_ok=True)
     await asyncio.to_thread(prune_temp_dir)
     script_path = temp_dir() / f"playwright-{uuid.uuid4().hex}.py"
     script_path.parent.mkdir(parents=True, exist_ok=True)
@@ -151,14 +153,14 @@ with sync_playwright() as p:
     browser.close()
 '''
     await asyncio.to_thread(script_path.write_text, textwrap.dedent(script), encoding="utf-8")
-    result = await run_shell(f"python3 {shlex.quote(str(script_path))}", timeout_s=60, max_output_bytes=200_000)
-    return {**result.model_dump(), "pdf_path": relative_display(out)}
+    result = await run_shell(f"{quote_shell_argument(get_settings().python_bin)} {quote_shell_argument(str(script_path))}", timeout_s=60, max_output_bytes=200_000)
+    return {**result.model_dump(), "pdf_path": relative_display(out) if result.ok and out.is_file() else None}
 
 
 async def playwright_run_script(script: str, cwd: str = ".", timeout_s: int = 60) -> dict:
     """Run a caller-supplied Python Playwright script inside the workspace.
 
-    The script is written to .local-shell-mcp/tmp and executed with python3. This is powerful;
+    The script is written to .local-shell-mcp/tmp and executed with the configured Python interpreter. This is powerful;
     use it only when the container is disposable and authenticated.
     """
     _assert_script_size(script)
@@ -166,5 +168,10 @@ async def playwright_run_script(script: str, cwd: str = ".", timeout_s: int = 60
     path = temp_dir() / f"playwright-custom-{uuid.uuid4().hex}.py"
     path.parent.mkdir(parents=True, exist_ok=True)
     await asyncio.to_thread(path.write_text, script, encoding="utf-8")
-    result = await run_shell(f"python3 {shlex.quote(str(path))}", cwd=cwd, timeout_s=public_run_shell_timeout(timeout_s), max_output_bytes=1_000_000)
+    result = await run_shell(
+        f"{quote_shell_argument(get_settings().python_bin)} {quote_shell_argument(str(path))}",
+        cwd=cwd,
+        timeout_s=public_run_shell_timeout(timeout_s),
+        max_output_bytes=1_000_000,
+    )
     return {**result.model_dump(), "script_path": relative_display(path)}

@@ -17,6 +17,7 @@ from typing import Any, BinaryIO
 from .audit import audit
 from .fs_ops import resolve_path
 from .settings import get_settings
+from .shell_environment import subprocess_env
 from .shell_ops import (
     check_command_policy,
     kill_shell,
@@ -848,7 +849,7 @@ def run_job_runner_cli(argv: list[str] | None = None) -> None:
         process = subprocess.Popen(  # noqa: S603
             _runner_shell_args(args.shell, command),
             cwd=args.cwd,
-            env=os.environ.copy(),
+            env=subprocess_env(),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )

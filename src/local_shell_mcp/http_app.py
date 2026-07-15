@@ -73,6 +73,17 @@ from .todo_ops import todo_read, todo_write
 from .version import version_info
 
 PUBLIC_TOOL_TIMEOUT_S = PUBLIC_TOOL_WATCHDOG_TIMEOUT_S
+NON_CANCELLABLE_HTTP_MUTATIONS = frozenset(
+    {
+        "/tools/download/create",
+        "/tools/download/revoke",
+        "/tools/write_file",
+        "/tools/edit_file",
+        "/tools/multi_edit_file",
+        "/tools/delete",
+        "/tools/todo",
+    }
+)
 
 
 class SkillLoadRequest(BaseModel):
@@ -87,7 +98,7 @@ class SkillReadFileRequest(SkillLoadRequest):
 
 def principal_dep(request: Request) -> Principal:
     principal = verify_request(request)
-    require_scopes(principal, required_scopes_for_http_tool(str(request.url.path)))
+    require_scopes(principal, required_scopes_for_http_tool(str(request.url.path), request.method))
     return principal
 
 
@@ -96,6 +107,32 @@ PRINCIPAL_DEP = Depends(principal_dep)
 
 async def _blocking(func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
     return await asyncio.to_thread(func, *args, **kwargs)
+
+
+def _body_bool(body: dict, key: str, default: bool) -> bool:
+    if key not in body:
+        return default
+    value = body[key]
+    if not isinstance(value, bool):
+        raise ValueError(f"{key} must be a boolean")
+    return value
+
+
+def _body_int(
+    body: dict,
+    key: str,
+    default: int | None,
+    *,
+    allow_none: bool = False,
+) -> int | None:
+    if key not in body:
+        return default
+    value = body[key]
+    if value is None and allow_none:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{key} must be an integer")
+    return value
 
 
 def build_http_app() -> FastAPI:
@@ -147,6 +184,10 @@ def build_http_app() -> FastAPI:
     async def tools_timeout_middleware(request: Request, call_next):  # noqa: ANN001
         if not request.url.path.startswith("/tools/"):
             return await call_next(request)
+        if request.url.path in NON_CANCELLABLE_HTTP_MUTATIONS and (
+            request.url.path != "/tools/todo" or request.method.upper() != "GET"
+        ):
+            return await call_next(request)
         try:
             return await asyncio.wait_for(call_next(request), timeout=PUBLIC_TOOL_TIMEOUT_S)
         except TimeoutError:
@@ -165,7 +206,7 @@ def build_http_app() -> FastAPI:
 
     @app.get("/readyz")
     async def readyz():
-        return {"ok": True, "workspace_root": str(settings.workspace_root)}
+        return {"ok": True}
 
     @app.get("/version")
     async def api_version():
@@ -197,7 +238,7 @@ def build_http_app() -> FastAPI:
     @app.post("/tools/run_shell")
     async def api_run_shell(body: dict, _: Principal = PRINCIPAL_DEP):
         try:
-            return (await public_run_shell(body["command"], body.get("cwd", "."), body.get("timeout_s"), body.get("max_output_bytes"))).model_dump()
+            return (await public_run_shell(body["command"], body.get("cwd", "."), _body_int(body, "timeout_s", None, allow_none=True), _body_int(body, "max_output_bytes", None, allow_none=True))).model_dump()
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -207,11 +248,11 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/shell_send")
     async def api_shell_send(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await send_shell(body["session_id"], body["input_text"], body.get("enter", True))
+        return await send_shell(body["session_id"], body["input_text"], _body_bool(body, "enter", True))
 
     @app.post("/tools/shell_read")
     async def api_shell_read(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await read_shell(body["session_id"], body.get("lines", 200))
+        return await read_shell(body["session_id"], _body_int(body, "lines", 200))
 
     @app.post("/tools/shell_kill")
     async def api_shell_kill(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -223,19 +264,19 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/list_files")
     async def api_list_files(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(list_dir, body.get("path", "."), body.get("recursive", False), body.get("max_entries", 500))
+        return await _blocking(list_dir, body.get("path", "."), _body_bool(body, "recursive", False), _body_int(body, "max_entries", 500))
 
     @app.post("/tools/tree")
     async def api_tree(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await tree(body.get("cwd", "."), body.get("depth", 3), body.get("max_entries", 500))
+        return await tree(body.get("cwd", "."), _body_int(body, "depth", 3), _body_int(body, "max_entries", 500))
 
     @app.post("/tools/glob")
     async def api_glob(body: dict, _: Principal = PRINCIPAL_DEP):
-        return {"paths": await _blocking(glob_paths, body["pattern"], body.get("cwd", "."), body.get("max_results", 500))}
+        return {"paths": await _blocking(glob_paths, body["pattern"], body.get("cwd", "."), _body_int(body, "max_results", 500))}
 
     @app.post("/tools/grep")
     async def api_grep(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await grep(body["query"], body.get("cwd", "."), body.get("glob"), body.get("regex", True), body.get("case_sensitive", True), body.get("max_results"))
+        return await grep(body["query"], body.get("cwd", "."), body.get("glob"), _body_bool(body, "regex", True), _body_bool(body, "case_sensitive", True), _body_int(body, "max_results", None, allow_none=True))
 
     @app.api_route("/download/{token}", methods=["GET", "HEAD"])
     async def api_download(request: Request):
@@ -246,9 +287,9 @@ def build_http_app() -> FastAPI:
         return await _blocking(
             create_download_link,
             body["path"],
-            body.get("ttl_s"),
+            _body_int(body, "ttl_s", None, allow_none=True),
             body.get("filename"),
-            body.get("max_downloads"),
+            _body_int(body, "max_downloads", None, allow_none=True),
         )
 
     @app.get("/tools/download/list")
@@ -264,19 +305,19 @@ def build_http_app() -> FastAPI:
         return await _blocking(
             read_text,
             body["path"],
-            body.get("start_line"),
-            body.get("end_line"),
+            _body_int(body, "start_line", None, allow_none=True),
+            _body_int(body, "end_line", None, allow_none=True),
             body.get("binary_preview"),
-            body.get("binary_preview_bytes", 256),
+            _body_int(body, "binary_preview_bytes", 256),
         )
 
     @app.post("/tools/write_file")
     async def api_write_file(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(write_text, body["path"], body["content"], body.get("overwrite", True))
+        return await _blocking(write_text, body["path"], body["content"], _body_bool(body, "overwrite", True))
 
     @app.post("/tools/edit_file")
     async def api_edit_file(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(edit_text, body["path"], body["old"], body["new"], body.get("replace_all", False))
+        return await _blocking(edit_text, body["path"], body["old"], body["new"], _body_bool(body, "replace_all", False))
 
     @app.post("/tools/multi_edit_file")
     async def api_multi_edit_file(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -284,7 +325,7 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/delete")
     async def api_delete(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(delete_path, body["path"], body.get("recursive", False))
+        return await _blocking(delete_path, body["path"], _body_bool(body, "recursive", False))
 
     @app.post("/tools/git/status")
     async def api_git_status(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -292,11 +333,11 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/git/diff")
     async def api_git_diff(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_diff(body.get("cwd", "."), body.get("staged", False), body.get("path"), body.get("stat", False))
+        return await git_diff(body.get("cwd", "."), _body_bool(body, "staged", False), body.get("path"), _body_bool(body, "stat", False))
 
     @app.post("/tools/git/log")
     async def api_git_log(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_log(body.get("cwd", "."), body.get("max_count", 20))
+        return await git_log(body.get("cwd", "."), _body_int(body, "max_count", 20))
 
     @app.post("/tools/git/clone")
     async def api_git_clone(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -304,15 +345,15 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/git/checkout")
     async def api_git_checkout(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_checkout(body["cwd"], body["ref"], body.get("create", False))
+        return await git_checkout(body["cwd"], body["ref"], _body_bool(body, "create", False))
 
     @app.post("/tools/git/fetch")
     async def api_git_fetch(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_fetch(body.get("cwd", "."), body.get("remote", "origin"), body.get("prune", True))
+        return await git_fetch(body.get("cwd", "."), body.get("remote", "origin"), _body_bool(body, "prune", True))
 
     @app.post("/tools/git/pull")
     async def api_git_pull(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_pull(body.get("cwd", "."), body.get("ff_only", True))
+        return await git_pull(body.get("cwd", "."), _body_bool(body, "ff_only", True))
 
     @app.post("/tools/git/add")
     async def api_git_add(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -320,11 +361,11 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/git/commit")
     async def api_git_commit(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_commit(body["cwd"], body["message"], body.get("all_changes", False))
+        return await git_commit(body["cwd"], body["message"], _body_bool(body, "all_changes", False))
 
     @app.post("/tools/git/push")
     async def api_git_push(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_push(body["cwd"], body.get("remote", "origin"), body.get("branch"), body.get("set_upstream", True))
+        return await git_push(body["cwd"], body.get("remote", "origin"), body.get("branch"), _body_bool(body, "set_upstream", True))
 
     @app.post("/tools/git/show")
     async def api_git_show(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -344,11 +385,11 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/playwright/install")
     async def api_playwright_install(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await playwright_install(body.get("browser", "chromium"), body.get("with_deps", False))
+        return await playwright_install(body.get("browser", "chromium"), _body_bool(body, "with_deps", False))
 
     @app.post("/tools/browser/screenshot")
     async def api_browser_screenshot(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await browser_screenshot(body["url"], body.get("output_path", "screenshots/page.png"), body.get("browser", "chromium"), body.get("full_page", True), body.get("width", 1440), body.get("height", 1000), body.get("wait_until", "networkidle"))
+        return await browser_screenshot(body["url"], body.get("output_path", "screenshots/page.png"), body.get("browser", "chromium"), _body_bool(body, "full_page", True), _body_int(body, "width", 1440), _body_int(body, "height", 1000), body.get("wait_until", "networkidle"))
 
     @app.post("/tools/browser/text")
     async def api_browser_text(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -360,11 +401,11 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/browser/pdf")
     async def api_browser_pdf(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await browser_pdf(body["url"], body.get("output_path", "screenshots/page.pdf"), body.get("width", 1440), body.get("height", 1000), body.get("wait_until", "networkidle"))
+        return await browser_pdf(body["url"], body.get("output_path", "screenshots/page.pdf"), _body_int(body, "width", 1440), _body_int(body, "height", 1000), body.get("wait_until", "networkidle"))
 
     @app.post("/tools/playwright/run_script")
     async def api_playwright_run_script(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await playwright_run_script(body["script"], body.get("cwd", "."), body.get("timeout_s", 60))
+        return await playwright_run_script(body["script"], body.get("cwd", "."), _body_int(body, "timeout_s", 60))
 
     app.router.routes.extend(ui_routes())
     return app
