@@ -6,12 +6,12 @@
 
 大多數編程任務可以使用這個循環：
 
-1. 檢查：`environment_info`、`tree_view`、`git_status_tool`、`grep_search`、`read_file`。
+1. 檢查：`environment_info`、`tree_view`、`run_shell_tool`、`grep_search`、`read_file`。
 2. 計劃：讓模型識別最小相關文件和測試。
-3. 編輯：使用 `edit_file`、`multi_edit_file`、`apply_patch` 或 shell 命令。
+3. 編輯：使用 `edit_file`、`apply_patch` 或 shell 命令。
 4. 驗證：用 `run_shell_tool` 或持久 shell 運行定向測試或構建。
-5. 複查：需要時使用 `git_diff_tool`、`secret_scan`、`audit_tail`。
-6. 提交或導出：使用 `git_add_tool`、`git_commit_tool`、`git_push_tool`，或 `create_file_link`。
+5. 複查：需要時使用 `run_shell_tool`、`secret_scan`、`audit_tail`。
+6. 提交或導出：透過 `run_shell_tool` 執行明確的 Git CLI 命令，或使用 `create_file_link`。
 
 ## 工具選擇
 
@@ -21,13 +21,13 @@
 | 長時間開發服務器、REPL、watch 任務 | `shell_start` + `shell_read` + `shell_send` | 用阻塞式 `run_shell_tool` 等到超時 |
 | 結構化分析或生成文件 | `run_python_tool` | 用脆弱的 shell 管道處理複雜 JSON / 文本 |
 | 小範圍精確編輯 | `edit_file` | 無必要地重寫整個文件 |
-| 同一文件多處替換 | `multi_edit_file` | 不重新讀取文件就反覆做陳舊編輯 |
+| 同一文件多處替換 | `edit_file` | 不重新讀取文件就反覆做陳舊編輯 |
 | 多文件補丁 | `apply_patch` | 臨時拼接 shell 編輯命令 |
 | 查找文件 | `tree_view`、`glob_search` | 對大型倉庫做完整遞歸列表 |
 | 查找代碼 | `grep_search` | 盲目讀取大量文件 |
-| 瀏覽器證據 | `browser_screenshot_tool`、`browser_get_text_tool` | 只根據頁面名或路由猜測 |
+| 瀏覽器證據 | `browser_capture_tool`、`browser_get_text_tool` | 只根據頁面名或路由猜測 |
 | 可下載產物 | `create_file_link` | 在聊天中粘貼大型二進制內容 |
-| 遠程機器任務 | `remote_*` 工具 | 在出站 worker 模式足夠時開放入站 SSH |
+| 遠端機器任務 | 一般工具加 `machine`，以及 `transfer_path` | 在出站 worker 模式足夠時開放入站 SSH |
 
 ## 提示詞模板
 
@@ -58,15 +58,15 @@
 ### 遠程 worker 任務
 
 ```text
-使用名爲 <machine> 的已連接遠程 worker。先調用 remote_environment_info 和 remote_list_files。只在配置的遠程工作目錄內操作。短命令用 remote_run_shell_tool，長時間任務用 remote_shell_start。
+使用名為 <machine> 的已連接遠端 worker。先呼叫 environment_info(machine=<machine>) 和 list_files(machine=<machine>)。只在配置的遠端工作目錄內操作。短命令用 run_shell_tool，長時間任務用 shell_start 或 job_start。
 ```
 
 ## 處理倉庫
 
 開源改動建議流程：
 
-1. 用 `git_status_tool` 檢查是否有未提交改動。
-2. 如果任務依賴上游狀態，使用 `git_fetch_tool` 並檢查分支。
+1. 用 `run_shell_tool` 檢查是否有未提交改動。
+2. 如果任務依賴上游狀態，使用 `run_shell_tool` 並檢查分支。
 3. 編輯前用 `grep_search` 和 `read_file` 定位相關代碼。
 4. 做最小補丁。
 5. 先跑定向測試；可行時再跑更廣的測試。
@@ -93,9 +93,8 @@
 推薦做法：
 
 - 用 `remote_invite` 或 `remote_rename_machine` 給機器取清晰名稱。
-- 操作前檢查 `remote_environment_info`。
-- 用 `remote_pull_file` / `remote_push_file` 做明確傳輸。
-- 用 `remote_copy_file` / `remote_copy_dir` 通過控制服務做遠程到遠程傳輸。
+- 操作前檢查 `environment_info`。
+- 用 `transfer_path` 處理控制端與 worker、或 worker 之間的檔案和目錄傳輸。
 - 任務結束後用 `remote_revoke_machine` 撤銷 worker。
 
 ## 反模式

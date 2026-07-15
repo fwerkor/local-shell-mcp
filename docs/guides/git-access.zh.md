@@ -1,56 +1,31 @@
 # Git 访问
 
-`local-shell-mcp` 包含面向 Git 的工具，也允许通过 shell 工具直接运行 Git 命令。
+`local-shell-mcp` 通过 `run_shell_tool`、`shell_start` 或 `job_start` 使用标准 Git CLI，不再暴露专用 Git MCP 工具。这样可以覆盖完整 Git 功能，并避免为每个子命令维护重复工具。
 
-## 常见任务
+## 常见流程
 
-```text
-克隆仓库，检查状态，做一个聚焦补丁，运行测试，提交并推送。
+尽量使用有边界、非交互式命令：
+
+```bash
+git status --short --branch
+git diff --stat
+git diff
+git add -- path/to/file
+git commit -m "fix: concise description"
+git push origin HEAD
 ```
 
-推荐顺序：
+建议流程：
 
-1. `git_status_tool`
-2. `git_diff_tool`
-3. 编辑或 patch 文件
-4. 运行测试
-5. `secret_scan`
-6. `git_add_tool`
-7. `git_commit_tool`
-8. `git_push_tool`
+1. 用 `run_shell_tool` 执行 `git status --short --branch`。
+2. 只读取和修改相关文件。
+3. 运行定向测试。
+4. 用 `git diff --check && git diff` 复查。
+5. 提交或推送前运行 `secret_scan`。
+6. 使用明确的 Git CLI 命令暂存、提交和推送。
 
-## 凭据
+仓库位于远程 worker 时，在同一个 shell 工具中指定 `machine`。
 
-Docker 部署可以在 `/persist/credentials` 下持久化常见 Git 凭据位置。把该 volume 视为敏感资源。
+## 凭据与提交卫生
 
-优先使用：
-
-- 只作用于单个仓库的 deploy key。
-- 短期 GitHub App token。
-- 用于自动化的隔离机器用户。
-- 推送前人工复查。
-
-避免：
-
-- 在环境变量中放长期个人访问令牌。
-- 把宿主机 SSH 目录挂进公开 AI 控制容器。
-- 通过文件链接分享凭据文件。
-
-## 提交卫生
-
-要求 AI：
-
-- 保持提交聚焦。
-- 避免生成缓存和构建产物。
-- 说明运行过的测试。
-- 当开源维护者偏好简洁人类风格提交时，避免 AI 味样板话。
-
-## 故障排查
-
-如果 `git push` 失败：
-
-- 检查 remote URL。
-- 检查凭据持久化。
-- 如果安装了 GitHub CLI，运行 `gh auth status`。
-- 确认分支保护规则。
-- 确认 token 或 deploy key 具有写权限。
+优先使用仓库范围的 deploy key、短期 GitHub App token 和隔离的自动化账户。提交应保持聚焦，不包含缓存、构建产物或无关改动。执行 reset、clean、force-push 等破坏性命令前，应先检查准确目标。

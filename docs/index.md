@@ -67,10 +67,10 @@ The intended isolation boundary is the container or VM running the service.
 |---|---|---|
 | Shell and Python | `run_shell_tool`, `run_python_tool`, `shell_start` | Builds, tests, scripts, long-running processes |
 | Files and search | `tree_view`, `grep_search`, `read_file`, `apply_patch` | Repository inspection and precise edits |
-| Git | `git_status_tool`, `git_diff_tool`, `git_commit_tool`, `git_push_tool` | Reviewable source-control workflows |
-| Browser | `browser_screenshot_tool`, `browser_get_text_tool`, `browser_eval_tool` | UI checks, screenshots, rendered docs, page text |
+| Git | `run_shell_tool`, `run_shell_tool`, `run_shell_tool`, `run_shell_tool` | Reviewable source-control workflows |
+| Browser | `browser_capture_tool`, `browser_get_text_tool`, `playwright_run_script_tool` | UI checks, screenshots, rendered docs, page text |
 | File links | `create_file_link`, `revoke_file_link` | Downloading generated artifacts from chat |
-| Remote workers | `remote_invite`, `remote_run_shell_tool`, `remote_push_file` | Machines behind NAT, firewalls, or cluster login flows |
+| Remote workers | `remote_invite`, `run_shell_tool`, `transfer_path` | Machines behind NAT, firewalls, or cluster login flows |
 
 ## Typical workflows
 
@@ -87,7 +87,7 @@ The intended isolation boundary is the container or VM running the service.
 
 1. Create a one-time remote worker invite.
 2. Paste the generated command on the remote host.
-3. Use `remote_run_shell_tool`, `remote_read_file`, `remote_push_file`, and remote Git tools from ChatGPT.
+3. Use `run_shell_tool`, `read_file`, `transfer_path`, and remote Git tools from ChatGPT.
 4. Revoke the worker after the task.
 
 ### Artifact generation

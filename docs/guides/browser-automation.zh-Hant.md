@@ -1,55 +1,21 @@
 # 瀏覽器自動化
 
-瀏覽器工具使用 Playwright 檢查網頁、採集證據、評估頁面狀態並生成 PDF。它們適合文檔站、UI smoke test、視覺迴歸排查，以及收集可復現截圖。
+瀏覽器工具基於 Playwright，用於檢查頁面、保存證據和執行可重現的互動流程。公開工具面刻意保持精簡。
 
 ## 工具
 
 | 工具 | 用途 |
 |---|---|
-| `playwright_install_tool` | 缺少瀏覽器二進制時安裝它們。 |
-| `browser_screenshot_tool` | 在工作區內保存頁面截圖。 |
-| `browser_get_text_tool` | 從選擇器中提取可見文本。 |
-| `browser_eval_tool` | 在頁面上下文中執行 JavaScript。 |
-| `browser_pdf_tool` | 保存頁面的 Chromium PDF。 |
-| `playwright_run_script_tool` | 運行完整 Python Playwright 腳本。 |
-| `remote_browser_*` | 在已連接遠程 worker 上運行等價操作。 |
+| `browser_get_text_tool` | 從指定 selector 提取可見文字。 |
+| `browser_capture_tool` | 保存 PNG 截圖或 Chromium PDF。 |
+| `playwright_run_script_tool` | 執行完整 Python Playwright 腳本，處理點擊、表單、主控台檢查或多頁面流程。 |
+
+三個工具都接受可選的 `machine` 參數。控制端或目標 worker 必須已經安裝瀏覽器相依套件；安裝工作透過一般 shell 命令完成，例如 `python -m playwright install chromium`。
 
 ## 常見流程
 
-### 截取本本文檔站
+進行視覺驗證時，先用 `shell_start` 或 `job_start` 啟動站點，等服務就緒後呼叫 `browser_capture_tool(capture_format="png")`，最後停止程序。需要可列印輸出時使用 `capture_format="pdf"`，並選擇 Chromium。
 
-1. 在持久 shell session 中啓動站點。
-2. 等待服務器輸出本地 URL。
-3. 對該 URL 調用 `browser_screenshot_tool`。
-4. 如果需要從聊天中下載截圖，使用 `create_file_link`。
-5. 關閉持久 shell session。
+只關心渲染文字時使用 `browser_get_text_tool`。需要互動、JavaScript 求值或複雜導覽時使用 `playwright_run_script_tool`。
 
-### 提取文本做快速驗證
-
-當主要問題是頁面是否渲染了預期內容時，使用 `browser_get_text_tool`。
-
-示例任務表述：
-
-```text
-啓動文檔預覽，對首頁使用 browser_get_text_tool，確認導航中出現 deployment、tools 和 usage-patterns 頁面。
-```
-
-### 運行自定義 Playwright 腳本
-
-當內置截圖、文本、PDF 工具不夠時，使用 `playwright_run_script_tool`。例如需要點擊流程、檢查 console error，或採集多個頁面。
-
-腳本應有明確邊界：
-
-- 設置顯式超時。
-- 把產物保存到工作區。
-- 除非環境專用於該任務，否則避免輸入憑據。
-- 對公開站點優先使用只讀檢查。
-
-## 故障排查
-
-如果瀏覽器啓動失敗：
-
-- 對所需瀏覽器運行 `playwright_install_tool`。
-- 確認容器或宿主機具備所需系統依賴。
-- Docker 中優先使用項目官方鏡像，因爲它包含預期的瀏覽器和文檔工具。
-- 對遠程 worker，在遠程機器上安裝依賴，或改用控制服務上的瀏覽器工具。
+腳本應設定明確逾時，把產物保存到工作區，並避免在非專用環境中輸入憑據。

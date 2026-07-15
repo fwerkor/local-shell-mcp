@@ -2,7 +2,7 @@
 
 # local-shell-mcp
 
-**A ChatGPT-ready MCP control plane for shell, files, Git, browser automation, file links, and remote machines.**
+**A ChatGPT-ready MCP control plane for shell, files, browser automation, file links, and remote machines.**
 
 [![Docs](https://img.shields.io/badge/docs-fwerkor.github.io%2Flocal--shell--mcp-7c3aed?logo=materialformkdocs&logoColor=white)](https://fwerkor.github.io/local-shell-mcp/)
 [![CI](https://github.com/fwerkor/local-shell-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/fwerkor/local-shell-mcp/actions/workflows/ci.yml)
@@ -17,7 +17,7 @@
 
 ---
 
-`local-shell-mcp` gives ChatGPT Developer Mode and other MCP clients controlled access to a real execution environment. It exposes a dedicated workspace with shell, persistent shell, filesystem, search, patch, Git, Playwright, audit, todo, public file links, and outbound remote-worker tools.
+`local-shell-mcp` gives ChatGPT Developer Mode and other MCP clients controlled access to a real execution environment. It exposes a dedicated workspace with shell, persistent shell, filesystem, search, patch, Playwright, audit, todo, public file links, and outbound remote-worker access. Git is handled through ordinary shell commands instead of a parallel wrapper API.
 
 ```text
 Runtime: Docker / VS Code extension / binary / Python / stdio
@@ -35,8 +35,8 @@ The intended safety boundary is the container or VM, not the host.
 |---|---|
 | Real terminal access | Run tests, build projects, inspect logs, and debug with persistent shell sessions. |
 | Workspace-aware file tools | Read, write, patch, search, and review files under a controlled root. |
-| Git workflow support | Clone, diff, commit, push, and inspect history from inside the AI-assisted environment. |
-| Browser automation | Capture screenshots, extract page text, evaluate JavaScript, and save PDFs with Playwright. |
+| Git workflow support | Run the standard Git CLI through shell tools without a second, incomplete Git abstraction. |
+| Browser automation | Extract page text, capture PNG/PDF evidence, or run a full Playwright script. |
 | Remote workers | Control NAT, firewall, HPC, NPU, or lab machines that can only connect outward. |
 | Agent Skills | Discover, load, and read reusable `SKILL.md` workflows through three fixed tools without changing the MCP tool list. |
 | ChatGPT connector support | OAuth 2.1, `/mcp`, discovery controls, and ChatGPT-compatible tool schemas. |
@@ -108,7 +108,7 @@ See the [human interface guide](https://fwerkor.github.io/local-shell-mcp/guides
 
 ## ChatGPT setup
 
-For full shell, filesystem, Git, and Playwright tools, use ChatGPT Developer Mode or another full MCP client. ChatGPT is a client connection; choose and start a runtime first.
+For full shell, filesystem, remote-worker, and Playwright tools, use ChatGPT Developer Mode or another full MCP client. ChatGPT is a client connection; choose and start a runtime first.
 
 1. Expose the server through HTTPS.
 2. Keep OAuth enabled.
@@ -132,7 +132,7 @@ For public ChatGPT access, expose the local server through an HTTPS tunnel and s
 
 ## Remote workers
 
-Remote worker mode is enabled by default. Create a one-time invite on the control server, paste the generated command on a remote machine, and use `remote_*` tools without opening SSH ports.
+Remote worker mode is enabled by default. Create a one-time invite on the control server, paste the generated command on a remote machine, then use the normal tools with their optional `machine` argument. Only worker administration retains `remote_*` names.
 
 This is intended for:
 
@@ -159,14 +159,14 @@ See the [Agent Skills guide](https://fwerkor.github.io/local-shell-mcp/guides/sk
 
 The public MCP surface includes:
 
-- Shell: `run_shell_tool`, `run_python_tool`, `shell_start`, `shell_send`, `shell_read`, `shell_kill`, `shell_list`.
-- Filesystem: `list_files`, `tree_view`, `glob_search`, `grep_search`, `read_file`, `read_many_files`, `write_file`, `edit_file`, `multi_edit_file`, `delete_file_or_dir`, `apply_patch`.
-- Git: `git_clone_tool`, `git_status_tool`, `git_diff_tool`, `git_log_tool`, `git_checkout_tool`, `git_fetch_tool`, `git_pull_tool`, `git_add_tool`, `git_commit_tool`, `git_push_tool`, `git_show_tool`, `git_reset_tool`, `secret_scan`.
-- Browser: `playwright_install_tool`, `browser_screenshot_tool`, `browser_get_text_tool`, `browser_eval_tool`, `browser_pdf_tool`, `playwright_run_script_tool`.
+- Shell and jobs: `run_shell_tool`, `run_python_tool`, persistent `shell_*`, and tracked `job_*` tools. Use `run_shell_tool` for Git CLI operations.
+- Filesystem: `list_files`, `tree_view`, `glob_search`, `grep_search`, unified `read_file`, `write_file`, unified `edit_file`, `delete_file_or_dir`, and `apply_patch`.
+- Transfer: `transfer_path` for files or directories across controller and worker endpoints.
+- Browser: `browser_get_text_tool`, unified `browser_capture_tool`, and `playwright_run_script_tool`.
 - File links: `create_file_link`, `list_file_links`, `revoke_file_link`.
-- Remote workers: `remote_invite`, `remote_list_machines`, `remote_run_shell_tool`, `remote_*` filesystem/Git/browser/transfer tools.
+- Remote workers: `remote_invite`, `remote_list_machines`, `remote_rename_machine`, and `remote_revoke_machine`; normal execution tools accept optional `machine`.
 - Agent Skills: `skills_list`, `skill_load`, `skill_read_file`.
-- Diagnostics: `environment_info`, `audit_tail`, `todo_read_tool`, `todo_write_tool`.
+- Diagnostics: `environment_info` (including version information), `secret_scan`, `audit_tail`, `todo_read_tool`, and `todo_write_tool`.
 
 The detailed tool reference, including purpose, inputs, returns, combinations, and notes for every tool, is available in the [docs](https://fwerkor.github.io/local-shell-mcp/reference/tools/).
 

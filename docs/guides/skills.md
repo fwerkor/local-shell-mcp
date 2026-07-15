@@ -40,7 +40,7 @@ skills_list
   -> choose the relevant Skill
   -> skill_load(name)
   -> skill_read_file(name, path) only for a related file that is needed
-  -> follow its instructions with the existing shell, Git, browser, or remote tools
+  -> follow its instructions with the existing shell, Git, browser, or machine-routed tools
 ```
 
 All three tools are fixed and read-only. `skills_list` performs a bounded registry scan; `skill_load` and `skill_read_file` access only the requested Skill. Changes on disk are visible on the next call.
