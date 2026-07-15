@@ -112,7 +112,6 @@ def required_scopes_for_http_tool(path: str, method: str | None = None) -> tuple
     read = ("shell:read",)
     write = ("shell:read", "shell:write")
     execute = ("shell:read", "shell:execute")
-    git_write = ("shell:read", "git:write")
     browser = ("browser:use",)
     browser_write = ("browser:use", "shell:write")
     browser_execute = ("browser:use", "shell:execute")
@@ -125,7 +124,6 @@ def required_scopes_for_http_tool(path: str, method: str | None = None) -> tuple
     if path in {
         "/tools/write_file",
         "/tools/edit_file",
-        "/tools/multi_edit_file",
         "/tools/delete",
     }:
         return write
@@ -136,22 +134,9 @@ def required_scopes_for_http_tool(path: str, method: str | None = None) -> tuple
         "/tools/shell_kill",
     }:
         return execute
-    if path.startswith("/tools/git/"):
-        if path in {
-            "/tools/git/status",
-            "/tools/git/diff",
-            "/tools/git/log",
-            "/tools/git/show",
-        }:
-            return read
-        return git_write
-    if path in {"/tools/browser/text", "/tools/browser/eval"}:
+    if path == "/tools/browser/text":
         return browser
-    if path in {
-        "/tools/browser/screenshot",
-        "/tools/browser/pdf",
-        "/tools/playwright/install",
-    }:
+    if path == "/tools/browser/capture":
         return browser_write
     if path == "/tools/playwright/run_script":
         return browser_execute
