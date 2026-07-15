@@ -454,7 +454,8 @@ async def _native_send_shell(session_id: str, input_text: str, enter: bool = Tru
     session = _get_native_session(session_id)
     if session.process.stdin is None:
         raise RuntimeError(f"Persistent shell session has no stdin: {session_id}")
-    data = input_text + ("\n" if enter else "")
+    newline = "\r\n" if sys.platform == "win32" else "\n"
+    data = input_text + (newline if enter else "")
     async with session.lock:
         session.process.stdin.write(data.encode())
         await session.process.stdin.drain()

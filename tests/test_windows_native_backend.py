@@ -32,6 +32,44 @@ async def test_native_persistent_shell_backend_roundtrip(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_native_send_uses_windows_line_ending(monkeypatch):
+    class FakeStdin:
+        def __init__(self):
+            self.data = bytearray()
+
+        def write(self, data):
+            self.data.extend(data)
+
+        async def drain(self):
+            return None
+
+    class FakeProcess:
+        def __init__(self):
+            self.stdin = FakeStdin()
+            self.returncode = None
+
+    process = FakeProcess()
+    session = ops.NativeShellSession(
+        session_id="native-newline",
+        process=process,
+        cwd=None,
+        command="powershell",
+        created=0,
+        output=ops.TailBuffer(1024, bytearray()),
+        readers=[],
+        lock=asyncio.Lock(),
+    )
+    monkeypatch.setattr(ops.sys, "platform", "win32")
+    ops._NATIVE_SHELL_SESSIONS[session.session_id] = session
+    try:
+        await ops._native_send_shell(session.session_id, "echo native-ok")
+    finally:
+        ops._NATIVE_SHELL_SESSIONS.pop(session.session_id, None)
+
+    assert bytes(process.stdin.data) == b"echo native-ok\r\n"
+
+
+@pytest.mark.asyncio
 async def test_native_shell_creation_is_serialized(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_TMUX_SESSIONS", "1")
