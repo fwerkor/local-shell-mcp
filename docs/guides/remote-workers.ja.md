@@ -1,6 +1,6 @@
 # リモートワーカー
 
-Remote workers connect outbound to the control server and expose `remote_*` tools to the MCP client.
+Remote workers connect outbound to the control server and expose normal tools with an optional `machine` argument to the MCP client.
 
 ```text
 ChatGPT -> local-shell-mcp -> outbound polling worker -> remote machine

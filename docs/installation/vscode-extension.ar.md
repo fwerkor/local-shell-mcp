@@ -31,7 +31,6 @@ Endpoint: https://your-host.example.com/mcp
 
 - `environment_info` يؤكد إعدادات Runtime ومساحة العمل.
 - `tree_view` يؤكد الملفات المرئية.
-- `git_status_tool` يؤكد سياق المستودع.
 - `run_shell_tool` يؤكد بيئة الأوامر.
 
 ## ملاحظات

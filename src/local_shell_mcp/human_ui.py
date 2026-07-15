@@ -47,7 +47,6 @@ UI_FULL_SCOPES = (
     "shell:read",
     "shell:write",
     "shell:execute",
-    "git:write",
     "browser:use",
     "file:share",
     "remote:use",

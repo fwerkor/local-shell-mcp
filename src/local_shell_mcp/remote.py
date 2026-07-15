@@ -31,38 +31,16 @@ from .fs_ops import (
     edit_text,
     glob_paths,
     list_dir,
-    multi_edit_text,
     perform_file_action,
     prune_temp_dir,
-    read_text,
+    read_texts,
     relative_display,
     resolve_path,
     temp_dir,
     write_text,
 )
-from .git_ops import (
-    git_add,
-    git_checkout,
-    git_clone,
-    git_commit,
-    git_diff,
-    git_fetch,
-    git_log,
-    git_pull,
-    git_push,
-    git_reset,
-    git_show,
-    git_status,
-)
 from .jobs import list_jobs, retry_job, start_job, stop_job, tail_job
-from .playwright_ops import (
-    browser_eval,
-    browser_get_text,
-    browser_pdf,
-    browser_screenshot,
-    playwright_install,
-    playwright_run_script,
-)
+from .playwright_ops import browser_capture, browser_get_text, playwright_run_script
 from .search_ops import grep, tree
 from .settings import get_settings, safe_settings_dump
 from .shell_ops import (
@@ -89,6 +67,7 @@ from .transfer_ops import (
     transfer_unpack_archive,
     transfer_write_chunk,
 )
+from .version import version_info as get_version_info
 
 REMOTE_JOIN_PATH = "/join"
 REMOTE_API_PREFIX = "/remote"
@@ -108,7 +87,6 @@ REMOTE_NON_CANCELLABLE_WORKER_TOOLS = frozenset(
     {
         "write_file",
         "edit_file",
-        "multi_edit_file",
         "delete_file_or_dir",
         "human_file_action",
         "transfer_begin_write",
@@ -938,25 +916,6 @@ def _handled_remote_exception(exc: Exception) -> dict[str, Any]:
     return {"ok": False, "error": type(exc).__name__, "message": str(exc)}
 
 
-def _read_many_files_sync(
-    paths: list[str],
-    start_line: int | None = None,
-    end_line: int | None = None,
-    binary_preview: str | None = None,
-    binary_preview_bytes: int = 256,
-) -> dict[str, Any]:
-    files = [
-        read_text(path, start_line, end_line, binary_preview, binary_preview_bytes)
-        for path in paths
-    ]
-    return {
-        "files": files,
-        "total_content_bytes": sum(
-            len(str(item.get("content") or item.get("preview") or "").encode()) for item in files
-        ),
-    }
-
-
 async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
     _assert_worker_text_input_size("patch", patch)
     await _to_thread(prune_temp_dir)
@@ -1011,10 +970,8 @@ REMOTE_WORKER_TOOL_NAMES = frozenset(
         "glob_search",
         "grep_search",
         "read_file",
-        "read_many_files",
         "write_file",
         "edit_file",
-        "multi_edit_file",
         "delete_file_or_dir",
         "human_file_action",
         "transfer_stat",
@@ -1029,23 +986,8 @@ REMOTE_WORKER_TOOL_NAMES = frozenset(
         "transfer_upload_url",
         "transfer_download_url",
         "apply_patch",
-        "git_clone_tool",
-        "git_status_tool",
-        "git_diff_tool",
-        "git_log_tool",
-        "git_checkout_tool",
-        "git_fetch_tool",
-        "git_pull_tool",
-        "git_add_tool",
-        "git_commit_tool",
-        "git_push_tool",
-        "git_show_tool",
-        "git_reset_tool",
-        "playwright_install_tool",
-        "browser_screenshot_tool",
+        "browser_capture_tool",
         "browser_get_text_tool",
-        "browser_eval_tool",
-        "browser_pdf_tool",
         "playwright_run_script_tool",
     }
 )
@@ -1200,7 +1142,12 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
             cwd=".",
             timeout_s=10,
         )
-        return {"settings": safe_settings_dump(), "persistent_shell": persistent_shell_backend_info(), "probe": result.model_dump()}
+        return {
+            "version": get_version_info(),
+            "settings": safe_settings_dump(),
+            "persistent_shell": persistent_shell_backend_info(),
+            "probe": result.model_dump(),
+        }
     if tool == "run_shell_tool":
         return (
             await public_run_shell(
@@ -1258,17 +1205,8 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
         )
     if tool == "read_file":
         return await _to_thread(
-            read_text,
+            read_texts,
             args["path"],
-            args.get("start_line"),
-            args.get("end_line"),
-            args.get("binary_preview"),
-            args.get("binary_preview_bytes", 256),
-        )
-    if tool == "read_many_files":
-        return await _to_thread(
-            _read_many_files_sync,
-            args["paths"],
             args.get("start_line"),
             args.get("end_line"),
             args.get("binary_preview"),
@@ -1283,11 +1221,7 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
             args.get("expected_sha256"),
         )
     if tool == "edit_file":
-        return await _to_thread(
-            edit_text, args["path"], args["old"], args["new"], args.get("replace_all", False)
-        )
-    if tool == "multi_edit_file":
-        return await _to_thread(multi_edit_text, args["path"], args["edits"])
+        return await _to_thread(edit_text, args["path"], args["edits"])
     if tool == "delete_file_or_dir":
         return await _to_thread(delete_path, args["path"], args.get("recursive", False))
     if tool == "human_file_action":
@@ -1363,54 +1297,11 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
         )
     if tool == "apply_patch":
         return await _apply_patch_text(args["patch"], args.get("cwd", "."))
-    if tool == "git_clone_tool":
-        return await git_clone(
-            args["repo_url"], args.get("dest"), args.get("branch"), args.get("cwd", ".")
-        )
-    if tool == "git_status_tool":
-        return await git_status(args.get("cwd", "."))
-    if tool == "git_diff_tool":
-        return await git_diff(
-            args.get("cwd", "."),
-            args.get("staged", False),
-            args.get("path"),
-            args.get("stat", False),
-        )
-    if tool == "git_log_tool":
-        return await git_log(args.get("cwd", "."), args.get("max_count", 20))
-    if tool == "git_checkout_tool":
-        return await git_checkout(args["cwd"], args["ref"], args.get("create", False))
-    if tool == "git_fetch_tool":
-        return await git_fetch(
-            args.get("cwd", "."), args.get("remote", "origin"), args.get("prune", True)
-        )
-    if tool == "git_pull_tool":
-        return await git_pull(args.get("cwd", "."), args.get("ff_only", True))
-    if tool == "git_add_tool":
-        return await git_add(args.get("cwd", "."), args.get("paths"))
-    if tool == "git_commit_tool":
-        return await git_commit(args["cwd"], args["message"], args.get("all_changes", False))
-    if tool == "git_push_tool":
-        return await git_push(
-            args["cwd"],
-            args.get("remote", "origin"),
-            args.get("branch"),
-            args.get("set_upstream", True),
-        )
-    if tool == "git_show_tool":
-        return await git_show(args.get("cwd", "."), args.get("ref", "HEAD"), args.get("path"))
-    if tool == "git_reset_tool":
-        return await git_reset(
-            args.get("cwd", "."), args.get("mode", "soft"), args.get("ref", "HEAD")
-        )
-    if tool == "playwright_install_tool":
-        return await playwright_install(
-            args.get("browser", "chromium"), args.get("with_deps", False)
-        )
-    if tool == "browser_screenshot_tool":
-        return await browser_screenshot(
+    if tool == "browser_capture_tool":
+        return await browser_capture(
             args["url"],
-            args.get("output_path", "screenshots/page.png"),
+            args.get("output_path"),
+            args.get("capture_format", "png"),
             args.get("browser", "chromium"),
             args.get("full_page", True),
             args.get("width", 1440),
@@ -1423,21 +1314,6 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
             args.get("browser", "chromium"),
             args.get("wait_until", "networkidle"),
             args.get("selector", "body"),
-        )
-    if tool == "browser_eval_tool":
-        return await browser_eval(
-            args["url"],
-            args["javascript"],
-            args.get("browser", "chromium"),
-            args.get("wait_until", "networkidle"),
-        )
-    if tool == "browser_pdf_tool":
-        return await browser_pdf(
-            args["url"],
-            args.get("output_path", "screenshots/page.pdf"),
-            args.get("width", 1440),
-            args.get("height", 1000),
-            args.get("wait_until", "networkidle"),
         )
     if tool == "playwright_run_script_tool":
         return await playwright_run_script(
@@ -1454,7 +1330,6 @@ def worker_capabilities() -> list[str]:
         "files",
         "file_transfer",
         "search",
-        "git",
         "python",
         "playwright",
     ]

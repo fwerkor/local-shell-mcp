@@ -613,9 +613,9 @@ def test_http_localhost_bypass_is_not_inherited_by_reverse_proxy(tmp_path, monke
     get_settings.cache_clear()
     client = TestClient(build_http_app(), client=("127.0.0.1", 4242))
 
-    direct = client.get("/tools/version", headers={"Host": "127.0.0.1:8765"})
+    direct = client.get("/tools/skills_list", headers={"Host": "127.0.0.1:8765"})
     proxied = client.get(
-        "/tools/version",
+        "/tools/skills_list",
         headers={
             "Host": "public.example.test",
             "X-Forwarded-For": "203.0.113.9",

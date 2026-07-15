@@ -6,12 +6,12 @@
 
 Use this loop for most coding tasks:
 
-1. Inspect: `environment_info`, `tree_view`, `git_status_tool`, `grep_search`, `read_file`.
+1. Inspect: `environment_info`, `tree_view`, `grep_search`, `read_file`, and `run_shell_tool` for commands such as `git status`.
 2. Plan: ask the model to identify the minimal files and tests involved.
-3. Edit: use `edit_file`, `multi_edit_file`, `apply_patch`, or shell commands.
+3. Edit: use unified `edit_file`, `apply_patch`, or shell commands.
 4. Verify: run targeted tests or builds with `run_shell_tool` or persistent shells.
-5. Review: `git_diff_tool`, `secret_scan`, `audit_tail` when needed.
-6. Commit or export: `git_add_tool`, `git_commit_tool`, `git_push_tool`, or `create_file_link`.
+5. Review: run `git diff` through `run_shell_tool`, then use `secret_scan` and `audit_tail` when needed.
+6. Commit or export: use explicit Git CLI commands through `run_shell_tool`, or use `create_file_link`.
 
 ## Tool choice
 
@@ -21,13 +21,13 @@ Use this loop for most coding tasks:
 | Long-running dev server, REPL, watch task | `shell_start` + `shell_read` + `shell_send` | Blocking `run_shell_tool` until timeout |
 | Structured analysis or file generation | `run_python_tool` | Fragile shell pipelines for complex JSON/text handling |
 | Small exact edit | `edit_file` | Rewriting whole files unnecessarily |
-| Several replacements in one file | `multi_edit_file` | Repeated stale edits without rereading |
+| One or several replacements in one file | `edit_file` with an `edits` array | Repeated stale edits without rereading |
 | Multi-file patch | `apply_patch` | Ad hoc shell edits |
 | Finding files | `tree_view`, `glob_search` | Full recursive listings of large repositories |
 | Finding code | `grep_search` | Reading many files blindly |
-| Browser evidence | `browser_screenshot_tool`, `browser_get_text_tool` | Guessing from page names or routes |
+| Browser evidence | `browser_capture_tool`, `browser_get_text_tool` | Guessing from page names or routes |
 | Downloadable artifacts | `create_file_link` | Pasting large binary content into chat |
-| Remote machine work | `remote_*` tools | Opening inbound SSH when outbound worker mode is enough |
+| Remote machine work | normal tools with `machine`, plus `transfer_path` | Opening inbound SSH when outbound worker mode is enough |
 
 ## Prompt templates
 
@@ -58,20 +58,20 @@ Start the dev server in a persistent shell session, read the output until it is 
 ### Remote worker task
 
 ```text
-Use the connected remote worker named <machine>. First call remote_environment_info and remote_list_files. Work only inside the configured remote workdir. Use remote_run_shell_tool for short commands and remote_shell_start for long-running jobs.
+Use the connected remote worker named <machine>. First call environment_info with machine=<machine>, then list_files with the same machine. Work only inside the configured remote workdir. Use run_shell_tool for short commands and shell_start or job_start for long-running work.
 ```
 
 ## Working with repositories
 
 Recommended sequence for open-source changes:
 
-1. `git_status_tool` to detect dirty state.
-2. `git_fetch_tool` and branch inspection if the task depends on upstream state.
-3. `grep_search` and `read_file` before editing.
-4. Minimal patch.
-5. Targeted tests first, then broader tests when practical.
-6. `secret_scan` before commit or push.
-7. Commit with a concise message that describes the behavior change.
+1. Run `git status --short --branch` through `run_shell_tool`.
+2. Fetch and inspect branches with explicit Git CLI commands when upstream state matters.
+3. Use `grep_search` and `read_file` before editing.
+4. Make a minimal patch.
+5. Run targeted tests first, then broader tests when practical.
+6. Run `secret_scan` before commit or push.
+7. Stage and commit explicitly with a concise message.
 
 Ask for one commit per logical change when maintainers need reviewable history.
 
@@ -93,9 +93,8 @@ Remote worker mode is useful when a machine can make outbound HTTPS requests but
 Good practice:
 
 - Name machines clearly with `remote_invite` or `remote_rename_machine`.
-- Check `remote_environment_info` before acting.
-- Use `remote_pull_file` / `remote_push_file` for explicit transfers.
-- Use `remote_copy_file` / `remote_copy_dir` for remote-to-remote transfer through the control server.
+- Call `environment_info(machine=...)` before acting.
+- Use `transfer_path` for all controller/worker and worker/worker file or directory transfers.
 - Revoke workers after the task with `remote_revoke_machine`.
 
 ## Anti-patterns

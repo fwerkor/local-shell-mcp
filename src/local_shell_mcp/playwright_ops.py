@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import shlex
 import textwrap
 import uuid
 
@@ -10,58 +8,42 @@ from .fs_ops import prune_temp_dir, relative_display, resolve_path, temp_dir
 from .settings import get_settings
 from .shell_ops import public_run_shell_timeout, quote_shell_argument, run_shell
 
+_VALID_BROWSERS = {"chromium", "firefox", "webkit"}
+_VALID_WAIT_UNTIL = {"load", "domcontentloaded", "networkidle", "commit"}
+
 
 def _assert_script_size(script: str) -> None:
     settings = get_settings()
     size = len(script.encode("utf-8"))
     if size > settings.max_file_write_bytes:
-        raise ValueError(f"Refusing Playwright script of {size} bytes; max is {settings.max_file_write_bytes}")
+        raise ValueError(
+            f"Refusing Playwright script of {size} bytes; max is {settings.max_file_write_bytes}"
+        )
 
 
-async def playwright_install(browser: str = "chromium", with_deps: bool = False) -> dict:
-    if browser not in {"chromium", "firefox", "webkit", "all"}:
-        raise ValueError("browser must be chromium, firefox, webkit, or all")
-    cmd = f"{quote_shell_argument(get_settings().python_bin)} -m playwright install"
-    if with_deps:
-        cmd += " --with-deps"
-    if browser != "all":
-        cmd += " " + shlex.quote(browser)
-    result = await run_shell(cmd, timeout_s=60, max_output_bytes=500_000)
-    return result.model_dump()
-
-
-async def browser_screenshot(
-    url: str,
-    output_path: str = "screenshots/page.png",
-    browser: str = "chromium",
-    full_page: bool = True,
-    width: int = 1440,
-    height: int = 1000,
-    wait_until: str = "networkidle",
-) -> dict:
-    if browser not in {"chromium", "firefox", "webkit"}:
+def _validate_browser(browser: str, wait_until: str) -> None:
+    if browser not in _VALID_BROWSERS:
         raise ValueError("browser must be chromium, firefox, or webkit")
-    if wait_until not in {"load", "domcontentloaded", "networkidle", "commit"}:
+    if wait_until not in _VALID_WAIT_UNTIL:
         raise ValueError("invalid wait_until")
-    out = resolve_path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.unlink(missing_ok=True)
+
+
+async def _run_generated_script(script: str, *, max_output_bytes: int = 500_000) -> dict:
     await asyncio.to_thread(prune_temp_dir)
     script_path = temp_dir() / f"playwright-{uuid.uuid4().hex}.py"
     script_path.parent.mkdir(parents=True, exist_ok=True)
-    script = f'''
-from playwright.sync_api import sync_playwright
-with sync_playwright() as p:
-    browser = getattr(p, {browser!r}).launch(headless=True)
-    page = browser.new_page(viewport={{"width": {int(width)}, "height": {int(height)}}})
-    page.goto({url!r}, wait_until={wait_until!r}, timeout=60000)
-    page.screenshot(path={str(out)!r}, full_page={bool(full_page)!r})
-    print(page.title())
-    browser.close()
-'''
-    await asyncio.to_thread(script_path.write_text, textwrap.dedent(script), encoding="utf-8")
-    result = await run_shell(f"{quote_shell_argument(get_settings().python_bin)} {quote_shell_argument(str(script_path))}", timeout_s=60, max_output_bytes=200_000)
-    return {**result.model_dump(), "screenshot_path": relative_display(out) if result.ok and out.is_file() else None}
+    await asyncio.to_thread(
+        script_path.write_text,
+        textwrap.dedent(script),
+        encoding="utf-8",
+    )
+    result = await run_shell(
+        f"{quote_shell_argument(get_settings().python_bin)} "
+        f"{quote_shell_argument(str(script_path))}",
+        timeout_s=60,
+        max_output_bytes=max_output_bytes,
+    )
+    return {**result.model_dump(), "script_path": relative_display(script_path)}
 
 
 async def browser_get_text(
@@ -70,11 +52,7 @@ async def browser_get_text(
     wait_until: str = "networkidle",
     selector: str = "body",
 ) -> dict:
-    if browser not in {"chromium", "firefox", "webkit"}:
-        raise ValueError("browser must be chromium, firefox, or webkit")
-    await asyncio.to_thread(prune_temp_dir)
-    script_path = temp_dir() / f"playwright-{uuid.uuid4().hex}.py"
-    script_path.parent.mkdir(parents=True, exist_ok=True)
+    _validate_browser(browser, wait_until)
     script = f'''
 from playwright.sync_api import sync_playwright
 with sync_playwright() as p:
@@ -83,86 +61,59 @@ with sync_playwright() as p:
     page.goto({url!r}, wait_until={wait_until!r}, timeout=60000)
     print("TITLE:", page.title())
     print("URL:", page.url)
-    locator = page.locator({selector!r}).first
-    print(locator.inner_text(timeout=10000))
+    print(page.locator({selector!r}).first.inner_text(timeout=10000))
     browser.close()
 '''
-    await asyncio.to_thread(script_path.write_text, textwrap.dedent(script), encoding="utf-8")
-    result = await run_shell(f"{quote_shell_argument(get_settings().python_bin)} {quote_shell_argument(str(script_path))}", timeout_s=60, max_output_bytes=500_000)
-    return result.model_dump()
+    return await _run_generated_script(script)
 
 
-async def browser_eval(
+async def browser_capture(
     url: str,
-    javascript: str,
+    output_path: str | None = None,
+    capture_format: str = "png",
     browser: str = "chromium",
-    wait_until: str = "networkidle",
-) -> dict:
-    """Navigate to a URL and evaluate JavaScript.
-
-    The JavaScript should be an expression or function body accepted by Playwright page.evaluate.
-    """
-    if browser not in {"chromium", "firefox", "webkit"}:
-        raise ValueError("browser must be chromium, firefox, or webkit")
-    await asyncio.to_thread(prune_temp_dir)
-    script_path = temp_dir() / f"playwright-{uuid.uuid4().hex}.py"
-    script_path.parent.mkdir(parents=True, exist_ok=True)
-    script = f'''
-import json
-from playwright.sync_api import sync_playwright
-with sync_playwright() as p:
-    browser = getattr(p, {browser!r}).launch(headless=True)
-    page = browser.new_page()
-    page.goto({url!r}, wait_until={wait_until!r}, timeout=60000)
-    value = page.evaluate({javascript!r})
-    print(json.dumps(value, ensure_ascii=False, default=str))
-    browser.close()
-'''
-    await asyncio.to_thread(script_path.write_text, textwrap.dedent(script), encoding="utf-8")
-    result = await run_shell(f"{quote_shell_argument(get_settings().python_bin)} {quote_shell_argument(str(script_path))}", timeout_s=60, max_output_bytes=500_000)
-    parsed = None
-    if result.ok and result.stdout.strip():
-        try:
-            parsed = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            parsed = None
-    return {**result.model_dump(), "json": parsed}
-
-
-async def browser_pdf(
-    url: str,
-    output_path: str = "screenshots/page.pdf",
+    full_page: bool = True,
     width: int = 1440,
     height: int = 1000,
     wait_until: str = "networkidle",
 ) -> dict:
+    capture_format = capture_format.lower().strip()
+    if capture_format not in {"png", "pdf"}:
+        raise ValueError("capture_format must be png or pdf")
+    _validate_browser(browser, wait_until)
+    if capture_format == "pdf" and browser != "chromium":
+        raise ValueError("PDF capture requires chromium")
+
+    output_path = output_path or f"screenshots/page.{capture_format}"
     out = resolve_path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.unlink(missing_ok=True)
-    await asyncio.to_thread(prune_temp_dir)
-    script_path = temp_dir() / f"playwright-{uuid.uuid4().hex}.py"
-    script_path.parent.mkdir(parents=True, exist_ok=True)
+    capture_statement = (
+        f"page.screenshot(path={str(out)!r}, full_page={bool(full_page)!r})"
+        if capture_format == "png"
+        else f"page.pdf(path={str(out)!r}, print_background=True)"
+    )
     script = f'''
 from playwright.sync_api import sync_playwright
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True)
+    browser = getattr(p, {browser!r}).launch(headless=True)
     page = browser.new_page(viewport={{"width": {int(width)}, "height": {int(height)}}})
     page.goto({url!r}, wait_until={wait_until!r}, timeout=60000)
-    page.pdf(path={str(out)!r}, print_background=True)
+    {capture_statement}
     print(page.title())
     browser.close()
 '''
-    await asyncio.to_thread(script_path.write_text, textwrap.dedent(script), encoding="utf-8")
-    result = await run_shell(f"{quote_shell_argument(get_settings().python_bin)} {quote_shell_argument(str(script_path))}", timeout_s=60, max_output_bytes=200_000)
-    return {**result.model_dump(), "pdf_path": relative_display(out) if result.ok and out.is_file() else None}
+    result = await _run_generated_script(script, max_output_bytes=200_000)
+    return {
+        **result,
+        "capture_format": capture_format,
+        "capture_path": relative_display(out) if result.get("ok") and out.is_file() else None,
+    }
 
 
 async def playwright_run_script(script: str, cwd: str = ".", timeout_s: int = 60) -> dict:
-    """Run a caller-supplied Python Playwright script inside the workspace.
+    """Run a caller-supplied Python Playwright script inside the workspace."""
 
-    The script is written to .local-shell-mcp/tmp and executed with the configured Python interpreter. This is powerful;
-    use it only when the container is disposable and authenticated.
-    """
     _assert_script_size(script)
     await asyncio.to_thread(prune_temp_dir)
     path = temp_dir() / f"playwright-custom-{uuid.uuid4().hex}.py"

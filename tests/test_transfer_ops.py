@@ -5,6 +5,7 @@ import tarfile
 
 import pytest
 
+import local_shell_mcp.tools as tools_module
 import local_shell_mcp.transfer_ops as transfer_module
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.tools import build_mcp
@@ -108,10 +109,11 @@ def test_unpack_rejects_archive_path_traversal(tmp_path, monkeypatch):
     assert not (root.parent / "escape.txt").exists()
 
 
-def test_mcp_exposes_remote_transfer_tools(tmp_path, monkeypatch):
+def test_mcp_exposes_unified_transfer_tool(tmp_path, monkeypatch):
     _workspace(tmp_path, monkeypatch)
     mcp = build_mcp()
     names = set(mcp._tool_manager._tools)  # noqa: SLF001
+    assert "transfer_path" in names
     assert {
         "remote_copy_file",
         "remote_copy_dir",
@@ -119,7 +121,74 @@ def test_mcp_exposes_remote_transfer_tools(tmp_path, monkeypatch):
         "remote_push_file",
         "remote_pull_dir",
         "remote_push_dir",
-    } <= names
+    }.isdisjoint(names)
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source_type", "source_machine", "destination_machine", "operation_name"),
+    [
+        ("file", None, "dst", "_copy_local_file_to_remote"),
+        ("dir", None, "dst", "_copy_local_dir_to_remote"),
+        ("file", "src", None, "_copy_remote_file_to_local"),
+        ("dir", "src", None, "_copy_remote_dir_to_local"),
+        ("file", "src", "dst", "_copy_remote_file_to_remote"),
+        ("dir", "src", "dst", "_copy_remote_dir_to_remote"),
+    ],
+)
+async def test_unified_transfer_selects_endpoint_and_source_type(
+    tmp_path,
+    monkeypatch,
+    source_type,
+    source_machine,
+    destination_machine,
+    operation_name,
+):
+    root = _workspace(tmp_path, monkeypatch)
+    source_path = "source"
+    if source_machine is None:
+        source = root / source_path
+        if source_type == "dir":
+            source.mkdir()
+        else:
+            source.write_text("content", encoding="utf-8")
+    else:
+        async def fake_remote_transfer_data(machine, tool, args):
+            assert machine == source_machine
+            assert tool == "transfer_stat"
+            assert args == {"path": source_path, "sha256": False}
+            return {"type": source_type}
+
+        monkeypatch.setattr(tools_module, "_remote_transfer_data", fake_remote_transfer_data)
+
+    calls = []
+
+    async def fake_operation(*args):
+        calls.append(args)
+        return {"completed": True}
+
+    monkeypatch.setattr(tools_module, operation_name, fake_operation)
+
+    result = await tools_module._transfer_path(
+        source_path,
+        "destination",
+        source_machine,
+        destination_machine,
+        overwrite=True,
+        chunk_size=4096,
+    )
+
+    assert result == {"type": source_type, "completed": True}
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_unified_transfer_rejects_controller_to_controller(tmp_path, monkeypatch):
+    _workspace(tmp_path, monkeypatch)
+
+    with pytest.raises(ValueError, match="At least one transfer endpoint"):
+        await tools_module._transfer_path("source", "destination")
 
 
 def test_directory_pack_rejects_symlinks_before_archive_creation(tmp_path, monkeypatch):

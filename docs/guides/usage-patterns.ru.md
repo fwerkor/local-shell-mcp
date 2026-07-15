@@ -31,7 +31,6 @@ Endpoint: https://your-host.example.com/mcp
 
 - `environment_info` подтверждает настройки Runtime и рабочее пространство.
 - `tree_view` подтверждает видимые файлы.
-- `git_status_tool` подтверждает контекст репозитория.
 - `run_shell_tool` подтверждает командную среду.
 
 ## Примечания

@@ -1,64 +1,28 @@
-# 遠程節點
+# 遠端 worker
 
-遠程節點讓 `local-shell-mcp` 控制那些可以主動發起 HTTP(S) 請求、但無法接收入站 SSH 連接的機器。
-
-典型場景包括：
-
-- HPC 集羣。
-- 位於 NAT 後面的 NPU/GPU 服務器。
-- 有防火牆限制的實驗室機器。
-- 臨時構建主機。
-- 配置 SSH 不方便，但允許出站 HTTPS 的機器。
-
-## 概念
+遠端 worker 適用於能夠發起出站 HTTP(S)、但無法接收入站 SSH 的機器。
 
 ```text
-ChatGPT -> local-shell-mcp 控制服務 -> 出站輪詢 worker -> 遠程機器
+MCP 客戶端 -> 控制服務 -> 出站輪詢 worker -> 遠端機器
 ```
-
-worker 使用一次性邀請加入，並輪詢控制服務獲取任務。控制服務會向 MCP 客戶端暴露 `remote_*` 工具。
 
 ## 基本流程
 
-1. 使用 `remote_invite` 創建邀請。
-2. 複製生成的命令。
-3. 在遠程機器上運行該命令。
-4. 通過 `remote_list_machines` 確認機器已經出現。
-5. 使用 `remote_run_shell_tool`、`remote_read_file`、`remote_push_file` 等遠程工具。
-6. 任務結束後撤銷該 worker。
+1. 使用 `remote_invite` 建立一次性邀請。
+2. 在遠端機器上執行生成的命令。
+3. 使用 `remote_list_machines` 確認註冊成功。
+4. 在一般工具中指定 `machine="<worker-name>"`，例如 `environment_info`、`run_shell_tool`、`read_file` 或 `browser_capture_tool`。
+5. 使用 `transfer_path` 處理控制端到 worker、worker 到控制端以及 worker 到 worker 的檔案或目錄傳輸。
+6. 使用 `remote_rename_machine` 重新命名，或用 `remote_revoke_machine` 撤銷 worker。
 
-## 能力範圍
+只有 worker 管理繼續使用 `remote_*` 名稱。執行、shell、job、檔案、patch 和瀏覽器操作在本地與遠端使用同一 Schema。指定 `machine` 時會額外要求 `remote:use` OAuth scope。
 
-遠程工具接近本地工具的能力面：
+## 能力與安全
 
-- 一次性 shell 和持久 shell。
-- 文件系統讀取、寫入、搜索和補丁。
-- 本地與遠程工作區之間的文件傳輸。
-- Git 操作。
-- 當遠程機器具備依賴時，可使用 Playwright / 瀏覽器相關工具。
+worker 支援 shell、持久終端、tracked job、檔案操作、傳輸、Python、patch，以及已安裝相依套件時的 Playwright。Git 透過 `run_shell_tool(machine=...)` 執行標準 CLI。
 
-## 安全模型
+加入 worker 相當於允許 MCP 客戶端控制其配置環境。應使用較短邀請 TTL、專用工作目錄或帳戶，保留稽核日誌，並在任務結束後撤銷 worker。生成的邀請會安裝與控制服務匹配的 worker 版本。
 
-加入後的遠程 worker 會把其配置環境交給 MCP 客戶端控制。條件允許時，應使用一次性賬號或專用目錄。
+## 疑難排解
 
-推薦做法：
-
-- 使用較短的邀請碼 TTL。
-- 任務完成後撤銷 worker。
-- 不要接入帶有無關生產憑據的機器。
-- 除非整臺機器都是一次性的，否則避免以 root 身份運行。
-- 保留遠程日誌和控制服務審計日誌，便於複查。
-
-## 版本匹配
-
-遠程 worker 代碼應與控制服務版本一致。優先使用 `remote_invite` 生成的命令，因爲控制服務可以提供匹配版本的 worker 引導流程。
-
-## 故障排查
-
-如果 worker 沒有出現：
-
-- 檢查遠程機器是否能訪問出站 HTTPS。
-- 確認遠程機器可以訪問公開 base URL。
-- 確認邀請沒有過期。
-- 檢查遠程機器系統時間。
-- 查看控制服務日誌。
+如果 worker 未出現，檢查出站 HTTPS、公開 base URL、邀請是否過期、系統時間以及控制服務日誌。

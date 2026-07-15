@@ -178,5 +178,5 @@ Use local-shell-mcp. Call environment_info and list_files on the workspace root.
 | ChatGPT cannot discover tools | Public URL must end in `/mcp`; `LOCAL_SHELL_MCP_PUBLIC_BASE_URL` must not include `/mcp` |
 | OAuth page fails | Admin PIN and JWT secret must be set for public OAuth deployments |
 | Tools cannot see files | Confirm the intended host directory is mounted to `/workspace` |
-| Browser tools fail | Confirm Playwright image is current; try `playwright_install_tool` for the target browser |
+| Browser tools fail | Confirm Playwright image is current; try `run_shell_tool` for the target browser |
 | Git auth disappeared | Check the credential volume and whether the container was recreated with the same volume |

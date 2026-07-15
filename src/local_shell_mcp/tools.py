@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import subprocess
 import uuid
@@ -22,38 +23,17 @@ from .fs_ops import (
     glob_paths,
     list_dir,
     missing_path_context,
-    multi_edit_text,
     prune_temp_dir,
     read_text,
+    read_texts,
     relative_display,
     resolve_path,
     temp_dir,
     write_text,
 )
-from .git_ops import (
-    git_add,
-    git_checkout,
-    git_clone,
-    git_commit,
-    git_diff,
-    git_fetch,
-    git_log,
-    git_pull,
-    git_push,
-    git_reset,
-    git_show,
-    git_status,
-)
 from .jobs import list_jobs, retry_job, start_job, stop_job, tail_job
 from .models import ToolResult
-from .playwright_ops import (
-    browser_eval,
-    browser_get_text,
-    browser_pdf,
-    browser_screenshot,
-    playwright_install,
-    playwright_run_script,
-)
+from .playwright_ops import browser_capture, browser_get_text, playwright_run_script
 from .remote import remote_manager
 from .remote_transfer import (
     create_download_ticket,
@@ -180,7 +160,7 @@ SECRET_PATTERNS = {
     "generic_assignment": r"(?i)(token|secret|password|passwd|api_key|apikey)\s*[:=]\s*['\"][^'\"]{8,}['\"]",
 }
 
-ALL_OAUTH_SCOPES = ["shell:read", "shell:write", "shell:execute", "git:write", "browser:use", "file:share", "remote:use"]
+ALL_OAUTH_SCOPES = ["shell:read", "shell:write", "shell:execute", "browser:use", "file:share", "remote:use"]
 
 
 def _oauth_security_scheme(scopes: list[str]) -> dict[str, Any]:
@@ -224,23 +204,17 @@ NON_CANCELLABLE_TOOL_NAMES = frozenset(
         "revoke_file_link",
         "write_file",
         "edit_file",
-        "multi_edit_file",
         "delete_file_or_dir",
         "apply_patch",
+        "transfer_path",
         "todo_write_tool",
-        "remote_write_file",
-        "remote_edit_file",
-        "remote_multi_edit_file",
-        "remote_delete_file_or_dir",
-        "remote_copy_file",
-        "remote_copy_dir",
-        "remote_pull_file",
-        "remote_push_file",
-        "remote_pull_dir",
-        "remote_push_dir",
-        "remote_apply_patch",
     }
 )
+
+REMOTE_MACHINE_ARGUMENTS = frozenset(
+    {"machine", "source_machine", "destination_machine"}
+)
+
 
 
 def _security_meta(schemes: list[dict[str, Any]]) -> dict[str, Any]:
@@ -367,27 +341,35 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                 required_scopes.extend(str(scope) for scope in scheme.get("scopes", []))
                 break
         tool_required_scopes = tuple(dict.fromkeys(required_scopes))
+        signature = inspect.signature(original)
 
         async def wrapped(  # noqa: ANN202
             *args,
             __original=original,
+            __signature=signature,
             __tool_name=tool_name,
             __required_scopes=tool_required_scopes,
             **kwargs,
         ):
             require_current_scopes(__required_scopes)
-            arguments = _audit_tool_arguments(args, kwargs)
-            audit_context = {}
-            keyword_args = (
-                arguments.get("keyword_args", {})
-                if isinstance(arguments, dict)
-                else {}
-            )
-            if isinstance(keyword_args, dict):
-                if keyword_args.get("machine"):
-                    audit_context["machine"] = keyword_args["machine"]
-                if keyword_args.get("session_id"):
-                    audit_context["session"] = keyword_args["session_id"]
+            try:
+                bound = __signature.bind_partial(*args, **kwargs)
+                call_arguments = dict(bound.arguments)
+            except TypeError:
+                call_arguments = dict(kwargs)
+            if any(call_arguments.get(name) for name in REMOTE_MACHINE_ARGUMENTS):
+                require_current_scopes(("remote:use",))
+            arguments = {
+                "positional_count": len(args),
+                "keyword_args": _redact_audit_value(call_arguments),
+            }
+            audit_context = {
+                name: call_arguments[name]
+                for name in REMOTE_MACHINE_ARGUMENTS
+                if call_arguments.get(name)
+            }
+            if call_arguments.get("session_id"):
+                audit_context["session"] = call_arguments["session_id"]
             audit(
                 "mcp_tool_call_start",
                 tool=__tool_name,
@@ -435,40 +417,50 @@ def _remove_remote_tools_when_disabled(mcp: FastMCP) -> None:
         return
     tools = mcp._tool_manager._tools  # noqa: SLF001
     for name in list(tools):
-        if name.startswith("remote_"):
+        if name.startswith("remote_") or name == "transfer_path":
             tools.pop(name, None)
 
 
-OPEN_WORLD_TOOL_NAMES = {
-    "browser_eval_tool",
-    "browser_get_text_tool",
-    "browser_pdf_tool",
-    "browser_screenshot_tool",
-    "create_file_link",
-    "git_clone_tool",
-    "git_fetch_tool",
-    "git_pull_tool",
-    "git_push_tool",
-    "playwright_install_tool",
-    "playwright_run_script_tool",
-    "revoke_file_link",
-    "run_python_tool",
+MACHINE_CAPABLE_TOOL_NAMES = {
+    "environment_info",
     "run_shell_tool",
-    "shell_send",
+    "run_python_tool",
     "shell_start",
+    "shell_send",
+    "shell_read",
+    "shell_kill",
+    "shell_list",
     "job_start",
+    "job_list",
+    "job_tail",
+    "job_stop",
     "job_retry",
+    "list_files",
+    "tree_view",
+    "glob_search",
+    "grep_search",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "delete_file_or_dir",
+    "apply_patch",
+    "browser_capture_tool",
+    "browser_get_text_tool",
+    "playwright_run_script_tool",
+}
+
+OPEN_WORLD_TOOL_NAMES = {
+    *MACHINE_CAPABLE_TOOL_NAMES,
+    "create_file_link",
+    "revoke_file_link",
 }
 
 READ_ONLY_OPEN_WORLD_TOOL_NAMES = {
     "browser_get_text_tool",
-    "remote_browser_get_text_tool",
 }
 
 NON_DESTRUCTIVE_MUTATION_TOOL_NAMES = {
     "create_file_link",
-    "git_clone_tool",
-    "git_commit_tool",
     "remote_invite",
 }
 
@@ -477,9 +469,7 @@ def _install_tool_annotations(mcp: FastMCP) -> None:
     """Attach conservative, semantically accurate MCP safety annotations."""
 
     for name, tool in mcp._tool_manager._tools.items():  # noqa: SLF001
-        existing_read_only = bool(
-            tool.annotations and tool.annotations.readOnlyHint
-        )
+        existing_read_only = bool(tool.annotations and tool.annotations.readOnlyHint)
         read_only = existing_read_only or name in READ_ONLY_OPEN_WORLD_TOOL_NAMES
         open_world = name.startswith("remote_") or name in OPEN_WORLD_TOOL_NAMES
         tool.annotations = ToolAnnotations(
@@ -491,35 +481,6 @@ def _install_tool_annotations(mcp: FastMCP) -> None:
             openWorldHint=open_world,
         )
 
-
-def _read_many_files_sync(
-    paths: list[str],
-    start_line: int | None = None,
-    end_line: int | None = None,
-    binary_preview: str | None = None,
-    binary_preview_bytes: int = 256,
-) -> dict:
-    settings = get_settings()
-    if len(paths) > settings.max_read_many_files:
-        raise ValueError(f"Refusing to read {len(paths)} files; max is {settings.max_read_many_files}")
-
-    files = []
-    total_content_bytes = 0
-    for path in paths:
-        item = read_text(path, start_line, end_line, binary_preview, binary_preview_bytes)
-        content = item.get("content")
-        if isinstance(content, str):
-            total_content_bytes += len(content.encode("utf-8"))
-        preview = item.get("preview")
-        if isinstance(preview, str):
-            total_content_bytes += len(preview.encode("utf-8"))
-        if total_content_bytes > settings.max_read_many_total_bytes:
-            raise ValueError(
-                f"Refusing to return {total_content_bytes} bytes from read_many_files; "
-                f"max is {settings.max_read_many_total_bytes}"
-            )
-        files.append(item)
-    return {"files": files, "total_content_bytes": total_content_bytes}
 
 
 def _gitignore_spec(
@@ -989,6 +950,73 @@ async def _copy_local_dir_to_remote(
     }
 
 
+async def _transfer_path(
+    source_path: str,
+    destination_path: str,
+    source_machine: str | None = None,
+    destination_machine: str | None = None,
+    overwrite: bool = False,
+    chunk_size: int | None = None,
+) -> dict:
+    if not source_machine and not destination_machine:
+        raise ValueError("At least one transfer endpoint must be a remote machine")
+    if source_machine:
+        source_stat = await _remote_transfer_data(
+            source_machine,
+            "transfer_stat",
+            {"path": source_path, "sha256": False},
+        )
+    else:
+        source_stat = await _to_thread(transfer_stat, source_path, False)
+
+    source_type = source_stat.get("type")
+    if source_type not in {"file", "dir"}:
+        raise ValueError(f"Unsupported transfer source type: {source_type}")
+
+    if source_machine and destination_machine:
+        operation = (
+            _copy_remote_dir_to_remote
+            if source_type == "dir"
+            else _copy_remote_file_to_remote
+        )
+        result = await operation(
+            source_machine,
+            source_path,
+            destination_machine,
+            destination_path,
+            overwrite,
+            chunk_size,
+        )
+    elif source_machine:
+        operation = (
+            _copy_remote_dir_to_local
+            if source_type == "dir"
+            else _copy_remote_file_to_local
+        )
+        result = await operation(
+            source_machine,
+            source_path,
+            destination_path,
+            overwrite,
+            chunk_size,
+        )
+    else:
+        assert destination_machine is not None
+        operation = (
+            _copy_local_dir_to_remote
+            if source_type == "dir"
+            else _copy_local_file_to_remote
+        )
+        result = await operation(
+            source_path,
+            destination_machine,
+            destination_path,
+            overwrite,
+            chunk_size,
+        )
+    return {"type": source_type, **result}
+
+
 def _read_audit_tail_entries(lines: int = 100) -> dict:
     settings = get_settings()
     path = settings.audit_log_path
@@ -1029,34 +1057,47 @@ def build_mcp() -> FastMCP:
         instructions=MCP_INSTRUCTIONS,
         transport_security=_transport_security_settings(),
     )
-    read_only_tool = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+    read_only_tool = ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
     read_only_meta = _public_read_meta()
     shell_read_meta = _oauth_meta(["shell:read"])
     shell_write_meta = _oauth_meta(["shell:read", "shell:write"])
     shell_execute_meta = _oauth_meta(["shell:read", "shell:execute"])
-    git_read_meta = shell_read_meta
-    git_write_meta = _oauth_meta(["shell:read", "git:write"])
-    patch_meta = _oauth_meta(["shell:read", "shell:write", "git:write"])
+    patch_meta = _oauth_meta(["shell:read", "shell:write"])
     browser_meta = _oauth_meta(["browser:use"])
     browser_write_meta = _oauth_meta(["browser:use", "shell:write"])
     browser_execute_meta = _oauth_meta(["browser:use", "shell:execute"])
     file_share_meta = _oauth_meta(["shell:read", "file:share"])
     remote_meta = _oauth_meta(["remote:use"])
-    remote_read_meta = _oauth_meta(["remote:use", "shell:read"])
-    remote_write_meta = _oauth_meta(["remote:use", "shell:read", "shell:write"])
-    remote_execute_meta = _oauth_meta(["remote:use", "shell:read", "shell:execute"])
-    remote_git_read_meta = remote_read_meta
-    remote_git_write_meta = _oauth_meta(["remote:use", "shell:read", "git:write"])
-    remote_patch_meta = _oauth_meta(["remote:use", "shell:read", "shell:write", "git:write"])
-    remote_browser_meta = _oauth_meta(["remote:use", "browser:use"])
-    remote_browser_write_meta = _oauth_meta(["remote:use", "browser:use", "shell:write"])
-    remote_browser_execute_meta = _oauth_meta(["remote:use", "browser:use", "shell:execute"])
+
+    async def _remote_call(
+        machine: str,
+        tool: str,
+        args: dict,
+        timeout_s: int | None = None,
+    ) -> ToolResult:
+        try:
+            if not settings.remote_enabled:
+                raise RuntimeError("Remote workers are disabled")
+            return await remote_manager().call(machine, tool, args, timeout_s)
+        except Exception as exc:
+            return _handled_error(exc)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=read_only_meta)
     async def search(query: str) -> str:
         """Search workspace files and return ChatGPT connector-compatible results."""
         try:
-            result = await grep(query, cwd=".", regex=False, case_sensitive=False, max_results=20)
+            result = await grep(
+                query,
+                cwd=".",
+                regex=False,
+                case_sensitive=False,
+                max_results=20,
+            )
             seen: set[str] = set()
             rows = []
             for match in result.get("matches", []):
@@ -1091,7 +1132,9 @@ def build_mcp() -> FastMCP:
                 {
                     "id": path,
                     "title": path,
-                    "text": data.get("content") if not binary else data.get("message", "Binary file omitted"),
+                    "text": data.get("content")
+                    if not binary
+                    else data.get("message", "Binary file omitted"),
                     "url": resolved.as_uri(),
                     "metadata": {
                         "source": "workspace",
@@ -1112,14 +1155,19 @@ def build_mcp() -> FastMCP:
                     "title": id,
                     "text": f"Unable to fetch file: {type(exc).__name__}: {exc}",
                     "url": f"file:///workspace/{id}",
-                    "metadata": {"source": "workspace", "error": type(exc).__name__},
+                    "metadata": {
+                        "source": "workspace",
+                        "error": type(exc).__name__,
+                    },
                 },
                 ensure_ascii=False,
             )
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
-    async def environment_info() -> ToolResult:
-        """Return workspace, auth, policy, and basic environment information."""
+    async def environment_info(machine: str | None = None) -> ToolResult:
+        """Return version, workspace, auth, policy, and environment information locally or on a remote machine."""
+        if machine:
+            return await _remote_call(machine, "environment_info", {})
         try:
             python = quote_shell_argument(settings.python_bin)
             git = quote_shell_argument(settings.git_bin)
@@ -1129,21 +1177,20 @@ def build_mcp() -> FastMCP:
                 cwd=".",
                 timeout_s=10,
             )
-            return _ok({"settings": safe_settings_dump(settings), "persistent_shell": persistent_shell_backend_info(), "probe": result.model_dump()})
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
-    async def version_info() -> ToolResult:
-        """Return the local-shell-mcp version, installed package version, Python version, platform, and executable path."""
-        try:
-            return _ok(get_version_info())
+            return _ok(
+                {
+                    "version": get_version_info(),
+                    "settings": safe_settings_dump(settings),
+                    "persistent_shell": persistent_shell_backend_info(),
+                    "probe": result.model_dump(),
+                }
+            )
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def skills_list() -> ToolResult:
-        """List installed agent skills from the server-side skills directory without loading their instructions. The MCP tool surface stays fixed; adding or removing skill directories is reflected on the next call."""
+        """List installed agent skills without loading their instructions. The MCP tool surface stays fixed; adding or removing skill directories is reflected on the next call."""
         try:
             return _ok(await _to_thread(list_installed_skills, settings))
         except Exception as exc:
@@ -1151,7 +1198,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def skill_load(name: str) -> ToolResult:
-        """Load one installed agent skill by the exact name returned from skills_list. Returns SKILL.md instructions plus related file paths; read related files separately only when needed."""
+        """Load one installed agent skill by the exact name returned from skills_list. Returns SKILL.md instructions plus related file paths."""
         try:
             return _ok(await _to_thread(load_installed_skill, name, settings))
         except Exception as exc:
@@ -1159,175 +1206,361 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def skill_read_file(name: str, path: str) -> ToolResult:
-        """Read one related text file from an installed Skill. Use the exact Skill name and relative path returned by skill_load; paths are constrained to that Skill directory."""
+        """Read one related text file from an installed Skill."""
+        try:
+            return _ok(await _to_thread(read_installed_skill_file, name, path, settings))
+        except Exception as exc:
+            return _handled_error(exc)
+
+    @mcp.tool(structured_output=True, meta=shell_execute_meta)
+    async def run_shell_tool(
+        command: str,
+        cwd: str = ".",
+        timeout_s: int | None = None,
+        max_output_bytes: int | None = None,
+        purpose: str | None = None,
+        explanation: str | None = None,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Run one non-interactive shell command locally or on a remote machine. Use for build, test, package-manager, Git, and inspection commands that should finish promptly. For long-running, interactive, or streaming processes, use shell_start or job_start. Optional purpose/explanation fields let agents state why the command is being run."""
+        _audit_tool_purpose("run_shell_tool", purpose, explanation)
+        if machine:
+            return await _remote_call(
+                machine,
+                "run_shell_tool",
+                {
+                    "command": command,
+                    "cwd": cwd,
+                    "timeout_s": timeout_s,
+                    "max_output_bytes": max_output_bytes,
+                },
+                timeout_s,
+            )
         try:
             return _ok(
-                await _to_thread(read_installed_skill_file, name, path, settings)
+                (
+                    await public_run_shell(command, cwd, timeout_s, max_output_bytes)
+                ).model_dump()
             )
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
-    async def run_shell_tool(command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Run one non-interactive shell command in the controlled workspace/container. Use for build, test, package-manager, git, and inspection commands that should finish promptly. Parameters: command is the shell command string; cwd defaults to '.' and is resolved relative to the workspace unless full-container mode allows absolute paths. timeout_s defaults to 10 seconds and may be set to at most 120 seconds. For long-running, interactive, or streaming processes, use shell_start with shell_send and shell_read. Optional purpose/explanation fields let agents state why the command is being run."""
+    async def run_python_tool(
+        code: str,
+        cwd: str = ".",
+        timeout_s: int = 60,
+        purpose: str | None = None,
+        explanation: str | None = None,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Write and run a short Python script locally or on a remote machine."""
+        _audit_tool_purpose("run_python_tool", purpose, explanation)
+        if machine:
+            return await _remote_call(
+                machine,
+                "run_python_tool",
+                {"code": code, "cwd": cwd, "timeout_s": timeout_s},
+                timeout_s,
+            )
         try:
-            _audit_tool_purpose("run_shell_tool", purpose, explanation)
-            return _ok((await public_run_shell(command, cwd, timeout_s, max_output_bytes)).model_dump())
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, meta=shell_execute_meta)
-    async def run_python_tool(code: str, cwd: str = ".", timeout_s: int = 60, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Write Python code to a temporary file and execute it in the controlled workspace/container. Use for short scripts, structured file analysis, JSON manipulation, or calculations that are easier and safer in Python than shell. Keep code non-interactive and write durable outputs explicitly if needed. Optional purpose/explanation fields let agents state why the script is being run."""
-        try:
-            _audit_tool_purpose("run_python_tool", purpose, explanation)
             return _ok(await _run_python(code, cwd, timeout_s))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
-    async def shell_start(cwd: str = ".", name: str | None = None, command: str | None = None, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Start a persistent shell session using system or bundled tmux on Unix-like platforms, with native process fallback when tmux is unavailable; Windows uses ConPTY when available and otherwise the native fallback. Use for interactive programs, development servers, REPLs, long-running watches, or commands whose output must be read incrementally. For one-shot commands, use run_shell_tool. Optional purpose/explanation fields let agents state why the session is being started."""
+    async def shell_start(
+        cwd: str = ".",
+        name: str | None = None,
+        command: str | None = None,
+        purpose: str | None = None,
+        explanation: str | None = None,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Start a persistent interactive shell locally or on a remote machine."""
+        _audit_tool_purpose("shell_start", purpose, explanation)
+        if machine:
+            return await _remote_call(
+                machine,
+                "shell_start",
+                {"cwd": cwd, "name": name, "command": command},
+            )
         try:
-            _audit_tool_purpose("shell_start", purpose, explanation)
             return _ok(await start_shell(cwd, name, command))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
-    async def shell_send(session_id: str, input_text: str, enter: bool = True) -> ToolResult:
-        """Send input to an existing persistent shell session. Use after shell_start when a process is waiting for commands or interactive input. Set enter=false only when intentionally sending partial input without a newline."""
+    async def shell_send(
+        session_id: str,
+        input_text: str,
+        enter: bool = True,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Send input to a persistent local or remote shell session."""
+        if machine:
+            return await _remote_call(
+                machine,
+                "shell_send",
+                {"session_id": session_id, "input_text": input_text, "enter": enter},
+            )
         try:
             return _ok(await send_shell(session_id, input_text, enter))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
-    async def shell_read(session_id: str, lines: int = 200) -> ToolResult:
-        """Read recent output from a persistent shell session. Use after shell_start or shell_send to inspect incremental output without blocking. Increase lines only when needed for context."""
+    async def shell_read(
+        session_id: str,
+        lines: int = 200,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Read recent output from a persistent local or remote shell session."""
+        if machine:
+            return await _remote_call(
+                machine,
+                "shell_read",
+                {"session_id": session_id, "lines": lines},
+            )
         try:
             return _ok(await read_shell(session_id, lines))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
-    async def shell_kill(session_id: str) -> ToolResult:
-        """Terminate a persistent shell session by session_id. Use when a server, watch process, REPL, or stuck command is no longer needed. This is destructive for that session but does not delete files."""
+    async def shell_kill(
+        session_id: str,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Terminate a persistent local or remote shell session."""
+        if machine:
+            return await _remote_call(machine, "shell_kill", {"session_id": session_id})
         try:
             return _ok(await kill_shell(session_id))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
-    async def shell_list() -> ToolResult:
-        """List active persistent shell sessions. Use before reading, sending to, or killing sessions when you do not know the session_id or need to check what long-running processes are active."""
+    async def shell_list(machine: str | None = None) -> ToolResult:
+        """List persistent shell sessions locally or on a remote machine."""
+        if machine:
+            return await _remote_call(machine, "shell_list", {})
         try:
             return _ok(await list_shells())
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
-    async def job_start(command: str, cwd: str = ".", name: str | None = None, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Start a named long-running job backed by a persistent shell session. Use for builds, servers, watches, experiments, or other commands that should be listed, tailed, stopped, or retried later. Optional purpose/explanation fields let agents state why the job is being started."""
+    async def job_start(
+        command: str,
+        cwd: str = ".",
+        name: str | None = None,
+        purpose: str | None = None,
+        explanation: str | None = None,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Start a tracked long-running job locally or on a remote machine."""
+        _audit_tool_purpose("job_start", purpose, explanation)
+        if machine:
+            return await _remote_call(
+                machine,
+                "job_start",
+                {"command": command, "cwd": cwd, "name": name},
+            )
         try:
-            _audit_tool_purpose("job_start", purpose, explanation)
             return _ok(await start_job(command, cwd, name))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
-    async def job_list(include_finished: bool = True) -> ToolResult:
-        """List tracked long-running jobs with running/exited/stopped status counts."""
+    async def job_list(
+        include_finished: bool = True,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """List tracked jobs locally or on a remote machine."""
+        if machine:
+            return await _remote_call(
+                machine,
+                "job_list",
+                {"include_finished": include_finished},
+            )
         try:
             return _ok(await list_jobs(include_finished))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
-    async def job_tail(job_id: str, lines: int = 200) -> ToolResult:
-        """Read recent output for a tracked long-running job."""
+    async def job_tail(
+        job_id: str,
+        lines: int = 200,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Read recent output for a tracked local or remote job."""
+        if machine:
+            return await _remote_call(
+                machine,
+                "job_tail",
+                {"job_id": job_id, "lines": lines},
+            )
         try:
             return _ok(await tail_job(job_id, lines))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
-    async def job_stop(job_id: str) -> ToolResult:
-        """Stop a tracked long-running job and its backing persistent shell session."""
+    async def job_stop(
+        job_id: str,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Stop a tracked local or remote job."""
+        if machine:
+            return await _remote_call(machine, "job_stop", {"job_id": job_id})
         try:
             return _ok(await stop_job(job_id))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
-    async def job_retry(job_id: str, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Restart a stopped or exited tracked job using the original command and working directory. Optional purpose/explanation fields let agents state why the retry is needed."""
+    async def job_retry(
+        job_id: str,
+        purpose: str | None = None,
+        explanation: str | None = None,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Restart a stopped or exited tracked local or remote job."""
+        _audit_tool_purpose("job_retry", purpose, explanation)
+        if machine:
+            return await _remote_call(machine, "job_retry", {"job_id": job_id})
         try:
-            _audit_tool_purpose("job_retry", purpose, explanation)
             return _ok(await retry_job(job_id))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
-    async def list_files(path: str = ".", recursive: bool = False, max_entries: int = 500) -> ToolResult:
-        """List files and directories under a path. Use for quick directory inspection when a compact listing is enough. path defaults to '.' and is workspace-relative unless full-container mode allows absolute paths; recursive walks descendants and max_entries is capped by server settings."""
+    async def list_files(
+        path: str = ".",
+        recursive: bool = False,
+        max_entries: int = 500,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """List files and directories locally or on a remote machine."""
+        if machine:
+            return await _remote_call(
+                machine,
+                "list_files",
+                {
+                    "path": path,
+                    "recursive": recursive,
+                    "max_entries": max_entries,
+                },
+            )
         try:
             return _ok(await _to_thread(list_dir, path, recursive, max_entries))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
-    async def tree_view(cwd: str = ".", depth: int = 3, max_entries: int = 500) -> ToolResult:
-        """Return a compact directory tree."""
+    async def tree_view(
+        cwd: str = ".",
+        depth: int = 3,
+        max_entries: int = 500,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Return a compact directory tree locally or on a remote machine."""
+        if machine:
+            return await _remote_call(
+                machine,
+                "tree_view",
+                {"cwd": cwd, "depth": depth, "max_entries": max_entries},
+            )
         try:
             return _ok(await tree(cwd, depth, max_entries))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
-    async def glob_search(pattern: str, cwd: str = ".", max_results: int = 500) -> ToolResult:
-        """Find files by glob pattern."""
+    async def glob_search(
+        pattern: str,
+        cwd: str = ".",
+        max_results: int = 500,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Find paths by glob locally or on a remote machine."""
+        if machine:
+            return await _remote_call(
+                machine,
+                "glob_search",
+                {"pattern": pattern, "cwd": cwd, "max_results": max_results},
+            )
         try:
-            return _ok({"paths": await _to_thread(glob_paths, pattern, cwd, max_results)})
+            return _ok(
+                {"paths": await _to_thread(glob_paths, pattern, cwd, max_results)}
+            )
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
-    async def grep_search(query: str, cwd: str = ".", glob: str | None = None, regex: bool = True, case_sensitive: bool = True, max_results: int | None = None) -> ToolResult:
-        """Search file contents using ripgrep."""
+    async def grep_search(
+        query: str,
+        cwd: str = ".",
+        glob: str | None = None,
+        regex: bool = True,
+        case_sensitive: bool = True,
+        max_results: int | None = None,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Search file contents locally or on a remote machine."""
+        if machine:
+            return await _remote_call(
+                machine,
+                "grep_search",
+                {
+                    "query": query,
+                    "cwd": cwd,
+                    "glob": glob,
+                    "regex": regex,
+                    "case_sensitive": case_sensitive,
+                    "max_results": max_results,
+                },
+            )
         try:
-            return _ok(await grep(query, cwd, glob, regex, case_sensitive, max_results))
+            return _ok(
+                await grep(
+                    query,
+                    cwd,
+                    glob,
+                    regex,
+                    case_sensitive,
+                    max_results,
+                )
+            )
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def read_file(
-        path: str,
+        path: str | list[str],
         start_line: int | None = None,
         end_line: int | None = None,
         binary_preview: str | None = None,
         binary_preview_bytes: int = 256,
+        machine: str | None = None,
     ) -> ToolResult:
-        """Read a UTF-8 text file, optionally by line range. Use after locating a file to inspect exact content before editing. start_line and end_line are 1-based inclusive line numbers for paging large files; binary_preview can request a bounded hex or base64 preview."""
-        try:
-            return _ok(await _to_thread(read_text, path, start_line, end_line, binary_preview, binary_preview_bytes))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
-    async def read_many_files(
-        paths: list[str],
-        start_line: int | None = None,
-        end_line: int | None = None,
-        binary_preview: str | None = None,
-        binary_preview_bytes: int = 256,
-    ) -> ToolResult:
-        """Read multiple UTF-8 text files with the same optional line range. Use when comparing related small files or collecting context across a targeted path list; server settings cap file count and total bytes."""
+        """Read one file or a list of files locally or on a remote machine."""
+        args = {
+            "path": path,
+            "start_line": start_line,
+            "end_line": end_line,
+            "binary_preview": binary_preview,
+            "binary_preview_bytes": binary_preview_bytes,
+        }
+        if machine:
+            return await _remote_call(machine, "read_file", args)
         try:
             return _ok(
                 await _to_thread(
-                    _read_many_files_sync,
-                    paths,
+                    read_texts,
+                    path,
                     start_line,
                     end_line,
                     binary_preview,
@@ -1338,178 +1571,173 @@ def build_mcp() -> FastMCP:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, meta=file_share_meta)
-    async def create_file_link(path: str, ttl_s: int | None = None, filename: str | None = None, max_downloads: int | None = None) -> ToolResult:
-        """Create a temporary browser-accessible download URL for a regular workspace file. Generated links are public bearer URLs protected by a high-entropy token, TTL, optional download-count limit, optional size limit, and explicit revocation."""
+    async def create_file_link(
+        path: str,
+        ttl_s: int | None = None,
+        filename: str | None = None,
+        max_downloads: int | None = None,
+    ) -> ToolResult:
+        """Create a temporary browser-accessible download URL for a local file. Links are public bearer URLs protected by a high-entropy token, TTL, optional download-count limit, and explicit revocation."""
         try:
-            mod = __import__("local_shell_mcp.downloads", fromlist=["create_share_link"])
-            return _ok(await _to_thread(mod.create_share_link, path, ttl_s, filename, max_downloads))
+            mod = __import__(
+                "local_shell_mcp.downloads",
+                fromlist=["create_share_link"],
+            )
+            return _ok(
+                await _to_thread(
+                    mod.create_share_link,
+                    path,
+                    ttl_s,
+                    filename,
+                    max_downloads,
+                )
+            )
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=file_share_meta)
     async def list_file_links(include_expired: bool = False) -> ToolResult:
-        """List generated file download URLs."""
+        """List generated local file download URLs."""
         try:
-            mod = __import__("local_shell_mcp.downloads", fromlist=["list_share_links"])
+            mod = __import__(
+                "local_shell_mcp.downloads",
+                fromlist=["list_share_links"],
+            )
             return _ok(await _to_thread(mod.list_share_links, include_expired))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, meta=file_share_meta)
     async def revoke_file_link(token: str) -> ToolResult:
-        """Revoke a generated file download URL."""
+        """Revoke a generated local file download URL."""
         try:
-            mod = __import__("local_shell_mcp.downloads", fromlist=["revoke_share_link"])
+            mod = __import__(
+                "local_shell_mcp.downloads",
+                fromlist=["revoke_share_link"],
+            )
             return _ok(await _to_thread(mod.revoke_share_link, token))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, meta=shell_write_meta)
-    async def write_file(path: str, content: str, overwrite: bool = True, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Write a UTF-8 text file. Use to create a new file or intentionally replace a whole file. overwrite defaults to true; set overwrite=false when creating only if absent. For precise modifications to existing files, use edit_file or apply_patch. Optional purpose/explanation fields let agents state why the file write is needed."""
+    async def write_file(
+        path: str,
+        content: str,
+        overwrite: bool = True,
+        purpose: str | None = None,
+        explanation: str | None = None,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Write a UTF-8 text file locally or on a remote machine."""
+        _audit_tool_purpose("write_file", purpose, explanation)
+        if machine:
+            return await _remote_call(
+                machine,
+                "write_file",
+                {"path": path, "content": content, "overwrite": overwrite},
+            )
         try:
-            _audit_tool_purpose("write_file", purpose, explanation)
             return _ok(await _to_thread(write_text, path, content, overwrite))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, meta=shell_write_meta)
-    async def edit_file(path: str, old: str, new: str, replace_all: bool = False, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Replace exact text in a file. Use for small precise edits after reading the target file. old must match exactly, including whitespace and indentation; replace_all should be true only when every exact occurrence should change. Optional purpose/explanation fields let agents state why the edit is needed."""
+    async def edit_file(
+        path: str,
+        edits: list[dict],
+        purpose: str | None = None,
+        explanation: str | None = None,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Apply one or more exact-text edits to one local or remote file. Each edits entry contains old, new, and optional replace_all; old must match exactly, including whitespace and indentation."""
+        _audit_tool_purpose("edit_file", purpose, explanation)
+        if machine:
+            return await _remote_call(
+                machine,
+                "edit_file",
+                {"path": path, "edits": edits},
+            )
         try:
-            _audit_tool_purpose("edit_file", purpose, explanation)
-            return _ok(await _to_thread(edit_text, path, old, new, replace_all))
+            return _ok(await _to_thread(edit_text, path, edits))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, meta=shell_write_meta)
-    async def multi_edit_file(path: str, edits: list[dict], purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Apply multiple exact-text edits to one file. Use when several small replacements in the same file should be made together. Each old string must match exactly; read the file first to avoid stale or ambiguous edits. Optional purpose/explanation fields let agents state why the edits are needed."""
+    async def delete_file_or_dir(
+        path: str,
+        recursive: bool = False,
+        purpose: str | None = None,
+        explanation: str | None = None,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Delete a local or remote file or directory. recursive=false deletes files or empty directories; recursive=true is required for non-empty directories and should be used carefully."""
+        _audit_tool_purpose("delete_file_or_dir", purpose, explanation)
+        if machine:
+            return await _remote_call(
+                machine,
+                "delete_file_or_dir",
+                {"path": path, "recursive": recursive},
+            )
         try:
-            _audit_tool_purpose("multi_edit_file", purpose, explanation)
-            return _ok(await _to_thread(multi_edit_text, path, edits))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, meta=shell_write_meta)
-    async def delete_file_or_dir(path: str, recursive: bool = False, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Delete a file or directory inside the controlled workspace/container. Use only when removal is intentional. recursive=false deletes files or empty directories; recursive=true is required for non-empty directories and should be used carefully. Optional purpose/explanation fields let agents state why deletion is needed."""
-        try:
-            _audit_tool_purpose("delete_file_or_dir", purpose, explanation)
             return _ok(await _to_thread(delete_path, path, recursive))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, meta=patch_meta)
-    async def apply_patch(patch: str, cwd: str = ".", purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Apply a unified diff using git apply. Use for larger or multi-file edits where an exact patch is clearer than multiple edit_file calls. The patch is checked before application and cwd is workspace-relative unless full-container mode allows absolute paths. Optional purpose/explanation fields let agents state why the patch is needed."""
+    async def apply_patch(
+        patch: str,
+        cwd: str = ".",
+        purpose: str | None = None,
+        explanation: str | None = None,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Check and apply a unified diff locally or on a remote machine."""
+        _audit_tool_purpose("apply_patch", purpose, explanation)
+        if machine:
+            return await _remote_call(
+                machine,
+                "apply_patch",
+                {"patch": patch, "cwd": cwd},
+            )
         try:
-            _audit_tool_purpose("apply_patch", purpose, explanation)
             return _ok(await _apply_patch_text(patch, cwd))
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=git_write_meta)
-    async def git_clone_tool(repo_url: str, dest: str | None = None, branch: str | None = None, cwd: str = ".") -> ToolResult:
-        """Clone a Git repository."""
+    @mcp.tool(structured_output=True, meta=shell_write_meta)
+    async def transfer_path(
+        source_path: str,
+        destination_path: str,
+        source_machine: str | None = None,
+        destination_machine: str | None = None,
+        overwrite: bool = False,
+        chunk_size: int | None = None,
+        purpose: str | None = None,
+        explanation: str | None = None,
+    ) -> ToolResult:
+        """Copy a file or directory between the controller and remote machines. A missing machine denotes the controller; at least one endpoint must be remote."""
+        _audit_tool_purpose("transfer_path", purpose, explanation)
         try:
-            return _ok(await git_clone(repo_url, dest, branch, cwd))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=git_read_meta)
-    async def git_status_tool(cwd: str = ".") -> ToolResult:
-        """Run git status and list remotes."""
-        try:
-            return _ok(await git_status(cwd))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=git_read_meta)
-    async def git_diff_tool(cwd: str = ".", staged: bool = False, path: str | None = None, stat: bool = False) -> ToolResult:
-        """Run git diff."""
-        try:
-            return _ok(await git_diff(cwd, staged, path, stat))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=git_read_meta)
-    async def git_log_tool(cwd: str = ".", max_count: int = 20) -> ToolResult:
-        """Show recent git commits."""
-        try:
-            return _ok(await git_log(cwd, max_count))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, meta=git_write_meta)
-    async def git_checkout_tool(cwd: str, ref: str, create: bool = False) -> ToolResult:
-        """Checkout an existing ref or create a branch."""
-        try:
-            return _ok(await git_checkout(cwd, ref, create))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, meta=git_write_meta)
-    async def git_fetch_tool(cwd: str = ".", remote: str = "origin", prune: bool = True) -> ToolResult:
-        """Fetch a git remote."""
-        try:
-            return _ok(await git_fetch(cwd, remote, prune))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, meta=git_write_meta)
-    async def git_pull_tool(cwd: str = ".", ff_only: bool = True) -> ToolResult:
-        """Pull current branch."""
-        try:
-            return _ok(await git_pull(cwd, ff_only))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, meta=git_write_meta)
-    async def git_add_tool(cwd: str = ".", paths: list[str] | None = None) -> ToolResult:
-        """Stage paths for commit."""
-        try:
-            return _ok(await git_add(cwd, paths))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, meta=git_write_meta)
-    async def git_commit_tool(cwd: str, message: str, all_changes: bool = False, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Create a git commit. Optional purpose/explanation fields let agents state why the commit is being created."""
-        try:
-            _audit_tool_purpose("git_commit_tool", purpose, explanation)
-            return _ok(await git_commit(cwd, message, all_changes))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, meta=git_write_meta)
-    async def git_push_tool(cwd: str, remote: str = "origin", branch: str | None = None, set_upstream: bool = True, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Push current HEAD to a remote branch. Optional purpose/explanation fields let agents state why the push is being performed."""
-        try:
-            _audit_tool_purpose("git_push_tool", purpose, explanation)
-            return _ok(await git_push(cwd, remote, branch, set_upstream))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=git_read_meta)
-    async def git_show_tool(cwd: str = ".", ref: str = "HEAD", path: str | None = None) -> ToolResult:
-        """Show a commit, object, or file at ref:path."""
-        try:
-            return _ok(await git_show(cwd, ref, path))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, meta=git_write_meta)
-    async def git_reset_tool(cwd: str = ".", mode: str = "soft", ref: str = "HEAD") -> ToolResult:
-        """Run git reset. Modes: soft, mixed, hard."""
-        try:
-            return _ok(await git_reset(cwd, mode, ref))
+            return _ok(
+                await _transfer_path(
+                    source_path,
+                    destination_path,
+                    source_machine,
+                    destination_machine,
+                    overwrite,
+                    chunk_size,
+                )
+            )
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
-    async def secret_scan(cwd: str = ".", glob: str | None = None, max_results: int = 200) -> ToolResult:
-        """Scan workspace text files for common secrets before commit/push."""
+    async def secret_scan(
+        cwd: str = ".",
+        glob: str | None = None,
+        max_results: int = 200,
+    ) -> ToolResult:
+        """Scan local workspace text files for common secrets before commit or push."""
         try:
             return _ok(await _secret_scan(cwd, glob, max_results))
         except Exception as exc:
@@ -1517,7 +1745,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def todo_read_tool() -> ToolResult:
-        """Read the agent todo list. Similar to Claude Code TodoRead."""
+        """Read the local agent todo list."""
         try:
             return _ok(await _to_thread(todo_read))
         except Exception as exc:
@@ -1525,55 +1753,79 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, meta=shell_write_meta)
     async def todo_write_tool(todos: list[dict]) -> ToolResult:
-        """Write the agent todo list. Each todo: id, content, status, priority."""
+        """Write the local agent todo list."""
         try:
             return _ok(await _to_thread(todo_write, todos))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, meta=browser_write_meta)
-    async def playwright_install_tool(browser: str = "chromium", with_deps: bool = False) -> ToolResult:
-        """Install Playwright browser binaries in the container."""
+    async def browser_capture_tool(
+        url: str,
+        output_path: str | None = None,
+        capture_format: str = "png",
+        browser: str = "chromium",
+        full_page: bool = True,
+        width: int = 1440,
+        height: int = 1000,
+        wait_until: str = "networkidle",
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Open a URL and save a PNG screenshot or PDF locally or on a remote machine."""
+        args = {
+            "url": url,
+            "output_path": output_path,
+            "capture_format": capture_format,
+            "browser": browser,
+            "full_page": full_page,
+            "width": width,
+            "height": height,
+            "wait_until": wait_until,
+        }
+        if machine:
+            return await _remote_call(machine, "browser_capture_tool", args)
         try:
-            return _ok(await playwright_install(browser, with_deps))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, meta=browser_write_meta)
-    async def browser_screenshot_tool(url: str, output_path: str = "screenshots/page.png", browser: str = "chromium", full_page: bool = True, width: int = 1440, height: int = 1000, wait_until: str = "networkidle") -> ToolResult:
-        """Open a URL with Playwright and save a screenshot."""
-        try:
-            return _ok(await browser_screenshot(url, output_path, browser, full_page, width, height, wait_until))
+            return _ok(await browser_capture(**args))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, meta=browser_meta)
-    async def browser_get_text_tool(url: str, browser: str = "chromium", wait_until: str = "networkidle", selector: str = "body") -> ToolResult:
-        """Open a URL with Playwright and return visible text for a selector."""
+    async def browser_get_text_tool(
+        url: str,
+        browser: str = "chromium",
+        wait_until: str = "networkidle",
+        selector: str = "body",
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Open a URL and return visible text locally or on a remote machine."""
+        args = {
+            "url": url,
+            "browser": browser,
+            "wait_until": wait_until,
+            "selector": selector,
+        }
+        if machine:
+            return await _remote_call(machine, "browser_get_text_tool", args)
         try:
-            return _ok(await browser_get_text(url, browser, wait_until, selector))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, meta=browser_meta)
-    async def browser_eval_tool(url: str, javascript: str, browser: str = "chromium", wait_until: str = "networkidle") -> ToolResult:
-        """Open a URL with Playwright and evaluate JavaScript."""
-        try:
-            return _ok(await browser_eval(url, javascript, browser, wait_until))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, meta=browser_write_meta)
-    async def browser_pdf_tool(url: str, output_path: str = "screenshots/page.pdf", width: int = 1440, height: int = 1000, wait_until: str = "networkidle") -> ToolResult:
-        """Open a URL with Chromium and save a PDF."""
-        try:
-            return _ok(await browser_pdf(url, output_path, width, height, wait_until))
+            return _ok(await browser_get_text(**args))
         except Exception as exc:
             return _handled_error(exc)
 
     @mcp.tool(structured_output=True, meta=browser_execute_meta)
-    async def playwright_run_script_tool(script: str, cwd: str = ".", timeout_s: int = 60) -> ToolResult:
-        """Run a full Python Playwright script. Powerful; use in disposable containers."""
+    async def playwright_run_script_tool(
+        script: str,
+        cwd: str = ".",
+        timeout_s: int = 60,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Run a full Python Playwright script locally or on a remote machine."""
+        if machine:
+            return await _remote_call(
+                machine,
+                "playwright_run_script_tool",
+                {"script": script, "cwd": cwd, "timeout_s": timeout_s},
+                timeout_s,
+            )
         try:
             return _ok(await playwright_run_script(script, cwd, timeout_s))
         except Exception as exc:
@@ -1581,23 +1833,19 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def audit_tail(lines: int = 100) -> ToolResult:
-        """Read recent audit log entries."""
+        """Read recent local audit log entries."""
         try:
             return _ok(await _to_thread(_read_audit_tail_entries, lines))
         except Exception as exc:
             return _handled_error(exc)
 
-
-
-    async def _remote_call(machine: str, tool: str, args: dict, timeout_s: int | None = None) -> ToolResult:
-        try:
-            return await remote_manager().call(machine, tool, args, timeout_s)
-        except Exception as exc:
-            return _handled_error(exc)
-
     @mcp.tool(structured_output=True, meta=remote_meta)
-    async def remote_invite(name: str | None = None, workdir: str | None = None, ttl_s: int | None = None) -> ToolResult:
-        """Create a one-time command for a remote machine to join this control server."""
+    async def remote_invite(
+        name: str | None = None,
+        workdir: str | None = None,
+        ttl_s: int | None = None,
+    ) -> ToolResult:
+        """Create a one-time command for a remote machine to join this server."""
         try:
             return _ok(await remote_manager().create_invite(name, workdir, ttl_s))
         except Exception as exc:
@@ -1605,7 +1853,7 @@ def build_mcp() -> FastMCP:
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_meta)
     async def remote_list_machines() -> ToolResult:
-        """List remote worker machines connected to this control server."""
+        """List registered remote worker machines."""
         try:
             return _ok(remote_manager().list_machines())
         except Exception as exc:
@@ -1626,264 +1874,6 @@ def build_mcp() -> FastMCP:
             return _ok(remote_manager().rename(machine, new_name))
         except Exception as exc:
             return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
-    async def remote_environment_info(machine: str) -> ToolResult:
-        """Return remote workspace, auth, policy, and basic environment information."""
-        return await _remote_call(machine, "environment_info", {})
-
-    @mcp.tool(structured_output=True, meta=remote_execute_meta)
-    async def remote_run_shell_tool(machine: str, command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Run a shell command on a remote worker machine. timeout_s defaults to 10 seconds and may be set to at most 120 seconds. Optional purpose/explanation fields let agents state why the command is being run."""
-        return await _remote_call(machine, "run_shell_tool", {"command": command, "cwd": cwd, "timeout_s": timeout_s, "max_output_bytes": max_output_bytes, "purpose": purpose, "explanation": explanation}, timeout_s)
-
-    @mcp.tool(structured_output=True, meta=remote_execute_meta)
-    async def remote_run_python_tool(machine: str, code: str, cwd: str = ".", timeout_s: int = 60, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Write Python code to a temporary file and execute it on a remote worker. Optional purpose/explanation fields let agents state why the script is being run."""
-        return await _remote_call(machine, "run_python_tool", {"code": code, "cwd": cwd, "timeout_s": timeout_s, "purpose": purpose, "explanation": explanation}, timeout_s)
-
-    @mcp.tool(structured_output=True, meta=remote_execute_meta)
-    async def remote_shell_start(machine: str, cwd: str = ".", name: str | None = None, command: str | None = None, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Start a persistent shell session on a remote worker. Optional purpose/explanation fields let agents state why the session is being started."""
-        return await _remote_call(machine, "shell_start", {"cwd": cwd, "name": name, "command": command, "purpose": purpose, "explanation": explanation})
-
-    @mcp.tool(structured_output=True, meta=remote_execute_meta)
-    async def remote_shell_send(machine: str, session_id: str, input_text: str, enter: bool = True) -> ToolResult:
-        """Send input to a persistent remote shell session."""
-        return await _remote_call(machine, "shell_send", {"session_id": session_id, "input_text": input_text, "enter": enter})
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
-    async def remote_shell_read(machine: str, session_id: str, lines: int = 200) -> ToolResult:
-        """Read recent output from a persistent remote shell session."""
-        return await _remote_call(machine, "shell_read", {"session_id": session_id, "lines": lines})
-
-    @mcp.tool(structured_output=True, meta=remote_execute_meta)
-    async def remote_shell_kill(machine: str, session_id: str) -> ToolResult:
-        """Kill a persistent remote shell session."""
-        return await _remote_call(machine, "shell_kill", {"session_id": session_id})
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
-    async def remote_shell_list(machine: str) -> ToolResult:
-        """List persistent shell sessions on a remote worker."""
-        return await _remote_call(machine, "shell_list", {})
-
-    @mcp.tool(structured_output=True, meta=remote_execute_meta)
-    async def remote_job_start(machine: str, command: str, cwd: str = ".", name: str | None = None, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Start a tracked long-running job on a remote worker. Optional purpose/explanation fields let agents state why the job is being started."""
-        return await _remote_call(machine, "job_start", {"command": command, "cwd": cwd, "name": name, "purpose": purpose, "explanation": explanation})
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
-    async def remote_job_list(machine: str, include_finished: bool = True) -> ToolResult:
-        """List tracked long-running jobs on a remote worker."""
-        return await _remote_call(machine, "job_list", {"include_finished": include_finished})
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
-    async def remote_job_tail(machine: str, job_id: str, lines: int = 200) -> ToolResult:
-        """Read recent output for a tracked remote job."""
-        return await _remote_call(machine, "job_tail", {"job_id": job_id, "lines": lines})
-
-    @mcp.tool(structured_output=True, meta=remote_execute_meta)
-    async def remote_job_stop(machine: str, job_id: str) -> ToolResult:
-        """Stop a tracked long-running job on a remote worker."""
-        return await _remote_call(machine, "job_stop", {"job_id": job_id})
-
-    @mcp.tool(structured_output=True, meta=remote_execute_meta)
-    async def remote_job_retry(machine: str, job_id: str, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Restart a stopped or exited tracked job on a remote worker. Optional purpose/explanation fields let agents state why the retry is needed."""
-        return await _remote_call(machine, "job_retry", {"job_id": job_id, "purpose": purpose, "explanation": explanation})
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
-    async def remote_list_files(machine: str, path: str = ".", recursive: bool = False, max_entries: int = 500) -> ToolResult:
-        """List files and directories on a remote worker."""
-        return await _remote_call(machine, "list_files", {"path": path, "recursive": recursive, "max_entries": max_entries})
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
-    async def remote_tree_view(machine: str, cwd: str = ".", depth: int = 3, max_entries: int = 500) -> ToolResult:
-        """Return a compact directory tree from a remote worker."""
-        return await _remote_call(machine, "tree_view", {"cwd": cwd, "depth": depth, "max_entries": max_entries})
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
-    async def remote_glob_search(machine: str, pattern: str, cwd: str = ".", max_results: int = 500) -> ToolResult:
-        """Find files by glob pattern on a remote worker."""
-        return await _remote_call(machine, "glob_search", {"pattern": pattern, "cwd": cwd, "max_results": max_results})
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
-    async def remote_grep_search(machine: str, query: str, cwd: str = ".", glob: str | None = None, regex: bool = True, case_sensitive: bool = True, max_results: int | None = None) -> ToolResult:
-        """Search remote file contents using ripgrep."""
-        return await _remote_call(machine, "grep_search", {"query": query, "cwd": cwd, "glob": glob, "regex": regex, "case_sensitive": case_sensitive, "max_results": max_results})
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
-    async def remote_read_file(machine: str, path: str, start_line: int | None = None, end_line: int | None = None, binary_preview: str | None = None, binary_preview_bytes: int = 256) -> ToolResult:
-        """Read a UTF-8 text file on a remote worker, optionally by line range."""
-        return await _remote_call(machine, "read_file", {"path": path, "start_line": start_line, "end_line": end_line, "binary_preview": binary_preview, "binary_preview_bytes": binary_preview_bytes})
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_read_meta)
-    async def remote_read_many_files(machine: str, paths: list[str], start_line: int | None = None, end_line: int | None = None, binary_preview: str | None = None, binary_preview_bytes: int = 256) -> ToolResult:
-        """Read multiple UTF-8 text files on a remote worker."""
-        return await _remote_call(machine, "read_many_files", {"paths": paths, "start_line": start_line, "end_line": end_line, "binary_preview": binary_preview, "binary_preview_bytes": binary_preview_bytes})
-
-    @mcp.tool(structured_output=True, meta=remote_write_meta)
-    async def remote_write_file(machine: str, path: str, content: str, overwrite: bool = True) -> ToolResult:
-        """Write a UTF-8 text file on a remote worker."""
-        return await _remote_call(machine, "write_file", {"path": path, "content": content, "overwrite": overwrite})
-
-    @mcp.tool(structured_output=True, meta=remote_write_meta)
-    async def remote_edit_file(machine: str, path: str, old: str, new: str, replace_all: bool = False) -> ToolResult:
-        """Replace exact text in a remote file."""
-        return await _remote_call(machine, "edit_file", {"path": path, "old": old, "new": new, "replace_all": replace_all})
-
-    @mcp.tool(structured_output=True, meta=remote_write_meta)
-    async def remote_multi_edit_file(machine: str, path: str, edits: list[dict]) -> ToolResult:
-        """Apply multiple exact-text edits to one remote file."""
-        return await _remote_call(machine, "multi_edit_file", {"path": path, "edits": edits})
-
-    @mcp.tool(structured_output=True, meta=remote_write_meta)
-    async def remote_delete_file_or_dir(machine: str, path: str, recursive: bool = False) -> ToolResult:
-        """Delete a file or directory on a remote worker."""
-        return await _remote_call(machine, "delete_file_or_dir", {"path": path, "recursive": recursive})
-
-    @mcp.tool(structured_output=True, meta=remote_write_meta)
-    async def remote_copy_file(src_machine: str, src_path: str, dst_machine: str, dst_path: str, overwrite: bool = True, chunk_size: int | None = None) -> ToolResult:
-        """Copy a file from one remote worker machine to another through the control server."""
-        try:
-            return _ok(await _copy_remote_file_to_remote(src_machine, src_path, dst_machine, dst_path, overwrite, chunk_size))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, meta=remote_write_meta)
-    async def remote_copy_dir(src_machine: str, src_path: str, dst_machine: str, dst_path: str, overwrite: bool = False, chunk_size: int | None = None) -> ToolResult:
-        """Copy a directory tree from one remote worker machine to another through the control server."""
-        try:
-            return _ok(await _copy_remote_dir_to_remote(src_machine, src_path, dst_machine, dst_path, overwrite, chunk_size))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, meta=remote_write_meta)
-    async def remote_pull_file(machine: str, remote_path: str, local_path: str, overwrite: bool = True, chunk_size: int | None = None) -> ToolResult:
-        """Copy a file from a remote worker to the control server workspace."""
-        try:
-            return _ok(await _copy_remote_file_to_local(machine, remote_path, local_path, overwrite, chunk_size))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, meta=remote_write_meta)
-    async def remote_push_file(local_path: str, machine: str, remote_path: str, overwrite: bool = True, chunk_size: int | None = None) -> ToolResult:
-        """Copy a file from the control server workspace to a remote worker."""
-        try:
-            return _ok(await _copy_local_file_to_remote(local_path, machine, remote_path, overwrite, chunk_size))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, meta=remote_write_meta)
-    async def remote_pull_dir(machine: str, remote_path: str, local_path: str, overwrite: bool = False, chunk_size: int | None = None) -> ToolResult:
-        """Copy a directory tree from a remote worker to the control server workspace."""
-        try:
-            return _ok(await _copy_remote_dir_to_local(machine, remote_path, local_path, overwrite, chunk_size))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, meta=remote_write_meta)
-    async def remote_push_dir(local_path: str, machine: str, remote_path: str, overwrite: bool = False, chunk_size: int | None = None) -> ToolResult:
-        """Copy a directory tree from the control server workspace to a remote worker."""
-        try:
-            return _ok(await _copy_local_dir_to_remote(local_path, machine, remote_path, overwrite, chunk_size))
-        except Exception as exc:
-            return _handled_error(exc)
-
-    @mcp.tool(structured_output=True, meta=remote_patch_meta)
-    async def remote_apply_patch(machine: str, patch: str, cwd: str = ".", purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Apply a unified diff on a remote worker using git apply. Optional purpose/explanation fields let agents state why the patch is needed."""
-        return await _remote_call(machine, "apply_patch", {"patch": patch, "cwd": cwd, "purpose": purpose, "explanation": explanation})
-
-    @mcp.tool(structured_output=True, meta=remote_git_write_meta)
-    async def remote_git_clone_tool(machine: str, repo_url: str, dest: str | None = None, branch: str | None = None, cwd: str = ".") -> ToolResult:
-        """Clone a Git repository on a remote worker."""
-        return await _remote_call(machine, "git_clone_tool", {"repo_url": repo_url, "dest": dest, "branch": branch, "cwd": cwd})
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_git_read_meta)
-    async def remote_git_status_tool(machine: str, cwd: str = ".") -> ToolResult:
-        """Run git status on a remote worker."""
-        return await _remote_call(machine, "git_status_tool", {"cwd": cwd})
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_git_read_meta)
-    async def remote_git_diff_tool(machine: str, cwd: str = ".", staged: bool = False, path: str | None = None, stat: bool = False) -> ToolResult:
-        """Run git diff on a remote worker."""
-        return await _remote_call(machine, "git_diff_tool", {"cwd": cwd, "staged": staged, "path": path, "stat": stat})
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_git_read_meta)
-    async def remote_git_log_tool(machine: str, cwd: str = ".", max_count: int = 20) -> ToolResult:
-        """Show recent git commits on a remote worker."""
-        return await _remote_call(machine, "git_log_tool", {"cwd": cwd, "max_count": max_count})
-
-    @mcp.tool(structured_output=True, meta=remote_git_write_meta)
-    async def remote_git_checkout_tool(machine: str, cwd: str, ref: str, create: bool = False) -> ToolResult:
-        """Checkout an existing ref or create a branch on a remote worker."""
-        return await _remote_call(machine, "git_checkout_tool", {"cwd": cwd, "ref": ref, "create": create})
-
-    @mcp.tool(structured_output=True, meta=remote_git_write_meta)
-    async def remote_git_fetch_tool(machine: str, cwd: str = ".", remote: str = "origin", prune: bool = True) -> ToolResult:
-        """Fetch a git remote on a remote worker."""
-        return await _remote_call(machine, "git_fetch_tool", {"cwd": cwd, "remote": remote, "prune": prune})
-
-    @mcp.tool(structured_output=True, meta=remote_git_write_meta)
-    async def remote_git_pull_tool(machine: str, cwd: str = ".", ff_only: bool = True) -> ToolResult:
-        """Pull current branch on a remote worker."""
-        return await _remote_call(machine, "git_pull_tool", {"cwd": cwd, "ff_only": ff_only})
-
-    @mcp.tool(structured_output=True, meta=remote_git_write_meta)
-    async def remote_git_add_tool(machine: str, cwd: str = ".", paths: list[str] | None = None) -> ToolResult:
-        """Stage paths on a remote worker."""
-        return await _remote_call(machine, "git_add_tool", {"cwd": cwd, "paths": paths})
-
-    @mcp.tool(structured_output=True, meta=remote_git_write_meta)
-    async def remote_git_commit_tool(machine: str, cwd: str, message: str, all_changes: bool = False, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Create a git commit on a remote worker. Optional purpose/explanation fields let agents state why the commit is being created."""
-        return await _remote_call(machine, "git_commit_tool", {"cwd": cwd, "message": message, "all_changes": all_changes, "purpose": purpose, "explanation": explanation})
-
-    @mcp.tool(structured_output=True, meta=remote_git_write_meta)
-    async def remote_git_push_tool(machine: str, cwd: str, remote: str = "origin", branch: str | None = None, set_upstream: bool = True, purpose: str | None = None, explanation: str | None = None) -> ToolResult:
-        """Push current HEAD from a remote worker. Optional purpose/explanation fields let agents state why the push is being performed."""
-        return await _remote_call(machine, "git_push_tool", {"cwd": cwd, "remote": remote, "branch": branch, "set_upstream": set_upstream, "purpose": purpose, "explanation": explanation})
-
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_git_read_meta)
-    async def remote_git_show_tool(machine: str, cwd: str = ".", ref: str = "HEAD", path: str | None = None) -> ToolResult:
-        """Show a commit, object, or file at ref:path on a remote worker."""
-        return await _remote_call(machine, "git_show_tool", {"cwd": cwd, "ref": ref, "path": path})
-
-    @mcp.tool(structured_output=True, meta=remote_git_write_meta)
-    async def remote_git_reset_tool(machine: str, cwd: str = ".", mode: str = "soft", ref: str = "HEAD") -> ToolResult:
-        """Run git reset on a remote worker. Modes: soft, mixed, hard."""
-        return await _remote_call(machine, "git_reset_tool", {"cwd": cwd, "mode": mode, "ref": ref})
-
-    @mcp.tool(structured_output=True, meta=remote_browser_write_meta)
-    async def remote_playwright_install_tool(machine: str, browser: str = "chromium", with_deps: bool = False) -> ToolResult:
-        """Install Playwright browser binaries on a remote worker."""
-        return await _remote_call(machine, "playwright_install_tool", {"browser": browser, "with_deps": with_deps})
-
-    @mcp.tool(structured_output=True, meta=remote_browser_write_meta)
-    async def remote_browser_screenshot_tool(machine: str, url: str, output_path: str = "screenshots/page.png", browser: str = "chromium", full_page: bool = True, width: int = 1440, height: int = 1000, wait_until: str = "networkidle") -> ToolResult:
-        """Open a URL with Playwright on a remote worker and save a screenshot."""
-        return await _remote_call(machine, "browser_screenshot_tool", {"url": url, "output_path": output_path, "browser": browser, "full_page": full_page, "width": width, "height": height, "wait_until": wait_until})
-
-    @mcp.tool(structured_output=True, meta=remote_browser_meta)
-    async def remote_browser_get_text_tool(machine: str, url: str, browser: str = "chromium", wait_until: str = "networkidle", selector: str = "body") -> ToolResult:
-        """Open a URL with Playwright on a remote worker and return visible text."""
-        return await _remote_call(machine, "browser_get_text_tool", {"url": url, "browser": browser, "wait_until": wait_until, "selector": selector})
-
-    @mcp.tool(structured_output=True, meta=remote_browser_meta)
-    async def remote_browser_eval_tool(machine: str, url: str, javascript: str, browser: str = "chromium", wait_until: str = "networkidle") -> ToolResult:
-        """Open a URL with Playwright on a remote worker and evaluate JavaScript."""
-        return await _remote_call(machine, "browser_eval_tool", {"url": url, "javascript": javascript, "browser": browser, "wait_until": wait_until})
-
-    @mcp.tool(structured_output=True, meta=remote_browser_write_meta)
-    async def remote_browser_pdf_tool(machine: str, url: str, output_path: str = "screenshots/page.pdf", width: int = 1440, height: int = 1000, wait_until: str = "networkidle") -> ToolResult:
-        """Open a URL with Chromium on a remote worker and save a PDF."""
-        return await _remote_call(machine, "browser_pdf_tool", {"url": url, "output_path": output_path, "width": width, "height": height, "wait_until": wait_until})
-
-    @mcp.tool(structured_output=True, meta=remote_browser_execute_meta)
-    async def remote_playwright_run_script_tool(machine: str, script: str, cwd: str = ".", timeout_s: int = 60) -> ToolResult:
-        """Run a full Python Playwright script on a remote worker."""
-        return await _remote_call(machine, "playwright_run_script_tool", {"script": script, "cwd": cwd, "timeout_s": timeout_s}, timeout_s)
 
     _remove_remote_tools_when_disabled(mcp)
     _install_tool_annotations(mcp)

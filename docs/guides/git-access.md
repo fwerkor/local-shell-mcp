@@ -1,56 +1,39 @@
 # Git access
 
-`local-shell-mcp` includes Git-oriented tools and also allows direct Git commands through shell tools.
+`local-shell-mcp` uses the standard Git command-line interface through `run_shell_tool`, `shell_start`, or `job_start`. Dedicated Git MCP wrappers are intentionally not exposed: the CLI is complete, familiar to coding agents, and avoids duplicating every Git subcommand in the tool list.
 
-## Common tasks
+## Common workflow
 
-```text
-Clone a repository, inspect status, make a focused patch, run tests, commit, and push.
+Use bounded, non-interactive commands where possible:
+
+```bash
+git status --short --branch
+git diff --stat
+git diff
+git add -- path/to/file
+git commit -m "fix: concise description"
+git push origin HEAD
 ```
 
-Recommended sequence:
+A typical agent sequence is:
 
-1. `git_status_tool`
-2. `git_diff_tool`
-3. edit or patch files
-4. run tests
-5. `secret_scan`
-6. `git_add_tool`
-7. `git_commit_tool`
-8. `git_push_tool`
+1. Inspect with `run_shell_tool(command="git status --short --branch")`.
+2. Read and edit only the relevant files.
+3. Run targeted tests.
+4. Review with `run_shell_tool(command="git diff --check && git diff")`.
+5. Run `secret_scan` before committing or pushing.
+6. Stage, commit, and push using explicit Git CLI commands.
+
+Use `machine` on the same shell tool when the repository is on a remote worker.
 
 ## Credentials
 
-Docker deployments can persist common Git credential locations under `/persist/credentials`. Treat that volume as sensitive.
-
-Prefer:
-
-- Deploy keys scoped to one repository.
-- Short-lived GitHub App tokens.
-- Isolated machine users for automation.
-- Manual review before push.
-
-Avoid:
-
-- Long-lived personal access tokens in environment variables.
-- Mounting host SSH directories into a public AI-controlled container.
-- Sharing credential files through file links.
+Docker deployments can persist common Git credential locations under `/persist/credentials`. Treat that volume as sensitive. Prefer repository-scoped deploy keys, short-lived GitHub App tokens, isolated automation users, and manual review before push.
 
 ## Commit hygiene
 
-Ask the AI to:
-
-- Keep commits focused.
-- Avoid generated caches and build artifacts.
-- Mention tests run.
-- Avoid AI-flavored boilerplate in open-source PRs when maintainers prefer concise human-style commits.
+Keep commits focused, omit generated caches and build artifacts, record the tests run, and avoid staging unrelated changes. For destructive commands such as reset, clean, or force-push, inspect the exact target first.
 
 ## Troubleshooting
 
-If `git push` fails:
-
-- Check remote URL.
-- Check credential persistence.
-- Run `gh auth status` if GitHub CLI is installed.
-- Confirm branch protection rules.
-- Confirm the token or deploy key has write permission.
+When `git push` fails, inspect the remote URL, credential persistence, branch protection, and token permissions. `gh auth status` is useful when GitHub CLI is installed.

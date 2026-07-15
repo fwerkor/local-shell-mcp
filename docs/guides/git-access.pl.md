@@ -31,7 +31,6 @@ Endpoint: https://your-host.example.com/mcp
 
 - `environment_info` potwierdza ustawienia Runtime i workspace.
 - `tree_view` potwierdza widoczne pliki.
-- `git_status_tool` potwierdza kontekst repozytorium.
 - `run_shell_tool` potwierdza środowisko poleceń.
 
 ## Uwagi

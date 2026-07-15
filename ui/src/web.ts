@@ -158,7 +158,7 @@ async function startOAuth(): Promise<void> {
     authorize.searchParams.set("response_type", "code")
     authorize.searchParams.set("client_id", client.client_id)
     authorize.searchParams.set("redirect_uri", callback)
-    authorize.searchParams.set("scope", "shell:read shell:write shell:execute git:write browser:use file:share remote:use")
+    authorize.searchParams.set("scope", "shell:read shell:write shell:execute browser:use file:share remote:use")
     authorize.searchParams.set("resource", location.origin)
     authorize.searchParams.set("code_challenge", challenge)
     authorize.searchParams.set("code_challenge_method", "S256")
