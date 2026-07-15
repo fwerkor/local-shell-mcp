@@ -70,6 +70,7 @@ from .shell_ops import (
     list_shells,
     public_run_shell,
     public_run_shell_timeout,
+    quote_shell_argument,
     read_shell,
     run_shell,
     send_shell,
@@ -81,6 +82,7 @@ from .transfer_ops import (
     transfer_alloc_temp_path,
     transfer_begin_write,
     transfer_finish_write,
+    transfer_mark_complete_write,
     transfer_pack_dir,
     transfer_read_chunk,
     transfer_stat,
@@ -98,9 +100,31 @@ REMOTE_WORKER_BUNDLE_PATH = "/remote/worker-bundle.tgz"
 # controller's Python ABI.
 REMOTE_WORKER_DISTRIBUTIONS: tuple[str, ...] = ()
 REMOTE_WORKER_REGISTRY_FILE_NAME = "remote-workers.json"
+REMOTE_WORKER_REGISTRY_BACKUP_FILE_NAME = "remote-workers.json.bak"
 REMOTE_WORKER_IDENTITY_FILE_NAME = "identity.json"
 MAX_REMOTE_INVITES = 1_024
 MAX_REMOTE_MACHINE_NAME_LENGTH = 128
+REMOTE_NON_CANCELLABLE_WORKER_TOOLS = frozenset(
+    {
+        "write_file",
+        "edit_file",
+        "multi_edit_file",
+        "delete_file_or_dir",
+        "human_file_action",
+        "transfer_begin_write",
+        "transfer_write_chunk",
+        "transfer_finish_write",
+        "transfer_abort_write",
+        "transfer_pack_dir",
+        "transfer_unpack_archive",
+        "transfer_upload_url",
+        "transfer_download_url",
+    }
+)
+
+
+class RemoteJobCancelled(RuntimeError):
+    pass
 
 
 class WorkerHttpError(RuntimeError):
@@ -210,6 +234,7 @@ class RemoteManager:
         self.pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self.pending_machines: dict[str, str] = {}
         self.cancelled_jobs: dict[str, float] = {}
+        self.claimed_jobs: set[str] = set()
         self._lock = asyncio.Lock()
         self._state_lock = threading.RLock()
         self._registry_loaded = False
@@ -217,20 +242,57 @@ class RemoteManager:
     def _registry_path(self) -> Path:
         return get_settings().state_dir / REMOTE_WORKER_REGISTRY_FILE_NAME
 
+    def _registry_backup_path(self) -> Path:
+        return get_settings().state_dir / REMOTE_WORKER_REGISTRY_BACKUP_FILE_NAME
+
+    @staticmethod
+    def _read_registry(path: Path) -> list[dict[str, Any]]:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or data.get("version") != 1:
+            raise ValueError(f"unsupported or invalid remote worker registry: {path}")
+        rows = data.get("workers")
+        if not isinstance(rows, list):
+            raise ValueError(f"remote worker registry workers field is invalid: {path}")
+        return [item for item in rows if isinstance(item, dict)]
+
     def _load_registry_unlocked(self) -> None:
         if self._registry_loaded:
             return
-        self._registry_loaded = True
         path = self._registry_path()
-        if not path.exists():
+        backup_path = self._registry_backup_path()
+        if not path.exists() and not backup_path.exists():
+            self._registry_loaded = True
             return
+        rows: list[dict[str, Any]] | None = None
+        main_error: Exception | None = None
+        recovered_from_backup = False
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            return
-        rows = data.get("workers") if isinstance(data, dict) else None
-        if not isinstance(rows, list):
-            return
+            if path.exists():
+                rows = self._read_registry(path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            main_error = exc
+            audit("remote_worker_registry_unreadable", path=str(path), error=repr(exc))
+        if rows is None and backup_path.exists():
+            try:
+                rows = self._read_registry(backup_path)
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                audit(
+                    "remote_worker_registry_backup_unreadable",
+                    path=str(backup_path),
+                    error=repr(exc),
+                )
+            else:
+                recovered_from_backup = True
+                audit(
+                    "remote_worker_registry_recovered",
+                    path=str(path),
+                    backup_path=str(backup_path),
+                )
+        if rows is None:
+            raise RuntimeError(
+                "Remote worker registry is unreadable and no valid backup is available; "
+                "refusing to reset it"
+            ) from main_error
         for item in rows:
             if not isinstance(item, dict):
                 continue
@@ -249,9 +311,13 @@ class RemoteManager:
                 info=dict(item.get("info") or {}),
             )
             self.tokens[access] = name
+        self._registry_loaded = True
+        if recovered_from_backup:
+            self._save_registry_unlocked()
 
     def _save_registry_unlocked(self) -> None:
         path = self._registry_path()
+        backup_path = self._registry_backup_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "version": 1,
@@ -267,11 +333,21 @@ class RemoteManager:
                 for worker in sorted(self.workers.values(), key=lambda item: item.name)
             ],
         }
-        tmp_path = path.with_name(path.name + ".tmp")
-        tmp_path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-        with contextlib.suppress(OSError):
-            tmp_path.chmod(0o600)
-        tmp_path.replace(path)
+        payload = json.dumps(data, indent=2, sort_keys=True)
+        tmp_path = path.with_name(path.name + f".{uuid.uuid4().hex}.tmp")
+        backup_tmp_path = backup_path.with_name(
+            backup_path.name + f".{uuid.uuid4().hex}.tmp"
+        )
+        try:
+            for temporary in (tmp_path, backup_tmp_path):
+                temporary.write_text(payload, encoding="utf-8")
+                with contextlib.suppress(OSError):
+                    temporary.chmod(0o600)
+            os.replace(tmp_path, path)
+            os.replace(backup_tmp_path, backup_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+            backup_tmp_path.unlink(missing_ok=True)
 
     def _join_url(self, base_url: str | None = None) -> str:
         settings = get_settings()
@@ -416,15 +492,26 @@ class RemoteManager:
             oldest = next(iter(self.cancelled_jobs))
             self.cancelled_jobs.pop(oldest, None)
 
+    def _cancel_job_locked(self, job_id: str) -> None:
+        future = self.pending.pop(job_id, None)
+        self.pending_machines.pop(job_id, None)
+        self.claimed_jobs.discard(job_id)
+        now = _utc()
+        self.cancelled_jobs[job_id] = now
+        self._prune_cancelled_jobs_locked(now)
+        if future and not future.done():
+            future.cancel()
+
     def _cancel_job(self, job_id: str) -> None:
         with self._state_lock:
-            future = self.pending.pop(job_id, None)
-            self.pending_machines.pop(job_id, None)
-            now = _utc()
-            self.cancelled_jobs[job_id] = now
-            self._prune_cancelled_jobs_locked(now)
-            if future and not future.done():
-                future.cancel()
+            self._cancel_job_locked(job_id)
+
+    def _cancel_job_if_unclaimed(self, job_id: str) -> bool:
+        with self._state_lock:
+            if job_id in self.claimed_jobs:
+                return False
+            self._cancel_job_locked(job_id)
+            return True
 
     async def poll(self, token: str) -> dict[str, Any]:
         worker = self._worker_by_token(token)
@@ -447,15 +534,24 @@ class RemoteManager:
                 if job_id in self.cancelled_jobs:
                     self.cancelled_jobs.pop(job_id, None)
                     continue
+                self.claimed_jobs.add(job_id)
             return {"job": job}
 
-    async def heartbeat(self, token: str) -> dict[str, Any]:
+    async def heartbeat(
+        self, token: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         worker = self._worker_by_token(token)
+        job_id = str((payload or {}).get("job_id") or "")
         with self._state_lock:
             worker.status = "online"
             worker.last_seen = _utc()
             name = worker.name
-        return {"accepted": True, "name": name}
+            self._prune_cancelled_jobs_locked()
+            cancelled = bool(job_id and job_id in self.cancelled_jobs)
+        result = {"accepted": not cancelled, "name": name}
+        if cancelled:
+            result["cancelled"] = True
+        return result
 
     async def submit_result(self, token: str, payload: dict[str, Any]) -> dict[str, Any]:
         worker = self._worker_by_token(token)
@@ -477,9 +573,11 @@ class RemoteManager:
                 )
             if assigned_machine is None:
                 self.cancelled_jobs.pop(job_id, None)
+                self.claimed_jobs.discard(job_id)
                 return {"accepted": False}
             self.pending_machines.pop(job_id, None)
             self.cancelled_jobs.pop(job_id, None)
+            self.claimed_jobs.discard(job_id)
             future = self.pending.pop(job_id, None)
             if future and not future.done():
                 future.set_result(payload)
@@ -519,18 +617,46 @@ class RemoteManager:
                     "expires_at": _utc() + effective_timeout,
                 }
             )
+        preserve_pending = False
         try:
-            result = await asyncio.wait_for(future, timeout=effective_timeout)
+            result = await asyncio.wait_for(
+                asyncio.shield(future), timeout=effective_timeout
+            )
         except TimeoutError as exc:
-            self._cancel_job(job_id)
-            raise TimeoutError(f"remote job timed out: {tool} on {machine}") from exc
+            if tool in REMOTE_NON_CANCELLABLE_WORKER_TOOLS:
+                cancelled = self._cancel_job_if_unclaimed(job_id)
+                if not cancelled:
+                    result = await future
+                else:
+                    raise TimeoutError(
+                        f"remote job timed out: {tool} on {machine}"
+                    ) from exc
+            else:
+                self._cancel_job(job_id)
+                raise TimeoutError(f"remote job timed out: {tool} on {machine}") from exc
         except asyncio.CancelledError:
-            self._cancel_job(job_id)
+            claimed_mutation = False
+            if tool in REMOTE_NON_CANCELLABLE_WORKER_TOOLS:
+                claimed_mutation = not self._cancel_job_if_unclaimed(job_id)
+            if claimed_mutation:
+                preserve_pending = True
+
+                def cleanup(_future: asyncio.Future[dict[str, Any]]) -> None:
+                    with self._state_lock:
+                        self.pending.pop(job_id, None)
+                        self.pending_machines.pop(job_id, None)
+                        self.claimed_jobs.discard(job_id)
+
+                future.add_done_callback(cleanup)
+            elif tool not in REMOTE_NON_CANCELLABLE_WORKER_TOOLS:
+                self._cancel_job(job_id)
             raise
         finally:
-            with self._state_lock:
-                self.pending.pop(job_id, None)
-                self.pending_machines.pop(job_id, None)
+            if not preserve_pending:
+                with self._state_lock:
+                    self.pending.pop(job_id, None)
+                    self.pending_machines.pop(job_id, None)
+                    self.claimed_jobs.discard(job_id)
         if not result.get("ok", False):
             return _ok(
                 {
@@ -758,7 +884,13 @@ async def heartbeat_endpoint(request: Any):  # noqa: ANN201
     from starlette.responses import JSONResponse
 
     try:
-        return JSONResponse(_ok(await remote_manager().heartbeat(_bearer_token(request))))
+        return JSONResponse(
+            _ok(
+                await remote_manager().heartbeat(
+                    _bearer_token(request), await request.json()
+                )
+            )
+        )
     except Exception as exc:
         return _error(str(exc), type(exc).__name__, 401)
 
@@ -832,7 +964,10 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
     patch_path.parent.mkdir(parents=True, exist_ok=True)
     await _to_thread(patch_path.write_text, patch, encoding="utf-8")
     result = await run_shell(
-        f"git apply --check {shlex.quote(str(patch_path))} && git apply {shlex.quote(str(patch_path))}",
+        f"{quote_shell_argument(get_settings().git_bin)} apply --check "
+        f"{quote_shell_argument(str(patch_path))} && "
+        f"{quote_shell_argument(get_settings().git_bin)} apply "
+        f"{quote_shell_argument(str(patch_path))}",
         cwd=cwd,
         timeout_s=60,
         max_output_bytes=500_000,
@@ -847,7 +982,8 @@ async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict[st
     script.parent.mkdir(parents=True, exist_ok=True)
     await _to_thread(script.write_text, code, encoding="utf-8")
     result = await run_shell(
-        f"python3 {shlex.quote(str(script))}",
+        f"{quote_shell_argument(get_settings().python_bin)} "
+        f"{quote_shell_argument(str(script))}",
         cwd=cwd,
         timeout_s=public_run_shell_timeout(timeout_s),
         max_output_bytes=1_000_000,
@@ -1024,6 +1160,7 @@ def _worker_download_url(
             raise RuntimeError(
                 f"stream download failed with curl exit {completed.returncode}: {detail}"
             )
+        transfer_mark_complete_write(path, begin["transfer_id"])
         finish = transfer_finish_write(
             path,
             begin["transfer_id"],
@@ -1055,8 +1192,11 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
     if tool not in REMOTE_WORKER_TOOL_NAMES:
         raise ValueError(f"unsupported remote worker tool: {tool}")
     if tool == "environment_info":
+        python = quote_shell_argument(get_settings().python_bin)
+        git = quote_shell_argument(get_settings().git_bin)
         result = await run_shell(
-            "uname -a; echo '---'; id; echo '---'; pwd; echo '---'; python3 --version; git --version",
+            f"uname -a; echo '---'; id; echo '---'; pwd; echo '---'; "
+            f"{python} --version; {git} --version",
             cwd=".",
             timeout_s=10,
         )
@@ -1558,21 +1698,28 @@ async def _execute_worker_job_with_heartbeat(
     heartbeat_interval_s: float,
 ) -> Any:
     task = asyncio.create_task(execute_worker_tool(job["tool"], dict(job.get("args") or {})))
+    cancelled_by_controller = False
 
     async def heartbeat_loop() -> None:
+        nonlocal cancelled_by_controller
         interval = max(0.01, heartbeat_interval_s)
         while not task.done():
             await asyncio.sleep(interval)
             if task.done():
                 return
             try:
-                await asyncio.to_thread(
+                response = await asyncio.to_thread(
                     _worker_post_json,
                     f"{server}{REMOTE_API_PREFIX}/heartbeat",
-                    {},
+                    {"job_id": job.get("id")},
                     headers,
                     30,
                 )
+                data = response.get("data", {}) if isinstance(response, dict) else {}
+                if data.get("cancelled"):
+                    cancelled_by_controller = True
+                    task.cancel()
+                    return
             except Exception as exc:  # noqa: BLE001
                 if not _worker_error_is_retryable(exc):
                     return
@@ -1581,6 +1728,10 @@ async def _execute_worker_job_with_heartbeat(
     heartbeat = asyncio.create_task(heartbeat_loop())
     try:
         return await task
+    except asyncio.CancelledError as exc:
+        if cancelled_by_controller:
+            raise RemoteJobCancelled("remote job was cancelled by the controller") from exc
+        raise
     finally:
         heartbeat.cancel()
         await asyncio.gather(heartbeat, return_exceptions=True)

@@ -44,6 +44,8 @@ class _TransferTicket:
     overwrite: bool
     created_at: float
     expires_at: float
+    display_path: str | None = None
+    cleanup_path: str | None = None
     claimed: bool = False
 
 
@@ -84,11 +86,20 @@ def _validate_expected(expected_bytes: int, expected_sha256: str) -> tuple[int, 
     return size, digest
 
 
+def _cleanup_ticket_file(ticket: _TransferTicket) -> None:
+    if not ticket.cleanup_path:
+        return
+    with contextlib.suppress(OSError):
+        Path(ticket.cleanup_path).unlink(missing_ok=True)
+
+
 def _prune_locked(now: float | None = None) -> None:
     current = _now() if now is None else now
     for token, ticket in list(_TICKETS.items()):
         if ticket.expires_at <= current:
-            _TICKETS.pop(token, None)
+            removed = _TICKETS.pop(token, None)
+            if removed is not None:
+                _cleanup_ticket_file(removed)
 
 
 def _create_ticket(
@@ -97,9 +108,13 @@ def _create_ticket(
     expected_bytes: int,
     expected_sha256: str,
     overwrite: bool,
+    *,
+    token: str | None = None,
+    display_path: Path | None = None,
+    cleanup_path: Path | None = None,
 ) -> dict[str, Any]:
     size, digest = _validate_expected(expected_bytes, expected_sha256)
-    token = secrets.token_urlsafe(32)
+    token = token or secrets.token_urlsafe(32)
     now = _now()
     ticket = _TransferTicket(
         token=token,
@@ -110,6 +125,8 @@ def _create_ticket(
         overwrite=bool(overwrite),
         created_at=now,
         expires_at=now + _ticket_ttl_s(),
+        display_path=str(display_path or path),
+        cleanup_path=str(cleanup_path) if cleanup_path is not None else None,
     )
     with _TICKET_LOCK:
         _prune_locked(now)
@@ -117,14 +134,14 @@ def _create_ticket(
     audit(
         "remote_transfer_ticket_created",
         direction=direction,
-        path=relative_display(path),
+        path=relative_display(Path(ticket.display_path or ticket.path)),
         bytes=size,
         token_id=_token_id(token),
     )
     return {
         "token": token,
         "url": f"{_public_base_url()}{REMOTE_TRANSFER_PREFIX}/{direction}/{token}",
-        "path": relative_display(path),
+        "path": relative_display(Path(ticket.display_path or ticket.path)),
         "bytes": size,
         "sha256": digest,
         "expires_at": ticket.expires_at,
@@ -141,21 +158,91 @@ def create_upload_ticket(
     return _create_ticket("upload", destination, expected_bytes, expected_sha256, overwrite)
 
 
+def _download_snapshot_path(token: str) -> Path:
+    directory = get_settings().state_dir / "remote-transfers"
+    directory.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(OSError):
+        directory.chmod(0o700)
+    return directory / f"{hashlib.sha256(token.encode('utf-8')).hexdigest()}.bin"
+
+
+def _create_download_snapshot(
+    source: Path, token: str, expected_bytes: int, expected_sha256: str
+) -> Path:
+    snapshot = _download_snapshot_path(token)
+    temporary = snapshot.with_name(snapshot.name + f".{secrets.token_hex(8)}.tmp")
+    digest = hashlib.sha256()
+    try:
+        with source.open("rb") as source_handle, temporary.open("xb") as output:
+            before = os.fstat(source_handle.fileno())
+            if before.st_size != expected_bytes:
+                raise ValueError(
+                    f"size mismatch: expected {expected_bytes}, got {before.st_size}"
+                )
+            while chunk := source_handle.read(_TRANSFER_CHUNK_BYTES):
+                digest.update(chunk)
+                output.write(chunk)
+            output.flush()
+            os.fsync(output.fileno())
+            after = os.fstat(source_handle.fileno())
+            identity_before = (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+                before.st_ctime_ns,
+            )
+            identity_after = (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ctime_ns,
+            )
+            if identity_before != identity_after:
+                raise RuntimeError("source changed while creating remote transfer snapshot")
+        if digest.hexdigest() != expected_sha256:
+            raise ValueError("file sha256 mismatch")
+        with contextlib.suppress(OSError):
+            temporary.chmod(0o600)
+        os.replace(temporary, snapshot)
+        return snapshot
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def create_download_ticket(
     source_path: str,
     expected_bytes: int,
     expected_sha256: str,
 ) -> dict[str, Any]:
+    size, digest = _validate_expected(expected_bytes, expected_sha256)
     source = resolve_path(source_path, must_exist=True)
     if not source.is_file():
         raise ValueError(f"source is not a file: {source_path}")
-    return _create_ticket("download", source, expected_bytes, expected_sha256, False)
+    token = secrets.token_urlsafe(32)
+    snapshot = _create_download_snapshot(source, token, size, digest)
+    try:
+        return _create_ticket(
+            "download",
+            snapshot,
+            size,
+            digest,
+            False,
+            token=token,
+            display_path=source,
+            cleanup_path=snapshot,
+        )
+    except Exception:
+        snapshot.unlink(missing_ok=True)
+        raise
 
 
 def revoke_transfer_ticket(token: str) -> dict[str, Any]:
     with _TICKET_LOCK:
         removed = _TICKETS.pop(token, None)
     if removed is not None:
+        _cleanup_ticket_file(removed)
         audit(
             "remote_transfer_ticket_revoked",
             direction=removed.direction,
@@ -189,6 +276,7 @@ def _complete_ticket(token: str) -> None:
     with _TICKET_LOCK:
         ticket = _TICKETS.pop(token, None)
     if ticket is not None:
+        _cleanup_ticket_file(ticket)
         audit(
             "remote_transfer_completed",
             direction=ticket.direction,
@@ -362,7 +450,9 @@ async def download_endpoint(request: Request):  # noqa: ANN201
         headers={
             "Content-Length": str(ticket.expected_bytes),
             "X-Content-SHA256": ticket.expected_sha256,
-            "Content-Disposition": _content_disposition(path.name),
+            "Content-Disposition": _content_disposition(
+                Path(ticket.display_path or path).name
+            ),
             "Cache-Control": "no-store",
         },
     )
