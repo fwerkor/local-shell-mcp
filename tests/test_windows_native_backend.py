@@ -29,3 +29,43 @@ async def test_native_persistent_shell_backend_roundtrip(tmp_path, monkeypatch):
     finally:
         await ops.kill_shell(session["session_id"])
         ops._use_native_persistent_shell_backend = old_backend
+
+
+@pytest.mark.asyncio
+async def test_native_shell_creation_is_serialized(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_TMUX_SESSIONS", "1")
+    get_settings.cache_clear()
+    monkeypatch.setattr(ops, "_use_native_persistent_shell_backend", lambda: True)
+    monkeypatch.setattr(ops.conpty_ops, "is_available", lambda: False)
+    ops._NATIVE_SHELL_SESSIONS.clear()
+    spawned = []
+
+    class FakeProcess:
+        def __init__(self):
+            self.pid = len(spawned) + 1
+            self.returncode = None
+            self.stdout = None
+            self.stdin = None
+
+    async def fake_create_subprocess_exec(*args, **kwargs):  # noqa: ANN002, ANN003
+        await asyncio.sleep(0)
+        process = FakeProcess()
+        spawned.append(process)
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    outcomes = await asyncio.gather(
+        ops.start_shell(name="duplicate", command="echo one"),
+        ops.start_shell(name="duplicate", command="echo two"),
+        return_exceptions=True,
+    )
+
+    assert len(spawned) == 1
+    assert sum(isinstance(item, dict) for item in outcomes) == 1
+    assert sum(isinstance(item, RuntimeError) for item in outcomes) == 1
+    assert list(ops._NATIVE_SHELL_SESSIONS) == ["duplicate"]
+
+    spawned[0].returncode = 0
+    await ops.kill_shell("duplicate")

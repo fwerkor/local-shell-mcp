@@ -6,8 +6,10 @@ import re
 import shlex
 import signal
 import sys
+import threading
 import time
 import uuid
+import weakref
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +31,10 @@ READER_DRAIN_TIMEOUT_S = 2
 _COMMAND_SEMAPHORE: asyncio.Semaphore | None = None
 _COMMAND_SEMAPHORE_SIZE: int | None = None
 _NATIVE_SHELL_SESSIONS = {}
+_SHELL_START_LOCKS_GUARD = threading.Lock()
+_SHELL_START_LOCKS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+    weakref.WeakKeyDictionary()
+)
 NATIVE_SHELL_BUFFER_BYTES = 1_000_000
 
 
@@ -136,6 +142,16 @@ def _command_semaphore() -> asyncio.Semaphore:
         _COMMAND_SEMAPHORE = asyncio.Semaphore(size)
         _COMMAND_SEMAPHORE_SIZE = size
     return _COMMAND_SEMAPHORE
+
+
+def _shell_start_lock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    with _SHELL_START_LOCKS_GUARD:
+        lock = _SHELL_START_LOCKS.get(loop)
+        if lock is None:
+            lock = asyncio.Lock()
+            _SHELL_START_LOCKS[loop] = lock
+        return lock
 
 
 def _shell_program_name(shell: str) -> str:
@@ -521,7 +537,7 @@ async def _native_list_shells() -> dict:
     return {"sessions": sessions}
 
 
-async def start_shell(
+async def _start_shell_unlocked(
     cwd: str = ".", name: str | None = None, command: str | None = None
 ) -> dict:
     if _use_windows_persistent_shell_backend():
@@ -561,6 +577,13 @@ async def start_shell(
         "command": initial,
         "backend": backend,
     }
+
+
+async def start_shell(
+    cwd: str = ".", name: str | None = None, command: str | None = None
+) -> dict:
+    async with _shell_start_lock():
+        return await _start_shell_unlocked(cwd, name, command)
 
 
 async def send_shell(session_id: str, input_text: str, enter: bool = True) -> dict:

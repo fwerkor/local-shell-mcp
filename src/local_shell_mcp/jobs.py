@@ -30,6 +30,7 @@ JOB_STORE_BACKUP_FILE_NAME = "jobs.json.bak"
 JOB_STORE_VERSION = 2
 TERMINAL_STATUSES = {"succeeded", "failed", "exited", "stopped", "lost"}
 _JOB_STORE_THREAD_LOCK = threading.RLock()
+_ACTIVE_JOB_OPERATIONS: set[str] = set()
 
 
 def _utc() -> float:
@@ -342,6 +343,33 @@ def _adopt_pending_retry(job: dict[str, Any]) -> None:
             job[active_key] = value
 
 
+def _begin_job_operation(job: dict[str, Any], kind: str) -> str:
+    operation_id = f"{kind}_{uuid.uuid4().hex}"
+    _ACTIVE_JOB_OPERATIONS.add(operation_id)
+    job["operation_id"] = operation_id
+    job["operation_kind"] = kind
+    job["operation_started_at"] = _utc()
+    return operation_id
+
+
+def _job_operation_matches(job: dict[str, Any], operation_id: str) -> bool:
+    return str(job.get("operation_id") or "") == operation_id
+
+
+def _job_operation_is_active(job: dict[str, Any], kind: str) -> bool:
+    operation_id = str(job.get("operation_id") or "")
+    return (
+        bool(operation_id)
+        and str(job.get("operation_kind") or "") == kind
+        and operation_id in _ACTIVE_JOB_OPERATIONS
+    )
+
+
+def _clear_job_operation(job: dict[str, Any]) -> None:
+    for key in ("operation_id", "operation_kind", "operation_started_at"):
+        job.pop(key, None)
+
+
 def _refresh_job_status(
     job: dict[str, Any], active_sessions: set[str], now: float | None = None
 ) -> dict[str, Any]:
@@ -350,6 +378,10 @@ def _refresh_job_status(
         return job
 
     updated = now or _utc()
+    if status == "retrying" and _job_operation_is_active(job, "retry"):
+        return job
+    if status == "stopping" and _job_operation_is_active(job, "stop"):
+        return job
     if status == "retrying":
         pending_session = str(job.get("pending_session_name") or "")
         status_payload = _read_status_path(job.get("pending_status_path"))
@@ -569,149 +601,193 @@ async def tail_job(job_id: str, lines: int = 200) -> dict[str, Any]:
 async def stop_job(job_id: str) -> dict[str, Any]:
     active = _active_session_ids(await list_shells())
     session_id = ""
-    with _store_transaction() as store:
-        job = _refresh_job_status(_find_job(store, job_id), active)
-        if job.get("status") == "running":
-            session_id = str(job.get("session_id") or "")
-            job["status"] = "stopping"
-            job["updated_at"] = _utc()
-        else:
-            return {
-                "job": _public_job(job),
-                "killed": False,
-                "stderr": "",
-            }
+    operation_id = ""
+    try:
+        with _store_transaction() as store:
+            job = _refresh_job_status(_find_job(store, job_id), active)
+            if job.get("status") == "running":
+                session_id = str(job.get("session_id") or "")
+                job["status"] = "stopping"
+                job["updated_at"] = _utc()
+                operation_id = _begin_job_operation(job, "stop")
+            else:
+                return {
+                    "job": _public_job(job),
+                    "killed": False,
+                    "stderr": "",
+                }
+    except BaseException:
+        _ACTIVE_JOB_OPERATIONS.discard(operation_id)
+        raise
 
     try:
-        result = await kill_shell(session_id)
-    except Exception as exc:
-        still_active = True
-        with contextlib.suppress(Exception):
-            still_active = session_id in _active_session_ids(await list_shells())
+        try:
+            result = await kill_shell(session_id)
+        except Exception as exc:
+            still_active = True
+            with contextlib.suppress(Exception):
+                still_active = session_id in _active_session_ids(await list_shells())
+            with _store_transaction() as store:
+                job = _find_job(store, job_id)
+                if (
+                    job.get("status") == "stopping"
+                    and str(job.get("session_id") or "") == session_id
+                    and _job_operation_matches(job, operation_id)
+                ):
+                    job["status"] = "running" if still_active else "lost"
+                    job["updated_at"] = _utc()
+                    job["error"] = f"stop failed: {type(exc).__name__}: {exc}"
+                    if not still_active:
+                        job["completed_at"] = job["updated_at"]
+                    _clear_job_operation(job)
+            raise
+
+        killed = bool(result.get("killed"))
+        stderr = str(result.get("stderr") or "")
         with _store_transaction() as store:
             job = _find_job(store, job_id)
-            if job.get("status") == "stopping" and str(job.get("session_id") or "") == session_id:
-                job["status"] = "running" if still_active else "lost"
+            if (
+                job.get("status") == "stopping"
+                and str(job.get("session_id") or "") == session_id
+                and _job_operation_matches(job, operation_id)
+            ):
+                job["status"] = "stopped" if killed else "lost"
                 job["updated_at"] = _utc()
-                job["error"] = f"stop failed: {type(exc).__name__}: {exc}"
-                if not still_active:
-                    job["completed_at"] = job["updated_at"]
-        raise
-    killed = bool(result.get("killed"))
-    stderr = str(result.get("stderr") or "")
-    with _store_transaction() as store:
-        job = _find_job(store, job_id)
-        if job.get("status") == "stopping" and str(job.get("session_id") or "") == session_id:
-            job["status"] = "stopped" if killed else "lost"
-            job["updated_at"] = _utc()
-            job["completed_at"] = job["updated_at"]
-            job["exit_code"] = None
-        public_job = _public_job(job)
-    audit("job_stop", job_id=job_id, session=session_id, killed=killed)
-    return {"job": public_job, "killed": killed, "stderr": stderr}
+                job["completed_at"] = job["updated_at"]
+                job["exit_code"] = None
+                _clear_job_operation(job)
+            public_job = _public_job(job)
+        audit("job_stop", job_id=job_id, session=session_id, killed=killed)
+        return {"job": public_job, "killed": killed, "stderr": stderr}
+    finally:
+        _ACTIVE_JOB_OPERATIONS.discard(operation_id)
 
 
 async def retry_job(job_id: str) -> dict[str, Any]:
     active = _active_session_ids(await list_shells())
-    with _store_transaction() as store:
-        job = _refresh_job_status(_find_job(store, job_id), active)
-        if job.get("status") in {"running", "stopping", "retrying"}:
-            raise RuntimeError(f"job is still active: {job_id}")
-        attempts = int(job.get("attempts") or 1) + 1
-        command = str(job["command"])
-        cwd = str(job.get("cwd") or ".")
-        display_name = str(job.get("name") or job_id)
-        shell_name = _shell_safe_name(f"{display_name}-{job_id}-{attempts}")
-        job.update(
-            {
-                "status": "retrying",
-                "updated_at": _utc(),
-                "pending_attempt": attempts,
-                "pending_session_name": shell_name,
-            }
-        )
+    operation_id = ""
+    try:
+        with _store_transaction() as store:
+            job = _refresh_job_status(_find_job(store, job_id), active)
+            if job.get("status") in {"running", "stopping", "retrying"}:
+                raise RuntimeError(f"job is still active: {job_id}")
+            attempts = int(job.get("attempts") or 1) + 1
+            command = str(job["command"])
+            cwd = str(job.get("cwd") or ".")
+            display_name = str(job.get("name") or job_id)
+            shell_name = _shell_safe_name(f"{display_name}-{job_id}-{attempts}")
+            job.update(
+                {
+                    "status": "retrying",
+                    "updated_at": _utc(),
+                    "pending_attempt": attempts,
+                    "pending_session_name": shell_name,
+                }
+            )
+            operation_id = _begin_job_operation(job, "retry")
+    except BaseException:
+        _ACTIVE_JOB_OPERATIONS.discard(operation_id)
+        raise
 
     paths: dict[str, Path] | None = None
     try:
-        paths, runner_command = _prepare_attempt(job_id, attempts, command, cwd)
-        with _store_transaction() as store:
-            job = _find_job(store, job_id)
-            if job.get("status") != "retrying":
-                raise RuntimeError(f"job changed while preparing retry: {job_id}")
-            job.update(
-                {
-                    "pending_command_path": str(paths["command"]),
-                    "pending_log_path": str(paths["log"]),
-                    "pending_status_path": str(paths["status"]),
-                }
-            )
-        shell = await start_shell(cwd, shell_name, runner_command)
-    except Exception as exc:
-        _remove_attempt_paths(paths)
-        with _store_transaction() as store:
-            job = _find_job(store, job_id)
-            if job.get("status") == "retrying":
-                _clear_pending_retry(job)
-                job["status"] = "failed"
-                job["updated_at"] = _utc()
-                job["completed_at"] = job["updated_at"]
-                job["error"] = f"retry failed: {type(exc).__name__}: {exc}"
-        raise
-
-    now = _utc()
-    changed_while_retrying = False
-    try:
-        with _store_transaction() as store:
-            job = _find_job(store, job_id)
-            if job.get("status") != "retrying":
-                changed_while_retrying = True
-            else:
-                _clear_pending_retry(job)
+        try:
+            paths, runner_command = _prepare_attempt(job_id, attempts, command, cwd)
+            with _store_transaction() as store:
+                job = _find_job(store, job_id)
+                if (
+                    job.get("status") != "retrying"
+                    or not _job_operation_matches(job, operation_id)
+                ):
+                    raise RuntimeError(f"job changed while preparing retry: {job_id}")
                 job.update(
                     {
-                        "status": "running",
-                        "session_id": shell["session_id"],
-                        "backend": shell.get("backend"),
-                        "command_path": str(paths["command"]),
-                        "log_path": str(paths["log"]),
-                        "status_path": str(paths["status"]),
-                        "updated_at": now,
-                        "last_started_at": now,
-                        "completed_at": None,
-                        "exit_code": None,
-                        "error": None,
-                        "log_truncated": False,
-                        "output_bytes": 0,
-                        "attempts": attempts,
+                        "pending_command_path": str(paths["command"]),
+                        "pending_log_path": str(paths["log"]),
+                        "pending_status_path": str(paths["status"]),
                     }
                 )
-            public_job = _public_job(job)
-    except Exception as exc:
-        with contextlib.suppress(Exception):
-            await kill_shell(str(shell["session_id"]))
-        _remove_attempt_paths(paths)
-        with contextlib.suppress(Exception), _store_transaction() as store:
-            job = _find_job(store, job_id)
-            if job.get("status") == "retrying":
-                _clear_pending_retry(job)
-                job["status"] = "failed"
-                job["updated_at"] = _utc()
-                job["completed_at"] = job["updated_at"]
-                job["error"] = f"retry commit failed: {type(exc).__name__}: {exc}"
-        raise
-    if changed_while_retrying:
-        with contextlib.suppress(Exception):
-            await kill_shell(str(shell["session_id"]))
-        _remove_attempt_paths(paths)
-        raise RuntimeError(f"job changed while retrying: {job_id}")
-    _remove_attempt_files(job_id, keep_attempt=attempts)
-    audit(
-        "job_retry",
-        job_id=job_id,
-        session=shell["session_id"],
-        attempts=attempts,
-    )
-    return public_job
+            shell = await start_shell(cwd, shell_name, runner_command)
+        except Exception as exc:
+            _remove_attempt_paths(paths)
+            with _store_transaction() as store:
+                job = _find_job(store, job_id)
+                if (
+                    job.get("status") == "retrying"
+                    and _job_operation_matches(job, operation_id)
+                ):
+                    _clear_pending_retry(job)
+                    _clear_job_operation(job)
+                    job["status"] = "failed"
+                    job["updated_at"] = _utc()
+                    job["completed_at"] = job["updated_at"]
+                    job["error"] = f"retry failed: {type(exc).__name__}: {exc}"
+            raise
+
+        now = _utc()
+        changed_while_retrying = False
+        try:
+            with _store_transaction() as store:
+                job = _find_job(store, job_id)
+                if (
+                    job.get("status") != "retrying"
+                    or not _job_operation_matches(job, operation_id)
+                ):
+                    changed_while_retrying = True
+                else:
+                    _clear_pending_retry(job)
+                    _clear_job_operation(job)
+                    job.update(
+                        {
+                            "status": "running",
+                            "session_id": shell["session_id"],
+                            "backend": shell.get("backend"),
+                            "command_path": str(paths["command"]),
+                            "log_path": str(paths["log"]),
+                            "status_path": str(paths["status"]),
+                            "updated_at": now,
+                            "last_started_at": now,
+                            "completed_at": None,
+                            "exit_code": None,
+                            "error": None,
+                            "log_truncated": False,
+                            "output_bytes": 0,
+                            "attempts": attempts,
+                        }
+                    )
+                public_job = _public_job(job)
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                await kill_shell(str(shell["session_id"]))
+            _remove_attempt_paths(paths)
+            with contextlib.suppress(Exception), _store_transaction() as store:
+                job = _find_job(store, job_id)
+                if (
+                    job.get("status") == "retrying"
+                    and _job_operation_matches(job, operation_id)
+                ):
+                    _clear_pending_retry(job)
+                    _clear_job_operation(job)
+                    job["status"] = "failed"
+                    job["updated_at"] = _utc()
+                    job["completed_at"] = job["updated_at"]
+                    job["error"] = f"retry commit failed: {type(exc).__name__}: {exc}"
+            raise
+        if changed_while_retrying:
+            with contextlib.suppress(Exception):
+                await kill_shell(str(shell["session_id"]))
+            _remove_attempt_paths(paths)
+            raise RuntimeError(f"job changed while retrying: {job_id}")
+        _remove_attempt_files(job_id, keep_attempt=attempts)
+        audit(
+            "job_retry",
+            job_id=job_id,
+            session=shell["session_id"],
+            attempts=attempts,
+        )
+        return public_job
+    finally:
+        _ACTIVE_JOB_OPERATIONS.discard(operation_id)
 
 
 def _runner_shell_args(shell: str, command: str) -> list[str]:

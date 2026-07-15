@@ -417,3 +417,111 @@ async def test_job_store_refuses_to_overwrite_unrecoverable_corruption(tmp_path,
         await list_jobs()
     assert store_path.read_text(encoding="utf-8") == "{broken"
     assert not (state_dir / jobs_module.JOB_STORE_BACKUP_FILE_NAME).exists()
+
+
+@pytest.mark.asyncio
+async def test_job_list_does_not_interrupt_active_stop(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    active = {"session-stop"}
+    kill_entered = asyncio.Event()
+    allow_kill = asyncio.Event()
+
+    async def fake_start_shell(cwd=".", name=None, command=None):
+        return {
+            "session_id": "session-stop",
+            "cwd": cwd,
+            "command": command,
+            "backend": "fake",
+        }
+
+    async def fake_list_shells():
+        return {"sessions": [{"session_id": item} for item in sorted(active)]}
+
+    async def fake_kill_shell(session_id):
+        assert session_id == "session-stop"
+        kill_entered.set()
+        await allow_kill.wait()
+        active.discard(session_id)
+        return {"session_id": session_id, "killed": True, "stderr": ""}
+
+    monkeypatch.setattr(jobs_module, "start_shell", fake_start_shell)
+    monkeypatch.setattr(jobs_module, "list_shells", fake_list_shells)
+    monkeypatch.setattr(jobs_module, "kill_shell", fake_kill_shell)
+
+    job = await start_job("sleep 10")
+    stop_task = asyncio.create_task(stop_job(job["job_id"]))
+    await kill_entered.wait()
+
+    during = await list_jobs()
+    assert during["jobs"][0]["status"] == "stopping"
+
+    allow_kill.set()
+    stopped = await stop_task
+    assert stopped["job"]["status"] == "stopped"
+    assert (await list_jobs())["jobs"][0]["status"] == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_job_list_does_not_interrupt_active_retry(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".state"
+    state_dir.mkdir()
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    now = time.time()
+    (state_dir / jobs_module.JOB_STORE_FILE_NAME).write_text(
+        json.dumps(
+            {
+                "version": jobs_module.JOB_STORE_VERSION,
+                "jobs": [
+                    {
+                        "job_id": "job-retry-race",
+                        "name": "retry-race",
+                        "status": "failed",
+                        "command": "echo retry",
+                        "cwd": ".",
+                        "session_id": "old-session",
+                        "created_at": now,
+                        "updated_at": now,
+                        "completed_at": now,
+                        "exit_code": 1,
+                        "attempts": 1,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    active: set[str] = set()
+    start_entered = asyncio.Event()
+    allow_start = asyncio.Event()
+
+    async def fake_list_shells():
+        return {"sessions": [{"session_id": item} for item in sorted(active)]}
+
+    async def fake_start_shell(cwd=".", name=None, command=None):
+        start_entered.set()
+        await allow_start.wait()
+        active.add(str(name))
+        return {
+            "session_id": str(name),
+            "cwd": cwd,
+            "command": command,
+            "backend": "fake",
+        }
+
+    monkeypatch.setattr(jobs_module, "list_shells", fake_list_shells)
+    monkeypatch.setattr(jobs_module, "start_shell", fake_start_shell)
+
+    retry_task = asyncio.create_task(retry_job("job-retry-race"))
+    await start_entered.wait()
+
+    during = await list_jobs()
+    assert during["jobs"][0]["status"] == "retrying"
+
+    allow_start.set()
+    retried = await retry_task
+    assert retried["status"] == "running"
+    assert retried["attempts"] == 2
