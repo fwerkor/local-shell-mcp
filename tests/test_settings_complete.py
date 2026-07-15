@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -19,10 +20,10 @@ def test_ui_path_csv_shell_and_default_helpers(tmp_path, monkeypatch):
     assert settings._split_csv(["a", "b"]) == ["a", "b"]
     assert settings._split_csv(" a, ,b ") == ["a", "b"]
 
-    monkeypatch.setattr(settings.os, "name", "nt")
+    monkeypatch.setattr(settings, "os", SimpleNamespace(name="nt"))
     assert settings.default_shell_executable() == "powershell.exe"
     assert settings.default_python_executable() == "python.exe"
-    monkeypatch.setattr(settings.os, "name", "posix")
+    monkeypatch.setattr(settings, "os", SimpleNamespace(name="posix"))
     assert settings.default_shell_executable() == "/bin/bash"
     assert settings.default_python_executable() == "python3"
 

@@ -72,7 +72,7 @@ def test_resolved_directories_regular_files_and_roots(tmp_path, monkeypatch):
     skill = directory / "good"
     skill.mkdir()
     entry = skill / "SKILL.md"
-    entry.write_text("line\r\nnext\r", encoding="utf-8")
+    entry.write_bytes(b"line\r\nnext\r")
     content, size, resolved = skills._open_regular_file(entry, skill, 100)
     assert content == "line\nnext\n"
     assert size > 0 and resolved == entry.resolve()

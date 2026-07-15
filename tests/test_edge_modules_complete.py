@@ -476,7 +476,8 @@ def test_tmux_selection_backend_and_version(tmp_path, monkeypatch):
     assert tmux_helper.resolve_tmux().source == "native"
     assert tmux_helper.tmux_socket_name().startswith("local-shell-mcp-")
 
-    monkeypatch.setattr(tmux_helper.os, "name", "posix")
+    os_proxy = SimpleNamespace(**{**vars(os), "name": "posix"})
+    monkeypatch.setattr(tmux_helper, "os", os_proxy)
     monkeypatch.setattr(
         tmux_helper,
         "resolve_tmux",
@@ -488,7 +489,7 @@ def test_tmux_selection_backend_and_version(tmp_path, monkeypatch):
     monkeypatch.setattr(tmux_helper, "resolve_tmux", lambda: tmux_helper.TmuxSelection(None, "native"))
     assert tmux_helper.persistent_shell_backend_info()["backend"] == "native"
 
-    monkeypatch.setattr(tmux_helper.os, "name", "nt")
+    os_proxy.name = "nt"
     monkeypatch.setattr(conpty_ops, "is_available", lambda: True)
     assert tmux_helper.persistent_shell_backend_info()["backend"] == "conpty"
     monkeypatch.setattr(conpty_ops, "is_available", lambda: False)
@@ -754,7 +755,8 @@ def test_bundled_tmux_permissions_and_windows_import_failure(tmp_path, monkeypat
 
     monkeypatch.setattr(tmux_helper, "_platform_tag", lambda: None)
     assert tmux_helper.bundled_tmux_path() is None
-    monkeypatch.setattr(tmux_helper.os, "name", "nt")
+    os_proxy = SimpleNamespace(**{**vars(os), "name": "nt"})
+    monkeypatch.setattr(tmux_helper, "os", os_proxy)
     monkeypatch.setattr(conpty_ops, "is_available", lambda: (_ for _ in ()).throw(RuntimeError("import")))
     assert tmux_helper.persistent_shell_backend_info()["backend"] == "native"
 

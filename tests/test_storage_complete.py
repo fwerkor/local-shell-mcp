@@ -55,7 +55,7 @@ def test_filesystem_binary_glob_context_and_limits(tmp_path, monkeypatch):
     assert context["nearest_existing_parent"] == str(tmp_path)
     assert context["truncated"] is True
     outside = fs.relative_display(Path("/outside/value"))
-    assert outside.startswith("/")
+    assert Path(outside).is_absolute()
 
     assert fs._is_probably_binary(b"") is False
     assert fs._is_probably_binary(b"a\x00b") is True

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -391,16 +392,17 @@ def test_resolve_spawn_and_tui_cli_branches(tmp_path, monkeypatch):
 
     source = tmp_path / "tui.tsx"
     source.write_text("x", encoding="utf-8")
-    monkeypatch.setattr(ui.Path, "is_file", lambda self: False)
-    monkeypatch.setattr(ui, "_tui_source_path", lambda: source)
-    monkeypatch.setattr(ui.shutil, "which", lambda name: "/usr/bin/bun")
-    assert ui.resolve_tui_command() == ["/usr/bin/bun", str(source)]
-    monkeypatch.setattr(ui.shutil, "which", lambda name: None)
-    with pytest.raises(RuntimeError, match="Bun"):
-        ui.resolve_tui_command()
-    monkeypatch.setattr(ui, "_tui_source_path", lambda: None)
-    with pytest.raises(RuntimeError, match="runtime not found"):
-        ui.resolve_tui_command()
+    with monkeypatch.context() as scoped:
+        scoped.setattr(ui.Path, "is_file", lambda self: False)
+        scoped.setattr(ui, "_tui_source_path", lambda: source)
+        scoped.setattr(ui.shutil, "which", lambda name: "/usr/bin/bun")
+        assert ui.resolve_tui_command() == ["/usr/bin/bun", str(source)]
+        scoped.setattr(ui.shutil, "which", lambda name: None)
+        with pytest.raises(RuntimeError, match="Bun"):
+            ui.resolve_tui_command()
+        scoped.setattr(ui, "_tui_source_path", lambda: None)
+        with pytest.raises(RuntimeError, match="runtime not found"):
+            ui.resolve_tui_command()
 
     captured = {}
 
@@ -411,7 +413,9 @@ def test_resolve_spawn_and_tui_cli_branches(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_UI_TUI_COMMAND", "/tmp/tui")
     get_settings.cache_clear()
     monkeypatch.setattr(ui, "_UnixPtyProcess", FakeUnix)
-    monkeypatch.setattr(ui.os, "name", "posix")
+    os_proxy = SimpleNamespace(**{**vars(os), "name": "posix"})
+    monkeypatch.setattr(ui, "os", os_proxy)
+    monkeypatch.setattr(ui, "resolve_tui_command", lambda: ["/tmp/tui"])
     ui._spawn_tui_process(80, 24)
     assert captured["env"]["LOCAL_SHELL_MCP_UI_MODE"] == "web"
 
@@ -462,6 +466,7 @@ def test_unix_and_windows_pty_edge_branches(monkeypatch):
     unix._fcntl = SimpleNamespace(ioctl=lambda *args: calls.append(args))
     unix._termios = SimpleNamespace(TIOCSWINSZ=1)
     unix.process = SimpleNamespace(pid=12, poll=lambda: None)
+    monkeypatch.setattr(ui.signal, "SIGWINCH", getattr(signal, "SIGWINCH", 28), raising=False)
     monkeypatch.setattr(ui.os, "killpg", lambda *args: calls.append(args), raising=False)
     unix.resize(80, 24)
     assert calls

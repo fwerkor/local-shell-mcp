@@ -395,6 +395,7 @@ def test_shell_process_termination_native_sessions_and_dispatch(tmp_path, monkey
     assert (asyncio.run(shell.read_shell("x")))["native"]
     assert (asyncio.run(shell.kill_shell("x")))["native"]
 
+    monkeypatch.setattr(shell, "_use_windows_persistent_shell_backend", lambda: False)
     monkeypatch.setattr(shell, "resolve_tmux", lambda: TmuxSelection("/tmux", "system"))
     responses = iter([_command_result(), _command_result(), _command_result(stdout="pane"), _command_result()])
     monkeypatch.setattr(shell, "tmux", lambda *args, **kwargs: asyncio.sleep(0, result=next(responses)))
