@@ -217,6 +217,14 @@ def main() -> int:
                 "LOCAL_SHELL_MCP_UI_TUI_COMMAND": str(TUI_PATH),
             }
         )
+        if os.getenv("LOCAL_SHELL_MCP_COVERAGE") == "1":
+            env["COVERAGE_PROCESS_START"] = str(ROOT / "pyproject.toml")
+            env["COVERAGE_FILE"] = str(ROOT / ".coverage")
+            env["PYTHONPATH"] = os.pathsep.join(
+                item
+                for item in (str(ROOT), str(ROOT / "src"), env.get("PYTHONPATH", ""))
+                if item
+            )
         process = subprocess.Popen(  # noqa: S603
             [sys.executable, "-m", "local_shell_mcp.main", "--mode", "mcp", "--no-remote"],
             cwd=ROOT,

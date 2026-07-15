@@ -115,6 +115,12 @@ def start_server(mode: str, auth: str, workspace: Path, port: int) -> subprocess
             "LOCAL_SHELL_MCP_PUBLIC_BASE_URL": base_url if auth == "oauth" else "",
         }
     )
+    if os.getenv("LOCAL_SHELL_MCP_COVERAGE") == "1":
+        env["COVERAGE_PROCESS_START"] = str(ROOT / "pyproject.toml")
+        env["COVERAGE_FILE"] = str(ROOT / ".coverage")
+        env["PYTHONPATH"] = os.pathsep.join(
+            item for item in (str(ROOT), env.get("PYTHONPATH", "")) if item
+        )
     return subprocess.Popen(
         server_command(mode),
         cwd=ROOT,

@@ -113,9 +113,10 @@ jobs:
         working-directory: ui
         run: bun install --frozen-lockfile
 
-      - name: Type-check and build WebUI/OpenTUI
+      - name: Test, type-check, and build WebUI/OpenTUI
         working-directory: ui
         run: |
+          bun test
           bun run typecheck
           bun run build
 
@@ -158,11 +159,58 @@ jobs:
         working-directory: ui
         run: |
           bun install --frozen-lockfile
+          bun test
           bun run typecheck
           bun run build
 
       - name: Run OAuth, PTY, navigation, and responsive browser smoke test
         run: python scripts/ui-smoke.py
+
+  coverage:
+    name: Coverage / unit and process E2E
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Install test dependencies
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ripgrep tmux
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+          python -m playwright install --with-deps chromium
+
+      - name: Build and test Human UI
+        working-directory: ui
+        run: |
+          bun install --frozen-lockfile
+          bun test
+          bun run typecheck
+          bun run build
+
+      - name: Collect combined branch coverage
+        run: bash scripts/run-coverage.sh
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-coverage
+          path: coverage.xml
+          if-no-files-found: error
+
 
   python-tests:
     name: Python / ${{ matrix.label }}
@@ -453,6 +501,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Reclaim hosted-runner disk space
+        run: bash scripts/free-ci-disk-space.sh
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -553,9 +604,11 @@ jobs:
       - static
       - human-ui
       - human-ui-e2e
+      - coverage
       - python-tests
       - endpoint-smoke
       - package
+      - bundled-tmux
       - docker
       - compose
       - binary-release-matrix
