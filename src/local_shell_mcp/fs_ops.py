@@ -410,6 +410,51 @@ def read_text(
     }
 
 
+def read_texts(
+    paths: str | list[str],
+    start_line: int | None = None,
+    end_line: int | None = None,
+    binary_preview: str | None = None,
+    binary_preview_bytes: int = BINARY_PREVIEW_BYTES,
+) -> dict:
+    """Read one or more files while enforcing the aggregate read limits."""
+
+    many = isinstance(paths, list)
+    normalized = paths if many else [paths]
+    settings = get_settings()
+    if not normalized:
+        raise ValueError("paths must not be empty")
+    if len(normalized) > settings.max_read_many_files:
+        raise ValueError(
+            f"Refusing to read {len(normalized)} files; max is {settings.max_read_many_files}"
+        )
+
+    files: list[dict] = []
+    total_content_bytes = 0
+    for path in normalized:
+        item = read_text(
+            path,
+            start_line,
+            end_line,
+            binary_preview,
+            binary_preview_bytes,
+        )
+        for field in ("content", "preview"):
+            value = item.get(field)
+            if isinstance(value, str):
+                total_content_bytes += len(value.encode("utf-8"))
+        if total_content_bytes > settings.max_read_many_total_bytes:
+            raise ValueError(
+                f"Refusing to return {total_content_bytes} bytes from read_file; "
+                f"max is {settings.max_read_many_total_bytes}"
+            )
+        files.append(item)
+
+    if not many:
+        return files[0]
+    return {"files": files, "total_content_bytes": total_content_bytes}
+
+
 def write_text(
     path: str,
     content: str,
@@ -537,30 +582,9 @@ def perform_file_action(
     }
 
 
-def edit_text(path: str, old: str, new: str, replace_all: bool = False) -> dict:
-    if old == "":
-        raise ValueError("old text must not be empty")
-    settings = get_settings()
-    p = resolve_path(path, must_exist=True)
-    if p.stat().st_size > settings.max_file_write_bytes:
-        raise ValueError(f"Refusing to edit {p.stat().st_size} bytes; max is {settings.max_file_write_bytes}")
-    _assert_text_file(p)
-    expected_sha256 = _sha256_file(p)
-    text = p.read_text(encoding="utf-8")
-    count = text.count(old)
-    if count == 0:
-        raise ValueError("old text not found")
-    if not replace_all and count > 1:
-        raise ValueError(f"old text occurs {count} times; set replace_all=true or provide more context")
-    updated = text.replace(old, new) if replace_all else text.replace(old, new, 1)
-    updated_bytes = len(updated.encode("utf-8"))
-    if updated_bytes > settings.max_file_write_bytes:
-        raise ValueError(f"Refusing to write {updated_bytes} bytes; max is {settings.max_file_write_bytes}")
-    write_text(path, updated, overwrite=True, expected_sha256=expected_sha256)
-    return {"path": relative_display(p), "replacements": count if replace_all else 1}
-
-
-def multi_edit_text(path: str, edits: list[dict]) -> dict:
+def edit_text(path: str, edits: list[dict]) -> dict:
+    if not edits:
+        raise ValueError("edits must not be empty")
     settings = get_settings()
     p = resolve_path(path, must_exist=True)
     if p.stat().st_size > settings.max_file_write_bytes:

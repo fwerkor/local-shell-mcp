@@ -26,33 +26,11 @@ from .fs_ops import (
     edit_text,
     glob_paths,
     list_dir,
-    multi_edit_text,
-    read_text,
+    read_texts,
     write_text,
 )
-from .git_ops import (
-    git_add,
-    git_checkout,
-    git_clone,
-    git_commit,
-    git_diff,
-    git_fetch,
-    git_log,
-    git_pull,
-    git_push,
-    git_reset,
-    git_show,
-    git_status,
-)
 from .human_ui import ui_routes
-from .playwright_ops import (
-    browser_eval,
-    browser_get_text,
-    browser_pdf,
-    browser_screenshot,
-    playwright_install,
-    playwright_run_script,
-)
+from .playwright_ops import browser_capture, browser_get_text, playwright_run_script
 from .search_ops import grep, tree
 from .settings import get_settings
 from .shell_ops import (
@@ -79,7 +57,6 @@ NON_CANCELLABLE_HTTP_MUTATIONS = frozenset(
         "/tools/download/revoke",
         "/tools/write_file",
         "/tools/edit_file",
-        "/tools/multi_edit_file",
         "/tools/delete",
         "/tools/todo",
     }
@@ -212,10 +189,6 @@ def build_http_app() -> FastAPI:
     async def api_version():
         return version_info()
 
-    @app.get("/tools/version")
-    async def api_tool_version(_: Principal = PRINCIPAL_DEP):
-        return version_info()
-
     @app.get("/tools/skills_list")
     async def api_skills_list(_: Principal = PRINCIPAL_DEP):
         return await _blocking(list_installed_skills, settings)
@@ -303,7 +276,7 @@ def build_http_app() -> FastAPI:
     @app.post("/tools/read_file")
     async def api_read_file(body: dict, _: Principal = PRINCIPAL_DEP):
         return await _blocking(
-            read_text,
+            read_texts,
             body["path"],
             _body_int(body, "start_line", None, allow_none=True),
             _body_int(body, "end_line", None, allow_none=True),
@@ -317,63 +290,11 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/edit_file")
     async def api_edit_file(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(edit_text, body["path"], body["old"], body["new"], _body_bool(body, "replace_all", False))
-
-    @app.post("/tools/multi_edit_file")
-    async def api_multi_edit_file(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(multi_edit_text, body["path"], body["edits"])
+        return await _blocking(edit_text, body["path"], body["edits"])
 
     @app.post("/tools/delete")
     async def api_delete(body: dict, _: Principal = PRINCIPAL_DEP):
         return await _blocking(delete_path, body["path"], _body_bool(body, "recursive", False))
-
-    @app.post("/tools/git/status")
-    async def api_git_status(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_status(body.get("cwd", "."))
-
-    @app.post("/tools/git/diff")
-    async def api_git_diff(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_diff(body.get("cwd", "."), _body_bool(body, "staged", False), body.get("path"), _body_bool(body, "stat", False))
-
-    @app.post("/tools/git/log")
-    async def api_git_log(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_log(body.get("cwd", "."), _body_int(body, "max_count", 20))
-
-    @app.post("/tools/git/clone")
-    async def api_git_clone(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_clone(body["repo_url"], body.get("dest"), body.get("branch"), body.get("cwd", "."))
-
-    @app.post("/tools/git/checkout")
-    async def api_git_checkout(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_checkout(body["cwd"], body["ref"], _body_bool(body, "create", False))
-
-    @app.post("/tools/git/fetch")
-    async def api_git_fetch(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_fetch(body.get("cwd", "."), body.get("remote", "origin"), _body_bool(body, "prune", True))
-
-    @app.post("/tools/git/pull")
-    async def api_git_pull(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_pull(body.get("cwd", "."), _body_bool(body, "ff_only", True))
-
-    @app.post("/tools/git/add")
-    async def api_git_add(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_add(body.get("cwd", "."), body.get("paths"))
-
-    @app.post("/tools/git/commit")
-    async def api_git_commit(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_commit(body["cwd"], body["message"], _body_bool(body, "all_changes", False))
-
-    @app.post("/tools/git/push")
-    async def api_git_push(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_push(body["cwd"], body.get("remote", "origin"), body.get("branch"), _body_bool(body, "set_upstream", True))
-
-    @app.post("/tools/git/show")
-    async def api_git_show(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_show(body.get("cwd", "."), body.get("ref", "HEAD"), body.get("path"))
-
-    @app.post("/tools/git/reset")
-    async def api_git_reset(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await git_reset(body.get("cwd", "."), body.get("mode", "soft"), body.get("ref", "HEAD"))
 
     @app.get("/tools/todo")
     async def api_todo_read(_: Principal = PRINCIPAL_DEP):
@@ -383,25 +304,27 @@ def build_http_app() -> FastAPI:
     async def api_todo_write(body: dict, _: Principal = PRINCIPAL_DEP):
         return await _blocking(todo_write, body.get("todos", []))
 
-    @app.post("/tools/playwright/install")
-    async def api_playwright_install(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await playwright_install(body.get("browser", "chromium"), _body_bool(body, "with_deps", False))
-
-    @app.post("/tools/browser/screenshot")
-    async def api_browser_screenshot(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await browser_screenshot(body["url"], body.get("output_path", "screenshots/page.png"), body.get("browser", "chromium"), _body_bool(body, "full_page", True), _body_int(body, "width", 1440), _body_int(body, "height", 1000), body.get("wait_until", "networkidle"))
+    @app.post("/tools/browser/capture")
+    async def api_browser_capture(body: dict, _: Principal = PRINCIPAL_DEP):
+        return await browser_capture(
+            body["url"],
+            body.get("output_path"),
+            body.get("capture_format", "png"),
+            body.get("browser", "chromium"),
+            _body_bool(body, "full_page", True),
+            _body_int(body, "width", 1440),
+            _body_int(body, "height", 1000),
+            body.get("wait_until", "networkidle"),
+        )
 
     @app.post("/tools/browser/text")
     async def api_browser_text(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await browser_get_text(body["url"], body.get("browser", "chromium"), body.get("wait_until", "networkidle"), body.get("selector", "body"))
-
-    @app.post("/tools/browser/eval")
-    async def api_browser_eval(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await browser_eval(body["url"], body["javascript"], body.get("browser", "chromium"), body.get("wait_until", "networkidle"))
-
-    @app.post("/tools/browser/pdf")
-    async def api_browser_pdf(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await browser_pdf(body["url"], body.get("output_path", "screenshots/page.pdf"), _body_int(body, "width", 1440), _body_int(body, "height", 1000), body.get("wait_until", "networkidle"))
+        return await browser_get_text(
+            body["url"],
+            body.get("browser", "chromium"),
+            body.get("wait_until", "networkidle"),
+            body.get("selector", "body"),
+        )
 
     @app.post("/tools/playwright/run_script")
     async def api_playwright_run_script(body: dict, _: Principal = PRINCIPAL_DEP):
