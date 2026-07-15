@@ -21,6 +21,9 @@ from local_shell_mcp.human_ui import (
     _authorize_websocket,
     _bounded_int,
     _idle_timeout_remaining,
+    _normalize_file_entries,
+    _parent_path,
+    _path_name,
     _split_tui_command,
     _UnixPtyProcess,
     _validate_tui_api_base,
@@ -699,3 +702,24 @@ async def test_windows_pty_write_accepts_zero_from_async_pywinpty():
     await process.write(b"\x1bOR")
 
     assert calls == ["\x1bOR"]
+
+
+
+def test_windows_worker_paths_use_windows_semantics():
+    path = r"C:\Users\Alice\project\main.py"
+
+    assert _path_name(path, windows=True) == "main.py"
+    assert _parent_path(path, windows=True) == r"C:\Users\Alice\project"
+    assert _parent_path("C:\\", windows=True) == "C:\\"
+    assert _path_name("/home/alice/main.py", windows=False) == "main.py"
+    assert _parent_path("/home/alice/main.py", windows=False) == "/home/alice"
+
+    normalized = _normalize_file_entries(
+        [
+            {"path": r"C:\Users\Alice\.hidden", "type": "file"},
+            {"path": r"C:\Users\Alice\folder", "type": "dir"},
+        ],
+        windows=True,
+    )
+    assert [entry["name"] for entry in normalized] == ["folder", ".hidden"]
+    assert normalized[1]["hidden"] is True

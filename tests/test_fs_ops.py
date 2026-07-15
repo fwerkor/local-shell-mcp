@@ -308,3 +308,18 @@ def test_multi_path_lock_deduplicates_colliding_file_shards(tmp_path, monkeypatc
 
     assert completed.is_set(), "colliding lock shards deadlocked"
     assert errors == []
+
+
+def test_file_actions_exist_ok_requires_matching_object_type(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    (tmp_path / "file").write_text("data", encoding="utf-8")
+    (tmp_path / "directory").mkdir()
+
+    with pytest.raises(FileExistsError, match="not a directory"):
+        perform_file_action("mkdir", "file", exist_ok=True)
+    with pytest.raises(FileExistsError, match="not a regular file"):
+        perform_file_action("touch", "directory", exist_ok=True)
+
+    assert perform_file_action("mkdir", "directory", exist_ok=True)["action"] == "mkdir"
+    assert perform_file_action("touch", "file", exist_ok=True)["action"] == "touch"

@@ -13,7 +13,7 @@ import signal
 import sys
 import time
 from collections.abc import Awaitable, Callable
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -256,30 +256,55 @@ async def _machine_dispatch(
     return await _remote_call(machine, remote_tool, remote_args)
 
 
-def _path_name(path: str) -> str:
+def _machine_uses_windows_paths(machine: str) -> bool:
+    if machine == "local":
+        return os.name == "nt"
+    with contextlib.suppress(Exception):
+        for row in remote_manager().list_machines().get("machines", []):
+            if str(row.get("name") or "") != machine:
+                continue
+            info = row.get("info") if isinstance(row.get("info"), dict) else {}
+            platform = str(info.get("platform") or info.get("system") or "").lower()
+            return platform.startswith("win") or "windows" in platform
+    return False
+
+
+def _path_parser(path: str, windows: bool | None = None):  # noqa: ANN201
+    if windows is None:
+        windows = "\\" in path or bool(PureWindowsPath(path).drive)
+    return PureWindowsPath(path) if windows else PurePosixPath(path)
+
+
+def _path_name(path: str, windows: bool | None = None) -> str:
     cleaned = path.rstrip("/\\")
     if not cleaned or cleaned == ".":
         return "."
-    return Path(cleaned).name or cleaned
+    return _path_parser(cleaned, windows).name or cleaned
 
 
-def _parent_path(path: str) -> str:
-    if path in {"", ".", "/"}:
-        return "." if path != "/" else "/"
-    parent = str(Path(path).parent)
+def _parent_path(path: str, windows: bool | None = None) -> str:
+    parser = _path_parser(path, windows)
+    if path in {"", "."}:
+        return "."
+    if parser.parent == parser:
+        return str(parser)
+    parent = str(parser.parent)
     return parent or "."
 
 
-def _normalize_file_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _normalize_file_entries(
+    entries: list[dict[str, Any]], windows: bool | None = None
+) -> list[dict[str, Any]]:
     rows = []
     for item in entries:
         path = str(item.get("path") or "")
+        name = _path_name(path, windows)
         rows.append(
             {
                 **item,
                 "path": path,
-                "name": _path_name(path),
-                "hidden": _path_name(path).startswith("."),
+                "name": name,
+                "hidden": name.startswith("."),
             }
         )
     rows.sort(key=lambda item: (item.get("type") != "dir", str(item.get("name") or "").casefold()))
@@ -329,7 +354,8 @@ async def api_files(request: Request) -> Response:
             "list_files",
             {"path": path, "recursive": False, "max_entries": 1_000},
         )
-        parent = _parent_path(path)
+        windows_paths = _machine_uses_windows_paths(machine)
+        parent = _parent_path(path, windows_paths)
         parent_entries: list[dict[str, Any]] = []
         if parent != path:
             with contextlib.suppress(Exception):
@@ -344,8 +370,8 @@ async def api_files(request: Request) -> Response:
                 "machine": machine,
                 "path": path,
                 "parent": parent,
-                "entries": _normalize_file_entries(list(entries or [])),
-                "parent_entries": _normalize_file_entries(list(parent_entries or [])),
+                "entries": _normalize_file_entries(list(entries or []), windows_paths),
+                "parent_entries": _normalize_file_entries(list(parent_entries or []), windows_paths),
             }
         )
     except Exception as exc:
@@ -357,13 +383,14 @@ async def api_file_preview(request: Request) -> Response:
     path = request.query_params.get("path", ".")
     try:
         _require_ui_scopes(request, "shell:read", machine=machine)
+        windows_paths = _machine_uses_windows_paths(machine)
         if machine == "local":
             resolved = await asyncio.to_thread(resolve_path, path, must_exist=True)
             if await asyncio.to_thread(resolved.is_dir):
                 return _json_ok(
                     {
                         "kind": "directory",
-                        "entries": _normalize_file_entries(list_dir(path, False, 100)),
+                        "entries": _normalize_file_entries(list_dir(path, False, 100), windows_paths),
                     }
                 )
         else:
@@ -375,7 +402,7 @@ async def api_file_preview(request: Request) -> Response:
                 )
                 if isinstance(listed, list):
                     return _json_ok(
-                        {"kind": "directory", "entries": _normalize_file_entries(listed)}
+                        {"kind": "directory", "entries": _normalize_file_entries(listed, windows_paths)}
                     )
 
         content = await _machine_dispatch(
@@ -396,7 +423,7 @@ async def api_file_preview(request: Request) -> Response:
                 "list_files",
                 {"path": path, "recursive": False, "max_entries": 100},
             )
-            return _json_ok({"kind": "directory", "entries": _normalize_file_entries(list(entries or []))})
+            return _json_ok({"kind": "directory", "entries": _normalize_file_entries(list(entries or []), windows_paths)})
         except Exception as exc:
             return _json_error(exc)
     except Exception as exc:

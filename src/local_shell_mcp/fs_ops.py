@@ -464,6 +464,10 @@ def perform_file_action(
             if os.path.lexists(source):
                 if not exist_ok:
                     raise FileExistsError(str(source))
+                if action == "mkdir" and not (source.is_dir() and not source.is_symlink()):
+                    raise FileExistsError(f"mkdir target exists and is not a directory: {source}")
+                if action == "touch" and (source.is_dir() or source.is_symlink()):
+                    raise FileExistsError(f"touch target exists and is not a regular file: {source}")
                 return {"action": action, "path": relative_display(source)}
             if action == "mkdir":
                 source.mkdir(parents=True)
