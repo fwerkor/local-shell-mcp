@@ -83,10 +83,6 @@ def principal_dep(request: Request) -> Principal:
 PRINCIPAL_DEP = Depends(principal_dep)
 
 
-async def _blocking(func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-    return await asyncio.to_thread(func, *args, **kwargs)
-
-
 def _body_bool(body: dict, key: str, default: bool) -> bool:
     if key not in body:
         return default
@@ -199,15 +195,15 @@ def _register_status_routes(app: FastAPI) -> None:
 def _register_skill_routes(app: FastAPI, settings: Any) -> None:
     @app.get("/tools/skills_list")
     async def api_skills_list(_: Principal = PRINCIPAL_DEP):
-        return await _blocking(list_installed_skills, settings)
+        return await asyncio.to_thread(list_installed_skills, settings)
 
     @app.post("/tools/skill_load")
     async def api_skill_load(body: SkillLoadRequest, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(load_installed_skill, body.name, settings)
+        return await asyncio.to_thread(load_installed_skill, body.name, settings)
 
     @app.post("/tools/skill_read_file")
     async def api_skill_read_file(body: SkillReadFileRequest, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(
+        return await asyncio.to_thread(
             read_installed_skill_file,
             body.name,
             body.path,
@@ -256,7 +252,7 @@ def _register_shell_routes(app: FastAPI) -> None:
 def _register_workspace_routes(app: FastAPI) -> None:
     @app.post("/tools/list_files")
     async def api_list_files(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(
+        return await asyncio.to_thread(
             list_dir,
             body.get("path", "."),
             _body_bool(body, "recursive", False),
@@ -272,7 +268,7 @@ def _register_workspace_routes(app: FastAPI) -> None:
     @app.post("/tools/glob")
     async def api_glob(body: dict, _: Principal = PRINCIPAL_DEP):
         return {
-            "paths": await _blocking(
+            "paths": await asyncio.to_thread(
                 glob_paths,
                 body["pattern"],
                 body.get("cwd", "."),
@@ -293,7 +289,7 @@ def _register_workspace_routes(app: FastAPI) -> None:
 
     @app.post("/tools/read_file")
     async def api_read_file(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(
+        return await asyncio.to_thread(
             read_texts,
             body["path"],
             _body_int(body, "start_line", None, allow_none=True),
@@ -304,17 +300,19 @@ def _register_workspace_routes(app: FastAPI) -> None:
 
     @app.post("/tools/write_file")
     async def api_write_file(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(
+        return await asyncio.to_thread(
             write_text, body["path"], body["content"], _body_bool(body, "overwrite", True)
         )
 
     @app.post("/tools/edit_file")
     async def api_edit_file(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(edit_text, body["path"], body["edits"])
+        return await asyncio.to_thread(edit_text, body["path"], body["edits"])
 
     @app.post("/tools/delete")
     async def api_delete(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(delete_path, body["path"], _body_bool(body, "recursive", False))
+        return await asyncio.to_thread(
+            delete_path, body["path"], _body_bool(body, "recursive", False)
+        )
 
 
 def _register_download_routes(app: FastAPI) -> None:
@@ -324,7 +322,7 @@ def _register_download_routes(app: FastAPI) -> None:
 
     @app.post("/tools/download/create")
     async def api_create_download_link(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(
+        return await asyncio.to_thread(
             create_download_link,
             body["path"],
             _body_int(body, "ttl_s", None, allow_none=True),
@@ -334,21 +332,21 @@ def _register_download_routes(app: FastAPI) -> None:
 
     @app.get("/tools/download/list")
     async def api_list_download_links(include_expired: bool = False, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(list_download_links, include_expired)
+        return await asyncio.to_thread(list_download_links, include_expired)
 
     @app.post("/tools/download/revoke")
     async def api_revoke_download_link(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(revoke_download_link, body["token"])
+        return await asyncio.to_thread(revoke_download_link, body["token"])
 
 
 def _register_todo_routes(app: FastAPI) -> None:
     @app.get("/tools/todo")
     async def api_todo_read(_: Principal = PRINCIPAL_DEP):
-        return await _blocking(todo_read)
+        return await asyncio.to_thread(todo_read)
 
     @app.post("/tools/todo")
     async def api_todo_write(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(todo_write, body.get("todos", []))
+        return await asyncio.to_thread(todo_write, body.get("todos", []))
 
 
 def _register_browser_routes(app: FastAPI) -> None:

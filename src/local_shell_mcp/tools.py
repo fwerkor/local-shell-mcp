@@ -133,10 +133,6 @@ def _sync(coro):  # noqa: ANN001
     return asyncio.get_event_loop().run_until_complete(coro)
 
 
-async def _to_thread(func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-    return await asyncio.to_thread(func, *args, **kwargs)
-
-
 async def _tool_call(operation, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
     try:
         result = operation(*args, **kwargs)
@@ -157,10 +153,10 @@ def _assert_text_input_size(label: str, text: str, limit: int | None = None) -> 
 
 async def _apply_patch_text(patch: str, cwd: str = ".") -> dict:
     _assert_text_input_size("patch", patch)
-    await _to_thread(prune_temp_dir)
+    await asyncio.to_thread(prune_temp_dir)
     patch_path = temp_dir() / f"patch-{uuid.uuid4().hex}.diff"
     patch_path.parent.mkdir(parents=True, exist_ok=True)
-    await _to_thread(patch_path.write_text, patch, encoding="utf-8")
+    await asyncio.to_thread(patch_path.write_text, patch, encoding="utf-8")
     quoted = quote_shell_argument(str(patch_path))
     git = quote_shell_argument(get_settings().git_bin)
     result = await run_shell(
@@ -174,10 +170,10 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict:
 
 async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict:
     _assert_text_input_size("Python script", code)
-    await _to_thread(prune_temp_dir)
+    await asyncio.to_thread(prune_temp_dir)
     path = temp_dir() / f"script-{uuid.uuid4().hex}.py"
     path.parent.mkdir(parents=True, exist_ok=True)
-    await _to_thread(path.write_text, code, encoding="utf-8")
+    await asyncio.to_thread(path.write_text, code, encoding="utf-8")
     python = quote_shell_argument(get_settings().python_bin)
     result = await run_shell(
         f"{python} {quote_shell_argument(str(path))}",
@@ -643,7 +639,7 @@ def _secret_scan_sync(cwd: str = ".", glob: str | None = None, max_results: int 
 
 
 async def _secret_scan(cwd: str = ".", glob: str | None = None, max_results: int = 200) -> dict:
-    return await _to_thread(_secret_scan_sync, cwd, glob, max_results)
+    return await asyncio.to_thread(_secret_scan_sync, cwd, glob, max_results)
 
 
 class RemoteTransferError(RuntimeError):
@@ -675,7 +671,7 @@ async def _copy_local_file_to_remote(
     overwrite: bool = True,
     chunk_size: int | None = None,
 ) -> dict:
-    stat = await _to_thread(transfer_stat, source_path, True)
+    stat = await asyncio.to_thread(transfer_stat, source_path, True)
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {source_path}")
     if chunk_size is None:
@@ -718,7 +714,7 @@ async def _copy_local_file_to_remote(
         chunks = 0
         try:
             while offset < stat["size"]:
-                chunk = await _to_thread(
+                chunk = await asyncio.to_thread(
                     transfer_read_chunk, source_path, offset, effective_chunk_size
                 )
                 await _remote_transfer_data(
@@ -803,7 +799,9 @@ async def _copy_remote_file_to_local(
         transport = "http-stream"
     else:
         effective_chunk_size = normalize_chunk_size(chunk_size)
-        begin = await _to_thread(transfer_begin_write, destination_path, overwrite, stat["size"])
+        begin = await asyncio.to_thread(
+            transfer_begin_write, destination_path, overwrite, stat["size"]
+        )
         offset = 0
         chunks = 0
         try:
@@ -817,7 +815,7 @@ async def _copy_remote_file_to_local(
                         "chunk_size": effective_chunk_size,
                     },
                 )
-                await _to_thread(
+                await asyncio.to_thread(
                     transfer_write_chunk,
                     destination_path,
                     begin["transfer_id"],
@@ -827,7 +825,7 @@ async def _copy_remote_file_to_local(
                 )
                 offset += chunk["bytes"]
                 chunks += 1
-            finish = await _to_thread(
+            finish = await asyncio.to_thread(
                 transfer_finish_write,
                 destination_path,
                 begin["transfer_id"],
@@ -836,7 +834,9 @@ async def _copy_remote_file_to_local(
             )
         except BaseException:
             with suppress(Exception):
-                await _to_thread(transfer_abort_write, destination_path, begin["transfer_id"])
+                await asyncio.to_thread(
+                    transfer_abort_write, destination_path, begin["transfer_id"]
+                )
             raise
         transport = "mcp-chunks"
     return {
@@ -858,7 +858,7 @@ async def _copy_remote_file_to_remote(
     overwrite: bool = True,
     chunk_size: int | None = None,
 ) -> dict:
-    temporary = await _to_thread(transfer_alloc_temp_path, ".bin")
+    temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".bin")
     try:
         pull = await _copy_remote_file_to_local(
             src_machine,
@@ -952,12 +952,12 @@ async def _copy_remote_dir_to_local(
     pack = await _remote_transfer_data(
         src_machine, "transfer_pack_dir", {"path": src_path, "compression": "gz"}
     )
-    archive = await _to_thread(transfer_alloc_temp_path, ".tar.gz")
+    archive = await asyncio.to_thread(transfer_alloc_temp_path, ".tar.gz")
     try:
         copy_result = await _copy_remote_file_to_local(
             src_machine, pack["archive_path"], archive["path"], True, chunk_size
         )
-        unpack = await _to_thread(
+        unpack = await asyncio.to_thread(
             transfer_unpack_archive, archive["path"], destination_path, overwrite, True
         )
     finally:
@@ -981,7 +981,7 @@ async def _copy_local_dir_to_remote(
     overwrite: bool = True,
     chunk_size: int | None = None,
 ) -> dict:
-    pack = await _to_thread(transfer_pack_dir, source_path, "gz")
+    pack = await asyncio.to_thread(transfer_pack_dir, source_path, "gz")
     dst_archive = await _remote_transfer_data(
         dst_machine, "transfer_alloc_temp_path", {"suffix": ".tar.gz"}
     )
@@ -1032,7 +1032,7 @@ async def _transfer_path(
             {"path": source_path, "sha256": False},
         )
     else:
-        source_stat = await _to_thread(transfer_stat, source_path, False)
+        source_stat = await asyncio.to_thread(transfer_stat, source_path, False)
 
     source_type = source_stat.get("type")
     if source_type not in {"file", "dir"}:
@@ -1255,7 +1255,7 @@ def _register_connector_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -> 
     async def fetch(id: str) -> str:
         """Fetch a workspace file by id returned from search."""
         try:
-            data = await _to_thread(read_text, id)
+            data = await asyncio.to_thread(read_text, id)
             path = data.get("path") or id
             binary = bool(data.get("binary"))
             resolved = resolve_path(id, must_exist=True)
@@ -1328,17 +1328,17 @@ def _register_environment_tools(
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def skills_list() -> ToolResult:
         """List installed agent skills without loading their instructions. The MCP tool surface stays fixed; adding or removing skill directories is reflected on the next call."""
-        return await _tool_call(_to_thread, list_installed_skills, settings)
+        return await _tool_call(asyncio.to_thread, list_installed_skills, settings)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def skill_load(name: str) -> ToolResult:
         """Load one installed agent skill by the exact name returned from skills_list. Returns SKILL.md instructions plus related file paths."""
-        return await _tool_call(_to_thread, load_installed_skill, name, settings)
+        return await _tool_call(asyncio.to_thread, load_installed_skill, name, settings)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def skill_read_file(name: str, path: str) -> ToolResult:
         """Read one related text file from an installed Skill."""
-        return await _tool_call(_to_thread, read_installed_skill_file, name, path, settings)
+        return await _tool_call(asyncio.to_thread, read_installed_skill_file, name, path, settings)
 
 
 def _register_command_tools(mcp: FastMCP, settings: Any) -> None:
@@ -1576,7 +1576,7 @@ def _register_workspace_read_tools(
                     "max_entries": max_entries,
                 },
             )
-        return await _tool_call(_to_thread, list_dir, path, recursive, max_entries)
+        return await _tool_call(asyncio.to_thread, list_dir, path, recursive, max_entries)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def tree_view(
@@ -1611,7 +1611,7 @@ def _register_workspace_read_tools(
                 {"pattern": pattern, "cwd": cwd, "max_results": max_results},
             )
         try:
-            return _ok({"paths": await _to_thread(glob_paths, pattern, cwd, max_results)})
+            return _ok({"paths": await asyncio.to_thread(glob_paths, pattern, cwd, max_results)})
         except Exception as exc:
             return _handled_error(exc)
 
@@ -1662,7 +1662,7 @@ def _register_workspace_read_tools(
         if machine:
             return await _remote_call(settings, machine, "read_file", args)
         return await _tool_call(
-            _to_thread,
+            asyncio.to_thread,
             read_texts,
             path,
             start_line,
@@ -1692,7 +1692,7 @@ def _register_download_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -> N
     ) -> ToolResult:
         """Create a temporary browser-accessible download URL for a local file. Links are public bearer URLs protected by a high-entropy token, TTL, optional download-count limit, and explicit revocation."""
         return await _tool_call(
-            _to_thread,
+            asyncio.to_thread,
             create_share_link,
             path,
             ttl_s,
@@ -1703,12 +1703,12 @@ def _register_download_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -> N
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=file_share_meta)
     async def list_file_links(include_expired: bool = False) -> ToolResult:
         """List generated local file download URLs."""
-        return await _tool_call(_to_thread, list_share_links, include_expired)
+        return await _tool_call(asyncio.to_thread, list_share_links, include_expired)
 
     @mcp.tool(structured_output=True, meta=file_share_meta)
     async def revoke_file_link(token: str) -> ToolResult:
         """Revoke a generated local file download URL."""
-        return await _tool_call(_to_thread, revoke_share_link, token)
+        return await _tool_call(asyncio.to_thread, revoke_share_link, token)
 
 
 def _register_workspace_write_tools(mcp: FastMCP, settings: Any) -> None:
@@ -1734,7 +1734,7 @@ def _register_workspace_write_tools(mcp: FastMCP, settings: Any) -> None:
                 "write_file",
                 {"path": path, "content": content, "overwrite": overwrite},
             )
-        return await _tool_call(_to_thread, write_text, path, content, overwrite)
+        return await _tool_call(asyncio.to_thread, write_text, path, content, overwrite)
 
     @mcp.tool(structured_output=True, meta=shell_write_meta)
     async def edit_file(
@@ -1754,7 +1754,7 @@ def _register_workspace_write_tools(mcp: FastMCP, settings: Any) -> None:
                 "edit_file",
                 {"path": path, "edits": edit_payloads},
             )
-        return await _tool_call(_to_thread, edit_text, path, edit_payloads)
+        return await _tool_call(asyncio.to_thread, edit_text, path, edit_payloads)
 
     @mcp.tool(structured_output=True, meta=shell_write_meta)
     async def delete_file_or_dir(
@@ -1773,7 +1773,7 @@ def _register_workspace_write_tools(mcp: FastMCP, settings: Any) -> None:
                 "delete_file_or_dir",
                 {"path": path, "recursive": recursive},
             )
-        return await _tool_call(_to_thread, delete_path, path, recursive)
+        return await _tool_call(asyncio.to_thread, delete_path, path, recursive)
 
     @mcp.tool(structured_output=True, meta=patch_meta)
     async def apply_patch(
@@ -1834,17 +1834,17 @@ def _register_maintenance_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def todo_read_tool() -> ToolResult:
         """Read the local agent todo list."""
-        return await _tool_call(_to_thread, todo_read)
+        return await _tool_call(asyncio.to_thread, todo_read)
 
     @mcp.tool(structured_output=True, meta=shell_write_meta)
     async def todo_write_tool(todos: list[dict]) -> ToolResult:
         """Write the local agent todo list."""
-        return await _tool_call(_to_thread, todo_write, todos)
+        return await _tool_call(asyncio.to_thread, todo_write, todos)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def audit_tail(lines: int = 100) -> ToolResult:
         """Read recent local audit log entries."""
-        return await _tool_call(_to_thread, _read_audit_tail_entries, lines)
+        return await _tool_call(asyncio.to_thread, _read_audit_tail_entries, lines)
 
 
 def _register_browser_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnotations) -> None:

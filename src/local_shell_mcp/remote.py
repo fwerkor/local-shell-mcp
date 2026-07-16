@@ -886,10 +886,6 @@ def remote_routes() -> list[Any]:
     ]
 
 
-async def _to_thread(func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-    return await asyncio.to_thread(func, *args, **kwargs)
-
-
 def _assert_worker_text_input_size(label: str, text: str) -> None:
     max_bytes = max(1, get_settings().max_file_write_bytes)
     size = len(text.encode("utf-8"))
@@ -903,10 +899,10 @@ def _handled_remote_exception(exc: Exception) -> dict[str, Any]:
 
 async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
     _assert_worker_text_input_size("patch", patch)
-    await _to_thread(prune_temp_dir)
+    await asyncio.to_thread(prune_temp_dir)
     patch_path = temp_dir() / f"remote-patch-{uuid.uuid4().hex}.diff"
     patch_path.parent.mkdir(parents=True, exist_ok=True)
-    await _to_thread(patch_path.write_text, patch, encoding="utf-8")
+    await asyncio.to_thread(patch_path.write_text, patch, encoding="utf-8")
     result = await run_shell(
         f"{quote_shell_argument(get_settings().git_bin)} apply --check "
         f"{quote_shell_argument(str(patch_path))} && "
@@ -921,10 +917,10 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
 
 async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict[str, Any]:
     _assert_worker_text_input_size("Python script", code)
-    await _to_thread(prune_temp_dir)
+    await asyncio.to_thread(prune_temp_dir)
     script = temp_dir() / f"remote-script-{uuid.uuid4().hex}.py"
     script.parent.mkdir(parents=True, exist_ok=True)
-    await _to_thread(script.write_text, code, encoding="utf-8")
+    await asyncio.to_thread(script.write_text, code, encoding="utf-8")
     result = await run_shell(
         f"{quote_shell_argument(get_settings().python_bin)} {quote_shell_argument(str(script))}",
         cwd=cwd,
@@ -1223,7 +1219,7 @@ async def _execute_job_worker_tool(tool: str, args: dict[str, Any]) -> Any:
 
 async def _execute_file_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "list_files":
-        return await _to_thread(
+        return await asyncio.to_thread(
             list_dir,
             args.get("path", "."),
             args.get("recursive", False),
@@ -1235,7 +1231,7 @@ async def _execute_file_worker_tool(tool: str, args: dict[str, Any]) -> Any:
 
     if tool == "glob_search":
         return {
-            "paths": await _to_thread(
+            "paths": await asyncio.to_thread(
                 glob_paths, args["pattern"], args.get("cwd", "."), args.get("max_results", 500)
             )
         }
@@ -1251,7 +1247,7 @@ async def _execute_file_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         )
 
     if tool == "read_file":
-        return await _to_thread(
+        return await asyncio.to_thread(
             read_texts,
             args["path"],
             args.get("start_line"),
@@ -1261,7 +1257,7 @@ async def _execute_file_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         )
 
     if tool == "write_file":
-        return await _to_thread(
+        return await asyncio.to_thread(
             write_text,
             args["path"],
             args["content"],
@@ -1270,13 +1266,13 @@ async def _execute_file_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         )
 
     if tool == "edit_file":
-        return await _to_thread(edit_text, args["path"], args["edits"])
+        return await asyncio.to_thread(edit_text, args["path"], args["edits"])
 
     if tool == "delete_file_or_dir":
-        return await _to_thread(delete_path, args["path"], args.get("recursive", False))
+        return await asyncio.to_thread(delete_path, args["path"], args.get("recursive", False))
 
     if tool == "human_file_action":
-        return await _to_thread(
+        return await asyncio.to_thread(
             perform_file_action,
             args["action"],
             args["path"],
@@ -1288,15 +1284,15 @@ async def _execute_file_worker_tool(tool: str, args: dict[str, Any]) -> Any:
 
 async def _execute_transfer_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "transfer_stat":
-        return await _to_thread(transfer_stat, args["path"], args.get("sha256", True))
+        return await asyncio.to_thread(transfer_stat, args["path"], args.get("sha256", True))
 
     if tool == "transfer_read_chunk":
-        return await _to_thread(
+        return await asyncio.to_thread(
             transfer_read_chunk, args["path"], args.get("offset", 0), args.get("chunk_size")
         )
 
     if tool == "transfer_begin_write":
-        return await _to_thread(
+        return await asyncio.to_thread(
             transfer_begin_write,
             args["path"],
             args.get("overwrite", True),
@@ -1304,7 +1300,7 @@ async def _execute_transfer_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         )
 
     if tool == "transfer_write_chunk":
-        return await _to_thread(
+        return await asyncio.to_thread(
             transfer_write_chunk,
             args["path"],
             args["transfer_id"],
@@ -1314,7 +1310,7 @@ async def _execute_transfer_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         )
 
     if tool == "transfer_finish_write":
-        return await _to_thread(
+        return await asyncio.to_thread(
             transfer_finish_write,
             args["path"],
             args["transfer_id"],
@@ -1323,16 +1319,18 @@ async def _execute_transfer_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         )
 
     if tool == "transfer_abort_write":
-        return await _to_thread(transfer_abort_write, args["path"], args["transfer_id"])
+        return await asyncio.to_thread(transfer_abort_write, args["path"], args["transfer_id"])
 
     if tool == "transfer_alloc_temp_path":
-        return await _to_thread(transfer_alloc_temp_path, args.get("suffix", ".bin"))
+        return await asyncio.to_thread(transfer_alloc_temp_path, args.get("suffix", ".bin"))
 
     if tool == "transfer_pack_dir":
-        return await _to_thread(transfer_pack_dir, args["path"], args.get("compression", "gz"))
+        return await asyncio.to_thread(
+            transfer_pack_dir, args["path"], args.get("compression", "gz")
+        )
 
     if tool == "transfer_unpack_archive":
-        return await _to_thread(
+        return await asyncio.to_thread(
             transfer_unpack_archive,
             args["archive_path"],
             args["dst_path"],
@@ -1341,7 +1339,7 @@ async def _execute_transfer_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         )
 
     if tool == "transfer_upload_url":
-        return await _to_thread(
+        return await asyncio.to_thread(
             _worker_upload_url,
             args["path"],
             args["url"],
@@ -1351,7 +1349,7 @@ async def _execute_transfer_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         )
 
     if tool == "transfer_download_url":
-        return await _to_thread(
+        return await asyncio.to_thread(
             _worker_download_url,
             args["url"],
             args["path"],
