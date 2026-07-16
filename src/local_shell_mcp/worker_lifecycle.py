@@ -281,8 +281,8 @@ if [ "$PERSIST" = "1" ]; then
   mkdir -p "$BIN_DIR"
   cat > "$BIN_DIR/local-shell-mcp" <<'EOF'
 #!/bin/sh
-STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}/local-shell-mcp-worker"
-export PYTHONPATH="$STATE_HOME/runtime:$STATE_HOME/runtime/vendor${PYTHONPATH:+:$PYTHONPATH}"
+STATE_HOME="${{XDG_STATE_HOME:-$HOME/.local/state}}/local-shell-mcp-worker"
+export PYTHONPATH="$STATE_HOME/runtime:$STATE_HOME/runtime/vendor${{PYTHONPATH:+:$PYTHONPATH}}"
 exec python3 -m local_shell_mcp.main "$@"
 EOF
   chmod 755 "$BIN_DIR/local-shell-mcp"
