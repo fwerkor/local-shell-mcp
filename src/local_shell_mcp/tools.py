@@ -1152,7 +1152,7 @@ async def _view_image_result(path: str, machine: str | None = None) -> CallToolR
             if not isinstance(stat, dict) or stat.get("type") != "file":
                 raise ValueError(f"source is not a file: {path}")
             assert_view_image_size(int(stat.get("size") or 0))
-            temporary = await _to_thread(transfer_alloc_temp_path, ".bin")
+            temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".bin")
             temporary_path = temporary["path"]
             try:
                 await _copy_remote_file_to_local(
@@ -1161,13 +1161,13 @@ async def _view_image_result(path: str, machine: str | None = None) -> CallToolR
                     temporary_path,
                     True,
                 )
-                image = await _to_thread(read_image, temporary_path)
+                image = await asyncio.to_thread(read_image, temporary_path)
             finally:
                 with suppress(Exception):
-                    await _to_thread(delete_path, temporary_path, False)
+                    await asyncio.to_thread(delete_path, temporary_path, False)
             display_path = str(stat.get("path") or path)
         else:
-            image = await _to_thread(read_image, path)
+            image = await asyncio.to_thread(read_image, path)
             display_path = image.path
         return _view_image_success_result(image, display_path, machine)
     except Exception as exc:
