@@ -14,6 +14,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pathspec.gitignore import GitIgnoreSpec
+from pydantic import BaseModel, ConfigDict, Field
 
 from .audit import audit
 from .auth import require_current_scopes
@@ -74,6 +75,16 @@ from .transfer_ops import (
     transfer_write_chunk,
 )
 from .version import version_info as get_version_info
+
+
+class TextEdit(BaseModel):
+    """One exact text replacement accepted by the unified edit tool."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    old: str = Field(min_length=1)
+    new: str
+    replace_all: bool = False
 
 
 def _ok(data: Any = None, message: str = "") -> dict:
@@ -453,6 +464,7 @@ OPEN_WORLD_TOOL_NAMES = {
     *MACHINE_CAPABLE_TOOL_NAMES,
     "create_file_link",
     "revoke_file_link",
+    "transfer_path",
 }
 
 READ_ONLY_OPEN_WORLD_TOOL_NAMES = {
@@ -1073,6 +1085,7 @@ def build_mcp() -> FastMCP:
     browser_execute_meta = _oauth_meta(["browser:use", "shell:execute"])
     file_share_meta = _oauth_meta(["shell:read", "file:share"])
     remote_meta = _oauth_meta(["remote:use"])
+    transfer_meta = _oauth_meta(["remote:use", "shell:read", "shell:write"])
 
     async def _remote_call(
         machine: str,
@@ -1644,21 +1657,22 @@ def build_mcp() -> FastMCP:
     @mcp.tool(structured_output=True, meta=shell_write_meta)
     async def edit_file(
         path: str,
-        edits: list[dict],
+        edits: list[TextEdit],
         purpose: str | None = None,
         explanation: str | None = None,
         machine: str | None = None,
     ) -> ToolResult:
         """Apply one or more exact-text edits to one local or remote file. Each edits entry contains old, new, and optional replace_all; old must match exactly, including whitespace and indentation."""
         _audit_tool_purpose("edit_file", purpose, explanation)
+        edit_payloads = [edit.model_dump() for edit in edits]
         if machine:
             return await _remote_call(
                 machine,
                 "edit_file",
-                {"path": path, "edits": edits},
+                {"path": path, "edits": edit_payloads},
             )
         try:
-            return _ok(await _to_thread(edit_text, path, edits))
+            return _ok(await _to_thread(edit_text, path, edit_payloads))
         except Exception as exc:
             return _handled_error(exc)
 
@@ -1704,7 +1718,7 @@ def build_mcp() -> FastMCP:
         except Exception as exc:
             return _handled_error(exc)
 
-    @mcp.tool(structured_output=True, meta=shell_write_meta)
+    @mcp.tool(structured_output=True, meta=transfer_meta)
     async def transfer_path(
         source_path: str,
         destination_path: str,

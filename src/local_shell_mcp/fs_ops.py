@@ -582,9 +582,39 @@ def perform_file_action(
     }
 
 
-def edit_text(path: str, edits: list[dict]) -> dict:
-    if not edits:
+def _validated_text_edits(edits: list[dict]) -> list[dict[str, str | bool]]:
+    if not isinstance(edits, list) or not edits:
         raise ValueError("edits must not be empty")
+    validated: list[dict[str, str | bool]] = []
+    allowed = {"old", "new", "replace_all"}
+    for index, edit in enumerate(edits):
+        if not isinstance(edit, dict):
+            raise ValueError(f"edits[{index}] must be an object")
+        unexpected = sorted(set(edit) - allowed)
+        if unexpected:
+            raise ValueError(
+                f"edits[{index}] contains unsupported field(s): {', '.join(unexpected)}"
+            )
+        missing = sorted({"old", "new"} - set(edit))
+        if missing:
+            raise ValueError(f"edits[{index}] is missing field(s): {', '.join(missing)}")
+        old = edit["old"]
+        new = edit["new"]
+        replace_all = edit.get("replace_all", False)
+        if not isinstance(old, str):
+            raise ValueError(f"edits[{index}].old must be a string")
+        if not isinstance(new, str):
+            raise ValueError(f"edits[{index}].new must be a string")
+        if not isinstance(replace_all, bool):
+            raise ValueError(f"edits[{index}].replace_all must be a boolean")
+        if not old:
+            raise ValueError(f"edits[{index}].old must not be empty")
+        validated.append({"old": old, "new": new, "replace_all": replace_all})
+    return validated
+
+
+def edit_text(path: str, edits: list[dict]) -> dict:
+    validated_edits = _validated_text_edits(edits)
     settings = get_settings()
     p = resolve_path(path, must_exist=True)
     if p.stat().st_size > settings.max_file_write_bytes:
@@ -593,12 +623,10 @@ def edit_text(path: str, edits: list[dict]) -> dict:
     expected_sha256 = _sha256_file(p)
     text = p.read_text(encoding="utf-8")
     total = 0
-    for edit in edits:
+    for edit in validated_edits:
         old = str(edit["old"])
         new = str(edit["new"])
-        if old == "":
-            raise ValueError("old text must not be empty")
-        replace_all = bool(edit.get("replace_all", False))
+        replace_all = bool(edit["replace_all"])
         count = text.count(old)
         if count == 0:
             raise ValueError(f"old text not found: {old[:80]!r}")
