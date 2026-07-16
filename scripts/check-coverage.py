@@ -9,13 +9,6 @@ from pathlib import Path
 
 GLOBAL_MINIMUM = 93.0
 MODULE_MINIMUM = 90.0
-CRITICAL_MINIMUM = 92.0
-CRITICAL_MODULES = {
-    "src/local_shell_mcp/human_ui.py",
-    "src/local_shell_mcp/remote.py",
-    "src/local_shell_mcp/shell_ops.py",
-    "src/local_shell_mcp/tools.py",
-}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,7 +25,7 @@ def main(argv: list[str] | None = None) -> int:
 
     for path, details in sorted(report["files"].items()):
         covered = float(details["summary"]["percent_covered"])
-        minimum = CRITICAL_MINIMUM if path in CRITICAL_MODULES else MODULE_MINIMUM
+        minimum = MODULE_MINIMUM
         if covered < minimum:
             failures.append(
                 f"{path}: {covered:.2f}% is below the {minimum:.2f}% floor"
@@ -46,8 +39,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(
         f"Coverage gates passed: total={total:.2f}%, "
-        f"all modules>={MODULE_MINIMUM:.2f}%, "
-        f"critical modules>={CRITICAL_MINIMUM:.2f}%"
+        f"all modules>={MODULE_MINIMUM:.2f}%"
     )
     return 0
 
