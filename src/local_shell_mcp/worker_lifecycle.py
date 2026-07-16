@@ -25,8 +25,12 @@ from .remote import (
     worker_capabilities,
     worker_info,
 )
-from .remote import remote_routes as legacy_remote_routes
-from .remote import run_worker_cli as legacy_run_worker_cli
+from .remote import (
+    remote_routes as legacy_remote_routes,
+)
+from .remote import (
+    run_worker_cli as legacy_run_worker_cli,
+)
 
 WORKER_MANIFEST_PATH = "/remote/worker-manifest.json"
 WORKER_CONFIG_FILE_NAME = "config.json"
