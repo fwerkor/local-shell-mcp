@@ -36,6 +36,7 @@ from .fs_ops import (
 from .image_ops import ImageFile, assert_view_image_size, read_image
 from .jobs import list_jobs, retry_job, start_job, stop_job, tail_job
 from .models import ToolResult
+from .models import ok_result as _ok
 from .playwright_ops import browser_capture, browser_get_text, playwright_run_script
 from .remote import remote_manager
 from .remote_transfer import (
@@ -101,10 +102,6 @@ class ViewImageResult(BaseModel):
     bytes: int | None = None
     message: str = ""
     error_type: str | None = None
-
-
-def _ok(data: Any = None, message: str = "") -> dict:
-    return {"ok": True, "message": message, "data": data}
 
 
 def _handled_error(exc: Exception) -> dict:

@@ -40,6 +40,7 @@ from .fs_ops import (
     write_text,
 )
 from .jobs import list_jobs, retry_job, start_job, stop_job, tail_job
+from .models import ok_result as _ok
 from .playwright_ops import browser_capture, browser_get_text, playwright_run_script
 from .search_ops import grep, tree
 from .settings import get_settings, safe_settings_dump
@@ -170,10 +171,6 @@ def _validate_machine_name(value: str) -> str:
     if any(ord(character) < 32 or character in {"/", "\\"} for character in name):
         raise ValueError("machine name contains unsupported characters")
     return name
-
-
-def _ok(data: Any = None, message: str = "") -> dict[str, Any]:
-    return {"ok": True, "message": message, "data": data}
 
 
 def _error(message: str, error: str = "remote_error", status_code: int = 400):  # noqa: ANN201
