@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from types import SimpleNamespace
 
@@ -215,6 +214,13 @@ def test_cli_enroll_and_run(monkeypatch, capsys):
     )
     lifecycle.run_worker_cli(["run"])
     assert "Enrolled worker n" in capsys.readouterr().out
+
+
+def test_cli_legacy_passthrough(monkeypatch):
+    calls = []
+    monkeypatch.setattr(lifecycle, "legacy_run_worker_cli", calls.append)
+    lifecycle.run_worker_cli(["--server", "https://s", "--invite", "i"])
+    assert calls == [["--server", "https://s", "--invite", "i"]]
 
 
 def test_cli_failure(monkeypatch, capsys):
