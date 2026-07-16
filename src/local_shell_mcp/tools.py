@@ -195,7 +195,14 @@ SECRET_PATTERNS = {
     "generic_assignment": r"(?i)(token|secret|password|passwd|api_key|apikey)\s*[:=]\s*['\"][^'\"]{8,}['\"]",
 }
 
-ALL_OAUTH_SCOPES = ["shell:read", "shell:write", "shell:execute", "browser:use", "file:share", "remote:use"]
+ALL_OAUTH_SCOPES = [
+    "shell:read",
+    "shell:write",
+    "shell:execute",
+    "browser:use",
+    "file:share",
+    "remote:use",
+]
 
 
 def _oauth_security_scheme(scopes: list[str]) -> dict[str, Any]:
@@ -247,10 +254,7 @@ NON_CANCELLABLE_TOOL_NAMES = frozenset(
     }
 )
 
-REMOTE_MACHINE_ARGUMENTS = frozenset(
-    {"machine", "source_machine", "destination_machine"}
-)
-
+REMOTE_MACHINE_ARGUMENTS = frozenset({"machine", "source_machine", "destination_machine"})
 
 
 def _security_meta(schemes: list[dict[str, Any]]) -> dict[str, Any]:
@@ -313,9 +317,8 @@ def _redact_audit_value(value: Any) -> Any:
         for name, item in list(value.items())[:50]:
             name_s = str(name)
             name_lower = name_s.lower()
-            if (
-                name_lower in OPAQUE_AUDIT_TOOL_ARGS
-                or any(fragment in name_lower for fragment in SENSITIVE_TOOL_ARG_FRAGMENTS)
+            if name_lower in OPAQUE_AUDIT_TOOL_ARGS or any(
+                fragment in name_lower for fragment in SENSITIVE_TOOL_ARG_FRAGMENTS
             ):
                 out[name_s] = "<redacted>"
             else:
@@ -331,7 +334,9 @@ def _audit_tool_arguments(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict
     }
 
 
-def _audit_tool_purpose(tool_name: str, purpose: str | None = None, explanation: str | None = None) -> dict[str, str]:
+def _audit_tool_purpose(
+    tool_name: str, purpose: str | None = None, explanation: str | None = None
+) -> dict[str, str]:
     details: dict[str, str] = {}
     if purpose is not None:
         purpose = purpose.strip()
@@ -447,7 +452,6 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
         tool.fn = wrapped
 
 
-
 def _remove_remote_tools_when_disabled(mcp: FastMCP) -> None:
     if get_settings().remote_enabled:
         return
@@ -512,13 +516,10 @@ def _install_tool_annotations(mcp: FastMCP) -> None:
         open_world = name.startswith("remote_") or name in OPEN_WORLD_TOOL_NAMES
         tool.annotations = ToolAnnotations(
             readOnlyHint=read_only,
-            destructiveHint=not (
-                read_only or name in NON_DESTRUCTIVE_MUTATION_TOOL_NAMES
-            ),
+            destructiveHint=not (read_only or name in NON_DESTRUCTIVE_MUTATION_TOOL_NAMES),
             idempotentHint=read_only,
             openWorldHint=open_world,
         )
-
 
 
 def _gitignore_spec(
@@ -565,7 +566,9 @@ def _secret_scan_candidates(base: Any, glob: str | None = None) -> list[Any]:
     if glob:
         args.extend(["--glob", glob])
     try:
-        result = subprocess.run(args, cwd=str(base), text=True, capture_output=True, timeout=30, check=False)
+        result = subprocess.run(
+            args, cwd=str(base), text=True, capture_output=True, timeout=30, check=False
+        )
     except Exception:
         result = None
     if result is not None and result.returncode in {0, 1}:
@@ -631,7 +634,11 @@ def _secret_scan_sync(cwd: str = ".", glob: str | None = None, max_results: int 
                 line = text.count("\n", 0, match.start()) + 1
                 findings.append({"type": name, "path": relative_display(path), "line": line})
                 if len(findings) >= max_results:
-                    return {"findings": findings, "truncated": True, "truncated_files": truncated_files}
+                    return {
+                        "findings": findings,
+                        "truncated": True,
+                        "truncated_files": truncated_files,
+                    }
     return {"findings": findings, "truncated": False, "truncated_files": truncated_files}
 
 
@@ -654,7 +661,9 @@ def _unwrap_remote_transfer_result(result: dict, *, machine: str, tool: str) -> 
     return data
 
 
-async def _remote_transfer_data(machine: str, tool: str, args: dict, timeout_s: int | None = None) -> Any:
+async def _remote_transfer_data(
+    machine: str, tool: str, args: dict, timeout_s: int | None = None
+) -> Any:
     result = await remote_manager().call(machine, tool, args, timeout_s)
     return _unwrap_remote_transfer_result(result, machine=machine, tool=tool)
 
@@ -794,9 +803,7 @@ async def _copy_remote_file_to_local(
         transport = "http-stream"
     else:
         effective_chunk_size = normalize_chunk_size(chunk_size)
-        begin = await _to_thread(
-            transfer_begin_write, destination_path, overwrite, stat["size"]
-        )
+        begin = await _to_thread(transfer_begin_write, destination_path, overwrite, stat["size"])
         offset = 0
         chunks = 0
         try:
@@ -829,9 +836,7 @@ async def _copy_remote_file_to_local(
             )
         except BaseException:
             with suppress(Exception):
-                await _to_thread(
-                    transfer_abort_write, destination_path, begin["transfer_id"]
-                )
+                await _to_thread(transfer_abort_write, destination_path, begin["transfer_id"])
             raise
         transport = "mcp-chunks"
     return {
@@ -889,7 +894,9 @@ async def _copy_remote_file_to_remote(
 
 async def _remote_cleanup_file(machine: str, path: str) -> None:
     with suppress(Exception):
-        await _remote_transfer_data(machine, "delete_file_or_dir", {"path": path, "recursive": False})
+        await _remote_transfer_data(
+            machine, "delete_file_or_dir", {"path": path, "recursive": False}
+        )
 
 
 async def _copy_remote_dir_to_remote(
@@ -900,8 +907,12 @@ async def _copy_remote_dir_to_remote(
     overwrite: bool = True,
     chunk_size: int | None = None,
 ) -> dict:
-    pack = await _remote_transfer_data(src_machine, "transfer_pack_dir", {"path": src_path, "compression": "gz"})
-    dst_archive = await _remote_transfer_data(dst_machine, "transfer_alloc_temp_path", {"suffix": ".tar.gz"})
+    pack = await _remote_transfer_data(
+        src_machine, "transfer_pack_dir", {"path": src_path, "compression": "gz"}
+    )
+    dst_archive = await _remote_transfer_data(
+        dst_machine, "transfer_alloc_temp_path", {"suffix": ".tar.gz"}
+    )
     try:
         copy_result = await _copy_remote_file_to_remote(
             src_machine, pack["archive_path"], dst_machine, dst_archive["path"], True, chunk_size
@@ -909,7 +920,12 @@ async def _copy_remote_dir_to_remote(
         unpack = await _remote_transfer_data(
             dst_machine,
             "transfer_unpack_archive",
-            {"archive_path": dst_archive["path"], "dst_path": dst_path, "overwrite": overwrite, "cleanup_archive": True},
+            {
+                "archive_path": dst_archive["path"],
+                "dst_path": dst_path,
+                "overwrite": overwrite,
+                "cleanup_archive": True,
+            },
         )
     except Exception:
         await _remote_cleanup_file(dst_machine, dst_archive.get("path", ""))
@@ -933,7 +949,9 @@ async def _copy_remote_dir_to_local(
     overwrite: bool = True,
     chunk_size: int | None = None,
 ) -> dict:
-    pack = await _remote_transfer_data(src_machine, "transfer_pack_dir", {"path": src_path, "compression": "gz"})
+    pack = await _remote_transfer_data(
+        src_machine, "transfer_pack_dir", {"path": src_path, "compression": "gz"}
+    )
     archive = await _to_thread(transfer_alloc_temp_path, ".tar.gz")
     try:
         copy_result = await _copy_remote_file_to_local(
@@ -964,13 +982,22 @@ async def _copy_local_dir_to_remote(
     chunk_size: int | None = None,
 ) -> dict:
     pack = await _to_thread(transfer_pack_dir, source_path, "gz")
-    dst_archive = await _remote_transfer_data(dst_machine, "transfer_alloc_temp_path", {"suffix": ".tar.gz"})
+    dst_archive = await _remote_transfer_data(
+        dst_machine, "transfer_alloc_temp_path", {"suffix": ".tar.gz"}
+    )
     try:
-        copy_result = await _copy_local_file_to_remote(pack["archive_path"], dst_machine, dst_archive["path"], True, chunk_size)
+        copy_result = await _copy_local_file_to_remote(
+            pack["archive_path"], dst_machine, dst_archive["path"], True, chunk_size
+        )
         unpack = await _remote_transfer_data(
             dst_machine,
             "transfer_unpack_archive",
-            {"archive_path": dst_archive["path"], "dst_path": dst_path, "overwrite": overwrite, "cleanup_archive": True},
+            {
+                "archive_path": dst_archive["path"],
+                "dst_path": dst_path,
+                "overwrite": overwrite,
+                "cleanup_archive": True,
+            },
         )
     except Exception:
         await _remote_cleanup_file(dst_machine, dst_archive.get("path", ""))
@@ -1013,9 +1040,7 @@ async def _transfer_path(
 
     if source_machine and destination_machine:
         operation = (
-            _copy_remote_dir_to_remote
-            if source_type == "dir"
-            else _copy_remote_file_to_remote
+            _copy_remote_dir_to_remote if source_type == "dir" else _copy_remote_file_to_remote
         )
         result = await operation(
             source_machine,
@@ -1027,9 +1052,7 @@ async def _transfer_path(
         )
     elif source_machine:
         operation = (
-            _copy_remote_dir_to_local
-            if source_type == "dir"
-            else _copy_remote_file_to_local
+            _copy_remote_dir_to_local if source_type == "dir" else _copy_remote_file_to_local
         )
         result = await operation(
             source_machine,
@@ -1041,9 +1064,7 @@ async def _transfer_path(
     else:
         assert destination_machine is not None
         operation = (
-            _copy_local_dir_to_remote
-            if source_type == "dir"
-            else _copy_local_file_to_remote
+            _copy_local_dir_to_remote if source_type == "dir" else _copy_local_file_to_remote
         )
         result = await operation(
             source_path,
@@ -1163,53 +1184,39 @@ def _read_audit_tail_entries(lines: int = 100) -> dict:
             bytes_read += len(chunk)
             newline_count += chunk.count(b"\n")
 
-    content = b"".join(reversed(chunks)).decode("utf-8", errors="replace").splitlines()[-line_limit:]
+    content = (
+        b"".join(reversed(chunks)).decode("utf-8", errors="replace").splitlines()[-line_limit:]
+    )
     entries = []
     for line in content:
         try:
             entries.append(json.loads(line))
         except json.JSONDecodeError:
             entries.append({"raw": line})
-    return {"entries": entries, "bytes_read": bytes_read, "truncated_bytes": max(0, path.stat().st_size - bytes_read)}
+    return {
+        "entries": entries,
+        "bytes_read": bytes_read,
+        "truncated_bytes": max(0, path.stat().st_size - bytes_read),
+    }
 
 
-def build_mcp() -> FastMCP:
-    settings = get_settings()
-    mcp = FastMCP(
-        "local-shell-mcp",
-        instructions=MCP_INSTRUCTIONS,
-        transport_security=_transport_security_settings(),
-    )
-    read_only_tool = ToolAnnotations(
-        readOnlyHint=True,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=False,
-    )
+async def _remote_call(
+    settings: Any,
+    machine: str,
+    tool: str,
+    args: dict,
+    timeout_s: int | None = None,
+) -> ToolResult:
+    try:
+        if not settings.remote_enabled:
+            raise RuntimeError("Remote workers are disabled")
+        return await remote_manager().call(machine, tool, args, timeout_s)
+    except Exception as exc:
+        return _handled_error(exc)
+
+
+def _register_connector_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -> None:
     read_only_meta = _public_read_meta()
-    shell_read_meta = _oauth_meta(["shell:read"])
-    shell_write_meta = _oauth_meta(["shell:read", "shell:write"])
-    shell_execute_meta = _oauth_meta(["shell:read", "shell:execute"])
-    patch_meta = _oauth_meta(["shell:read", "shell:write"])
-    browser_meta = _oauth_meta(["browser:use"])
-    browser_write_meta = _oauth_meta(["browser:use", "shell:write"])
-    browser_execute_meta = _oauth_meta(["browser:use", "shell:execute"])
-    file_share_meta = _oauth_meta(["shell:read", "file:share"])
-    remote_meta = _oauth_meta(["remote:use"])
-    transfer_meta = _oauth_meta(["remote:use", "shell:read", "shell:write"])
-
-    async def _remote_call(
-        machine: str,
-        tool: str,
-        args: dict,
-        timeout_s: int | None = None,
-    ) -> ToolResult:
-        try:
-            if not settings.remote_enabled:
-                raise RuntimeError("Remote workers are disabled")
-            return await remote_manager().call(machine, tool, args, timeout_s)
-        except Exception as exc:
-            return _handled_error(exc)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=read_only_meta)
     async def search(query: str) -> str:
@@ -1287,11 +1294,17 @@ def build_mcp() -> FastMCP:
                 ensure_ascii=False,
             )
 
+
+def _register_environment_tools(
+    mcp: FastMCP, settings: Any, read_only_tool: ToolAnnotations
+) -> None:
+    shell_read_meta = _oauth_meta(["shell:read"])
+
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def environment_info(machine: str | None = None) -> ToolResult:
         """Return version, workspace, auth, policy, and environment information locally or on a remote machine."""
         if machine:
-            return await _remote_call(machine, "environment_info", {})
+            return await _remote_call(settings, machine, "environment_info", {})
         try:
             python = quote_shell_argument(settings.python_bin)
             git = quote_shell_argument(settings.git_bin)
@@ -1325,9 +1338,11 @@ def build_mcp() -> FastMCP:
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def skill_read_file(name: str, path: str) -> ToolResult:
         """Read one related text file from an installed Skill."""
-        return await _tool_call(
-            _to_thread, read_installed_skill_file, name, path, settings
-        )
+        return await _tool_call(_to_thread, read_installed_skill_file, name, path, settings)
+
+
+def _register_command_tools(mcp: FastMCP, settings: Any) -> None:
+    shell_execute_meta = _oauth_meta(["shell:read", "shell:execute"])
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def run_shell_tool(
@@ -1343,6 +1358,7 @@ def build_mcp() -> FastMCP:
         _audit_tool_purpose("run_shell_tool", purpose, explanation)
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "run_shell_tool",
                 {
@@ -1355,9 +1371,7 @@ def build_mcp() -> FastMCP:
             )
         try:
             return _ok(
-                (
-                    await public_run_shell(command, cwd, timeout_s, max_output_bytes)
-                ).model_dump()
+                (await public_run_shell(command, cwd, timeout_s, max_output_bytes)).model_dump()
             )
         except Exception as exc:
             return _handled_error(exc)
@@ -1375,12 +1389,18 @@ def build_mcp() -> FastMCP:
         _audit_tool_purpose("run_python_tool", purpose, explanation)
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "run_python_tool",
                 {"code": code, "cwd": cwd, "timeout_s": timeout_s},
                 timeout_s,
             )
         return await _tool_call(_run_python, code, cwd, timeout_s)
+
+
+def _register_shell_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnotations) -> None:
+    shell_read_meta = _oauth_meta(["shell:read"])
+    shell_execute_meta = _oauth_meta(["shell:read", "shell:execute"])
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def shell_start(
@@ -1395,6 +1415,7 @@ def build_mcp() -> FastMCP:
         _audit_tool_purpose("shell_start", purpose, explanation)
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "shell_start",
                 {"cwd": cwd, "name": name, "command": command},
@@ -1411,6 +1432,7 @@ def build_mcp() -> FastMCP:
         """Send input to a persistent local or remote shell session."""
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "shell_send",
                 {"session_id": session_id, "input_text": input_text, "enter": enter},
@@ -1426,6 +1448,7 @@ def build_mcp() -> FastMCP:
         """Read recent output from a persistent local or remote shell session."""
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "shell_read",
                 {"session_id": session_id, "lines": lines},
@@ -1439,15 +1462,20 @@ def build_mcp() -> FastMCP:
     ) -> ToolResult:
         """Terminate a persistent local or remote shell session."""
         if machine:
-            return await _remote_call(machine, "shell_kill", {"session_id": session_id})
+            return await _remote_call(settings, machine, "shell_kill", {"session_id": session_id})
         return await _tool_call(kill_shell, session_id)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def shell_list(machine: str | None = None) -> ToolResult:
         """List persistent shell sessions locally or on a remote machine."""
         if machine:
-            return await _remote_call(machine, "shell_list", {})
+            return await _remote_call(settings, machine, "shell_list", {})
         return await _tool_call(list_shells)
+
+
+def _register_job_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnotations) -> None:
+    shell_read_meta = _oauth_meta(["shell:read"])
+    shell_execute_meta = _oauth_meta(["shell:read", "shell:execute"])
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def job_start(
@@ -1462,6 +1490,7 @@ def build_mcp() -> FastMCP:
         _audit_tool_purpose("job_start", purpose, explanation)
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "job_start",
                 {"command": command, "cwd": cwd, "name": name},
@@ -1476,6 +1505,7 @@ def build_mcp() -> FastMCP:
         """List tracked jobs locally or on a remote machine."""
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "job_list",
                 {"include_finished": include_finished},
@@ -1491,6 +1521,7 @@ def build_mcp() -> FastMCP:
         """Read recent output for a tracked local or remote job."""
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "job_tail",
                 {"job_id": job_id, "lines": lines},
@@ -1504,7 +1535,7 @@ def build_mcp() -> FastMCP:
     ) -> ToolResult:
         """Stop a tracked local or remote job."""
         if machine:
-            return await _remote_call(machine, "job_stop", {"job_id": job_id})
+            return await _remote_call(settings, machine, "job_stop", {"job_id": job_id})
         return await _tool_call(stop_job, job_id)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
@@ -1517,8 +1548,14 @@ def build_mcp() -> FastMCP:
         """Restart a stopped or exited tracked local or remote job."""
         _audit_tool_purpose("job_retry", purpose, explanation)
         if machine:
-            return await _remote_call(machine, "job_retry", {"job_id": job_id})
+            return await _remote_call(settings, machine, "job_retry", {"job_id": job_id})
         return await _tool_call(retry_job, job_id)
+
+
+def _register_workspace_read_tools(
+    mcp: FastMCP, settings: Any, read_only_tool: ToolAnnotations
+) -> None:
+    shell_read_meta = _oauth_meta(["shell:read"])
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def list_files(
@@ -1530,6 +1567,7 @@ def build_mcp() -> FastMCP:
         """List files and directories locally or on a remote machine."""
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "list_files",
                 {
@@ -1550,6 +1588,7 @@ def build_mcp() -> FastMCP:
         """Return a compact directory tree locally or on a remote machine."""
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "tree_view",
                 {"cwd": cwd, "depth": depth, "max_entries": max_entries},
@@ -1566,14 +1605,13 @@ def build_mcp() -> FastMCP:
         """Find paths by glob locally or on a remote machine."""
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "glob_search",
                 {"pattern": pattern, "cwd": cwd, "max_results": max_results},
             )
         try:
-            return _ok(
-                {"paths": await _to_thread(glob_paths, pattern, cwd, max_results)}
-            )
+            return _ok({"paths": await _to_thread(glob_paths, pattern, cwd, max_results)})
         except Exception as exc:
             return _handled_error(exc)
 
@@ -1590,6 +1628,7 @@ def build_mcp() -> FastMCP:
         """Search file contents locally or on a remote machine."""
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "grep_search",
                 {
@@ -1601,9 +1640,7 @@ def build_mcp() -> FastMCP:
                     "max_results": max_results,
                 },
             )
-        return await _tool_call(
-            grep, query, cwd, glob, regex, case_sensitive, max_results
-        )
+        return await _tool_call(grep, query, cwd, glob, regex, case_sensitive, max_results)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def read_file(
@@ -1623,7 +1660,7 @@ def build_mcp() -> FastMCP:
             "binary_preview_bytes": binary_preview_bytes,
         }
         if machine:
-            return await _remote_call(machine, "read_file", args)
+            return await _remote_call(settings, machine, "read_file", args)
         return await _tool_call(
             _to_thread,
             read_texts,
@@ -1641,6 +1678,10 @@ def build_mcp() -> FastMCP:
     ) -> ViewImageResult:
         """View a PNG, JPEG, GIF, or WebP file as native MCP image content locally or on a remote machine. Use this instead of read_file when visual inspection is needed. Remote images reuse the existing file-transfer protocol, so the worker does not need a new image-specific RPC."""
         return cast(ViewImageResult, await _view_image_result(path, machine))
+
+
+def _register_download_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -> None:
+    file_share_meta = _oauth_meta(["shell:read", "file:share"])
 
     @mcp.tool(structured_output=True, meta=file_share_meta)
     async def create_file_link(
@@ -1669,6 +1710,12 @@ def build_mcp() -> FastMCP:
         """Revoke a generated local file download URL."""
         return await _tool_call(_to_thread, revoke_share_link, token)
 
+
+def _register_workspace_write_tools(mcp: FastMCP, settings: Any) -> None:
+    shell_write_meta = _oauth_meta(["shell:read", "shell:write"])
+    patch_meta = _oauth_meta(["shell:read", "shell:write"])
+    transfer_meta = _oauth_meta(["remote:use", "shell:read", "shell:write"])
+
     @mcp.tool(structured_output=True, meta=shell_write_meta)
     async def write_file(
         path: str,
@@ -1682,6 +1729,7 @@ def build_mcp() -> FastMCP:
         _audit_tool_purpose("write_file", purpose, explanation)
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "write_file",
                 {"path": path, "content": content, "overwrite": overwrite},
@@ -1701,6 +1749,7 @@ def build_mcp() -> FastMCP:
         edit_payloads = [edit.model_dump() for edit in edits]
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "edit_file",
                 {"path": path, "edits": edit_payloads},
@@ -1719,6 +1768,7 @@ def build_mcp() -> FastMCP:
         _audit_tool_purpose("delete_file_or_dir", purpose, explanation)
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "delete_file_or_dir",
                 {"path": path, "recursive": recursive},
@@ -1737,6 +1787,7 @@ def build_mcp() -> FastMCP:
         _audit_tool_purpose("apply_patch", purpose, explanation)
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "apply_patch",
                 {"patch": patch, "cwd": cwd},
@@ -1766,6 +1817,11 @@ def build_mcp() -> FastMCP:
             chunk_size,
         )
 
+
+def _register_maintenance_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -> None:
+    shell_read_meta = _oauth_meta(["shell:read"])
+    shell_write_meta = _oauth_meta(["shell:read", "shell:write"])
+
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def secret_scan(
         cwd: str = ".",
@@ -1784,6 +1840,17 @@ def build_mcp() -> FastMCP:
     async def todo_write_tool(todos: list[dict]) -> ToolResult:
         """Write the local agent todo list."""
         return await _tool_call(_to_thread, todo_write, todos)
+
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
+    async def audit_tail(lines: int = 100) -> ToolResult:
+        """Read recent local audit log entries."""
+        return await _tool_call(_to_thread, _read_audit_tail_entries, lines)
+
+
+def _register_browser_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnotations) -> None:
+    browser_meta = _oauth_meta(["browser:use"])
+    browser_write_meta = _oauth_meta(["browser:use", "shell:write"])
+    browser_execute_meta = _oauth_meta(["browser:use", "shell:execute"])
 
     @mcp.tool(structured_output=True, meta=browser_write_meta)
     async def browser_capture_tool(
@@ -1809,7 +1876,7 @@ def build_mcp() -> FastMCP:
             "wait_until": wait_until,
         }
         if machine:
-            return await _remote_call(machine, "browser_capture_tool", args)
+            return await _remote_call(settings, machine, "browser_capture_tool", args)
         return await _tool_call(browser_capture, **args)
 
     @mcp.tool(structured_output=True, meta=browser_meta)
@@ -1828,7 +1895,7 @@ def build_mcp() -> FastMCP:
             "selector": selector,
         }
         if machine:
-            return await _remote_call(machine, "browser_get_text_tool", args)
+            return await _remote_call(settings, machine, "browser_get_text_tool", args)
         return await _tool_call(browser_get_text, **args)
 
     @mcp.tool(structured_output=True, meta=browser_execute_meta)
@@ -1841,6 +1908,7 @@ def build_mcp() -> FastMCP:
         """Run a full Python Playwright script locally or on a remote machine."""
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "playwright_run_script_tool",
                 {"script": script, "cwd": cwd, "timeout_s": timeout_s},
@@ -1848,10 +1916,9 @@ def build_mcp() -> FastMCP:
             )
         return await _tool_call(playwright_run_script, script, cwd, timeout_s)
 
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
-    async def audit_tail(lines: int = 100) -> ToolResult:
-        """Read recent local audit log entries."""
-        return await _tool_call(_to_thread, _read_audit_tail_entries, lines)
+
+def _register_remote_admin_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -> None:
+    remote_meta = _oauth_meta(["remote:use"])
 
     @mcp.tool(structured_output=True, meta=remote_meta)
     async def remote_invite(
@@ -1860,9 +1927,7 @@ def build_mcp() -> FastMCP:
         ttl_s: int | None = None,
     ) -> ToolResult:
         """Create a one-time command for a remote machine to join this server."""
-        return await _tool_call(
-            lambda: remote_manager().create_invite(name, workdir, ttl_s)
-        )
+        return await _tool_call(lambda: remote_manager().create_invite(name, workdir, ttl_s))
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_meta)
     async def remote_list_machines() -> ToolResult:
@@ -1878,6 +1943,33 @@ def build_mcp() -> FastMCP:
     async def remote_rename_machine(machine: str, new_name: str) -> ToolResult:
         """Rename a remote worker machine."""
         return await _tool_call(lambda: remote_manager().rename(machine, new_name))
+
+
+def build_mcp() -> FastMCP:
+    settings = get_settings()
+    mcp = FastMCP(
+        "local-shell-mcp",
+        instructions=MCP_INSTRUCTIONS,
+        transport_security=_transport_security_settings(),
+    )
+    read_only_tool = ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
+
+    _register_connector_tools(mcp, read_only_tool)
+    _register_environment_tools(mcp, settings, read_only_tool)
+    _register_command_tools(mcp, settings)
+    _register_shell_tools(mcp, settings, read_only_tool)
+    _register_job_tools(mcp, settings, read_only_tool)
+    _register_workspace_read_tools(mcp, settings, read_only_tool)
+    _register_download_tools(mcp, read_only_tool)
+    _register_workspace_write_tools(mcp, settings)
+    _register_maintenance_tools(mcp, read_only_tool)
+    _register_browser_tools(mcp, settings, read_only_tool)
+    _register_remote_admin_tools(mcp, read_only_tool)
 
     _remove_remote_tools_when_disabled(mcp)
     _install_tool_annotations(mcp)
