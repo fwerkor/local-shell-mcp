@@ -20,13 +20,13 @@ from .remote import (
     REMOTE_WORKER_BUNDLE_PATH,
     _worker_post_json_forever,
     _write_worker_identity,
-    remote_routes as legacy_remote_routes,
     run_worker,
-    run_worker_cli as legacy_run_worker_cli,
     worker_bundle,
     worker_capabilities,
     worker_info,
 )
+from .remote import remote_routes as legacy_remote_routes
+from .remote import run_worker_cli as legacy_run_worker_cli
 
 WORKER_MANIFEST_PATH = "/remote/worker-manifest.json"
 WORKER_CONFIG_FILE_NAME = "config.json"
