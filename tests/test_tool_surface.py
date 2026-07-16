@@ -135,6 +135,14 @@ async def test_machine_capable_tools_use_optional_machine_arguments(tmp_path, mo
     transfer_properties = tools["transfer_path"].inputSchema["properties"]
     assert {"source_machine", "destination_machine"} <= set(transfer_properties)
 
+    edit_schema = tools["edit_file"].inputSchema
+    edit_definition = edit_schema["$defs"]["TextEdit"]
+    assert edit_schema["properties"]["edits"]["items"] == {"$ref": "#/$defs/TextEdit"}
+    assert edit_definition["additionalProperties"] is False
+    assert set(edit_definition["required"]) == {"old", "new"}
+    assert edit_definition["properties"]["old"]["minLength"] == 1
+    assert edit_definition["properties"]["replace_all"]["type"] == "boolean"
+
 
 @pytest.mark.asyncio
 async def test_key_tool_descriptions_guide_tool_choice(tmp_path, monkeypatch):

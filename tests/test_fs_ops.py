@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -30,6 +31,29 @@ def test_write_read_edit(tmp_path, monkeypatch):
     assert read_text("a.txt")["content"] == "hello world"
     edit_text("a.txt", [{"old": "world", "new": "mcp"}])
     assert read_text("a.txt")["content"] == "hello mcp"
+
+
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        ({"old": "hello", "new": "hi", "replace_all": "false"}, "replace_all must be a boolean"),
+        ({"old": 1, "new": "hi"}, "old must be a string"),
+        ({"old": "hello", "new": 1}, "new must be a string"),
+        ({"old": "hello"}, "missing field(s): new"),
+        ({"old": "hello", "new": "hi", "unexpected": True}, "unsupported field(s): unexpected"),
+        ({"old": "", "new": "hi"}, "old must not be empty"),
+    ],
+)
+def test_edit_text_rejects_invalid_edit_objects(tmp_path, monkeypatch, edit, message):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    path = tmp_path / "a.txt"
+    path.write_text("hello hello", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=re.escape(message)):
+        edit_text("a.txt", [edit])
+
+    assert path.read_text(encoding="utf-8") == "hello hello"
 
 
 def test_read_text_refuses_binary_without_decoding(tmp_path, monkeypatch):

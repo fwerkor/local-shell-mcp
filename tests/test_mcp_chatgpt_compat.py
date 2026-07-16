@@ -104,6 +104,7 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
     assert "shell:read" in scopes("apply_patch")
     assert scopes("browser_get_text_tool")
     assert scopes("browser_capture_tool")
+    assert scopes("transfer_path") == ["remote:use", "shell:read", "shell:write"]
     assert all(tool.outputSchema is not None for tool in tools.values())
     assert tools["run_shell_tool"].outputSchema["title"] == "ToolResult"
     assert set(tools["run_shell_tool"].outputSchema["properties"]) == {"ok", "message", "data"}
@@ -171,6 +172,7 @@ async def test_tool_annotations_are_conservative_and_mode_independent(
 
     assert tools["delete_file_or_dir"].annotations.destructiveHint is True
     assert tools["transfer_path"].annotations.destructiveHint is True
+    assert tools["transfer_path"].annotations.openWorldHint is True
     assert tools["write_file"].annotations.openWorldHint is True
     assert tools["create_file_link"].annotations.destructiveHint is False
     assert tools["create_file_link"].annotations.openWorldHint is True
