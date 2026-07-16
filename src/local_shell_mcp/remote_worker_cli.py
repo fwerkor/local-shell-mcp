@@ -23,6 +23,7 @@ from .remote_worker_state import (
     read_worker_config,
     write_worker_config,
 )
+from .shell_environment import is_frozen_app
 
 
 def _read_invite(args: argparse.Namespace) -> str:
@@ -147,6 +148,17 @@ async def run_enrolled_worker() -> None:
     )
 
 
+def _worker_run_exec_argv() -> list[str]:
+    if is_frozen_app():
+        return [sys.executable, "worker", "run"]
+    return [sys.executable, "-m", "local_shell_mcp.main", "worker", "run"]
+
+
+def _reexec_worker_run() -> None:
+    argv = _worker_run_exec_argv()
+    os.execv(argv[0], argv)
+
+
 async def _connect(args: argparse.Namespace) -> None:
     await enroll_worker(
         server=args.server,
@@ -156,7 +168,14 @@ async def _connect(args: argparse.Namespace) -> None:
         runtime_digest=args.runtime_digest,
         runtime_version=args.runtime_version,
     )
-    await run_enrolled_worker()
+    _reexec_worker_run()
+
+
+def _prepare_worker_start() -> None:
+    config = _load_config_or_migrate()
+    install_or_update_runtime(str(config["server"]))
+    install_launcher()
+    ensure_user_bin_on_path()
 
 
 def _add_enrollment_arguments(parser: argparse.ArgumentParser) -> None:
@@ -213,13 +232,13 @@ def _run_command(args: argparse.Namespace) -> None:
     elif args.command == "run":
         asyncio.run(run_enrolled_worker())
     elif args.command == "start":
-        install_launcher()
-        ensure_user_bin_on_path()
+        _prepare_worker_start()
         _print_result(start_service())
     elif args.command == "stop":
         _print_result(stop_service())
     elif args.command == "restart":
         stop_service()
+        _prepare_worker_start()
         _print_result(start_service())
     elif args.command == "status":
         _print_result(service_status())

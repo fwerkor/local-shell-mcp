@@ -187,13 +187,12 @@ def test_cli_legacy_and_lifecycle_dispatch(tmp_path, monkeypatch, capsys):
     assert '"running": true' in capsys.readouterr().out
 
     calls = []
-    monkeypatch.setattr(cli, "install_launcher", lambda: tmp_path / "bin" / "local-shell-mcp")
-    monkeypatch.setattr(cli, "ensure_user_bin_on_path", lambda: [tmp_path / ".profile"])
+    monkeypatch.setattr(cli, "_prepare_worker_start", lambda: calls.append("prepare"))
     monkeypatch.setattr(cli, "start_service", lambda: calls.append("start") or {"running": True})
     monkeypatch.setattr(cli, "stop_service", lambda: calls.append("stop") or {"running": False})
     cli.run_worker_cli(["start"])
     cli.run_worker_cli(["restart"])
-    assert calls == ["start", "stop", "start"]
+    assert calls == ["prepare", "start", "stop", "prepare", "start"]
 
 
 def test_cli_update_restarts_running_service(tmp_path, monkeypatch, capsys):
@@ -261,20 +260,58 @@ def test_load_config_rejects_non_mapping_legacy_identity(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_connect_enrolls_then_runs(monkeypatch):
+async def test_connect_enrolls_then_reexecs_without_invite(monkeypatch):
     calls = []
+
     async def fake_enroll(**kwargs):
         calls.append(("enroll", kwargs))
-    async def fake_run():
-        calls.append(("run", None))
+
     monkeypatch.setattr(cli, "enroll_worker", fake_enroll)
-    monkeypatch.setattr(cli, "run_enrolled_worker", fake_run)
+    monkeypatch.setattr(cli, "_reexec_worker_run", lambda: calls.append(("reexec", None)))
     args = cli.argparse.Namespace(
         server="https://s", invite="i", invite_stdin=False, name="n", workdir="/w",
         runtime_digest="d", runtime_version="v",
     )
     await cli._connect(args)  # noqa: SLF001
-    assert [item[0] for item in calls] == ["enroll", "run"]
+    assert [item[0] for item in calls] == ["enroll", "reexec"]
+    assert calls[0][1]["invite"] == "i"
+
+
+def test_worker_run_reexec_uses_token_free_argv(monkeypatch):
+    monkeypatch.setattr(cli, "is_frozen_app", lambda: False)
+    assert cli._worker_run_exec_argv() == [  # noqa: SLF001
+        cli.sys.executable,
+        "-m",
+        "local_shell_mcp.main",
+        "worker",
+        "run",
+    ]
+    monkeypatch.setattr(cli, "is_frozen_app", lambda: True)
+    assert cli._worker_run_exec_argv() == [cli.sys.executable, "worker", "run"]  # noqa: SLF001
+
+    calls = []
+    monkeypatch.setattr(cli.os, "execv", lambda executable, argv: calls.append((executable, argv)))
+    cli._reexec_worker_run()  # noqa: SLF001
+    assert calls == [(cli.sys.executable, [cli.sys.executable, "worker", "run"])]
+
+
+def test_prepare_worker_start_installs_runtime_before_launcher(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    state.write_worker_config(server="https://example.test", name="worker", workdir=str(tmp_path))
+    calls = []
+    monkeypatch.setattr(
+        cli,
+        "install_or_update_runtime",
+        lambda server: calls.append(("runtime", server)),
+    )
+    monkeypatch.setattr(cli, "install_launcher", lambda: calls.append(("launcher", None)))
+    monkeypatch.setattr(cli, "ensure_user_bin_on_path", lambda: calls.append(("path", None)))
+    cli._prepare_worker_start()  # noqa: SLF001
+    assert calls == [
+        ("runtime", "https://example.test"),
+        ("launcher", None),
+        ("path", None),
+    ]
 
 
 def test_all_remaining_lifecycle_command_branches(tmp_path, monkeypatch, capsys):
