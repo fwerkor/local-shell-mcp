@@ -33,13 +33,9 @@ class TailBuffer:
     total_bytes: int = 0
 
     def append(self, chunk: bytes) -> None:
-        if not chunk:
-            return
         self.total_bytes += len(chunk)
         self.data.extend(chunk)
-        overflow = len(self.data) - self.keep_bytes
-        if overflow > 0:
-            del self.data[:overflow]
+        del self.data[: max(0, len(self.data) - self.keep_bytes)]
 
 
 @dataclass
