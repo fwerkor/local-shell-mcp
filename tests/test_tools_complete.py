@@ -72,6 +72,9 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
     async def async_value(*args, **kwargs):
         return {"args": list(args), "kwargs": kwargs}
 
+    async def image_value(*args, **kwargs):
+        return {"ok": True, "args": list(args), "kwargs": kwargs}
+
     def sync_value(*args, **kwargs):
         return {"args": list(args), "kwargs": kwargs}
 
@@ -125,6 +128,7 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
     ):
         monkeypatch.setattr(tools, name, sync_value)
 
+    monkeypatch.setattr(tools, "_view_image_result", image_value)
     monkeypatch.setattr(downloads, "create_share_link", sync_value)
     monkeypatch.setattr(downloads, "list_share_links", sync_value)
     monkeypatch.setattr(downloads, "revoke_share_link", sync_value)
@@ -154,6 +158,7 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
         "glob_search": {"pattern": "*.py"},
         "grep_search": {"query": "x"},
         "read_file": {"path": "x"},
+        "view_image": {"path": "found.png"},
         "create_file_link": {"path": "found.txt"},
         "list_file_links": {},
         "revoke_file_link": {"token": "t"},
@@ -202,6 +207,7 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
         "glob_search": {"pattern": "*"},
         "grep_search": {"query": "x"},
         "read_file": {"path": "x"},
+        "view_image": {"path": "x"},
         "write_file": {"path": "x", "content": "y"},
         "edit_file": {"path": "x", "edits": []},
         "delete_file_or_dir": {"path": "x"},
@@ -213,7 +219,8 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
     for name, kwargs in remote_cases.items():
         result = await _raw_tool(mcp, name)(**kwargs, machine="node")
         assert result["ok"] is True, name
-    assert len(fake_remote.calls) == len(remote_cases)
+    assert len(fake_remote.calls) == len(remote_cases) - 1
+    assert all(tool != "view_image" for _, tool, _, _ in fake_remote.calls)
 
 
 @pytest.mark.asyncio

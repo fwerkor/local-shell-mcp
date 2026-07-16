@@ -379,6 +379,19 @@ OAuth scopes: `shell:read`.
 
 When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
 
+### `view_image`
+
+View a PNG, JPEG, GIF, or WebP file as native MCP image content locally or on a remote machine. Use this instead of read_file when visual inspection is needed. Remote images reuse the existing file-transfer protocol, so the worker does not need a new image-specific RPC.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `path` | `string` | required |  |
+| `machine` | `string \| null` | `null` |  |
+
+OAuth scopes: `shell:read`.
+
+When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+
 ### `write_file`
 
 Write a UTF-8 text file locally or on a remote machine.
