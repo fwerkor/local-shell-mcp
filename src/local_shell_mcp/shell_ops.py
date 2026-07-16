@@ -20,7 +20,14 @@ from .audit import audit
 from .fs_ops import relative_display, resolve_path
 from .models import CommandResult
 from .settings import get_settings
-from .shell_environment import subprocess_env
+from .shell_environment import (
+    persistent_shell_args,
+    shell_command_args,
+    subprocess_env,
+)
+from .shell_environment import (
+    shell_program_name as _shell_program_name,
+)
 from .tmux_helper import resolve_tmux, tmux_socket_name
 
 PUBLIC_RUN_SHELL_DEFAULT_TIMEOUT_S = 10
@@ -87,13 +94,15 @@ def clamp_timeout(timeout_s: int | None) -> int:
 
 def public_run_shell_timeout(timeout_s: int | None) -> int:
     if timeout_s is not None and timeout_s > PUBLIC_RUN_SHELL_TIMEOUT_CAP_S:
-        raise ValueError(f"timeout_s must be <= {PUBLIC_RUN_SHELL_TIMEOUT_CAP_S} seconds for public run_shell")
-    return max(1, min(timeout_s or PUBLIC_RUN_SHELL_DEFAULT_TIMEOUT_S, PUBLIC_RUN_SHELL_TIMEOUT_CAP_S))
+        raise ValueError(
+            f"timeout_s must be <= {PUBLIC_RUN_SHELL_TIMEOUT_CAP_S} seconds for public run_shell"
+        )
+    return max(
+        1, min(timeout_s or PUBLIC_RUN_SHELL_DEFAULT_TIMEOUT_S, PUBLIC_RUN_SHELL_TIMEOUT_CAP_S)
+    )
 
 
-def _shared_tail_bytes(
-    stdout: bytes, stderr: bytes, limit: int
-) -> tuple[bytes, bytes, bool]:
+def _shared_tail_bytes(stdout: bytes, stderr: bytes, limit: int) -> tuple[bytes, bytes, bool]:
     total = len(stdout) + len(stderr)
     if total <= limit:
         return stdout, stderr, False
@@ -156,10 +165,6 @@ def _shell_start_lock() -> asyncio.Lock:
         return lock
 
 
-def _shell_program_name(shell: str) -> str:
-    return Path(shell).name.lower()
-
-
 def quote_shell_argument(value: str) -> str:
     name = _shell_program_name(get_settings().shell_executable)
     powershell = "power" + "shell"
@@ -171,22 +176,11 @@ def quote_shell_argument(value: str) -> str:
 
 
 def _shell_command_args(command: str) -> list[str]:
-    settings = get_settings()
-    shell = settings.shell_executable
-    name = _shell_program_name(shell)
-    ps = "power" + "shell"
-    if name in {ps + ".exe", ps, "pwsh.exe", "pwsh"}:
-        return [shell, "-NoProfile", "-NonInteractive", "-Command", command]
-    if name in {"cmd.exe", "cmd"}:
-        return [shell, "/S", "/C", command]
-    return [shell, "-lc", command]
+    return shell_command_args(get_settings().shell_executable, command)
 
 
 def _persistent_shell_args(command: str | None = None) -> list[str]:
-    settings = get_settings()
-    if command:
-        return _shell_command_args(command)
-    return [settings.shell_executable]
+    return persistent_shell_args(get_settings().shell_executable, command)
 
 
 def _use_native_persistent_shell_backend() -> bool:
@@ -247,7 +241,9 @@ async def _terminate_process_group(proc: asyncio.subprocess.Process) -> str:
     return "Process did not exit after SIGKILL"
 
 
-async def _finish_reader_tasks(tasks: list[asyncio.Task[None]], timeout_s: float = READER_DRAIN_TIMEOUT_S) -> None:
+async def _finish_reader_tasks(
+    tasks: list[asyncio.Task[None]], timeout_s: float = READER_DRAIN_TIMEOUT_S
+) -> None:
     try:
         await asyncio.wait_for(asyncio.gather(*tasks), timeout=timeout_s)
     except TimeoutError:
@@ -275,7 +271,9 @@ async def _close_process_transport(proc: asyncio.subprocess.Process) -> None:
     await asyncio.sleep(0)
 
 
-async def run_shell(command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None) -> CommandResult:
+async def run_shell(
+    command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None
+) -> CommandResult:
     check_command_policy(command)
     resolved_cwd = resolve_path(cwd, must_exist=True)
     start = time.time()
@@ -340,9 +338,7 @@ async def run_shell(command: str, cwd: str = ".", timeout_s: int | None = None, 
     )
     stdout = stdout_b.decode(errors="replace")
     stderr = stderr_b.decode(errors="replace")
-    truncated = (
-        stdout_tail.truncated or stderr_tail.truncated or total_truncated
-    )
+    truncated = stdout_tail.truncated or stderr_tail.truncated or total_truncated
     duration_ms = int((time.time() - start) * 1000)
     result = CommandResult(
         ok=(proc is not None and proc.returncode == 0 and not timed_out),
@@ -367,7 +363,9 @@ async def run_shell(command: str, cwd: str = ".", timeout_s: int | None = None, 
     return result
 
 
-async def public_run_shell(command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None) -> CommandResult:
+async def public_run_shell(
+    command: str, cwd: str = ".", timeout_s: int | None = None, max_output_bytes: int | None = None
+) -> CommandResult:
     return await run_shell(command, cwd, public_run_shell_timeout(timeout_s), max_output_bytes)
 
 
@@ -381,14 +379,13 @@ async def tmux(args: list[str], timeout_s: int = 10) -> CommandResult:
     selection = resolve_tmux()
     if selection.path is None:
         raise RuntimeError("tmux is unavailable and no bundled helper matches this platform")
-    cmd = " ".join(
-        shlex.quote(x)
-        for x in [selection.path, "-L", tmux_socket_name(), *args]
-    )
+    cmd = " ".join(shlex.quote(x) for x in [selection.path, "-L", tmux_socket_name(), *args])
     return await run_shell(cmd, cwd=".", timeout_s=timeout_s)
 
 
-async def _read_native_shell_stream(session: NativeShellSession, stream: asyncio.StreamReader | None) -> None:
+async def _read_native_shell_stream(
+    session: NativeShellSession, stream: asyncio.StreamReader | None
+) -> None:
     if stream is None:
         return
     try:
@@ -409,11 +406,15 @@ def _get_native_session(session_id: str) -> NativeShellSession:
         raise RuntimeError(f"Persistent shell session not found: {session_id}")
     if session.process.returncode is not None:
         _NATIVE_SHELL_SESSIONS.pop(session_id, None)
-        raise RuntimeError(f"Persistent shell session exited with code {session.process.returncode}: {session_id}")
+        raise RuntimeError(
+            f"Persistent shell session exited with code {session.process.returncode}: {session_id}"
+        )
     return session
 
 
-async def _native_start_shell(cwd: str = ".", name: str | None = None, command: str | None = None) -> dict:
+async def _native_start_shell(
+    cwd: str = ".", name: str | None = None, command: str | None = None
+) -> dict:
     resolved_cwd = resolve_path(cwd, must_exist=True)
     max_sessions = max(1, get_settings().max_tmux_sessions)
     active = [
@@ -454,7 +455,9 @@ async def _native_start_shell(cwd: str = ".", name: str | None = None, command: 
     )
     session.readers.append(asyncio.create_task(_read_native_shell_stream(session, proc.stdout)))
     _NATIVE_SHELL_SESSIONS[session_id] = session
-    audit("shell_start", session=session_id, cwd=str(resolved_cwd), command=initial, backend="native")
+    audit(
+        "shell_start", session=session_id, cwd=str(resolved_cwd), command=initial, backend="native"
+    )
     return {
         "session_id": session_id,
         "cwd": relative_display(resolved_cwd),
@@ -472,7 +475,13 @@ async def _native_send_shell(session_id: str, input_text: str, enter: bool = Tru
     async with session.lock:
         session.process.stdin.write(data.encode())
         await session.process.stdin.drain()
-    audit("shell_send", session=session_id, bytes=len(input_text.encode()), enter=enter, backend="native")
+    audit(
+        "shell_send",
+        session=session_id,
+        bytes=len(input_text.encode()),
+        enter=enter,
+        backend="native",
+    )
     return {"session_id": session_id, "sent_bytes": len(input_text.encode()), "enter": enter}
 
 
@@ -484,7 +493,7 @@ async def _native_read_shell(session_id: str, lines: int = 200) -> dict:
     if lines > 0:
         split = output.splitlines()
         if split:
-            output = "\n".join(split[-max(1, lines):])
+            output = "\n".join(split[-max(1, lines) :])
             if bytes(session.output.data).endswith((b"\n", b"\r")):
                 output += "\n"
         else:
@@ -523,7 +532,11 @@ async def _native_stop_process(proc: asyncio.subprocess.Process) -> str:
 async def _native_kill_shell(session_id: str) -> dict:
     session = _NATIVE_SHELL_SESSIONS.pop(session_id, None)
     if session is None:
-        return {"session_id": session_id, "killed": False, "stderr": "Persistent shell session not found"}
+        return {
+            "session_id": session_id,
+            "killed": False,
+            "stderr": "Persistent shell session not found",
+        }
     stderr = await _native_stop_process(session.process)
     for reader in session.readers:
         reader.cancel()
@@ -593,9 +606,7 @@ async def _start_shell_unlocked(
     }
 
 
-async def start_shell(
-    cwd: str = ".", name: str | None = None, command: str | None = None
-) -> dict:
+async def start_shell(cwd: str = ".", name: str | None = None, command: str | None = None) -> dict:
     async with _shell_start_lock():
         return await _start_shell_unlocked(cwd, name, command)
 
@@ -633,9 +644,7 @@ async def read_shell(session_id: str, lines: int = 200) -> dict:
     if session_id in _NATIVE_SHELL_SESSIONS or resolve_tmux().path is None:
         return await _native_read_shell(session_id, lines)
 
-    result = await tmux(
-        ["capture-pane", "-p", "-t", session_id, "-S", f"-{max(1, lines)}"]
-    )
+    result = await tmux(["capture-pane", "-p", "-t", session_id, "-S", f"-{max(1, lines)}"])
     if not result.ok:
         raise RuntimeError(result.stderr or result.stdout)
     audit("shell_read", session=session_id, lines=lines, backend="tmux")

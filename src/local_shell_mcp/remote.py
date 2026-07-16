@@ -40,6 +40,7 @@ from .fs_ops import (
     write_text,
 )
 from .jobs import list_jobs, retry_job, start_job, stop_job, tail_job
+from .models import ok_result as _ok
 from .playwright_ops import browser_capture, browser_get_text, playwright_run_script
 from .search_ops import grep, tree
 from .settings import get_settings, safe_settings_dump
@@ -170,10 +171,6 @@ def _validate_machine_name(value: str) -> str:
     if any(ord(character) < 32 or character in {"/", "\\"} for character in name):
         raise ValueError("machine name contains unsupported characters")
     return name
-
-
-def _ok(data: Any = None, message: str = "") -> dict[str, Any]:
-    return {"ok": True, "message": message, "data": data}
 
 
 def _error(message: str, error: str = "remote_error", status_code: int = 400):  # noqa: ANN201
@@ -313,9 +310,7 @@ class RemoteManager:
         }
         payload = json.dumps(data, indent=2, sort_keys=True)
         tmp_path = path.with_name(path.name + f".{uuid.uuid4().hex}.tmp")
-        backup_tmp_path = backup_path.with_name(
-            backup_path.name + f".{uuid.uuid4().hex}.tmp"
-        )
+        backup_tmp_path = backup_path.with_name(backup_path.name + f".{uuid.uuid4().hex}.tmp")
         try:
             for temporary in (tmp_path, backup_tmp_path):
                 temporary.write_text(payload, encoding="utf-8")
@@ -515,9 +510,7 @@ class RemoteManager:
                 self.claimed_jobs.add(job_id)
             return {"job": job}
 
-    async def heartbeat(
-        self, token: str, payload: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    async def heartbeat(self, token: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         worker = self._worker_by_token(token)
         job_id = str((payload or {}).get("job_id") or "")
         with self._state_lock:
@@ -597,18 +590,14 @@ class RemoteManager:
             )
         preserve_pending = False
         try:
-            result = await asyncio.wait_for(
-                asyncio.shield(future), timeout=effective_timeout
-            )
+            result = await asyncio.wait_for(asyncio.shield(future), timeout=effective_timeout)
         except TimeoutError as exc:
             if tool in REMOTE_NON_CANCELLABLE_WORKER_TOOLS:
                 cancelled = self._cancel_job_if_unclaimed(job_id)
                 if not cancelled:
                     result = await future
                 else:
-                    raise TimeoutError(
-                        f"remote job timed out: {tool} on {machine}"
-                    ) from exc
+                    raise TimeoutError(f"remote job timed out: {tool} on {machine}") from exc
             else:
                 self._cancel_job(job_id)
                 raise TimeoutError(f"remote job timed out: {tool} on {machine}") from exc
@@ -863,11 +852,7 @@ async def heartbeat_endpoint(request: Any):  # noqa: ANN201
 
     try:
         return JSONResponse(
-            _ok(
-                await remote_manager().heartbeat(
-                    _bearer_token(request), await request.json()
-                )
-            )
+            _ok(await remote_manager().heartbeat(_bearer_token(request), await request.json()))
         )
     except Exception as exc:
         return _error(str(exc), type(exc).__name__, 401)
@@ -901,10 +886,6 @@ def remote_routes() -> list[Any]:
     ]
 
 
-async def _to_thread(func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-    return await asyncio.to_thread(func, *args, **kwargs)
-
-
 def _assert_worker_text_input_size(label: str, text: str) -> None:
     max_bytes = max(1, get_settings().max_file_write_bytes)
     size = len(text.encode("utf-8"))
@@ -918,10 +899,10 @@ def _handled_remote_exception(exc: Exception) -> dict[str, Any]:
 
 async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
     _assert_worker_text_input_size("patch", patch)
-    await _to_thread(prune_temp_dir)
+    await asyncio.to_thread(prune_temp_dir)
     patch_path = temp_dir() / f"remote-patch-{uuid.uuid4().hex}.diff"
     patch_path.parent.mkdir(parents=True, exist_ok=True)
-    await _to_thread(patch_path.write_text, patch, encoding="utf-8")
+    await asyncio.to_thread(patch_path.write_text, patch, encoding="utf-8")
     result = await run_shell(
         f"{quote_shell_argument(get_settings().git_bin)} apply --check "
         f"{quote_shell_argument(str(patch_path))} && "
@@ -936,13 +917,12 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
 
 async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict[str, Any]:
     _assert_worker_text_input_size("Python script", code)
-    await _to_thread(prune_temp_dir)
+    await asyncio.to_thread(prune_temp_dir)
     script = temp_dir() / f"remote-script-{uuid.uuid4().hex}.py"
     script.parent.mkdir(parents=True, exist_ok=True)
-    await _to_thread(script.write_text, code, encoding="utf-8")
+    await asyncio.to_thread(script.write_text, code, encoding="utf-8")
     result = await run_shell(
-        f"{quote_shell_argument(get_settings().python_bin)} "
-        f"{quote_shell_argument(str(script))}",
+        f"{quote_shell_argument(get_settings().python_bin)} {quote_shell_argument(str(script))}",
         cwd=cwd,
         timeout_s=public_run_shell_timeout(timeout_s),
         max_output_bytes=1_000_000,
@@ -950,21 +930,38 @@ async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict[st
     return {**result.model_dump(), "script_path": relative_display(script)}
 
 
-REMOTE_WORKER_TOOL_NAMES = frozenset(
+WORKER_ENVIRONMENT_TOOLS = frozenset(
     {
         "environment_info",
+    }
+)
+WORKER_COMMAND_TOOLS = frozenset(
+    {
         "run_shell_tool",
         "run_python_tool",
+        "apply_patch",
+    }
+)
+WORKER_SHELL_TOOLS = frozenset(
+    {
         "shell_start",
         "shell_send",
         "shell_read",
         "shell_kill",
         "shell_list",
+    }
+)
+WORKER_JOB_TOOLS = frozenset(
+    {
         "job_start",
         "job_list",
         "job_tail",
         "job_stop",
         "job_retry",
+    }
+)
+WORKER_FILE_TOOLS = frozenset(
+    {
         "list_files",
         "tree_view",
         "glob_search",
@@ -974,6 +971,10 @@ REMOTE_WORKER_TOOL_NAMES = frozenset(
         "edit_file",
         "delete_file_or_dir",
         "human_file_action",
+    }
+)
+WORKER_TRANSFER_TOOLS = frozenset(
+    {
         "transfer_stat",
         "transfer_read_chunk",
         "transfer_begin_write",
@@ -985,11 +986,23 @@ REMOTE_WORKER_TOOL_NAMES = frozenset(
         "transfer_unpack_archive",
         "transfer_upload_url",
         "transfer_download_url",
-        "apply_patch",
+    }
+)
+WORKER_BROWSER_TOOLS = frozenset(
+    {
         "browser_capture_tool",
         "browser_get_text_tool",
         "playwright_run_script_tool",
     }
+)
+REMOTE_WORKER_TOOL_NAMES = frozenset().union(
+    WORKER_ENVIRONMENT_TOOLS,
+    WORKER_COMMAND_TOOLS,
+    WORKER_SHELL_TOOLS,
+    WORKER_JOB_TOOLS,
+    WORKER_FILE_TOOLS,
+    WORKER_TRANSFER_TOOLS,
+    WORKER_BROWSER_TOOLS,
 )
 
 
@@ -1130,9 +1143,7 @@ async def execute_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     return await _execute_worker_tool_inner(tool, call_args)
 
 
-async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
-    if tool not in REMOTE_WORKER_TOOL_NAMES:
-        raise ValueError(f"unsupported remote worker tool: {tool}")
+async def _execute_environment_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "environment_info":
         python = quote_shell_argument(get_settings().python_bin)
         git = quote_shell_argument(get_settings().git_bin)
@@ -1148,6 +1159,10 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
             "persistent_shell": persistent_shell_backend_info(),
             "probe": result.model_dump(),
         }
+    raise ValueError(f"unsupported remote worker tool: {tool}")
+
+
+async def _execute_command_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "run_shell_tool":
         return (
             await public_run_shell(
@@ -1157,43 +1172,70 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
                 args.get("max_output_bytes"),
             )
         ).model_dump()
+
     if tool == "run_python_tool":
         return await _run_python(args["code"], args.get("cwd", "."), args.get("timeout_s", 60))
+
+    if tool == "apply_patch":
+        return await _apply_patch_text(args["patch"], args.get("cwd", "."))
+    raise ValueError(f"unsupported remote worker tool: {tool}")
+
+
+async def _execute_shell_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "shell_start":
         return await start_shell(args.get("cwd", "."), args.get("name"), args.get("command"))
+
     if tool == "shell_send":
         return await send_shell(args["session_id"], args["input_text"], args.get("enter", True))
+
     if tool == "shell_read":
         return await read_shell(args["session_id"], args.get("lines", 200))
+
     if tool == "shell_kill":
         return await kill_shell(args["session_id"])
+
     if tool == "shell_list":
         return await list_shells()
+    raise ValueError(f"unsupported remote worker tool: {tool}")
+
+
+async def _execute_job_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "job_start":
         return await start_job(args["command"], args.get("cwd", "."), args.get("name"))
+
     if tool == "job_list":
         return await list_jobs(args.get("include_finished", True))
+
     if tool == "job_tail":
         return await tail_job(args["job_id"], args.get("lines", 200))
+
     if tool == "job_stop":
         return await stop_job(args["job_id"])
+
     if tool == "job_retry":
         return await retry_job(args["job_id"])
+    raise ValueError(f"unsupported remote worker tool: {tool}")
+
+
+async def _execute_file_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "list_files":
-        return await _to_thread(
+        return await asyncio.to_thread(
             list_dir,
             args.get("path", "."),
             args.get("recursive", False),
             args.get("max_entries", 500),
         )
+
     if tool == "tree_view":
         return await tree(args.get("cwd", "."), args.get("depth", 3), args.get("max_entries", 500))
+
     if tool == "glob_search":
         return {
-            "paths": await _to_thread(
+            "paths": await asyncio.to_thread(
                 glob_paths, args["pattern"], args.get("cwd", "."), args.get("max_results", 500)
             )
         }
+
     if tool == "grep_search":
         return await grep(
             args["query"],
@@ -1203,8 +1245,9 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
             args.get("case_sensitive", True),
             args.get("max_results"),
         )
+
     if tool == "read_file":
-        return await _to_thread(
+        return await asyncio.to_thread(
             read_texts,
             args["path"],
             args.get("start_line"),
@@ -1212,41 +1255,52 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
             args.get("binary_preview"),
             args.get("binary_preview_bytes", 256),
         )
+
     if tool == "write_file":
-        return await _to_thread(
+        return await asyncio.to_thread(
             write_text,
             args["path"],
             args["content"],
             args.get("overwrite", True),
             args.get("expected_sha256"),
         )
+
     if tool == "edit_file":
-        return await _to_thread(edit_text, args["path"], args["edits"])
+        return await asyncio.to_thread(edit_text, args["path"], args["edits"])
+
     if tool == "delete_file_or_dir":
-        return await _to_thread(delete_path, args["path"], args.get("recursive", False))
+        return await asyncio.to_thread(delete_path, args["path"], args.get("recursive", False))
+
     if tool == "human_file_action":
-        return await _to_thread(
+        return await asyncio.to_thread(
             perform_file_action,
             args["action"],
             args["path"],
             args.get("destination"),
             exist_ok=args.get("exist_ok", False),
         )
+    raise ValueError(f"unsupported remote worker tool: {tool}")
+
+
+async def _execute_transfer_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "transfer_stat":
-        return await _to_thread(transfer_stat, args["path"], args.get("sha256", True))
+        return await asyncio.to_thread(transfer_stat, args["path"], args.get("sha256", True))
+
     if tool == "transfer_read_chunk":
-        return await _to_thread(
+        return await asyncio.to_thread(
             transfer_read_chunk, args["path"], args.get("offset", 0), args.get("chunk_size")
         )
+
     if tool == "transfer_begin_write":
-        return await _to_thread(
+        return await asyncio.to_thread(
             transfer_begin_write,
             args["path"],
             args.get("overwrite", True),
             args.get("expected_bytes"),
         )
+
     if tool == "transfer_write_chunk":
-        return await _to_thread(
+        return await asyncio.to_thread(
             transfer_write_chunk,
             args["path"],
             args["transfer_id"],
@@ -1254,30 +1308,38 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
             args["data_b64"],
             args.get("expected_sha256"),
         )
+
     if tool == "transfer_finish_write":
-        return await _to_thread(
+        return await asyncio.to_thread(
             transfer_finish_write,
             args["path"],
             args["transfer_id"],
             args.get("expected_bytes"),
             args.get("expected_sha256"),
         )
+
     if tool == "transfer_abort_write":
-        return await _to_thread(transfer_abort_write, args["path"], args["transfer_id"])
+        return await asyncio.to_thread(transfer_abort_write, args["path"], args["transfer_id"])
+
     if tool == "transfer_alloc_temp_path":
-        return await _to_thread(transfer_alloc_temp_path, args.get("suffix", ".bin"))
+        return await asyncio.to_thread(transfer_alloc_temp_path, args.get("suffix", ".bin"))
+
     if tool == "transfer_pack_dir":
-        return await _to_thread(transfer_pack_dir, args["path"], args.get("compression", "gz"))
+        return await asyncio.to_thread(
+            transfer_pack_dir, args["path"], args.get("compression", "gz")
+        )
+
     if tool == "transfer_unpack_archive":
-        return await _to_thread(
+        return await asyncio.to_thread(
             transfer_unpack_archive,
             args["archive_path"],
             args["dst_path"],
             args.get("overwrite", True),
             args.get("cleanup_archive", True),
         )
+
     if tool == "transfer_upload_url":
-        return await _to_thread(
+        return await asyncio.to_thread(
             _worker_upload_url,
             args["path"],
             args["url"],
@@ -1285,8 +1347,9 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
             args["expected_sha256"],
             args.get("timeout_s"),
         )
+
     if tool == "transfer_download_url":
-        return await _to_thread(
+        return await asyncio.to_thread(
             _worker_download_url,
             args["url"],
             args["path"],
@@ -1295,8 +1358,10 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
             args["expected_sha256"],
             args.get("timeout_s"),
         )
-    if tool == "apply_patch":
-        return await _apply_patch_text(args["patch"], args.get("cwd", "."))
+    raise ValueError(f"unsupported remote worker tool: {tool}")
+
+
+async def _execute_browser_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "browser_capture_tool":
         return await browser_capture(
             args["url"],
@@ -1308,6 +1373,7 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
             args.get("height", 1000),
             args.get("wait_until", "networkidle"),
         )
+
     if tool == "browser_get_text_tool":
         return await browser_get_text(
             args["url"],
@@ -1315,10 +1381,29 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
             args.get("wait_until", "networkidle"),
             args.get("selector", "body"),
         )
+
     if tool == "playwright_run_script_tool":
         return await playwright_run_script(
             args["script"], args.get("cwd", "."), args.get("timeout_s", 60)
         )
+    raise ValueError(f"unsupported remote worker tool: {tool}")
+
+
+async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
+    if tool in WORKER_ENVIRONMENT_TOOLS:
+        return await _execute_environment_worker_tool(tool, args)
+    if tool in WORKER_COMMAND_TOOLS:
+        return await _execute_command_worker_tool(tool, args)
+    if tool in WORKER_SHELL_TOOLS:
+        return await _execute_shell_worker_tool(tool, args)
+    if tool in WORKER_JOB_TOOLS:
+        return await _execute_job_worker_tool(tool, args)
+    if tool in WORKER_FILE_TOOLS:
+        return await _execute_file_worker_tool(tool, args)
+    if tool in WORKER_TRANSFER_TOOLS:
+        return await _execute_transfer_worker_tool(tool, args)
+    if tool in WORKER_BROWSER_TOOLS:
+        return await _execute_browser_worker_tool(tool, args)
     raise ValueError(f"unsupported remote worker tool: {tool}")
 
 

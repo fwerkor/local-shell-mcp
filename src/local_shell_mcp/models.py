@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from typing import Any
+
+
+def ok_result(data: Any = None, message: str = "") -> dict[str, Any]:
+    return {"ok": True, "message": message, "data": data}
+
+
 try:
     from pydantic import BaseModel, Field
 except Exception:  # pragma: no cover - exercised in dependency-light worker bootstraps.
     from dataclasses import asdict, dataclass, field
-    from typing import Any
-
     class _ModelMixin:
         def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:  # noqa: ARG002
             return asdict(self)

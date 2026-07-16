@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -82,10 +83,6 @@ def principal_dep(request: Request) -> Principal:
 PRINCIPAL_DEP = Depends(principal_dep)
 
 
-async def _blocking(func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-    return await asyncio.to_thread(func, *args, **kwargs)
-
-
 def _body_bool(body: dict, key: str, default: bool) -> bool:
     if key not in body:
         return default
@@ -112,28 +109,29 @@ def _body_int(
     return value
 
 
-def build_http_app() -> FastAPI:
-    app = FastAPI(title="local-shell-mcp REST API", version="0.1.0")
-    settings = get_settings()
-    if settings.auth_mode != "none":
-        app.add_middleware(CloudflareAccessMiddleware)
-    app.add_middleware(RequestBodyLimitMiddleware)
-
+def _install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(ValueError)
     async def value_error_handler(request: Request, exc: ValueError):  # noqa: ARG001
-        return JSONResponse(status_code=400, content={"ok": False, "error": "validation_error", "message": str(exc)})
+        return JSONResponse(
+            status_code=400, content={"ok": False, "error": "validation_error", "message": str(exc)}
+        )
 
     @app.exception_handler(KeyError)
     async def key_error_handler(request: Request, exc: KeyError):  # noqa: ARG001
         missing = str(exc.args[0]) if exc.args else "unknown"
         return JSONResponse(
             status_code=400,
-            content={"ok": False, "error": "validation_error", "message": f"Missing required argument: {missing}"},
+            content={
+                "ok": False,
+                "error": "validation_error",
+                "message": f"Missing required argument: {missing}",
+            },
         )
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_error_handler(
-        request: Request, exc: RequestValidationError  # noqa: ARG001
+        request: Request,
+        exc: RequestValidationError,  # noqa: ARG001
     ):
         messages = []
         for error in exc.errors():
@@ -157,6 +155,8 @@ def build_http_app() -> FastAPI:
             headers=exc.headers,
         )
 
+
+def _install_tool_timeout_middleware(app: FastAPI) -> None:
     @app.middleware("http")
     async def tools_timeout_middleware(request: Request, call_next):  # noqa: ANN001
         if not request.url.path.startswith("/tools/"):
@@ -177,6 +177,8 @@ def build_http_app() -> FastAPI:
                 },
             )
 
+
+def _register_status_routes(app: FastAPI) -> None:
     @app.get("/healthz")
     async def healthz():
         return {"ok": True}
@@ -189,29 +191,38 @@ def build_http_app() -> FastAPI:
     async def api_version():
         return version_info()
 
+
+def _register_skill_routes(app: FastAPI, settings: Any) -> None:
     @app.get("/tools/skills_list")
     async def api_skills_list(_: Principal = PRINCIPAL_DEP):
-        return await _blocking(list_installed_skills, settings)
+        return await asyncio.to_thread(list_installed_skills, settings)
 
     @app.post("/tools/skill_load")
     async def api_skill_load(body: SkillLoadRequest, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(load_installed_skill, body.name, settings)
+        return await asyncio.to_thread(load_installed_skill, body.name, settings)
 
     @app.post("/tools/skill_read_file")
-    async def api_skill_read_file(
-        body: SkillReadFileRequest, _: Principal = PRINCIPAL_DEP
-    ):
-        return await _blocking(
+    async def api_skill_read_file(body: SkillReadFileRequest, _: Principal = PRINCIPAL_DEP):
+        return await asyncio.to_thread(
             read_installed_skill_file,
             body.name,
             body.path,
             settings,
         )
 
+
+def _register_shell_routes(app: FastAPI) -> None:
     @app.post("/tools/run_shell")
     async def api_run_shell(body: dict, _: Principal = PRINCIPAL_DEP):
         try:
-            return (await public_run_shell(body["command"], body.get("cwd", "."), _body_int(body, "timeout_s", None, allow_none=True), _body_int(body, "max_output_bytes", None, allow_none=True))).model_dump()
+            return (
+                await public_run_shell(
+                    body["command"],
+                    body.get("cwd", "."),
+                    _body_int(body, "timeout_s", None, allow_none=True),
+                    _body_int(body, "max_output_bytes", None, allow_none=True),
+                )
+            ).model_dump()
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -221,7 +232,9 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/shell_send")
     async def api_shell_send(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await send_shell(body["session_id"], body["input_text"], _body_bool(body, "enter", True))
+        return await send_shell(
+            body["session_id"], body["input_text"], _body_bool(body, "enter", True)
+        )
 
     @app.post("/tools/shell_read")
     async def api_shell_read(body: dict, _: Principal = PRINCIPAL_DEP):
@@ -235,47 +248,48 @@ def build_http_app() -> FastAPI:
     async def api_shell_list(_: Principal = PRINCIPAL_DEP):
         return await list_shells()
 
+
+def _register_workspace_routes(app: FastAPI) -> None:
     @app.post("/tools/list_files")
     async def api_list_files(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(list_dir, body.get("path", "."), _body_bool(body, "recursive", False), _body_int(body, "max_entries", 500))
+        return await asyncio.to_thread(
+            list_dir,
+            body.get("path", "."),
+            _body_bool(body, "recursive", False),
+            _body_int(body, "max_entries", 500),
+        )
 
     @app.post("/tools/tree")
     async def api_tree(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await tree(body.get("cwd", "."), _body_int(body, "depth", 3), _body_int(body, "max_entries", 500))
+        return await tree(
+            body.get("cwd", "."), _body_int(body, "depth", 3), _body_int(body, "max_entries", 500)
+        )
 
     @app.post("/tools/glob")
     async def api_glob(body: dict, _: Principal = PRINCIPAL_DEP):
-        return {"paths": await _blocking(glob_paths, body["pattern"], body.get("cwd", "."), _body_int(body, "max_results", 500))}
+        return {
+            "paths": await asyncio.to_thread(
+                glob_paths,
+                body["pattern"],
+                body.get("cwd", "."),
+                _body_int(body, "max_results", 500),
+            )
+        }
 
     @app.post("/tools/grep")
     async def api_grep(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await grep(body["query"], body.get("cwd", "."), body.get("glob"), _body_bool(body, "regex", True), _body_bool(body, "case_sensitive", True), _body_int(body, "max_results", None, allow_none=True))
-
-    @app.api_route("/download/{token}", methods=["GET", "HEAD"])
-    async def api_download(request: Request):
-        return await download_endpoint(request)
-
-    @app.post("/tools/download/create")
-    async def api_create_download_link(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(
-            create_download_link,
-            body["path"],
-            _body_int(body, "ttl_s", None, allow_none=True),
-            body.get("filename"),
-            _body_int(body, "max_downloads", None, allow_none=True),
+        return await grep(
+            body["query"],
+            body.get("cwd", "."),
+            body.get("glob"),
+            _body_bool(body, "regex", True),
+            _body_bool(body, "case_sensitive", True),
+            _body_int(body, "max_results", None, allow_none=True),
         )
-
-    @app.get("/tools/download/list")
-    async def api_list_download_links(include_expired: bool = False, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(list_download_links, include_expired)
-
-    @app.post("/tools/download/revoke")
-    async def api_revoke_download_link(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(revoke_download_link, body["token"])
 
     @app.post("/tools/read_file")
     async def api_read_file(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(
+        return await asyncio.to_thread(
             read_texts,
             body["path"],
             _body_int(body, "start_line", None, allow_none=True),
@@ -286,24 +300,56 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/write_file")
     async def api_write_file(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(write_text, body["path"], body["content"], _body_bool(body, "overwrite", True))
+        return await asyncio.to_thread(
+            write_text, body["path"], body["content"], _body_bool(body, "overwrite", True)
+        )
 
     @app.post("/tools/edit_file")
     async def api_edit_file(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(edit_text, body["path"], body["edits"])
+        return await asyncio.to_thread(edit_text, body["path"], body["edits"])
 
     @app.post("/tools/delete")
     async def api_delete(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(delete_path, body["path"], _body_bool(body, "recursive", False))
+        return await asyncio.to_thread(
+            delete_path, body["path"], _body_bool(body, "recursive", False)
+        )
 
+
+def _register_download_routes(app: FastAPI) -> None:
+    @app.api_route("/download/{token}", methods=["GET", "HEAD"])
+    async def api_download(request: Request):
+        return await download_endpoint(request)
+
+    @app.post("/tools/download/create")
+    async def api_create_download_link(body: dict, _: Principal = PRINCIPAL_DEP):
+        return await asyncio.to_thread(
+            create_download_link,
+            body["path"],
+            _body_int(body, "ttl_s", None, allow_none=True),
+            body.get("filename"),
+            _body_int(body, "max_downloads", None, allow_none=True),
+        )
+
+    @app.get("/tools/download/list")
+    async def api_list_download_links(include_expired: bool = False, _: Principal = PRINCIPAL_DEP):
+        return await asyncio.to_thread(list_download_links, include_expired)
+
+    @app.post("/tools/download/revoke")
+    async def api_revoke_download_link(body: dict, _: Principal = PRINCIPAL_DEP):
+        return await asyncio.to_thread(revoke_download_link, body["token"])
+
+
+def _register_todo_routes(app: FastAPI) -> None:
     @app.get("/tools/todo")
     async def api_todo_read(_: Principal = PRINCIPAL_DEP):
-        return await _blocking(todo_read)
+        return await asyncio.to_thread(todo_read)
 
     @app.post("/tools/todo")
     async def api_todo_write(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await _blocking(todo_write, body.get("todos", []))
+        return await asyncio.to_thread(todo_write, body.get("todos", []))
 
+
+def _register_browser_routes(app: FastAPI) -> None:
     @app.post("/tools/browser/capture")
     async def api_browser_capture(body: dict, _: Principal = PRINCIPAL_DEP):
         return await browser_capture(
@@ -328,7 +374,27 @@ def build_http_app() -> FastAPI:
 
     @app.post("/tools/playwright/run_script")
     async def api_playwright_run_script(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await playwright_run_script(body["script"], body.get("cwd", "."), _body_int(body, "timeout_s", 60))
+        return await playwright_run_script(
+            body["script"], body.get("cwd", "."), _body_int(body, "timeout_s", 60)
+        )
+
+
+def build_http_app() -> FastAPI:
+    app = FastAPI(title="local-shell-mcp REST API", version="0.1.0")
+    settings = get_settings()
+    if settings.auth_mode != "none":
+        app.add_middleware(CloudflareAccessMiddleware)
+    app.add_middleware(RequestBodyLimitMiddleware)
+
+    _install_exception_handlers(app)
+    _install_tool_timeout_middleware(app)
+    _register_status_routes(app)
+    _register_skill_routes(app, settings)
+    _register_shell_routes(app)
+    _register_workspace_routes(app)
+    _register_download_routes(app)
+    _register_todo_routes(app)
+    _register_browser_routes(app)
 
     app.router.routes.extend(ui_routes())
     return app

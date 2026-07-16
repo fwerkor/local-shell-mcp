@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 from .settings import get_settings
 
@@ -11,6 +12,26 @@ FROZEN_LOADER_ENV_VARS = (
     "DYLD_LIBRARY_PATH",
     "DYLD_INSERT_LIBRARIES",
 )
+
+
+def shell_program_name(shell: str) -> str:
+    return Path(shell).name.lower()
+
+
+def shell_command_args(shell: str, command: str) -> list[str]:
+    name = shell_program_name(shell)
+    powershell = "power" + "shell"
+    if name in {powershell + ".exe", powershell, "pwsh.exe", "pwsh"}:
+        return [shell, "-NoProfile", "-NonInteractive", "-Command", command]
+    if name in {"cmd.exe", "cmd"}:
+        return [shell, "/S", "/C", command]
+    return [shell, "-lc", command]
+
+
+def persistent_shell_args(shell: str, command: str | None = None) -> list[str]:
+    if command:
+        return shell_command_args(shell, command)
+    return [shell]
 
 
 def is_frozen_app() -> bool:

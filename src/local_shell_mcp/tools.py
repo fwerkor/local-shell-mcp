@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .audit import audit
 from .auth import require_current_scopes
+from .downloads import create_share_link, list_share_links, revoke_share_link
 from .fs_ops import (
     delete_path,
     edit_text,
@@ -36,6 +37,7 @@ from .fs_ops import (
 from .image_ops import ImageFile, assert_view_image_size, read_image
 from .jobs import list_jobs, retry_job, start_job, stop_job, tail_job
 from .models import ToolResult
+from .models import ok_result as _ok
 from .playwright_ops import browser_capture, browser_get_text, playwright_run_script
 from .remote import remote_manager
 from .remote_transfer import (
@@ -103,10 +105,6 @@ class ViewImageResult(BaseModel):
     error_type: str | None = None
 
 
-def _ok(data: Any = None, message: str = "") -> dict:
-    return {"ok": True, "message": message, "data": data}
-
-
 def _handled_error(exc: Exception) -> dict:
     audit("tool_error", error=repr(exc))
     if isinstance(exc, FileNotFoundError) and str(exc):
@@ -135,8 +133,14 @@ def _sync(coro):  # noqa: ANN001
     return asyncio.get_event_loop().run_until_complete(coro)
 
 
-async def _to_thread(func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
-    return await asyncio.to_thread(func, *args, **kwargs)
+async def _tool_call(operation, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+    try:
+        result = operation(*args, **kwargs)
+        if inspect.isawaitable(result):
+            result = await result
+        return _ok(result)
+    except Exception as exc:
+        return _handled_error(exc)
 
 
 def _assert_text_input_size(label: str, text: str, limit: int | None = None) -> None:
@@ -149,10 +153,10 @@ def _assert_text_input_size(label: str, text: str, limit: int | None = None) -> 
 
 async def _apply_patch_text(patch: str, cwd: str = ".") -> dict:
     _assert_text_input_size("patch", patch)
-    await _to_thread(prune_temp_dir)
+    await asyncio.to_thread(prune_temp_dir)
     patch_path = temp_dir() / f"patch-{uuid.uuid4().hex}.diff"
     patch_path.parent.mkdir(parents=True, exist_ok=True)
-    await _to_thread(patch_path.write_text, patch, encoding="utf-8")
+    await asyncio.to_thread(patch_path.write_text, patch, encoding="utf-8")
     quoted = quote_shell_argument(str(patch_path))
     git = quote_shell_argument(get_settings().git_bin)
     result = await run_shell(
@@ -166,10 +170,10 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict:
 
 async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict:
     _assert_text_input_size("Python script", code)
-    await _to_thread(prune_temp_dir)
+    await asyncio.to_thread(prune_temp_dir)
     path = temp_dir() / f"script-{uuid.uuid4().hex}.py"
     path.parent.mkdir(parents=True, exist_ok=True)
-    await _to_thread(path.write_text, code, encoding="utf-8")
+    await asyncio.to_thread(path.write_text, code, encoding="utf-8")
     python = quote_shell_argument(get_settings().python_bin)
     result = await run_shell(
         f"{python} {quote_shell_argument(str(path))}",
@@ -187,7 +191,14 @@ SECRET_PATTERNS = {
     "generic_assignment": r"(?i)(token|secret|password|passwd|api_key|apikey)\s*[:=]\s*['\"][^'\"]{8,}['\"]",
 }
 
-ALL_OAUTH_SCOPES = ["shell:read", "shell:write", "shell:execute", "browser:use", "file:share", "remote:use"]
+ALL_OAUTH_SCOPES = [
+    "shell:read",
+    "shell:write",
+    "shell:execute",
+    "browser:use",
+    "file:share",
+    "remote:use",
+]
 
 
 def _oauth_security_scheme(scopes: list[str]) -> dict[str, Any]:
@@ -239,10 +250,7 @@ NON_CANCELLABLE_TOOL_NAMES = frozenset(
     }
 )
 
-REMOTE_MACHINE_ARGUMENTS = frozenset(
-    {"machine", "source_machine", "destination_machine"}
-)
-
+REMOTE_MACHINE_ARGUMENTS = frozenset({"machine", "source_machine", "destination_machine"})
 
 
 def _security_meta(schemes: list[dict[str, Any]]) -> dict[str, Any]:
@@ -305,9 +313,8 @@ def _redact_audit_value(value: Any) -> Any:
         for name, item in list(value.items())[:50]:
             name_s = str(name)
             name_lower = name_s.lower()
-            if (
-                name_lower in OPAQUE_AUDIT_TOOL_ARGS
-                or any(fragment in name_lower for fragment in SENSITIVE_TOOL_ARG_FRAGMENTS)
+            if name_lower in OPAQUE_AUDIT_TOOL_ARGS or any(
+                fragment in name_lower for fragment in SENSITIVE_TOOL_ARG_FRAGMENTS
             ):
                 out[name_s] = "<redacted>"
             else:
@@ -323,7 +330,9 @@ def _audit_tool_arguments(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict
     }
 
 
-def _audit_tool_purpose(tool_name: str, purpose: str | None = None, explanation: str | None = None) -> dict[str, str]:
+def _audit_tool_purpose(
+    tool_name: str, purpose: str | None = None, explanation: str | None = None
+) -> dict[str, str]:
     details: dict[str, str] = {}
     if purpose is not None:
         purpose = purpose.strip()
@@ -439,7 +448,6 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
         tool.fn = wrapped
 
 
-
 def _remove_remote_tools_when_disabled(mcp: FastMCP) -> None:
     if get_settings().remote_enabled:
         return
@@ -504,13 +512,10 @@ def _install_tool_annotations(mcp: FastMCP) -> None:
         open_world = name.startswith("remote_") or name in OPEN_WORLD_TOOL_NAMES
         tool.annotations = ToolAnnotations(
             readOnlyHint=read_only,
-            destructiveHint=not (
-                read_only or name in NON_DESTRUCTIVE_MUTATION_TOOL_NAMES
-            ),
+            destructiveHint=not (read_only or name in NON_DESTRUCTIVE_MUTATION_TOOL_NAMES),
             idempotentHint=read_only,
             openWorldHint=open_world,
         )
-
 
 
 def _gitignore_spec(
@@ -557,7 +562,9 @@ def _secret_scan_candidates(base: Any, glob: str | None = None) -> list[Any]:
     if glob:
         args.extend(["--glob", glob])
     try:
-        result = subprocess.run(args, cwd=str(base), text=True, capture_output=True, timeout=30, check=False)
+        result = subprocess.run(
+            args, cwd=str(base), text=True, capture_output=True, timeout=30, check=False
+        )
     except Exception:
         result = None
     if result is not None and result.returncode in {0, 1}:
@@ -623,12 +630,16 @@ def _secret_scan_sync(cwd: str = ".", glob: str | None = None, max_results: int 
                 line = text.count("\n", 0, match.start()) + 1
                 findings.append({"type": name, "path": relative_display(path), "line": line})
                 if len(findings) >= max_results:
-                    return {"findings": findings, "truncated": True, "truncated_files": truncated_files}
+                    return {
+                        "findings": findings,
+                        "truncated": True,
+                        "truncated_files": truncated_files,
+                    }
     return {"findings": findings, "truncated": False, "truncated_files": truncated_files}
 
 
 async def _secret_scan(cwd: str = ".", glob: str | None = None, max_results: int = 200) -> dict:
-    return await _to_thread(_secret_scan_sync, cwd, glob, max_results)
+    return await asyncio.to_thread(_secret_scan_sync, cwd, glob, max_results)
 
 
 class RemoteTransferError(RuntimeError):
@@ -646,7 +657,9 @@ def _unwrap_remote_transfer_result(result: dict, *, machine: str, tool: str) -> 
     return data
 
 
-async def _remote_transfer_data(machine: str, tool: str, args: dict, timeout_s: int | None = None) -> Any:
+async def _remote_transfer_data(
+    machine: str, tool: str, args: dict, timeout_s: int | None = None
+) -> Any:
     result = await remote_manager().call(machine, tool, args, timeout_s)
     return _unwrap_remote_transfer_result(result, machine=machine, tool=tool)
 
@@ -658,7 +671,7 @@ async def _copy_local_file_to_remote(
     overwrite: bool = True,
     chunk_size: int | None = None,
 ) -> dict:
-    stat = await _to_thread(transfer_stat, source_path, True)
+    stat = await asyncio.to_thread(transfer_stat, source_path, True)
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {source_path}")
     if chunk_size is None:
@@ -701,7 +714,7 @@ async def _copy_local_file_to_remote(
         chunks = 0
         try:
             while offset < stat["size"]:
-                chunk = await _to_thread(
+                chunk = await asyncio.to_thread(
                     transfer_read_chunk, source_path, offset, effective_chunk_size
                 )
                 await _remote_transfer_data(
@@ -786,7 +799,7 @@ async def _copy_remote_file_to_local(
         transport = "http-stream"
     else:
         effective_chunk_size = normalize_chunk_size(chunk_size)
-        begin = await _to_thread(
+        begin = await asyncio.to_thread(
             transfer_begin_write, destination_path, overwrite, stat["size"]
         )
         offset = 0
@@ -802,7 +815,7 @@ async def _copy_remote_file_to_local(
                         "chunk_size": effective_chunk_size,
                     },
                 )
-                await _to_thread(
+                await asyncio.to_thread(
                     transfer_write_chunk,
                     destination_path,
                     begin["transfer_id"],
@@ -812,7 +825,7 @@ async def _copy_remote_file_to_local(
                 )
                 offset += chunk["bytes"]
                 chunks += 1
-            finish = await _to_thread(
+            finish = await asyncio.to_thread(
                 transfer_finish_write,
                 destination_path,
                 begin["transfer_id"],
@@ -821,7 +834,7 @@ async def _copy_remote_file_to_local(
             )
         except BaseException:
             with suppress(Exception):
-                await _to_thread(
+                await asyncio.to_thread(
                     transfer_abort_write, destination_path, begin["transfer_id"]
                 )
             raise
@@ -845,7 +858,7 @@ async def _copy_remote_file_to_remote(
     overwrite: bool = True,
     chunk_size: int | None = None,
 ) -> dict:
-    temporary = await _to_thread(transfer_alloc_temp_path, ".bin")
+    temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".bin")
     try:
         pull = await _copy_remote_file_to_local(
             src_machine,
@@ -881,7 +894,67 @@ async def _copy_remote_file_to_remote(
 
 async def _remote_cleanup_file(machine: str, path: str) -> None:
     with suppress(Exception):
-        await _remote_transfer_data(machine, "delete_file_or_dir", {"path": path, "recursive": False})
+        await _remote_transfer_data(
+            machine, "delete_file_or_dir", {"path": path, "recursive": False}
+        )
+
+
+async def _copy_packed_dir_to_remote(
+    pack: dict,
+    src_machine: str | None,
+    dst_machine: str,
+    dst_path: str,
+    overwrite: bool,
+    chunk_size: int | None,
+) -> dict:
+    dst_archive = await _remote_transfer_data(
+        dst_machine, "transfer_alloc_temp_path", {"suffix": ".tar.gz"}
+    )
+    try:
+        if src_machine:
+            copy_result = await _copy_remote_file_to_remote(
+                src_machine,
+                pack["archive_path"],
+                dst_machine,
+                dst_archive["path"],
+                True,
+                chunk_size,
+            )
+        else:
+            copy_result = await _copy_local_file_to_remote(
+                pack["archive_path"],
+                dst_machine,
+                dst_archive["path"],
+                True,
+                chunk_size,
+            )
+        unpack = await _remote_transfer_data(
+            dst_machine,
+            "transfer_unpack_archive",
+            {
+                "archive_path": dst_archive["path"],
+                "dst_path": dst_path,
+                "overwrite": overwrite,
+                "cleanup_archive": True,
+            },
+        )
+    except Exception:
+        await _remote_cleanup_file(dst_machine, dst_archive.get("path", ""))
+        raise
+    finally:
+        if src_machine:
+            await _remote_cleanup_file(src_machine, pack.get("archive_path", ""))
+        else:
+            with suppress(Exception):
+                delete_path(pack.get("archive_path", ""), False)
+    return {
+        "source": {"machine": src_machine or "controller", "path": pack["path"]},
+        "destination": {"machine": dst_machine, "path": unpack["path"]},
+        "archive_bytes": pack["bytes"],
+        "archive_sha256": pack["sha256"],
+        "chunks": copy_result["chunks"],
+        "entries": unpack["entries"],
+    }
 
 
 async def _copy_remote_dir_to_remote(
@@ -892,30 +965,17 @@ async def _copy_remote_dir_to_remote(
     overwrite: bool = True,
     chunk_size: int | None = None,
 ) -> dict:
-    pack = await _remote_transfer_data(src_machine, "transfer_pack_dir", {"path": src_path, "compression": "gz"})
-    dst_archive = await _remote_transfer_data(dst_machine, "transfer_alloc_temp_path", {"suffix": ".tar.gz"})
-    try:
-        copy_result = await _copy_remote_file_to_remote(
-            src_machine, pack["archive_path"], dst_machine, dst_archive["path"], True, chunk_size
-        )
-        unpack = await _remote_transfer_data(
-            dst_machine,
-            "transfer_unpack_archive",
-            {"archive_path": dst_archive["path"], "dst_path": dst_path, "overwrite": overwrite, "cleanup_archive": True},
-        )
-    except Exception:
-        await _remote_cleanup_file(dst_machine, dst_archive.get("path", ""))
-        raise
-    finally:
-        await _remote_cleanup_file(src_machine, pack.get("archive_path", ""))
-    return {
-        "source": {"machine": src_machine, "path": pack["path"]},
-        "destination": {"machine": dst_machine, "path": unpack["path"]},
-        "archive_bytes": pack["bytes"],
-        "archive_sha256": pack["sha256"],
-        "chunks": copy_result["chunks"],
-        "entries": unpack["entries"],
-    }
+    pack = await _remote_transfer_data(
+        src_machine, "transfer_pack_dir", {"path": src_path, "compression": "gz"}
+    )
+    return await _copy_packed_dir_to_remote(
+        pack,
+        src_machine,
+        dst_machine,
+        dst_path,
+        overwrite,
+        chunk_size,
+    )
 
 
 async def _copy_remote_dir_to_local(
@@ -925,13 +985,15 @@ async def _copy_remote_dir_to_local(
     overwrite: bool = True,
     chunk_size: int | None = None,
 ) -> dict:
-    pack = await _remote_transfer_data(src_machine, "transfer_pack_dir", {"path": src_path, "compression": "gz"})
-    archive = await _to_thread(transfer_alloc_temp_path, ".tar.gz")
+    pack = await _remote_transfer_data(
+        src_machine, "transfer_pack_dir", {"path": src_path, "compression": "gz"}
+    )
+    archive = await asyncio.to_thread(transfer_alloc_temp_path, ".tar.gz")
     try:
         copy_result = await _copy_remote_file_to_local(
             src_machine, pack["archive_path"], archive["path"], True, chunk_size
         )
-        unpack = await _to_thread(
+        unpack = await asyncio.to_thread(
             transfer_unpack_archive, archive["path"], destination_path, overwrite, True
         )
     finally:
@@ -955,29 +1017,15 @@ async def _copy_local_dir_to_remote(
     overwrite: bool = True,
     chunk_size: int | None = None,
 ) -> dict:
-    pack = await _to_thread(transfer_pack_dir, source_path, "gz")
-    dst_archive = await _remote_transfer_data(dst_machine, "transfer_alloc_temp_path", {"suffix": ".tar.gz"})
-    try:
-        copy_result = await _copy_local_file_to_remote(pack["archive_path"], dst_machine, dst_archive["path"], True, chunk_size)
-        unpack = await _remote_transfer_data(
-            dst_machine,
-            "transfer_unpack_archive",
-            {"archive_path": dst_archive["path"], "dst_path": dst_path, "overwrite": overwrite, "cleanup_archive": True},
-        )
-    except Exception:
-        await _remote_cleanup_file(dst_machine, dst_archive.get("path", ""))
-        raise
-    finally:
-        with suppress(Exception):
-            delete_path(pack.get("archive_path", ""), False)
-    return {
-        "source": {"machine": "controller", "path": pack["path"]},
-        "destination": {"machine": dst_machine, "path": unpack["path"]},
-        "archive_bytes": pack["bytes"],
-        "archive_sha256": pack["sha256"],
-        "chunks": copy_result["chunks"],
-        "entries": unpack["entries"],
-    }
+    pack = await asyncio.to_thread(transfer_pack_dir, source_path, "gz")
+    return await _copy_packed_dir_to_remote(
+        pack,
+        None,
+        dst_machine,
+        dst_path,
+        overwrite,
+        chunk_size,
+    )
 
 
 async def _transfer_path(
@@ -997,7 +1045,7 @@ async def _transfer_path(
             {"path": source_path, "sha256": False},
         )
     else:
-        source_stat = await _to_thread(transfer_stat, source_path, False)
+        source_stat = await asyncio.to_thread(transfer_stat, source_path, False)
 
     source_type = source_stat.get("type")
     if source_type not in {"file", "dir"}:
@@ -1005,9 +1053,7 @@ async def _transfer_path(
 
     if source_machine and destination_machine:
         operation = (
-            _copy_remote_dir_to_remote
-            if source_type == "dir"
-            else _copy_remote_file_to_remote
+            _copy_remote_dir_to_remote if source_type == "dir" else _copy_remote_file_to_remote
         )
         result = await operation(
             source_machine,
@@ -1019,9 +1065,7 @@ async def _transfer_path(
         )
     elif source_machine:
         operation = (
-            _copy_remote_dir_to_local
-            if source_type == "dir"
-            else _copy_remote_file_to_local
+            _copy_remote_dir_to_local if source_type == "dir" else _copy_remote_file_to_local
         )
         result = await operation(
             source_machine,
@@ -1033,9 +1077,7 @@ async def _transfer_path(
     else:
         assert destination_machine is not None
         operation = (
-            _copy_local_dir_to_remote
-            if source_type == "dir"
-            else _copy_local_file_to_remote
+            _copy_local_dir_to_remote if source_type == "dir" else _copy_local_file_to_remote
         )
         result = await operation(
             source_path,
@@ -1110,7 +1152,7 @@ async def _view_image_result(path: str, machine: str | None = None) -> CallToolR
             if not isinstance(stat, dict) or stat.get("type") != "file":
                 raise ValueError(f"source is not a file: {path}")
             assert_view_image_size(int(stat.get("size") or 0))
-            temporary = await _to_thread(transfer_alloc_temp_path, ".bin")
+            temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".bin")
             temporary_path = temporary["path"]
             try:
                 await _copy_remote_file_to_local(
@@ -1119,13 +1161,13 @@ async def _view_image_result(path: str, machine: str | None = None) -> CallToolR
                     temporary_path,
                     True,
                 )
-                image = await _to_thread(read_image, temporary_path)
+                image = await asyncio.to_thread(read_image, temporary_path)
             finally:
                 with suppress(Exception):
-                    await _to_thread(delete_path, temporary_path, False)
+                    await asyncio.to_thread(delete_path, temporary_path, False)
             display_path = str(stat.get("path") or path)
         else:
-            image = await _to_thread(read_image, path)
+            image = await asyncio.to_thread(read_image, path)
             display_path = image.path
         return _view_image_success_result(image, display_path, machine)
     except Exception as exc:
@@ -1155,53 +1197,39 @@ def _read_audit_tail_entries(lines: int = 100) -> dict:
             bytes_read += len(chunk)
             newline_count += chunk.count(b"\n")
 
-    content = b"".join(reversed(chunks)).decode("utf-8", errors="replace").splitlines()[-line_limit:]
+    content = (
+        b"".join(reversed(chunks)).decode("utf-8", errors="replace").splitlines()[-line_limit:]
+    )
     entries = []
     for line in content:
         try:
             entries.append(json.loads(line))
         except json.JSONDecodeError:
             entries.append({"raw": line})
-    return {"entries": entries, "bytes_read": bytes_read, "truncated_bytes": max(0, path.stat().st_size - bytes_read)}
+    return {
+        "entries": entries,
+        "bytes_read": bytes_read,
+        "truncated_bytes": max(0, path.stat().st_size - bytes_read),
+    }
 
 
-def build_mcp() -> FastMCP:
-    settings = get_settings()
-    mcp = FastMCP(
-        "local-shell-mcp",
-        instructions=MCP_INSTRUCTIONS,
-        transport_security=_transport_security_settings(),
-    )
-    read_only_tool = ToolAnnotations(
-        readOnlyHint=True,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=False,
-    )
+async def _remote_call(
+    settings: Any,
+    machine: str,
+    tool: str,
+    args: dict,
+    timeout_s: int | None = None,
+) -> ToolResult:
+    try:
+        if not settings.remote_enabled:
+            raise RuntimeError("Remote workers are disabled")
+        return await remote_manager().call(machine, tool, args, timeout_s)
+    except Exception as exc:
+        return _handled_error(exc)
+
+
+def _register_connector_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -> None:
     read_only_meta = _public_read_meta()
-    shell_read_meta = _oauth_meta(["shell:read"])
-    shell_write_meta = _oauth_meta(["shell:read", "shell:write"])
-    shell_execute_meta = _oauth_meta(["shell:read", "shell:execute"])
-    patch_meta = _oauth_meta(["shell:read", "shell:write"])
-    browser_meta = _oauth_meta(["browser:use"])
-    browser_write_meta = _oauth_meta(["browser:use", "shell:write"])
-    browser_execute_meta = _oauth_meta(["browser:use", "shell:execute"])
-    file_share_meta = _oauth_meta(["shell:read", "file:share"])
-    remote_meta = _oauth_meta(["remote:use"])
-    transfer_meta = _oauth_meta(["remote:use", "shell:read", "shell:write"])
-
-    async def _remote_call(
-        machine: str,
-        tool: str,
-        args: dict,
-        timeout_s: int | None = None,
-    ) -> ToolResult:
-        try:
-            if not settings.remote_enabled:
-                raise RuntimeError("Remote workers are disabled")
-            return await remote_manager().call(machine, tool, args, timeout_s)
-        except Exception as exc:
-            return _handled_error(exc)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=read_only_meta)
     async def search(query: str) -> str:
@@ -1240,7 +1268,7 @@ def build_mcp() -> FastMCP:
     async def fetch(id: str) -> str:
         """Fetch a workspace file by id returned from search."""
         try:
-            data = await _to_thread(read_text, id)
+            data = await asyncio.to_thread(read_text, id)
             path = data.get("path") or id
             binary = bool(data.get("binary"))
             resolved = resolve_path(id, must_exist=True)
@@ -1279,11 +1307,17 @@ def build_mcp() -> FastMCP:
                 ensure_ascii=False,
             )
 
+
+def _register_environment_tools(
+    mcp: FastMCP, settings: Any, read_only_tool: ToolAnnotations
+) -> None:
+    shell_read_meta = _oauth_meta(["shell:read"])
+
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def environment_info(machine: str | None = None) -> ToolResult:
         """Return version, workspace, auth, policy, and environment information locally or on a remote machine."""
         if machine:
-            return await _remote_call(machine, "environment_info", {})
+            return await _remote_call(settings, machine, "environment_info", {})
         try:
             python = quote_shell_argument(settings.python_bin)
             git = quote_shell_argument(settings.git_bin)
@@ -1307,26 +1341,21 @@ def build_mcp() -> FastMCP:
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def skills_list() -> ToolResult:
         """List installed agent skills without loading their instructions. The MCP tool surface stays fixed; adding or removing skill directories is reflected on the next call."""
-        try:
-            return _ok(await _to_thread(list_installed_skills, settings))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(asyncio.to_thread, list_installed_skills, settings)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def skill_load(name: str) -> ToolResult:
         """Load one installed agent skill by the exact name returned from skills_list. Returns SKILL.md instructions plus related file paths."""
-        try:
-            return _ok(await _to_thread(load_installed_skill, name, settings))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(asyncio.to_thread, load_installed_skill, name, settings)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def skill_read_file(name: str, path: str) -> ToolResult:
         """Read one related text file from an installed Skill."""
-        try:
-            return _ok(await _to_thread(read_installed_skill_file, name, path, settings))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(asyncio.to_thread, read_installed_skill_file, name, path, settings)
+
+
+def _register_command_tools(mcp: FastMCP, settings: Any) -> None:
+    shell_execute_meta = _oauth_meta(["shell:read", "shell:execute"])
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def run_shell_tool(
@@ -1342,6 +1371,7 @@ def build_mcp() -> FastMCP:
         _audit_tool_purpose("run_shell_tool", purpose, explanation)
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "run_shell_tool",
                 {
@@ -1354,9 +1384,7 @@ def build_mcp() -> FastMCP:
             )
         try:
             return _ok(
-                (
-                    await public_run_shell(command, cwd, timeout_s, max_output_bytes)
-                ).model_dump()
+                (await public_run_shell(command, cwd, timeout_s, max_output_bytes)).model_dump()
             )
         except Exception as exc:
             return _handled_error(exc)
@@ -1374,15 +1402,18 @@ def build_mcp() -> FastMCP:
         _audit_tool_purpose("run_python_tool", purpose, explanation)
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "run_python_tool",
                 {"code": code, "cwd": cwd, "timeout_s": timeout_s},
                 timeout_s,
             )
-        try:
-            return _ok(await _run_python(code, cwd, timeout_s))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(_run_python, code, cwd, timeout_s)
+
+
+def _register_shell_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnotations) -> None:
+    shell_read_meta = _oauth_meta(["shell:read"])
+    shell_execute_meta = _oauth_meta(["shell:read", "shell:execute"])
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def shell_start(
@@ -1397,14 +1428,12 @@ def build_mcp() -> FastMCP:
         _audit_tool_purpose("shell_start", purpose, explanation)
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "shell_start",
                 {"cwd": cwd, "name": name, "command": command},
             )
-        try:
-            return _ok(await start_shell(cwd, name, command))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(start_shell, cwd, name, command)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def shell_send(
@@ -1416,14 +1445,12 @@ def build_mcp() -> FastMCP:
         """Send input to a persistent local or remote shell session."""
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "shell_send",
                 {"session_id": session_id, "input_text": input_text, "enter": enter},
             )
-        try:
-            return _ok(await send_shell(session_id, input_text, enter))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(send_shell, session_id, input_text, enter)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def shell_read(
@@ -1434,14 +1461,12 @@ def build_mcp() -> FastMCP:
         """Read recent output from a persistent local or remote shell session."""
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "shell_read",
                 {"session_id": session_id, "lines": lines},
             )
-        try:
-            return _ok(await read_shell(session_id, lines))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(read_shell, session_id, lines)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def shell_kill(
@@ -1450,21 +1475,20 @@ def build_mcp() -> FastMCP:
     ) -> ToolResult:
         """Terminate a persistent local or remote shell session."""
         if machine:
-            return await _remote_call(machine, "shell_kill", {"session_id": session_id})
-        try:
-            return _ok(await kill_shell(session_id))
-        except Exception as exc:
-            return _handled_error(exc)
+            return await _remote_call(settings, machine, "shell_kill", {"session_id": session_id})
+        return await _tool_call(kill_shell, session_id)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def shell_list(machine: str | None = None) -> ToolResult:
         """List persistent shell sessions locally or on a remote machine."""
         if machine:
-            return await _remote_call(machine, "shell_list", {})
-        try:
-            return _ok(await list_shells())
-        except Exception as exc:
-            return _handled_error(exc)
+            return await _remote_call(settings, machine, "shell_list", {})
+        return await _tool_call(list_shells)
+
+
+def _register_job_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnotations) -> None:
+    shell_read_meta = _oauth_meta(["shell:read"])
+    shell_execute_meta = _oauth_meta(["shell:read", "shell:execute"])
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def job_start(
@@ -1479,14 +1503,12 @@ def build_mcp() -> FastMCP:
         _audit_tool_purpose("job_start", purpose, explanation)
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "job_start",
                 {"command": command, "cwd": cwd, "name": name},
             )
-        try:
-            return _ok(await start_job(command, cwd, name))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(start_job, command, cwd, name)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def job_list(
@@ -1496,14 +1518,12 @@ def build_mcp() -> FastMCP:
         """List tracked jobs locally or on a remote machine."""
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "job_list",
                 {"include_finished": include_finished},
             )
-        try:
-            return _ok(await list_jobs(include_finished))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(list_jobs, include_finished)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def job_tail(
@@ -1514,14 +1534,12 @@ def build_mcp() -> FastMCP:
         """Read recent output for a tracked local or remote job."""
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "job_tail",
                 {"job_id": job_id, "lines": lines},
             )
-        try:
-            return _ok(await tail_job(job_id, lines))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(tail_job, job_id, lines)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def job_stop(
@@ -1530,11 +1548,8 @@ def build_mcp() -> FastMCP:
     ) -> ToolResult:
         """Stop a tracked local or remote job."""
         if machine:
-            return await _remote_call(machine, "job_stop", {"job_id": job_id})
-        try:
-            return _ok(await stop_job(job_id))
-        except Exception as exc:
-            return _handled_error(exc)
+            return await _remote_call(settings, machine, "job_stop", {"job_id": job_id})
+        return await _tool_call(stop_job, job_id)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def job_retry(
@@ -1546,11 +1561,14 @@ def build_mcp() -> FastMCP:
         """Restart a stopped or exited tracked local or remote job."""
         _audit_tool_purpose("job_retry", purpose, explanation)
         if machine:
-            return await _remote_call(machine, "job_retry", {"job_id": job_id})
-        try:
-            return _ok(await retry_job(job_id))
-        except Exception as exc:
-            return _handled_error(exc)
+            return await _remote_call(settings, machine, "job_retry", {"job_id": job_id})
+        return await _tool_call(retry_job, job_id)
+
+
+def _register_workspace_read_tools(
+    mcp: FastMCP, settings: Any, read_only_tool: ToolAnnotations
+) -> None:
+    shell_read_meta = _oauth_meta(["shell:read"])
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def list_files(
@@ -1562,6 +1580,7 @@ def build_mcp() -> FastMCP:
         """List files and directories locally or on a remote machine."""
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "list_files",
                 {
@@ -1570,10 +1589,7 @@ def build_mcp() -> FastMCP:
                     "max_entries": max_entries,
                 },
             )
-        try:
-            return _ok(await _to_thread(list_dir, path, recursive, max_entries))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(asyncio.to_thread, list_dir, path, recursive, max_entries)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def tree_view(
@@ -1585,14 +1601,12 @@ def build_mcp() -> FastMCP:
         """Return a compact directory tree locally or on a remote machine."""
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "tree_view",
                 {"cwd": cwd, "depth": depth, "max_entries": max_entries},
             )
-        try:
-            return _ok(await tree(cwd, depth, max_entries))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(tree, cwd, depth, max_entries)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def glob_search(
@@ -1604,14 +1618,13 @@ def build_mcp() -> FastMCP:
         """Find paths by glob locally or on a remote machine."""
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "glob_search",
                 {"pattern": pattern, "cwd": cwd, "max_results": max_results},
             )
         try:
-            return _ok(
-                {"paths": await _to_thread(glob_paths, pattern, cwd, max_results)}
-            )
+            return _ok({"paths": await asyncio.to_thread(glob_paths, pattern, cwd, max_results)})
         except Exception as exc:
             return _handled_error(exc)
 
@@ -1628,6 +1641,7 @@ def build_mcp() -> FastMCP:
         """Search file contents locally or on a remote machine."""
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "grep_search",
                 {
@@ -1639,19 +1653,7 @@ def build_mcp() -> FastMCP:
                     "max_results": max_results,
                 },
             )
-        try:
-            return _ok(
-                await grep(
-                    query,
-                    cwd,
-                    glob,
-                    regex,
-                    case_sensitive,
-                    max_results,
-                )
-            )
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(grep, query, cwd, glob, regex, case_sensitive, max_results)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def read_file(
@@ -1671,20 +1673,16 @@ def build_mcp() -> FastMCP:
             "binary_preview_bytes": binary_preview_bytes,
         }
         if machine:
-            return await _remote_call(machine, "read_file", args)
-        try:
-            return _ok(
-                await _to_thread(
-                    read_texts,
-                    path,
-                    start_line,
-                    end_line,
-                    binary_preview,
-                    binary_preview_bytes,
-                )
-            )
-        except Exception as exc:
-            return _handled_error(exc)
+            return await _remote_call(settings, machine, "read_file", args)
+        return await _tool_call(
+            asyncio.to_thread,
+            read_texts,
+            path,
+            start_line,
+            end_line,
+            binary_preview,
+            binary_preview_bytes,
+        )
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def view_image(
@@ -1694,6 +1692,10 @@ def build_mcp() -> FastMCP:
         """View a PNG, JPEG, GIF, or WebP file as native MCP image content locally or on a remote machine. Use this instead of read_file when visual inspection is needed. Remote images reuse the existing file-transfer protocol, so the worker does not need a new image-specific RPC."""
         return cast(ViewImageResult, await _view_image_result(path, machine))
 
+
+def _register_download_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -> None:
+    file_share_meta = _oauth_meta(["shell:read", "file:share"])
+
     @mcp.tool(structured_output=True, meta=file_share_meta)
     async def create_file_link(
         path: str,
@@ -1702,46 +1704,30 @@ def build_mcp() -> FastMCP:
         max_downloads: int | None = None,
     ) -> ToolResult:
         """Create a temporary browser-accessible download URL for a local file. Links are public bearer URLs protected by a high-entropy token, TTL, optional download-count limit, and explicit revocation."""
-        try:
-            mod = __import__(
-                "local_shell_mcp.downloads",
-                fromlist=["create_share_link"],
-            )
-            return _ok(
-                await _to_thread(
-                    mod.create_share_link,
-                    path,
-                    ttl_s,
-                    filename,
-                    max_downloads,
-                )
-            )
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(
+            asyncio.to_thread,
+            create_share_link,
+            path,
+            ttl_s,
+            filename,
+            max_downloads,
+        )
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=file_share_meta)
     async def list_file_links(include_expired: bool = False) -> ToolResult:
         """List generated local file download URLs."""
-        try:
-            mod = __import__(
-                "local_shell_mcp.downloads",
-                fromlist=["list_share_links"],
-            )
-            return _ok(await _to_thread(mod.list_share_links, include_expired))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(asyncio.to_thread, list_share_links, include_expired)
 
     @mcp.tool(structured_output=True, meta=file_share_meta)
     async def revoke_file_link(token: str) -> ToolResult:
         """Revoke a generated local file download URL."""
-        try:
-            mod = __import__(
-                "local_shell_mcp.downloads",
-                fromlist=["revoke_share_link"],
-            )
-            return _ok(await _to_thread(mod.revoke_share_link, token))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(asyncio.to_thread, revoke_share_link, token)
+
+
+def _register_workspace_write_tools(mcp: FastMCP, settings: Any) -> None:
+    shell_write_meta = _oauth_meta(["shell:read", "shell:write"])
+    patch_meta = _oauth_meta(["shell:read", "shell:write"])
+    transfer_meta = _oauth_meta(["remote:use", "shell:read", "shell:write"])
 
     @mcp.tool(structured_output=True, meta=shell_write_meta)
     async def write_file(
@@ -1756,14 +1742,12 @@ def build_mcp() -> FastMCP:
         _audit_tool_purpose("write_file", purpose, explanation)
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "write_file",
                 {"path": path, "content": content, "overwrite": overwrite},
             )
-        try:
-            return _ok(await _to_thread(write_text, path, content, overwrite))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(asyncio.to_thread, write_text, path, content, overwrite)
 
     @mcp.tool(structured_output=True, meta=shell_write_meta)
     async def edit_file(
@@ -1778,14 +1762,12 @@ def build_mcp() -> FastMCP:
         edit_payloads = [edit.model_dump() for edit in edits]
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "edit_file",
                 {"path": path, "edits": edit_payloads},
             )
-        try:
-            return _ok(await _to_thread(edit_text, path, edit_payloads))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(asyncio.to_thread, edit_text, path, edit_payloads)
 
     @mcp.tool(structured_output=True, meta=shell_write_meta)
     async def delete_file_or_dir(
@@ -1799,14 +1781,12 @@ def build_mcp() -> FastMCP:
         _audit_tool_purpose("delete_file_or_dir", purpose, explanation)
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "delete_file_or_dir",
                 {"path": path, "recursive": recursive},
             )
-        try:
-            return _ok(await _to_thread(delete_path, path, recursive))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(asyncio.to_thread, delete_path, path, recursive)
 
     @mcp.tool(structured_output=True, meta=patch_meta)
     async def apply_patch(
@@ -1820,14 +1800,12 @@ def build_mcp() -> FastMCP:
         _audit_tool_purpose("apply_patch", purpose, explanation)
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "apply_patch",
                 {"patch": patch, "cwd": cwd},
             )
-        try:
-            return _ok(await _apply_patch_text(patch, cwd))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(_apply_patch_text, patch, cwd)
 
     @mcp.tool(structured_output=True, meta=transfer_meta)
     async def transfer_path(
@@ -1842,19 +1820,20 @@ def build_mcp() -> FastMCP:
     ) -> ToolResult:
         """Copy a file or directory between the controller and remote machines. A missing machine denotes the controller; at least one endpoint must be remote."""
         _audit_tool_purpose("transfer_path", purpose, explanation)
-        try:
-            return _ok(
-                await _transfer_path(
-                    source_path,
-                    destination_path,
-                    source_machine,
-                    destination_machine,
-                    overwrite,
-                    chunk_size,
-                )
-            )
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(
+            _transfer_path,
+            source_path,
+            destination_path,
+            source_machine,
+            destination_machine,
+            overwrite,
+            chunk_size,
+        )
+
+
+def _register_maintenance_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -> None:
+    shell_read_meta = _oauth_meta(["shell:read"])
+    shell_write_meta = _oauth_meta(["shell:read", "shell:write"])
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def secret_scan(
@@ -1863,26 +1842,28 @@ def build_mcp() -> FastMCP:
         max_results: int = 200,
     ) -> ToolResult:
         """Scan local workspace text files for common secrets before commit or push."""
-        try:
-            return _ok(await _secret_scan(cwd, glob, max_results))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(_secret_scan, cwd, glob, max_results)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def todo_read_tool() -> ToolResult:
         """Read the local agent todo list."""
-        try:
-            return _ok(await _to_thread(todo_read))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(asyncio.to_thread, todo_read)
 
     @mcp.tool(structured_output=True, meta=shell_write_meta)
     async def todo_write_tool(todos: list[dict]) -> ToolResult:
         """Write the local agent todo list."""
-        try:
-            return _ok(await _to_thread(todo_write, todos))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(asyncio.to_thread, todo_write, todos)
+
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
+    async def audit_tail(lines: int = 100) -> ToolResult:
+        """Read recent local audit log entries."""
+        return await _tool_call(asyncio.to_thread, _read_audit_tail_entries, lines)
+
+
+def _register_browser_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnotations) -> None:
+    browser_meta = _oauth_meta(["browser:use"])
+    browser_write_meta = _oauth_meta(["browser:use", "shell:write"])
+    browser_execute_meta = _oauth_meta(["browser:use", "shell:execute"])
 
     @mcp.tool(structured_output=True, meta=browser_write_meta)
     async def browser_capture_tool(
@@ -1908,11 +1889,8 @@ def build_mcp() -> FastMCP:
             "wait_until": wait_until,
         }
         if machine:
-            return await _remote_call(machine, "browser_capture_tool", args)
-        try:
-            return _ok(await browser_capture(**args))
-        except Exception as exc:
-            return _handled_error(exc)
+            return await _remote_call(settings, machine, "browser_capture_tool", args)
+        return await _tool_call(browser_capture, **args)
 
     @mcp.tool(structured_output=True, meta=browser_meta)
     async def browser_get_text_tool(
@@ -1930,11 +1908,8 @@ def build_mcp() -> FastMCP:
             "selector": selector,
         }
         if machine:
-            return await _remote_call(machine, "browser_get_text_tool", args)
-        try:
-            return _ok(await browser_get_text(**args))
-        except Exception as exc:
-            return _handled_error(exc)
+            return await _remote_call(settings, machine, "browser_get_text_tool", args)
+        return await _tool_call(browser_get_text, **args)
 
     @mcp.tool(structured_output=True, meta=browser_execute_meta)
     async def playwright_run_script_tool(
@@ -1946,23 +1921,17 @@ def build_mcp() -> FastMCP:
         """Run a full Python Playwright script locally or on a remote machine."""
         if machine:
             return await _remote_call(
+                settings,
                 machine,
                 "playwright_run_script_tool",
                 {"script": script, "cwd": cwd, "timeout_s": timeout_s},
                 timeout_s,
             )
-        try:
-            return _ok(await playwright_run_script(script, cwd, timeout_s))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(playwright_run_script, script, cwd, timeout_s)
 
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
-    async def audit_tail(lines: int = 100) -> ToolResult:
-        """Read recent local audit log entries."""
-        try:
-            return _ok(await _to_thread(_read_audit_tail_entries, lines))
-        except Exception as exc:
-            return _handled_error(exc)
+
+def _register_remote_admin_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -> None:
+    remote_meta = _oauth_meta(["remote:use"])
 
     @mcp.tool(structured_output=True, meta=remote_meta)
     async def remote_invite(
@@ -1971,34 +1940,49 @@ def build_mcp() -> FastMCP:
         ttl_s: int | None = None,
     ) -> ToolResult:
         """Create a one-time command for a remote machine to join this server."""
-        try:
-            return _ok(await remote_manager().create_invite(name, workdir, ttl_s))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(lambda: remote_manager().create_invite(name, workdir, ttl_s))
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_meta)
     async def remote_list_machines() -> ToolResult:
         """List registered remote worker machines."""
-        try:
-            return _ok(remote_manager().list_machines())
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(lambda: remote_manager().list_machines())
 
     @mcp.tool(structured_output=True, meta=remote_meta)
     async def remote_revoke_machine(machine: str) -> ToolResult:
         """Revoke and remove a remote worker machine."""
-        try:
-            return _ok(remote_manager().revoke(machine))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(lambda: remote_manager().revoke(machine))
 
     @mcp.tool(structured_output=True, meta=remote_meta)
     async def remote_rename_machine(machine: str, new_name: str) -> ToolResult:
         """Rename a remote worker machine."""
-        try:
-            return _ok(remote_manager().rename(machine, new_name))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(lambda: remote_manager().rename(machine, new_name))
+
+
+def build_mcp() -> FastMCP:
+    settings = get_settings()
+    mcp = FastMCP(
+        "local-shell-mcp",
+        instructions=MCP_INSTRUCTIONS,
+        transport_security=_transport_security_settings(),
+    )
+    read_only_tool = ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
+
+    _register_connector_tools(mcp, read_only_tool)
+    _register_environment_tools(mcp, settings, read_only_tool)
+    _register_command_tools(mcp, settings)
+    _register_shell_tools(mcp, settings, read_only_tool)
+    _register_job_tools(mcp, settings, read_only_tool)
+    _register_workspace_read_tools(mcp, settings, read_only_tool)
+    _register_download_tools(mcp, read_only_tool)
+    _register_workspace_write_tools(mcp, settings)
+    _register_maintenance_tools(mcp, read_only_tool)
+    _register_browser_tools(mcp, settings, read_only_tool)
+    _register_remote_admin_tools(mcp, read_only_tool)
 
     _remove_remote_tools_when_disabled(mcp)
     _install_tool_annotations(mcp)
