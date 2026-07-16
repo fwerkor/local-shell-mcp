@@ -899,24 +899,35 @@ async def _remote_cleanup_file(machine: str, path: str) -> None:
         )
 
 
-async def _copy_remote_dir_to_remote(
-    src_machine: str,
-    src_path: str,
+async def _copy_packed_dir_to_remote(
+    pack: dict,
+    src_machine: str | None,
     dst_machine: str,
     dst_path: str,
-    overwrite: bool = True,
-    chunk_size: int | None = None,
+    overwrite: bool,
+    chunk_size: int | None,
 ) -> dict:
-    pack = await _remote_transfer_data(
-        src_machine, "transfer_pack_dir", {"path": src_path, "compression": "gz"}
-    )
     dst_archive = await _remote_transfer_data(
         dst_machine, "transfer_alloc_temp_path", {"suffix": ".tar.gz"}
     )
     try:
-        copy_result = await _copy_remote_file_to_remote(
-            src_machine, pack["archive_path"], dst_machine, dst_archive["path"], True, chunk_size
-        )
+        if src_machine:
+            copy_result = await _copy_remote_file_to_remote(
+                src_machine,
+                pack["archive_path"],
+                dst_machine,
+                dst_archive["path"],
+                True,
+                chunk_size,
+            )
+        else:
+            copy_result = await _copy_local_file_to_remote(
+                pack["archive_path"],
+                dst_machine,
+                dst_archive["path"],
+                True,
+                chunk_size,
+            )
         unpack = await _remote_transfer_data(
             dst_machine,
             "transfer_unpack_archive",
@@ -931,15 +942,40 @@ async def _copy_remote_dir_to_remote(
         await _remote_cleanup_file(dst_machine, dst_archive.get("path", ""))
         raise
     finally:
-        await _remote_cleanup_file(src_machine, pack.get("archive_path", ""))
+        if src_machine:
+            await _remote_cleanup_file(src_machine, pack.get("archive_path", ""))
+        else:
+            with suppress(Exception):
+                delete_path(pack.get("archive_path", ""), False)
     return {
-        "source": {"machine": src_machine, "path": pack["path"]},
+        "source": {"machine": src_machine or "controller", "path": pack["path"]},
         "destination": {"machine": dst_machine, "path": unpack["path"]},
         "archive_bytes": pack["bytes"],
         "archive_sha256": pack["sha256"],
         "chunks": copy_result["chunks"],
         "entries": unpack["entries"],
     }
+
+
+async def _copy_remote_dir_to_remote(
+    src_machine: str,
+    src_path: str,
+    dst_machine: str,
+    dst_path: str,
+    overwrite: bool = True,
+    chunk_size: int | None = None,
+) -> dict:
+    pack = await _remote_transfer_data(
+        src_machine, "transfer_pack_dir", {"path": src_path, "compression": "gz"}
+    )
+    return await _copy_packed_dir_to_remote(
+        pack,
+        src_machine,
+        dst_machine,
+        dst_path,
+        overwrite,
+        chunk_size,
+    )
 
 
 async def _copy_remote_dir_to_local(
@@ -982,37 +1018,14 @@ async def _copy_local_dir_to_remote(
     chunk_size: int | None = None,
 ) -> dict:
     pack = await asyncio.to_thread(transfer_pack_dir, source_path, "gz")
-    dst_archive = await _remote_transfer_data(
-        dst_machine, "transfer_alloc_temp_path", {"suffix": ".tar.gz"}
+    return await _copy_packed_dir_to_remote(
+        pack,
+        None,
+        dst_machine,
+        dst_path,
+        overwrite,
+        chunk_size,
     )
-    try:
-        copy_result = await _copy_local_file_to_remote(
-            pack["archive_path"], dst_machine, dst_archive["path"], True, chunk_size
-        )
-        unpack = await _remote_transfer_data(
-            dst_machine,
-            "transfer_unpack_archive",
-            {
-                "archive_path": dst_archive["path"],
-                "dst_path": dst_path,
-                "overwrite": overwrite,
-                "cleanup_archive": True,
-            },
-        )
-    except Exception:
-        await _remote_cleanup_file(dst_machine, dst_archive.get("path", ""))
-        raise
-    finally:
-        with suppress(Exception):
-            delete_path(pack.get("archive_path", ""), False)
-    return {
-        "source": {"machine": "controller", "path": pack["path"]},
-        "destination": {"machine": dst_machine, "path": unpack["path"]},
-        "archive_bytes": pack["bytes"],
-        "archive_sha256": pack["sha256"],
-        "chunks": copy_result["chunks"],
-        "entries": unpack["entries"],
-    }
 
 
 async def _transfer_path(
