@@ -13,7 +13,11 @@ from typing import Any
 from .audit import audit
 from .fs_ops import relative_display, resolve_path
 from .settings import get_settings
-from .shell_environment import subprocess_env
+from .shell_environment import (
+    persistent_shell_args,
+    shell_command_args,
+    subprocess_env,
+)
 
 CONPTY_BUFFER_BYTES = 1_000_000
 CONPTY_READ_CHARS = 65536
@@ -63,27 +67,12 @@ def _session_name(name: str | None = None) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "-", base)[:64]
 
 
-def _shell_program_name(shell: str) -> str:
-    return Path(shell).name.lower()
-
-
 def _shell_command_args(command: str) -> list[str]:
-    settings = get_settings()
-    shell = settings.shell_executable
-    name = _shell_program_name(shell)
-    ps = "power" + "shell"
-    if name in {ps + ".exe", ps, "pwsh.exe", "pwsh"}:
-        return [shell, "-NoProfile", "-NonInteractive", "-Command", command]
-    if name in {"cmd.exe", "cmd"}:
-        return [shell, "/S", "/C", command]
-    return [shell, "-lc", command]
+    return shell_command_args(get_settings().shell_executable, command)
 
 
 def _persistent_shell_args(command: str | None = None) -> list[str]:
-    settings = get_settings()
-    if command:
-        return _shell_command_args(command)
-    return [settings.shell_executable]
+    return persistent_shell_args(get_settings().shell_executable, command)
 
 
 def _spawn_command(argv: list[str]) -> str:
