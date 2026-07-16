@@ -310,7 +310,7 @@ def test_all_remaining_lifecycle_command_branches(tmp_path, monkeypatch, capsys)
     output = capsys.readouterr().out
     assert '"service": false' in output
     assert '"uninstalled": true' in output
-    assert str(tmp_path / ".profile") in output
+    assert json.dumps(str(tmp_path / ".profile")) in output
     assert runtime_installs == [("https://s", False), ("https://s", False)]
 
 
