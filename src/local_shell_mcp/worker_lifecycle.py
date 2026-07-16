@@ -6,11 +6,11 @@ import contextlib
 import hashlib
 import json
 import os
-import platform
 import shlex
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +22,7 @@ from .remote import (
     _write_worker_identity,
     remote_routes as legacy_remote_routes,
     run_worker,
+    run_worker_cli as legacy_run_worker_cli,
     worker_bundle,
     worker_capabilities,
     worker_info,
@@ -124,8 +125,7 @@ def start_worker() -> int:
     env = os.environ.copy()
     current = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = _runtime_pythonpath() + (os.pathsep + current if current else "")
-    log = worker_log_path().open("ab")
-    try:
+    with worker_log_path().open("ab") as log:
         process = subprocess.Popen(
             _worker_command(),
             stdin=subprocess.DEVNULL,
@@ -134,8 +134,6 @@ def start_worker() -> int:
             start_new_session=True,
             env=env,
         )
-    finally:
-        log.close()
     worker_pid_path().write_text(str(process.pid), encoding="utf-8")
     return process.pid
 
@@ -146,10 +144,8 @@ def stop_worker(timeout_s: float = 10.0) -> bool:
         return False
     with contextlib.suppress(ProcessLookupError):
         os.kill(pid, signal.SIGTERM)
-    deadline = asyncio.get_event_loop_policy().get_event_loop().time() + timeout_s
-    while _pid_is_running(pid) and asyncio.get_event_loop_policy().get_event_loop().time() < deadline:
-        import time
-
+    deadline = time.monotonic() + timeout_s
+    while _pid_is_running(pid) and time.monotonic() < deadline:
         time.sleep(0.05)
     if _pid_is_running(pid):
         with contextlib.suppress(ProcessLookupError):
@@ -159,9 +155,8 @@ def stop_worker(timeout_s: float = 10.0) -> bool:
 
 
 def worker_status() -> dict[str, Any]:
-    config: dict[str, Any] | None
     try:
-        config = read_worker_config()
+        config: dict[str, Any] | None = read_worker_config()
     except RuntimeError:
         config = None
     pid = read_worker_pid()
@@ -198,12 +193,7 @@ async def enroll_worker(server: str, invite: str, name: str | None, workdir: str
     _write_worker_identity(
         {"server": server, "name": machine_name, "access": access, "workdir": workdir}
     )
-    config = {
-        "version": 1,
-        "server": server,
-        "name": machine_name,
-        "workdir": workdir,
-    }
+    config = {"version": 1, "server": server, "name": machine_name, "workdir": workdir}
     write_worker_config(config)
     return config
 
@@ -222,10 +212,10 @@ async def run_installed_worker() -> None:
 async def worker_manifest(request: Any):  # noqa: ARG001, ANN201
     from starlette.responses import JSONResponse
 
-    response = await worker_bundle(request)
-    payload = bytes(response.body)
     from . import __version__
 
+    response = await worker_bundle(request)
+    payload = bytes(response.body)
     return JSONResponse(
         {
             "schema_version": 1,
@@ -238,10 +228,9 @@ async def worker_manifest(request: Any):  # noqa: ARG001, ANN201
 
 
 def _join_script(server: str) -> str:
-    quoted_server = shlex.quote(server)
     return f'''#!/usr/bin/env bash
 set -euo pipefail
-SERVER={quoted_server}
+SERVER={shlex.quote(server)}
 BUNDLE_URL="$SERVER{REMOTE_WORKER_BUNDLE_PATH}"
 MANIFEST_URL="$SERVER{WORKER_MANIFEST_PATH}"
 INVITE=""
@@ -269,9 +258,9 @@ trap 'rm -rf "$TMPDIR"' EXIT
 if [ "$PERSIST" = "1" ]; then
   STATE_HOME="${{XDG_STATE_HOME:-$HOME/.local/state}}/local-shell-mcp-worker"
   RUNTIME="$STATE_HOME/runtime"
-  MANIFEST="$TMPDIR/manifest.json"
-  curl -fsSL "$MANIFEST_URL" -o "$MANIFEST"
-  EXPECTED="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sha256"])' "$MANIFEST")"
+  mkdir -p "$STATE_HOME"
+  curl -fsSL "$MANIFEST_URL" -o "$TMPDIR/manifest.json"
+  EXPECTED="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sha256"])' "$TMPDIR/manifest.json")"
   CURRENT="$(cat "$STATE_HOME/runtime.sha256" 2>/dev/null || true)"
   if [ "$CURRENT" != "$EXPECTED" ] || [ ! -d "$RUNTIME/local_shell_mcp" ]; then
     echo "Downloading worker bundle..." >&2
@@ -292,9 +281,9 @@ if [ "$PERSIST" = "1" ]; then
   mkdir -p "$BIN_DIR"
   cat > "$BIN_DIR/local-shell-mcp" <<'EOF'
 #!/bin/sh
-STATE_HOME="${{XDG_STATE_HOME:-$HOME/.local/state}}/local-shell-mcp-worker"
-export PYTHONPATH="$STATE_HOME/runtime:$STATE_HOME/runtime/vendor${{PYTHONPATH:+:$PYTHONPATH}}"
-exec python3 -m local_shell_mcp "$@"
+STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}/local-shell-mcp-worker"
+export PYTHONPATH="$STATE_HOME/runtime:$STATE_HOME/runtime/vendor${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m local_shell_mcp.main "$@"
 EOF
   chmod 755 "$BIN_DIR/local-shell-mcp"
   PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
@@ -346,12 +335,12 @@ async def join_script(request: Any):  # noqa: ARG001, ANN201
 def remote_routes() -> list[Any]:
     from starlette.routing import Route
 
-    routes = []
-    for route in legacy_remote_routes():
-        if getattr(route, "path", None) == REMOTE_JOIN_PATH:
-            routes.append(Route(REMOTE_JOIN_PATH, join_script, methods=["GET"]))
-        else:
-            routes.append(route)
+    routes = [
+        Route(REMOTE_JOIN_PATH, join_script, methods=["GET"])
+        if getattr(route, "path", None) == REMOTE_JOIN_PATH
+        else route
+        for route in legacy_remote_routes()
+    ]
     routes.append(Route(WORKER_MANIFEST_PATH, worker_manifest, methods=["GET"]))
     return routes
 
@@ -370,20 +359,20 @@ def _print_status(status: dict[str, Any]) -> None:
 
 
 def run_worker_cli(argv: list[str] | None = None) -> None:
+    argv = list(argv or [])
+    if argv and argv[0].startswith("-"):
+        legacy_run_worker_cli(argv)
+        return
+
     parser = argparse.ArgumentParser(description="Manage the local-shell-mcp remote worker")
     subparsers = parser.add_subparsers(dest="command", required=True)
-
     enroll = subparsers.add_parser("enroll")
     enroll.add_argument("--server", required=True)
     enroll.add_argument("--invite", required=True)
     enroll.add_argument("--name", default=None)
     enroll.add_argument("--workdir", default=os.getcwd())
-
-    subparsers.add_parser("run")
-    subparsers.add_parser("start")
-    subparsers.add_parser("stop")
-    subparsers.add_parser("restart")
-    subparsers.add_parser("status")
+    for command in ("run", "start", "stop", "restart", "status"):
+        subparsers.add_parser(command)
 
     args = parser.parse_args(argv)
     try:
