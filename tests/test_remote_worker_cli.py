@@ -33,6 +33,48 @@ def test_enrollment_payload_restores_temporary_environment(tmp_path, monkeypatch
     assert "LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER" not in os.environ
 
 
+def test_enrollment_payload_overrides_and_restores_existing_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", "/stale/workspace")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "false")
+
+    def capabilities():
+        assert os.environ["LOCAL_SHELL_MCP_WORKSPACE_ROOT"] == str(tmp_path)
+        assert os.environ["LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER"] == "true"
+        return ["shell"]
+
+    monkeypatch.setattr(cli.remote, "worker_capabilities", capabilities)
+    monkeypatch.setattr(cli.remote, "worker_info", lambda workdir: {"workdir": workdir})
+    cli._enrollment_payload("worker", str(tmp_path), "invite")  # noqa: SLF001
+    assert os.environ["LOCAL_SHELL_MCP_WORKSPACE_ROOT"] == "/stale/workspace"
+    assert os.environ["LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER"] == "false"
+
+
+@pytest.mark.asyncio
+async def test_run_worker_overrides_stale_scope(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", "/stale/workspace")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "false")
+    monkeypatch.setattr(cli.remote, "worker_capabilities", lambda: [])
+    monkeypatch.setattr(cli.remote, "worker_info", lambda workdir: {})
+    monkeypatch.setattr(cli.remote, "_read_worker_identity", lambda server, name=None: None)
+    monkeypatch.setattr(cli.remote, "_write_worker_identity", lambda data: None)
+    calls = 0
+
+    async def fake_post(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        assert os.environ["LOCAL_SHELL_MCP_WORKSPACE_ROOT"] == str(tmp_path)
+        assert os.environ["LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER"] == "true"
+        if calls == 1:
+            return {"ok": True, "data": {"token": "access", "name": "worker"}}
+        raise RuntimeError("stop polling")
+
+    monkeypatch.setattr(cli.remote, "_worker_post_json_forever", fake_post)
+    with pytest.raises(RuntimeError, match="stop polling"):
+        await cli.remote.run_worker(
+            "https://example.test", "invite", workdir=str(tmp_path)
+        )
+
+
 @pytest.mark.asyncio
 async def test_enroll_worker_registers_and_persists(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -245,7 +287,13 @@ def test_all_remaining_lifecycle_command_branches(tmp_path, monkeypatch, capsys)
     monkeypatch.setattr(cli, "stop_service", lambda: calls.append(("stop", None)) or {"running": False})
     monkeypatch.setattr(cli, "service_status", lambda: {"running": False})
     monkeypatch.setattr(cli, "_load_config_or_migrate", lambda: {"server": "https://s"})
-    monkeypatch.setattr(cli, "install_or_update_runtime", lambda server, force=False: {"updated": False})
+    runtime_installs = []
+    monkeypatch.setattr(
+        cli,
+        "install_or_update_runtime",
+        lambda server, force=False: runtime_installs.append((server, force))
+        or {"updated": False},
+    )
     monkeypatch.setattr(cli, "install_service", lambda start=True: {"service": start})
     monkeypatch.setattr(cli, "uninstall_service", lambda: {"uninstalled": True})
     monkeypatch.setattr(cli, "install_launcher", lambda: tmp_path / "local-shell-mcp")
@@ -263,6 +311,7 @@ def test_all_remaining_lifecycle_command_branches(tmp_path, monkeypatch, capsys)
     assert '"service": false' in output
     assert '"uninstalled": true' in output
     assert str(tmp_path / ".profile") in output
+    assert runtime_installs == [("https://s", False), ("https://s", False)]
 
 
 def test_cli_keyboard_interrupt_is_clean(monkeypatch, capsys):

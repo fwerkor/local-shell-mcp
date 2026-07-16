@@ -1620,8 +1620,8 @@ async def run_worker(
     persist: bool = False,
 ) -> None:  # noqa: ARG001
     workdir = str(Path(workdir or os.getcwd()).expanduser().resolve())
-    os.environ.setdefault("LOCAL_SHELL_MCP_WORKSPACE_ROOT", workdir)
-    os.environ.setdefault("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "true")
+    os.environ["LOCAL_SHELL_MCP_WORKSPACE_ROOT"] = workdir
+    os.environ["LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER"] = "true"
     from .settings import get_settings as _get_settings
 
     _get_settings.cache_clear()

@@ -216,6 +216,8 @@ def _read_pid() -> int | None:
 
 def _process_environment() -> dict[str, str]:
     env = os.environ.copy()
+    env.pop("LOCAL_SHELL_MCP_WORKSPACE_ROOT", None)
+    env.pop("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", None)
     runtime = worker_runtime_dir()
     current = env.get("PYTHONPATH", "")
     pythonpath = os.pathsep.join((str(runtime), str(runtime / "vendor")))

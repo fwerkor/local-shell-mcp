@@ -51,17 +51,21 @@ def _enrollment_payload(name: str | None, workdir: str, invite: str) -> dict[str
         "LOCAL_SHELL_MCP_WORKSPACE_ROOT": workdir,
         "LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER": "true",
     }
-    introduced = []
+    previous_environment = {
+        variable: os.environ.get(variable) for variable in temporary_environment
+    }
+    present_environment = set(os.environ).intersection(temporary_environment)
     for variable, value in temporary_environment.items():
-        if variable not in os.environ:
-            os.environ[variable] = value
-            introduced.append(variable)
+        os.environ[variable] = value
     get_settings.cache_clear()
     try:
         return _worker_payload(name, workdir, invite)
     finally:
-        for variable in introduced:
-            os.environ.pop(variable, None)
+        for variable, previous in previous_environment.items():
+            if variable in present_environment:
+                os.environ[variable] = previous or ""
+            else:
+                os.environ.pop(variable, None)
         get_settings.cache_clear()
 
 
@@ -228,6 +232,8 @@ def _run_command(args: argparse.Namespace) -> None:
             start_service()
         _print_result(result)
     elif args.command == "install-service":
+        config = _load_config_or_migrate()
+        install_or_update_runtime(str(config["server"]))
         _print_result(install_service(start=not args.no_start))
     elif args.command == "uninstall-service":
         _print_result(uninstall_service())

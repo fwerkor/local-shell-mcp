@@ -124,6 +124,16 @@ def test_process_fallback_start_stop_and_stale_pid(tmp_path, monkeypatch):
     assert not service.worker_pid_path().exists()
 
 
+def test_process_environment_scrubs_inherited_worker_scope(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", "/stale/workspace")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "false")
+    env = service._process_environment()  # noqa: SLF001
+    assert "LOCAL_SHELL_MCP_WORKSPACE_ROOT" not in env
+    assert "LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER" not in env
+    assert env["LOCAL_SHELL_MCP_WORKER_STATE_DIR"] == str((tmp_path / "state").resolve())
+
+
 def test_process_fallback_is_reported_without_native_service_file(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     service.install_launcher()
