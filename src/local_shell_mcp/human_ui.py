@@ -10,6 +10,7 @@ import select
 import shlex
 import shutil
 import signal
+import subprocess
 import sys
 import time
 from collections.abc import Awaitable, Callable
@@ -788,7 +789,7 @@ class _UnixPtyProcess:
         self._termios = termios
         self.master_fd, slave_fd = pty.openpty()
         self.resize(cols, rows)
-        self.process = __import__("subprocess").Popen(
+        self.process = subprocess.Popen(
             command,
             stdin=slave_fd,
             stdout=slave_fd,

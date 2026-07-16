@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .audit import audit
 from .auth import require_current_scopes
+from .downloads import create_share_link, list_share_links, revoke_share_link
 from .fs_ops import (
     delete_path,
     edit_text,
@@ -1649,46 +1650,24 @@ def build_mcp() -> FastMCP:
         max_downloads: int | None = None,
     ) -> ToolResult:
         """Create a temporary browser-accessible download URL for a local file. Links are public bearer URLs protected by a high-entropy token, TTL, optional download-count limit, and explicit revocation."""
-        try:
-            mod = __import__(
-                "local_shell_mcp.downloads",
-                fromlist=["create_share_link"],
-            )
-            return _ok(
-                await _to_thread(
-                    mod.create_share_link,
-                    path,
-                    ttl_s,
-                    filename,
-                    max_downloads,
-                )
-            )
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(
+            _to_thread,
+            create_share_link,
+            path,
+            ttl_s,
+            filename,
+            max_downloads,
+        )
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=file_share_meta)
     async def list_file_links(include_expired: bool = False) -> ToolResult:
         """List generated local file download URLs."""
-        try:
-            mod = __import__(
-                "local_shell_mcp.downloads",
-                fromlist=["list_share_links"],
-            )
-            return _ok(await _to_thread(mod.list_share_links, include_expired))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(_to_thread, list_share_links, include_expired)
 
     @mcp.tool(structured_output=True, meta=file_share_meta)
     async def revoke_file_link(token: str) -> ToolResult:
         """Revoke a generated local file download URL."""
-        try:
-            mod = __import__(
-                "local_shell_mcp.downloads",
-                fromlist=["revoke_share_link"],
-            )
-            return _ok(await _to_thread(mod.revoke_share_link, token))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(_to_thread, revoke_share_link, token)
 
     @mcp.tool(structured_output=True, meta=shell_write_meta)
     async def write_file(
