@@ -7,7 +7,7 @@ import pytest
 import local_shell_mcp.human_ui as human_ui
 import local_shell_mcp.jobs as jobs
 import local_shell_mcp.main as main_module
-import local_shell_mcp.remote as remote
+import local_shell_mcp.remote_worker_cli as remote_worker_cli
 import local_shell_mcp.settings as settings_module
 import local_shell_mcp.tools as tools
 import local_shell_mcp.version as version
@@ -147,7 +147,7 @@ def test_run_http(monkeypatch):
 def test_main_subcommands_and_version(monkeypatch, capsys):
     calls = []
     monkeypatch.setattr(jobs, "run_job_runner_cli", lambda argv: calls.append(("job", argv)))
-    monkeypatch.setattr(remote, "run_worker_cli", lambda argv: calls.append(("worker", argv)))
+    monkeypatch.setattr(remote_worker_cli, "run_worker_cli", lambda argv: calls.append(("worker", argv)))
     monkeypatch.setattr(human_ui, "run_tui_cli", lambda argv: calls.append(("tui", argv)))
     monkeypatch.setattr(version, "format_version_info", lambda: "version-info")
 
