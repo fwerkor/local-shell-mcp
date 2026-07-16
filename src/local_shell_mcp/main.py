@@ -22,8 +22,8 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
         oauth_server_metadata,
         oauth_token,
     )
-    from .remote import remote_routes
     from .settings import get_settings
+    from .worker_lifecycle import remote_routes
 
     @asynccontextmanager
     async def lifespan(app):  # noqa: ANN001
@@ -130,7 +130,7 @@ def main(argv: list[str] | None = None) -> None:
         run_job_runner_cli(argv[1:])
         return
     if argv and argv[0] == "worker":
-        from .remote import run_worker_cli
+        from .worker_lifecycle import run_worker_cli
 
         run_worker_cli(argv[1:])
         return
@@ -153,8 +153,16 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="local-shell-mcp")
     parser.add_argument("--mode", choices=["mcp", "http", "stdio"], default=None)
     parser.add_argument("--config", default=None, help="Path to config YAML")
-    parser.add_argument("--remote", dest="remote", action="store_true", default=None, help="Enable remote worker mode (default)")
-    parser.add_argument("--no-remote", dest="remote", action="store_false", help="Disable remote worker mode")
+    parser.add_argument(
+        "--remote",
+        dest="remote",
+        action="store_true",
+        default=None,
+        help="Enable remote worker mode (default)",
+    )
+    parser.add_argument(
+        "--no-remote", dest="remote", action="store_false", help="Disable remote worker mode"
+    )
     args = parser.parse_args(argv)
     if args.config:
         os.environ["LOCAL_SHELL_MCP_CONFIG"] = args.config
