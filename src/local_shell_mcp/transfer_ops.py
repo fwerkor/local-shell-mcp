@@ -231,42 +231,16 @@ def transfer_write_chunk(
     digest = hashlib.sha256(data).hexdigest()
     if expected_sha256 and digest != expected_sha256:
         raise ValueError("chunk sha256 mismatch")
-    with _path_lock(tmp):
-        if not tmp.exists():
-            raise FileNotFoundError(str(tmp))
-        metadata = _read_transfer_metadata(tmp)
-        expected = metadata.get("expected_bytes")
-        if expected is not None and start + len(data) > int(expected):
-            raise ValueError("chunk exceeds expected transfer size")
-        _record_received_range(metadata, start, start + len(data))
-        with tmp.open("r+b") as fh:
-            fh.seek(start)
-            fh.write(data)
-            fh.flush()
-        _write_transfer_metadata(tmp, metadata)
-    return {
-        "path": relative_display(dst),
-        "temp_path": relative_display(tmp),
-        "offset": start,
-        "bytes": len(data),
-        "sha256": digest,
-    }
+    return _write_transfer_payload(dst, tmp, start, data, digest)
 
 
-def transfer_write_bytes(
-    path: str,
-    transfer_id: str,
-    offset: int,
-    data: bytes,
+def _write_transfer_payload(
+    dst: Path,
+    tmp: Path,
+    start: int,
+    payload: bytes,
+    digest: str,
 ) -> dict[str, Any]:
-    """Write an already-decoded binary chunk into a transactional transfer."""
-
-    dst = resolve_path(path, follow_final_symlink=False)
-    tmp = _transfer_temp_path(dst, transfer_id)
-    start = int(offset)
-    if start < 0:
-        raise ValueError("offset must be >= 0")
-    payload = bytes(data)
     with _path_lock(tmp):
         if not tmp.exists():
             raise FileNotFoundError(str(tmp))
@@ -285,8 +259,31 @@ def transfer_write_bytes(
         "temp_path": relative_display(tmp),
         "offset": start,
         "bytes": len(payload),
-        "sha256": hashlib.sha256(payload).hexdigest(),
+        "sha256": digest,
     }
+
+
+def transfer_write_bytes(
+    path: str,
+    transfer_id: str,
+    offset: int,
+    data: bytes,
+) -> dict[str, Any]:
+    """Write an already-decoded binary chunk into a transactional transfer."""
+
+    dst = resolve_path(path, follow_final_symlink=False)
+    tmp = _transfer_temp_path(dst, transfer_id)
+    start = int(offset)
+    if start < 0:
+        raise ValueError("offset must be >= 0")
+    payload = bytes(data)
+    return _write_transfer_payload(
+        dst,
+        tmp,
+        start,
+        payload,
+        hashlib.sha256(payload).hexdigest(),
+    )
 
 
 def transfer_mark_complete_write(path: str, transfer_id: str) -> dict[str, Any]:
