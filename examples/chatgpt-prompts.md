@@ -18,17 +18,17 @@ Use local-shell-mcp. Create a remote worker invite named `npu-4card` with workdi
 
 ## Remote machine diagnostics
 
-Use local-shell-mcp. On remote machine `npu-4card`, run `pwd`, `hostname`, `python3 --version`, `git log -1 --oneline`, and `npu-smi info` from `/home/cyh/FrameDiff`. Use `remote_run_shell_tool`.
+Use local-shell-mcp. With `run_shell_tool` and `machine` set to `npu-4card`, run `pwd`, `hostname`, `python3 --version`, `git log -1 --oneline`, and `npu-smi info` from `/home/cyh/FrameDiff`.
 
 ## Remote code edit and test
 
-Use local-shell-mcp. On remote machine `hpc-a`, inspect `/home/cyh/project`, search for the requested symbol with `remote_grep_search`, edit the file with `remote_edit_file` or `remote_apply_patch`, run the relevant test with `remote_run_shell_tool`, then show `remote_git_diff_tool`.
+Use local-shell-mcp. On remote machine `hpc-a`, inspect `/home/cyh/project` with `tree_view`, search with `grep_search`, edit with `edit_file` or `apply_patch`, and run the relevant test plus `git diff` with `run_shell_tool`. Set `machine` to `hpc-a` on every call.
 
 
 ## Remote host-to-host file transfer
 
-Use local-shell-mcp. Copy `/data/run-42/result.tar.zst` from remote machine `hpc-a` to `/scratch/imports/result.tar.zst` on remote machine `hpc-b` using `remote_copy_file`, then verify the destination size and checksum with `remote_run_shell_tool`.
+Use local-shell-mcp. Copy `/data/run-42/result.tar.zst` from remote machine `hpc-a` to `/scratch/imports/result.tar.zst` on remote machine `hpc-b` using `transfer_path` with both machine endpoints, then verify the destination size and checksum with `run_shell_tool` on `hpc-b`.
 
 ## Remote directory transfer through the controller
 
-Use local-shell-mcp. Copy directory `/data/run-42` from remote machine `hpc-a` to `/scratch/run-42` on remote machine `hpc-b` using `remote_copy_dir`. The remote machines cannot SSH to each other, so use the control-server-mediated transfer tools rather than `scp` or `rsync`.
+Use local-shell-mcp. Copy directory `/data/run-42` from remote machine `hpc-a` to `/scratch/run-42` on remote machine `hpc-b` using `transfer_path` with both machine endpoints. The remote machines cannot SSH to each other, so use the controller-mediated transfer rather than `scp` or `rsync`.

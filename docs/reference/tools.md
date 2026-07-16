@@ -403,7 +403,7 @@ Apply one or more exact-text edits to one local or remote file. Each edits entry
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `path` | `string` | required |  |
-| `edits` | `array[object]` | required |  |
+| `edits` | `array[TextEdit]` | required |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
@@ -459,7 +459,7 @@ Copy a file or directory between the controller and remote machines. A missing m
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 
-OAuth scopes: `shell:read, shell:write`.
+OAuth scopes: `remote:use, shell:read, shell:write`.
 
 At least one of `source_machine` and `destination_machine` must be supplied. Omitted endpoints refer to the controller workspace; the source may be either a file or a directory.
 

@@ -87,7 +87,7 @@ The intended isolation boundary is the container or VM running the service.
 
 1. Create a one-time remote worker invite.
 2. Paste the generated command on the remote host.
-3. Use `run_shell_tool`, `read_file`, `transfer_path`, and remote Git tools from ChatGPT.
+3. Use normal tools with `machine`; run Git through `run_shell_tool` and transfer paths with `transfer_path`.
 4. Revoke the worker after the task.
 
 ### Artifact generation
