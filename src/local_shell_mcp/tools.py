@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import inspect
 import json
 import subprocess
 import uuid
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp.types import ToolAnnotations
+from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 from pathspec.gitignore import GitIgnoreSpec
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,6 +33,7 @@ from .fs_ops import (
     temp_dir,
     write_text,
 )
+from .image_ops import ImageFile, assert_view_image_size, read_image
 from .jobs import list_jobs, retry_job, start_job, stop_job, tail_job
 from .models import ToolResult
 from .playwright_ops import browser_capture, browser_get_text, playwright_run_script
@@ -85,6 +87,20 @@ class TextEdit(BaseModel):
     old: str = Field(min_length=1)
     new: str
     replace_all: bool = False
+
+
+class ViewImageResult(BaseModel):
+    """Structured metadata accompanying native MCP image content."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ok: bool
+    path: str
+    machine: str | None = None
+    mime_type: str | None = None
+    bytes: int | None = None
+    message: str = ""
+    error_type: str | None = None
 
 
 def _ok(data: Any = None, message: str = "") -> dict:
@@ -213,6 +229,7 @@ NON_CANCELLABLE_TOOL_NAMES = frozenset(
     {
         "create_file_link",
         "revoke_file_link",
+        "view_image",
         "write_file",
         "edit_file",
         "delete_file_or_dir",
@@ -451,6 +468,7 @@ MACHINE_CAPABLE_TOOL_NAMES = {
     "glob_search",
     "grep_search",
     "read_file",
+    "view_image",
     "write_file",
     "edit_file",
     "delete_file_or_dir",
@@ -1029,6 +1047,91 @@ async def _transfer_path(
     return {"type": source_type, **result}
 
 
+def _view_image_success_result(
+    image: ImageFile,
+    path: str,
+    machine: str | None,
+) -> CallToolResult:
+    metadata = ViewImageResult(
+        ok=True,
+        path=path,
+        machine=machine,
+        mime_type=image.mime_type,
+        bytes=image.size,
+    )
+    return CallToolResult(
+        content=[
+            ImageContent(
+                type="image",
+                data=base64.b64encode(image.data).decode("ascii"),
+                mimeType=image.mime_type,
+            ),
+            TextContent(
+                type="text",
+                text=f"{path} ({image.mime_type}, {image.size} bytes)",
+            ),
+        ],
+        structuredContent=metadata.model_dump(mode="json"),
+    )
+
+
+def _view_image_error_result(
+    path: str,
+    machine: str | None,
+    exc: Exception,
+) -> CallToolResult:
+    audit("tool_error", error=repr(exc))
+    message = f"{type(exc).__name__}: {exc}"
+    metadata = ViewImageResult(
+        ok=False,
+        path=path,
+        machine=machine,
+        message=message,
+        error_type=type(exc).__name__,
+    )
+    return CallToolResult(
+        content=[TextContent(type="text", text=f"Unable to view image: {message}")],
+        structuredContent=metadata.model_dump(mode="json"),
+        isError=True,
+    )
+
+
+async def _view_image_result(path: str, machine: str | None = None) -> CallToolResult:
+    try:
+        display_path = path
+        if machine:
+            if not get_settings().remote_enabled:
+                raise RuntimeError("Remote workers are disabled")
+            stat = await _remote_transfer_data(
+                machine,
+                "transfer_stat",
+                {"path": path, "sha256": False},
+            )
+            if not isinstance(stat, dict) or stat.get("type") != "file":
+                raise ValueError(f"source is not a file: {path}")
+            assert_view_image_size(int(stat.get("size") or 0))
+            temporary = await _to_thread(transfer_alloc_temp_path, ".bin")
+            temporary_path = temporary["path"]
+            try:
+                await _copy_remote_file_to_local(
+                    machine,
+                    path,
+                    temporary_path,
+                    True,
+                )
+                image = await _to_thread(read_image, temporary_path)
+            finally:
+                with suppress(Exception):
+                    await _to_thread(delete_path, temporary_path, False)
+            display_path = str(stat.get("path") or path)
+        else:
+            image = await _to_thread(read_image, path)
+            display_path = image.path
+        return _view_image_success_result(image, display_path, machine)
+    except Exception as exc:
+        return _view_image_error_result(path, machine, exc)
+
+
 def _read_audit_tail_entries(lines: int = 100) -> dict:
     settings = get_settings()
     path = settings.audit_log_path
@@ -1582,6 +1685,14 @@ def build_mcp() -> FastMCP:
             )
         except Exception as exc:
             return _handled_error(exc)
+
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
+    async def view_image(
+        path: str,
+        machine: str | None = None,
+    ) -> ViewImageResult:
+        """View a PNG, JPEG, GIF, or WebP file as native MCP image content locally or on a remote machine. Use this instead of read_file when visual inspection is needed. Remote images reuse the existing file-transfer protocol, so the worker does not need a new image-specific RPC."""
+        return cast(ViewImageResult, await _view_image_result(path, machine))
 
     @mcp.tool(structured_output=True, meta=file_share_meta)
     async def create_file_link(

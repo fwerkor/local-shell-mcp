@@ -160,7 +160,7 @@ See the [Agent Skills guide](https://fwerkor.github.io/local-shell-mcp/guides/sk
 The public MCP surface includes:
 
 - Shell and jobs: `run_shell_tool`, `run_python_tool`, persistent `shell_*`, and tracked `job_*` tools. Use `run_shell_tool` for Git CLI operations.
-- Filesystem: `list_files`, `tree_view`, `glob_search`, `grep_search`, unified `read_file`, `write_file`, unified `edit_file`, `delete_file_or_dir`, and `apply_patch`.
+- Filesystem: `list_files`, `tree_view`, `glob_search`, `grep_search`, unified `read_file`, native-vision `view_image`, `write_file`, unified `edit_file`, `delete_file_or_dir`, and `apply_patch`.
 - Transfer: `transfer_path` for files or directories across controller and worker endpoints.
 - Browser: `browser_get_text_tool`, unified `browser_capture_tool`, and `playwright_run_script_tool`.
 - File links: `create_file_link`, `list_file_links`, `revoke_file_link`.

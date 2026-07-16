@@ -27,6 +27,7 @@ CORE_TOOL_NAMES = {
     "glob_search",
     "grep_search",
     "read_file",
+    "view_image",
     "create_file_link",
     "list_file_links",
     "revoke_file_link",
@@ -121,6 +122,7 @@ async def test_machine_capable_tools_use_optional_machine_arguments(tmp_path, mo
         "glob_search",
         "grep_search",
         "read_file",
+        "view_image",
         "write_file",
         "edit_file",
         "delete_file_or_dir",
@@ -158,6 +160,8 @@ async def test_key_tool_descriptions_guide_tool_choice(tmp_path, monkeypatch):
     assert "old must match exactly" in tools["edit_file"].description
     assert "recursive=true is required" in tools["delete_file_or_dir"].description
     assert "high-entropy token" in tools["create_file_link"].description
+    assert "native MCP image content" in tools["view_image"].description
+    assert "existing file-transfer protocol" in tools["view_image"].description
     assert "tool surface stays fixed" in tools["skills_list"].description
     assert "exact name returned from skills_list" in tools["skill_load"].description
 

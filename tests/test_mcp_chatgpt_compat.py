@@ -180,6 +180,8 @@ async def test_tool_annotations_are_conservative_and_mode_independent(
     assert tools["browser_get_text_tool"].annotations.openWorldHint is True
     assert tools["read_file"].annotations.readOnlyHint is True
     assert tools["read_file"].annotations.openWorldHint is True
+    assert tools["view_image"].annotations.readOnlyHint is True
+    assert tools["view_image"].annotations.openWorldHint is True
     assert tools["search"].annotations.readOnlyHint is True
     assert tools["search"].annotations.openWorldHint is False
     assert all(tool.annotations is not None for tool in tools.values())
@@ -328,6 +330,7 @@ async def test_read_only_tools_have_read_only_hint(tmp_path, monkeypatch):
         "glob_search",
         "grep_search",
         "read_file",
+        "view_image",
         "list_file_links",
         "secret_scan",
         "todo_read_tool",

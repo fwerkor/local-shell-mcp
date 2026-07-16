@@ -54,6 +54,7 @@ GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "glob_search",
             "grep_search",
             "read_file",
+            "view_image",
             "write_file",
             "edit_file",
             "delete_file_or_dir",
