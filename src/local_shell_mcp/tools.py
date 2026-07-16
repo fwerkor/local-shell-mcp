@@ -139,6 +139,16 @@ async def _to_thread(func, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
     return await asyncio.to_thread(func, *args, **kwargs)
 
 
+async def _tool_call(operation, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+    try:
+        result = operation(*args, **kwargs)
+        if inspect.isawaitable(result):
+            result = await result
+        return _ok(result)
+    except Exception as exc:
+        return _handled_error(exc)
+
+
 def _assert_text_input_size(label: str, text: str, limit: int | None = None) -> None:
     settings = get_settings()
     max_bytes = limit or settings.max_file_write_bytes
@@ -1307,26 +1317,19 @@ def build_mcp() -> FastMCP:
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def skills_list() -> ToolResult:
         """List installed agent skills without loading their instructions. The MCP tool surface stays fixed; adding or removing skill directories is reflected on the next call."""
-        try:
-            return _ok(await _to_thread(list_installed_skills, settings))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(_to_thread, list_installed_skills, settings)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def skill_load(name: str) -> ToolResult:
         """Load one installed agent skill by the exact name returned from skills_list. Returns SKILL.md instructions plus related file paths."""
-        try:
-            return _ok(await _to_thread(load_installed_skill, name, settings))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(_to_thread, load_installed_skill, name, settings)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def skill_read_file(name: str, path: str) -> ToolResult:
         """Read one related text file from an installed Skill."""
-        try:
-            return _ok(await _to_thread(read_installed_skill_file, name, path, settings))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(
+            _to_thread, read_installed_skill_file, name, path, settings
+        )
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def run_shell_tool(
@@ -1379,10 +1382,7 @@ def build_mcp() -> FastMCP:
                 {"code": code, "cwd": cwd, "timeout_s": timeout_s},
                 timeout_s,
             )
-        try:
-            return _ok(await _run_python(code, cwd, timeout_s))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(_run_python, code, cwd, timeout_s)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def shell_start(
@@ -1401,10 +1401,7 @@ def build_mcp() -> FastMCP:
                 "shell_start",
                 {"cwd": cwd, "name": name, "command": command},
             )
-        try:
-            return _ok(await start_shell(cwd, name, command))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(start_shell, cwd, name, command)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def shell_send(
@@ -1420,10 +1417,7 @@ def build_mcp() -> FastMCP:
                 "shell_send",
                 {"session_id": session_id, "input_text": input_text, "enter": enter},
             )
-        try:
-            return _ok(await send_shell(session_id, input_text, enter))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(send_shell, session_id, input_text, enter)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def shell_read(
@@ -1438,10 +1432,7 @@ def build_mcp() -> FastMCP:
                 "shell_read",
                 {"session_id": session_id, "lines": lines},
             )
-        try:
-            return _ok(await read_shell(session_id, lines))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(read_shell, session_id, lines)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def shell_kill(
@@ -1451,20 +1442,14 @@ def build_mcp() -> FastMCP:
         """Terminate a persistent local or remote shell session."""
         if machine:
             return await _remote_call(machine, "shell_kill", {"session_id": session_id})
-        try:
-            return _ok(await kill_shell(session_id))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(kill_shell, session_id)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def shell_list(machine: str | None = None) -> ToolResult:
         """List persistent shell sessions locally or on a remote machine."""
         if machine:
             return await _remote_call(machine, "shell_list", {})
-        try:
-            return _ok(await list_shells())
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(list_shells)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def job_start(
@@ -1483,10 +1468,7 @@ def build_mcp() -> FastMCP:
                 "job_start",
                 {"command": command, "cwd": cwd, "name": name},
             )
-        try:
-            return _ok(await start_job(command, cwd, name))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(start_job, command, cwd, name)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def job_list(
@@ -1500,10 +1482,7 @@ def build_mcp() -> FastMCP:
                 "job_list",
                 {"include_finished": include_finished},
             )
-        try:
-            return _ok(await list_jobs(include_finished))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(list_jobs, include_finished)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def job_tail(
@@ -1518,10 +1497,7 @@ def build_mcp() -> FastMCP:
                 "job_tail",
                 {"job_id": job_id, "lines": lines},
             )
-        try:
-            return _ok(await tail_job(job_id, lines))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(tail_job, job_id, lines)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def job_stop(
@@ -1531,10 +1507,7 @@ def build_mcp() -> FastMCP:
         """Stop a tracked local or remote job."""
         if machine:
             return await _remote_call(machine, "job_stop", {"job_id": job_id})
-        try:
-            return _ok(await stop_job(job_id))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(stop_job, job_id)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def job_retry(
@@ -1547,10 +1520,7 @@ def build_mcp() -> FastMCP:
         _audit_tool_purpose("job_retry", purpose, explanation)
         if machine:
             return await _remote_call(machine, "job_retry", {"job_id": job_id})
-        try:
-            return _ok(await retry_job(job_id))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(retry_job, job_id)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def list_files(
@@ -1570,10 +1540,7 @@ def build_mcp() -> FastMCP:
                     "max_entries": max_entries,
                 },
             )
-        try:
-            return _ok(await _to_thread(list_dir, path, recursive, max_entries))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(_to_thread, list_dir, path, recursive, max_entries)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def tree_view(
@@ -1589,10 +1556,7 @@ def build_mcp() -> FastMCP:
                 "tree_view",
                 {"cwd": cwd, "depth": depth, "max_entries": max_entries},
             )
-        try:
-            return _ok(await tree(cwd, depth, max_entries))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(tree, cwd, depth, max_entries)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def glob_search(
@@ -1639,19 +1603,9 @@ def build_mcp() -> FastMCP:
                     "max_results": max_results,
                 },
             )
-        try:
-            return _ok(
-                await grep(
-                    query,
-                    cwd,
-                    glob,
-                    regex,
-                    case_sensitive,
-                    max_results,
-                )
-            )
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(
+            grep, query, cwd, glob, regex, case_sensitive, max_results
+        )
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def read_file(
@@ -1672,19 +1626,15 @@ def build_mcp() -> FastMCP:
         }
         if machine:
             return await _remote_call(machine, "read_file", args)
-        try:
-            return _ok(
-                await _to_thread(
-                    read_texts,
-                    path,
-                    start_line,
-                    end_line,
-                    binary_preview,
-                    binary_preview_bytes,
-                )
-            )
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(
+            _to_thread,
+            read_texts,
+            path,
+            start_line,
+            end_line,
+            binary_preview,
+            binary_preview_bytes,
+        )
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def view_image(
@@ -1760,10 +1710,7 @@ def build_mcp() -> FastMCP:
                 "write_file",
                 {"path": path, "content": content, "overwrite": overwrite},
             )
-        try:
-            return _ok(await _to_thread(write_text, path, content, overwrite))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(_to_thread, write_text, path, content, overwrite)
 
     @mcp.tool(structured_output=True, meta=shell_write_meta)
     async def edit_file(
@@ -1782,10 +1729,7 @@ def build_mcp() -> FastMCP:
                 "edit_file",
                 {"path": path, "edits": edit_payloads},
             )
-        try:
-            return _ok(await _to_thread(edit_text, path, edit_payloads))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(_to_thread, edit_text, path, edit_payloads)
 
     @mcp.tool(structured_output=True, meta=shell_write_meta)
     async def delete_file_or_dir(
@@ -1803,10 +1747,7 @@ def build_mcp() -> FastMCP:
                 "delete_file_or_dir",
                 {"path": path, "recursive": recursive},
             )
-        try:
-            return _ok(await _to_thread(delete_path, path, recursive))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(_to_thread, delete_path, path, recursive)
 
     @mcp.tool(structured_output=True, meta=patch_meta)
     async def apply_patch(
@@ -1824,10 +1765,7 @@ def build_mcp() -> FastMCP:
                 "apply_patch",
                 {"patch": patch, "cwd": cwd},
             )
-        try:
-            return _ok(await _apply_patch_text(patch, cwd))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(_apply_patch_text, patch, cwd)
 
     @mcp.tool(structured_output=True, meta=transfer_meta)
     async def transfer_path(
@@ -1842,19 +1780,15 @@ def build_mcp() -> FastMCP:
     ) -> ToolResult:
         """Copy a file or directory between the controller and remote machines. A missing machine denotes the controller; at least one endpoint must be remote."""
         _audit_tool_purpose("transfer_path", purpose, explanation)
-        try:
-            return _ok(
-                await _transfer_path(
-                    source_path,
-                    destination_path,
-                    source_machine,
-                    destination_machine,
-                    overwrite,
-                    chunk_size,
-                )
-            )
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(
+            _transfer_path,
+            source_path,
+            destination_path,
+            source_machine,
+            destination_machine,
+            overwrite,
+            chunk_size,
+        )
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def secret_scan(
@@ -1863,26 +1797,17 @@ def build_mcp() -> FastMCP:
         max_results: int = 200,
     ) -> ToolResult:
         """Scan local workspace text files for common secrets before commit or push."""
-        try:
-            return _ok(await _secret_scan(cwd, glob, max_results))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(_secret_scan, cwd, glob, max_results)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def todo_read_tool() -> ToolResult:
         """Read the local agent todo list."""
-        try:
-            return _ok(await _to_thread(todo_read))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(_to_thread, todo_read)
 
     @mcp.tool(structured_output=True, meta=shell_write_meta)
     async def todo_write_tool(todos: list[dict]) -> ToolResult:
         """Write the local agent todo list."""
-        try:
-            return _ok(await _to_thread(todo_write, todos))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(_to_thread, todo_write, todos)
 
     @mcp.tool(structured_output=True, meta=browser_write_meta)
     async def browser_capture_tool(
@@ -1909,10 +1834,7 @@ def build_mcp() -> FastMCP:
         }
         if machine:
             return await _remote_call(machine, "browser_capture_tool", args)
-        try:
-            return _ok(await browser_capture(**args))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(browser_capture, **args)
 
     @mcp.tool(structured_output=True, meta=browser_meta)
     async def browser_get_text_tool(
@@ -1931,10 +1853,7 @@ def build_mcp() -> FastMCP:
         }
         if machine:
             return await _remote_call(machine, "browser_get_text_tool", args)
-        try:
-            return _ok(await browser_get_text(**args))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(browser_get_text, **args)
 
     @mcp.tool(structured_output=True, meta=browser_execute_meta)
     async def playwright_run_script_tool(
@@ -1951,18 +1870,12 @@ def build_mcp() -> FastMCP:
                 {"script": script, "cwd": cwd, "timeout_s": timeout_s},
                 timeout_s,
             )
-        try:
-            return _ok(await playwright_run_script(script, cwd, timeout_s))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(playwright_run_script, script, cwd, timeout_s)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def audit_tail(lines: int = 100) -> ToolResult:
         """Read recent local audit log entries."""
-        try:
-            return _ok(await _to_thread(_read_audit_tail_entries, lines))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(_to_thread, _read_audit_tail_entries, lines)
 
     @mcp.tool(structured_output=True, meta=remote_meta)
     async def remote_invite(
@@ -1971,34 +1884,24 @@ def build_mcp() -> FastMCP:
         ttl_s: int | None = None,
     ) -> ToolResult:
         """Create a one-time command for a remote machine to join this server."""
-        try:
-            return _ok(await remote_manager().create_invite(name, workdir, ttl_s))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(
+            lambda: remote_manager().create_invite(name, workdir, ttl_s)
+        )
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=remote_meta)
     async def remote_list_machines() -> ToolResult:
         """List registered remote worker machines."""
-        try:
-            return _ok(remote_manager().list_machines())
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(lambda: remote_manager().list_machines())
 
     @mcp.tool(structured_output=True, meta=remote_meta)
     async def remote_revoke_machine(machine: str) -> ToolResult:
         """Revoke and remove a remote worker machine."""
-        try:
-            return _ok(remote_manager().revoke(machine))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(lambda: remote_manager().revoke(machine))
 
     @mcp.tool(structured_output=True, meta=remote_meta)
     async def remote_rename_machine(machine: str, new_name: str) -> ToolResult:
         """Rename a remote worker machine."""
-        try:
-            return _ok(remote_manager().rename(machine, new_name))
-        except Exception as exc:
-            return _handled_error(exc)
+        return await _tool_call(lambda: remote_manager().rename(machine, new_name))
 
     _remove_remote_tools_when_disabled(mcp)
     _install_tool_annotations(mcp)
