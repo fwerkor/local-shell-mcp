@@ -158,7 +158,7 @@ def test_invalid_persisted_oauth_secret_is_not_silently_replaced(tmp_path, monke
 def test_mcp_session_defaults():
     settings = Settings()
 
-    assert settings.mcp_session_idle_timeout_s == 300
+    assert settings.mcp_session_idle_timeout_s == 180
     assert settings.mcp_max_sessions == 1024
 
 

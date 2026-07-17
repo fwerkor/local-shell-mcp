@@ -108,7 +108,7 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-long-random-secret
 | `auth_mode` | `LOCAL_SHELL_MCP_AUTH_MODE` | `'oauth'` | 公开部署使用 `oauth`。 |
 | `auth_bypass_localhost` | `LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST` | `True` | 是否允许 localhost 绕过认证。 |
 | `require_auth_for_mcp_discovery` | `LOCAL_SHELL_MCP_REQUIRE_AUTH_FOR_MCP_DISCOVERY` | `True` | MCP 初始化与工具发现是否要求 OAuth 认证。 |
-| `mcp_session_idle_timeout_s` | `LOCAL_SHELL_MCP_MCP_SESSION_IDLE_TIMEOUT_S` | `300` | Stateful Streamable HTTP 会话空闲超时。 |
+| `mcp_session_idle_timeout_s` | `LOCAL_SHELL_MCP_MCP_SESSION_IDLE_TIMEOUT_S` | `180` | Stateful Streamable HTTP 会话空闲超时。 |
 | `mcp_max_sessions` | `LOCAL_SHELL_MCP_MCP_MAX_SESSIONS` | `1024` | Stateful MCP 会话最大并发数。 |
 | `public_base_url` | `LOCAL_SHELL_MCP_PUBLIC_BASE_URL` | `None` | 外部 HTTPS origin。不要包含 `/mcp`。 |
 | `oauth_issuer` | `LOCAL_SHELL_MCP_OAUTH_ISSUER` | `None` | OAuth issuer 覆盖值。 |
