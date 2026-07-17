@@ -1,16 +1,14 @@
 name: Apply UI runtime patch
 
 on:
-  push:
-    branches:
-      - fix/embedded-ui-runtime
+  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
