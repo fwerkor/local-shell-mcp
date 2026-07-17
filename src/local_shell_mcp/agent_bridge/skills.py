@@ -4,7 +4,7 @@ import os
 import re
 import stat
 import tomllib
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 import yaml
@@ -27,8 +27,16 @@ def _relative_posix(base: Path, path: Path) -> str:
 
 
 def _is_relative_child_path(value: Path) -> bool:
-    """Accept only relative child paths so skill references cannot escape their root."""
-    return not value.is_absolute() and ".." not in value.parts
+    """Accept portable relative child paths on every host platform."""
+    raw = os.fspath(value)
+    posix = PurePosixPath(raw)
+    windows = PureWindowsPath(raw)
+    return (
+        not posix.anchor
+        and not windows.anchor
+        and ".." not in posix.parts
+        and ".." not in windows.parts
+    )
 
 
 def validate_skill_name(name: str) -> str:

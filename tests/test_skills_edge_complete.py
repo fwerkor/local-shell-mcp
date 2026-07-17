@@ -68,10 +68,9 @@ def test_descriptions_front_matter_and_warning_cap():
 def test_resolved_directories_regular_files_and_roots(tmp_path, monkeypatch):
     config = tmp_path / "config"
     config.mkdir()
-    with pytest.raises(ValueError, match="inside"):
-        skills._resolved_skills_directory(config, "../outside")
-    with pytest.raises(ValueError, match="inside"):
-        skills._resolved_skills_directory(config, "/absolute")
+    for invalid_directory in ("../outside", "/absolute", r"\absolute", "C:/absolute"):
+        with pytest.raises(ValueError, match="inside"):
+            skills._resolved_skills_directory(config, invalid_directory)
     root, directory = skills._resolved_skills_directory(config, "skills")
     assert root == config.resolve()
     assert directory == config.resolve() / "skills"
