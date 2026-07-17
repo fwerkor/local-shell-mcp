@@ -21,38 +21,23 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          old = '''          EXTRA_PYINSTALLER_ARGS=()
-          if [[ "${RUNNER_OS}" == "Windows" ]]; then
-            EXTRA_PYINSTALLER_ARGS+=(--collect-all winpty)
-          fi
-          pyinstaller \\
-            --clean \\
-            --onefile \\
-            --name local-shell-mcp \\
-            --collect-all local_shell_mcp \\
-            --collect-all mcp \\
-            --collect-all uvicorn \\
-            --collect-all fastapi \\
-            --collect-all starlette \\
-            --exclude-module cryptography \\
-            "${EXTRA_PYINSTALLER_ARGS[@]}" \\
-            scripts/pyinstaller-entry.py'''
-
-          new = '''          PYINSTALLER_ARGS=(
-            --clean
-            --onefile
-            --name local-shell-mcp
-            --collect-all local_shell_mcp
-            --collect-all mcp
-            --collect-all uvicorn
-            --collect-all fastapi
-            --collect-all starlette
-            --exclude-module cryptography
-          )
-          if [[ "${RUNNER_OS}" == "Windows" ]]; then
-            PYINSTALLER_ARGS+=(--collect-all winpty)
-          fi
-          pyinstaller "${PYINSTALLER_ARGS[@]}" scripts/pyinstaller-entry.py'''
+          replacement = [
+              "          PYINSTALLER_ARGS=(",
+              "            --clean",
+              "            --onefile",
+              "            --name local-shell-mcp",
+              "            --collect-all local_shell_mcp",
+              "            --collect-all mcp",
+              "            --collect-all uvicorn",
+              "            --collect-all fastapi",
+              "            --collect-all starlette",
+              "            --exclude-module cryptography",
+              "          )",
+              '          if [[ "${RUNNER_OS}" == "Windows" ]]; then',
+              "            PYINSTALLER_ARGS+=(--collect-all winpty)",
+              "          fi",
+              '          pyinstaller "${PYINSTALLER_ARGS[@]}" scripts/pyinstaller-entry.py',
+          ]
 
           for name in (
               ".github/workflows/ci.yml",
@@ -60,11 +45,20 @@ jobs:
               ".github/workflows/ui-runtime.yml",
           ):
               path = Path(name)
-              text = path.read_text()
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{name}: expected one unsafe block, found {count}")
-              path.write_text(text.replace(old, new))
+              lines = path.read_text().splitlines()
+              starts = [i for i, line in enumerate(lines) if line.strip() == "EXTRA_PYINSTALLER_ARGS=()"]
+              if len(starts) != 1:
+                  raise SystemExit(f"{name}: expected one unsafe block, found {len(starts)}")
+              start = starts[0]
+              ends = [
+                  i
+                  for i in range(start, len(lines))
+                  if lines[i].strip() == "scripts/pyinstaller-entry.py"
+              ]
+              if len(ends) != 1:
+                  raise SystemExit(f"{name}: could not locate PyInstaller entry line")
+              end = ends[0]
+              path.write_text("\n".join(lines[:start] + replacement + lines[end + 1 :]) + "\n")
 
           Path(".github/workflows/apply-ui-runtime-patch.yml").unlink()
           PY
