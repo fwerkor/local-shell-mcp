@@ -67,6 +67,7 @@ export function AuditScreen({
   const selectedOperation = OPERATIONS[operationIndex] || ""
   const timeRange = TIME_RANGES[timeIndex] || TIME_RANGES[2]!
   const current = entries[selected]
+  const narrow = width < 70
   const tableHeight = Math.max(6, height - 15)
   const { rows, start } = useVisibleRows(entries, selected, tableHeight)
 
@@ -163,18 +164,31 @@ export function AuditScreen({
 
   return (
     <box style={{ flexGrow: 1, flexDirection: "column", gap: 1 }}>
-      <box style={{ height: 4, flexDirection: "row", gap: 1 }}>
-        {[
-          ["Node", selectedNode || "All", theme.cyan],
-          ["Operation", selectedOperation || "All", theme.blue],
-          ["Time", timeRange.label, theme.yellow],
-          ["Sort", sort.toUpperCase(), theme.magenta],
-        ].map(([title, value, color]) => (
-          <Panel key={String(title)} title={String(title)} active style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
-            <text fg={String(color)} attributes={1} content={String(value)} />
-          </Panel>
-        ))}
-      </box>
+      {width < 82 ? (
+        <Panel title="Filters" active style={{ height: 3, alignItems: "center", justifyContent: "center" }}>
+          <text
+            fg={theme.muted}
+            content={
+              width < 58
+                ? `N:${selectedNode || "*"} O:${selectedOperation || "*"} T:${timeRange.label} S:${sort.slice(0, 1).toUpperCase()}`
+                : `${selectedNode || "All nodes"}  │  ${selectedOperation || "All ops"}  │  ${timeRange.label}  │  ${sort.toUpperCase()}`
+            }
+          />
+        </Panel>
+      ) : (
+        <box style={{ height: 4, flexDirection: "row", gap: 1 }}>
+          {[
+            ["Node", selectedNode || "All", theme.cyan],
+            ["Operation", selectedOperation || "All", theme.blue],
+            ["Time", timeRange.label, theme.yellow],
+            ["Sort", sort.toUpperCase(), theme.magenta],
+          ].map(([title, value, color]) => (
+            <Panel key={String(title)} title={String(title)} active style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
+              <text fg={String(color)} attributes={1} content={String(value)} />
+            </Panel>
+          ))}
+        </box>
+      )}
       {(search || event || session) && (
         <box style={{ height: 2, flexDirection: "row", paddingLeft: 1, alignItems: "center", backgroundColor: theme.panelAlt }}>
           <text fg={theme.faint} content="Filters  " />
@@ -191,8 +205,8 @@ export function AuditScreen({
             <box style={{ flexDirection: "column", flexGrow: 1 }}>
               <box style={{ height: 2, flexDirection: "row", paddingLeft: 1, paddingRight: 1 }}>
                 <text fg={theme.faint} content="TIME       " />
-                <text fg={theme.faint} content="NODE              " />
-                <text fg={theme.faint} content="OPERATION     " />
+                {!narrow && <text fg={theme.faint} content="NODE              " />}
+                {!narrow && <text fg={theme.faint} content="OPERATION     " />}
                 <text fg={theme.faint} content="EVENT / TOOL" />
               </box>
               {rows.map((entry, offset) => {
@@ -210,8 +224,8 @@ export function AuditScreen({
                     }}
                   >
                     <text fg={theme.faint} content={`${new Date(entry.ts * 1000).toLocaleTimeString().padEnd(11)} `} />
-                    <text fg={active ? theme.text : theme.muted} content={`${entry.node.slice(0, 16).padEnd(17)} `} />
-                    <text fg={entryColor(entry)} content={`${entry.operation.slice(0, 12).padEnd(13)} `} />
+                    {!narrow && <text fg={active ? theme.text : theme.muted} content={`${entry.node.slice(0, 16).padEnd(17)} `} />}
+                    {!narrow && <text fg={entryColor(entry)} content={`${entry.operation.slice(0, 12).padEnd(13)} `} />}
                     <text fg={active ? theme.text : theme.muted} attributes={active ? 1 : 0} content={entry.tool || entry.event} />
                   </box>
                 )

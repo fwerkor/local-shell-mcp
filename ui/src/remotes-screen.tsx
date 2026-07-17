@@ -144,20 +144,29 @@ export function RemotesScreen({
 
   return (
     <box style={{ flexGrow: 1, flexDirection: "column", gap: 1 }}>
-      <box style={{ height: compact ? 2 : 4, flexDirection: "row", gap: 1 }}>
-        <Panel title={compact ? "On" : "Online"} active style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
-          <text fg={theme.green} attributes={1} content={String(online)} />
+      {width < 70 ? (
+        <Panel title="Remote status" active style={{ height: 3, alignItems: "center", justifyContent: "center" }}>
+          <text
+            fg={theme.muted}
+            content={`On ${online}  │  Off ${offline}  │  Total ${machines.length}  │  ${loading ? "SYNC" : "READY"}`}
+          />
         </Panel>
-        <Panel title={compact ? "Off" : "Offline"} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
-          <text fg={offline ? theme.orange : theme.faint} attributes={1} content={String(offline)} />
-        </Panel>
-        <Panel title="Total" style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
-          <text fg={theme.cyan} attributes={1} content={String(machines.length)} />
-        </Panel>
-        <Panel title={compact ? "Ctl" : "Controller"} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
-          <text fg={theme.blue} content={loading ? (compact ? "SYNC" : "SYNCING") : "READY"} />
-        </Panel>
-      </box>
+      ) : (
+        <box style={{ height: compact ? 2 : 4, flexDirection: "row", gap: 1 }}>
+          <Panel title={compact ? "On" : "Online"} active style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
+            <text fg={theme.green} attributes={1} content={String(online)} />
+          </Panel>
+          <Panel title={compact ? "Off" : "Offline"} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
+            <text fg={offline ? theme.orange : theme.faint} attributes={1} content={String(offline)} />
+          </Panel>
+          <Panel title="Total" style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
+            <text fg={theme.cyan} attributes={1} content={String(machines.length)} />
+          </Panel>
+          <Panel title={compact ? "Ctl" : "Controller"} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
+            <text fg={theme.blue} content={loading ? (compact ? "SYNC" : "SYNCING") : "READY"} />
+          </Panel>
+        </box>
+      )}
       <box style={{ flexGrow: 1, flexDirection: compact ? "column" : "row", gap: 1 }}>
         <Panel title="Remote nodes" active style={{ flexGrow: 1, paddingTop: 1 }}>
           {machines.length === 0 ? (

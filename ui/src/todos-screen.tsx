@@ -196,20 +196,33 @@ export function TodosScreen({
 
   return (
     <box style={{ flexGrow: 1, flexDirection: "column" }}>
-      <box style={{ height: 4, flexDirection: "row", gap: 1 }}>
-        {[
-          ["All", counts.total, theme.cyan],
-          ["Open", counts.open, theme.yellow],
-          ["Done", counts.completed, theme.green],
-        ].map(([label, value, color]) => (
-          <Panel key={String(label)} title={String(label)} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
-            <text fg={String(color)} attributes={1} content={String(value)} />
-          </Panel>
-        ))}
-        <Panel title="View" active style={{ width: Math.max(20, Math.floor(width * 0.2)), alignItems: "center", justifyContent: "center" }}>
-          <text fg={theme.cyan} attributes={1} content={filter.toUpperCase()} />
+      {width < 76 ? (
+        <Panel title="Summary" active style={{ height: 3, alignItems: "center", justifyContent: "center" }}>
+          <text
+            fg={theme.muted}
+            content={
+              width < 58
+                ? `A:${counts.total}  O:${counts.open}  D:${counts.completed}  V:${filter.slice(0, 1).toUpperCase()}`
+                : `All ${counts.total}  │  Open ${counts.open}  │  Done ${counts.completed}  │  ${filter.toUpperCase()}`
+            }
+          />
         </Panel>
-      </box>
+      ) : (
+        <box style={{ height: 4, flexDirection: "row", gap: 1 }}>
+          {[
+            ["All", counts.total, theme.cyan],
+            ["Open", counts.open, theme.yellow],
+            ["Done", counts.completed, theme.green],
+          ].map(([label, value, color]) => (
+            <Panel key={String(label)} title={String(label)} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
+              <text fg={String(color)} attributes={1} content={String(value)} />
+            </Panel>
+          ))}
+          <Panel title="View" active style={{ width: Math.max(20, Math.floor(width * 0.2)), alignItems: "center", justifyContent: "center" }}>
+            <text fg={theme.cyan} attributes={1} content={filter.toUpperCase()} />
+          </Panel>
+        </box>
+      )}
       <Panel title={`Todos · ${visible.length}`} active style={{ flexGrow: 1, paddingTop: 1 }}>
         {visible.length === 0 ? (
           <EmptyState title="No matching todos" detail="Press n to add an item" />

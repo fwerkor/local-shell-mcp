@@ -137,6 +137,7 @@ export function FilesScreen({
   const [dialog, setDialog] = useState<Dialog>({ type: "none" })
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null)
   const [busy, setBusy] = useState(false)
+  const [narrowPane, setNarrowPane] = useState<"list" | "preview">("list")
   const editorRef = useRef<TextareaRenderable>(null)
   const refreshRequest = useRef(0)
   const refreshController = useRef<AbortController | null>(null)
@@ -158,6 +159,7 @@ export function FilesScreen({
   useEffect(() => {
     setSelected((value) => clampIndex(value, entries.length))
   }, [entries.length])
+  const narrow = width < 70
   const compact = width < 105
 
   const refresh = useCallback(async () => {
@@ -190,6 +192,7 @@ export function FilesScreen({
     setSelected(0)
     setDialog({ type: "none" })
     setClipboard(null)
+    setNarrowPane("list")
   }, [machine])
 
   useEffect(() => {
@@ -313,6 +316,7 @@ export function FilesScreen({
     setDialog({ type: "none" })
     setClipboard(null)
     setPath(".")
+    setNarrowPane("list")
     onMachine(machines[next]!.name)
   }
 
@@ -372,6 +376,11 @@ export function FilesScreen({
       return
     }
 
+    if (narrow && key.name === "tab") {
+      key.preventDefault()
+      setNarrowPane((value) => (value === "list" ? "preview" : "list"))
+      return
+    }
     if (key.name === "j" || key.name === "down") {
       setSelected((value) => clampIndex(value + 1, entries.length))
     }
@@ -449,27 +458,56 @@ export function FilesScreen({
               />
             )}
           </box>
+          {narrow && (
+            <box style={{ height: 2, flexDirection: "row", alignItems: "center", paddingLeft: 1 }}>
+              {(["list", "preview"] as const).map((pane) => {
+                const active = narrowPane === pane
+                return (
+                  <box
+                    key={pane}
+                    onMouseDown={() => setNarrowPane(pane)}
+                    style={{
+                      height: 1,
+                      marginRight: 1,
+                      paddingLeft: 1,
+                      paddingRight: 1,
+                      backgroundColor: active ? theme.selectedStrong : theme.panelAlt,
+                    }}
+                  >
+                    <text fg={active ? theme.cyan : theme.muted} attributes={active ? 1 : 0} content={pane === "list" ? "LIST" : "PREVIEW"} />
+                  </box>
+                )
+              })}
+              <box style={{ flexGrow: 1 }} />
+              <text fg={theme.faint} content="Tab switch  " />
+            </box>
+          )}
           <box style={{ flexGrow: 1, flexDirection: "row", gap: 1 }}>
             {!compact && (
               <Panel title="Parent" style={{ width: "24%", paddingTop: 1 }}>
                 <FileRows entries={parentEntries} selected={Math.max(0, parentEntries.findIndex((entry) => entry.path === path))} height={listHeight} />
               </Panel>
             )}
-            <Panel title="Current" active style={{ width: compact ? "48%" : "38%", paddingTop: 1 }}>
-              {entries.length ? (
-                <FileRows entries={entries} selected={selected} height={listHeight} />
-              ) : (
-                <EmptyState title="Empty directory" detail="n file · N directory" />
-              )}
-            </Panel>
-            <Panel title={current ? `Preview · ${current.name}` : "Preview"} style={{ flexGrow: 1, paddingTop: 1 }}>
-              <Preview preview={preview} entry={current} />
-            </Panel>
+            {(!narrow || narrowPane === "list") && (
+              <Panel title="Current" active style={{ width: narrow ? "100%" : compact ? "48%" : "38%", paddingTop: 1 }}>
+                {entries.length ? (
+                  <FileRows entries={entries} selected={selected} height={listHeight} />
+                ) : (
+                  <EmptyState title="Empty directory" detail="n file · N directory" />
+                )}
+              </Panel>
+            )}
+            {(!narrow || narrowPane === "preview") && (
+              <Panel title={current ? `Preview · ${current.name}` : "Preview"} style={{ flexGrow: 1, width: narrow ? "100%" : undefined, paddingTop: 1 }}>
+                <Preview preview={preview} entry={current} />
+              </Panel>
+            )}
           </box>
         </box>
       </box>
       <KeyHint
         items={[
+          ...(narrow ? ([['Tab', 'list/preview']] as Array<[string, string]>) : []),
           ["j/k", "move"],
           ["h/l", "parent/open"],
           ["n/N", "new"],
