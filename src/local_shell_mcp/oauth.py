@@ -33,6 +33,7 @@ class OAuthClient:
     redirect_uris: list[str] = field(default_factory=list)
     client_name: str | None = None
     created_at: int = field(default_factory=lambda: int(time.time()))
+    approved: bool = False
 
 
 @dataclass
@@ -55,6 +56,7 @@ MAX_OAUTH_CODES = 2_048
 MAX_REDIRECT_URIS = 10
 MAX_OAUTH_URI_LENGTH = 2_048
 MAX_CLIENT_NAME_LENGTH = 200
+OAUTH_PENDING_CLIENT_TTL_S = 24 * 60 * 60
 OAUTH_CLIENT_STORE_VERSION = 1
 OAUTH_CLIENT_STORE_FILE_NAME = "oauth-clients.json"
 ALL_OAUTH_SCOPES = (
@@ -152,6 +154,7 @@ def _load_clients_locked() -> None:
                 redirect_uris=redirect_uris,
                 client_name=client_name,
                 created_at=created_at or int(time.time()),
+                approved=True,
             )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         audit("oauth_client_store_unreadable", path=str(path), error=repr(exc))
@@ -169,6 +172,7 @@ def _save_clients_locked() -> None:
                 "created_at": client.created_at,
             }
             for client_id, client in sorted(_CLIENTS.items())
+            if client.approved
         },
     }
     temporary = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
@@ -191,6 +195,32 @@ def _get_client(client_id: str) -> OAuthClient | None:
         return _CLIENTS.get(client_id)
 
 
+def _prune_clients_locked(now: int, *, reserve_slot: bool = False) -> None:
+    for client_id, client in list(_CLIENTS.items()):
+        if not client.approved and now - client.created_at > OAUTH_PENDING_CLIENT_TTL_S:
+            _CLIENTS.pop(client_id, None)
+
+    while reserve_slot and len(_CLIENTS) >= MAX_OAUTH_CLIENTS:
+        pending = [client for client in _CLIENTS.values() if not client.approved]
+        if not pending:
+            break
+        oldest = min(pending, key=lambda client: client.created_at)
+        _CLIENTS.pop(oldest.client_id, None)
+
+
+def _approve_client(client_id: str) -> OAuthClient | None:
+    with _CLIENT_STORE_LOCK:
+        _load_clients_locked()
+        client = _CLIENTS.get(client_id)
+        if client is None:
+            return None
+        if not client.approved:
+            client.approved = True
+            _save_clients_locked()
+            audit("oauth_client_approved", client_id=client_id)
+        return client
+
+
 def _persist_legacy_client(client_id: str, redirect_uri: str) -> OAuthClient | None:
     if not _LEGACY_CLIENT_ID_RE.fullmatch(client_id):
         return None
@@ -199,12 +229,14 @@ def _persist_legacy_client(client_id: str, redirect_uri: str) -> OAuthClient | N
         existing = _CLIENTS.get(client_id)
         if existing is not None:
             return existing
+        _prune_clients_locked(int(time.time()), reserve_slot=True)
         if len(_CLIENTS) >= MAX_OAUTH_CLIENTS:
             return None
         client = OAuthClient(
             client_id=client_id,
             redirect_uris=[redirect_uri],
             client_name="ChatGPT",
+            approved=True,
         )
         _CLIENTS[client_id] = client
         _save_clients_locked()
@@ -259,6 +291,9 @@ def _prune_oauth_state(now: int | None = None) -> None:
     while len(_CODES) > MAX_OAUTH_CODES:
         oldest = min(_CODES, key=lambda key: _CODES[key].created_at)
         _CODES.pop(oldest, None)
+    with _CLIENT_STORE_LOCK:
+        _load_clients_locked()
+        _prune_clients_locked(now)
 
 
 def _validate_redirect_uri(uri: str) -> str | None:
@@ -323,6 +358,7 @@ async def oauth_register(request: Request) -> JSONResponse:
     )
     with _CLIENT_STORE_LOCK:
         _load_clients_locked()
+        _prune_clients_locked(int(time.time()), reserve_slot=True)
         if len(_CLIENTS) >= MAX_OAUTH_CLIENTS:
             return _json(
                 {
@@ -332,7 +368,6 @@ async def oauth_register(request: Request) -> JSONResponse:
                 status_code=503,
             )
         _CLIENTS[client_id] = client
-        _save_clients_locked()
     audit("oauth_client_registered", client_id=client_id, redirect_uris=redirect_uris)
     return _json(
         {
@@ -490,10 +525,11 @@ async def oauth_authorize_post(request: Request) -> Response:
         audit("oauth_pin_failed", client_id=params.get("client_id"))
         return _authorize_form(params, error="Invalid admin PIN")
 
-    if not _get_client(params["client_id"]) and not _persist_legacy_client(
-        params["client_id"], params["redirect_uri"]
-    ):
-        return _authorize_form(params, error="OAuth client registry is full")
+    client = _approve_client(params["client_id"])
+    if client is None:
+        client = _persist_legacy_client(params["client_id"], params["redirect_uri"])
+        if client is None:
+            return _authorize_form(params, error="OAuth client registry is full")
 
     code = secrets.token_urlsafe(32)
     auth_code = AuthCode(
@@ -546,7 +582,7 @@ def issue_access_token(
         "aud": resource,
         "iat": now,
         "client_id": client_id,
-        "scope": _scope_value(),
+        "scope": scope,
     }
     if settings.oauth_access_token_ttl_s > 0:
         payload["exp"] = now + settings.oauth_access_token_ttl_s
@@ -603,7 +639,7 @@ async def oauth_token(request: Request) -> JSONResponse:
 
 def validate_bearer_token(token: str, request: Request | None = None) -> dict[str, Any]:
     settings = get_settings()
-    claims = jwt.decode(
+    return jwt.decode(
         token,
         settings.oauth_jwt_secret,
         algorithms=["HS256"],
@@ -611,5 +647,3 @@ def validate_bearer_token(token: str, request: Request | None = None) -> dict[st
         issuer=issuer_url(request),
         options={"require": ["iat", "aud", "iss"]},
     )
-    claims["scope"] = _scope_value()
-    return claims

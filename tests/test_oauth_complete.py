@@ -117,30 +117,50 @@ def test_registration_rejects_every_invalid_shape(tmp_path, monkeypatch):
     ).status_code == 503
 
 
-def test_registered_clients_survive_memory_reset(tmp_path, monkeypatch):
+def test_registered_clients_survive_memory_reset_after_approval(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     client = TestClient(_app())
     redirect = "https://client.test/persistent-callback"
     client_id = _register(client, redirect)
     store_path = get_settings().state_dir / oauth.OAUTH_CLIENT_STORE_FILE_NAME
+    params = {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": redirect,
+        "code_challenge": "challenge",
+        "code_challenge_method": "S256",
+    }
 
-    assert store_path.exists()
-    oauth._CLIENTS.clear()
-
-    response = client.get(
+    assert not store_path.exists()
+    approved = client.post(
         "/oauth/authorize",
-        params={
-            "response_type": "code",
-            "client_id": client_id,
-            "redirect_uri": redirect,
-            "code_challenge": "challenge",
-            "code_challenge_method": "S256",
-        },
+        data={**params, "pin": "correct-admin-pin"},
+        follow_redirects=False,
     )
+    assert approved.status_code == 302
+    assert store_path.exists()
+
+    oauth._CLIENTS.clear()
+    response = client.get("/oauth/authorize", params=params)
 
     assert "Unknown client_id" not in response.text
     assert client_id in oauth._CLIENTS
+    assert oauth._CLIENTS[client_id].approved is True
 
+
+def test_unapproved_registrations_do_not_fill_persistent_store(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(oauth, "MAX_OAUTH_CLIENTS", 2)
+    client = TestClient(_app())
+
+    first = _register(client, "https://first.test/callback")
+    second = _register(client, "https://second.test/callback")
+    third = _register(client, "https://third.test/callback")
+
+    assert first not in oauth._CLIENTS
+    assert second in oauth._CLIENTS
+    assert third in oauth._CLIENTS
+    assert not (get_settings().state_dir / oauth.OAUTH_CLIENT_STORE_FILE_NAME).exists()
 
 def test_v2_client_id_is_migrated_after_pin_approval(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -369,6 +389,12 @@ def test_expired_code_capacity_pruning_and_pkce_variants(tmp_path, monkeypatch):
         client_id="old",
         redirect_uris=["https://old.test/cb"],
         created_at=0,
+        approved=True,
+    )
+    oauth._CLIENTS["stale-pending"] = oauth.OAuthClient(
+        client_id="stale-pending",
+        redirect_uris=["https://pending.test/cb"],
+        created_at=0,
     )
     monkeypatch.setattr(oauth, "MAX_OAUTH_CODES", 2)
     for index in range(4):
@@ -385,6 +411,7 @@ def test_expired_code_capacity_pruning_and_pkce_variants(tmp_path, monkeypatch):
     oauth._prune_oauth_state(now=100_000)
     assert "used" not in oauth._CODES
     assert "old" in oauth._CLIENTS
+    assert "stale-pending" not in oauth._CLIENTS
 
     for index in range(4):
         oauth._CODES[str(index)] = oauth.AuthCode(

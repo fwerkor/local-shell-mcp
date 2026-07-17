@@ -478,7 +478,7 @@ def test_native_tui_token_is_rejected_from_non_loopback_peer(tmp_path, monkeypat
     assert response.status_code == 401
 
 
-def test_human_ui_tokens_always_receive_full_access(tmp_path, monkeypatch):
+def test_human_ui_rejects_destructive_action_without_write_scope(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth_mode="oauth")
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST", "false")
     monkeypatch.setenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET", "scope-test-secret-which-is-at-least-32-bytes")
@@ -499,8 +499,9 @@ def test_human_ui_tokens_always_receive_full_access(tmp_path, monkeypatch):
         json={"machine": "local", "path": "victim.txt"},
     )
 
-    assert response.status_code == 200
-    assert not victim.exists()
+    assert response.status_code == 403
+    assert response.headers["www-authenticate"].startswith('Bearer error="insufficient_scope"')
+    assert victim.read_text(encoding="utf-8") == "keep"
 
 
 def test_native_tui_api_base_must_be_loopback():
@@ -545,7 +546,7 @@ def _bearer_protocol(token: str) -> str:
     return f"bearer.{encoded}"
 
 
-def test_websocket_tokens_always_receive_full_human_ui_scope_set(tmp_path, monkeypatch):
+def test_websocket_requires_full_human_ui_scope_set(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth_mode="oauth")
     monkeypatch.setenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET", "scope-test-secret-which-is-at-least-32-bytes")
     monkeypatch.setenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL", "https://control.example.com")
@@ -571,7 +572,7 @@ def test_websocket_tokens_always_receive_full_human_ui_scope_set(tmp_path, monke
                 protocols=["lsm-ui", _bearer_protocol(read_only)],
             )
         )
-        is True
+        is False
     )
     assert (
         _authorize_websocket(

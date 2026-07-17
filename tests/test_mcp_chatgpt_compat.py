@@ -225,6 +225,7 @@ def test_oauth_access_tokens_do_not_expire_by_default(tmp_path, monkeypatch):
 
     assert "exp" not in claims
     assert claims["client_id"] == "test-client"
+    assert claims["scope"] == "shell:execute"
 
 
 def _oauth_test_client() -> TestClient:
