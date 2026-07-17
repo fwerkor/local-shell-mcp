@@ -46,7 +46,17 @@ function icon(entry: FileEntry): string {
   return "·"
 }
 
-function FileRows({ entries, selected, height }: { entries: FileEntry[]; selected: number; height: number }) {
+function FileRows({
+  entries,
+  selected,
+  height,
+  onSelect,
+}: {
+  entries: FileEntry[]
+  selected: number
+  height: number
+  onSelect?: (entry: FileEntry, index: number) => void
+}) {
   const { rows, start } = useVisibleRows(entries, selected, height)
   return (
     <box style={{ flexDirection: "column", flexGrow: 1 }}>
@@ -56,6 +66,7 @@ function FileRows({ entries, selected, height }: { entries: FileEntry[]; selecte
         return (
           <box
             key={entry.path}
+            onMouseDown={() => onSelect?.(entry, index)}
             style={{
               height: 1,
               flexDirection: "row",
@@ -489,13 +500,25 @@ export function FilesScreen({
           <box style={{ flexGrow: 1, flexDirection: "row", gap: 1 }}>
             {!compact && (
               <Panel title="Parent" style={{ width: "24%", paddingTop: 1 }}>
-                <FileRows entries={parentEntries} selected={Math.max(0, parentEntries.findIndex((entry) => entry.path === path))} height={listHeight} />
+                <FileRows
+                  entries={parentEntries}
+                  selected={Math.max(0, parentEntries.findIndex((entry) => entry.path === path))}
+                  height={listHeight}
+                  onSelect={(entry) => {
+                    if (entry.type === "dir") setPath(entry.path)
+                  }}
+                />
               </Panel>
             )}
             {(!narrow || narrowPane === "list") && (
               <Panel title="Current" active accent={colors.accent} activeBackground={colors.panel} style={{ width: narrow ? "100%" : compact ? "48%" : "38%", paddingTop: 1 }}>
                 {entries.length ? (
-                  <FileRows entries={entries} selected={selected} height={listHeight} />
+                  <FileRows
+                    entries={entries}
+                    selected={selected}
+                    height={listHeight}
+                    onSelect={(_entry, index) => setSelected(index)}
+                  />
                 ) : (
                   <EmptyState title="Empty directory" detail="n file · N directory" />
                 )}

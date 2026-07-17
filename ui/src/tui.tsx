@@ -25,6 +25,7 @@ function Help({ close }: { close: () => void }) {
       <text fg={theme.borderBright} content="\nScreen conventions" />
       <text fg={theme.muted} content="j/k or arrows move selection · Enter activates · Esc closes dialogs" />
       <text fg={theme.muted} content="[ / ] switches Files machines · Alt+[ / ] switches Terminal machines" />
+      <text fg={theme.muted} content="Terminals: Alt+N new · Alt+W kill · Alt+A audit · Alt+R refresh" />
       <text fg={theme.muted} content="The footer on every screen lists its contextual commands." />
       <text fg={theme.borderBright} content="\nAudit policy" />
       <text fg={theme.muted} content="Audit contains MCP-originated operations. Actions typed by a human in this TUI or the WebUI are intentionally excluded." />
@@ -121,7 +122,7 @@ function App() {
     }
     if (help || interactionLocked) return
     if (key.name === "f1") setHelp(true)
-    else if (key.option && /^[1-5]$/.test(key.name)) setScreen(SCREENS[Number(key.name) - 1]!)
+    else if ((key.option || key.meta) && /^[1-5]$/.test(key.name)) setScreen(SCREENS[Number(key.name) - 1]!)
     else if (/^f[2-6]$/.test(key.name)) setScreen(SCREENS[Number(key.name.slice(1)) - 2]!)
     else if (key.name === "f7") void loadBootstrap()
   })

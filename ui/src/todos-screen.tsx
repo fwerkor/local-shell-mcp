@@ -68,6 +68,16 @@ export function TodosScreen({
   const listHeight = Math.max(5, height - 13)
   const { rows, start } = useVisibleRows(visible, selected, listHeight)
 
+  const selectFilter = (next: "all" | "open" | "completed") => {
+    setFilter(next)
+    setSelected(0)
+  }
+
+  const cycleFilter = () => {
+    setFilter((value) => (value === "all" ? "open" : value === "open" ? "completed" : "all"))
+    setSelected(0)
+  }
+
   const applyPayload = useCallback((payload: TodoPayload) => {
     const nextRevision = payload.revision || 0
     stateRef.current = { todos: payload.todos, revision: nextRevision }
@@ -185,8 +195,7 @@ export function TodosScreen({
     } else if (key.name === "p" && current) {
       replaceItem(current.id, (todo) => ({ priority: nextValue(todo.priority, PRIORITY_ORDER) }))
     } else if (key.name === "f") {
-      setFilter((value) => (value === "all" ? "open" : value === "open" ? "completed" : "all"))
-      setSelected(0)
+      cycleFilter()
     } else if (key.name === "r" && pendingMutations.current === 0) void load()
   })
 
@@ -200,27 +209,25 @@ export function TodosScreen({
     <box style={{ flexGrow: 1, flexDirection: "column" }}>
       {width < 76 ? (
         <Panel title="Summary" active accent={colors.accent} activeBackground={colors.panel} style={{ height: 3, alignItems: "center", justifyContent: "center" }}>
-          <text
-            fg={theme.muted}
-            content={
-              width < 58
-                ? `A:${counts.total}  O:${counts.open}  D:${counts.completed}  V:${filter.slice(0, 1).toUpperCase()}`
-                : `All ${counts.total}  │  Open ${counts.open}  │  Done ${counts.completed}  │  ${filter.toUpperCase()}`
-            }
-          />
+          <box style={{ flexDirection: "row" }}>
+            <text onMouseDown={() => selectFilter("all")} fg={colors.accent} content={`A:${counts.total}  `} />
+            <text onMouseDown={() => selectFilter("open")} fg={theme.yellow} content={`O:${counts.open}  `} />
+            <text onMouseDown={() => selectFilter("completed")} fg={theme.green} content={`D:${counts.completed}  `} />
+            <text onMouseDown={cycleFilter} fg={theme.muted} content={`V:${filter.slice(0, 1).toUpperCase()}`} />
+          </box>
         </Panel>
       ) : (
         <box style={{ height: 4, flexDirection: "row", gap: 1 }}>
           {[
-            ["All", counts.total, colors.accent],
-            ["Open", counts.open, theme.yellow],
-            ["Done", counts.completed, theme.green],
-          ].map(([label, value, color]) => (
-            <Panel key={String(label)} title={String(label)} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
-              <text fg={String(color)} attributes={1} content={String(value)} />
+            { label: "All", value: counts.total, color: colors.accent, filter: "all" as const },
+            { label: "Open", value: counts.open, color: theme.yellow, filter: "open" as const },
+            { label: "Done", value: counts.completed, color: theme.green, filter: "completed" as const },
+          ].map(({ label, value, color, filter: nextFilter }) => (
+            <Panel key={label} title={label} onMouseDown={() => selectFilter(nextFilter)} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
+              <text fg={color} attributes={1} content={String(value)} />
             </Panel>
           ))}
-          <Panel title="View" active accent={colors.accent} activeBackground={colors.panel} style={{ width: Math.max(20, Math.floor(width * 0.2)), alignItems: "center", justifyContent: "center" }}>
+          <Panel title="View" active accent={colors.accent} activeBackground={colors.panel} onMouseDown={cycleFilter} style={{ width: Math.max(20, Math.floor(width * 0.2)), alignItems: "center", justifyContent: "center" }}>
             <text fg={colors.accent} attributes={1} content={filter.toUpperCase()} />
           </Panel>
         </box>
@@ -236,6 +243,7 @@ export function TodosScreen({
               return (
                 <box
                   key={todo.id}
+                  onMouseDown={() => setSelected(index)}
                   style={{
                     height: 3,
                     flexDirection: "row",

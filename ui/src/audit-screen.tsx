@@ -73,6 +73,11 @@ export function AuditScreen({
   const tableHeight = Math.max(6, height - 15)
   const { rows, start } = useVisibleRows(entries, selected, tableHeight)
 
+  const cycleNode = () => setNodeIndex((value) => (value + 1) % nodes.length)
+  const cycleOperation = () => setOperationIndex((value) => (value + 1) % OPERATIONS.length)
+  const cycleTime = () => setTimeIndex((value) => (value + 1) % TIME_RANGES.length)
+  const toggleSort = () => setSort((value) => (value === "desc" ? "asc" : "desc"))
+
   const refresh = useCallback(async (force = false) => {
     if (refreshController.current && !force) return
     refreshController.current?.abort()
@@ -139,10 +144,10 @@ export function AuditScreen({
       setSelected((value) => clampIndex(value + 1, entries.length))
     }
     else if (key.name === "k" || key.name === "up") setSelected((value) => Math.max(0, value - 1))
-    else if (key.name === "n") setNodeIndex((value) => (value + 1) % nodes.length)
-    else if (key.name === "o") setOperationIndex((value) => (value + 1) % OPERATIONS.length)
-    else if (key.name === "t") setTimeIndex((value) => (value + 1) % TIME_RANGES.length)
-    else if (key.name === "s") setSort((value) => (value === "desc" ? "asc" : "desc"))
+    else if (key.name === "n") cycleNode()
+    else if (key.name === "o") cycleOperation()
+    else if (key.name === "t") cycleTime()
+    else if (key.name === "s") toggleSort()
     else if (key.name === "/") setDialog({ type: "search" })
     else if (key.name === "e") setDialog({ type: "event" })
     else if (key.name === "i") setDialog({ type: "session" })
@@ -168,25 +173,23 @@ export function AuditScreen({
     <box style={{ flexGrow: 1, flexDirection: "column", gap: 1 }}>
       {width < 82 ? (
         <Panel title="Filters" active accent={colors.accent} activeBackground={colors.panel} style={{ height: 3, alignItems: "center", justifyContent: "center" }}>
-          <text
-            fg={theme.muted}
-            content={
-              width < 58
-                ? `N:${selectedNode || "*"} O:${selectedOperation || "*"} T:${timeRange.label} S:${sort.slice(0, 1).toUpperCase()}`
-                : `${selectedNode || "All nodes"}  │  ${selectedOperation || "All ops"}  │  ${timeRange.label}  │  ${sort.toUpperCase()}`
-            }
-          />
+          <box style={{ flexDirection: "row" }}>
+            <text onMouseDown={cycleNode} fg={colors.accent} content={`N:${selectedNode || "*"}  `} />
+            <text onMouseDown={cycleOperation} fg={theme.blue} content={`O:${selectedOperation || "*"}  `} />
+            <text onMouseDown={cycleTime} fg={theme.yellow} content={`T:${timeRange.label}  `} />
+            <text onMouseDown={toggleSort} fg={theme.magenta} content={`S:${sort.slice(0, 1).toUpperCase()}`} />
+          </box>
         </Panel>
       ) : (
         <box style={{ height: 4, flexDirection: "row", gap: 1 }}>
           {[
-            ["Node", selectedNode || "All", colors.accent],
-            ["Operation", selectedOperation || "All", theme.blue],
-            ["Time", timeRange.label, theme.yellow],
-            ["Sort", sort.toUpperCase(), theme.magenta],
-          ].map(([title, value, color]) => (
-            <Panel key={String(title)} title={String(title)} active accent={colors.accent} activeBackground={colors.panel} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
-              <text fg={String(color)} attributes={1} content={String(value)} />
+            { title: "Node", value: selectedNode || "All", color: colors.accent, action: cycleNode },
+            { title: "Operation", value: selectedOperation || "All", color: theme.blue, action: cycleOperation },
+            { title: "Time", value: timeRange.label, color: theme.yellow, action: cycleTime },
+            { title: "Sort", value: sort.toUpperCase(), color: theme.magenta, action: toggleSort },
+          ].map(({ title, value, color, action }) => (
+            <Panel key={title} title={title} active accent={colors.accent} activeBackground={colors.panel} onMouseDown={action} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
+              <text fg={color} attributes={1} content={value} />
             </Panel>
           ))}
         </box>
@@ -217,6 +220,7 @@ export function AuditScreen({
                 return (
                   <box
                     key={`${entry.ts}-${entry.event}-${index}`}
+                    onMouseDown={() => setSelected(index)}
                     style={{
                       height: 1,
                       flexDirection: "row",
