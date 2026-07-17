@@ -55,9 +55,11 @@ def test_make_image_preview_returns_bounded_rgba(tmp_path, monkeypatch):
     preview = make_image_preview(read_image("wide.png"), max_columns=12, max_rows=4)
 
     assert (preview.original_width, preview.original_height) == (100, 50)
-    assert (preview.width, preview.height) == (6, 3)
-    assert (preview.cell_width, preview.cell_height) == (12, 2)
-    assert len(preview.rgba) == 6 * 3 * 4
+    assert (preview.width, preview.height) == (16, 8)
+    assert (preview.cell_width, preview.cell_height) == (8, 4)
+    assert preview.cell_width <= 12
+    assert preview.cell_height <= 4
+    assert len(preview.rgba) == 16 * 8 * 4
 
 
 def test_image_validation_errors(tmp_path, monkeypatch):
