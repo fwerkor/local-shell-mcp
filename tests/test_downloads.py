@@ -31,7 +31,27 @@ def test_create_share_link_serves_file(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert response.text == "hello"
+    assert response.headers["content-disposition"].startswith("attachment;")
     assert "result.txt" in response.headers["content-disposition"]
+    assert link["inline"] is False
+
+
+def test_create_share_link_can_render_inline(tmp_path, monkeypatch):
+    _reset(tmp_path, monkeypatch)
+    (tmp_path / "preview.png").write_bytes(b"not-a-real-png")
+
+    link = create_share_link("preview.png", ttl_s=60, inline=True)
+    client = TestClient(Starlette(routes=download_routes()))
+
+    get_response = client.get(link["url"])
+    head_response = client.head(link["url"])
+
+    assert link["inline"] is True
+    assert get_response.status_code == 200
+    assert get_response.headers["content-type"] == "image/png"
+    assert get_response.headers["content-disposition"].startswith("inline;")
+    assert head_response.status_code == 200
+    assert head_response.headers["content-disposition"].startswith("inline;")
 
 
 def test_share_link_expires_and_can_be_revoked(tmp_path, monkeypatch):
@@ -76,9 +96,10 @@ def test_share_link_download_limit(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_file_link_tools_are_registered(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
-    names = {tool.name for tool in await build_mcp().list_tools()}
+    tools = {tool.name: tool for tool in await build_mcp().list_tools()}
 
-    assert {"create_file_link", "list_file_links", "revoke_file_link"} <= names
+    assert {"create_file_link", "list_file_links", "revoke_file_link"} <= tools.keys()
+    assert tools["create_file_link"].inputSchema["properties"]["inline"]["default"] is False
 
 
 def test_share_link_cannot_be_retargeted_outside_workspace(tmp_path, monkeypatch):

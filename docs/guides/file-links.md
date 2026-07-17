@@ -1,6 +1,6 @@
 # File links
 
-`local-shell-mcp` can expose files from the controlled workspace through high-entropy bearer URLs. This is useful when the AI generates reports, archives, PDFs, screenshots, or other artifacts that must be downloaded from chat.
+`local-shell-mcp` can expose files from the controlled workspace through high-entropy bearer URLs. This is useful when the AI generates reports, archives, PDFs, screenshots, or other artifacts that must be downloaded from or displayed in chat.
 
 ## When to use file links
 
@@ -17,7 +17,7 @@ Do not use file links for secrets, private keys, credential stores, or unrelated
 ## Typical flow
 
 1. Generate or locate a file under `/workspace`.
-2. Call `create_file_link` with a TTL and optional download limit.
+2. Call `create_file_link` with a TTL and optional download limit. Set `inline=true` when the file should render directly in a browser or Markdown image; the default is `false`, which forces attachment download behavior.
 3. Share the returned URL.
 4. Revoke the link when no longer needed.
 
