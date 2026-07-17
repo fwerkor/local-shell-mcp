@@ -2,10 +2,19 @@ from __future__ import annotations
 
 import gzip
 import os
+import shlex
 import shutil
 import stat
+import subprocess
 import sys
 from pathlib import Path
+
+
+def _format_tui_command(path: Path, *, windows: bool | None = None) -> str:
+    windows = os.name == "nt" if windows is None else windows
+    if windows:
+        return subprocess.list2cmdline([str(path)])
+    return shlex.join([str(path)])
 
 
 def _configure_embedded_tui() -> None:
@@ -28,12 +37,12 @@ def _configure_embedded_tui() -> None:
             | stat.S_IXGRP
             | stat.S_IXOTH
         )
-    os.environ.setdefault("LOCAL_SHELL_MCP_UI_TUI_COMMAND", str(candidate))
+    os.environ.setdefault("LOCAL_SHELL_MCP_UI_TUI_COMMAND", _format_tui_command(candidate))
 
 
 _configure_embedded_tui()
 
-from local_shell_mcp.main import main  # noqa: E402
+from local_shell_mcp.main import main  # noqa: E402, I001
 
 
 if __name__ == "__main__":
