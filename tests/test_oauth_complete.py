@@ -117,6 +117,92 @@ def test_registration_rejects_every_invalid_shape(tmp_path, monkeypatch):
     ).status_code == 503
 
 
+def test_registered_clients_survive_memory_reset_after_approval(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    client = TestClient(_app())
+    redirect = "https://client.test/persistent-callback"
+    client_id = _register(client, redirect)
+    store_path = get_settings().state_dir / oauth.OAUTH_CLIENT_STORE_FILE_NAME
+    params = {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": redirect,
+        "code_challenge": "challenge",
+        "code_challenge_method": "S256",
+    }
+
+    assert not store_path.exists()
+    approved = client.post(
+        "/oauth/authorize",
+        data={**params, "pin": "correct-admin-pin"},
+        follow_redirects=False,
+    )
+    assert approved.status_code == 302
+    assert store_path.exists()
+
+    oauth._CLIENTS.clear()
+    response = client.get("/oauth/authorize", params=params)
+
+    assert "Unknown client_id" not in response.text
+    assert client_id in oauth._CLIENTS
+    assert oauth._CLIENTS[client_id].approved is True
+
+
+def test_unapproved_registrations_do_not_fill_persistent_store(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(oauth, "MAX_OAUTH_CLIENTS", 2)
+    client = TestClient(_app())
+
+    first = _register(client, "https://first.test/callback")
+    second = _register(client, "https://second.test/callback")
+    third = _register(client, "https://third.test/callback")
+
+    assert first not in oauth._CLIENTS
+    assert second in oauth._CLIENTS
+    assert third in oauth._CLIENTS
+    assert not (get_settings().state_dir / oauth.OAUTH_CLIENT_STORE_FILE_NAME).exists()
+
+def test_v2_client_id_is_migrated_after_pin_approval(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    client = TestClient(_app())
+    client_id = "local-shell-mcp-" + "v2LegacyClientId_1234567890abcd"
+    redirect = "https://client.test/v2-callback"
+    params = {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": redirect,
+        "code_challenge": "challenge",
+        "code_challenge_method": "S256",
+    }
+
+    invalid_redirect = client.get(
+        "/oauth/authorize",
+        params={**params, "redirect_uri": "relative/callback"},
+    )
+    assert "redirect_uri must be absolute" in invalid_redirect.text
+
+    form = client.get("/oauth/authorize", params=params)
+    assert "Unknown client_id" not in form.text
+    assert client_id not in oauth._CLIENTS
+
+    rejected = client.post("/oauth/authorize", data={**params, "pin": "wrong"})
+    assert "Invalid admin PIN" in rejected.text
+    assert client_id not in oauth._CLIENTS
+
+    approved = client.post(
+        "/oauth/authorize",
+        data={**params, "pin": "correct-admin-pin"},
+        follow_redirects=False,
+    )
+    assert approved.status_code == 302
+    assert client_id in oauth._CLIENTS
+
+    oauth._CLIENTS.clear()
+    reloaded = client.get("/oauth/authorize", params=params)
+    assert "Unknown client_id" not in reloaded.text
+    assert client_id in oauth._CLIENTS
+
+
 def test_authorize_validation_and_pin_failures(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     client = TestClient(_app())
@@ -137,7 +223,6 @@ def test_authorize_validation_and_pin_failures(tmp_path, monkeypatch):
         ({**base, "redirect_uri": "https://other.test/cb"}, "not registered"),
         ({key: value for key, value in base.items() if key != "code_challenge"}, "Missing code_challenge"),
         ({**base, "code_challenge_method": "plain"}, "Only code_challenge_method=S256"),
-        ({**base, "scope": "shell:read unsupported"}, "Unsupported OAuth scope"),
     ]
     for params, message in cases:
         response = client.get("/oauth/authorize", params=params)
@@ -146,6 +231,13 @@ def test_authorize_validation_and_pin_failures(tmp_path, monkeypatch):
 
     invalid_post = client.post("/oauth/authorize", data={"client_id": "missing"})
     assert "Only response_type=code" in invalid_post.text
+
+    ignored_scope = client.get(
+        "/oauth/authorize",
+        params={**base, "scope": "shell:read git:write unknown:scope"},
+    )
+    assert "Unsupported OAuth scope" not in ignored_scope.text
+    assert oauth._scope_value() in ignored_scope.text
 
     wrong_pin = client.post("/oauth/authorize", data={**base, "pin": "wrong"})
     assert wrong_pin.status_code == 200
@@ -238,7 +330,8 @@ def test_complete_authorization_code_flow_and_token_failures(tmp_path, monkeypat
         issuer="http://testserver",
     )
     assert claims["client_id"] == client_id
-    assert claims["scope"] == "shell:read shell:execute"
+    assert claims["scope"] == oauth._scope_value()
+    assert body["scope"] == oauth._scope_value()
     assert claims["exp"] > claims["iat"]
 
     reused = client.post(
@@ -296,6 +389,12 @@ def test_expired_code_capacity_pruning_and_pkce_variants(tmp_path, monkeypatch):
         client_id="old",
         redirect_uris=["https://old.test/cb"],
         created_at=0,
+        approved=True,
+    )
+    oauth._CLIENTS["stale-pending"] = oauth.OAuthClient(
+        client_id="stale-pending",
+        redirect_uris=["https://pending.test/cb"],
+        created_at=0,
     )
     monkeypatch.setattr(oauth, "MAX_OAUTH_CODES", 2)
     for index in range(4):
@@ -311,7 +410,8 @@ def test_expired_code_capacity_pruning_and_pkce_variants(tmp_path, monkeypatch):
         )
     oauth._prune_oauth_state(now=100_000)
     assert "used" not in oauth._CODES
-    assert "old" not in oauth._CLIENTS
+    assert "old" in oauth._CLIENTS
+    assert "stale-pending" not in oauth._CLIENTS
 
     for index in range(4):
         oauth._CODES[str(index)] = oauth.AuthCode(

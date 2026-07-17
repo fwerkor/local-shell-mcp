@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import hmac
 import html as html_lib
+import json
+import os
+import re
 import secrets
+import threading
 import time
 from dataclasses import dataclass, field
 from functools import lru_cache
 from importlib.resources import files
+from pathlib import Path
 from string import Template
 from typing import Any
 from urllib.parse import urlencode, urlsplit
@@ -27,6 +33,7 @@ class OAuthClient:
     redirect_uris: list[str] = field(default_factory=list)
     client_name: str | None = None
     created_at: int = field(default_factory=lambda: int(time.time()))
+    approved: bool = False
 
 
 @dataclass
@@ -49,7 +56,20 @@ MAX_OAUTH_CODES = 2_048
 MAX_REDIRECT_URIS = 10
 MAX_OAUTH_URI_LENGTH = 2_048
 MAX_CLIENT_NAME_LENGTH = 200
-OAUTH_CLIENT_TTL_S = 24 * 60 * 60
+OAUTH_PENDING_CLIENT_TTL_S = 24 * 60 * 60
+OAUTH_CLIENT_STORE_VERSION = 1
+OAUTH_CLIENT_STORE_FILE_NAME = "oauth-clients.json"
+ALL_OAUTH_SCOPES = (
+    "shell:read",
+    "shell:write",
+    "shell:execute",
+    "browser:use",
+    "file:share",
+    "remote:use",
+)
+_LEGACY_CLIENT_ID_RE = re.compile(r"local-shell-mcp-[A-Za-z0-9_-]{16,128}\Z")
+_CLIENT_STORE_LOCK = threading.RLock()
+_LOADED_CLIENT_STORE_PATH: Path | None = None
 
 
 def public_base_url(request: Request | None = None) -> str:
@@ -62,7 +82,11 @@ def public_base_url(request: Request | None = None) -> str:
             proto = "http"
         elif proto == "wss":
             proto = "https"
-        host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+        host = (
+            request.headers.get("x-forwarded-host")
+            or request.headers.get("host")
+            or request.url.netloc
+        )
         return f"{proto}://{host}".rstrip("/")
     return "http://127.0.0.1:8765"
 
@@ -78,7 +102,146 @@ def resource_url(request: Request | None = None) -> str:
 
 
 def _scopes() -> list[str]:
-    return ["shell:read", "shell:write", "shell:execute", "browser:use", "file:share", "remote:use"]
+    return list(ALL_OAUTH_SCOPES)
+
+
+def _scope_value() -> str:
+    return " ".join(ALL_OAUTH_SCOPES)
+
+
+def _client_store_path() -> Path:
+    path = get_settings().state_dir / OAUTH_CLIENT_STORE_FILE_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _load_clients_locked() -> None:
+    global _LOADED_CLIENT_STORE_PATH
+
+    path = _client_store_path()
+    if path == _LOADED_CLIENT_STORE_PATH and (_CLIENTS or not path.exists()):
+        return
+
+    _CLIENTS.clear()
+    _LOADED_CLIENT_STORE_PATH = path
+    if not path.exists():
+        return
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or data.get("version") != OAUTH_CLIENT_STORE_VERSION:
+            raise ValueError("unsupported OAuth client store version")
+        rows = data.get("clients")
+        if not isinstance(rows, dict):
+            raise ValueError("OAuth client store clients field is invalid")
+        for client_id, row in rows.items():
+            if not isinstance(client_id, str) or not isinstance(row, dict):
+                continue
+            redirect_uris = row.get("redirect_uris")
+            if not isinstance(redirect_uris, list) or not all(
+                isinstance(uri, str) for uri in redirect_uris
+            ):
+                continue
+            client_name = row.get("client_name")
+            if client_name is not None and not isinstance(client_name, str):
+                client_name = None
+            try:
+                created_at = int(row.get("created_at") or 0)
+            except (TypeError, ValueError):
+                created_at = 0
+            _CLIENTS[client_id] = OAuthClient(
+                client_id=client_id,
+                redirect_uris=redirect_uris,
+                client_name=client_name,
+                created_at=created_at or int(time.time()),
+                approved=True,
+            )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        audit("oauth_client_store_unreadable", path=str(path), error=repr(exc))
+        _CLIENTS.clear()
+
+
+def _save_clients_locked() -> None:
+    path = _client_store_path()
+    payload = {
+        "version": OAUTH_CLIENT_STORE_VERSION,
+        "clients": {
+            client_id: {
+                "redirect_uris": client.redirect_uris,
+                "client_name": client.client_name,
+                "created_at": client.created_at,
+            }
+            for client_id, client in sorted(_CLIENTS.items())
+            if client.approved
+        },
+    }
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        with contextlib.suppress(OSError):
+            temporary.chmod(0o600)
+        os.replace(temporary, path)
+    finally:
+        with contextlib.suppress(OSError):
+            temporary.unlink(missing_ok=True)
+
+
+def _get_client(client_id: str) -> OAuthClient | None:
+    with _CLIENT_STORE_LOCK:
+        _load_clients_locked()
+        return _CLIENTS.get(client_id)
+
+
+def _prune_clients_locked(now: int, *, reserve_slot: bool = False) -> None:
+    for client_id, client in list(_CLIENTS.items()):
+        if not client.approved and now - client.created_at > OAUTH_PENDING_CLIENT_TTL_S:
+            _CLIENTS.pop(client_id, None)
+
+    while reserve_slot and len(_CLIENTS) >= MAX_OAUTH_CLIENTS:
+        pending = [client for client in _CLIENTS.values() if not client.approved]
+        if not pending:
+            break
+        oldest = min(pending, key=lambda client: client.created_at)
+        _CLIENTS.pop(oldest.client_id, None)
+
+
+def _approve_client(client_id: str) -> OAuthClient | None:
+    with _CLIENT_STORE_LOCK:
+        _load_clients_locked()
+        client = _CLIENTS.get(client_id)
+        if client is None:
+            return None
+        if not client.approved:
+            client.approved = True
+            _save_clients_locked()
+            audit("oauth_client_approved", client_id=client_id)
+        return client
+
+
+def _persist_legacy_client(client_id: str, redirect_uri: str) -> OAuthClient | None:
+    if not _LEGACY_CLIENT_ID_RE.fullmatch(client_id):
+        return None
+    with _CLIENT_STORE_LOCK:
+        _load_clients_locked()
+        existing = _CLIENTS.get(client_id)
+        if existing is not None:
+            return existing
+        _prune_clients_locked(int(time.time()), reserve_slot=True)
+        if len(_CLIENTS) >= MAX_OAUTH_CLIENTS:
+            return None
+        client = OAuthClient(
+            client_id=client_id,
+            redirect_uris=[redirect_uri],
+            client_name="ChatGPT",
+            approved=True,
+        )
+        _CLIENTS[client_id] = client
+        _save_clients_locked()
+    audit("oauth_client_migrated", client_id=client_id, redirect_uris=[redirect_uri])
+    return client
 
 
 def protected_resource_metadata(request: Request) -> dict[str, Any]:
@@ -125,12 +288,12 @@ def _prune_oauth_state(now: int | None = None) -> None:
     for code, item in list(_CODES.items()):
         if item.used or now - item.created_at > code_ttl:
             _CODES.pop(code, None)
-    for client_id, item in list(_CLIENTS.items()):
-        if now - item.created_at > OAUTH_CLIENT_TTL_S:
-            _CLIENTS.pop(client_id, None)
     while len(_CODES) > MAX_OAUTH_CODES:
         oldest = min(_CODES, key=lambda key: _CODES[key].created_at)
         _CODES.pop(oldest, None)
+    with _CLIENT_STORE_LOCK:
+        _load_clients_locked()
+        _prune_clients_locked(now)
 
 
 def _validate_redirect_uri(uri: str) -> str | None:
@@ -146,32 +309,65 @@ def _validate_redirect_uri(uri: str) -> str | None:
 
 async def oauth_register(request: Request) -> JSONResponse:
     _prune_oauth_state()
-    if len(_CLIENTS) >= MAX_OAUTH_CLIENTS:
-        return _json({"error": "temporarily_unavailable", "error_description": "OAuth client registry is full"}, status_code=503)
     try:
         body = await request.json()
     except Exception:
-        return _json({"error": "invalid_client_metadata", "error_description": "Request body must be JSON"}, status_code=400)
+        return _json(
+            {"error": "invalid_client_metadata", "error_description": "Request body must be JSON"},
+            status_code=400,
+        )
     raw_redirects = body.get("redirect_uris", [])
-    if not isinstance(raw_redirects, list) or not raw_redirects or len(raw_redirects) > MAX_REDIRECT_URIS:
-        return _json({"error": "invalid_redirect_uri", "error_description": f"Provide 1 to {MAX_REDIRECT_URIS} redirect_uris"}, status_code=400)
+    if (
+        not isinstance(raw_redirects, list)
+        or not raw_redirects
+        or len(raw_redirects) > MAX_REDIRECT_URIS
+    ):
+        return _json(
+            {
+                "error": "invalid_redirect_uri",
+                "error_description": f"Provide 1 to {MAX_REDIRECT_URIS} redirect_uris",
+            },
+            status_code=400,
+        )
     redirect_uris = [str(x) for x in raw_redirects if isinstance(x, str)]
     if len(redirect_uris) != len(raw_redirects):
-        return _json({"error": "invalid_redirect_uri", "error_description": "redirect_uris must contain strings"}, status_code=400)
+        return _json(
+            {
+                "error": "invalid_redirect_uri",
+                "error_description": "redirect_uris must contain strings",
+            },
+            status_code=400,
+        )
     for uri in redirect_uris:
         error = _validate_redirect_uri(uri)
         if error:
-            return _json({"error": "invalid_redirect_uri", "error_description": error}, status_code=400)
+            return _json(
+                {"error": "invalid_redirect_uri", "error_description": error}, status_code=400
+            )
     client_name = body.get("client_name") if isinstance(body.get("client_name"), str) else None
     if client_name and len(client_name) > MAX_CLIENT_NAME_LENGTH:
-        return _json({"error": "invalid_client_metadata", "error_description": "client_name is too long"}, status_code=400)
+        return _json(
+            {"error": "invalid_client_metadata", "error_description": "client_name is too long"},
+            status_code=400,
+        )
     client_id = "local-shell-mcp-" + secrets.token_urlsafe(24)
     client = OAuthClient(
         client_id=client_id,
         redirect_uris=redirect_uris,
         client_name=client_name,
     )
-    _CLIENTS[client_id] = client
+    with _CLIENT_STORE_LOCK:
+        _load_clients_locked()
+        _prune_clients_locked(int(time.time()), reserve_slot=True)
+        if len(_CLIENTS) >= MAX_OAUTH_CLIENTS:
+            return _json(
+                {
+                    "error": "temporarily_unavailable",
+                    "error_description": "OAuth client registry is full",
+                },
+                status_code=503,
+            )
+        _CLIENTS[client_id] = client
     audit("oauth_client_registered", client_id=client_id, redirect_uris=redirect_uris)
     return _json(
         {
@@ -195,19 +391,19 @@ def _validate_authorize_params(params: dict[str, str]) -> str | None:
     if not params.get("redirect_uri"):
         return "Missing redirect_uri"
     _prune_oauth_state()
-    client = _CLIENTS.get(params["client_id"])
-    if not client:
+    client = _get_client(params["client_id"])
+    if not client and not _LEGACY_CLIENT_ID_RE.fullmatch(params["client_id"]):
         return "Unknown client_id"
-    if params["redirect_uri"] not in client.redirect_uris:
+    if not client:
+        redirect_error = _validate_redirect_uri(params["redirect_uri"])
+        if redirect_error:
+            return redirect_error
+    elif params["redirect_uri"] not in client.redirect_uris:
         return "redirect_uri is not registered for this client"
     if not params.get("code_challenge"):
         return "Missing code_challenge"
     if params.get("code_challenge_method") != "S256":
         return "Only code_challenge_method=S256 is supported"
-    requested_scopes = {item for item in (params.get("scope") or " ".join(_scopes())).split() if item}
-    unsupported = sorted(requested_scopes - set(_scopes()))
-    if unsupported:
-        return f"Unsupported OAuth scope(s): {', '.join(unsupported)}"
     return None
 
 
@@ -265,9 +461,9 @@ def _scope_items(scope: str) -> str:
 
 def _authorize_form(params: dict[str, str], error: str | None = None) -> HTMLResponse:
     settings = get_settings()
-    scope = params.get("scope") or " ".join(_scopes())
+    scope = _scope_value()
     resource = params.get("resource") or resource_url()
-    client = _CLIENTS.get(params.get("client_id", ""))
+    client = _get_client(params.get("client_id", ""))
     client_name = client.client_name if client and client.client_name else "ChatGPT"
     error_html = (
         f'<div class="notice notice-error" role="alert"><strong>Authorization failed</strong><span>{html_lib.escape(error)}</span></div>'
@@ -288,13 +484,14 @@ def _authorize_form(params: dict[str, str], error: str | None = None) -> HTMLRes
           <span>This request can be approved without a PIN. Configure one before exposing this service publicly.</span>
         </div>"""
         security_notice = "This service currently allows approval without an admin PIN."
+    normalized_params = {**params, "scope": scope}
     html = _authorize_template().substitute(
         client_name=html_lib.escape(client_name),
         scope_items=_scope_items(scope),
         resource_title=html_lib.escape(resource, quote=True),
         resource=html_lib.escape(resource),
         error_html=error_html,
-        hidden_inputs=_hidden_inputs(params),
+        hidden_inputs=_hidden_inputs(normalized_params),
         pin_field=pin_field,
         security_notice=html_lib.escape(security_notice),
     )
@@ -328,19 +525,27 @@ async def oauth_authorize_post(request: Request) -> Response:
         audit("oauth_pin_failed", client_id=params.get("client_id"))
         return _authorize_form(params, error="Invalid admin PIN")
 
+    client = _approve_client(params["client_id"])
+    if client is None:
+        client = _persist_legacy_client(params["client_id"], params["redirect_uri"])
+        if client is None:
+            return _authorize_form(params, error="OAuth client registry is full")
+
     code = secrets.token_urlsafe(32)
     auth_code = AuthCode(
         code=code,
         client_id=params["client_id"],
         redirect_uri=params["redirect_uri"],
-        scope=params.get("scope") or " ".join(_scopes()),
+        scope=_scope_value(),
         resource=params.get("resource") or resource_url(request),
         code_challenge=params.get("code_challenge"),
         code_challenge_method=params.get("code_challenge_method"),
     )
     _prune_oauth_state()
     if len(_CODES) >= MAX_OAUTH_CODES:
-        return _authorize_form(params, error="Too many pending authorization requests; try again later")
+        return _authorize_form(
+            params, error="Too many pending authorization requests; try again later"
+        )
     _CODES[code] = auth_code
     audit("oauth_code_issued", client_id=auth_code.client_id, resource=auth_code.resource)
     query = {"code": code, "iss": issuer_url(request)}
@@ -396,13 +601,23 @@ async def oauth_token(request: Request) -> JSONResponse:
     _prune_oauth_state()
     code_obj = _CODES.get(code)
     if not code_obj or code_obj.used:
-        return _json({"error": "invalid_grant", "error_description": "Unknown or used code"}, status_code=400)
+        return _json(
+            {"error": "invalid_grant", "error_description": "Unknown or used code"}, status_code=400
+        )
     if int(time.time()) - code_obj.created_at > get_settings().oauth_code_ttl_s:
-        return _json({"error": "invalid_grant", "error_description": "Expired code"}, status_code=400)
+        return _json(
+            {"error": "invalid_grant", "error_description": "Expired code"}, status_code=400
+        )
     if code_obj.client_id != client_id or code_obj.redirect_uri != redirect_uri:
-        return _json({"error": "invalid_grant", "error_description": "Client or redirect mismatch"}, status_code=400)
+        return _json(
+            {"error": "invalid_grant", "error_description": "Client or redirect mismatch"},
+            status_code=400,
+        )
     if not _verify_pkce(code_obj, verifier):
-        return _json({"error": "invalid_grant", "error_description": "PKCE verification failed"}, status_code=400)
+        return _json(
+            {"error": "invalid_grant", "error_description": "PKCE verification failed"},
+            status_code=400,
+        )
     code_obj.used = True
     _CODES.pop(code, None)
     token = issue_access_token(

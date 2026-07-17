@@ -15,6 +15,7 @@ from local_shell_mcp.main import _build_mcp_http_app
 from local_shell_mcp.oauth import (
     _CLIENTS,
     _CODES,
+    ALL_OAUTH_SCOPES,
     _authorize_form,
     issue_access_token,
     oauth_authorize_get,
@@ -98,13 +99,13 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
     def scopes(tool_name: str, scheme_index: int = 0) -> list[str]:
         return tools[tool_name].meta["securitySchemes"][scheme_index]["scopes"]
 
-    search_fallback_scopes = scopes("search", scheme_index=1)
-    assert search_fallback_scopes[0] == "shell:read"
-    assert "shell:read" in scopes("audit_tail")
-    assert "shell:read" in scopes("apply_patch")
-    assert scopes("browser_get_text_tool")
-    assert scopes("browser_capture_tool")
-    assert scopes("transfer_path") == ["remote:use", "shell:read", "shell:write"]
+    full_scopes = list(ALL_OAUTH_SCOPES)
+    assert scopes("search", scheme_index=1) == full_scopes
+    assert scopes("audit_tail") == full_scopes
+    assert scopes("apply_patch") == full_scopes
+    assert scopes("browser_get_text_tool") == full_scopes
+    assert scopes("browser_capture_tool") == full_scopes
+    assert scopes("transfer_path") == full_scopes
     assert all(tool.outputSchema is not None for tool in tools.values())
     assert tools["run_shell_tool"].outputSchema["title"] == "ToolResult"
     assert set(tools["run_shell_tool"].outputSchema["properties"]) == {"ok", "message", "data"}
@@ -117,25 +118,40 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_mcp_tool_execution_enforces_advertised_scopes(tmp_path, monkeypatch):
+async def test_mcp_tool_execution_uses_one_full_scope_bundle(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "oauth")
     get_settings.cache_clear()
     (tmp_path / "readable.txt").write_text("content", encoding="utf-8")
     mcp = build_mcp()
-    principal_token = _CURRENT_PRINCIPAL.set(
-        Principal(email=None, subject="read-only", claims={"scope": "shell:read"})
+    partial_token = _CURRENT_PRINCIPAL.set(
+        Principal(email=None, subject="partial", claims={"scope": "shell:read"})
+    )
+    try:
+        with pytest.raises(Exception, match="shell:write"):
+            await mcp.call_tool("read_file", {"path": "readable.txt"})
+    finally:
+        _CURRENT_PRINCIPAL.reset(partial_token)
+
+    full_token = _CURRENT_PRINCIPAL.set(
+        Principal(
+            email=None,
+            subject="full",
+            claims={"scope": " ".join(ALL_OAUTH_SCOPES)},
+        )
     )
     try:
         content, structured = await mcp.call_tool("read_file", {"path": "readable.txt"})
         assert content
         assert structured["ok"] is True
-        with pytest.raises(Exception, match="shell:write"):
-            await mcp.call_tool("write_file", {"path": "blocked.txt", "content": "no"})
+        _, written = await mcp.call_tool(
+            "write_file", {"path": "written.txt", "content": "yes"}
+        )
+        assert written["ok"] is True
     finally:
-        _CURRENT_PRINCIPAL.reset(principal_token)
+        _CURRENT_PRINCIPAL.reset(full_token)
 
-    assert not (tmp_path / "blocked.txt").exists()
+    assert (tmp_path / "written.txt").read_text(encoding="utf-8") == "yes"
 
 
 @pytest.mark.asyncio
@@ -209,6 +225,7 @@ def test_oauth_access_tokens_do_not_expire_by_default(tmp_path, monkeypatch):
 
     assert "exp" not in claims
     assert claims["client_id"] == "test-client"
+    assert claims["scope"] == "shell:execute"
 
 
 def _oauth_test_client() -> TestClient:
@@ -278,7 +295,7 @@ def test_oauth_registration_validates_redirects_and_authorize_requires_registere
     assert "Approve" in valid.text
     assert "Unknown client_id" not in valid.text
 
-    unsupported_scope = client.get(
+    ignored_scope = client.get(
         "/oauth/authorize",
         params={
             "response_type": "code",
@@ -286,10 +303,10 @@ def test_oauth_registration_validates_redirects_and_authorize_requires_registere
             "redirect_uri": "https://example.test/callback",
             "code_challenge": "challenge",
             "code_challenge_method": "S256",
-            "scope": "shell:read unknown:scope",
+            "scope": "shell:read git:write unknown:scope",
         },
     )
-    assert "Unsupported OAuth scope" in unsupported_scope.text
+    assert "Unsupported OAuth scope" not in ignored_scope.text
 
 
 def test_oauth_authorize_form_escapes_reflected_fields(tmp_path, monkeypatch):
