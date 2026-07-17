@@ -1,5 +1,6 @@
-import { chmod, copyFile, mkdir, rm } from "node:fs/promises"
+import { chmod, mkdir, rm } from "node:fs/promises"
 import { resolve } from "node:path"
+import { gzipSync } from "node:zlib"
 import { nonCurrentOpenTuiNativePackages } from "./platform"
 
 const root = resolve(import.meta.dir, "..")
@@ -30,8 +31,7 @@ if (process.platform !== "win32") await chmod(outfile, 0o755)
 const embeddedDir = resolve(repository, "src/local_shell_mcp/ui_runtime")
 await rm(embeddedDir, { recursive: true, force: true })
 await mkdir(embeddedDir, { recursive: true })
-const embeddedFile = resolve(embeddedDir, executableName)
-await copyFile(outfile, embeddedFile)
-if (process.platform !== "win32") await chmod(embeddedFile, 0o755)
+const executable = new Uint8Array(await Bun.file(outfile).arrayBuffer())
+await Bun.write(resolve(embeddedDir, `${executableName}.gz`), gzipSync(executable, { level: 9 }))
 
 console.log(outfile)
