@@ -1,6 +1,6 @@
 # 配置
 
-環境變量使用 `LOCAL_SHELL_MCP_` 前綴，並覆蓋由 `LOCAL_SHELL_MCP_CONFIG` 或 `--config` 加載的 YAML 配置值。YAML key 使用下表中的字段名。
+倉庫只提供一份可直接複製的起始配置：[`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example)。Docker Compose 會自動讀取複製後的 `.env`，其他運行方式也可以使用相同的 `LOCAL_SHELL_MCP_` 環境變量。YAML 僅作為二進制或源碼部署的可選高級輸入；需要時自行創建文件，並通過 `LOCAL_SHELL_MCP_CONFIG` 或 `--config` 顯式指定。環境變量會覆蓋 YAML 值，因此除非有意覆蓋，否則不要在兩處重複定義同一設置。YAML key 使用下表中的字段名。
 
 ## 優先級
 

@@ -1,6 +1,6 @@
 # Configuration
 
-Environment variables use the `LOCAL_SHELL_MCP_` prefix and override YAML config values loaded by `LOCAL_SHELL_MCP_CONFIG` or `--config`. YAML keys use the field names shown below.
+The repository ships one copyable starter file: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose reads the resulting `.env` file automatically, and other runtimes can use the same `LOCAL_SHELL_MCP_` environment variables. YAML remains an optional advanced input for binary or source deployments; create a file explicitly and select it with `LOCAL_SHELL_MCP_CONFIG` or `--config`. Environment variables override YAML values, so avoid defining the same setting in both unless the override is intentional. YAML keys use the field names shown below.
 
 ## Precedence
 
