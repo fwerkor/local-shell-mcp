@@ -1,0 +1,80 @@
+name: Apply UI runtime patch
+
+on:
+  push:
+    branches:
+      - fix/embedded-ui-runtime
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/embedded-ui-runtime
+          fetch-depth: 0
+
+      - name: Replace Bash 3.2-unsafe PyInstaller argument handling
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          old = '''          EXTRA_PYINSTALLER_ARGS=()
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            EXTRA_PYINSTALLER_ARGS+=(--collect-all winpty)
+          fi
+          pyinstaller \\
+            --clean \\
+            --onefile \\
+            --name local-shell-mcp \\
+            --collect-all local_shell_mcp \\
+            --collect-all mcp \\
+            --collect-all uvicorn \\
+            --collect-all fastapi \\
+            --collect-all starlette \\
+            --exclude-module cryptography \\
+            "${EXTRA_PYINSTALLER_ARGS[@]}" \\
+            scripts/pyinstaller-entry.py'''
+
+          new = '''          PYINSTALLER_ARGS=(
+            --clean
+            --onefile
+            --name local-shell-mcp
+            --collect-all local_shell_mcp
+            --collect-all mcp
+            --collect-all uvicorn
+            --collect-all fastapi
+            --collect-all starlette
+            --exclude-module cryptography
+          )
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            PYINSTALLER_ARGS+=(--collect-all winpty)
+          fi
+          pyinstaller "${PYINSTALLER_ARGS[@]}" scripts/pyinstaller-entry.py'''
+
+          for name in (
+              ".github/workflows/ci.yml",
+              ".github/workflows/release.yml",
+              ".github/workflows/ui-runtime.yml",
+          ):
+              path = Path(name)
+              text = path.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{name}: expected one unsafe block, found {count}")
+              path.write_text(text.replace(old, new))
+
+          Path(".github/workflows/apply-ui-runtime-patch.yml").unlink()
+          PY
+
+      - name: Commit patch
+        run: |
+          git config user.name "Cao Yuhang"
+          git config user.email "caoyuhang@fwerkor.com"
+          git add .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/ui-runtime.yml .github/workflows/apply-ui-runtime-patch.yml
+          git commit -m "fix(ci): support macOS Bash 3.2 in binary builds"
+          git push origin HEAD:fix/embedded-ui-runtime
