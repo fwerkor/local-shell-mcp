@@ -198,7 +198,7 @@ For vulnerability reporting, read [SECURITY.md](SECURITY.md).
 
 ## Configuration
 
-Common settings are documented in [`config.example.yaml`](config.example.yaml), [`.env.example`](.env.example), and the [configuration reference](https://fwerkor.github.io/local-shell-mcp/reference/configuration/).
+Copy [`.env.example`](.env.example) for the standard setup. The [configuration reference](https://fwerkor.github.io/local-shell-mcp/reference/configuration/) documents every environment variable and the optional YAML format for advanced deployments.
 
 Important options:
 
