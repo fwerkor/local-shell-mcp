@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 concurrency:
   group: ui-runtime-${{ github.ref }}
@@ -77,6 +76,7 @@ jobs:
           bun run build
 
       - name: Build one-file executable with embedded OpenTUI
+        id: build
         shell: bash
         run: |
           set -uo pipefail
@@ -99,6 +99,14 @@ jobs:
             scripts/pyinstaller-entry.py > pyinstaller.log 2>&1
           status=$?
           set -e
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import re
+          from pathlib import Path
+          lines = [line.strip() for line in Path("pyinstaller.log").read_text(errors="replace").splitlines() if line.strip()]
+          tail = " | ".join(lines[-5:]) if lines else "no-log"
+          tail = re.sub(r"[^A-Za-z0-9._ -]+", "_", tail)[:180].strip(" .") or "unknown"
+          print(f"diagnostic={tail}")
+          PY
           tail -n 120 pyinstaller.log
           exit "$status"
 
@@ -106,29 +114,12 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: pyinstaller-${{ matrix.label }}-log
+          name: pyinstaller-${{ matrix.label }}-${{ steps.build.outputs.diagnostic }}
           path: pyinstaller.log
           if-no-files-found: ignore
 
-      - name: Report PyInstaller failure
-        if: failure() && github.event_name == 'pull_request'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          tail = "\n".join(Path("pyinstaller.log").read_text(errors="replace").splitlines()[-100:])
-          body = "Temporary diagnostic for **${{ matrix.label }}** PyInstaller failure:\n\n```text\n" + tail + "\n```"
-          Path("diagnostic.json").write_text(json.dumps({"body": body}))
-          PY
-          gh api \
-            --method POST \
-            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
-            --input diagnostic.json
-
       - name: Verify WebUI and embedded TUI without sidecar
+        id: smoke
         shell: bash
         run: |
           set -uo pipefail
@@ -138,26 +129,24 @@ jobs:
           python scripts/standalone-ui-smoke.py --server "dist/${{ matrix.binary }}" > smoke.log 2>&1
           status=$?
           set -e
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import re
+          from pathlib import Path
+          lines = [line.strip() for line in Path("smoke.log").read_text(errors="replace").splitlines() if line.strip()]
+          tail = " | ".join(lines[-5:]) if lines else "no-log"
+          tail = re.sub(r"[^A-Za-z0-9._ -]+", "_", tail)[:180].strip(" .") or "unknown"
+          print(f"diagnostic={tail}")
+          PY
           cat smoke.log
           exit "$status"
 
-      - name: Report standalone UI smoke failure
-        if: failure() && github.event_name == 'pull_request' && hashFiles('smoke.log') != ''
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          tail = "\n".join(Path("smoke.log").read_text(errors="replace").splitlines()[-100:])
-          body = "Temporary diagnostic for **${{ matrix.label }}** standalone UI smoke failure:\n\n```text\n" + tail + "\n```"
-          Path("diagnostic.json").write_text(json.dumps({"body": body}))
-          PY
-          gh api \
-            --method POST \
-            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
-            --input diagnostic.json
+      - name: Upload standalone smoke failure log
+        if: failure() && hashFiles('smoke.log') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-${{ matrix.label }}-${{ steps.smoke.outputs.diagnostic }}
+          path: smoke.log
+          if-no-files-found: ignore
 
   docker:
     name: Docker UI / ${{ matrix.platform }}
