@@ -14,6 +14,7 @@ const authGate = document.querySelector<HTMLElement>("#auth-gate")!
 const loginButton = document.querySelector<HTMLButtonElement>("#login-button")!
 const reconnectButton = document.querySelector<HTMLButtonElement>("#reconnect-button")!
 const fullscreenButton = document.querySelector<HTMLButtonElement>("#fullscreen-button")!
+const touchButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("#touchbar [data-key]"))
 const stateElement = document.querySelector<HTMLElement>("#connection-state")!
 const sizeElement = document.querySelector<HTMLElement>("#terminal-size")!
 const gateDetail = document.querySelector<HTMLElement>("#gate-detail")!
@@ -80,6 +81,21 @@ const categorySequences: Record<string, string> = {
   "4": "\u001b[15~",
   "5": "\u001b[17~",
 }
+const touchSequences: Record<string, string> = {
+  escape: "\u001b",
+  tab: "\t",
+  left: "\u001b[D",
+  up: "\u001b[A",
+  down: "\u001b[B",
+  right: "\u001b[C",
+  enter: "\r",
+  help: "\u001bOP",
+}
+
+function sendTerminalInput(sequence: string): void {
+  if (socket?.readyState !== WebSocket.OPEN) return
+  socket.send(encoder.encode(sequence))
+}
 window.addEventListener(
   "keydown",
   (event) => {
@@ -87,7 +103,7 @@ window.addEventListener(
     if (!sequence || socket?.readyState !== WebSocket.OPEN) return
     event.preventDefault()
     event.stopImmediatePropagation()
-    socket.send(encoder.encode(sequence))
+    sendTerminalInput(sequence)
   },
   { capture: true },
 )
@@ -306,6 +322,14 @@ terminal.onBinary((data) => {
   socket.send(Uint8Array.from(data, (character) => character.charCodeAt(0) & 0xff))
 })
 
+touchButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    const sequence = touchSequences[button.dataset.key || ""]
+    if (sequence) sendTerminalInput(sequence)
+    terminal.focus()
+  })
+})
+
 const resizeObserver = new ResizeObserver(() => window.requestAnimationFrame(sendResize))
 resizeObserver.observe(terminalElement)
 window.addEventListener("resize", () => window.requestAnimationFrame(sendResize))
@@ -326,7 +350,11 @@ fullscreenButton.addEventListener("click", () => {
 })
 
 document.addEventListener("fullscreenchange", () => {
-  fullscreenButton.textContent = document.fullscreenElement ? "Exit fullscreen" : "Fullscreen"
+  const label = document.fullscreenElement ? "Exit fullscreen" : "Fullscreen"
+  fullscreenButton.title = label
+  fullscreenButton.setAttribute("aria-label", label)
+  const wideLabel = fullscreenButton.querySelector<HTMLElement>(".wide-label")
+  if (wideLabel) wideLabel.textContent = label
   window.requestAnimationFrame(sendResize)
 })
 

@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>Authorize local-shell-mcp</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #07111f;
+      color: #e8eef8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 32px 20px;
+      background:
+        radial-gradient(circle at 12% 10%, rgba(45, 212, 191, .16), transparent 32rem),
+        radial-gradient(circle at 88% 84%, rgba(59, 130, 246, .18), transparent 30rem),
+        linear-gradient(145deg, #07111f 0%, #0b1728 48%, #08111d 100%);
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .22;
+      background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+      background-size: 32px 32px;
+      mask-image: linear-gradient(to bottom, black, transparent 85%);
+    }
+    main {
+      position: relative;
+      width: min(100%, 680px);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0 0 18px 4px;
+      color: #a9b8cb;
+      font-size: 14px;
+      font-weight: 650;
+      letter-spacing: .02em;
+    }
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border: 1px solid rgba(94, 234, 212, .28);
+      border-radius: 10px;
+      background: rgba(13, 148, 136, .12);
+      color: #5eead4;
+      font: 700 16px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      box-shadow: inset 0 1px rgba(255,255,255,.06);
+    }
+    .card {
+      overflow: hidden;
+      border: 1px solid rgba(148, 163, 184, .18);
+      border-radius: 24px;
+      background: rgba(10, 22, 38, .88);
+      box-shadow: 0 28px 80px rgba(0, 0, 0, .42), inset 0 1px rgba(255,255,255,.04);
+      backdrop-filter: blur(18px);
+    }
+    .card-header {
+      padding: 32px 34px 26px;
+      border-bottom: 1px solid rgba(148, 163, 184, .13);
+    }
+    .eyebrow {
+      margin: 0 0 9px;
+      color: #5eead4;
+      font-size: 12px;
+      font-weight: 750;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0;
+      color: #f8fafc;
+      font-size: clamp(26px, 5vw, 36px);
+      line-height: 1.16;
+      letter-spacing: -.035em;
+    }
+    .lead {
+      margin: 13px 0 0;
+      color: #a9b8cb;
+      font-size: 15px;
+      line-height: 1.65;
+    }
+    .lead strong { color: #e8eef8; }
+    .card-body { padding: 28px 34px 34px; }
+    .section-title {
+      margin: 0 0 14px;
+      color: #cbd5e1;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .permissions {
+      display: grid;
+      gap: 10px;
+      margin: 0 0 24px;
+      padding: 0;
+      list-style: none;
+    }
+    .permission {
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      gap: 11px;
+      align-items: start;
+      padding: 12px 14px;
+      border: 1px solid rgba(148, 163, 184, .12);
+      border-radius: 13px;
+      background: rgba(15, 30, 49, .66);
+    }
+    .permission-icon {
+      display: grid;
+      place-items: center;
+      width: 25px;
+      height: 25px;
+      margin-top: 1px;
+      border-radius: 8px;
+      background: rgba(45, 212, 191, .12);
+      color: #5eead4;
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .permission strong { display: block; color: #e8eef8; font-size: 14px; line-height: 1.45; }
+    .permission small { display: block; margin-top: 2px; color: #8292a7; font-size: 12.5px; line-height: 1.5; }
+    .resource {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 24px;
+      padding: 13px 14px;
+      border-radius: 13px;
+      background: rgba(7, 17, 31, .7);
+      color: #8ea0b7;
+      font-size: 12px;
+    }
+    .resource code {
+      min-width: 0;
+      overflow: hidden;
+      color: #cbd5e1;
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .notice {
+      display: grid;
+      gap: 4px;
+      margin-bottom: 20px;
+      padding: 13px 15px;
+      border: 1px solid;
+      border-radius: 13px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .notice strong { color: inherit; }
+    .notice span { color: #b6c2d1; }
+    .notice-error { border-color: rgba(251, 113, 133, .32); background: rgba(159, 18, 57, .14); color: #fda4af; }
+    .notice-warning { border-color: rgba(251, 191, 36, .27); background: rgba(146, 64, 14, .13); color: #fcd34d; }
+    .field { display: grid; gap: 8px; }
+    .field > span { color: #dbe5f2; font-size: 13px; font-weight: 700; }
+    input {
+      width: 100%;
+      min-height: 48px;
+      border: 1px solid rgba(148, 163, 184, .25);
+      border-radius: 12px;
+      outline: none;
+      background: rgba(5, 14, 26, .78);
+      color: #f8fafc;
+      padding: 0 14px;
+      font: inherit;
+      transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+    }
+    input::placeholder { color: #65768c; }
+    input:focus {
+      border-color: rgba(45, 212, 191, .72);
+      background: rgba(7, 20, 34, .95);
+      box-shadow: 0 0 0 4px rgba(45, 212, 191, .1);
+    }
+    .field-help { margin: 8px 0 22px; color: #718198; font-size: 12px; line-height: 1.5; }
+    .field-help code { color: #9fb0c4; }
+    .actions { display: grid; gap: 12px; }
+    button {
+      min-height: 50px;
+      border: 0;
+      border-radius: 13px;
+      cursor: pointer;
+      background: linear-gradient(135deg, #2dd4bf, #22c3ee);
+      color: #04211f;
+      font: inherit;
+      font-size: 15px;
+      font-weight: 750;
+      box-shadow: 0 12px 30px rgba(34, 211, 238, .15), inset 0 1px rgba(255,255,255,.35);
+      transition: transform .16s ease, filter .16s ease, box-shadow .16s ease;
+    }
+    button:hover { filter: brightness(1.07); box-shadow: 0 15px 34px rgba(34, 211, 238, .22), inset 0 1px rgba(255,255,255,.4); transform: translateY(-1px); }
+    button:active { transform: translateY(0); }
+    button:focus-visible { outline: 3px solid rgba(94, 234, 212, .45); outline-offset: 3px; }
+    .security {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 7px;
+      margin: 0;
+      color: #66778d;
+      font-size: 11.5px;
+      line-height: 1.5;
+      text-align: center;
+    }
+    .security svg { flex: 0 0 auto; margin-top: 1px; }
+    @media (max-width: 560px) {
+      body { place-items: start center; padding: 24px 14px; }
+      .brand { margin-left: 2px; }
+      .card { border-radius: 20px; }
+      .card-header { padding: 27px 22px 22px; }
+      .card-body { padding: 23px 22px 27px; }
+      .resource { align-items: flex-start; flex-direction: column; gap: 5px; }
+      .resource code { width: 100%; white-space: normal; overflow-wrap: anywhere; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand"><span class="brand-mark" aria-hidden="true">&gt;_</span><span>local-shell-mcp</span></div>
+    <section class="card" aria-labelledby="authorization-title">
+      <header class="card-header">
+        <p class="eyebrow">OAuth authorization</p>
+        <h1 id="authorization-title">Approve access to your workspace</h1>
+        <p class="lead"><strong>$client_name</strong> is requesting access through local-shell-mcp.</p>
+      </header>
+      <div class="card-body">
+        <p class="section-title">This connection will be able to</p>
+        <ul class="permissions">$scope_items</ul>
+        <div class="resource"><span>Resource</span><code title="$resource_title">$resource</code></div>
+        $error_html
+        <form method="post" action="/oauth/authorize">
+          $hidden_inputs
+          $pin_field
+          <div class="actions">
+            <button type="submit">Approve connection</button>
+            <p class="security">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.9 8.8 7 10 4.1-1.2 7-5.4 7-10V6l-7-3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m9.5 12 1.7 1.7 3.6-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>$security_notice</span>
+            </p>
+          </div>
+        </form>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

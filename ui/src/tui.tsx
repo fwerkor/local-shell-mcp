@@ -34,8 +34,20 @@ function Help({ close }: { close: () => void }) {
   )
 }
 
-function StatusLine({ status, bootstrap }: { status: string; bootstrap: BootstrapPayload | null }) {
+function StatusLine({
+  status,
+  bootstrap,
+  width,
+}: {
+  status: string
+  bootstrap: BootstrapPayload | null
+  width: number
+}) {
   const online = bootstrap?.machines.machines.filter((machine) => machine.status === "online").length || 0
+  const narrow = width < 60
+  const compact = width < 90
+  const statusBudget = Math.max(8, width - (compact ? 14 : 47))
+  const visibleStatus = status.length > statusBudget ? `${status.slice(0, Math.max(1, statusBudget - 1))}…` : status
   return (
     <box
       style={{
@@ -49,12 +61,16 @@ function StatusLine({ status, bootstrap }: { status: string; bootstrap: Bootstra
     >
       <text fg={theme.green} content="● " />
       <text fg={theme.muted} content={`${online} online`} />
-      <text fg={theme.faint} content="  │  " />
-      <text fg={theme.muted} content={status} />
+      <text fg={theme.faint} content={narrow ? "  " : "  │  "} />
+      <text fg={theme.muted} content={visibleStatus} />
       <box style={{ flexGrow: 1 }} />
-      <text fg={theme.faint} content={bootstrap?.features.yazi_available ? "Yazi available" : "Yazi UX mode"} />
-      <text fg={theme.faint} content="  │  " />
-      <text fg={theme.cyan} content="local-shell-mcp" />
+      {!compact && (
+        <>
+          <text fg={theme.faint} content={bootstrap?.features.yazi_available ? "Yazi available" : "Yazi UX mode"} />
+          <text fg={theme.faint} content="  │  " />
+          <text fg={theme.cyan} content="local-shell-mcp" />
+        </>
+      )}
     </box>
   )
 }
@@ -186,7 +202,7 @@ function App() {
         }}
       />
       <box style={{ flexGrow: 1, marginTop: 1 }}>{content}</box>
-      <StatusLine status={status} bootstrap={bootstrap} />
+      <StatusLine status={status} bootstrap={bootstrap} width={width} />
       {help && <Help close={() => setHelp(false)} />}
     </box>
   )

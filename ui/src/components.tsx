@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { useMemo } from "react"
+import { useTerminalDimensions } from "@opentui/react"
 import { clampIndex } from "./state-utils"
 import type { Machine, ScreenName } from "./types"
 import { theme } from "./theme"
@@ -15,6 +16,7 @@ export function TopNav({
   width: number
   onSelect: (screen: ScreenName) => void
 }) {
+  const narrow = width < 47
   const compact = width < 88
   return (
     <box
@@ -31,19 +33,24 @@ export function TopNav({
       }}
     >
       <text fg={theme.cyan} attributes={1} content={compact ? "LSM" : "LOCAL SHELL MCP"} />
-      <text fg={theme.faint} content="  /  " />
+      <text fg={theme.faint} content={narrow ? " " : "  /  "} />
       {SCREENS.map((screen, index) => {
         const selected = screen === active
         const key = `A${index + 1}`
-        const label = compact ? `${key}:${screen.slice(0, 3)}` : `Alt+${index + 1} ${screen}`
+        const narrowInitial = screen === "Todos" ? "D" : screen[0]
+        const label = narrow
+          ? `${index + 1}${narrowInitial}`
+          : compact
+            ? `${key}:${screen.slice(0, 3)}`
+            : `Alt+${index + 1} ${screen}`
         return (
           <box
             key={screen}
             onMouseDown={() => onSelect(screen)}
             style={{
               height: 1,
-              marginRight: compact ? 1 : 2,
-              paddingLeft: 1,
+              marginRight: narrow ? 0 : compact ? 1 : 2,
+              paddingLeft: narrow ? 0 : 1,
               paddingRight: 1,
               backgroundColor: selected ? theme.selectedStrong : undefined,
             }}
@@ -141,6 +148,20 @@ export function Panel({
 }
 
 export function KeyHint({ items }: { items: Array<[string, string]> }) {
+  const { width } = useTerminalDimensions()
+  const keysOnly = width < 60
+  const compact = width < 92
+  const budget = Math.max(8, width - 4)
+  const visible: Array<[string, string]> = []
+  let used = 0
+  for (const [key, label] of items) {
+    const nextLabel = keysOnly ? "" : compact ? label.slice(0, 7) : label
+    const segmentLength = key.length + (nextLabel ? nextLabel.length + 1 : 0) + (visible.length ? 2 : 0)
+    if (used + segmentLength > budget - 2) break
+    visible.push([key, nextLabel])
+    used += segmentLength
+  }
+  const clipped = visible.length < items.length
   return (
     <box
       style={{
@@ -152,12 +173,13 @@ export function KeyHint({ items }: { items: Array<[string, string]> }) {
         backgroundColor: theme.panelAlt,
       }}
     >
-      {items.map(([key, label], index) => (
-        <box key={`${key}-${label}`} style={{ flexDirection: "row", marginRight: 2 }}>
+      {visible.map(([key, label]) => (
+        <box key={`${key}-${label}`} style={{ flexDirection: "row", marginRight: keysOnly ? 1 : 2 }}>
           <text fg={theme.cyan} attributes={1} content={key} />
-          <text fg={theme.muted} content={` ${label}${index === items.length - 1 ? "" : ""}`} />
+          {label && <text fg={theme.muted} content={` ${label}`} />}
         </box>
       ))}
+      {clipped && <text fg={theme.faint} content="…" />}
     </box>
   )
 }
@@ -190,6 +212,9 @@ export function Modal({
   width?: number
   height?: number
 }) {
+  const terminal = useTerminalDimensions()
+  const actualWidth = Math.min(width, Math.max(16, terminal.width - 4))
+  const actualHeight = Math.min(height, Math.max(6, terminal.height - 4))
   return (
     <box
       style={{
@@ -204,8 +229,8 @@ export function Modal({
       <box
         title={` ${title} `}
         style={{
-          width,
-          height,
+          width: actualWidth,
+          height: actualHeight,
           flexDirection: "column",
           border: true,
           borderStyle: "double",
