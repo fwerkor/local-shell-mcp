@@ -82,10 +82,11 @@ def make_image_preview(
 
     columns = max(2, min(int(max_columns), 200))
     rows = max(1, min(int(max_rows), 100))
-    # OpenTUI's supersampled renderer maps one source pixel to two terminal
-    # columns and two vertical pixels to one terminal row.
-    max_pixel_width = max(1, columns // 2)
-    max_pixel_height = max(1, rows * 2)
+    # OpenTUI's supersampled renderer consumes a 2x2 source-pixel block for
+    # each terminal cell, so the source raster may be twice the cell bounds
+    # in both dimensions.
+    max_pixel_width = columns * 2
+    max_pixel_height = rows * 2
 
     with Image.open(BytesIO(image.data)) as opened:
         opened.seek(0)
@@ -111,7 +112,9 @@ def make_image_preview(
         rgba=rgba,
         width=width,
         height=height,
-        cell_width=width * 2,
+        # Keep a two-column minimum for the preview render box while reporting
+        # the actual 2x2 supersampling footprint for normal images.
+        cell_width=max(2, (width + 1) // 2),
         cell_height=(height + 1) // 2,
         original_width=original_width,
         original_height=original_height,
