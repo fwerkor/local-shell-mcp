@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 from pathlib import Path
 
 import pytest
 from mcp.types import CallToolResult, ImageContent, TextContent
+from PIL import Image
 
 import local_shell_mcp.tools as tools
 from local_shell_mcp.image_ops import (
     MAX_VIEW_IMAGE_BYTES,
     assert_view_image_size,
     detect_image_type,
+    make_image_preview,
     read_image,
 )
 from local_shell_mcp.settings import get_settings
@@ -41,6 +44,20 @@ def _configure(tmp_path: Path, monkeypatch, *, remote_enabled: bool = True) -> N
 )
 def test_detect_image_type(header, expected):
     assert detect_image_type(header) == expected
+
+
+def test_make_image_preview_returns_bounded_rgba(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    buffer = BytesIO()
+    Image.new("RGB", (100, 50), (12, 34, 56)).save(buffer, format="PNG")
+    (tmp_path / "wide.png").write_bytes(buffer.getvalue())
+
+    preview = make_image_preview(read_image("wide.png"), max_columns=12, max_rows=4)
+
+    assert (preview.original_width, preview.original_height) == (100, 50)
+    assert (preview.width, preview.height) == (6, 3)
+    assert (preview.cell_width, preview.cell_height) == (12, 2)
+    assert len(preview.rgba) == 6 * 3 * 4
 
 
 def test_image_validation_errors(tmp_path, monkeypatch):

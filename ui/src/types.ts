@@ -34,9 +34,17 @@ export interface FilesPayload {
 }
 
 export interface FilePreview {
-  kind: "directory" | "text" | "binary"
+  kind: "directory" | "text" | "binary" | "image"
   content?: string
   preview?: string
+  rgba?: string
+  mime_type?: string
+  width?: number
+  height?: number
+  cell_width?: number
+  cell_height?: number
+  original_width?: number
+  original_height?: number
   entries?: FileEntry[]
   size?: number
   path?: string

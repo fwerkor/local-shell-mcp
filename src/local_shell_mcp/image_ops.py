@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from io import BytesIO
+
+from PIL import Image, ImageOps
 
 from .fs_ops import relative_display, resolve_path
 
 MAX_VIEW_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_PREVIEW_SOURCE_PIXELS = 25_000_000
 
 
 @dataclass(frozen=True)
@@ -14,6 +18,17 @@ class ImageFile:
     format: str
     mime_type: str
     size: int
+
+
+@dataclass(frozen=True)
+class ImagePreview:
+    rgba: bytes
+    width: int
+    height: int
+    cell_width: int
+    cell_height: int
+    original_width: int
+    original_height: int
 
 
 def assert_view_image_size(size: int) -> None:
@@ -55,4 +70,49 @@ def read_image(path: str) -> ImageFile:
         format=image_format,
         mime_type=mime_type,
         size=len(data),
+    )
+
+
+def make_image_preview(
+    image: ImageFile,
+    max_columns: int,
+    max_rows: int,
+) -> ImagePreview:
+    """Decode a bounded first-frame RGBA thumbnail for OpenTUI's pixel buffer."""
+
+    columns = max(2, min(int(max_columns), 200))
+    rows = max(1, min(int(max_rows), 100))
+    # OpenTUI's supersampled renderer maps one source pixel to two terminal
+    # columns and two vertical pixels to one terminal row.
+    max_pixel_width = max(1, columns // 2)
+    max_pixel_height = max(1, rows * 2)
+
+    with Image.open(BytesIO(image.data)) as opened:
+        opened.seek(0)
+        oriented = ImageOps.exif_transpose(opened)
+        original_width, original_height = oriented.size
+        if original_width <= 0 or original_height <= 0:
+            raise ValueError("Image has invalid dimensions")
+        if original_width * original_height > MAX_PREVIEW_SOURCE_PIXELS:
+            raise ValueError(
+                "Refusing to decode image preview with "
+                f"{original_width * original_height} pixels; max is {MAX_PREVIEW_SOURCE_PIXELS}"
+            )
+        frame = oriented.convert("RGBA")
+        frame.thumbnail(
+            (max_pixel_width, max_pixel_height),
+            Image.Resampling.LANCZOS,
+            reducing_gap=3.0,
+        )
+        width, height = frame.size
+        rgba = frame.tobytes()
+
+    return ImagePreview(
+        rgba=rgba,
+        width=width,
+        height=height,
+        cell_width=width * 2,
+        cell_height=(height + 1) // 2,
+        original_width=original_width,
+        original_height=original_height,
     )

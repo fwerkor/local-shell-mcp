@@ -71,8 +71,8 @@ export const api = {
   files(machine: string, path: string, signal?: AbortSignal): Promise<FilesPayload> {
     return request(`/files${queryString({ machine, path })}`, { signal })
   },
-  filePreview(machine: string, path: string): Promise<FilePreview> {
-    return request(`/files/preview${queryString({ machine, path })}`)
+  filePreview(machine: string, path: string, columns?: number, rows?: number): Promise<FilePreview> {
+    return request(`/files/preview${queryString({ machine, path, columns, rows })}`)
   },
   fileContent(machine: string, path: string): Promise<FilePreview> {
     return request(`/files/content${queryString({ machine, path })}`)

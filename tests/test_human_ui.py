@@ -115,6 +115,28 @@ def test_human_file_api_has_yazi_style_directory_payload(tmp_path, monkeypatch):
     assert any(entry["name"] == "alpha.txt" and entry["type"] == "file" for entry in payload["entries"])
 
 
+def test_human_file_api_renders_image_preview(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+    (tmp_path / "pixel.png").write_bytes(png)
+
+    client = TestClient(build_http_app())
+    response = client.get(
+        "/api/ui/files/preview",
+        params={"machine": "local", "path": "pixel.png", "columns": 20, "rows": 8},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["kind"] == "image"
+    assert payload["mime_type"] == "image/png"
+    assert (payload["width"], payload["height"]) == (1, 1)
+    assert (payload["cell_width"], payload["cell_height"]) == (2, 1)
+    assert len(base64.b64decode(payload["rgba"])) == 4
+
+
 def test_editor_content_reads_the_complete_bounded_file(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     content = "\n".join(f"line-{index}" for index in range(350))
