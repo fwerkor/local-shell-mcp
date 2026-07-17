@@ -483,6 +483,96 @@ async def test_job_start_does_not_launch_shell_when_store_is_invalid(
 
 
 @pytest.mark.asyncio
+async def test_job_start_records_shell_launch_failure(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".state"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+
+    async def failing_start_shell(cwd=".", name=None, command=None):  # noqa: ARG001
+        raise RuntimeError("shell launch failed")
+
+    monkeypatch.setattr(jobs_module, "start_shell", failing_start_shell)
+
+    with pytest.raises(RuntimeError, match="shell launch failed"):
+        await start_job("echo never-ran")
+
+    stored = json.loads(
+        (state_dir / jobs_module.JOB_STORE_FILE_NAME).read_text(encoding="utf-8")
+    )
+    assert len(stored["jobs"]) == 1
+    job = stored["jobs"][0]
+    assert job["status"] == "failed"
+    assert job["completed_at"] is not None
+    assert job["error"] == "start failed: RuntimeError: shell launch failed"
+    assert "operation_id" not in job
+    runtime_dir = state_dir / "jobs"
+    assert not list(runtime_dir.iterdir())
+
+
+@pytest.mark.asyncio
+async def test_job_start_kills_shell_when_running_state_cannot_be_committed(
+    tmp_path, monkeypatch
+):
+    state_dir = tmp_path / ".state"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    killed: list[str] = []
+
+    async def corrupt_store_after_start(cwd=".", name=None, command=None):  # noqa: ARG001
+        invalid = json.dumps({"version": 99, "jobs": []})
+        for path in (
+            state_dir / jobs_module.JOB_STORE_FILE_NAME,
+            state_dir / jobs_module.JOB_STORE_BACKUP_FILE_NAME,
+        ):
+            path.write_text(invalid, encoding="utf-8")
+        return {"session_id": str(name), "backend": "fake"}
+
+    async def fake_kill_shell(session_id):
+        killed.append(session_id)
+        return {"session_id": session_id, "killed": True, "stderr": ""}
+
+    monkeypatch.setattr(jobs_module, "start_shell", corrupt_store_after_start)
+    monkeypatch.setattr(jobs_module, "kill_shell", fake_kill_shell)
+
+    with pytest.raises(RuntimeError, match="refusing to reset"):
+        await start_job("echo started")
+
+    assert len(killed) == 1
+    runtime_dir = state_dir / "jobs"
+    assert not list(runtime_dir.iterdir())
+
+
+@pytest.mark.asyncio
+async def test_job_start_kills_shell_if_reserved_job_changes(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".state"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    killed: list[str] = []
+
+    async def change_reserved_job(cwd=".", name=None, command=None):  # noqa: ARG001
+        with jobs_module._store_transaction() as store:
+            store["jobs"][0]["status"] = "stopped"
+        return {"session_id": str(name), "backend": "fake"}
+
+    async def fake_kill_shell(session_id):
+        killed.append(session_id)
+        return {"session_id": session_id, "killed": True, "stderr": ""}
+
+    monkeypatch.setattr(jobs_module, "start_shell", change_reserved_job)
+    monkeypatch.setattr(jobs_module, "kill_shell", fake_kill_shell)
+
+    with pytest.raises(RuntimeError, match="job changed while starting"):
+        await start_job("echo changed")
+
+    assert len(killed) == 1
+    runtime_dir = state_dir / "jobs"
+    assert not list(runtime_dir.iterdir())
+
+
+@pytest.mark.asyncio
 async def test_job_list_recovers_interrupted_start(tmp_path, monkeypatch):
     state_dir = tmp_path / ".state"
     state_dir.mkdir()
