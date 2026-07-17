@@ -8,7 +8,7 @@
         "@opentui/core": "0.4.3",
         "@opentui/react": "0.4.3",
         "@xterm/addon-fit": "0.10.0",
-        "@xterm/addon-image": "0.9.0",
+        "@xterm/addon-image": "0.8.0",
         "@xterm/xterm": "5.5.0",
         "react": "19.2.0",
         "react-reconciler": "0.33.0",
@@ -50,7 +50,7 @@
 
     "@xterm/addon-fit": ["@xterm/addon-fit@0.10.0", "", { "peerDependencies": { "@xterm/xterm": "^5.0.0" } }, "sha512-UFYkDm4HUahf2lnEyHvio51TNGiLK66mqP2JoATy7hRZeXaGMRDr00JiSF7m63vR5WKATF605yEggJKsw0JpMQ=="],
 
-    "@xterm/addon-image": ["@xterm/addon-image@0.9.0", "", {}, "sha512-oYWA8/QAr5/Emwl1xL7WCoOqeG3IZfpzEz/OVq1j4Oi9934TQmHiyubClikRf0D/jL3JNiNuz/Lsqx0kXQ02BA=="],
+    "@xterm/addon-image": ["@xterm/addon-image@0.8.0", "", { "peerDependencies": { "@xterm/xterm": "^5.2.0" } }, "sha512-b/dqpFn3jUad2pUP5UpF4scPIh0WdxRQL/1qyiahGfUI85XZTCXo0py9G6AcOR2QYUw8eJ8EowGspT7BQcgw6A=="],
 
     "@xterm/xterm": ["@xterm/xterm@5.5.0", "", {}, "sha512-hqJHYaQb5OptNunnyAnkHyM8aCjZ1MEIDTQu1iIbbTD/xops91NB5yq1ZK/dC2JDbVWtF23zUtl9JE2NqwT87A=="],
 
