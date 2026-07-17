@@ -512,22 +512,21 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           python -m pip install -e . pyinstaller typer
-          EXTRA_PYINSTALLER_ARGS=()
+          PYINSTALLER_ARGS=(
+            --clean
+            --onefile
+            --name local-shell-mcp
+            --collect-all local_shell_mcp
+            --collect-all mcp
+            --collect-all uvicorn
+            --collect-all fastapi
+            --collect-all starlette
+            --exclude-module cryptography
+          )
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
-            EXTRA_PYINSTALLER_ARGS+=(--collect-all winpty)
+            PYINSTALLER_ARGS+=(--collect-all winpty)
           fi
-          pyinstaller \
-            --clean \
-            --onefile \
-            --name local-shell-mcp \
-            --collect-all local_shell_mcp \
-            --collect-all mcp \
-            --collect-all uvicorn \
-            --collect-all fastapi \
-            --collect-all starlette \
-            --exclude-module cryptography \
-            "${EXTRA_PYINSTALLER_ARGS[@]}" \
-            scripts/pyinstaller-entry.py
+          pyinstaller "${PYINSTALLER_ARGS[@]}" scripts/pyinstaller-entry.py
 
       - name: Smoke test self-contained executable
         shell: bash

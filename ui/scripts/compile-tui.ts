@@ -1,8 +1,10 @@
 import { chmod, mkdir, rm } from "node:fs/promises"
 import { resolve } from "node:path"
+import { gzipSync } from "node:zlib"
 import { nonCurrentOpenTuiNativePackages } from "./platform"
 
 const root = resolve(import.meta.dir, "..")
+const repository = resolve(root, "..")
 const executableName = process.platform === "win32" ? "local-shell-mcp-tui.exe" : "local-shell-mcp-tui"
 const outdir = process.env.LSM_UI_BINARY_OUTDIR
   ? resolve(process.env.LSM_UI_BINARY_OUTDIR)
@@ -25,4 +27,11 @@ if (!result.success) {
   process.exit(1)
 }
 if (process.platform !== "win32") await chmod(outfile, 0o755)
+
+const embeddedDir = resolve(repository, "src/local_shell_mcp/ui_runtime")
+await rm(embeddedDir, { recursive: true, force: true })
+await mkdir(embeddedDir, { recursive: true })
+const executable = new Uint8Array(await Bun.file(outfile).arrayBuffer())
+await Bun.write(resolve(embeddedDir, `${executableName}.gz`), gzipSync(executable, { level: 9 }))
+
 console.log(outfile)

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import importlib.util
 import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -326,6 +328,23 @@ def test_windows_tui_command_parser_preserves_backslashes_and_quotes():
         r'"D:\Program Files\local-shell-mcp-tui.exe" --flag',
         windows=True,
     ) == [r'D:\Program Files\local-shell-mcp-tui.exe', "--flag"]
+
+
+def test_pyinstaller_entry_quotes_embedded_tui_paths():
+    entry_path = Path(__file__).resolve().parents[1] / "scripts" / "pyinstaller-entry.py"
+    spec = importlib.util.spec_from_file_location("pyinstaller_entry", entry_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    posix_path = Path("/tmp/local shell mcp/local-shell-mcp-tui")
+    windows_path = Path(r"C:\Users\Jane Doe\local-shell-mcp-tui.exe")
+    assert _split_tui_command(module._format_tui_command(posix_path, windows=False), windows=False) == [
+        str(posix_path)
+    ]
+    assert _split_tui_command(module._format_tui_command(windows_path, windows=True), windows=True) == [
+        str(windows_path)
+    ]
 
 
 def test_terminal_dimensions_are_clamped_to_safe_limits():

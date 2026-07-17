@@ -50,7 +50,8 @@ ENV PYTHONUNBUFFERED=1 \
     LOCAL_SHELL_MCP_HOST=0.0.0.0 \
     LOCAL_SHELL_MCP_PORT=8765 \
     LOCAL_SHELL_MCP_PERSISTENT_CREDENTIALS=true \
-    LOCAL_SHELL_MCP_CREDENTIALS_DIR=/persist/credentials
+    LOCAL_SHELL_MCP_CREDENTIALS_DIR=/persist/credentials \
+    LOCAL_SHELL_MCP_UI_TUI_COMMAND=/usr/local/bin/local-shell-mcp-tui
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
@@ -149,7 +150,11 @@ RUN set -eux; \
 COPY --from=ui-builder /source/src/local_shell_mcp/ui_static /app/src/local_shell_mcp/ui_static
 COPY --from=ui-builder /source/ui/dist/local-shell-mcp-tui /usr/local/bin/local-shell-mcp-tui
 RUN pip install --no-cache-dir -e ".[dev]" "playwright==${PLAYWRIGHT_VERSION}" \
-  && chmod 0755 /usr/local/bin/local-shell-mcp-tui
+  && chmod 0755 /usr/local/bin/local-shell-mcp-tui \
+  && test -s /app/src/local_shell_mcp/ui_static/index.html \
+  && test -s /app/src/local_shell_mcp/ui_static/web.js \
+  && test -s /app/src/local_shell_mcp/ui_static/web.css \
+  && /usr/local/bin/local-shell-mcp-tui --version
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN useradd -m -u 10001 agent \
