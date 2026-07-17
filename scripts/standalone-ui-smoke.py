@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import os
 import socket
 import subprocess
@@ -20,7 +21,23 @@ def free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def wait_for_http(port: int, process: subprocess.Popen[str], timeout_s: float = 45) -> None:
+def _read_log(path: Path) -> str:
+    with contextlib.suppress(OSError):
+        return path.read_text(encoding="utf-8", errors="replace")
+    return ""
+
+
+def _logs(stdout_path: Path, stderr_path: Path) -> tuple[str, str]:
+    return _read_log(stdout_path), _read_log(stderr_path)
+
+
+def wait_for_http(
+    port: int,
+    process: subprocess.Popen[bytes],
+    stdout_path: Path,
+    stderr_path: Path,
+    timeout_s: float = 45,
+) -> None:
     deadline = time.monotonic() + timeout_s
     checks = {
         "/healthz": None,
@@ -31,7 +48,7 @@ def wait_for_http(port: int, process: subprocess.Popen[str], timeout_s: float = 
     pending = dict(checks)
     while pending and time.monotonic() < deadline:
         if process.poll() is not None:
-            stdout, stderr = process.communicate()
+            stdout, stderr = _logs(stdout_path, stderr_path)
             raise RuntimeError(
                 f"Server exited with {process.returncode}\nstdout:\n{stdout}\nstderr:\n{stderr}"
             )
@@ -89,6 +106,26 @@ async def exercise_websocket(port: int) -> None:
         await receive_render(websocket, minimum_bytes=128)
 
 
+def _stop_process_tree(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(  # noqa: S603, S607
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    else:
+        process.terminate()
+    try:
+        process.wait(timeout=8)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=8)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Smoke-test WebUI assets and its PTY-backed OpenTUI runtime"
@@ -109,6 +146,8 @@ def main() -> int:
         root = Path(temp_dir)
         workspace = root / "workspace"
         workspace.mkdir()
+        stdout_path = root / "server.stdout.log"
+        stderr_path = root / "server.stderr.log"
         env = os.environ.copy()
         env.update(
             {
@@ -126,27 +165,24 @@ def main() -> int:
         if not args.use_environment_tui:
             env.pop("LOCAL_SHELL_MCP_UI_TUI_COMMAND", None)
 
-        process = subprocess.Popen(  # noqa: S603
-            [str(server), "--mode", "mcp", "--no-remote"],
-            cwd=server.parent,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
         failure: BaseException | None = None
-        try:
-            wait_for_http(port, process)
-            asyncio.run(exercise_websocket(port))
-        except BaseException as exc:
-            failure = exc
-        finally:
-            process.terminate()
+        with stdout_path.open("wb") as stdout_file, stderr_path.open("wb") as stderr_file:
+            process = subprocess.Popen(  # noqa: S603
+                [str(server), "--mode", "mcp", "--no-remote"],
+                cwd=server.parent,
+                env=env,
+                stdout=stdout_file,
+                stderr=stderr_file,
+            )
             try:
-                stdout, stderr = process.communicate(timeout=8)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                stdout, stderr = process.communicate(timeout=8)
+                wait_for_http(port, process, stdout_path, stderr_path)
+                asyncio.run(exercise_websocket(port))
+            except BaseException as exc:
+                failure = exc
+            finally:
+                _stop_process_tree(process)
+
+        stdout, stderr = _logs(stdout_path, stderr_path)
         if failure is not None:
             raise RuntimeError(
                 f"Standalone UI smoke failed: {failure}\nstdout:\n{stdout}\nstderr:\n{stderr}"
