@@ -19,12 +19,26 @@
         </div>
         <div class="connection" id="connection-state"><span></span><strong>Starting</strong></div>
         <div class="chrome-actions">
-          <button id="reconnect-button" type="button" title="Reconnect">Reconnect</button>
-          <button id="fullscreen-button" type="button" title="Toggle fullscreen">Fullscreen</button>
+          <button id="reconnect-button" type="button" title="Reconnect" aria-label="Reconnect">
+            <span class="wide-label">Reconnect</span><span class="compact-label" aria-hidden="true">↻</span>
+          </button>
+          <button id="fullscreen-button" type="button" title="Toggle fullscreen" aria-label="Toggle fullscreen">
+            <span class="wide-label">Fullscreen</span><span class="compact-label" aria-hidden="true">⛶</span>
+          </button>
         </div>
       </header>
       <section class="terminal-frame" aria-label="local-shell-mcp terminal user interface">
         <div id="terminal"></div>
+        <nav class="touchbar" id="touchbar" aria-label="Terminal shortcut keys">
+          <button type="button" data-key="escape">Esc</button>
+          <button type="button" data-key="tab">Tab</button>
+          <button type="button" data-key="left" aria-label="Left arrow">←</button>
+          <button type="button" data-key="up" aria-label="Up arrow">↑</button>
+          <button type="button" data-key="down" aria-label="Down arrow">↓</button>
+          <button type="button" data-key="right" aria-label="Right arrow">→</button>
+          <button type="button" data-key="enter">Enter</button>
+          <button type="button" data-key="help">F1</button>
+        </nav>
         <div class="scanline" aria-hidden="true"></div>
         <section class="gate" id="auth-gate" hidden>
           <div class="gate-card">
