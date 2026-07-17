@@ -78,11 +78,12 @@ jobs:
       - name: Build one-file executable with embedded OpenTUI
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           EXTRA_PYINSTALLER_ARGS=()
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
             EXTRA_PYINSTALLER_ARGS+=(--collect-all winpty)
           fi
+          set +e
           pyinstaller \
             --clean \
             --onefile \
@@ -94,7 +95,19 @@ jobs:
             --collect-all starlette \
             --exclude-module cryptography \
             "${EXTRA_PYINSTALLER_ARGS[@]}" \
-            scripts/pyinstaller-entry.py
+            scripts/pyinstaller-entry.py > pyinstaller.log 2>&1
+          status=$?
+          set -e
+          tail -n 120 pyinstaller.log
+          exit "$status"
+
+      - name: Upload PyInstaller failure log
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pyinstaller-${{ matrix.label }}-log
+          path: pyinstaller.log
+          if-no-files-found: ignore
 
       - name: Verify WebUI and embedded TUI without sidecar
         shell: bash
