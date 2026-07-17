@@ -727,8 +727,8 @@ def validate_public_oauth_configuration(settings: Settings | None = None) -> Non
         return
     pin = (settings.oauth_admin_pin or "").strip()
     weak_pin_values = {"", "change-me", "change-me-long-random-pin"}
-    if pin in weak_pin_values or len(pin) < 12:
+    if pin in weak_pin_values or len(pin) < 8:
         raise RuntimeError(
-            "LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN must be set to a non-placeholder value of at least 12 characters "
+            "LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN must be set to a non-placeholder value of at least 8 characters "
             "when LOCAL_SHELL_MCP_PUBLIC_BASE_URL is configured."
         )

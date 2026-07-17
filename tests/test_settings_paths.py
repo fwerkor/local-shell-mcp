@@ -91,6 +91,15 @@ def test_public_oauth_requires_strong_secret_and_admin_pin():
             )
         )
 
+    with pytest.raises(RuntimeError, match="at least 8 characters"):
+        validate_public_oauth_configuration(
+            Settings(**base, oauth_jwt_secret="s" * 32, oauth_admin_pin="1234567")
+        )
+
+    validate_public_oauth_configuration(
+        Settings(**base, oauth_jwt_secret="s" * 32, oauth_admin_pin="12345678")
+    )
+
     validate_public_oauth_configuration(
         Settings(**base, oauth_jwt_secret="s" * 32, oauth_admin_pin="a-strong-admin-pin")
     )
