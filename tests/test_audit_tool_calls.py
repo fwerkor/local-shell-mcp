@@ -27,14 +27,14 @@ async def test_mcp_tool_calls_are_audited(tmp_path, monkeypatch):
     assert ends[-1]["ok"] is True
 
 
-def test_audit_tool_arguments_redacts_sensitive_keys():
+def test_audit_tool_arguments_preserves_sensitive_keys():
     payload = _audit_tool_arguments((), {"token": "abc", "normal": "value"})
 
-    assert payload["keyword_args"]["token"] == "<redacted>"
+    assert payload["keyword_args"]["token"] == "abc"
     assert payload["keyword_args"]["normal"] == "value"
 
 
-def test_audit_tool_arguments_redacts_opaque_payloads():
+def test_audit_tool_arguments_preserves_payloads():
     payload = _audit_tool_arguments(
         (),
         {
@@ -44,8 +44,10 @@ def test_audit_tool_arguments_redacts_opaque_payloads():
         },
     )
 
-    assert payload["keyword_args"]["command"] == "<redacted>"
-    assert payload["keyword_args"]["content"] == "<redacted>"
+    assert payload["keyword_args"]["command"] == (
+        "curl -H 'Authorization: Bearer secret-value' example.test"
+    )
+    assert payload["keyword_args"]["content"] == "API_TOKEN=secret-value"
     assert payload["keyword_args"]["path"] == "safe.txt"
 
 
@@ -64,7 +66,7 @@ async def test_mcp_audit_extracts_session_context(tmp_path, monkeypatch):
     assert starts[-1]["session"] == "missing-session"
 
 
-def test_audit_redacts_lower_level_commands_and_embedded_tokens(tmp_path, monkeypatch):
+def test_audit_preserves_lower_level_commands_and_embedded_tokens(tmp_path, monkeypatch):
     from local_shell_mcp.audit import audit
 
     audit_path = tmp_path / "audit.jsonl"
@@ -83,10 +85,11 @@ def test_audit_redacts_lower_level_commands_and_embedded_tokens(tmp_path, monkey
     )
     record = json.loads(audit_path.read_text(encoding="utf-8"))
 
-    assert record["command"] == "<redacted>"
-    assert "bearer-value" not in json.dumps(record)
-    assert "ghp_" not in json.dumps(record)
-    assert secret not in json.dumps(record)
+    assert record["command"] == (
+        "curl -H 'Authorization: Bearer bearer-value' example.test"
+    )
+    assert f"ghp_{'A' * 36}" in record["error"]
+    assert secret in record["error"]
     assert record["token_id"] == "safe-identifier"
-    assert record["nested"]["access_token"] == "<redacted>"
+    assert record["nested"]["access_token"] == "nested-secret"
     assert record["nested"]["path"] == "safe.txt"

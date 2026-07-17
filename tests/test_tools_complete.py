@@ -319,11 +319,11 @@ async def test_tool_wrapper_error_paths_and_remote_disabled(tmp_path, monkeypatc
     )
 
 
-def test_tool_helpers_redaction_audit_timeout_and_tail(tmp_path, monkeypatch):
+def test_tool_helpers_audit_serialization_timeout_and_tail(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
-    assert tools._redact_audit_value("x" * 501).endswith("…<truncated>")
-    assert tools._redact_audit_value((1, 2)) == [1, 2]
-    redacted = tools._redact_audit_value(
+    assert tools._serialize_audit_value("x" * 501).endswith("…<truncated>")
+    assert tools._serialize_audit_value((1, 2)) == [1, 2]
+    serialized = tools._serialize_audit_value(
         {
             "token": "secret",
             "content": "body",
@@ -332,10 +332,10 @@ def test_tool_helpers_redaction_audit_timeout_and_tail(tmp_path, monkeypatch):
             "object": object(),
         }
     )
-    assert redacted["token"] == "<redacted>"
-    assert redacted["content"] == "<redacted>"
-    assert len(redacted["items"]) == 20
-    assert "object at" in redacted["object"]
+    assert serialized["token"] == "secret"
+    assert serialized["content"] == "body"
+    assert len(serialized["items"]) == 20
+    assert "object at" in serialized["object"]
     assert tools._audit_tool_arguments((1, 2), {"password": "x"})["positional_count"] == 2
 
     assert tools._audit_tool_purpose("x", "  purpose ", " explanation ") == {
