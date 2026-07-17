@@ -3,8 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, MachineSidebar, Modal, Panel, formatAge } from "./components"
 import { clampIndex, scopedItems } from "./state-utils"
-import { theme } from "./theme"
+import { screenTheme, theme } from "./theme"
 import type { AuditEntry, Machine, TerminalSession } from "./types"
+
+const colors = screenTheme.Terminals
 
 type TerminalDialog =
   | { type: "none" }
@@ -55,7 +57,7 @@ function AuditRail({ entries }: { entries: AuditEntry[] }) {
           return (
             <box key={`${entry.ts}-${entry.event}`} style={{ flexDirection: "column", marginBottom: 1 }}>
               <box style={{ flexDirection: "row" }}>
-                <text fg={ok === false ? theme.red : ok === true ? theme.green : theme.cyan} content="● " />
+                <text fg={ok === false ? theme.red : ok === true ? theme.green : colors.accent} content="● " />
                 <text fg={theme.text} attributes={1} content={entry.tool || entry.event} />
               </box>
               <text fg={theme.faint} content={`${new Date(entry.ts * 1000).toLocaleTimeString()} · ${entry.node}`} />
@@ -366,6 +368,8 @@ export function TerminalsScreen({
           <MachineSidebar
             machines={machines}
             selected={machine}
+            accent={colors.accent}
+            selectedColor={colors.selected}
             onSelect={(nextMachine) => {
               if (nextMachine === machine) return
               setSessions([])
@@ -383,7 +387,7 @@ export function TerminalsScreen({
           <box style={{ height: 2, flexDirection: "row", alignItems: "center", paddingLeft: 1 }}>
             <text fg={theme.faint} content={`${machine} / `} />
             <text
-              fg={selectedSession ? theme.cyan : theme.faint}
+              fg={selectedSession ? colors.accent : theme.faint}
               attributes={selectedSession ? 1 : 0}
               content={selectedSession?.session_id || "no terminal"}
             />
@@ -393,7 +397,7 @@ export function TerminalsScreen({
             <text fg={theme.faint} content={`${selectedSession?.backend || "—"}  `} />
           </box>
           <box style={{ flexGrow: 1, flexDirection: "row", gap: 1 }}>
-            <Panel title="Terminal" active style={{ flexGrow: 1, padding: 1 }}>
+            <Panel title="Terminal" active accent={colors.accent} activeBackground={colors.panel} style={{ flexGrow: 1, padding: 1 }}>
               {selectedSession ? (
                 <text fg={theme.text} content={visibleOutput || "Terminal is ready."} />
               ) : (
@@ -407,7 +411,7 @@ export function TerminalsScreen({
             )}
           </box>
           <box style={{ height: 3, flexDirection: "row", gap: 1 }}>
-            <Panel title="Command" active={Boolean(selectedSession)} style={{ flexGrow: 1, paddingLeft: 1, paddingRight: 1 }}>
+            <Panel title="Command" active={Boolean(selectedSession)} accent={colors.accent} activeBackground={colors.panel} style={{ flexGrow: 1, paddingLeft: 1, paddingRight: 1 }}>
               <input
                 key={selectedSession?.session_id || "no-session"}
                 focused={Boolean(selectedSession) && !rawMode && dialog.type === "none"}
@@ -437,11 +441,11 @@ export function TerminalsScreen({
                   marginRight: 1,
                   paddingLeft: 1,
                   paddingRight: 1,
-                  backgroundColor: index === selected ? theme.selectedStrong : theme.panelAlt,
+                  backgroundColor: index === selected ? colors.selected : theme.panelAlt,
                 }}
               >
                 <text
-                  fg={index === selected ? theme.cyan : theme.muted}
+                  fg={index === selected ? colors.accent : theme.muted}
                   attributes={index === selected ? 1 : 0}
                   content={session.session_id}
                 />
@@ -456,6 +460,7 @@ export function TerminalsScreen({
         </box>
       </box>
       <KeyHint
+        accent={colors.accent}
         items={[
           ["Alt+←/→", "terminal"],
           ["Ctrl+N", "new"],

@@ -3,7 +3,7 @@ import { useMemo } from "react"
 import { useTerminalDimensions } from "@opentui/react"
 import { clampIndex } from "./state-utils"
 import type { Machine, ScreenName } from "./types"
-import { theme } from "./theme"
+import { screenTheme, theme } from "./theme"
 
 export const SCREENS: ScreenName[] = ["Files", "Terminals", "Todos", "Audit", "Remotes"]
 
@@ -28,21 +28,18 @@ export function TopNav({
         paddingRight: 1,
         border: true,
         borderStyle: "rounded",
-        borderColor: theme.borderBright,
-        backgroundColor: theme.panelAlt,
+        borderColor: theme.border,
+        backgroundColor: theme.panel,
       }}
     >
-      <text fg={theme.cyan} attributes={1} content={compact ? "LSM" : "LOCAL SHELL MCP"} />
+      <text fg={theme.text} attributes={1} content={compact ? "LSM" : "LOCAL SHELL"} />
+      {!compact && <text fg={theme.cyan} attributes={1} content=" MCP" />}
       <text fg={theme.faint} content={narrow ? " " : "  /  "} />
-      {SCREENS.map((screen, index) => {
+      {SCREENS.map((screen) => {
         const selected = screen === active
-        const key = `A${index + 1}`
+        const colors = screenTheme[screen]
         const narrowInitial = screen === "Todos" ? "D" : screen[0]
-        const label = narrow
-          ? `${index + 1}${narrowInitial}`
-          : compact
-            ? `${key}:${screen.slice(0, 3)}`
-            : `Alt+${index + 1} ${screen}`
+        const label = narrow ? narrowInitial : compact ? screen.slice(0, 3) : screen
         return (
           <box
             key={screen}
@@ -52,15 +49,14 @@ export function TopNav({
               marginRight: narrow ? 0 : compact ? 1 : 2,
               paddingLeft: narrow ? 0 : 1,
               paddingRight: 1,
-              backgroundColor: selected ? theme.selectedStrong : undefined,
+              backgroundColor: selected ? colors.selected : undefined,
             }}
           >
-            <text fg={selected ? theme.cyan : theme.muted} attributes={selected ? 1 : 0} content={label} />
+            <text fg={selected ? colors.accent : theme.muted} attributes={selected ? 1 : 0} content={label} />
           </box>
         )
       })}
       <box style={{ flexGrow: 1 }} />
-      {!compact && <text fg={theme.faint} content="Alt+1…5 switch · F1 help · Ctrl+Q quit" />}
     </box>
   )
 }
@@ -70,12 +66,16 @@ export function MachineSidebar({
   selected,
   title = "Machines",
   width = 23,
+  accent = theme.cyan,
+  selectedColor = theme.selected,
   onSelect,
 }: {
   machines: Machine[]
   selected: string
   title?: string
   width?: number
+  accent?: string
+  selectedColor?: string
   onSelect?: (machine: string) => void
 }) {
   return (
@@ -104,11 +104,11 @@ export function MachineSidebar({
               paddingLeft: 1,
               paddingRight: 1,
               flexDirection: "row",
-              backgroundColor: active ? theme.selected : undefined,
+              backgroundColor: active ? selectedColor : undefined,
             }}
           >
             <text fg={online ? theme.green : theme.faint} content={online ? "● " : "○ "} />
-            <text fg={active ? theme.text : theme.muted} attributes={active ? 1 : 0} content={machine.name} />
+            <text fg={active ? accent : theme.muted} attributes={active ? 1 : 0} content={machine.name} />
           </box>
         )
       })}
@@ -122,11 +122,15 @@ export function MachineSidebar({
 export function Panel({
   title,
   active = false,
+  accent = theme.cyan,
+  activeBackground = theme.panelAlt,
   children,
   style,
 }: {
   title: string
   active?: boolean
+  accent?: string
+  activeBackground?: string
   children?: ReactNode
   style?: Record<string, unknown>
 }) {
@@ -137,8 +141,8 @@ export function Panel({
         flexDirection: "column",
         border: true,
         borderStyle: "rounded",
-        borderColor: active ? theme.cyan : theme.border,
-        backgroundColor: active ? theme.panelAlt : theme.panel,
+        borderColor: active ? accent : theme.border,
+        backgroundColor: active ? activeBackground : theme.panel,
         ...style,
       }}
     >
@@ -147,7 +151,7 @@ export function Panel({
   )
 }
 
-export function KeyHint({ items }: { items: Array<[string, string]> }) {
+export function KeyHint({ items, accent = theme.cyan }: { items: Array<[string, string]>; accent?: string }) {
   const { width } = useTerminalDimensions()
   const keysOnly = width < 60
   const compact = width < 92
@@ -175,7 +179,7 @@ export function KeyHint({ items }: { items: Array<[string, string]> }) {
     >
       {visible.map(([key, label]) => (
         <box key={`${key}-${label}`} style={{ flexDirection: "row", marginRight: keysOnly ? 1 : 2 }}>
-          <text fg={theme.cyan} attributes={1} content={key} />
+          <text fg={accent} attributes={1} content={key} />
           {label && <text fg={theme.muted} content={` ${label}`} />}
         </box>
       ))}

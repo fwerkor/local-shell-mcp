@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, MachineSidebar, Modal, Panel, formatBytes, useVisibleRows } from "./components"
 import { clampIndex, payloadMatches } from "./state-utils"
-import { theme } from "./theme"
+import { screenTheme, theme } from "./theme"
 import type { FileEntry, FilePreview, FilesPayload, Machine } from "./types"
+
+const colors = screenTheme.Files
 
 type Dialog =
   | { type: "none" }
@@ -59,10 +61,10 @@ function FileRows({ entries, selected, height }: { entries: FileEntry[]; selecte
               flexDirection: "row",
               paddingLeft: 1,
               paddingRight: 1,
-              backgroundColor: active ? theme.selectedStrong : undefined,
+              backgroundColor: active ? colors.selected : undefined,
             }}
           >
-            <text fg={entry.type === "dir" ? theme.cyan : theme.muted} content={`${icon(entry)} `} />
+            <text fg={entry.type === "dir" ? colors.accent : theme.muted} content={`${icon(entry)} `} />
             <text
               fg={active ? theme.text : entry.hidden ? theme.faint : theme.muted}
               attributes={active ? 1 : 0}
@@ -84,13 +86,13 @@ function Preview({ preview, entry }: { preview: FilePreview | null; entry?: File
     const entries = preview.entries || []
     return (
       <box style={{ flexDirection: "column", paddingLeft: 1, paddingRight: 1 }}>
-        <text fg={theme.cyan} attributes={1} content={entry.name} />
+        <text fg={colors.accent} attributes={1} content={entry.name} />
         <text fg={theme.faint} content={`${entries.length} visible entries`} />
         <text fg={theme.borderBright} content="" />
         {entries.slice(0, 30).map((item) => (
           <text
             key={item.path}
-            fg={item.type === "dir" ? theme.cyan : theme.muted}
+            fg={item.type === "dir" ? colors.accent : theme.muted}
             content={`${icon(item)} ${item.name}`}
           />
         ))}
@@ -434,6 +436,8 @@ export function FilesScreen({
           <MachineSidebar
             machines={machines}
             selected={machine}
+            accent={colors.accent}
+            selectedColor={colors.selected}
             onSelect={(nextMachine) => {
               if (nextMachine === machine) return
               setPayload(null)
@@ -448,7 +452,7 @@ export function FilesScreen({
         <box style={{ flexGrow: 1, flexDirection: "column" }}>
           <box style={{ height: 2, flexDirection: "row", alignItems: "center", paddingLeft: 1 }}>
             <text fg={theme.faint} content={`${machine} / `} />
-            <text fg={theme.cyan} attributes={1} content={path} />
+            <text fg={colors.accent} attributes={1} content={path} />
             <box style={{ flexGrow: 1 }} />
             {busy && <text fg={theme.yellow} content="syncing  " />}
             {clipboard && (
@@ -471,10 +475,10 @@ export function FilesScreen({
                       marginRight: 1,
                       paddingLeft: 1,
                       paddingRight: 1,
-                      backgroundColor: active ? theme.selectedStrong : theme.panelAlt,
+                      backgroundColor: active ? colors.selected : theme.panelAlt,
                     }}
                   >
-                    <text fg={active ? theme.cyan : theme.muted} attributes={active ? 1 : 0} content={pane === "list" ? "LIST" : "PREVIEW"} />
+                    <text fg={active ? colors.accent : theme.muted} attributes={active ? 1 : 0} content={pane === "list" ? "LIST" : "PREVIEW"} />
                   </box>
                 )
               })}
@@ -489,7 +493,7 @@ export function FilesScreen({
               </Panel>
             )}
             {(!narrow || narrowPane === "list") && (
-              <Panel title="Current" active style={{ width: narrow ? "100%" : compact ? "48%" : "38%", paddingTop: 1 }}>
+              <Panel title="Current" active accent={colors.accent} activeBackground={colors.panel} style={{ width: narrow ? "100%" : compact ? "48%" : "38%", paddingTop: 1 }}>
                 {entries.length ? (
                   <FileRows entries={entries} selected={selected} height={listHeight} />
                 ) : (
@@ -506,6 +510,7 @@ export function FilesScreen({
         </box>
       </box>
       <KeyHint
+        accent={colors.accent}
         items={[
           ...(narrow ? ([['Tab', 'list/preview']] as Array<[string, string]>) : []),
           ["j/k", "move"],

@@ -1,23 +1,52 @@
 export const theme = {
-  bg: "#07111f",
-  panel: "#0b1729",
-  panelAlt: "#0e2036",
-  panelSoft: "#102841",
-  border: "#27445f",
-  borderBright: "#4f84a8",
-  text: "#d8e9f5",
-  muted: "#7893a8",
-  faint: "#496479",
-  cyan: "#57d7ff",
-  blue: "#6ca7ff",
-  green: "#6ee7a8",
-  yellow: "#ffd479",
-  orange: "#ffad66",
-  red: "#ff7b8b",
-  magenta: "#d9a7ff",
-  selected: "#173d59",
-  selectedStrong: "#1d5273",
+  bg: "#080b14",
+  panel: "#111827",
+  panelAlt: "#172033",
+  panelSoft: "#1d2940",
+  border: "#33415c",
+  borderBright: "#66789a",
+  text: "#edf3ff",
+  muted: "#a0aec6",
+  faint: "#68758e",
+  cyan: "#5eead4",
+  blue: "#7aa2f7",
+  green: "#79d69f",
+  yellow: "#e0af68",
+  orange: "#f6c177",
+  red: "#f7768e",
+  magenta: "#bb9af7",
+  pink: "#f38ba8",
+  selected: "#1d2a42",
+  selectedStrong: "#263654",
 }
+
+export const screenTheme = {
+  Files: {
+    accent: theme.cyan,
+    selected: "#173b3a",
+    panel: "#102321",
+  },
+  Terminals: {
+    accent: theme.magenta,
+    selected: "#352846",
+    panel: "#1d1829",
+  },
+  Todos: {
+    accent: theme.orange,
+    selected: "#44351f",
+    panel: "#251f15",
+  },
+  Audit: {
+    accent: theme.pink,
+    selected: "#46283b",
+    panel: "#261824",
+  },
+  Remotes: {
+    accent: theme.blue,
+    selected: "#263b59",
+    panel: "#151f2e",
+  },
+} as const
 
 export const borders = {
   panel: {

@@ -3,8 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, Modal, Panel, useVisibleRows } from "./components"
 import { clampIndex } from "./state-utils"
-import { theme } from "./theme"
+import { screenTheme, theme } from "./theme"
 import type { AuditEntry, Machine } from "./types"
+
+const colors = screenTheme.Audit
 
 type AuditDialog = { type: "none" } | { type: "search" } | { type: "event" } | { type: "session" }
 
@@ -20,7 +22,7 @@ const OPERATIONS = ["", "run", "read", "write", "shell", "git", "remote", "brows
 function entryColor(entry: AuditEntry): string {
   if (entry.ok === false || entry.error) return theme.red
   if (entry.ok === true) return theme.green
-  if (entry.event.includes("start")) return theme.cyan
+  if (entry.event.includes("start")) return colors.accent
   return theme.muted
 }
 
@@ -165,7 +167,7 @@ export function AuditScreen({
   return (
     <box style={{ flexGrow: 1, flexDirection: "column", gap: 1 }}>
       {width < 82 ? (
-        <Panel title="Filters" active style={{ height: 3, alignItems: "center", justifyContent: "center" }}>
+        <Panel title="Filters" active accent={colors.accent} activeBackground={colors.panel} style={{ height: 3, alignItems: "center", justifyContent: "center" }}>
           <text
             fg={theme.muted}
             content={
@@ -178,12 +180,12 @@ export function AuditScreen({
       ) : (
         <box style={{ height: 4, flexDirection: "row", gap: 1 }}>
           {[
-            ["Node", selectedNode || "All", theme.cyan],
+            ["Node", selectedNode || "All", colors.accent],
             ["Operation", selectedOperation || "All", theme.blue],
             ["Time", timeRange.label, theme.yellow],
             ["Sort", sort.toUpperCase(), theme.magenta],
           ].map(([title, value, color]) => (
-            <Panel key={String(title)} title={String(title)} active style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
+            <Panel key={String(title)} title={String(title)} active accent={colors.accent} activeBackground={colors.panel} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
               <text fg={String(color)} attributes={1} content={String(value)} />
             </Panel>
           ))}
@@ -192,13 +194,13 @@ export function AuditScreen({
       {(search || event || session) && (
         <box style={{ height: 2, flexDirection: "row", paddingLeft: 1, alignItems: "center", backgroundColor: theme.panelAlt }}>
           <text fg={theme.faint} content="Filters  " />
-          {search && <text fg={theme.cyan} content={`search:${search}  `} />}
+          {search && <text fg={colors.accent} content={`search:${search}  `} />}
           {event && <text fg={theme.blue} content={`event:${event}  `} />}
           {session && <text fg={theme.yellow} content={`session:${session}  `} />}
         </box>
       )}
       <box style={{ flexGrow: 1, flexDirection: width >= 110 ? "row" : "column", gap: 1 }}>
-        <Panel title={`Audit records · ${entries.length}${loading ? " · syncing" : ""}`} active style={{ flexGrow: 1, paddingTop: 1 }}>
+        <Panel title={`Audit records · ${entries.length}${loading ? " · syncing" : ""}`} active accent={colors.accent} activeBackground={colors.panel} style={{ flexGrow: 1, paddingTop: 1 }}>
           {entries.length === 0 ? (
             <EmptyState title="No matching audit records" detail="Adjust filters or wait for MCP activity" />
           ) : (
@@ -220,7 +222,7 @@ export function AuditScreen({
                       flexDirection: "row",
                       paddingLeft: 1,
                       paddingRight: 1,
-                      backgroundColor: active ? theme.selectedStrong : index % 2 ? theme.panelAlt : undefined,
+                      backgroundColor: active ? colors.selected : index % 2 ? theme.panelAlt : undefined,
                     }}
                   >
                     <text fg={theme.faint} content={`${new Date(entry.ts * 1000).toLocaleTimeString().padEnd(11)} `} />
@@ -236,7 +238,7 @@ export function AuditScreen({
         <Panel title="Record details" style={{ width: width >= 110 ? Math.max(36, Math.floor(width * 0.31)) : "100%", height: width >= 110 ? "100%" : 8, padding: 1 }}>
           {current ? (
             <scrollbox focused={false} style={{ flexGrow: 1 }} scrollY verticalScrollbarOptions={{ visible: true }}>
-              <text fg={theme.cyan} attributes={1} content={current.tool || current.event} />
+              <text fg={colors.accent} attributes={1} content={current.tool || current.event} />
               <text fg={theme.faint} content={`${new Date(current.ts * 1000).toLocaleString()} · ${current.node}`} />
               <text fg={theme.muted} content={`\n${detail(current)}`} />
               <text fg={theme.faint} content={`\n\n${JSON.stringify(current, null, 2)}`} />
@@ -247,6 +249,7 @@ export function AuditScreen({
         </Panel>
       </box>
       <KeyHint
+        accent={colors.accent}
         items={[
           ["j/k", "move"],
           ["n", "node"],

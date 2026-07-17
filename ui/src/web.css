@@ -3,18 +3,18 @@
 :root {
   color-scheme: dark;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #020711;
-  --glass: rgba(5, 13, 25, 0.72);
-  --line: rgba(127, 193, 228, 0.24);
-  --line-strong: rgba(91, 216, 255, 0.54);
-  --cyan: #57d7ff;
-  --text: #d8e9f5;
-  --muted: #7893a8;
+  background: #080b14;
+  --glass: rgba(8, 11, 20, 0.76);
+  --line: rgba(123, 145, 183, 0.26);
+  --line-strong: rgba(94, 234, 212, 0.5);
+  --cyan: #5eead4;
+  --text: #edf3ff;
+  --muted: #a0aec6;
 }
 
 * { box-sizing: border-box; }
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
-body { color: var(--text); background: #020711; }
+body { color: var(--text); background: #080b14; }
 button { font: inherit; }
 .compact-label { display: none; }
 

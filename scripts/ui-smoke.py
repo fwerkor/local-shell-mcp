@@ -98,7 +98,7 @@ def run_browser(port: int) -> None:
                 }).then(response => response.status)"""
             )
             assert authenticated == 200
-            wait_for_terminal_text(page, "Alt+1 Files")
+            wait_for_terminal_text(page, "Files")
 
             session_name = f"ui-smoke-{os.getpid()}"
             created = page.evaluate(
@@ -114,7 +114,7 @@ def run_browser(port: int) -> None:
             )
             assert created["status"] == 200, created
             session_id = created["body"]["data"]["session_id"]
-            click_tui_label(page, "Alt+2 Terminals")
+            click_tui_label(page, "Terminals")
             wait_for_terminal_text(page, "MCP audit · manual input excluded")
             wait_for_terminal_text(page, session_name, timeout_s=8)
             page.locator(".xterm-helper-textarea").focus()
@@ -127,11 +127,11 @@ def run_browser(port: int) -> None:
             wait_for_terminal_text(page, "F8 raw mode")
 
             expectations = [
-                ("Alt+2 Terminals", "MCP audit · manual input excluded"),
-                ("Alt+3 Todos", "Todos ·"),
-                ("Alt+4 Audit", "Audit records"),
-                ("Alt+5 Remotes", "Remote nodes"),
-                ("Alt+1 Files", "Preview"),
+                ("Terminals", "MCP audit · manual input excluded"),
+                ("Todos", "Todos ·"),
+                ("Audit", "Audit records"),
+                ("Remotes", "Remote nodes"),
+                ("Files", "Preview"),
             ]
             for label, expected in expectations:
                 click_tui_label(page, label)
@@ -156,8 +156,8 @@ def run_browser(port: int) -> None:
             assert metrics["scrollHeight"] <= metrics["height"]
             assert metrics["shell"]["width"] <= metrics["width"]
             assert metrics["shell"]["height"] <= metrics["height"]
-            wait_for_terminal_text(page, "A1:Fil")
-            wait_for_terminal_text(page, "A5:Rem")
+            wait_for_terminal_text(page, "Fil")
+            wait_for_terminal_text(page, "Rem")
 
             killed = page.evaluate(
                 """sessionId => fetch('/api/ui/terminals/kill', {

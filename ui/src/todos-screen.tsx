@@ -3,8 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, Modal, Panel, useVisibleRows } from "./components"
 import { clampIndex, nextValue, updateTodo } from "./state-utils"
-import { theme } from "./theme"
+import { screenTheme, theme } from "./theme"
 import type { TodoItem, TodoPayload } from "./types"
+
+const colors = screenTheme.Todos
 
 type TodoDialog =
   | { type: "none" }
@@ -197,7 +199,7 @@ export function TodosScreen({
   return (
     <box style={{ flexGrow: 1, flexDirection: "column" }}>
       {width < 76 ? (
-        <Panel title="Summary" active style={{ height: 3, alignItems: "center", justifyContent: "center" }}>
+        <Panel title="Summary" active accent={colors.accent} activeBackground={colors.panel} style={{ height: 3, alignItems: "center", justifyContent: "center" }}>
           <text
             fg={theme.muted}
             content={
@@ -210,7 +212,7 @@ export function TodosScreen({
       ) : (
         <box style={{ height: 4, flexDirection: "row", gap: 1 }}>
           {[
-            ["All", counts.total, theme.cyan],
+            ["All", counts.total, colors.accent],
             ["Open", counts.open, theme.yellow],
             ["Done", counts.completed, theme.green],
           ].map(([label, value, color]) => (
@@ -218,12 +220,12 @@ export function TodosScreen({
               <text fg={String(color)} attributes={1} content={String(value)} />
             </Panel>
           ))}
-          <Panel title="View" active style={{ width: Math.max(20, Math.floor(width * 0.2)), alignItems: "center", justifyContent: "center" }}>
-            <text fg={theme.cyan} attributes={1} content={filter.toUpperCase()} />
+          <Panel title="View" active accent={colors.accent} activeBackground={colors.panel} style={{ width: Math.max(20, Math.floor(width * 0.2)), alignItems: "center", justifyContent: "center" }}>
+            <text fg={colors.accent} attributes={1} content={filter.toUpperCase()} />
           </Panel>
         </box>
       )}
-      <Panel title={`Todos · ${visible.length}`} active style={{ flexGrow: 1, paddingTop: 1 }}>
+      <Panel title={`Todos · ${visible.length}`} active accent={colors.accent} activeBackground={colors.panel} style={{ flexGrow: 1, paddingTop: 1 }}>
         {visible.length === 0 ? (
           <EmptyState title="No matching todos" detail="Press n to add an item" />
         ) : (
@@ -240,7 +242,7 @@ export function TodosScreen({
                     alignItems: "center",
                     paddingLeft: 1,
                     paddingRight: 1,
-                    backgroundColor: active ? theme.selectedStrong : index % 2 ? theme.panelAlt : undefined,
+                    backgroundColor: active ? colors.selected : index % 2 ? theme.panelAlt : undefined,
                   }}
                 >
                   <text fg={statusColor(todo.status)} attributes={1} content={`${statusIcon(todo.status)} `} />
@@ -262,6 +264,7 @@ export function TodosScreen({
         )}
       </Panel>
       <KeyHint
+        accent={colors.accent}
         items={[
           ["j/k", "move"],
           ["Enter", "status"],
