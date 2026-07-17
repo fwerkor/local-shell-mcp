@@ -683,6 +683,13 @@ def test_http_app_executes_every_route_wrapper(tmp_path, monkeypatch):
         response = getattr(client, method)(path, json=body) if body is not None else getattr(client, method)(path)
         assert response.status_code == 200, (method, path, response.text)
 
+    inline_response = client.post(
+        "/tools/download/create",
+        json={"path": "preview.png", "inline": True},
+    )
+    assert inline_response.status_code == 200
+    assert inline_response.json()["args"][-1] is True
+
     monkeypatch.setattr(
         http_app,
         "public_run_shell",

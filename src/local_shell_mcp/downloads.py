@@ -200,6 +200,7 @@ def _link_summary(token: str, link: dict[str, Any]) -> dict[str, Any]:
         "path": link.get("display_path"),
         "filename": link.get("filename"),
         "inline": bool(link.get("inline", False)),
+        "media_type": link.get("media_type"),
         "bytes": link.get("bytes"),
         "created_at": link.get("created_at"),
         "expires_at": link.get("expires_at"),
@@ -278,6 +279,7 @@ def create_share_link(
             "display_path": relative_display(resolved),
             "filename": _safe_filename(filename, resolved),
             "inline": bool(inline),
+            "media_type": mimetypes.guess_type(resolved.name)[0] or "application/octet-stream",
             "bytes": source_stat.st_size,
             "snapshot_name": snapshot.name,
             "device": int(snapshot_stat.st_dev),
@@ -467,16 +469,20 @@ async def download_endpoint(request: Request) -> Response:
 
     handle, path, link = claimed
     media_type = (
-        mimetypes.guess_type(link.get("filename") or path.name)[0] or "application/octet-stream"
+        link.get("media_type")
+        or mimetypes.guess_type(link.get("filename") or path.name)[0]
+        or "application/octet-stream"
     )
     filename = link.get("filename") or path.name
+    inline = bool(link.get("inline", False))
     headers = {
         "Cache-Control": "private, no-store",
-        "Content-Disposition": _content_disposition(
-            filename, inline=bool(link.get("inline", False))
-        ),
+        "Content-Disposition": _content_disposition(filename, inline=inline),
         "Content-Length": str(os.fstat(handle.fileno()).st_size),
+        "X-Content-Type-Options": "nosniff",
     }
+    if inline:
+        headers["Content-Security-Policy"] = "sandbox"
     audit(
         "download_link_served",
         path=link.get("display_path"),

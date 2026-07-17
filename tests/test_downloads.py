@@ -40,18 +40,22 @@ def test_create_share_link_can_render_inline(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
     (tmp_path / "preview.png").write_bytes(b"not-a-real-png")
 
-    link = create_share_link("preview.png", ttl_s=60, inline=True)
+    link = create_share_link("preview.png", ttl_s=60, filename="preview", inline=True)
     client = TestClient(Starlette(routes=download_routes()))
 
     get_response = client.get(link["url"])
     head_response = client.head(link["url"])
 
     assert link["inline"] is True
+    assert link["media_type"] == "image/png"
     assert get_response.status_code == 200
     assert get_response.headers["content-type"] == "image/png"
     assert get_response.headers["content-disposition"].startswith("inline;")
+    assert get_response.headers["content-security-policy"] == "sandbox"
+    assert get_response.headers["x-content-type-options"] == "nosniff"
     assert head_response.status_code == 200
     assert head_response.headers["content-disposition"].startswith("inline;")
+    assert head_response.headers["content-security-policy"] == "sandbox"
 
 
 def test_share_link_expires_and_can_be_revoked(tmp_path, monkeypatch):

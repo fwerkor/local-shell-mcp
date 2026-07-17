@@ -43,4 +43,4 @@ Use shorter TTLs for sensitive artifacts and set maximum download counts when a 
 
 ## Security notes
 
-File links are bearer URLs. Anyone with the URL can download the file until it expires, reaches its download limit, or is revoked. Treat them like temporary secrets.
+File links are bearer URLs. Anyone with the URL can download the file until it expires, reaches its download limit, or is revoked. Treat them like temporary secrets. Inline responses include a CSP sandbox and `X-Content-Type-Options: nosniff` so active formats cannot access the LSM origin or execute as unsandboxed same-origin content.
