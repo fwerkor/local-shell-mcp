@@ -7,6 +7,9 @@ import html as html_lib
 import secrets
 import time
 from dataclasses import dataclass, field
+from functools import lru_cache
+from importlib.resources import files
+from string import Template
 from typing import Any
 from urllib.parse import urlencode, urlsplit
 
@@ -215,32 +218,87 @@ def _hidden_inputs(params: dict[str, str]) -> str:
     )
 
 
+@lru_cache(maxsize=1)
+def _authorize_template() -> Template:
+    template = files("local_shell_mcp").joinpath("oauth_authorize.html").read_text(encoding="utf-8")
+    return Template(template)
+
+
+_SCOPE_DETAILS = {
+    "shell:read": (
+        "Read workspace",
+        "Inspect files, directories, terminal output, and runtime state.",
+    ),
+    "shell:write": (
+        "Change workspace",
+        "Create, edit, move, or delete files in the configured workspace.",
+    ),
+    "shell:execute": ("Run commands", "Execute commands and manage persistent terminal sessions."),
+    "browser:use": (
+        "Use browser tools",
+        "Open pages, automate browser actions, and capture page output.",
+    ),
+    "file:share": (
+        "Share files",
+        "Create temporary links for files from the configured workspace.",
+    ),
+    "remote:use": ("Use remote workers", "Access configured remote machines through this service."),
+}
+
+
+def _scope_items(scope: str) -> str:
+    items: list[str] = []
+    for name in dict.fromkeys(item for item in scope.split() if item):
+        title, description = _SCOPE_DETAILS.get(
+            name, (name, "Access requested by this OAuth client.")
+        )
+        escaped_title = html_lib.escape(title)
+        escaped_description = html_lib.escape(description)
+        items.append(
+            f"""<li class="permission">
+              <span class="permission-icon" aria-hidden="true">✓</span>
+              <span><strong>{escaped_title}</strong><small>{escaped_description}</small></span>
+            </li>"""
+        )
+    return "\n".join(items)
+
+
 def _authorize_form(params: dict[str, str], error: str | None = None) -> HTMLResponse:
     settings = get_settings()
     scope = params.get("scope") or " ".join(_scopes())
     resource = params.get("resource") or resource_url()
-    error_html = f'<p style="color:#b00020">{html_lib.escape(error)}</p>' if error else ""
-    pin_hint = "Enter LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN to approve this ChatGPT connector."
-    if not settings.oauth_admin_pin:
-        pin_hint = "No admin PIN is configured. Click Approve to continue. Set LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN before exposing this publicly."
-    html = f"""<!doctype html>
-<html>
-<head><meta charset="utf-8"><title>Authorize local-shell-mcp</title></head>
-<body style="font-family: system-ui, sans-serif; max-width: 720px; margin: 48px auto; line-height: 1.45;">
-  <h1>Authorize local-shell-mcp</h1>
-  <p>This grants ChatGPT access to tools that can execute shell commands inside the configured container workspace.</p>
-  <p><strong>Resource:</strong> {html_lib.escape(resource)}</p>
-  <p><strong>Scopes:</strong> {html_lib.escape(scope)}</p>
-  {error_html}
-  <form method="post" action="/oauth/authorize">
-    {_hidden_inputs(params)}
-    <label>Admin PIN<br><input type="password" name="pin" autofocus style="width: 320px; padding: 8px;" /></label>
-    <p style="color:#555">{html_lib.escape(pin_hint)}</p>
-    <button type="submit" style="padding: 8px 14px;">Approve</button>
-  </form>
-</body>
-</html>"""
-    return HTMLResponse(html)
+    client = _CLIENTS.get(params.get("client_id", ""))
+    client_name = client.client_name if client and client.client_name else "ChatGPT"
+    error_html = (
+        f'<div class="notice notice-error" role="alert"><strong>Authorization failed</strong><span>{html_lib.escape(error)}</span></div>'
+        if error
+        else ""
+    )
+    if settings.oauth_admin_pin:
+        pin_field = """<label class="field" for="pin">
+          <span>Admin PIN</span>
+          <input id="pin" type="password" name="pin" autocomplete="current-password" required
+                 aria-describedby="pin-help" placeholder="Enter the configured admin PIN" />
+        </label>
+        <p class="field-help" id="pin-help">Use the value configured in <code>LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN</code>.</p>"""
+        security_notice = "Only approve this request if you initiated it from a trusted client."
+    else:
+        pin_field = """<div class="notice notice-warning" role="status">
+          <strong>No admin PIN is configured</strong>
+          <span>This request can be approved without a PIN. Configure one before exposing this service publicly.</span>
+        </div>"""
+        security_notice = "This service currently allows approval without an admin PIN."
+    html = _authorize_template().substitute(
+        client_name=html_lib.escape(client_name),
+        scope_items=_scope_items(scope),
+        resource_title=html_lib.escape(resource, quote=True),
+        resource=html_lib.escape(resource),
+        error_html=error_html,
+        hidden_inputs=_hidden_inputs(params),
+        pin_field=pin_field,
+        security_notice=html_lib.escape(security_notice),
+    )
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 def _make_redirect(redirect_uri: str, query: dict[str, str]) -> RedirectResponse:
