@@ -71,6 +71,8 @@ export interface TodoPayload {
 }
 
 export interface AuditEntry {
+  id?: string
+  call_id?: string
   ts: number
   event: string
   node: string
@@ -80,7 +82,15 @@ export interface AuditEntry {
   command?: string
   cwd?: string
   ok?: boolean
+  paired?: boolean
+  status?: "success" | "failed" | "running" | "unpaired" | "completed" | string
+  duration_ms?: number
+  input?: unknown
+  output?: unknown
+  result?: unknown
+  arguments?: unknown
   error?: string
+  error_type?: string
   [key: string]: unknown
 }
 

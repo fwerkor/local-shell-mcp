@@ -5,6 +5,7 @@ import base64
 import inspect
 import json
 import subprocess
+import time
 import uuid
 from contextlib import suppress
 from pathlib import Path
@@ -275,6 +276,8 @@ def _transport_security_settings() -> TransportSecuritySettings:
 
 
 def _serialize_audit_value(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return _serialize_audit_value(value.model_dump(mode="json"))
     if isinstance(value, str):
         if len(value) > MAX_AUDIT_TOOL_ARG_STRING:
             return value[:MAX_AUDIT_TOOL_ARG_STRING] + "…<truncated>"
@@ -377,8 +380,11 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
             }
             if call_arguments.get("session_id"):
                 audit_context["session"] = call_arguments["session_id"]
+            call_id = uuid.uuid4().hex
+            started_at = time.monotonic()
             audit(
                 "mcp_tool_call_start",
+                call_id=call_id,
                 tool=__tool_name,
                 arguments=arguments,
                 **audit_context,
@@ -390,27 +396,48 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                     result = await asyncio.wait_for(
                         __original(*args, **kwargs), timeout=PUBLIC_TOOL_TIMEOUT_S
                     )
-                audit("mcp_tool_call_end", tool=__tool_name, ok=True, **audit_context)
+                audit(
+                    "mcp_tool_call_end",
+                    call_id=call_id,
+                    tool=__tool_name,
+                    ok=True,
+                    duration_ms=round((time.monotonic() - started_at) * 1000),
+                    result=_serialize_audit_value(result),
+                    **audit_context,
+                )
                 return result
             except TimeoutError:
                 exc = PublicToolTimeoutError(
                     f"{__tool_name} exceeded {PUBLIC_TOOL_TIMEOUT_S} second public tool timeout"
                 )
-                audit("tool_timeout", tool=__tool_name, timeout_s=PUBLIC_TOOL_TIMEOUT_S)
+                result = _timeout_payload_for_tool(__tool_name, exc)
+                audit(
+                    "tool_timeout",
+                    call_id=call_id,
+                    tool=__tool_name,
+                    timeout_s=PUBLIC_TOOL_TIMEOUT_S,
+                )
                 audit(
                     "mcp_tool_call_end",
+                    call_id=call_id,
                     tool=__tool_name,
                     ok=False,
-                    error=type(exc).__name__,
+                    duration_ms=round((time.monotonic() - started_at) * 1000),
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                    result=_serialize_audit_value(result),
                     **audit_context,
                 )
-                return _timeout_payload_for_tool(__tool_name, exc)
+                return result
             except Exception as exc:
                 audit(
                     "mcp_tool_call_end",
+                    call_id=call_id,
                     tool=__tool_name,
                     ok=False,
-                    error=type(exc).__name__,
+                    duration_ms=round((time.monotonic() - started_at) * 1000),
+                    error=str(exc) or type(exc).__name__,
+                    error_type=type(exc).__name__,
                     **audit_context,
                 )
                 raise
