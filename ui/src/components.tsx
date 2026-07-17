@@ -16,7 +16,7 @@ export function TopNav({
   width: number
   onSelect: (screen: ScreenName) => void
 }) {
-  const narrow = width < 50
+  const narrow = width < 47
   const compact = width < 88
   return (
     <box
