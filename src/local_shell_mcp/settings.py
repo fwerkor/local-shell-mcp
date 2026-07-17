@@ -389,8 +389,8 @@ if _PYDANTIC_AVAILABLE:
         auth_mode: Literal["none", "oauth"] = "oauth"
         auth_bypass_localhost: bool = True
         require_auth_for_mcp_discovery: bool = True
-        mcp_session_idle_timeout_s: int = 1800
-        mcp_max_sessions: int = 128
+        mcp_session_idle_timeout_s: int = 180
+        mcp_max_sessions: int = 1024
 
         # Built-in OAuth 2.1 authorization server for ChatGPT MCP connectors.
         # Set public_base_url to the externally reachable HTTPS origin, e.g. https://local-shell-mcp.example.com
@@ -585,8 +585,8 @@ else:
         auth_mode: Literal["none", "oauth"] = "oauth"
         auth_bypass_localhost: bool = True
         require_auth_for_mcp_discovery: bool = True
-        mcp_session_idle_timeout_s: int = 1800
-        mcp_max_sessions: int = 128
+        mcp_session_idle_timeout_s: int = 180
+        mcp_max_sessions: int = 1024
 
         public_base_url: str | None = None
         oauth_issuer: str | None = None

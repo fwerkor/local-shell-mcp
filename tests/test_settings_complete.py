@@ -199,6 +199,8 @@ def test_dependency_light_fallback_settings(tmp_path, monkeypatch):
     assert instance.remote_enabled is False
     assert instance.command_denylist == ["one", "two"]
     assert instance.workspace_root == workspace.resolve()
+    assert instance.mcp_session_idle_timeout_s == 180
+    assert instance.mcp_max_sessions == 1024
 
     dumped = instance.model_dump(mode="json")
     assert dumped["workspace_root"] == str(workspace.resolve())

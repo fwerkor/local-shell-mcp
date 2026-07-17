@@ -155,6 +155,13 @@ def test_invalid_persisted_oauth_secret_is_not_silently_replaced(tmp_path, monke
     assert secret_path.read_text(encoding="utf-8") == "short"
 
 
+def test_mcp_session_defaults():
+    settings = Settings()
+
+    assert settings.mcp_session_idle_timeout_s == 180
+    assert settings.mcp_max_sessions == 1024
+
+
 def test_removed_dynamic_agent_bridge_settings_are_not_exposed():
     settings = Settings()
 
