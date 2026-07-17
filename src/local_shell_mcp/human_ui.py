@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
@@ -35,6 +35,7 @@ from .fs_ops import (
     resolve_path,
     write_text,
 )
+from .oauth import ALL_OAUTH_SCOPES
 from .remote import remote_manager
 from .settings import get_settings
 from .shell_ops import kill_shell, list_shells, read_shell, send_shell, start_shell
@@ -44,14 +45,7 @@ from .version import version_info
 
 UI_API_PREFIX = "/api/ui"
 UI_SUBPROTOCOL = "lsm-ui"
-UI_FULL_SCOPES = (
-    "shell:read",
-    "shell:write",
-    "shell:execute",
-    "browser:use",
-    "file:share",
-    "remote:use",
-)
+UI_FULL_SCOPES = ALL_OAUTH_SCOPES
 UI_MIN_COLUMNS = 20
 UI_MAX_COLUMNS = 500
 UI_MIN_ROWS = 8
@@ -1108,12 +1102,18 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
             await websocket.close()
 
 
+async def ui_root_redirect(request: Request) -> RedirectResponse:  # noqa: ARG001
+    ui_path = get_settings().ui_path.strip("/")
+    return RedirectResponse(f"./{ui_path}/", status_code=307)
+
+
 def ui_routes() -> list[Any]:
     settings = get_settings()
     if not settings.ui_enabled:
         return []
     ui_path = "/" + settings.ui_path.strip("/")
     return [
+        Route("/", ui_root_redirect, methods=["GET"]),
         Route(ui_path, ui_index, methods=["GET"]),
         Route(ui_path + "/", ui_index, methods=["GET"]),
         Route(ui_path + "/callback", ui_index, methods=["GET"]),

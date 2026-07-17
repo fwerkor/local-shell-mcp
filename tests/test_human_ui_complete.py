@@ -16,7 +16,7 @@ from starlette.routing import Route
 from starlette.testclient import TestClient
 
 import local_shell_mcp.human_ui as ui
-from local_shell_mcp.auth import Principal
+from local_shell_mcp.auth import AuthMiddleware, Principal
 from local_shell_mcp.settings import get_settings
 
 
@@ -78,6 +78,19 @@ class FakeRemoteManager:
 
     def revoke(self, machine):
         return {"machine": machine, "revoked": True}
+
+
+def test_root_redirects_to_relative_ui_path_without_auth(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch, auth="oauth")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_UI_PATH", "/console")
+    get_settings.cache_clear()
+    app = Starlette(routes=ui.ui_routes())
+    app.add_middleware(AuthMiddleware)
+
+    response = TestClient(app).get("/", follow_redirects=False)
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "./console/"
 
 
 def test_index_assets_principal_and_basic_helpers(tmp_path, monkeypatch):

@@ -38,6 +38,7 @@ from .image_ops import ImageFile, assert_view_image_size, read_image
 from .jobs import list_jobs, retry_job, start_job, stop_job, tail_job
 from .models import ToolResult
 from .models import ok_result as _ok
+from .oauth import ALL_OAUTH_SCOPES
 from .playwright_ops import browser_capture, browser_get_text, playwright_run_script
 from .remote import remote_manager
 from .remote_transfer import (
@@ -191,18 +192,8 @@ SECRET_PATTERNS = {
     "generic_assignment": r"(?i)(token|secret|password|passwd|api_key|apikey)\s*[:=]\s*['\"][^'\"]{8,}['\"]",
 }
 
-ALL_OAUTH_SCOPES = [
-    "shell:read",
-    "shell:write",
-    "shell:execute",
-    "browser:use",
-    "file:share",
-    "remote:use",
-]
-
-
-def _oauth_security_scheme(scopes: list[str]) -> dict[str, Any]:
-    return {"type": "oauth2", "scopes": list(dict.fromkeys(scopes))}
+def _oauth_security_scheme(scopes: list[str] | tuple[str, ...]) -> dict[str, Any]:
+    return {"type": "oauth2", "scopes": list(ALL_OAUTH_SCOPES)}
 
 
 OAUTH_SECURITY_SCHEMES = [_oauth_security_scheme(ALL_OAUTH_SCOPES)]
@@ -262,7 +253,7 @@ def _oauth_meta(scopes: list[str]) -> dict[str, Any]:
 
 
 def _public_read_meta() -> dict[str, Any]:
-    return _security_meta([*NOAUTH_SECURITY_SCHEMES, _oauth_security_scheme(["shell:read"])])
+    return _security_meta([*NOAUTH_SECURITY_SCHEMES, _oauth_security_scheme(ALL_OAUTH_SCOPES)])
 
 
 def _transport_security_settings() -> TransportSecuritySettings:

@@ -25,7 +25,8 @@ _REMOTE_TRANSFER_PREFIX = "/remote/transfer/"
 def _is_public_path(path: str) -> bool:
     ui_path = "/" + get_settings().ui_path.strip("/")
     return (
-        path in PUBLIC_PATHS
+        path == "/"
+        or path in PUBLIC_PATHS
         or path.startswith(_REMOTE_TRANSFER_PREFIX)
         or path.startswith("/.well-known/")
         or path.startswith("/oauth/")
@@ -201,7 +202,7 @@ def _extract_token(request: Request) -> str | None:
 
 
 def _verify_oauth(request: Request, settings: Settings) -> Principal:
-    from .oauth import protected_resource_metadata, validate_bearer_token
+    from .oauth import ALL_OAUTH_SCOPES, protected_resource_metadata, validate_bearer_token
 
     token = _extract_token(request)
     if not token:
@@ -209,7 +210,12 @@ def _verify_oauth(request: Request, settings: Settings) -> Principal:
         raise HTTPException(
             status_code=401,
             detail="Missing OAuth bearer token",
-            headers={"WWW-Authenticate": f'Bearer resource_metadata="{metadata_url}", scope="shell:execute"'},
+            headers={
+                "WWW-Authenticate": (
+                    f'Bearer resource_metadata="{metadata_url}", '
+                    f'scope="{" ".join(ALL_OAUTH_SCOPES)}"'
+                )
+            },
         )
     try:
         claims = validate_bearer_token(token, request)
