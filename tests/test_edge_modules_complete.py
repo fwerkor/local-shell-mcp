@@ -111,7 +111,7 @@ def test_audit_serialization_trimming_and_all_filters(tmp_path, monkeypatch):
     settings.max_audit_tail_bytes = 10_000
     settings.max_audit_log_bytes = 10_000
     rows = [
-        {"ts": 1, "event": "mcp_tool_call_start", "tool": "read_file", "machine": "a", "session": "s", "detail": "needle"},
+        {"ts": 1, "event": "mcp_tool_call_start", "tool": "read_file", "machine": "a", "session": "s", "arguments": {"keyword_args": {"path": "needle"}}},
         {"ts": 2, "event": "oauth_auth_failed", "node": "b", "session": "x"},
         ["not", "dict"],
     ]
@@ -120,7 +120,7 @@ def test_audit_serialization_trimming_and_all_filters(tmp_path, monkeypatch):
         limit=9999,
         node="a",
         event="call",
-        operation="read",
+        operation="files",
         session="s",
         search="needle",
         start_ts=0,
@@ -128,9 +128,11 @@ def test_audit_serialization_trimming_and_all_filters(tmp_path, monkeypatch):
         sort="asc",
     )
     assert matched["total_matched"] == 1
-    assert matched["entries"][0]["operation"] == "read"
+    assert matched["entries"][0]["operation"] == "files"
     assert audit_module._operation_type({}) == "other"
-    assert audit_module._operation_type({"event": "remote_worker_registered"}) == "worker"
+    assert audit_module._operation_type({"event": "remote_worker_registered"}) == "remote"
+    assert audit_module._operation_type({"tool": "job_tail"}) == "jobs"
+    assert audit_module._operation_type({"tool": "create_file_link"}) == "transfer"
 
 
 def test_auth_scopes_hosts_tokens_and_metadata(tmp_path, monkeypatch):

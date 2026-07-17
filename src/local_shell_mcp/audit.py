@@ -97,15 +97,220 @@ def audit(event: str, **fields: Any) -> None:
             path.chmod(0o600)
 
 
+_TOOL_OPERATION_GROUPS: dict[str, frozenset[str]] = {
+    "files": frozenset(
+        {
+            "search",
+            "fetch",
+            "list_files",
+            "tree_view",
+            "glob_search",
+            "grep_search",
+            "read_file",
+            "view_image",
+            "write_file",
+            "edit_file",
+            "delete_file_or_dir",
+            "apply_patch",
+            "secret_scan",
+        }
+    ),
+    "shell": frozenset(
+        {
+            "run_shell_tool",
+            "run_python_tool",
+            "shell_start",
+            "shell_send",
+            "shell_read",
+            "shell_kill",
+            "shell_list",
+        }
+    ),
+    "jobs": frozenset({"job_start", "job_list", "job_tail", "job_stop", "job_retry"}),
+    "transfer": frozenset(
+        {"create_file_link", "list_file_links", "revoke_file_link", "transfer_path"}
+    ),
+    "browser": frozenset(
+        {"browser_capture_tool", "browser_get_text_tool", "playwright_run_script_tool"}
+    ),
+    "remote": frozenset(
+        {
+            "remote_invite",
+            "remote_list_machines",
+            "remote_revoke_machine",
+            "remote_rename_machine",
+        }
+    ),
+    "agent": frozenset(
+        {
+            "environment_info",
+            "skills_list",
+            "skill_load",
+            "skill_read_file",
+            "todo_read_tool",
+            "todo_write_tool",
+            "audit_tail",
+        }
+    ),
+}
+_TOOL_OPERATION_BY_NAME = {
+    tool: operation
+    for operation, tools in _TOOL_OPERATION_GROUPS.items()
+    for tool in tools
+}
+
+
 def _operation_type(record: dict[str, Any]) -> str:
-    event = str(record.get("event") or "")
     tool = str(record.get("tool") or "")
-    value = tool or event
-    for prefix in ("remote_", "mcp_tool_call_", "tool_", "oauth_", "shell_", "git_"):
-        if value.startswith(prefix):
-            value = value[len(prefix) :]
-            break
-    return value.split("_", 1)[0] if value else "other"
+    if tool in _TOOL_OPERATION_BY_NAME:
+        return _TOOL_OPERATION_BY_NAME[tool]
+
+    event = str(record.get("event") or "")
+    if event.startswith(("run_shell_", "shell_")):
+        return "shell"
+    if event.startswith("job_"):
+        return "jobs"
+    if event.startswith(("browser_", "playwright_")):
+        return "browser"
+    if event.startswith("remote_"):
+        return "remote"
+    if event.startswith(("download_", "file_link_", "transfer_")):
+        return "transfer"
+    return "other"
+
+
+def _record_node(record: dict[str, Any]) -> str:
+    return str(record.get("machine") or record.get("node") or "local")
+
+
+def _record_session(record: dict[str, Any]) -> str:
+    return str(record.get("session") or "")
+
+
+def _call_input(record: dict[str, Any]) -> Any:
+    arguments = record.get("arguments")
+    if not isinstance(arguments, dict):
+        return None
+    keyword_args = arguments.get("keyword_args")
+    return keyword_args if keyword_args is not None else arguments
+
+
+def _call_match_key(record: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(record.get("tool") or ""),
+        _record_node(record),
+        _record_session(record),
+    )
+
+
+def _new_call_entry(record: dict[str, Any], index: int) -> dict[str, Any]:
+    call_id = str(record.get("call_id") or "")
+    entry: dict[str, Any] = {
+        "id": f"call:{call_id}" if call_id else f"legacy-call:{record.get('ts', 0)}:{index}",
+        "ts": float(record.get("ts") or 0),
+        "event": "mcp_tool_call",
+        "tool": str(record.get("tool") or "unknown"),
+        "node": _record_node(record),
+        "operation": _operation_type(record),
+        "paired": False,
+        "status": "running",
+        "source_events": ["mcp_tool_call_start"],
+    }
+    if call_id:
+        entry["call_id"] = call_id
+    session = _record_session(record)
+    if session:
+        entry["session"] = session
+    call_input = _call_input(record)
+    if call_input is not None:
+        entry["input"] = call_input
+    return entry
+
+
+def _finish_call_entry(entry: dict[str, Any], record: dict[str, Any]) -> None:
+    ok = record.get("ok")
+    entry["paired"] = True
+    entry["ok"] = ok
+    entry["status"] = "success" if ok is True else "failed" if ok is False else "completed"
+    entry["source_events"] = ["mcp_tool_call_start", "mcp_tool_call_end"]
+    if "duration_ms" in record:
+        entry["duration_ms"] = record["duration_ms"]
+    if "result" in record:
+        entry["output"] = record["result"]
+    for name in ("error", "error_type"):
+        if record.get(name):
+            entry[name] = record[name]
+
+
+def _unpaired_end_entry(record: dict[str, Any], index: int) -> dict[str, Any]:
+    call_id = str(record.get("call_id") or "")
+    entry: dict[str, Any] = {
+        "id": f"call:{call_id}" if call_id else f"legacy-end:{record.get('ts', 0)}:{index}",
+        "ts": float(record.get("ts") or 0),
+        "event": "mcp_tool_call",
+        "tool": str(record.get("tool") or "unknown"),
+        "node": _record_node(record),
+        "operation": _operation_type(record),
+        "paired": False,
+        "status": "unpaired",
+        "source_events": ["mcp_tool_call_end"],
+    }
+    if call_id:
+        entry["call_id"] = call_id
+    session = _record_session(record)
+    if session:
+        entry["session"] = session
+    if "duration_ms" in record:
+        entry["duration_ms"] = record["duration_ms"]
+    if "result" in record:
+        entry["output"] = record["result"]
+    for name in ("ok", "error", "error_type"):
+        if name in record:
+            entry[name] = record[name]
+    return entry
+
+
+def _coalesce_audit_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    pending_by_id: dict[str, dict[str, Any]] = {}
+    pending_legacy: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+
+    for index, record in enumerate(records):
+        event = str(record.get("event") or "")
+        if event == "auth_ok":
+            continue
+        if event == "mcp_tool_call_start":
+            entry = _new_call_entry(record, index)
+            rows.append(entry)
+            call_id = str(record.get("call_id") or "")
+            if call_id:
+                pending_by_id[call_id] = entry
+            else:
+                pending_legacy.setdefault(_call_match_key(record), []).append(entry)
+            continue
+        if event == "mcp_tool_call_end":
+            call_id = str(record.get("call_id") or "")
+            entry = pending_by_id.pop(call_id, None) if call_id else None
+            if entry is None and not call_id:
+                pending = pending_legacy.get(_call_match_key(record), [])
+                if pending:
+                    entry = pending.pop(0)
+            if entry is None:
+                rows.append(_unpaired_end_entry(record, index))
+            else:
+                _finish_call_entry(entry, record)
+            continue
+
+        rows.append(
+            {
+                **record,
+                "id": str(record.get("id") or f"record:{record.get('ts', 0)}:{index}"),
+                "node": _record_node(record),
+                "operation": _operation_type(record),
+            }
+        )
+
+    return rows
 
 
 def query_audit(
@@ -120,7 +325,7 @@ def query_audit(
     end_ts: float | None = None,
     sort: str = "desc",
 ) -> dict[str, Any]:
-    """Read, filter, and sort the bounded JSONL audit log for the human UI."""
+    """Read, pair, filter, and sort the bounded JSONL audit log for the human UI."""
 
     settings = get_settings()
     path = settings.audit_log_path
@@ -136,52 +341,49 @@ def query_audit(
             handle.readline()
         raw = handle.read(max_bytes)
 
-    rows: list[dict[str, Any]] = []
-    needle = (search or "").casefold().strip()
-    node_filter = (node or "").casefold().strip()
-    event_filter = (event or "").casefold().strip()
-    operation_filter = (operation or "").casefold().strip()
-    session_filter = (session or "").casefold().strip()
-
+    records: list[dict[str, Any]] = []
     for line in raw.splitlines():
         try:
             record = json.loads(line)
         except (json.JSONDecodeError, UnicodeDecodeError):
             continue
-        if not isinstance(record, dict):
-            continue
-        ts = float(record.get("ts") or 0)
+        if isinstance(record, dict):
+            records.append(record)
+
+    rows = _coalesce_audit_records(records)
+    needle = (search or "").casefold().strip()
+    node_filter = (node or "").casefold().strip()
+    event_filter = (event or "").casefold().strip()
+    operation_filter = (operation or "").casefold().strip()
+    session_filter = (session or "").casefold().strip()
+    matched: list[dict[str, Any]] = []
+
+    for row in rows:
+        ts = float(row.get("ts") or 0)
         if start_ts is not None and ts < start_ts:
             continue
         if end_ts is not None and ts > end_ts:
             continue
-        record_node = str(record.get("machine") or record.get("node") or "local")
-        if node_filter and node_filter != record_node.casefold():
+        if node_filter and node_filter != str(row.get("node") or "local").casefold():
             continue
-        record_event = str(record.get("event") or "")
-        if event_filter and event_filter not in record_event.casefold():
-            continue
-        record_operation = _operation_type(record)
-        if operation_filter and operation_filter not in record_operation.casefold():
-            continue
-        record_session = str(record.get("session") or "")
-        if session_filter and session_filter != record_session.casefold():
-            continue
-        if needle and needle not in json.dumps(record, ensure_ascii=False, default=str).casefold():
-            continue
-        rows.append(
-            {
-                **record,
-                "node": record_node,
-                "operation": record_operation,
-            }
+        event_text = " ".join(
+            [str(row.get("event") or ""), *map(str, row.get("source_events") or [])]
         )
+        if event_filter and event_filter not in event_text.casefold():
+            continue
+        if operation_filter and operation_filter != str(row.get("operation") or "").casefold():
+            continue
+        if session_filter and session_filter != str(row.get("session") or "").casefold():
+            continue
+        if needle and needle not in json.dumps(row, ensure_ascii=False, default=str).casefold():
+            continue
+        matched.append(row)
 
     reverse = sort.lower() != "asc"
-    rows.sort(key=lambda item: float(item.get("ts") or 0), reverse=reverse)
-    total = len(rows)
+    matched.sort(key=lambda item: float(item.get("ts") or 0), reverse=reverse)
+    total = len(matched)
     return {
-        "entries": rows[:bounded_limit],
+        "entries": matched[:bounded_limit],
         "count": min(total, bounded_limit),
         "total_matched": total,
     }

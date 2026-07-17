@@ -407,27 +407,59 @@ def test_audit_storage_remains_valid_under_concurrent_trim_and_append(tmp_path, 
     assert not list(tmp_path.glob(".audit.jsonl.*.tmp"))
 
 
-def test_query_audit_filters_node_operation_and_order(tmp_path, monkeypatch):
+def test_query_audit_pairs_calls_filters_compact_operations_and_hides_auth(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     path = tmp_path / "audit.jsonl"
     path.write_text(
         "\n".join(
             json.dumps(record)
             for record in [
-                {"ts": 10, "event": "mcp_tool_call_start", "tool": "read_file", "machine": "worker-a"},
-                {"ts": 20, "event": "mcp_tool_call_start", "tool": "run_shell_tool", "machine": "worker-b"},
-                {"ts": 30, "event": "mcp_tool_call_end", "tool": "run_shell_tool", "machine": "worker-b", "ok": True},
+                {"ts": 5, "event": "auth_ok", "subject": "local-user"},
+                {
+                    "ts": 10,
+                    "event": "mcp_tool_call_start",
+                    "call_id": "files-call",
+                    "tool": "read_file",
+                    "machine": "worker-a",
+                    "arguments": {"keyword_args": {"path": "a.txt"}},
+                },
+                {
+                    "ts": 20,
+                    "event": "mcp_tool_call_start",
+                    "call_id": "shell-call",
+                    "tool": "run_shell_tool",
+                    "machine": "worker-b",
+                    "arguments": {"keyword_args": {"command": "true"}},
+                },
+                {
+                    "ts": 30,
+                    "event": "mcp_tool_call_end",
+                    "call_id": "shell-call",
+                    "tool": "run_shell_tool",
+                    "machine": "worker-b",
+                    "ok": True,
+                    "duration_ms": 12,
+                    "result": {"ok": True, "message": "", "data": {"exit_code": 0}},
+                },
             ]
         )
         + "\n",
         encoding="utf-8",
     )
 
-    result = query_audit(node="worker-b", operation="run", sort="asc")
+    result = query_audit(node="worker-b", operation="shell", sort="asc")
 
-    assert result["total_matched"] == 2
-    assert [entry["ts"] for entry in result["entries"]] == [20, 30]
-    assert all(entry["node"] == "worker-b" for entry in result["entries"])
+    assert result["total_matched"] == 1
+    entry = result["entries"][0]
+    assert entry["id"] == "call:shell-call"
+    assert entry["node"] == "worker-b"
+    assert entry["operation"] == "shell"
+    assert entry["paired"] is True
+    assert entry["status"] == "success"
+    assert entry["input"] == {"command": "true"}
+    assert entry["output"]["data"]["exit_code"] == 0
+    assert entry["duration_ms"] == 12
+    assert all(item["event"] != "auth_ok" for item in query_audit()["entries"])
 
 
 

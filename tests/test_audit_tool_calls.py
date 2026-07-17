@@ -22,9 +22,11 @@ async def test_mcp_tool_calls_are_audited(tmp_path, monkeypatch):
 
     assert starts[-1]["tool"] == "list_files"
     assert starts[-1]["arguments"]["keyword_args"]["path"] == "."
-    assert ends[-1] == {k: ends[-1][k] for k in ends[-1]}
+    assert starts[-1]["call_id"] == ends[-1]["call_id"]
     assert ends[-1]["tool"] == "list_files"
     assert ends[-1]["ok"] is True
+    assert ends[-1]["duration_ms"] >= 0
+    assert ends[-1]["result"]["ok"] is True
 
 
 def test_audit_tool_arguments_preserves_sensitive_keys():

@@ -1,6 +1,13 @@
 import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
+import {
+  AUDIT_OPERATIONS,
+  auditInput,
+  auditOutput,
+  formatAuditValue,
+  selectionAfterRefresh,
+} from "./audit-utils"
 import { EmptyState, KeyHint, Modal, Panel, useVisibleRows } from "./components"
 import { clampIndex } from "./state-utils"
 import { screenTheme, theme } from "./theme"
@@ -17,22 +24,26 @@ const TIME_RANGES = [
   { label: "7d", seconds: 7 * 24 * 60 * 60 },
   { label: "All", seconds: 0 },
 ]
-const OPERATIONS = ["", "run", "read", "write", "shell", "git", "remote", "browser", "download", "auth"]
 
 function entryColor(entry: AuditEntry): string {
-  if (entry.ok === false || entry.error) return theme.red
-  if (entry.ok === true) return theme.green
-  if (entry.event.includes("start")) return colors.accent
+  if (entry.paired === false) return theme.yellow
+  if (entry.ok === false || entry.error || entry.status === "failed") return theme.red
+  if (entry.ok === true || entry.status === "success") return theme.green
+  if (entry.event.endsWith("_start")) return theme.yellow
   return theme.muted
 }
 
-function detail(entry: AuditEntry): string {
-  if (entry.command) return String(entry.command)
-  if (entry.cwd) return String(entry.cwd)
-  if (entry.error) return String(entry.error)
-  const args = entry.arguments as Record<string, unknown> | undefined
-  if (args) return JSON.stringify(args)
-  return JSON.stringify(entry)
+function statusLabel(entry: AuditEntry): string {
+  if (entry.paired === false) return entry.status === "running" ? "RUNNING" : "UNPAIRED"
+  if (entry.ok === false || entry.error || entry.status === "failed") return "FAILED"
+  if (entry.ok === true || entry.status === "success") return "SUCCESS"
+  return entry.status?.toUpperCase() || "EVENT"
+}
+
+function durationLabel(entry: AuditEntry): string {
+  if (typeof entry.duration_ms !== "number") return ""
+  if (entry.duration_ms < 1000) return `${entry.duration_ms} ms`
+  return `${(entry.duration_ms / 1000).toFixed(2)} s`
 }
 
 export function AuditScreen({
@@ -63,18 +74,26 @@ export function AuditScreen({
   const [loading, setLoading] = useState(false)
   const refreshRequest = useRef(0)
   const refreshController = useRef<AbortController | null>(null)
+  const entriesRef = useRef<AuditEntry[]>([])
+  const selectedRef = useRef(0)
 
   const nodes = useMemo(() => ["", ...machines.map((machine) => machine.name)], [machines])
   const selectedNode = nodes[nodeIndex] || ""
-  const selectedOperation = OPERATIONS[operationIndex] || ""
+  const selectedOperation = AUDIT_OPERATIONS[operationIndex] || ""
   const timeRange = TIME_RANGES[timeIndex] || TIME_RANGES[2]!
   const current = entries[selected]
   const narrow = width < 70
   const tableHeight = Math.max(6, height - 15)
   const { rows, start } = useVisibleRows(entries, selected, tableHeight)
 
+  const selectIndex = useCallback((next: number | ((value: number) => number)) => {
+    const resolved = typeof next === "function" ? next(selectedRef.current) : next
+    selectedRef.current = resolved
+    setSelected(resolved)
+  }, [])
+
   const cycleNode = () => setNodeIndex((value) => (value + 1) % nodes.length)
-  const cycleOperation = () => setOperationIndex((value) => (value + 1) % OPERATIONS.length)
+  const cycleOperation = () => setOperationIndex((value) => (value + 1) % AUDIT_OPERATIONS.length)
   const cycleTime = () => setTimeIndex((value) => (value + 1) % TIME_RANGES.length)
   const toggleSort = () => setSort((value) => (value === "desc" ? "asc" : "desc"))
 
@@ -101,9 +120,12 @@ export function AuditScreen({
         controller.signal,
       )
       if (requestId !== refreshRequest.current || controller.signal.aborted) return
+      const nextSelected = selectionAfterRefresh(entriesRef.current, selectedRef.current, payload.entries)
+      entriesRef.current = payload.entries
+      selectedRef.current = nextSelected
       setEntries(payload.entries)
-      setSelected((value) => clampIndex(value, payload.entries.length))
-      setStatus(`Audit: ${payload.total_matched} matching records`)
+      setSelected(nextSelected)
+      setStatus(`Audit: ${payload.total_matched} matching calls and events`)
     } catch (error) {
       if (requestId === refreshRequest.current && !controller.signal.aborted) {
         setStatus(`Audit: ${formatError(error)}`)
@@ -141,10 +163,10 @@ export function AuditScreen({
       return
     }
     if (key.name === "j" || key.name === "down") {
-      setSelected((value) => clampIndex(value + 1, entries.length))
-    }
-    else if (key.name === "k" || key.name === "up") setSelected((value) => Math.max(0, value - 1))
-    else if (key.name === "n") cycleNode()
+      selectIndex((value) => clampIndex(value + 1, entries.length))
+    } else if (key.name === "k" || key.name === "up") {
+      selectIndex((value) => Math.max(0, value - 1))
+    } else if (key.name === "n") cycleNode()
     else if (key.name === "o") cycleOperation()
     else if (key.name === "t") cycleTime()
     else if (key.name === "s") toggleSort()
@@ -168,6 +190,13 @@ export function AuditScreen({
     else if (dialog.type === "session") setSession(submitted.trim())
     setDialog({ type: "none" })
   }
+
+  const outputText = current
+    ? formatAuditValue(auditOutput(current), "No return value recorded")
+    : ""
+  const inputText = current ? formatAuditValue(auditInput(current), "No input recorded") : ""
+  const duration = current ? durationLabel(current) : ""
+  const detailHeight = width >= 110 ? "100%" : Math.max(14, Math.floor(height * 0.42))
 
   return (
     <box style={{ flexGrow: 1, flexDirection: "column", gap: 1 }}>
@@ -211,7 +240,7 @@ export function AuditScreen({
               <box style={{ height: 2, flexDirection: "row", paddingLeft: 1, paddingRight: 1 }}>
                 <text fg={theme.faint} content="TIME       " />
                 {!narrow && <text fg={theme.faint} content="NODE              " />}
-                {!narrow && <text fg={theme.faint} content="OPERATION     " />}
+                {!narrow && <text fg={theme.faint} content="OPERATION  " />}
                 <text fg={theme.faint} content="EVENT / TOOL" />
               </box>
               {rows.map((entry, offset) => {
@@ -219,8 +248,8 @@ export function AuditScreen({
                 const active = index === selected
                 return (
                   <box
-                    key={`${entry.ts}-${entry.event}-${index}`}
-                    onMouseDown={() => setSelected(index)}
+                    key={entry.id || `${entry.ts}-${entry.event}-${index}`}
+                    onMouseDown={() => selectIndex(index)}
                     style={{
                       height: 1,
                       flexDirection: "row",
@@ -231,7 +260,7 @@ export function AuditScreen({
                   >
                     <text fg={theme.faint} content={`${new Date(entry.ts * 1000).toLocaleTimeString().padEnd(11)} `} />
                     {!narrow && <text fg={active ? theme.text : theme.muted} content={`${entry.node.slice(0, 16).padEnd(17)} `} />}
-                    {!narrow && <text fg={entryColor(entry)} content={`${entry.operation.slice(0, 12).padEnd(13)} `} />}
+                    {!narrow && <text fg={entryColor(entry)} content={`${entry.operation.slice(0, 9).padEnd(10)} `} />}
                     <text fg={active ? theme.text : theme.muted} attributes={active ? 1 : 0} content={entry.tool || entry.event} />
                   </box>
                 )
@@ -239,14 +268,37 @@ export function AuditScreen({
             </box>
           )}
         </Panel>
-        <Panel title="Record details" style={{ width: width >= 110 ? Math.max(36, Math.floor(width * 0.31)) : "100%", height: width >= 110 ? "100%" : 8, padding: 1 }}>
+        <Panel
+          title="Call details"
+          style={{
+            width: width >= 110 ? Math.max(44, Math.floor(width * 0.38)) : "100%",
+            height: detailHeight,
+            padding: 1,
+            gap: 1,
+          }}
+        >
           {current ? (
-            <scrollbox focused={false} style={{ flexGrow: 1 }} scrollY verticalScrollbarOptions={{ visible: true }}>
-              <text fg={colors.accent} attributes={1} content={current.tool || current.event} />
-              <text fg={theme.faint} content={`${new Date(current.ts * 1000).toLocaleString()} · ${current.node}`} />
-              <text fg={theme.muted} content={`\n${detail(current)}`} />
-              <text fg={theme.faint} content={`\n\n${JSON.stringify(current, null, 2)}`} />
-            </scrollbox>
+            <>
+              <box style={{ height: 1, flexDirection: "row" }}>
+                <text fg={colors.accent} attributes={1} content={current.tool || current.event} />
+                <box style={{ flexGrow: 1 }} />
+                <text fg={entryColor(current)} attributes={1} content={statusLabel(current)} />
+              </box>
+              <text
+                fg={theme.faint}
+                content={`${new Date(current.ts * 1000).toLocaleString()} · ${current.node}${duration ? ` · ${duration}` : ""}`}
+              />
+              <Panel title="Call result" style={{ flexGrow: 1, padding: 1 }}>
+                <scrollbox focused={false} style={{ flexGrow: 1 }} scrollY verticalScrollbarOptions={{ visible: true }}>
+                  <text fg={theme.muted} content={outputText} />
+                </scrollbox>
+              </Panel>
+              <Panel title="Call input" style={{ flexGrow: 1, padding: 1 }}>
+                <scrollbox focused={false} style={{ flexGrow: 1 }} scrollY verticalScrollbarOptions={{ visible: true }}>
+                  <text fg={theme.faint} content={inputText} />
+                </scrollbox>
+              </Panel>
+            </>
           ) : (
             <EmptyState title="No record selected" detail="Use j/k to inspect entries" />
           )}
