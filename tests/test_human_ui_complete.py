@@ -419,6 +419,10 @@ def test_resolve_spawn_and_tui_cli_branches(tmp_path, monkeypatch):
     monkeypatch.setattr(ui, "resolve_tui_command", lambda: ["/tmp/tui"])
     ui._spawn_tui_process(80, 24)
     assert captured["env"]["LOCAL_SHELL_MCP_UI_MODE"] == "web"
+    assert captured["env"]["TERM"] == "xterm-256color"
+    assert captured["env"]["COLORTERM"] == "truecolor"
+    assert captured["env"]["TERM_PROGRAM"] == "vscode"
+    assert captured["env"]["TERM_PROGRAM_VERSION"] == "local-shell-mcp"
 
     monkeypatch.setattr(ui, "resolve_tui_command", lambda: ["tui"])
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=7))

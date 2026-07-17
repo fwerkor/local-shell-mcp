@@ -904,8 +904,13 @@ def _spawn_tui_process(cols: int, rows: int):  # noqa: ANN201
     env = os.environ.copy()
     env.update(
         {
-            "TERM": env.get("TERM", "xterm-256color"),
+            "TERM": "xterm-256color",
             "COLORTERM": "truecolor",
+            # The browser wrapper is xterm.js with the image addon, matching the
+            # protocol surface exposed by VS Code's xterm.js terminal. Yazi uses
+            # TERM_PROGRAM to select iTerm IIP before falling back to SIXEL.
+            "TERM_PROGRAM": "vscode",
+            "TERM_PROGRAM_VERSION": "local-shell-mcp",
             "LOCAL_SHELL_MCP_UI_API_BASE": f"http://127.0.0.1:{settings.port}{UI_API_PREFIX}",
             "LOCAL_SHELL_MCP_UI_MODE": "web",
             UI_LOCAL_TOKEN_ENV: get_or_create_ui_local_token(),
