@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import gzip
 import os
+import shutil
 import stat
 import sys
 from pathlib import Path
@@ -11,9 +13,14 @@ def _configure_embedded_tui() -> None:
     if not bundle_root:
         return
     executable_name = "local-shell-mcp-tui.exe" if os.name == "nt" else "local-shell-mcp-tui"
-    candidate = Path(bundle_root) / "local_shell_mcp" / "ui_runtime" / executable_name
-    if not candidate.is_file():
+    runtime_dir = Path(bundle_root) / "local_shell_mcp" / "ui_runtime"
+    payload = runtime_dir / f"{executable_name}.gz"
+    candidate = runtime_dir / executable_name
+    if not payload.is_file():
         return
+    if not candidate.is_file():
+        with gzip.open(payload, "rb") as source, candidate.open("wb") as destination:
+            shutil.copyfileobj(source, destination)
     if os.name != "nt":
         candidate.chmod(
             candidate.stat().st_mode
