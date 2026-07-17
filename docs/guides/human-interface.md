@@ -70,7 +70,7 @@ Files uses a Yazi-derived three-pane interaction model:
 
 - The left sidebar selects `local` or any connected remote machine.
 - The parent pane shows the current directory in context.
-- The current pane lists directories before files.
+- The current pane lists directories before files and supports mouse selection.
 - The preview pane displays directory contents, text, or a bounded binary preview.
 - File operations include create, edit, rename, copy, move, paste, delete, hidden-file toggle, and refresh.
 
@@ -81,7 +81,7 @@ Official Docker images also include the `yazi` and `ya` executables. The OpenTUI
 Terminals manages the existing persistent terminal sessions:
 
 - The left sidebar selects a local or remote machine.
-- The bottom bar selects a session on that machine.
+- The bottom bar selects a session on that machine by keyboard or mouse.
 - The main panel displays recent terminal output.
 - The command field sends complete commands.
 - Raw input mode forwards terminal control keys for interactive programs.
@@ -91,7 +91,7 @@ Commands and file operations entered manually through the TUI or WebUI are inten
 
 ### Todos
 
-Todos provides persistent create, edit, delete, filtering, status changes, and priority changes using the same todo store exposed to MCP.
+Todos provides persistent create, edit, delete, filtering, status changes, and priority changes using the same todo store exposed to MCP. Todo rows and summary filters are mouse-selectable.
 
 ### Audit
 
@@ -104,6 +104,7 @@ Audit reads the bounded JSONL audit log and supports:
 - Time ranges.
 - Ascending or descending time order.
 - Record detail inspection.
+- Mouse selection for filter cards and audit rows.
 
 ### Remotes
 
@@ -120,6 +121,8 @@ The top category bar can be clicked with a mouse in both native terminals and th
 | `F1` | Open the keyboard guide. |
 | `F7` | Refresh the machine list. |
 | `Ctrl+Q` | Exit the native OpenTUI process. |
+
+Terminals uses `Alt+N` for a new session, `Alt+W` to kill the selected session, `Alt+A` to toggle its audit rail, `Alt+R` to refresh, and `Alt+Left/Right` to switch sessions. The WebUI intercepts these chords before browser-level navigation or menu handling.
 
 Each screen displays its contextual shortcuts in the footer.
 

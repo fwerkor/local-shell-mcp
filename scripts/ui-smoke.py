@@ -46,10 +46,21 @@ def xterm_rows(page: Page) -> list[str]:
     return page.locator(".xterm-rows > div").all_text_contents()
 
 
-def click_tui_label(page: Page, label: str) -> None:
+def click_tui_label(page: Page, label: str, occurrence: int = 0) -> None:
     rows = xterm_rows(page)
-    row_index = next(index for index, row in enumerate(rows) if label in row)
-    column = rows[row_index].index(label) + max(1, len(label) // 2)
+    matches: list[tuple[int, int]] = []
+    for row_index, row in enumerate(rows):
+        start = 0
+        while True:
+            column = row.find(label, start)
+            if column < 0:
+                break
+            matches.append((row_index, column))
+            start = column + max(1, len(label))
+    if not matches:
+        raise AssertionError(f"Terminal label not found: {label!r}")
+    row_index, column = matches[occurrence]
+    column += max(1, len(label) // 2)
     screen = page.locator(".xterm-screen").bounding_box()
     if not screen:
         raise AssertionError("xterm screen has no bounding box")
@@ -58,6 +69,63 @@ def click_tui_label(page: Page, label: str) -> None:
     x = screen["x"] + screen["width"] * (column + 0.5) / columns
     y = screen["y"] + screen["height"] * (row_index + 0.5) / row_count
     page.mouse.click(x, y)
+
+
+def api_request(page: Page, path: str, method: str = "GET", body: object | None = None) -> dict:
+    return page.evaluate(
+        """async ({path, method, body}) => {
+            const response = await fetch(path, {
+                method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: 'Bearer ' + sessionStorage.getItem('lsm.ui.access_token')
+                },
+                body: body === null ? undefined : JSON.stringify(body)
+            })
+            return {status: response.status, body: await response.json()}
+        }""",
+        {"path": path, "method": method, "body": body},
+    )
+
+
+def wait_for_terminal_session(page: Page, session_id: str, timeout_s: float = 10) -> str:
+    deadline = time.monotonic() + timeout_s
+    sessions: list[dict] = []
+    while time.monotonic() < deadline:
+        response = api_request(page, "/api/ui/terminals?machine=local")
+        assert response["status"] == 200, response
+        sessions = response["body"]["data"]["sessions"]
+        if any(session["session_id"] == session_id for session in sessions):
+            return session_id
+        page.wait_for_timeout(100)
+    raise AssertionError(
+        f"Terminal session did not appear: {session_id!r}; "
+        f"sessions={[session.get('session_id') for session in sessions]!r}"
+    )
+
+
+def selected_terminal_session(page: Page) -> str | None:
+    marker = "local / "
+    for row in xterm_rows(page):
+        if marker not in row:
+            continue
+        suffix = row.split(marker, 1)[1].strip()
+        if suffix:
+            return suffix.split()[0]
+    return None
+
+
+def wait_for_selected_terminal(page: Page, expected: str, timeout_s: float = 10) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if selected_terminal_session(page) == expected:
+            return
+        page.wait_for_timeout(100)
+    matching_rows = [row for row in xterm_rows(page) if "local / " in row]
+    raise AssertionError(
+        f"Selected terminal did not become {expected!r}; current={selected_terminal_session(page)!r}; "
+        f"matching_rows={matching_rows!r}"
+    )
 
 
 def wait_for_terminal_text(page: Page, needle: str, timeout_s: float = 10) -> None:
@@ -75,7 +143,7 @@ def run_browser(port: int) -> None:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1440, "height": 900})
-        session_id: str | None = None
+        session_ids: list[str] = []
         try:
             page.goto(f"{origin}/ui", wait_until="networkidle")
 
@@ -99,6 +167,24 @@ def run_browser(port: int) -> None:
             )
             assert authenticated == 200
             wait_for_terminal_text(page, "Files")
+            wait_for_terminal_text(page, "mouse-second.txt")
+            click_tui_label(page, "mouse-second.txt")
+            wait_for_terminal_text(page, "Preview · mouse-second.txt")
+
+            todo_seed = api_request(page, "/api/ui/todos")
+            assert todo_seed["status"] == 200, todo_seed
+            todo_items = [
+                {"id": "ui-smoke-first", "content": "mouse todo first", "status": "pending", "priority": "medium"},
+                {"id": "ui-smoke-second", "content": "mouse todo second", "status": "pending", "priority": "medium"},
+                {"id": "ui-smoke-done", "content": "mouse todo done", "status": "completed", "priority": "low"},
+            ]
+            todo_write = api_request(
+                page,
+                "/api/ui/todos",
+                "PUT",
+                {"todos": todo_items, "expected_revision": todo_seed["body"]["data"]["revision"]},
+            )
+            assert todo_write["status"] == 200, todo_write
 
             session_name = f"ui-smoke-{os.getpid()}"
             created = page.evaluate(
@@ -113,11 +199,33 @@ def run_browser(port: int) -> None:
                 session_name,
             )
             assert created["status"] == 200, created
-            session_id = created["body"]["data"]["session_id"]
+            first_session_id = created["body"]["data"]["session_id"]
+            session_ids.append(first_session_id)
             click_tui_label(page, "Terminals")
             wait_for_terminal_text(page, "MCP audit · manual input excluded")
             wait_for_terminal_text(page, session_name, timeout_s=8)
             page.locator(".xterm-helper-textarea").focus()
+
+            page_count = len(page.context.pages)
+            second_name = f"ui-mouse-{os.getpid()}"
+            page.keyboard.press("Alt+n")
+            wait_for_terminal_text(page, "New persistent terminal")
+            page.keyboard.type(second_name)
+            page.keyboard.press("Enter")
+            wait_for_terminal_text(page, second_name, timeout_s=8)
+            assert len(page.context.pages) == page_count
+
+            second_session_id = wait_for_terminal_session(page, second_name, timeout_s=10)
+            session_ids.append(second_session_id)
+            url_before_switch = page.url
+            page.keyboard.press("Alt+ArrowLeft")
+            wait_for_selected_terminal(page, second_name, timeout_s=8)
+            assert page.url == url_before_switch
+            click_tui_label(page, session_name, occurrence=-1)
+            wait_for_selected_terminal(page, session_name, timeout_s=8)
+            page.keyboard.press("Alt+ArrowLeft")
+            wait_for_selected_terminal(page, second_name, timeout_s=8)
+
             page.keyboard.press("F8")
             wait_for_terminal_text(page, "RAW INPUT")
             page.keyboard.press("Alt+1")
@@ -126,14 +234,33 @@ def run_browser(port: int) -> None:
             page.keyboard.press("F8")
             wait_for_terminal_text(page, "F8 raw mode")
 
-            expectations = [
-                ("Terminals", "MCP audit · manual input excluded"),
-                ("Todos", "Todos ·"),
-                ("Audit", "Audit records"),
-                ("Remotes", "Remote nodes"),
-                ("Files", "Preview"),
-            ]
-            for label, expected in expectations:
+            click_tui_label(page, "Todos")
+            wait_for_terminal_text(page, "mouse todo second")
+            click_tui_label(page, "mouse todo second")
+            page.locator(".xterm-helper-textarea").focus()
+            page.keyboard.press("p")
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline:
+                todo_state = api_request(page, "/api/ui/todos")
+                priorities = {item["id"]: item["priority"] for item in todo_state["body"]["data"]["todos"]}
+                if priorities.get("ui-smoke-second") == "high":
+                    break
+                page.wait_for_timeout(100)
+            else:
+                raise AssertionError(f"Todo mouse selection did not target the second row: {priorities}")
+            assert priorities["ui-smoke-first"] == "medium"
+            click_tui_label(page, "Open")
+            wait_for_terminal_text(page, "OPEN")
+
+            click_tui_label(page, "Audit")
+            wait_for_terminal_text(page, "Audit records")
+            wait_for_terminal_text(page, "audit-old-tool")
+            click_tui_label(page, "audit-old-tool")
+            wait_for_terminal_text(page, "audit-old-detail")
+            click_tui_label(page, "24h")
+            wait_for_terminal_text(page, "7d")
+
+            for label, expected in [("Remotes", "Remote nodes"), ("Files", "Preview")]:
                 click_tui_label(page, label)
                 wait_for_terminal_text(page, expected)
 
@@ -159,34 +286,26 @@ def run_browser(port: int) -> None:
             wait_for_terminal_text(page, "Fil")
             wait_for_terminal_text(page, "Rem")
 
-            killed = page.evaluate(
-                """sessionId => fetch('/api/ui/terminals/kill', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Authorization: 'Bearer ' + sessionStorage.getItem('lsm.ui.access_token')
-                    },
-                    body: JSON.stringify({machine: 'local', session_id: sessionId})
-                }).then(async response => ({status: response.status, body: await response.json()}))""",
-                session_id,
-            )
-            assert killed["status"] == 200, killed
-            assert killed["body"]["data"]["killed"] is True, killed
-            session_id = None
+            for session_id in list(session_ids):
+                killed = api_request(
+                    page,
+                    "/api/ui/terminals/kill",
+                    "POST",
+                    {"machine": "local", "session_id": session_id},
+                )
+                assert killed["status"] == 200, killed
+                assert killed["body"]["data"]["killed"] is True, killed
+                session_ids.remove(session_id)
         finally:
-            if session_id and not page.is_closed():
-                with suppress(Exception):
-                    page.evaluate(
-                        """sessionId => fetch('/api/ui/terminals/kill', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                Authorization: 'Bearer ' + sessionStorage.getItem('lsm.ui.access_token')
-                            },
-                            body: JSON.stringify({machine: 'local', session_id: sessionId})
-                        })""",
-                        session_id,
-                    )
+            if not page.is_closed():
+                for session_id in session_ids:
+                    with suppress(Exception):
+                        api_request(
+                            page,
+                            "/api/ui/terminals/kill",
+                            "POST",
+                            {"machine": "local", "session_id": session_id},
+                        )
             browser.close()
 
 
@@ -199,6 +318,20 @@ def main() -> int:
         workspace = Path(temp_dir) / "workspace"
         state_dir = Path(temp_dir) / "state"
         workspace.mkdir()
+        (workspace / "mouse-first.txt").write_text("first", encoding="utf-8")
+        (workspace / "mouse-second.txt").write_text("second", encoding="utf-8")
+        state_dir.mkdir()
+        now = time.time()
+        (state_dir / "audit.jsonl").write_text(
+            "\n".join(
+                [
+                    f'{{"ts": {now - 20}, "event": "mcp_tool_call_end", "tool": "audit-old-tool", "machine": "local", "operation": "read", "command": "audit-old-detail", "ok": true}}',
+                    f'{{"ts": {now - 10}, "event": "mcp_tool_call_end", "tool": "audit-new-tool", "machine": "local", "operation": "run", "command": "audit-new-detail", "ok": true}}',
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         env = os.environ.copy()
         env.update(
             {

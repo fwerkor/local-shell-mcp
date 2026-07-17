@@ -1,6 +1,7 @@
 import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
 import { createImageAddon } from "./image-support"
+import { browserShortcutSequence } from "./keyboard"
 
 declare global {
   interface Window {
@@ -76,13 +77,6 @@ let manualDisconnect = false
 let reconnectAttempt = 0
 let authenticated = false
 
-const categorySequences: Record<string, string> = {
-  "1": "\u001bOQ",
-  "2": "\u001bOR",
-  "3": "\u001bOS",
-  "4": "\u001b[15~",
-  "5": "\u001b[17~",
-}
 const touchSequences: Record<string, string> = {
   escape: "\u001b",
   tab: "\t",
@@ -101,7 +95,7 @@ function sendTerminalInput(sequence: string): void {
 window.addEventListener(
   "keydown",
   (event) => {
-    const sequence = event.altKey && !event.ctrlKey && !event.metaKey ? categorySequences[event.key] : undefined
+    const sequence = browserShortcutSequence(event)
     if (!sequence || socket?.readyState !== WebSocket.OPEN) return
     event.preventDefault()
     event.stopImmediatePropagation()

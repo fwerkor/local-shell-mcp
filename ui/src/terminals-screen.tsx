@@ -18,8 +18,14 @@ function encodeRawKey(key: {
   ctrl?: boolean
   shift?: boolean
   option?: boolean
+  meta?: boolean
   sequence?: string
 }): string | null {
+  const alt = Boolean(key.option || key.meta)
+  if (alt && key.name.length === 1) {
+    return `\x1b${key.shift ? key.name.toUpperCase() : key.name}`
+  }
+  if (alt && key.sequence?.startsWith("\x1b")) return key.sequence
   if (key.ctrl && key.name.length === 1) {
     const code = key.name.toUpperCase().charCodeAt(0) - 64
     if (code > 0 && code < 32) return String.fromCharCode(code)
@@ -93,7 +99,7 @@ export function TerminalsScreen({
 }) {
   const [sessions, setSessions] = useState<TerminalSession[]>([])
   const [sessionsMachine, setSessionsMachine] = useState<string | null>(null)
-  const [selected, setSelected] = useState(0)
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [output, setOutput] = useState("")
   const [audit, setAudit] = useState<AuditEntry[]>([])
   const [showAudit, setShowAudit] = useState(width >= 118)
@@ -107,11 +113,20 @@ export function TerminalsScreen({
   const outputController = useRef<AbortController | null>(null)
   const machineRef = useRef(machine)
   const activeSessions = scopedItems(sessionsMachine, machine, sessions)
-  const selectedSession = activeSessions[selected]
+  const selectedSession = activeSessions.find((session) => session.session_id === selectedSessionId)
+    || activeSessions[0]
+  const selected = Math.max(0, activeSessions.findIndex((session) => session.session_id === selectedSession?.session_id))
   const selectedSessionIdRef = useRef<string | null>(selectedSession?.session_id || null)
   machineRef.current = machine
   selectedSessionIdRef.current = selectedSession?.session_id || null
   const compact = width < 96
+
+  const selectSession = useCallback((index: number) => {
+    const nextIndex = clampIndex(index, activeSessions.length)
+    const nextSessionId = activeSessions[nextIndex]?.session_id || null
+    selectedSessionIdRef.current = nextSessionId
+    setSelectedSessionId(nextSessionId)
+  }, [activeSessions])
 
   const refreshSessions = useCallback(async (force = false): Promise<TerminalSession[]> => {
     if (sessionsController.current && !force) return []
@@ -129,7 +144,14 @@ export function TerminalsScreen({
       ) return []
       setSessions(payload.sessions)
       setSessionsMachine(targetMachine)
-      setSelected((value) => clampIndex(value, payload.sessions.length))
+      setSelectedSessionId((current) => {
+        const preferred = selectedSessionIdRef.current || current
+        const nextSessionId = preferred && payload.sessions.some((session) => session.session_id === preferred)
+          ? preferred
+          : payload.sessions[0]?.session_id || null
+        selectedSessionIdRef.current = nextSessionId
+        return nextSessionId
+      })
       return payload.sessions
     } catch (error) {
       if (!controller.signal.aborted) setStatus(`Terminals: ${formatError(error)}`)
@@ -186,7 +208,8 @@ export function TerminalsScreen({
     outputRequest.current += 1
     setSessions([])
     setSessionsMachine(machine)
-    setSelected(0)
+    setSelectedSessionId(null)
+    selectedSessionIdRef.current = null
     setOutput("")
     setAudit([])
     setDialog({ type: "none" })
@@ -279,9 +302,15 @@ export function TerminalsScreen({
         cwd: cwdParts.join(" ") || ".",
       })
       setDialog({ type: "none" })
+      selectedSessionIdRef.current = created.session_id
+      setSelectedSessionId(created.session_id)
       const nextSessions = await refreshSessions(true)
-      const nextIndex = nextSessions.findIndex((session) => session.session_id === created.session_id)
-      setSelected(Math.max(0, nextIndex))
+      const createdSession = nextSessions.find((session) => session.session_id === created.session_id)
+        || nextSessions.find((session) => session.session_id === namePart)
+      const nextSessionId = createdSession?.session_id || created.session_id
+      selectedSessionIdRef.current = nextSessionId
+      setSelectedSessionId(nextSessionId)
+      setStatus(`Started ${nextSessionId}`)
     } catch (error) {
       setStatus(`Start: ${formatError(error)}`)
     }
@@ -293,7 +322,8 @@ export function TerminalsScreen({
     const next = (index + delta + machines.length) % machines.length
     setSessions([])
     setSessionsMachine(null)
-    setSelected(0)
+    setSelectedSessionId(null)
+    selectedSessionIdRef.current = null
     setOutput("")
     setAudit([])
     setDialog({ type: "none" })
@@ -345,16 +375,14 @@ export function TerminalsScreen({
         setRawMode(true)
         setStatus("Raw input enabled · F8 to leave")
       }
-    } else if (key.option && key.name === "[") switchMachine(-1)
-    else if (key.option && key.name === "]") switchMachine(1)
-    else if (key.option && key.name === "left") setSelected((value) => Math.max(0, value - 1))
-    else if (key.option && key.name === "right") {
-      setSelected((value) => clampIndex(value + 1, activeSessions.length))
-    }
-    else if (key.ctrl && key.name === "n") setDialog({ type: "start", machine, name: "", cwd: "." })
-    else if (key.ctrl && key.name === "w" && selectedSession) setDialog({ type: "kill", machine, session: selectedSession })
-    else if (key.ctrl && key.name === "a") setShowAudit((value) => !value)
-    else if (key.ctrl && key.name === "r") void refreshOutput(true)
+    } else if ((key.option || key.meta) && key.name === "[") switchMachine(-1)
+    else if ((key.option || key.meta) && key.name === "]") switchMachine(1)
+    else if ((key.option || key.meta) && key.name === "left") selectSession(selected - 1)
+    else if ((key.option || key.meta) && key.name === "right") selectSession(selected + 1)
+    else if ((key.option || key.meta) && key.name === "n") setDialog({ type: "start", machine, name: "", cwd: "." })
+    else if ((key.option || key.meta) && key.name === "w" && selectedSession) setDialog({ type: "kill", machine, session: selectedSession })
+    else if ((key.option || key.meta) && key.name === "a") setShowAudit((value) => !value)
+    else if ((key.option || key.meta) && key.name === "r") void refreshOutput(true)
   })
 
   const outputLines = useMemo(() => output.split("\n"), [output])
@@ -374,7 +402,8 @@ export function TerminalsScreen({
               if (nextMachine === machine) return
               setSessions([])
               setSessionsMachine(null)
-              setSelected(0)
+              setSelectedSessionId(null)
+              selectedSessionIdRef.current = null
               setOutput("")
               setAudit([])
               setDialog({ type: "none" })
@@ -401,7 +430,7 @@ export function TerminalsScreen({
               {selectedSession ? (
                 <text fg={theme.text} content={visibleOutput || "Terminal is ready."} />
               ) : (
-                <EmptyState title="No persistent terminal" detail="Press n to create one" />
+                <EmptyState title="No persistent terminal" detail="Press Alt+N to create one" />
               )}
             </Panel>
             {showAudit && (
@@ -436,6 +465,7 @@ export function TerminalsScreen({
             {activeSessions.map((session, index) => (
               <box
                 key={session.session_id}
+                onMouseDown={() => selectSession(index)}
                 style={{
                   height: 1,
                   marginRight: 1,
@@ -463,12 +493,12 @@ export function TerminalsScreen({
         accent={colors.accent}
         items={[
           ["Alt+←/→", "terminal"],
-          ["Ctrl+N", "new"],
-          ["Ctrl+W", "kill"],
-          ["Ctrl+A", "audit"],
+          ["Alt+N", "new"],
+          ["Alt+W", "kill"],
+          ["Alt+A", "audit"],
           ["F8", "raw mode"],
           ["Alt+[ / ]", "machine"],
-          ["Ctrl+R", "refresh"],
+          ["Alt+R", "refresh"],
         ]}
       />
       {dialog.type === "start" && (

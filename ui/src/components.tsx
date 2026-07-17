@@ -126,6 +126,7 @@ export function Panel({
   activeBackground = theme.panelAlt,
   children,
   style,
+  onMouseDown,
 }: {
   title: string
   active?: boolean
@@ -133,10 +134,12 @@ export function Panel({
   activeBackground?: string
   children?: ReactNode
   style?: Record<string, unknown>
+  onMouseDown?: () => void
 }) {
   return (
     <box
       title={` ${title} `}
+      onMouseDown={onMouseDown}
       style={{
         flexDirection: "column",
         border: true,
