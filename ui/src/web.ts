@@ -1,5 +1,6 @@
 import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
+import { createImageAddon } from "./image-support"
 
 declare global {
   interface Window {
@@ -65,6 +66,7 @@ const terminal = new Terminal({
   },
 })
 const fitAddon = new FitAddon()
+terminal.loadAddon(createImageAddon())
 terminal.loadAddon(fitAddon)
 terminal.open(terminalElement)
 
