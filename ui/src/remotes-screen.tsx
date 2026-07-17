@@ -3,8 +3,10 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, Modal, Panel, formatAge, useVisibleRows } from "./components"
 import { clampIndex } from "./state-utils"
-import { theme } from "./theme"
+import { screenTheme, theme } from "./theme"
 import type { InvitePayload, Machine } from "./types"
+
+const colors = screenTheme.Remotes
 
 type RemoteDialog =
   | { type: "none" }
@@ -145,7 +147,7 @@ export function RemotesScreen({
   return (
     <box style={{ flexGrow: 1, flexDirection: "column", gap: 1 }}>
       {width < 70 ? (
-        <Panel title="Remote status" active style={{ height: 3, alignItems: "center", justifyContent: "center" }}>
+        <Panel title="Remote status" active accent={colors.accent} activeBackground={colors.panel} style={{ height: 3, alignItems: "center", justifyContent: "center" }}>
           <text
             fg={theme.muted}
             content={`On ${online}  │  Off ${offline}  │  Total ${machines.length}  │  ${loading ? "SYNC" : "READY"}`}
@@ -153,14 +155,14 @@ export function RemotesScreen({
         </Panel>
       ) : (
         <box style={{ height: compact ? 2 : 4, flexDirection: "row", gap: 1 }}>
-          <Panel title={compact ? "On" : "Online"} active style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
+          <Panel title={compact ? "On" : "Online"} active accent={colors.accent} activeBackground={colors.panel} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
             <text fg={theme.green} attributes={1} content={String(online)} />
           </Panel>
           <Panel title={compact ? "Off" : "Offline"} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
             <text fg={offline ? theme.orange : theme.faint} attributes={1} content={String(offline)} />
           </Panel>
           <Panel title="Total" style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
-            <text fg={theme.cyan} attributes={1} content={String(machines.length)} />
+            <text fg={colors.accent} attributes={1} content={String(machines.length)} />
           </Panel>
           <Panel title={compact ? "Ctl" : "Controller"} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
             <text fg={theme.blue} content={loading ? (compact ? "SYNC" : "SYNCING") : "READY"} />
@@ -168,7 +170,7 @@ export function RemotesScreen({
         </box>
       )}
       <box style={{ flexGrow: 1, flexDirection: compact ? "column" : "row", gap: 1 }}>
-        <Panel title="Remote nodes" active style={{ flexGrow: 1, paddingTop: 1 }}>
+        <Panel title="Remote nodes" active accent={colors.accent} activeBackground={colors.panel} style={{ flexGrow: 1, paddingTop: 1 }}>
           {machines.length === 0 ? (
             <EmptyState
               title={enabled ? "No remote nodes" : "Remote workers disabled"}
@@ -192,7 +194,7 @@ export function RemotesScreen({
                       alignItems: "center",
                       paddingLeft: 1,
                       paddingRight: 1,
-                      backgroundColor: active ? theme.selectedStrong : index % 2 ? theme.panelAlt : undefined,
+                      backgroundColor: active ? colors.selected : index % 2 ? theme.panelAlt : undefined,
                     }}
                   >
                     <text fg={onlineNode ? theme.green : theme.faint} attributes={1} content={onlineNode ? "● ON   " : "○ OFF  "} />
@@ -231,7 +233,7 @@ export function RemotesScreen({
           )}
         </Panel>
       </box>
-      <KeyHint items={[["j/k", "move"], ["n", "new invite"], ["e", "rename"], ["d", "revoke"], ["r", "refresh"]]} />
+      <KeyHint accent={colors.accent} items={[["j/k", "move"], ["n", "new invite"], ["e", "rename"], ["d", "revoke"], ["r", "refresh"]]} />
       {dialog.type === "invite" && (
         <Modal title="Create remote invite" height={8}>
           <text fg={theme.muted} content="Enter: optional-name [optional-workdir]" />
@@ -246,7 +248,7 @@ export function RemotesScreen({
           <text fg={theme.green} attributes={1} content="Invite ready" />
           <text fg={theme.muted} content="Run this command on the remote node:" />
           <box style={{ flexGrow: 1, border: true, borderColor: theme.borderBright, backgroundColor: theme.bg, padding: 1 }}>
-            <text fg={theme.cyan} content={dialog.invite.command} />
+            <text fg={colors.accent} content={dialog.invite.command} />
           </box>
           <text fg={theme.faint} content={`Expires ${new Date(dialog.invite.expires_at * 1000).toLocaleTimeString()} · Enter/Esc close`} />
         </Modal>
