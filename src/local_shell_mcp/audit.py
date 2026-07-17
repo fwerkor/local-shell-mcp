@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import re
 import threading
 import time
 from collections.abc import Iterator
@@ -16,84 +15,28 @@ from .settings import get_settings
 
 _AUDIT_ENABLED: ContextVar[bool] = ContextVar("local_shell_mcp_audit_enabled", default=True)
 _AUDIT_LOCK = threading.Lock()
-_AUDIT_REDACTED = "<redacted>"
-_AUDIT_OPAQUE_FIELDS = {
-    "code",
-    "command",
-    "content",
-    "data_b64",
-    "explanation",
-    "input_text",
-    "javascript",
-    "patch",
-    "purpose",
-    "repo_url",
-    "script",
-}
-_AUDIT_SECRET_FIELDS = {
-    "access",
-    "authorization",
-    "client_secret",
-    "cookie",
-    "oauth_admin_pin",
-    "oauth_jwt_secret",
-    "password",
-    "passwd",
-    "pin",
-    "secret",
-    "set-cookie",
-    "token",
-}
-_AUDIT_TOKEN_PATTERN = re.compile(
-    r"(?i)(?:bearer\s+)[A-Za-z0-9._~+/=-]+|gh[pousr]_[A-Za-z0-9_]{20,}"
-)
 _AUDIT_MAX_STRING = 2_000
 
 
-def _audit_configured_secrets(settings: Any) -> tuple[str, ...]:
-    values = []
-    for name in ("oauth_admin_pin", "oauth_jwt_secret"):
-        value = getattr(settings, name, None)
-        if isinstance(value, str) and len(value) >= 8:
-            values.append(value)
-    return tuple(values)
+def _format_audit_text(value: str) -> str:
+    if len(value) > _AUDIT_MAX_STRING:
+        return value[:_AUDIT_MAX_STRING] + "…<truncated>"
+    return value
 
 
-def _redact_audit_text(value: str, configured_secrets: tuple[str, ...]) -> str:
-    redacted = value
-    for secret in configured_secrets:
-        redacted = redacted.replace(secret, _AUDIT_REDACTED)
-    redacted = _AUDIT_TOKEN_PATTERN.sub(_AUDIT_REDACTED, redacted)
-    if len(redacted) > _AUDIT_MAX_STRING:
-        redacted = redacted[:_AUDIT_MAX_STRING] + "…<truncated>"
-    return redacted
-
-
-def _sanitize_audit_value(
-    value: Any, configured_secrets: tuple[str, ...], field_name: str | None = None
-) -> Any:
-    normalized = (field_name or "").casefold()
-    if normalized in _AUDIT_OPAQUE_FIELDS or normalized in _AUDIT_SECRET_FIELDS:
-        return _AUDIT_REDACTED
-    if normalized.endswith(("_password", "_passwd", "_secret", "_authorization")):
-        return _AUDIT_REDACTED
-    if normalized.endswith("_token") and normalized != "token_id":
-        return _AUDIT_REDACTED
+def _serialize_audit_value(value: Any) -> Any:
     if isinstance(value, str):
-        return _redact_audit_text(value, configured_secrets)
+        return _format_audit_text(value)
     if isinstance(value, dict):
         return {
-            str(name): _sanitize_audit_value(item, configured_secrets, str(name))
+            str(name): _serialize_audit_value(item)
             for name, item in list(value.items())[:100]
         }
     if isinstance(value, (list, tuple)):
-        return [
-            _sanitize_audit_value(item, configured_secrets)
-            for item in list(value)[:100]
-        ]
+        return [_serialize_audit_value(item) for item in list(value)[:100]]
     if isinstance(value, (int, float, bool)) or value is None:
         return value
-    return _redact_audit_text(repr(value), configured_secrets)
+    return _format_audit_text(repr(value))
 
 
 def _trim_audit_log(path: Path, max_bytes: int) -> None:
@@ -136,14 +79,10 @@ def audit(event: str, **fields: Any) -> None:
     if not _AUDIT_ENABLED.get():
         return
     settings = get_settings()
-    configured_secrets = _audit_configured_secrets(settings)
     record = {
         "ts": time.time(),
-        "event": _redact_audit_text(event, configured_secrets),
-        **{
-            name: _sanitize_audit_value(value, configured_secrets, name)
-            for name, value in fields.items()
-        },
+        "event": _format_audit_text(event),
+        **{name: _serialize_audit_value(value) for name, value in fields.items()},
     }
     path: Path = settings.audit_log_path
     encoded = json.dumps(record, ensure_ascii=False, default=str) + "\n"

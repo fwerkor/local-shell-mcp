@@ -199,20 +199,6 @@ def _oauth_security_scheme(scopes: list[str] | tuple[str, ...]) -> dict[str, Any
 OAUTH_SECURITY_SCHEMES = [_oauth_security_scheme(ALL_OAUTH_SCOPES)]
 NOAUTH_SECURITY_SCHEMES = [{"type": "noauth"}]
 PUBLIC_TOOL_TIMEOUT_S = PUBLIC_TOOL_WATCHDOG_TIMEOUT_S
-SENSITIVE_TOOL_ARG_FRAGMENTS = ("token", "secret", "password", "passwd", "pin", "jwt", "key")
-OPAQUE_AUDIT_TOOL_ARGS = {
-    "code",
-    "command",
-    "content",
-    "data_b64",
-    "explanation",
-    "input_text",
-    "javascript",
-    "patch",
-    "purpose",
-    "repo_url",
-    "script",
-}
 MAX_AUDIT_TOOL_ARG_STRING = 500
 MCP_INSTRUCTIONS = (
     "When a task may benefit from an installed Agent Skill, call skills_list first "
@@ -288,7 +274,7 @@ def _transport_security_settings() -> TransportSecuritySettings:
     )
 
 
-def _redact_audit_value(value: Any) -> Any:
+def _serialize_audit_value(value: Any) -> Any:
     if isinstance(value, str):
         if len(value) > MAX_AUDIT_TOOL_ARG_STRING:
             return value[:MAX_AUDIT_TOOL_ARG_STRING] + "…<truncated>"
@@ -296,28 +282,21 @@ def _redact_audit_value(value: Any) -> Any:
     if isinstance(value, (int, float, bool)) or value is None:
         return value
     if isinstance(value, list):
-        return [_redact_audit_value(item) for item in value[:20]]
+        return [_serialize_audit_value(item) for item in value[:20]]
     if isinstance(value, tuple):
-        return [_redact_audit_value(item) for item in value[:20]]
+        return [_serialize_audit_value(item) for item in value[:20]]
     if isinstance(value, dict):
-        out: dict[str, Any] = {}
-        for name, item in list(value.items())[:50]:
-            name_s = str(name)
-            name_lower = name_s.lower()
-            if name_lower in OPAQUE_AUDIT_TOOL_ARGS or any(
-                fragment in name_lower for fragment in SENSITIVE_TOOL_ARG_FRAGMENTS
-            ):
-                out[name_s] = "<redacted>"
-            else:
-                out[name_s] = _redact_audit_value(item)
-        return out
+        return {
+            str(name): _serialize_audit_value(item)
+            for name, item in list(value.items())[:50]
+        }
     return repr(value)
 
 
 def _audit_tool_arguments(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
     return {
         "positional_count": len(args),
-        "keyword_args": _redact_audit_value(kwargs),
+        "keyword_args": _serialize_audit_value(kwargs),
     }
 
 
@@ -389,7 +368,7 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                 require_current_scopes(("remote:use",))
             arguments = {
                 "positional_count": len(args),
-                "keyword_args": _redact_audit_value(call_arguments),
+                "keyword_args": _serialize_audit_value(call_arguments),
             }
             audit_context = {
                 name: call_arguments[name]

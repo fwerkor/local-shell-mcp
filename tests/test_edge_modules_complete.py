@@ -66,7 +66,7 @@ def _request(
     )
 
 
-def test_audit_sanitization_trimming_and_all_filters(tmp_path, monkeypatch):
+def test_audit_serialization_trimming_and_all_filters(tmp_path, monkeypatch):
     _configure(
         tmp_path,
         monkeypatch,
@@ -77,17 +77,11 @@ def test_audit_sanitization_trimming_and_all_filters(tmp_path, monkeypatch):
         LOCAL_SHELL_MCP_MAX_AUDIT_TAIL_BYTES=40,
     )
     settings = get_settings()
-    secrets = audit_module._audit_configured_secrets(settings)
-    assert "configured-secret-pin" in secrets
-    redacted = audit_module._redact_audit_text(
-        "Bearer abc.def configured-secret-pin ghp_" + "x" * 30 + "z" * 3000,
-        secrets,
-    )
-    assert "configured-secret-pin" not in redacted
-    assert "Bearer" not in redacted
-    assert audit_module._redact_audit_text("z" * 3000, ()).endswith("…<truncated>")
+    sensitive_text = "Bearer abc.def configured-secret-pin ghp_" + "x" * 30
+    assert audit_module._format_audit_text(sensitive_text) == sensitive_text
+    assert audit_module._format_audit_text("z" * 3000).endswith("…<truncated>")
 
-    value = audit_module._sanitize_audit_value(
+    value = audit_module._serialize_audit_value(
         {
             "token": "hidden",
             "api_token": "hidden",
@@ -96,13 +90,12 @@ def test_audit_sanitization_trimming_and_all_filters(tmp_path, monkeypatch):
             "items": list(range(110)),
             "tuple": (1, 2),
             "object": object(),
-        },
-        secrets,
+        }
     )
-    assert value["token"] == "<redacted>"
-    assert value["api_token"] == "<redacted>"
+    assert value["token"] == "hidden"
+    assert value["api_token"] == "hidden"
     assert value["token_id"] == "visible"
-    assert value["db_password"] == "<redacted>"
+    assert value["db_password"] == "hidden"
     assert len(value["items"]) == 100
     assert value["tuple"] == [1, 2]
     assert "object at" in value["object"]
