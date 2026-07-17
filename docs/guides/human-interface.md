@@ -38,7 +38,7 @@ The WebUI includes:
 
 ## Native TUI
 
-Release archives place `local-shell-mcp-tui` beside the main executable. Keep both files in the same directory, start the service, then run:
+Standalone release executables embed the platform OpenTUI runtime. Keep only the main executable, start the service, then run:
 
 ```bash
 local-shell-mcp tui
@@ -136,7 +136,8 @@ Each screen displays its contextual shortcuts in the footer.
 
 ## Packaging notes
 
-- Docker images include the WebUI assets, native OpenTUI sidecar, and Yazi.
-- Standalone release archives include the main executable and the platform-matching OpenTUI sidecar.
-- Python wheels include the WebUI assets. A native TUI requires a release sidecar or a source checkout with Bun and the UI dependencies installed.
+- Docker images include the WebUI assets, native OpenTUI runtime, and Yazi, and configure the service to use the bundled runtime directly.
+- Standalone release executables contain the WebUI assets and a compressed platform OpenTUI runtime; neither WebUI nor native TUI requires a neighboring sidecar.
+- Release archives may retain a neighboring TUI executable for compatibility with older launchers, but current executables do not depend on it.
+- Python wheels include the WebUI assets. A native TUI requires a release executable or a source checkout with Bun and the UI dependencies installed.
 - The WebUI is served from the same process and port as MCP; no additional web service is required.
