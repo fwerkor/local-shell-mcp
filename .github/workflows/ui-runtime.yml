@@ -9,7 +9,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
+  issues: write
 
 concurrency:
   group: ui-runtime-${{ github.ref }}
@@ -110,28 +110,54 @@ jobs:
           path: pyinstaller.log
           if-no-files-found: ignore
 
-      - name: Report macOS PyInstaller failure
-        if: failure() && github.event_name == 'pull_request' && startsWith(matrix.label, 'macos')
+      - name: Report PyInstaller failure
+        if: failure() && github.event_name == 'pull_request'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          {
-            echo "Temporary diagnostic for **${{ matrix.label }}**:"
-            echo
-            echo '```text'
-            tail -n 80 pyinstaller.log
-            echo '```'
-          } > pyinstaller-comment.md
-          gh pr comment "${{ github.event.pull_request.number }}" --body-file pyinstaller-comment.md
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          tail = "\n".join(Path("pyinstaller.log").read_text(errors="replace").splitlines()[-100:])
+          body = "Temporary diagnostic for **${{ matrix.label }}** PyInstaller failure:\n\n```text\n" + tail + "\n```"
+          Path("diagnostic.json").write_text(json.dumps({"body": body}))
+          PY
+          gh api \
+            --method POST \
+            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            --input diagnostic.json
 
       - name: Verify WebUI and embedded TUI without sidecar
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           rm -f "ui/dist/${{ matrix.tui_binary }}"
           test ! -e "ui/dist/${{ matrix.tui_binary }}"
-          python scripts/standalone-ui-smoke.py --server "dist/${{ matrix.binary }}"
+          set +e
+          python scripts/standalone-ui-smoke.py --server "dist/${{ matrix.binary }}" > smoke.log 2>&1
+          status=$?
+          set -e
+          cat smoke.log
+          exit "$status"
+
+      - name: Report standalone UI smoke failure
+        if: failure() && github.event_name == 'pull_request' && hashFiles('smoke.log') != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          tail = "\n".join(Path("smoke.log").read_text(errors="replace").splitlines()[-100:])
+          body = "Temporary diagnostic for **${{ matrix.label }}** standalone UI smoke failure:\n\n```text\n" + tail + "\n```"
+          Path("diagnostic.json").write_text(json.dumps({"body": body}))
+          PY
+          gh api \
+            --method POST \
+            "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            --input diagnostic.json
 
   docker:
     name: Docker UI / ${{ matrix.platform }}
