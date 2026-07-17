@@ -398,6 +398,149 @@ async def test_job_list_recovers_interrupted_stopping_and_retrying_states(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_job_store_migrates_v1_without_losing_history(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".state"
+    state_dir.mkdir()
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    legacy_jobs = [
+        {
+            "job_id": "job_legacy_done",
+            "name": "legacy-done",
+            "status": "exited",
+            "command": "true",
+            "cwd": ".",
+            "session_id": "legacy-done-session",
+            "created_at": 1.0,
+            "updated_at": 2.0,
+            "attempts": 1,
+        },
+        {
+            "job_id": "job_legacy_live",
+            "name": "legacy-live",
+            "status": "running",
+            "command": "sleep 10",
+            "cwd": ".",
+            "session_id": "legacy-live-session",
+            "created_at": 3.0,
+            "updated_at": 3.0,
+            "attempts": 1,
+        },
+    ]
+    store_path = state_dir / jobs_module.JOB_STORE_FILE_NAME
+    store_path.write_text(
+        json.dumps({"version": 1, "jobs": legacy_jobs}), encoding="utf-8"
+    )
+
+    async def legacy_shells():
+        return {"sessions": [{"session_id": "legacy-live-session"}]}
+
+    monkeypatch.setattr(jobs_module, "list_shells", legacy_shells)
+    listed = await list_jobs()
+
+    assert {job["job_id"] for job in listed["jobs"]} == {
+        "job_legacy_done",
+        "job_legacy_live",
+    }
+    assert listed["counts"] == {"exited": 1, "running": 1}
+    for path in (store_path, state_dir / jobs_module.JOB_STORE_BACKUP_FILE_NAME):
+        migrated = json.loads(path.read_text(encoding="utf-8"))
+        assert migrated["version"] == jobs_module.JOB_STORE_VERSION
+        assert {job["job_id"] for job in migrated["jobs"]} == {
+            "job_legacy_done",
+            "job_legacy_live",
+        }
+
+
+@pytest.mark.asyncio
+async def test_job_start_does_not_launch_shell_when_store_is_invalid(
+    tmp_path, monkeypatch
+):
+    state_dir = tmp_path / ".state"
+    state_dir.mkdir()
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    (state_dir / jobs_module.JOB_STORE_FILE_NAME).write_text(
+        json.dumps({"version": 99, "jobs": []}), encoding="utf-8"
+    )
+    started = False
+
+    async def fake_start_shell(cwd=".", name=None, command=None):  # noqa: ARG001
+        nonlocal started
+        started = True
+        return {"session_id": str(name), "backend": "fake"}
+
+    monkeypatch.setattr(jobs_module, "start_shell", fake_start_shell)
+
+    with pytest.raises(RuntimeError, match="refusing to reset"):
+        await start_job("echo must-not-run")
+
+    assert started is False
+    runtime_dir = state_dir / "jobs"
+    assert not runtime_dir.exists() or not list(runtime_dir.iterdir())
+
+
+@pytest.mark.asyncio
+async def test_job_list_recovers_interrupted_start(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".state"
+    state_dir.mkdir()
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    now = time.time()
+    rows = [
+        {
+            "job_id": "job_start_live",
+            "name": "start-live",
+            "status": "starting",
+            "command": "sleep 10",
+            "cwd": ".",
+            "session_id": "start-live-session",
+            "created_at": now,
+            "updated_at": now,
+            "attempts": 1,
+            "operation_id": "start_stale_live",
+            "operation_kind": "start",
+        },
+        {
+            "job_id": "job_start_missing",
+            "name": "start-missing",
+            "status": "starting",
+            "command": "sleep 10",
+            "cwd": ".",
+            "session_id": "start-missing-session",
+            "created_at": now - 1,
+            "updated_at": now,
+            "attempts": 1,
+            "operation_id": "start_stale_missing",
+            "operation_kind": "start",
+        },
+    ]
+    (state_dir / jobs_module.JOB_STORE_FILE_NAME).write_text(
+        json.dumps({"version": jobs_module.JOB_STORE_VERSION, "jobs": rows}),
+        encoding="utf-8",
+    )
+
+    async def active_shells():
+        return {"sessions": [{"session_id": "start-live-session"}]}
+
+    monkeypatch.setattr(jobs_module, "list_shells", active_shells)
+    listed = await list_jobs()
+    recovered = {job["job_id"]: job for job in listed["jobs"]}
+
+    assert recovered["job_start_live"]["status"] == "running"
+    assert "recovered job start" in recovered["job_start_live"]["error"]
+    assert recovered["job_start_missing"]["status"] == "failed"
+    assert "start was interrupted" in recovered["job_start_missing"]["error"]
+    stored = json.loads(
+        (state_dir / jobs_module.JOB_STORE_FILE_NAME).read_text(encoding="utf-8")
+    )
+    assert all("operation_id" not in job for job in stored["jobs"])
+
+
+@pytest.mark.asyncio
 async def test_job_store_recovers_from_atomic_backup(tmp_path, monkeypatch):
     state_dir = tmp_path / ".state"
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -451,6 +594,44 @@ async def test_job_store_refuses_to_overwrite_unrecoverable_corruption(tmp_path,
         await list_jobs()
     assert store_path.read_text(encoding="utf-8") == "{broken"
     assert not (state_dir / jobs_module.JOB_STORE_BACKUP_FILE_NAME).exists()
+
+
+@pytest.mark.asyncio
+async def test_job_list_does_not_interrupt_active_start(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    active: set[str] = set()
+    start_entered = asyncio.Event()
+    allow_start = asyncio.Event()
+
+    async def fake_start_shell(cwd=".", name=None, command=None):
+        start_entered.set()
+        await allow_start.wait()
+        active.add(str(name))
+        return {
+            "session_id": str(name),
+            "cwd": cwd,
+            "command": command,
+            "backend": "fake",
+        }
+
+    async def fake_list_shells():
+        return {"sessions": [{"session_id": item} for item in sorted(active)]}
+
+    monkeypatch.setattr(jobs_module, "start_shell", fake_start_shell)
+    monkeypatch.setattr(jobs_module, "list_shells", fake_list_shells)
+
+    start_task = asyncio.create_task(start_job("sleep 10"))
+    await start_entered.wait()
+
+    during = await list_jobs()
+    assert during["jobs"][0]["status"] == "starting"
+
+    allow_start.set()
+    started = await start_task
+    assert started["status"] == "running"
+    assert (await list_jobs())["jobs"][0]["status"] == "running"
 
 
 @pytest.mark.asyncio

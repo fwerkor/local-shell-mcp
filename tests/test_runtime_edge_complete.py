@@ -54,10 +54,19 @@ def test_job_store_helpers_recovery_pruning_and_attempt_files(tmp_path, monkeypa
     assert jobs._load_store() == jobs._empty_store()
 
     invalid = tmp_path / "invalid.json"
-    for payload in ({"version": 1, "jobs": []}, {"version": 2, "jobs": {}}, []):
+    for payload in ({"version": 3, "jobs": []}, {"version": 2, "jobs": {}}, []):
         invalid.write_text(json.dumps(payload), encoding="utf-8")
         with pytest.raises(ValueError):
             jobs._load_store_file(invalid)
+
+    invalid.write_text(
+        json.dumps({"version": 1, "jobs": [{"job_id": "legacy"}, 1]}),
+        encoding="utf-8",
+    )
+    assert jobs._load_store_file(invalid) == {
+        "version": jobs.JOB_STORE_VERSION,
+        "jobs": [{"job_id": "legacy"}],
+    }
 
     main = jobs._job_store_path()
     backup = jobs._job_store_backup_path()
