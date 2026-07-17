@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   patch:
@@ -14,7 +14,6 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: fix/embedded-ui-runtime
-          fetch-depth: 0
 
       - name: Replace Bash 3.2-unsafe PyInstaller argument handling
         run: |
@@ -50,23 +49,19 @@ jobs:
               if len(starts) != 1:
                   raise SystemExit(f"{name}: expected one unsafe block, found {len(starts)}")
               start = starts[0]
-              ends = [
-                  i
-                  for i in range(start, len(lines))
-                  if lines[i].strip() == "scripts/pyinstaller-entry.py"
-              ]
+              ends = [i for i in range(start, len(lines)) if lines[i].strip() == "scripts/pyinstaller-entry.py"]
               if len(ends) != 1:
                   raise SystemExit(f"{name}: could not locate PyInstaller entry line")
               end = ends[0]
               path.write_text("\n".join(lines[:start] + replacement + lines[end + 1 :]) + "\n")
-
-          Path(".github/workflows/apply-ui-runtime-patch.yml").unlink()
           PY
 
-      - name: Commit patch
-        run: |
-          git config user.name "Cao Yuhang"
-          git config user.email "caoyuhang@fwerkor.com"
-          git add .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/ui-runtime.yml .github/workflows/apply-ui-runtime-patch.yml
-          git commit -m "fix(ci): support macOS Bash 3.2 in binary builds"
-          git push origin HEAD:fix/embedded-ui-runtime
+      - name: Upload patched workflows
+        uses: actions/upload-artifact@v7
+        with:
+          name: patched-ui-workflows
+          path: |
+            .github/workflows/ci.yml
+            .github/workflows/release.yml
+            .github/workflows/ui-runtime.yml
+          if-no-files-found: error
