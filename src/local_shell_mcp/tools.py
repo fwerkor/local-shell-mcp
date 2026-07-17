@@ -1702,8 +1702,9 @@ def _register_download_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -> N
         ttl_s: int | None = None,
         filename: str | None = None,
         max_downloads: int | None = None,
+        inline: bool = False,
     ) -> ToolResult:
-        """Create a temporary browser-accessible download URL for a local file. Links are public bearer URLs protected by a high-entropy token, TTL, optional download-count limit, and explicit revocation."""
+        """Create a temporary browser-accessible URL for a local file. By default the response is an attachment download; set inline=true when the file should render directly in a browser or Markdown image. Links are public bearer URLs protected by a high-entropy token, TTL, optional download-count limit, and explicit revocation."""
         return await _tool_call(
             asyncio.to_thread,
             create_share_link,
@@ -1711,6 +1712,7 @@ def _register_download_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -> N
             ttl_s,
             filename,
             max_downloads,
+            inline,
         )
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=file_share_meta)

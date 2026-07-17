@@ -328,6 +328,7 @@ def _register_download_routes(app: FastAPI) -> None:
             _body_int(body, "ttl_s", None, allow_none=True),
             body.get("filename"),
             _body_int(body, "max_downloads", None, allow_none=True),
+            _body_bool(body, "inline", False),
         )
 
     @app.get("/tools/download/list")

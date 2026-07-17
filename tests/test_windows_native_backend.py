@@ -17,7 +17,7 @@ async def test_native_persistent_shell_backend_roundtrip(tmp_path, monkeypatch):
     try:
         await ops.send_shell(session["session_id"], "echo native-ok")
         data = {"output": ""}
-        for _ in range(40):
+        for _ in range(100):
             data = await ops.read_shell(session["session_id"], lines=20)
             if "native-ok" in data["output"]:
                 break

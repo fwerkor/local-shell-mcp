@@ -199,6 +199,8 @@ def _link_summary(token: str, link: dict[str, Any]) -> dict[str, Any]:
         "url": f"{_public_base_url()}{_DOWNLOAD_PREFIX}/{token}",
         "path": link.get("display_path"),
         "filename": link.get("filename"),
+        "inline": bool(link.get("inline", False)),
+        "media_type": link.get("media_type"),
         "bytes": link.get("bytes"),
         "created_at": link.get("created_at"),
         "expires_at": link.get("expires_at"),
@@ -252,6 +254,7 @@ def create_share_link(
     ttl_s: int | None = None,
     filename: str | None = None,
     max_downloads: int | None = None,
+    inline: bool = False,
 ) -> dict[str, Any]:
     settings = get_settings()
     if not settings.file_download_enabled:
@@ -271,10 +274,18 @@ def create_share_link(
             snapshot, source_stat, snapshot_stat = _create_snapshot(resolved, token)
         except (OSError, ValueError) as exc:
             raise ValueError(f"Not a regular shareable file: {path}") from exc
+        safe_filename = _safe_filename(filename, resolved)
+        media_type = (
+            mimetypes.guess_type(resolved.name)[0]
+            or mimetypes.guess_type(safe_filename)[0]
+            or "application/octet-stream"
+        )
         link = {
             "path": str(resolved),
             "display_path": relative_display(resolved),
-            "filename": _safe_filename(filename, resolved),
+            "filename": safe_filename,
+            "inline": bool(inline),
+            "media_type": media_type,
             "bytes": source_stat.st_size,
             "snapshot_name": snapshot.name,
             "device": int(snapshot_stat.st_dev),
@@ -296,6 +307,7 @@ def create_share_link(
         path=link["display_path"],
         token_id=_token_id(token),
         expires_at=link["expires_at"],
+        inline=link["inline"],
     )
     return _link_summary(token, link)
 
@@ -431,12 +443,13 @@ def _claim_download(
     return handle, path, claimed_link
 
 
-def _content_disposition(filename: str) -> str:
+def _content_disposition(filename: str, *, inline: bool = False) -> str:
     fallback = (
         filename.encode("ascii", errors="ignore").decode("ascii").replace('"', "") or "download"
     )
     encoded = quote(filename, safe="")
-    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
+    disposition = "inline" if inline else "attachment"
+    return f"{disposition}; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
 
 
 def _file_chunks(
@@ -462,14 +475,20 @@ async def download_endpoint(request: Request) -> Response:
 
     handle, path, link = claimed
     media_type = (
-        mimetypes.guess_type(link.get("filename") or path.name)[0] or "application/octet-stream"
+        link.get("media_type")
+        or mimetypes.guess_type(link.get("filename") or path.name)[0]
+        or "application/octet-stream"
     )
     filename = link.get("filename") or path.name
+    inline = bool(link.get("inline", False))
     headers = {
         "Cache-Control": "private, no-store",
-        "Content-Disposition": _content_disposition(filename),
+        "Content-Disposition": _content_disposition(filename, inline=inline),
         "Content-Length": str(os.fstat(handle.fileno()).st_size),
+        "X-Content-Type-Options": "nosniff",
     }
+    if inline:
+        headers["Content-Security-Policy"] = "sandbox"
     audit(
         "download_link_served",
         path=link.get("display_path"),

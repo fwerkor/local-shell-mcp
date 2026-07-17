@@ -478,7 +478,7 @@ At least one of `source_machine` and `destination_machine` must be supplied. Omi
 
 ### `create_file_link`
 
-Create a temporary browser-accessible download URL for a local file. Links are public bearer URLs protected by a high-entropy token, TTL, optional download-count limit, and explicit revocation.
+Create a temporary browser-accessible URL for a local file. By default the response is an attachment download; set inline=true when the file should render directly in a browser or Markdown image. Links are public bearer URLs protected by a high-entropy token, TTL, optional download-count limit, and explicit revocation.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -486,6 +486,7 @@ Create a temporary browser-accessible download URL for a local file. Links are p
 | `ttl_s` | `integer \| null` | `null` |  |
 | `filename` | `string \| null` | `null` |  |
 | `max_downloads` | `integer \| null` | `null` |  |
+| `inline` | `boolean` | `false` |  |
 
 OAuth scopes: `shell:read, file:share`.
 

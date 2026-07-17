@@ -161,7 +161,7 @@ def test_main_subcommands_and_version(monkeypatch, capsys):
     assert calls == [("job", ["a"]), ("worker", ["b"]), ("tui", ["c"])]
     output = capsys.readouterr().out
     assert "version-info" in output
-    assert output.count("3.0.0") == 2
+    assert output.count("3.0.1") == 2
 
 
 def test_main_modes_config_and_errors(tmp_path, monkeypatch):
