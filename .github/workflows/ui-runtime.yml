@@ -76,15 +76,13 @@ jobs:
           bun run build
 
       - name: Build one-file executable with embedded OpenTUI
-        id: build
         shell: bash
         run: |
-          set -uo pipefail
+          set -euo pipefail
           EXTRA_PYINSTALLER_ARGS=()
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
             EXTRA_PYINSTALLER_ARGS+=(--collect-all winpty)
           fi
-          set +e
           pyinstaller \
             --clean \
             --onefile \
@@ -96,57 +94,15 @@ jobs:
             --collect-all starlette \
             --exclude-module cryptography \
             "${EXTRA_PYINSTALLER_ARGS[@]}" \
-            scripts/pyinstaller-entry.py > pyinstaller.log 2>&1
-          status=$?
-          set -e
-          python - <<'PY' >> "$GITHUB_OUTPUT"
-          import re
-          from pathlib import Path
-          lines = [line.strip() for line in Path("pyinstaller.log").read_text(errors="replace").splitlines() if line.strip()]
-          tail = " | ".join(lines[-5:]) if lines else "no-log"
-          tail = re.sub(r"[^A-Za-z0-9._ -]+", "_", tail)[:180].strip(" .") or "unknown"
-          print(f"diagnostic={tail}")
-          PY
-          tail -n 120 pyinstaller.log
-          exit "$status"
-
-      - name: Upload PyInstaller failure log
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: pyinstaller-${{ matrix.label }}-${{ steps.build.outputs.diagnostic }}
-          path: pyinstaller.log
-          if-no-files-found: ignore
+            scripts/pyinstaller-entry.py
 
       - name: Verify WebUI and embedded TUI without sidecar
-        id: smoke
         shell: bash
         run: |
-          set -uo pipefail
+          set -euo pipefail
           rm -f "ui/dist/${{ matrix.tui_binary }}"
           test ! -e "ui/dist/${{ matrix.tui_binary }}"
-          set +e
-          python scripts/standalone-ui-smoke.py --server "dist/${{ matrix.binary }}" > smoke.log 2>&1
-          status=$?
-          set -e
-          python - <<'PY' >> "$GITHUB_OUTPUT"
-          import re
-          from pathlib import Path
-          lines = [line.strip() for line in Path("smoke.log").read_text(errors="replace").splitlines() if line.strip()]
-          tail = " | ".join(lines[-5:]) if lines else "no-log"
-          tail = re.sub(r"[^A-Za-z0-9._ -]+", "_", tail)[:180].strip(" .") or "unknown"
-          print(f"diagnostic={tail}")
-          PY
-          cat smoke.log
-          exit "$status"
-
-      - name: Upload standalone smoke failure log
-        if: failure() && hashFiles('smoke.log') != ''
-        uses: actions/upload-artifact@v7
-        with:
-          name: smoke-${{ matrix.label }}-${{ steps.smoke.outputs.diagnostic }}
-          path: smoke.log
-          if-no-files-found: ignore
+          python scripts/standalone-ui-smoke.py --server "dist/${{ matrix.binary }}"
 
   docker:
     name: Docker UI / ${{ matrix.platform }}
