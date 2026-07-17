@@ -59,9 +59,7 @@ def validate_skill_file_path(path: str) -> Path:
     if not path:
         raise ValueError("Skill file path must not be empty")
     if len(path) > MAX_SKILL_FILE_PATH_CHARS:
-        raise ValueError(
-            f"Skill file path must be at most {MAX_SKILL_FILE_PATH_CHARS} characters"
-        )
+        raise ValueError(f"Skill file path must be at most {MAX_SKILL_FILE_PATH_CHARS} characters")
     if "\\" in path or ":" in path:
         raise ValueError("Skill file path must use portable POSIX separators")
     if any(ord(character) < 32 or ord(character) == 127 for character in path):
@@ -175,23 +173,16 @@ def _resolved_skills_directory(config_dir: Path, directory: str) -> tuple[Path, 
     directory_path = Path(directory)
     if not _is_relative_child_path(directory_path):
         raise ValueError(f"Skills directory must be inside config directory: {directory}")
-    skills_dir = (config_root / directory_path).resolve()
-    if not skills_dir.is_relative_to(config_root):
-        raise ValueError(f"Skills directory must be inside config directory: {directory}")
+    skills_dir = config_root / directory_path
     return config_root, skills_dir
 
 
-def _open_regular_file(
-    path: Path, allowed_root: Path, max_bytes: int
-) -> tuple[str, int, Path]:
-    """Open a bounded regular file without following its final symlink and verify it stayed in-root."""
+def _open_regular_file(path: Path, max_bytes: int) -> tuple[str, int, Path]:
+    """Open a bounded regular file, following symlinks when present."""
     limit = _bounded(max_bytes, DEFAULT_MAX_ENTRY_BYTES)
-    root = allowed_root.resolve()
     flags = os.O_RDONLY
     if hasattr(os, "O_BINARY"):
         flags |= os.O_BINARY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
 
     try:
         descriptor = os.open(path, flags)
@@ -204,16 +195,10 @@ def _open_regular_file(
             if not stat.S_ISREG(opened_stat.st_mode):
                 raise ValueError("Skill file path must be a regular file")
             if opened_stat.st_size > limit:
-                raise ValueError(
-                    f"Skill file is {opened_stat.st_size} bytes; maximum is {limit}"
-                )
+                raise ValueError(f"Skill file is {opened_stat.st_size} bytes; maximum is {limit}")
 
             resolved = path.resolve(strict=True)
-            if not resolved.is_relative_to(root):
-                raise ValueError("Skill file path must stay inside the skill directory")
-            current_stat = path.stat(follow_symlinks=False)
-            if stat.S_ISLNK(current_stat.st_mode):
-                raise ValueError("Skill file path must not be a symlink")
+            current_stat = path.stat()
             if (
                 opened_stat.st_ino
                 and current_stat.st_ino
@@ -231,9 +216,7 @@ def _open_regular_file(
                 chunks.append(chunk)
                 total += len(chunk)
                 if total > limit:
-                    raise ValueError(
-                        f"Skill file exceeds maximum size of {limit} bytes"
-                    )
+                    raise ValueError(f"Skill file exceeds maximum size of {limit} bytes")
             data = b"".join(chunks)
         except OSError as exc:
             raise ValueError(
@@ -251,19 +234,16 @@ def _resolve_skill_root(skills_dir: Path, name: str) -> Path:
     validated_name = validate_skill_name(name)
     candidate = skills_dir / validated_name
     try:
-        candidate_stat = candidate.stat(follow_symlinks=False)
+        resolved = candidate.resolve(strict=True)
     except FileNotFoundError as exc:
         raise ValueError(
             f"Unknown skill: {validated_name}. Call skills_list to see installed skills."
         ) from exc
     except OSError as exc:
         raise ValueError(f"Could not inspect skill {validated_name}: {exc}") from exc
-    if stat.S_ISLNK(candidate_stat.st_mode) or not stat.S_ISDIR(candidate_stat.st_mode):
-        raise ValueError("Skill directory must be a regular directory, not a symlink")
-    resolved = candidate.resolve(strict=True)
-    if not resolved.is_relative_to(skills_dir):
-        raise ValueError("Skill directory must stay inside the skills directory")
-    return resolved
+    if not resolved.is_dir():
+        raise ValueError("Skill path must resolve to a directory")
+    return candidate
 
 
 def _scan_related_files(
@@ -293,10 +273,20 @@ def _scan_related_files(
         )
         return related_files, warnings, scanned_entries
     path_bytes = 0
-    stack = [skill_root]
+    stack: list[tuple[Path, tuple[str, ...]]] = [(skill_root, ())]
+    visited_directories: set[Path] = set()
+    resolved_entry = entry_path.resolve(strict=True)
 
     while stack:
-        current = stack.pop()
+        current, relative_parts = stack.pop()
+        try:
+            resolved_current = current.resolve(strict=True)
+        except OSError as exc:
+            _append_warning(warnings, f"Could not resolve related directory {current}: {exc}")
+            continue
+        if resolved_current in visited_directories:
+            continue
+        visited_directories.add(resolved_current)
         try:
             with os.scandir(current) as iterator:
                 entries = []
@@ -314,31 +304,19 @@ def _scan_related_files(
             continue
 
         for entry in sorted(entries, key=lambda item: item.name, reverse=True):
-            path = Path(entry.path)
+            path = current / entry.name
+            logical_parts = (*relative_parts, entry.name)
+            relative = PurePosixPath(*logical_parts).as_posix()
             try:
-                entry_stat = entry.stat(follow_symlinks=False)
-                if stat.S_ISLNK(entry_stat.st_mode):
-                    _append_warning(
-                        warnings,
-                        f"Skipping related path {path.name}: symlinks are not allowed",
-                    )
-                    continue
+                entry_stat = entry.stat(follow_symlinks=True)
                 if stat.S_ISDIR(entry_stat.st_mode):
-                    resolved_dir = path.resolve(strict=True)
-                    if resolved_dir.is_relative_to(skill_root):
-                        stack.append(resolved_dir)
-                    else:
-                        _append_warning(
-                            warnings,
-                            f"Skipping related directory {path.name}: path escaped the Skill",
-                        )
+                    stack.append((path, logical_parts))
                     continue
                 if not stat.S_ISREG(entry_stat.st_mode):
                     continue
                 resolved = path.resolve(strict=True)
-                if resolved == entry_path or not resolved.is_relative_to(skill_root):
+                if relative == "SKILL.md" or resolved == resolved_entry:
                     continue
-                relative = _relative_posix(skill_root, resolved)
                 validate_skill_file_path(relative)
                 encoded_bytes = len(relative.encode("utf-8"))
                 if len(related_files) >= related_limit:
@@ -378,9 +356,7 @@ def _load_skill_record(
     entry_path = skill_root / "SKILL.md"
     if not entry_path.exists():
         raise ValueError(f"Skill {name} is missing SKILL.md")
-    content, content_bytes, resolved_entry = _open_regular_file(
-        entry_path, skill_root, max_entry_bytes
-    )
+    content, content_bytes, resolved_entry = _open_regular_file(entry_path, max_entry_bytes)
     related_files, warnings, scanned_entries = _scan_related_files(
         skill_root,
         resolved_entry,
@@ -390,7 +366,7 @@ def _load_skill_record(
     )
     record = SkillRecord(
         name=name,
-        entry_path=_relative_posix(config_root, resolved_entry),
+        entry_path=_relative_posix(config_root, entry_path),
         description=_skill_description(content),
         related_files=related_files,
     )
@@ -433,21 +409,18 @@ def scan_agent_skills(
                     break
                 scanned_entries += 1
                 try:
-                    entry_stat = entry.stat(follow_symlinks=False)
+                    entry_stat = entry.stat(follow_symlinks=True)
                 except OSError as exc:
                     _append_warning(warnings, f"Skipping skill {entry.name!r}: {exc}")
-                    continue
-                if stat.S_ISLNK(entry_stat.st_mode):
-                    _append_warning(
-                        warnings,
-                        f"Skipping skill {entry.name!r}: skill directory is a symlink",
-                    )
                     continue
                 if not stat.S_ISDIR(entry_stat.st_mode):
                     continue
                 candidates.append(entry.name)
     except OSError as exc:
-        return SkillScanResult(warnings=[f"Could not scan skills directory {directory}: {exc}"])
+        return SkillScanResult(
+            warnings=[f"Could not scan skills directory {directory}: {exc}"],
+            scanned_entries=scanned_entries,
+        )
 
     candidates.sort()
     if len(candidates) > skill_limit:
@@ -458,6 +431,7 @@ def scan_agent_skills(
         candidates = candidates[:skill_limit]
 
     skills: dict[str, SkillRecord] = {}
+    total_scanned_entries = scanned_entries
     remaining_scan_entries = max(0, scan_limit - scanned_entries)
     remaining_path_bytes = max(0, int(max_path_bytes))
     for name in candidates:
@@ -476,15 +450,18 @@ def scan_agent_skills(
             _append_warning(warnings, f"Skipping skill {name!r}: {exc}")
             continue
         skills[name] = record
+        total_scanned_entries += related_scanned
         remaining_scan_entries = max(0, remaining_scan_entries - related_scanned)
         for warning in skill_warnings:
             _append_warning(warnings, f"Skill {name}: {warning}")
-        remaining_path_bytes -= sum(
-            len(path.encode("utf-8")) for path in record.related_files
-        )
+        remaining_path_bytes -= sum(len(path.encode("utf-8")) for path in record.related_files)
         remaining_path_bytes = max(0, remaining_path_bytes)
 
-    return SkillScanResult(skills=skills, warnings=warnings)
+    return SkillScanResult(
+        skills=skills,
+        warnings=warnings,
+        scanned_entries=total_scanned_entries,
+    )
 
 
 def load_agent_skill(
@@ -535,9 +512,7 @@ def read_agent_skill_file(
     if relative_path.as_posix() == "SKILL.md":
         raise ValueError("Use skill_load to read SKILL.md")
     file_path = skill_root / relative_path
-    content, content_bytes, _ = _open_regular_file(
-        file_path, skill_root, max_file_bytes
-    )
+    content, content_bytes, _ = _open_regular_file(file_path, max_file_bytes)
     return {
         "name": skill_name,
         "path": relative_path.as_posix(),
@@ -558,9 +533,7 @@ def activate_skill(
     if not _is_relative_child_path(entry_relative):
         raise ValueError("Skill entry path must be inside config directory")
     entry_path = config_root / entry_relative
-    content, content_bytes, _ = _open_regular_file(
-        entry_path, entry_path.parent.resolve(), max_entry_bytes
-    )
+    content, content_bytes, _ = _open_regular_file(entry_path, max_entry_bytes)
     return {
         "name": skill.name,
         "entry_path": skill.entry_path,

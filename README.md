@@ -145,13 +145,9 @@ See the [remote workers guide](https://fwerkor.github.io/local-shell-mcp/guides/
 
 ## Agent Skills
 
-Place externally managed Skill directories under:
+Skills are discovered from three ordered sources: project-level `/workspace/.agents/skills`, the LSM-managed `/workspace/.local-shell-mcp/agent_config/skills`, and global `~/.config/agents/skills`. Higher-priority sources override lower-priority Skills with the same name, and symlinked Skill directories and files are supported.
 
-```text
-/workspace/.local-shell-mcp/agent_config/skills/<skill-name>/SKILL.md
-```
-
-Use `skills_list` to discover installed Skills, `skill_load` to load one instruction set, and `skill_read_file` to read a related file by the returned Skill-relative path. Skill changes are detected on the next call; no per-Skill MCP tools are registered and no client reconnect is required. The runtime intentionally leaves installation, updates, and removal to ordinary file or Git operations.
+This makes the universal Skills CLI layout work directly, for example `npx skills add owner/repo --agent universal -y`. Use `skills_list` to discover installed Skills, `skill_load` to load one instruction set, and `skill_read_file` to read a related file by the returned Skill-relative path. Changes are detected on the next call; no per-Skill MCP tools are registered and no client reconnect is required.
 
 See the [Agent Skills guide](https://fwerkor.github.io/local-shell-mcp/guides/skills/).
 

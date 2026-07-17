@@ -21,7 +21,19 @@ def test_skill_name_and_path_validation_all_rejections(monkeypatch):
         skills.validate_skill_name(surrogate)
     assert skills.validate_skill_name("合法-name") == "合法-name"
 
-    invalid_paths = [None, "", "x" * (skills.MAX_SKILL_FILE_PATH_CHARS + 1), r"a\b", "a:b", "a\x01", "/a", "../a", ".", "a//b", "a/./b"]
+    invalid_paths = [
+        None,
+        "",
+        "x" * (skills.MAX_SKILL_FILE_PATH_CHARS + 1),
+        r"a\b",
+        "a:b",
+        "a\x01",
+        "/a",
+        "../a",
+        ".",
+        "a//b",
+        "a/./b",
+    ]
     for value in invalid_paths:
         with pytest.raises(ValueError):
             skills.validate_skill_file_path(value)  # type: ignore[arg-type]
@@ -37,7 +49,10 @@ def test_descriptions_front_matter_and_warning_cap():
     assert skills._normalize_description("   ") is None
     assert skills._normalize_description("x" * 600).endswith("…")
 
-    assert skills._skill_description("\n---\ndescription: Useful skill\n---\n# Heading") == "Useful skill"
+    assert (
+        skills._skill_description("\n---\ndescription: Useful skill\n---\n# Heading")
+        == "Useful skill"
+    )
     assert skills._skill_description("+++\ndescription = 'TOML skill'\n+++\nbody") == "TOML skill"
     assert skills._skill_description("---\n[bad\n---\n# Heading\n```\nignored\n```\n") == "Heading"
     assert skills._skill_description("```\nignored\n```\n") == "Agent skill"
@@ -66,20 +81,20 @@ def test_resolved_directories_regular_files_and_roots(tmp_path, monkeypatch):
         skills._resolve_skill_root(directory, "missing")
     file_skill = directory / "file"
     file_skill.write_text("x", encoding="utf-8")
-    with pytest.raises(ValueError, match="regular directory"):
+    with pytest.raises(ValueError, match="resolve to a directory"):
         skills._resolve_skill_root(directory, "file")
 
     skill = directory / "good"
     skill.mkdir()
     entry = skill / "SKILL.md"
     entry.write_bytes(b"line\r\nnext\r")
-    content, size, resolved = skills._open_regular_file(entry, skill, 100)
+    content, size, resolved = skills._open_regular_file(entry, 100)
     assert content == "line\nnext\n"
     assert size > 0 and resolved == entry.resolve()
     with pytest.raises(ValueError, match="maximum"):
-        skills._open_regular_file(entry, skill, 1)
+        skills._open_regular_file(entry, 1)
     with pytest.raises(ValueError, match="readable regular"):
-        skills._open_regular_file(skill / "missing", skill, 100)
+        skills._open_regular_file(skill / "missing", 100)
 
     if hasattr(os, "symlink"):
         link = skill / "link.md"
@@ -88,8 +103,10 @@ def test_resolved_directories_regular_files_and_roots(tmp_path, monkeypatch):
         except OSError:
             pass
         else:
-            with pytest.raises(ValueError):
-                skills._open_regular_file(link, skill, 100)
+            linked_content, linked_size, linked_resolved = skills._open_regular_file(link, 100)
+            assert linked_content == content
+            assert linked_size == size
+            assert linked_resolved == entry.resolve()
 
 
 def test_related_scan_budgets_symlinks_and_failures(tmp_path, monkeypatch):
@@ -156,14 +173,15 @@ def test_related_scan_budgets_symlinks_and_failures(tmp_path, monkeypatch):
         except OSError:
             pass
         else:
-            _, warnings, _ = skills._scan_related_files(
+            related, warnings, _ = skills._scan_related_files(
                 skill,
                 entry.resolve(),
                 max_related_files=10,
                 max_scan_entries=100,
                 max_path_bytes=1000,
             )
-            assert any("symlinks" in warning for warning in warnings)
+            assert "link" not in related
+            assert not any("symlink" in warning for warning in warnings)
 
     real_scandir = skills.os.scandir
 

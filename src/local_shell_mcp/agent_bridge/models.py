@@ -25,3 +25,5 @@ class SkillScanResult:
     """Accepted skills keyed by skill name."""
     warnings: list[str] = field(default_factory=list)
     """Non-fatal discovery warnings for ignored or invalid entries."""
+    scanned_entries: int = 0
+    """Filesystem entries consumed from the registry scan budget."""
