@@ -88,6 +88,22 @@ def api_request(page: Page, path: str, method: str = "GET", body: object | None 
     )
 
 
+def wait_for_terminal_session(page: Page, session_id: str, timeout_s: float = 10) -> str:
+    deadline = time.monotonic() + timeout_s
+    sessions: list[dict] = []
+    while time.monotonic() < deadline:
+        response = api_request(page, "/api/ui/terminals?machine=local")
+        assert response["status"] == 200, response
+        sessions = response["body"]["data"]["sessions"]
+        if any(session["session_id"] == session_id for session in sessions):
+            return session_id
+        page.wait_for_timeout(100)
+    raise AssertionError(
+        f"Terminal session did not appear: {session_id!r}; "
+        f"sessions={[session.get('session_id') for session in sessions]!r}"
+    )
+
+
 def selected_terminal_session(page: Page) -> str | None:
     marker = "local / "
     for row in xterm_rows(page):
@@ -199,13 +215,7 @@ def run_browser(port: int) -> None:
             wait_for_terminal_text(page, second_name, timeout_s=8)
             assert len(page.context.pages) == page_count
 
-            terminal_list = api_request(page, "/api/ui/terminals?machine=local")
-            assert terminal_list["status"] == 200, terminal_list
-            second_session_id = next(
-                session["session_id"]
-                for session in terminal_list["body"]["data"]["sessions"]
-                if session["session_id"] == second_name
-            )
+            second_session_id = wait_for_terminal_session(page, second_name, timeout_s=10)
             session_ids.append(second_session_id)
             url_before_switch = page.url
             page.keyboard.press("Alt+ArrowLeft")
