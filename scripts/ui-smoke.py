@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import socket
 import subprocess
@@ -322,14 +323,44 @@ def main() -> int:
         (workspace / "mouse-second.txt").write_text("second", encoding="utf-8")
         state_dir.mkdir()
         now = time.time()
+        audit_records = [
+            {
+                "ts": now - 21,
+                "event": "mcp_tool_call_start",
+                "call_id": "audit-old-call",
+                "tool": "audit-old-tool",
+                "machine": "local",
+                "arguments": {"keyword_args": {"command": "audit-old-input"}},
+            },
+            {
+                "ts": now - 20,
+                "event": "mcp_tool_call_end",
+                "call_id": "audit-old-call",
+                "tool": "audit-old-tool",
+                "machine": "local",
+                "ok": True,
+                "result": {"detail": "audit-old-detail"},
+            },
+            {
+                "ts": now - 11,
+                "event": "mcp_tool_call_start",
+                "call_id": "audit-new-call",
+                "tool": "audit-new-tool",
+                "machine": "local",
+                "arguments": {"keyword_args": {"command": "audit-new-input"}},
+            },
+            {
+                "ts": now - 10,
+                "event": "mcp_tool_call_end",
+                "call_id": "audit-new-call",
+                "tool": "audit-new-tool",
+                "machine": "local",
+                "ok": True,
+                "result": {"detail": "audit-new-detail"},
+            },
+        ]
         (state_dir / "audit.jsonl").write_text(
-            "\n".join(
-                [
-                    f'{{"ts": {now - 20}, "event": "mcp_tool_call_end", "tool": "audit-old-tool", "machine": "local", "operation": "read", "command": "audit-old-detail", "ok": true}}',
-                    f'{{"ts": {now - 10}, "event": "mcp_tool_call_end", "tool": "audit-new-tool", "machine": "local", "operation": "run", "command": "audit-new-detail", "ok": true}}',
-                ]
-            )
-            + "\n",
+            "\n".join(json.dumps(record) for record in audit_records) + "\n",
             encoding="utf-8",
         )
         env = os.environ.copy()
