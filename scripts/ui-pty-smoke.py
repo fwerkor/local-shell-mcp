@@ -89,7 +89,7 @@ async def exercise_websocket(port: int) -> None:
         initial = await receive_activity(websocket, label="initial render", minimum_bytes=512)
         if b"\x1b" not in initial:
             raise AssertionError("Initial OpenTUI output did not contain ANSI control sequences")
-        if b"F1 help" in initial or b"Ctrl+Q quit" in initial:
+        if b"Alt+1" in initial or b"F1 help" in initial or b"Ctrl+Q quit" in initial:
             raise AssertionError("Top navigation still contains persistent shortcut instructions")
 
         await drain_websocket(websocket)

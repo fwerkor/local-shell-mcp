@@ -35,16 +35,11 @@ export function TopNav({
       <text fg={theme.text} attributes={1} content={compact ? "LSM" : "LOCAL SHELL"} />
       {!compact && <text fg={theme.cyan} attributes={1} content=" MCP" />}
       <text fg={theme.faint} content={narrow ? " " : "  /  "} />
-      {SCREENS.map((screen, index) => {
+      {SCREENS.map((screen) => {
         const selected = screen === active
         const colors = screenTheme[screen]
-        const key = `A${index + 1}`
         const narrowInitial = screen === "Todos" ? "D" : screen[0]
-        const label = narrow
-          ? `${index + 1}${narrowInitial}`
-          : compact
-            ? `${key}:${screen.slice(0, 3)}`
-            : `Alt+${index + 1} ${screen}`
+        const label = narrow ? narrowInitial : compact ? screen.slice(0, 3) : screen
         return (
           <box
             key={screen}
