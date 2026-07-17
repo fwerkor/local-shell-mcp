@@ -58,6 +58,18 @@ def test_create_share_link_can_render_inline(tmp_path, monkeypatch):
     assert head_response.headers["content-security-policy"] == "sandbox"
 
 
+def test_inline_link_uses_display_filename_as_mime_fallback(tmp_path, monkeypatch):
+    _reset(tmp_path, monkeypatch)
+    (tmp_path / "preview").write_bytes(b"not-a-real-png")
+
+    link = create_share_link("preview", ttl_s=60, filename="plot.png", inline=True)
+    response = TestClient(Starlette(routes=download_routes())).get(link["url"])
+
+    assert link["media_type"] == "image/png"
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+
+
 def test_share_link_expires_and_can_be_revoked(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
     (tmp_path / "hello.txt").write_text("hello", encoding="utf-8")

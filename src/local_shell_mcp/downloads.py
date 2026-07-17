@@ -274,12 +274,18 @@ def create_share_link(
             snapshot, source_stat, snapshot_stat = _create_snapshot(resolved, token)
         except (OSError, ValueError) as exc:
             raise ValueError(f"Not a regular shareable file: {path}") from exc
+        safe_filename = _safe_filename(filename, resolved)
+        media_type = (
+            mimetypes.guess_type(resolved.name)[0]
+            or mimetypes.guess_type(safe_filename)[0]
+            or "application/octet-stream"
+        )
         link = {
             "path": str(resolved),
             "display_path": relative_display(resolved),
-            "filename": _safe_filename(filename, resolved),
+            "filename": safe_filename,
             "inline": bool(inline),
-            "media_type": mimetypes.guess_type(resolved.name)[0] or "application/octet-stream",
+            "media_type": media_type,
             "bytes": source_stat.st_size,
             "snapshot_name": snapshot.name,
             "device": int(snapshot_stat.st_dev),
