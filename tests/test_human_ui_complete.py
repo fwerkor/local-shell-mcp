@@ -634,6 +634,17 @@ def test_websocket_control_flow_and_limits(tmp_path, monkeypatch):
     assert b"Unable to start the TUI" in spawn_failure.sent[0]
     assert spawn_failure.closed[-1][0] == 1011
 
+    class WaitingSocket(Socket):
+        async def receive(self):
+            await asyncio.sleep(0.05)
+            return {"type": "websocket.disconnect"}
+
+    process = Process([b""])
+    monkeypatch.setattr(ui, "_spawn_tui_process", lambda *args: process)
+    exited = WaitingSocket()
+    asyncio.run(ui.ui_terminal_websocket(exited))
+    assert any(code == ui.UI_TUI_EXIT_CODE for code, _ in exited.closed)
+
     process = Process([b"hello"])
     monkeypatch.setattr(ui, "_spawn_tui_process", lambda *args: process)
     messages = [

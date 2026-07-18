@@ -229,6 +229,10 @@ def run_browser(port: int) -> None:
 
             page.keyboard.press("F8")
             wait_for_terminal_text(page, "RAW INPUT")
+            page.keyboard.press("Alt+q")
+            page.wait_for_timeout(500)
+            assert page.locator("#connection-state strong").inner_text() == "Connected"
+            wait_for_terminal_text(page, "RAW INPUT")
             page.keyboard.press("Alt+1")
             page.wait_for_timeout(500)
             assert "MCP audit · manual input excluded" in page.locator("body").inner_text()

@@ -51,6 +51,7 @@ UI_MIN_COLUMNS = 20
 UI_MAX_COLUMNS = 500
 UI_MIN_ROWS = 8
 UI_MAX_ROWS = 200
+UI_TUI_EXIT_CODE = 4410
 _ACTIVE_UI_TERMINALS: set[int] = set()
 _LOGGER = logging.getLogger(__name__)
 
@@ -1041,6 +1042,9 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
         while True:
             data = await process.read()
             if not data:
+                await websocket.close(
+                    code=UI_TUI_EXIT_CODE, reason="TUI process exited"
+                )
                 return
             last_activity = loop.time()
             await websocket.send_bytes(data)

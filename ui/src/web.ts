@@ -1,7 +1,7 @@
 import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
 import { createImageAddon } from "./image-support"
-import { BROWSER_QUIT_SEQUENCE, browserShortcutSequence } from "./keyboard"
+import { browserShortcutSequence } from "./keyboard"
 
 declare global {
   interface Window {
@@ -99,10 +99,6 @@ window.addEventListener(
     if (!sequence || socket?.readyState !== WebSocket.OPEN) return
     event.preventDefault()
     event.stopImmediatePropagation()
-    if (sequence === BROWSER_QUIT_SEQUENCE) {
-      manualDisconnect = true
-      clearReconnect()
-    }
     sendTerminalInput(sequence)
   },
   { capture: true },
@@ -298,6 +294,12 @@ function connect(): void {
       loginButton.disabled = false
       return
     }
+    if (event.code === 4410) {
+      manualDisconnect = true
+      setConnection("error", "Disconnected")
+      terminal.write("\r\n\x1b[38;2;255;204;102mThe TUI exited. Use Reconnect to start a new session.\x1b[0m\r\n")
+      return
+    }
     if ([1011, 4400, 4408, 4429].includes(event.code)) {
       manualDisconnect = true
       const detail = event.reason ||
@@ -310,12 +312,7 @@ function connect(): void {
       terminal.write(`\r\n\x1b[38;2;255;123;139m${detail}\x1b[0m\r\nUse Reconnect after correcting the problem.\r\n`)
       return
     }
-    if (manualDisconnect) {
-      setConnection("error", "Disconnected")
-      terminal.write("\r\n\x1b[38;2;255;204;102mThe TUI exited. Use Reconnect to start a new session.\x1b[0m\r\n")
-      return
-    }
-    scheduleReconnect()
+    if (!manualDisconnect) scheduleReconnect()
   }
 }
 

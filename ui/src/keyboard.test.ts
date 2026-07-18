@@ -12,9 +12,10 @@ describe("browserShortcutSequence", () => {
     expect(shortcut("5")).toBe("\u001b[17~")
   })
 
-  test("uses the physical key for Option-modified printable characters", () => {
+  test("uses the physical key only for Option-modified unsupported characters", () => {
     expect(shortcut("œ", "KeyQ")).toBe("\u001b[113;3u")
     expect(shortcut("¡", "Digit1")).toBe("\u001bOQ")
+    expect(shortcut("a", "KeyQ")).toBe("\u001b[97;3u")
   })
 
   test("encodes terminal actions as reliable Alt key events", () => {
