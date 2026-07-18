@@ -47,7 +47,13 @@ def xterm_rows(page: Page) -> list[str]:
     return page.locator(".xterm-rows > div").all_text_contents()
 
 
-def click_tui_label(page: Page, label: str, occurrence: int = 0) -> None:
+def click_tui_label(
+    page: Page,
+    label: str,
+    occurrence: int = 0,
+    *,
+    rightmost: bool = False,
+) -> None:
     rows = xterm_rows(page)
     matches: list[tuple[int, int]] = []
     for row_index, row in enumerate(rows):
@@ -60,7 +66,7 @@ def click_tui_label(page: Page, label: str, occurrence: int = 0) -> None:
             start = column + max(1, len(label))
     if not matches:
         raise AssertionError(f"Terminal label not found: {label!r}")
-    row_index, column = matches[occurrence]
+    row_index, column = max(matches, key=lambda match: match[1]) if rightmost else matches[occurrence]
     column += max(1, len(label) // 2)
     screen = page.locator(".xterm-screen").bounding_box()
     if not screen:
@@ -139,6 +145,26 @@ def wait_for_terminal_text(page: Page, needle: str, timeout_s: float = 10) -> No
     raise AssertionError(f"Terminal text did not contain {needle!r}\n{text[-5000:]}")
 
 
+def click_until_terminal_text(
+    page: Page,
+    label: str,
+    expected: str,
+    *,
+    rightmost: bool = False,
+    timeout_s: float = 10,
+) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        click_tui_label(page, label, rightmost=rightmost)
+        page.wait_for_timeout(200)
+        if expected in page.locator("body").inner_text():
+            return
+    text = page.locator("body").inner_text()
+    raise AssertionError(
+        f"Clicking terminal label {label!r} did not reveal {expected!r}\n{text[-5000:]}"
+    )
+
+
 def run_browser(port: int) -> None:
     origin = f"http://127.0.0.1:{port}"
     with sync_playwright() as playwright:
@@ -169,8 +195,12 @@ def run_browser(port: int) -> None:
             assert authenticated == 200
             wait_for_terminal_text(page, "Files")
             wait_for_terminal_text(page, "mouse-second.txt")
-            click_tui_label(page, "mouse-second.txt")
-            wait_for_terminal_text(page, "Preview · mouse-second.txt")
+            click_until_terminal_text(
+                page,
+                "mouse-second.txt",
+                "Preview · mouse-second.txt",
+                rightmost=True,
+            )
 
             todo_seed = api_request(page, "/api/ui/todos")
             assert todo_seed["status"] == 200, todo_seed
@@ -286,6 +316,120 @@ def run_browser(port: int) -> None:
             assert metrics["shell"]["height"] <= metrics["height"]
             wait_for_terminal_text(page, "Fil")
             wait_for_terminal_text(page, "Rem")
+
+            assert page.evaluate("!matchMedia('(pointer: coarse)').matches")
+            page.dispatch_event(
+                "#keyboard-button",
+                "pointerdown",
+                {"pointerType": "touch", "bubbles": True},
+            )
+            page.dispatch_event("#keyboard-button", "click")
+            first_hybrid_keyboard_tap = page.evaluate(
+                """(() => {
+                    const textarea = document.querySelector('.xterm-helper-textarea')
+                    return {
+                        readOnly: textarea.readOnly,
+                        inputMode: textarea.inputMode,
+                        pressed: document.querySelector('#keyboard-button').getAttribute('aria-pressed')
+                    }
+                })()"""
+            )
+            assert first_hybrid_keyboard_tap == {
+                "readOnly": False,
+                "inputMode": "text",
+                "pressed": "true",
+            }
+            page.dispatch_event(
+                "#keyboard-button",
+                "pointerdown",
+                {"pointerType": "touch", "bubbles": True},
+            )
+            page.dispatch_event("#keyboard-button", "click")
+
+            page.dispatch_event(
+                "#terminal",
+                "pointerdown",
+                {"pointerType": "touch", "bubbles": True},
+            )
+            hybrid_touch = page.evaluate(
+                """(() => {
+                    const textarea = document.querySelector('.xterm-helper-textarea')
+                    return {readOnly: textarea.readOnly, inputMode: textarea.inputMode}
+                })()"""
+            )
+            assert hybrid_touch == {"readOnly": True, "inputMode": "none"}
+            page.dispatch_event(
+                "#terminal",
+                "pointerdown",
+                {"pointerType": "mouse", "bubbles": True},
+            )
+            hybrid_mouse = page.evaluate(
+                """(() => {
+                    const textarea = document.querySelector('.xterm-helper-textarea')
+                    return {readOnly: textarea.readOnly, inputMode: textarea.inputMode}
+                })()"""
+            )
+            assert hybrid_mouse == {"readOnly": False, "inputMode": "text"}
+
+            mobile_context = browser.new_context(
+                viewport={"width": 390, "height": 844},
+                has_touch=True,
+                is_mobile=True,
+            )
+            mobile_page = mobile_context.new_page()
+            try:
+                mobile_page.goto(f"{origin}/ui", wait_until="networkidle")
+                mobile_page.locator("#login-button").click()
+                mobile_page.wait_for_url("**/oauth/authorize**")
+                mobile_page.get_by_role("button", name="Approve").click()
+                mobile_page.wait_for_url("**/ui")
+                mobile_page.locator("#connection-state").get_by_text("Connected").wait_for(timeout=15_000)
+                mobile_page.locator("#terminal").click(position={"x": 40, "y": 80})
+                mobile_page.wait_for_timeout(100)
+                locked = mobile_page.evaluate(
+                    """(() => {
+                        const textarea = document.querySelector('.xterm-helper-textarea')
+                        return {
+                            readOnly: textarea.readOnly,
+                            inputMode: textarea.inputMode,
+                            active: document.activeElement === textarea,
+                            pressed: document.querySelector('#keyboard-button').getAttribute('aria-pressed')
+                        }
+                    })()"""
+                )
+                assert locked == {
+                    "readOnly": True,
+                    "inputMode": "none",
+                    "active": False,
+                    "pressed": "false",
+                }, locked
+
+                mobile_page.locator("#keyboard-button").click()
+                enabled = mobile_page.evaluate(
+                    """(() => {
+                        const textarea = document.querySelector('.xterm-helper-textarea')
+                        return {
+                            readOnly: textarea.readOnly,
+                            inputMode: textarea.inputMode,
+                            active: document.activeElement === textarea,
+                            pressed: document.querySelector('#keyboard-button').getAttribute('aria-pressed')
+                        }
+                    })()"""
+                )
+                assert enabled == {
+                    "readOnly": False,
+                    "inputMode": "text",
+                    "active": True,
+                    "pressed": "true",
+                }, enabled
+
+                mobile_page.locator("#keyboard-button").click()
+                assert mobile_page.locator("#keyboard-button").get_attribute("aria-pressed") == "false"
+                assert mobile_page.evaluate(
+                    "document.activeElement !== document.querySelector('.xterm-helper-textarea')"
+                )
+            finally:
+                mobile_context.close()
 
             for session_id in list(session_ids):
                 killed = api_request(

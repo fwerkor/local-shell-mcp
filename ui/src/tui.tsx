@@ -5,6 +5,8 @@ import { api, formatError } from "./api"
 import { AuditScreen } from "./audit-screen"
 import { Modal, SCREENS, TopNav } from "./components"
 import { FilesScreen } from "./files-screen"
+import { appContentHeight, appContentWidth } from "./layout"
+import { forceFullRepaint } from "./repaint"
 import { RemotesScreen } from "./remotes-screen"
 import { TerminalsScreen } from "./terminals-screen"
 import { theme } from "./theme"
@@ -108,6 +110,10 @@ function App() {
     }
   }, [loadBootstrap])
 
+  useEffect(() => {
+    forceFullRepaint(renderer)
+  }, [height, renderer, screen, width])
+
   useKeyboard((key) => {
     if (terminalRawMode) return
     if (key.ctrl && key.name === "q") {
@@ -124,7 +130,8 @@ function App() {
   const machines: Machine[] = bootstrap?.machines.machines || [
     { name: "local", status: "online", capabilities: ["files", "terminals"] },
   ]
-  const contentHeight = Math.max(12, height - 5)
+  const contentWidth = appContentWidth(width)
+  const contentHeight = appContentHeight(height)
 
   let content
   if (screen === "Files") {
@@ -133,7 +140,7 @@ function App() {
         machines={machines}
         machine={machine}
         onMachine={setMachine}
-        width={width}
+        width={contentWidth}
         height={contentHeight}
         setStatus={setStatus}
         keyboardEnabled={!help}
@@ -146,7 +153,7 @@ function App() {
         machines={machines}
         machine={machine}
         onMachine={setMachine}
-        width={width}
+        width={contentWidth}
         height={contentHeight}
         setStatus={setStatus}
         onRawModeChange={setTerminalRawMode}
@@ -157,7 +164,7 @@ function App() {
   } else if (screen === "Todos") {
     content = (
       <TodosScreen
-        width={width}
+        width={contentWidth}
         height={contentHeight}
         setStatus={setStatus}
         keyboardEnabled={!help}
@@ -168,7 +175,7 @@ function App() {
     content = (
       <AuditScreen
         machines={machines}
-        width={width}
+        width={contentWidth}
         height={contentHeight}
         setStatus={setStatus}
         keyboardEnabled={!help}
@@ -178,7 +185,7 @@ function App() {
   } else {
     content = (
       <RemotesScreen
-        width={width}
+        width={contentWidth}
         height={contentHeight}
         setStatus={setStatus}
         keyboardEnabled={!help}
@@ -191,13 +198,18 @@ function App() {
     <box style={{ width: "100%", height: "100%", flexDirection: "column", backgroundColor: theme.bg, padding: 1 }}>
       <TopNav
         active={screen}
-        width={width}
+        width={contentWidth}
         onSelect={(next) => {
           if (!terminalRawMode && !help && !interactionLocked) setScreen(next)
         }}
       />
-      <box style={{ flexGrow: 1, marginTop: 1 }}>{content}</box>
-      <StatusLine status={status} bootstrap={bootstrap} width={width} />
+      <box
+        key={screen}
+        style={{ flexGrow: 1, marginTop: 1, backgroundColor: theme.bg }}
+      >
+        {content}
+      </box>
+      <StatusLine status={status} bootstrap={bootstrap} width={contentWidth} />
       {help && <Help close={() => setHelp(false)} />}
     </box>
   )

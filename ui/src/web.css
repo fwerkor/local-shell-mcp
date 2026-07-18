@@ -87,7 +87,7 @@ button { font: inherit; }
 #terminal .xterm-viewport { scrollbar-color: rgba(87, 215, 255, .36) transparent; }
 .touchbar {
   display: none;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: repeat(9, minmax(0, 1fr));
   gap: 4px;
   min-width: 0;
   padding: 4px 1px 0;
@@ -103,6 +103,7 @@ button { font: inherit; }
   touch-action: manipulation;
 }
 .touchbar button:active { border-color: var(--cyan); background: rgba(23, 61, 89, .95); }
+.touchbar button[aria-pressed="true"] { border-color: var(--cyan); color: var(--cyan); background: rgba(23, 61, 89, .95); }
 .scanline { pointer-events: none; position: absolute; inset: 7px; opacity: .11; background: repeating-linear-gradient(to bottom, transparent 0, transparent 3px, rgba(116, 203, 245, .09) 4px); mix-blend-mode: screen; }
 
 .gate { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(2, 7, 17, .76); backdrop-filter: blur(15px); }
