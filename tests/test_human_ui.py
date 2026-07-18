@@ -16,10 +16,13 @@ from starlette.requests import Request
 from starlette.routing import Route
 from starlette.websockets import WebSocket
 
+import local_shell_mcp.audit as audit_module
 from local_shell_mcp.audit import audit, query_audit, suppress_audit
 from local_shell_mcp.http_app import build_http_app
 from local_shell_mcp.human_ui import (
     UI_FULL_SCOPES,
+    UI_MAX_COLUMNS,
+    UI_MAX_ROWS,
     _authorize_websocket,
     _bounded_int,
     _idle_timeout_remaining,
@@ -47,6 +50,15 @@ def _configure(tmp_path, monkeypatch, *, auth_mode: str = "none") -> None:
     monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
     get_settings.cache_clear()
 
+
+
+def test_webui_shell_uses_available_viewport_without_fixed_desktop_cap():
+    css_path = Path(__file__).parents[1] / "src/local_shell_mcp/ui_static/web.css"
+    css = css_path.read_text(encoding="utf-8")
+
+    assert "1540px" not in css
+    assert "960px" not in css
+    assert ":fullscreen .shell" in css
 
 
 def test_ui_assets_reject_symlinks_outside_asset_root(tmp_path, monkeypatch):
@@ -372,6 +384,16 @@ def test_pyinstaller_entry_quotes_embedded_tui_paths():
 def test_terminal_dimensions_are_clamped_to_safe_limits():
     assert _bounded_int("2", default=120, minimum=20, maximum=500, label="cols") == 20
     assert _bounded_int("99999", default=120, minimum=20, maximum=500, label="cols") == 500
+    assert (
+        _bounded_int(
+            "1200", default=120, minimum=20, maximum=UI_MAX_COLUMNS, label="cols"
+        )
+        == 1200
+    )
+    assert (
+        _bounded_int("400", default=36, minimum=8, maximum=UI_MAX_ROWS, label="rows")
+        == 400
+    )
     with pytest.raises(ValueError, match="cols must be an integer"):
         _bounded_int("wide", default=120, minimum=20, maximum=500, label="cols")
 
@@ -427,6 +449,67 @@ def test_audit_storage_remains_valid_under_concurrent_trim_and_append(tmp_path, 
     assert all(record["event"] == "mcp_tool_call_end" for record in records)
     assert path.stat().st_size < 5000
     assert not list(tmp_path.glob(".audit.jsonl.*.tmp"))
+
+
+def test_audit_large_payloads_are_previewed_and_loaded_on_demand(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_TAIL_BYTES", "200000")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "200000")
+    get_settings.cache_clear()
+    large_input = "input:" + "x" * 30_000
+    large_output = "output:" + "y" * 40_000
+
+    audit(
+        "mcp_tool_call_start",
+        call_id="large-call",
+        tool="write_file",
+        arguments={"keyword_args": {"content": large_input}},
+    )
+    audit(
+        "mcp_tool_call_end",
+        call_id="large-call",
+        tool="write_file",
+        ok=True,
+        result={"stdout": large_output},
+    )
+
+    raw_records = [
+        json.loads(line)
+        for line in get_settings().audit_log_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert "$local_shell_mcp_audit_payload" in raw_records[0]["arguments"]
+    assert "$local_shell_mcp_audit_payload" in raw_records[1]["result"]
+    assert large_input not in get_settings().audit_log_path.read_text(encoding="utf-8")
+    assert len(list((get_settings().audit_log_path.parent / "audit-payloads").glob("*.json.gz"))) == 2
+
+    client = TestClient(build_http_app())
+    listing = client.get("/api/ui/audit").json()["data"]["entries"][0]
+    assert listing["id"] == "call:large-call"
+    assert listing["input"]["content"].endswith("…<preview>")
+    assert listing["output"]["stdout"].endswith("…<preview>")
+
+    detail = client.get(
+        "/api/ui/audit/detail", params={"id": listing["id"]}
+    ).json()["data"]
+    assert detail["input"]["content"] == large_input
+    assert detail["output"]["stdout"] == large_output
+
+
+def test_audit_trim_prunes_unreferenced_payload_files(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "3500")
+    get_settings.cache_clear()
+
+    audit("large_event", payload="z" * 30_000)
+    payloads = list((get_settings().audit_log_path.parent / "audit-payloads").glob("*.json.gz"))
+    assert len(payloads) == 1
+    stale = time.time() - audit_module._AUDIT_PAYLOAD_PRUNE_GRACE_S - 1
+    os.utime(payloads[0], (stale, stale))
+
+    audit("small_event", value="kept" * 300)
+
+    assert not payloads[0].exists()
+    assert query_audit()["entries"][0]["event"] == "small_event"
 
 
 def test_query_audit_pairs_calls_filters_compact_operations_and_hides_auth(tmp_path, monkeypatch):

@@ -200,7 +200,6 @@ def _oauth_security_scheme(scopes: list[str] | tuple[str, ...]) -> dict[str, Any
 OAUTH_SECURITY_SCHEMES = [_oauth_security_scheme(ALL_OAUTH_SCOPES)]
 NOAUTH_SECURITY_SCHEMES = [{"type": "noauth"}]
 PUBLIC_TOOL_TIMEOUT_S = PUBLIC_TOOL_WATCHDOG_TIMEOUT_S
-MAX_AUDIT_TOOL_ARG_STRING = 500
 MCP_INSTRUCTIONS = (
     "When a task may benefit from an installed Agent Skill, call skills_list first "
     "to discover the exact Skill name and description. Before following a Skill's "
@@ -279,20 +278,13 @@ def _serialize_audit_value(value: Any) -> Any:
     if isinstance(value, BaseModel):
         return _serialize_audit_value(value.model_dump(mode="json"))
     if isinstance(value, str):
-        if len(value) > MAX_AUDIT_TOOL_ARG_STRING:
-            return value[:MAX_AUDIT_TOOL_ARG_STRING] + "…<truncated>"
         return value
     if isinstance(value, (int, float, bool)) or value is None:
         return value
-    if isinstance(value, list):
-        return [_serialize_audit_value(item) for item in value[:20]]
-    if isinstance(value, tuple):
-        return [_serialize_audit_value(item) for item in value[:20]]
+    if isinstance(value, (list, tuple)):
+        return [_serialize_audit_value(item) for item in value]
     if isinstance(value, dict):
-        return {
-            str(name): _serialize_audit_value(item)
-            for name, item in list(value.items())[:50]
-        }
+        return {str(name): _serialize_audit_value(item) for name, item in value.items()}
     return repr(value)
 
 
