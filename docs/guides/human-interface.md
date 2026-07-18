@@ -66,7 +66,7 @@ local-shell-mcp tui --api-base http://127.0.0.1:9876/api/ui
 
 ### Files
 
-Files uses a Yazi-derived three-pane interaction model:
+Files is an LSM-native three-pane file manager:
 
 - The left sidebar selects `local` or any connected remote machine.
 - The parent pane shows the current directory in context.
@@ -74,7 +74,7 @@ Files uses a Yazi-derived three-pane interaction model:
 - The preview pane displays directory contents, text, or a bounded binary preview.
 - File operations include create, edit, rename, copy, move, paste, delete, hidden-file toggle, and refresh.
 
-Official Docker images also include the `yazi` and `ya` executables. The OpenTUI screen keeps the same interaction model on platforms where an external Yazi executable is unavailable.
+The same service API powers file operations on local and remote machines, so the interaction model and conflict handling remain consistent across both targets.
 
 ### Terminals
 
@@ -139,7 +139,7 @@ Each screen displays its contextual shortcuts in the footer.
 
 ## Packaging notes
 
-- Docker images include the WebUI assets, native OpenTUI runtime, and Yazi, and configure the service to use the bundled runtime directly.
+- Docker images include the WebUI assets and native OpenTUI runtime, and configure the service to use the bundled runtime directly.
 - Standalone release executables contain the WebUI assets and a compressed platform OpenTUI runtime; neither WebUI nor native TUI requires a neighboring sidecar.
 - Release archives contain one standalone executable; the OpenTUI runtime is compressed inside it and extracted into PyInstaller's temporary runtime directory when needed.
 - Python wheels include the WebUI assets. A native TUI requires a release executable or a source checkout with Bun and the UI dependencies installed.

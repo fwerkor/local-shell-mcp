@@ -99,7 +99,7 @@ async def test_local_file_api_does_not_block_event_loop(tmp_path, monkeypatch):
     response = await task
     assert response.status_code == 200
 
-def test_human_file_api_has_yazi_style_directory_payload(tmp_path, monkeypatch):
+def test_human_file_api_has_three_pane_directory_payload(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     (tmp_path / "folder").mkdir()
     (tmp_path / "alpha.txt").write_text("alpha", encoding="utf-8")
@@ -532,7 +532,9 @@ def test_native_tui_token_bypasses_oauth_without_weakening_browser_api(tmp_path,
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["machines"]["machines"][0]["name"] == "local"
+    payload = response.json()["data"]
+    assert payload["machines"]["machines"][0]["name"] == "local"
+    assert payload["features"] == {"remote": False, "wallpaper": "bing"}
 
 
 
