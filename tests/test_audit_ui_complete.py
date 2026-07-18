@@ -282,6 +282,83 @@ def test_get_audit_entry_loads_only_the_selected_payloads(tmp_path, monkeypatch)
     assert detail["output"]["stdout"] == "s" * 30_000
 
 
+def test_audit_payload_helpers_cover_edge_paths(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "200000")
+    get_settings.cache_clear()
+
+    class CustomValue:
+        def __repr__(self) -> str:
+            return "custom-value"
+
+    assert audit_module._preview_audit_value([1, "x", CustomValue()]) == [
+        1,
+        "x",
+        "custom-value",
+    ]
+    assert audit_module._preview_audit_value(None) is None
+    assert (
+        audit_module._is_payload_reference(
+            {audit_module._AUDIT_PAYLOAD_MARKER: "invalid", "preview": "x"}
+        )
+        is False
+    )
+    assert (
+        audit_module._is_payload_reference(
+            {
+                audit_module._AUDIT_PAYLOAD_MARKER: {
+                    "version": audit_module._AUDIT_PAYLOAD_VERSION,
+                    "sha256": "a" * 64,
+                },
+                "preview": "x",
+            }
+        )
+        is False
+    )
+
+    missing_reference = {
+        audit_module._AUDIT_PAYLOAD_MARKER: {
+            "version": audit_module._AUDIT_PAYLOAD_VERSION,
+            "sha256": "f" * 64,
+            "bytes": 10,
+        },
+        "preview": "missing-preview",
+    }
+    unavailable = audit_module._resolve_payload_reference(missing_reference, full=True)
+    assert unavailable["error"] == "Audit payload is unavailable"
+    assert unavailable["preview"] == "missing-preview"
+
+    collected: set[str] = set()
+    audit_module._collect_payload_ids("not-a-record", collected)
+    assert collected == set()
+    assert audit_module._payload_file_size("e" * 64) == 0
+
+    oversized = {
+        "id": "oversized",
+        "ts": 1,
+        "event": "custom_event",
+        "payload": "x" * 10_000,
+    }
+    assert audit_module._bounded_preview_record(oversized, 20) == b""
+    bounded = json.loads(audit_module._bounded_preview_record(oversized, 300))
+    assert bounded["audit_payloads_omitted"] == "record exceeded audit retention limit"
+    assert audit_module._bounded_preview_unit([], 100) == []
+    unit = [
+        (0, b"invalid\n", None, set()),
+        (1, b"record\n", oversized, set()),
+    ]
+    assert [index for index, _ in audit_module._bounded_preview_unit(unit, 600)] == [1]
+
+    log_path = get_settings().audit_log_path
+    audit_module._enforce_audit_storage_limit(log_path, 100)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_bytes(b"{" + b"x" * 200 + b"\n" + audit_module._encode_audit_record(oversized))
+    audit_module._enforce_audit_storage_limit(log_path, 300)
+    retained = json.loads(log_path.read_text(encoding="utf-8"))
+    assert retained["id"] == "oversized"
+    assert retained["audit_payloads_omitted"] == "record exceeded audit retention limit"
+
+
 def test_payload_store_follows_configured_audit_log(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     audit_path = tmp_path / "persisted-audit" / "records.jsonl"

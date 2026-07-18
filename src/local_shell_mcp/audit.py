@@ -267,7 +267,7 @@ def _bounded_preview_unit(
         encoded = _bounded_preview_record(record, per_record)
         if encoded:
             bounded.append((index, encoded))
-    return bounded if sum(len(raw_line) for _, raw_line in bounded) <= max_bytes else []
+    return bounded
 
 
 def _enforce_audit_storage_limit(log_path: Path, max_bytes: int) -> None:
