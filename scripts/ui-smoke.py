@@ -304,26 +304,62 @@ def run_browser(port: int) -> None:
                 raise AssertionError(
                     f"PageUp did not reveal older output: {initial_bottom_lines!r}"
                 )
-            page.keyboard.press("PageDown")
-            page.keyboard.press("PageDown")
-            wait_for_terminal_text(page, "SCROLL-LINE-120")
 
-            bottom_lines = visible_scroll_line_numbers(page)
-            assert 120 in bottom_lines, bottom_lines
-            click_tui_label(page, "SCROLL-LINE-115")
+            click_tui_label(page, f"SCROLL-LINE-{older_lines[-1]:03d}")
             page.mouse.wheel(0, -600)
             deadline = time.monotonic() + 8
             while time.monotonic() < deadline:
                 wheel_lines = visible_scroll_line_numbers(page)
-                if wheel_lines and min(wheel_lines) < min(bottom_lines):
+                if wheel_lines and min(wheel_lines) < min(older_lines):
                     break
                 page.wait_for_timeout(100)
             else:
                 raise AssertionError(
-                    f"Terminal mouse wheel did not reveal older output: {bottom_lines!r}"
+                    f"Terminal mouse wheel did not reveal older output: {older_lines!r}"
                 )
-            page.mouse.wheel(0, 600)
+            page.keyboard.press("PageDown")
+            page.keyboard.press("PageDown")
+            page.keyboard.press("PageDown")
             wait_for_terminal_text(page, "SCROLL-LINE-120")
+
+            before_freeze_bottom = visible_scroll_line_numbers(page)
+            page.keyboard.press("PageUp")
+            page.keyboard.press("PageUp")
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline:
+                frozen_lines = visible_scroll_line_numbers(page)
+                if (
+                    frozen_lines
+                    and before_freeze_bottom
+                    and min(frozen_lines) < min(before_freeze_bottom)
+                    and 120 not in frozen_lines
+                ):
+                    break
+                page.wait_for_timeout(100)
+            else:
+                raise AssertionError(
+                    f"PageUp did not establish a frozen history view: {before_freeze_bottom!r}"
+                )
+            repeated = api_request(
+                page,
+                "/api/ui/terminals/send",
+                "POST",
+                {
+                    "machine": "local",
+                    "session_id": second_session_id,
+                    "input_text": "for i in $(seq 1 40); do echo REPEAT-$((i % 2)); done; echo REPEAT-END",
+                    "enter": True,
+                },
+            )
+            assert repeated["status"] == 200, repeated
+            wait_for_terminal_output(page, second_session_id, "REPEAT-END")
+            page.wait_for_timeout(1_200)
+            frozen_after_output = visible_scroll_line_numbers(page)
+            assert frozen_after_output == frozen_lines, (frozen_lines, frozen_after_output)
+
+            page.keyboard.press("PageDown")
+            page.keyboard.press("PageDown")
+            wait_for_terminal_text(page, "REPEAT-END")
 
             click_tui_label(page, "Todos")
             wait_for_terminal_text(page, "mouse todo second")

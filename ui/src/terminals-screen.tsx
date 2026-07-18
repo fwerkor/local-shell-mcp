@@ -5,7 +5,6 @@ import { api, formatError } from "./api"
 import { EmptyState, KeyHint, MachineSidebar, Modal, Panel, formatAge } from "./components"
 import { clampIndex, scopedItems } from "./state-utils"
 import {
-  appendedTerminalRows,
   terminalDisplayRows,
   terminalScrollLimit,
   terminalViewportRows,
@@ -116,7 +115,8 @@ export function TerminalsScreen({
   const [dialog, setDialog] = useState<TerminalDialog>({ type: "none" })
   const [busy, setBusy] = useState(false)
   const commandInputRef = useRef<InputRenderable | null>(null)
-  const outputRowsRef = useRef<string[]>([])
+  const scrollOffsetRef = useRef(0)
+  const pendingOutputRef = useRef<string | null>(null)
   const rawQueue = useRef<Promise<void>>(Promise.resolve())
   const sessionsRequest = useRef(0)
   const outputRequest = useRef(0)
@@ -144,7 +144,11 @@ export function TerminalsScreen({
   const visibleLines = visibleTerminalLines(outputRows, terminalRows, safeScrollOffset)
 
   const scrollOutput = useCallback((delta: number) => {
-    setScrollOffset((current) => Math.max(0, Math.min(maxScrollOffset, current + delta)))
+    setScrollOffset((current) => {
+      const next = Math.max(0, Math.min(maxScrollOffset, current + delta))
+      scrollOffsetRef.current = next
+      return next
+    })
   }, [maxScrollOffset])
 
   const handleOutputScroll = (event: OpenTUIMouseEvent) => {
@@ -229,7 +233,8 @@ export function TerminalsScreen({
         selectedSessionIdRef.current !== targetSession ||
         controller.signal.aborted
       ) return
-      setOutput(terminal.output)
+      if (scrollOffsetRef.current > 0) pendingOutputRef.current = terminal.output
+      else setOutput(terminal.output)
       setAudit(records.entries)
     } catch (error) {
       if (!controller.signal.aborted) setStatus(`Terminal: ${formatError(error)}`)
@@ -246,6 +251,9 @@ export function TerminalsScreen({
     setSelectedSessionId(null)
     selectedSessionIdRef.current = null
     setOutput("")
+    pendingOutputRef.current = null
+    scrollOffsetRef.current = 0
+    setScrollOffset(0)
     setAudit([])
     setDialog({ type: "none" })
     setRawMode(false)
@@ -290,21 +298,21 @@ export function TerminalsScreen({
   }, [rawMode, selectedSession])
 
   useEffect(() => {
+    pendingOutputRef.current = null
+    scrollOffsetRef.current = 0
     setScrollOffset(0)
-    outputRowsRef.current = outputRows
   }, [machine, selectedSession?.session_id])
 
   useEffect(() => {
-    const addedRows = appendedTerminalRows(outputRowsRef.current, outputRows)
-    if (addedRows > 0) {
-      setScrollOffset((current) => current === 0
-        ? 0
-        : Math.min(maxScrollOffset, current + addedRows))
-    } else {
-      setScrollOffset((current) => Math.min(current, maxScrollOffset))
+    const clamped = Math.min(scrollOffset, maxScrollOffset)
+    if (clamped !== scrollOffset) setScrollOffset(clamped)
+    scrollOffsetRef.current = clamped
+    if (clamped === 0 && pendingOutputRef.current !== null) {
+      const pending = pendingOutputRef.current
+      pendingOutputRef.current = null
+      setOutput(pending)
     }
-    outputRowsRef.current = outputRows
-  }, [maxScrollOffset, outputRows])
+  }, [maxScrollOffset, scrollOffset])
 
   const send = async (inputText: string, enter = true) => {
     if (!selectedSession || inputText.length === 0) return
@@ -343,6 +351,8 @@ export function TerminalsScreen({
 
   const submitCommand = (value: string) => {
     if (!selectedSession || value.length === 0) return
+    pendingOutputRef.current = null
+    scrollOffsetRef.current = 0
     setScrollOffset(0)
     if (commandInputRef.current) commandInputRef.current.value = ""
     void send(value, true)
@@ -384,6 +394,9 @@ export function TerminalsScreen({
     setSelectedSessionId(null)
     selectedSessionIdRef.current = null
     setOutput("")
+    pendingOutputRef.current = null
+    scrollOffsetRef.current = 0
+    setScrollOffset(0)
     setAudit([])
     setDialog({ type: "none" })
     setRawMode(false)

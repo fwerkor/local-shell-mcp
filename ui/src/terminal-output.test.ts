@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
-  appendedTerminalRows,
+  terminalCellWidth,
   terminalDisplayRows,
   terminalOutputLines,
   terminalScrollLimit,
@@ -27,19 +27,21 @@ describe("terminal output viewport", () => {
     expect(visibleTerminalOutput(lines, 3, 99)).toBe("line-1\nline-2\nline-3")
   })
 
-  test("wraps long rows without counting ANSI control sequences", () => {
+  test("wraps long rows and carries ANSI styles across render rows", () => {
     expect(wrapTerminalLine("abcdefgh", 3)).toEqual(["abc", "def", "gh"])
     expect(wrapTerminalLine("\x1b[31mabcdef\x1b[0m", 3)).toEqual([
-      "\x1b[31mabc",
-      "def\x1b[0m",
+      "\x1b[31mabc\x1b[0m",
+      "\x1b[31mdef\x1b[0m",
     ])
     expect(terminalDisplayRows("abcdef\nxy", 3)).toEqual(["abc", "def", "xy"])
   })
 
-  test("detects appended rows when a capped tail shifts", () => {
-    expect(appendedTerminalRows(["1", "2", "3"], ["1", "2", "3", "4"])).toBe(1)
-    expect(appendedTerminalRows(["1", "2", "3"], ["2", "3", "4"])).toBe(1)
-    expect(appendedTerminalRows(["1", "2", "3"], ["changed", "rows", "only"])).toBe(0)
+  test("counts terminal cells for CJK, combining marks, and emoji", () => {
+    expect(terminalCellWidth("a")).toBe(1)
+    expect(terminalCellWidth("e\u0301")).toBe(1)
+    expect(terminalCellWidth("界")).toBe(2)
+    expect(terminalCellWidth("👩‍💻")).toBe(2)
+    expect(wrapTerminalLine("中文ab", 4)).toEqual(["中文", "ab"])
   })
 
   test("keeps a useful viewport on common terminal heights", () => {
