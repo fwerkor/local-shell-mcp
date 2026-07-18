@@ -117,6 +117,78 @@ def test_registration_rejects_every_invalid_shape(tmp_path, monkeypatch):
     ).status_code == 503
 
 
+def test_registration_reuses_matching_public_client_without_consuming_capacity(
+    tmp_path, monkeypatch
+):
+    _configure(tmp_path, monkeypatch)
+    client = TestClient(_app())
+    body = {
+        "client_name": "local-shell-mcp WebUI",
+        "redirect_uris": [
+            "https://client.test/second",
+            "https://client.test/first",
+        ],
+    }
+
+    first = client.post("/oauth/register", json=body)
+    repeated = client.post(
+        "/oauth/register",
+        json={**body, "redirect_uris": list(reversed(body["redirect_uris"]))},
+    )
+
+    assert first.status_code == 201
+    assert first.json()["reused"] is False
+    assert repeated.status_code == 200
+    assert repeated.json()["reused"] is True
+    assert repeated.json()["client_id"] == first.json()["client_id"]
+    assert len(oauth._CLIENTS) == 1
+
+    monkeypatch.setattr(oauth, "MAX_OAUTH_CLIENTS", 1)
+    at_capacity = client.post("/oauth/register", json=body)
+    assert at_capacity.status_code == 200
+    assert at_capacity.json()["client_id"] == first.json()["client_id"]
+    assert len(oauth._CLIENTS) == 1
+
+
+def test_registration_reuses_approved_client_after_memory_reload(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    client = TestClient(_app())
+    redirect = "https://client.test/ui-callback"
+    body = {
+        "client_name": "local-shell-mcp WebUI",
+        "redirect_uris": [redirect],
+    }
+    registered = client.post("/oauth/register", json=body)
+    client_id = registered.json()["client_id"]
+    approved = client.post(
+        "/oauth/authorize",
+        data={
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": redirect,
+            "code_challenge": "challenge",
+            "code_challenge_method": "S256",
+            "pin": "correct-admin-pin",
+        },
+        follow_redirects=False,
+    )
+    assert approved.status_code == 302
+
+    oauth._CLIENTS.clear()
+    repeated = client.post("/oauth/register", json=body)
+
+    assert repeated.status_code == 200
+    assert repeated.json()["client_id"] == client_id
+    assert repeated.json()["reused"] is True
+
+    monkeypatch.setattr(oauth, "MAX_OAUTH_CLIENTS", 1)
+    distinct = client.post(
+        "/oauth/register",
+        json={**body, "client_name": "different client"},
+    )
+    assert distinct.status_code == 503
+
+
 def test_registered_clients_survive_memory_reset_after_approval(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     client = TestClient(_app())

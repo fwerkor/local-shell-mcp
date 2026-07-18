@@ -96,7 +96,7 @@ http://127.0.0.1:8765/ui
 
 The WebUI uses the same OAuth flow as MCP. Its responsive terminal frame supports mouse interaction on the actual OpenTUI top bar, automatic PTY resizing, reconnects, fullscreen mode, and a cached Bing background with an animated fallback.
 
-Standalone release archives and Docker images also include the native OpenTUI sidecar. Start the service, then launch it without a human login prompt:
+Standalone release executables embed the native OpenTUI runtime, while Docker images provide it inside the image. Start the service, then launch it without a human login prompt:
 
 ```bash
 local-shell-mcp tui
