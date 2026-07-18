@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -11,6 +12,7 @@ import urllib.error
 import urllib.request
 from contextlib import suppress
 from pathlib import Path
+from urllib.parse import quote
 
 from playwright.sync_api import Page, sync_playwright
 
@@ -45,6 +47,14 @@ def wait_for_health(port: int, process: subprocess.Popen[str], timeout_s: float 
 
 def xterm_rows(page: Page) -> list[str]:
     return page.locator(".xterm-rows > div").all_text_contents()
+
+
+def visible_scroll_line_numbers(page: Page) -> list[int]:
+    return [
+        int(match)
+        for row in xterm_rows(page)
+        for match in re.findall(r"SCROLL-LINE-(\d+)", row)
+    ]
 
 
 def click_tui_label(page: Page, label: str, occurrence: int = 0) -> None:
@@ -137,6 +147,37 @@ def wait_for_terminal_text(page: Page, needle: str, timeout_s: float = 10) -> No
         page.wait_for_timeout(100)
     text = page.locator("body").inner_text()
     raise AssertionError(f"Terminal text did not contain {needle!r}\n{text[-5000:]}")
+
+
+def wait_for_terminal_text_absent(page: Page, needle: str, timeout_s: float = 10) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if needle not in page.locator("body").inner_text():
+            return
+        page.wait_for_timeout(100)
+    text = page.locator("body").inner_text()
+    raise AssertionError(f"Terminal text still contained {needle!r}\n{text[-5000:]}")
+
+
+def wait_for_terminal_output(
+    page: Page, session_id: str, needle: str, timeout_s: float = 10
+) -> None:
+    deadline = time.monotonic() + timeout_s
+    output = ""
+    path = (
+        "/api/ui/terminals/read?machine=local"
+        f"&session_id={quote(session_id)}&lines=500"
+    )
+    while time.monotonic() < deadline:
+        response = api_request(page, path)
+        assert response["status"] == 200, response
+        output = response["body"]["data"]["output"]
+        if needle in output:
+            return
+        page.wait_for_timeout(100)
+    raise AssertionError(
+        f"Terminal API output did not contain {needle!r}\n{output[-5000:]}"
+    )
 
 
 def run_browser(port: int) -> None:
@@ -237,7 +278,92 @@ def run_browser(port: int) -> None:
             page.wait_for_timeout(500)
             assert "MCP audit · manual input excluded" in page.locator("body").inner_text()
             page.keyboard.press("F8")
-            wait_for_terminal_text(page, "F8 raw mode")
+            wait_for_terminal_text_absent(page, "RAW INPUT")
+            wait_for_terminal_text(page, "Enter a command…")
+
+            page.keyboard.type(r"printf 'INPUT-CLEAR-ONE\n'")
+            page.keyboard.press("Enter")
+            wait_for_terminal_output(page, second_session_id, "INPUT-CLEAR-ONE")
+            wait_for_terminal_text(page, "INPUT-CLEAR-ONE")
+            page.keyboard.type(r"printf 'INPUT-CLEAR-TWO\n'")
+            page.keyboard.press("Enter")
+            wait_for_terminal_output(page, second_session_id, "INPUT-CLEAR-TWO")
+            wait_for_terminal_text(page, "INPUT-CLEAR-TWO")
+
+            page.keyboard.type("seq -f 'SCROLL-LINE-%03g' 1 120")
+            page.keyboard.press("Enter")
+            wait_for_terminal_output(page, second_session_id, "SCROLL-LINE-120")
+            wait_for_terminal_text(page, "SCROLL-LINE-120")
+            initial_bottom_lines = visible_scroll_line_numbers(page)
+            assert 120 in initial_bottom_lines, initial_bottom_lines
+            page.keyboard.press("PageUp")
+            page.keyboard.press("PageUp")
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline:
+                older_lines = visible_scroll_line_numbers(page)
+                if older_lines and min(older_lines) < min(initial_bottom_lines) and 120 not in older_lines:
+                    break
+                page.wait_for_timeout(100)
+            else:
+                raise AssertionError(
+                    f"PageUp did not reveal older output: {initial_bottom_lines!r}"
+                )
+
+            click_tui_label(page, f"SCROLL-LINE-{older_lines[-1]:03d}")
+            page.mouse.wheel(0, -600)
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline:
+                wheel_lines = visible_scroll_line_numbers(page)
+                if wheel_lines and min(wheel_lines) < min(older_lines):
+                    break
+                page.wait_for_timeout(100)
+            else:
+                raise AssertionError(
+                    f"Terminal mouse wheel did not reveal older output: {older_lines!r}"
+                )
+            page.keyboard.press("PageDown")
+            page.keyboard.press("PageDown")
+            page.keyboard.press("PageDown")
+            wait_for_terminal_text(page, "SCROLL-LINE-120")
+
+            before_freeze_bottom = visible_scroll_line_numbers(page)
+            page.keyboard.press("PageUp")
+            page.keyboard.press("PageUp")
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline:
+                frozen_lines = visible_scroll_line_numbers(page)
+                if (
+                    frozen_lines
+                    and before_freeze_bottom
+                    and min(frozen_lines) < min(before_freeze_bottom)
+                    and 120 not in frozen_lines
+                ):
+                    break
+                page.wait_for_timeout(100)
+            else:
+                raise AssertionError(
+                    f"PageUp did not establish a frozen history view: {before_freeze_bottom!r}"
+                )
+            repeated = api_request(
+                page,
+                "/api/ui/terminals/send",
+                "POST",
+                {
+                    "machine": "local",
+                    "session_id": second_session_id,
+                    "input_text": "for i in $(seq 1 40); do echo REPEAT-$((i % 2)); done; echo REPEAT-END",
+                    "enter": True,
+                },
+            )
+            assert repeated["status"] == 200, repeated
+            wait_for_terminal_output(page, second_session_id, "REPEAT-END")
+            page.wait_for_timeout(1_200)
+            frozen_after_output = visible_scroll_line_numbers(page)
+            assert frozen_after_output == frozen_lines, (frozen_lines, frozen_after_output)
+
+            page.keyboard.press("PageDown")
+            page.keyboard.press("PageDown")
+            wait_for_terminal_text(page, "REPEAT-END")
 
             click_tui_label(page, "Todos")
             wait_for_terminal_text(page, "mouse todo second")

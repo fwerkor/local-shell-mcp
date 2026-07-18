@@ -7,6 +7,11 @@ function shortcut(key: string, code?: string) {
 }
 
 describe("browserShortcutSequence", () => {
+  test("forwards Escape globally and provides Ctrl+[ as a fallback", () => {
+    expect(browserShortcutSequence({ key: "Escape", altKey: false, ctrlKey: false, metaKey: false })).toBe("\u001b")
+    expect(browserShortcutSequence({ key: "[", altKey: false, ctrlKey: true, metaKey: false })).toBe("\u001b")
+  })
+
   test("maps category shortcuts to the TUI function keys", () => {
     expect(shortcut("1")).toBe("\u001bOQ")
     expect(shortcut("5")).toBe("\u001b[17~")
@@ -41,5 +46,6 @@ describe("browserShortcutSequence", () => {
     expect(browserShortcutSequence({ key: "n", code: "KeyN", altKey: false, ctrlKey: false, metaKey: false })).toBeUndefined()
     expect(browserShortcutSequence({ key: "n", code: "KeyN", altKey: true, ctrlKey: true, metaKey: false })).toBeUndefined()
     expect(browserShortcutSequence({ key: "q", code: "KeyQ", altKey: true, ctrlKey: false, metaKey: true })).toBeUndefined()
+    expect(browserShortcutSequence({ key: "Escape", altKey: true, ctrlKey: false, metaKey: false })).toBeUndefined()
   })
 })

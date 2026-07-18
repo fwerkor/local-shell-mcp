@@ -40,9 +40,13 @@ function physicalShortcutKey(code: string | undefined): string | undefined {
 }
 
 export function browserShortcutSequence(event: BrowserShortcutEvent): string | undefined {
+  const key = event.key.toLowerCase()
+  if (!event.altKey && !event.metaKey) {
+    if (!event.ctrlKey && (key === "escape" || key === "esc")) return "\u001b"
+    if (event.ctrlKey && key === "[") return "\u001b"
+  }
   if (event.ctrlKey || event.metaKey || !event.altKey) return undefined
-  const logicalKey = event.key.toLowerCase()
-  const logicalSequence = categorySequences[logicalKey] || browserShortcutSequences[logicalKey]
+  const logicalSequence = categorySequences[key] || browserShortcutSequences[key]
   if (logicalSequence) return logicalSequence
   const physicalKey = physicalShortcutKey(event.code)
   return physicalKey ? categorySequences[physicalKey] || browserShortcutSequences[physicalKey] : undefined
