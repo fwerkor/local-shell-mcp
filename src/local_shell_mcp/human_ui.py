@@ -35,6 +35,7 @@ from .fs_ops import (
     resolve_path,
     write_text,
 )
+from .image_ops import make_image_preview
 from .oauth import ALL_OAUTH_SCOPES
 from .remote import remote_manager
 from .settings import get_settings
@@ -398,6 +399,32 @@ async def api_file_preview(request: Request) -> Response:
                     return _json_ok(
                         {"kind": "directory", "entries": _normalize_file_entries(listed, windows_paths)}
                     )
+
+        if path.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
+            columns = max(8, min(int(request.query_params.get("columns", "96")), 200))
+            rows = max(4, min(int(request.query_params.get("rows", "32")), 100))
+            from .tools import load_image_for_machine
+
+            image, display_path = await load_image_for_machine(
+                path,
+                None if machine == "local" else machine,
+            )
+            rendered = await asyncio.to_thread(make_image_preview, image, columns, rows)
+            return _json_ok(
+                {
+                    "kind": "image",
+                    "path": display_path,
+                    "bytes": image.size,
+                    "mime_type": image.mime_type,
+                    "rgba": base64.b64encode(rendered.rgba).decode("ascii"),
+                    "width": rendered.width,
+                    "height": rendered.height,
+                    "cell_width": rendered.cell_width,
+                    "cell_height": rendered.cell_height,
+                    "original_width": rendered.original_width,
+                    "original_height": rendered.original_height,
+                }
+            )
 
         content = await _machine_dispatch(
             machine,

@@ -102,7 +102,7 @@ Standalone release archives and Docker images also include the native OpenTUI si
 local-shell-mcp tui
 ```
 
-Files follows a Yazi-derived three-pane interaction model and Docker images include `yazi` and `ya`. Manual actions entered through either human interface are excluded from the MCP audit log; the Audit screen and terminal audit rail show model-originated MCP activity.
+Files follows a Yazi-derived three-pane interaction model, renders bounded PNG/JPEG/GIF/WebP thumbnails directly in OpenTUI, and Docker images include `yazi` and `ya`. Manual actions entered through either human interface are excluded from the MCP audit log; the Audit screen and terminal audit rail show model-originated MCP activity.
 
 See the [human interface guide](https://fwerkor.github.io/local-shell-mcp/guides/human-interface/).
 

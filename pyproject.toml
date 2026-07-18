@@ -32,6 +32,7 @@ dependencies = [
   "aiofiles>=23.2.1",
   "python-multipart>=0.0.9",
   "pathspec>=0.12.1",
+  "pillow>=10.3.0",
   "playwright>=1.44.0",
   "pywinpty>=2.0.13; platform_system == \"Windows\"",
 ]
