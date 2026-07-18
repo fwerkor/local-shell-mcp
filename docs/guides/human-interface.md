@@ -35,6 +35,7 @@ The WebUI includes:
 - A lightweight animated aurora fallback when the wallpaper cannot be fetched.
 - Binary terminal transport, automatic PTY resize, reconnect backoff, and fullscreen mode.
 - Mouse support on the actual OpenTUI controls, including the top category bar.
+- A mobile shortcut row whose `KB` button explicitly opens the soft keyboard; ordinary taps remain pointer actions and do not summon it.
 
 ## Native TUI
 
@@ -112,7 +113,9 @@ Remotes displays online and offline remote workers, capabilities, work directori
 
 ## Navigation
 
-The top category bar and contextual footer actions can be clicked with a mouse in both native terminals and the WebUI. Keyboard navigation is also available:
+The top category bar and contextual footer actions can be clicked with a mouse in both native terminals and the WebUI.
+
+Mouse-wheel input is forwarded through the WebUI terminal protocol. Lists move their selection under the pointer, while preview and detail panes scroll their own content. Keyboard navigation is also available:
 
 | Keys | Action |
 |---|---|
@@ -120,7 +123,7 @@ The top category bar and contextual footer actions can be clicked with a mouse i
 | `F2` … `F6` | Alternative category shortcuts. |
 | `F1` | Open the keyboard guide. |
 | `F7` | Refresh the machine list. |
-| `Ctrl+Q` | Exit the native OpenTUI process. |
+| `Alt+Q` | Exit the native OpenTUI process without invoking a browser-reserved Ctrl shortcut. |
 
 Terminals uses `Alt+N` for a new session, `Alt+W` to kill the selected session, `Alt+A` to toggle its audit rail, `Alt+R` to refresh, and `Alt+Left/Right` to switch sessions. The WebUI intercepts these chords before browser-level navigation or menu handling.
 

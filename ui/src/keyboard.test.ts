@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test"
 import { parseKeypress } from "@opentui/core"
 import { browserShortcutSequence } from "./keyboard"
 
-function shortcut(key: string) {
-  return browserShortcutSequence({ key, altKey: true, ctrlKey: false, metaKey: false })
+function shortcut(key: string, code?: string) {
+  return browserShortcutSequence({ key, code, altKey: true, ctrlKey: false, metaKey: false })
 }
 
 describe("browserShortcutSequence", () => {
@@ -17,8 +17,14 @@ describe("browserShortcutSequence", () => {
     expect(shortcut("5")).toBe("\u001b[17~")
   })
 
+  test("uses the physical key only for Option-modified unsupported characters", () => {
+    expect(shortcut("œ", "KeyQ")).toBe("\u001b[113;3u")
+    expect(shortcut("¡", "Digit1")).toBe("\u001bOQ")
+    expect(shortcut("a", "KeyQ")).toBe("\u001b[97;3u")
+  })
+
   test("encodes terminal actions as reliable Alt key events", () => {
-    for (const [key, name] of [["n", "n"], ["w", "w"], ["a", "a"], ["r", "r"], ["[", "["], ["]", "]"]] as const) {
+    for (const [key, name] of [["n", "n"], ["w", "w"], ["a", "a"], ["q", "q"], ["r", "r"], ["[", "["], ["]", "]"]] as const) {
       const sequence = shortcut(key)
       expect(sequence).toBeDefined()
       const parsed = parseKeypress(Buffer.from(sequence!), { useKittyKeyboard: true })
@@ -37,9 +43,9 @@ describe("browserShortcutSequence", () => {
   })
 
   test("ignores non-Alt and mixed modifier shortcuts", () => {
-    expect(browserShortcutSequence({ key: "n", altKey: false, ctrlKey: false, metaKey: false })).toBeUndefined()
-    expect(browserShortcutSequence({ key: "n", altKey: true, ctrlKey: true, metaKey: false })).toBeUndefined()
-    expect(browserShortcutSequence({ key: "n", altKey: true, ctrlKey: false, metaKey: true })).toBeUndefined()
+    expect(browserShortcutSequence({ key: "n", code: "KeyN", altKey: false, ctrlKey: false, metaKey: false })).toBeUndefined()
+    expect(browserShortcutSequence({ key: "n", code: "KeyN", altKey: true, ctrlKey: true, metaKey: false })).toBeUndefined()
+    expect(browserShortcutSequence({ key: "q", code: "KeyQ", altKey: true, ctrlKey: false, metaKey: true })).toBeUndefined()
     expect(browserShortcutSequence({ key: "Escape", altKey: true, ctrlKey: false, metaKey: false })).toBeUndefined()
   })
 })

@@ -2,6 +2,7 @@ import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, Modal, Panel, useVisibleRows } from "./components"
+import { handleSelectionScroll } from "./mouse"
 import { clampIndex, nextValue, updateTodo } from "./state-utils"
 import { screenTheme, theme } from "./theme"
 import type { TodoItem, TodoPayload } from "./types"
@@ -247,7 +248,13 @@ export function TodosScreen({
         {visible.length === 0 ? (
           <EmptyState title="No matching todos" detail="Press n to add an item" />
         ) : (
-          <box style={{ flexDirection: "column", flexGrow: 1 }}>
+          <box
+            onMouseScroll={(event) => handleSelectionScroll(
+              event,
+              (delta) => setSelected((value) => clampIndex(value + delta, visible.length)),
+            )}
+            style={{ flexDirection: "column", flexGrow: 1 }}
+          >
             {rows.map((todo, offset) => {
               const index = start + offset
               const active = index === selected
