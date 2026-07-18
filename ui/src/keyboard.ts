@@ -25,6 +25,11 @@ const browserShortcutSequences: Record<string, string> = {
 }
 
 export function browserShortcutSequence(event: BrowserShortcutEvent): string | undefined {
+  const key = event.key.toLowerCase()
+  if (!event.altKey && !event.metaKey) {
+    if (!event.ctrlKey && (key === "escape" || key === "esc")) return "\u001b"
+    if (event.ctrlKey && key === "[") return "\u001b"
+  }
   if (event.ctrlKey || event.metaKey || !event.altKey) return undefined
-  return categorySequences[event.key] || browserShortcutSequences[event.key.toLowerCase()]
+  return categorySequences[event.key] || browserShortcutSequences[key]
 }
