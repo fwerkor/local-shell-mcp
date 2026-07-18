@@ -25,7 +25,7 @@ describe("API client endpoint wrappers", () => {
     await api.bootstrap()
     await api.machines()
     await api.files("worker a", "src path")
-    await api.filePreview("local", "")
+    await api.filePreview("local", "", 80, 24, 2.75)
     await api.fileContent("local", "a/b")
     await api.fileAction("rename item", { path: "a", destination: "b" })
     await api.terminals("worker a")
@@ -45,7 +45,7 @@ describe("API client endpoint wrappers", () => {
       `${API_BASE}/bootstrap`,
       `${API_BASE}/machines`,
       `${API_BASE}/files?machine=worker+a&path=src+path`,
-      `${API_BASE}/files/preview?machine=local`,
+      `${API_BASE}/files/preview?machine=local&columns=80&rows=24&cell_aspect=2.75`,
       `${API_BASE}/files/content?machine=local&path=a%2Fb`,
       `${API_BASE}/files/rename%20item`,
       `${API_BASE}/terminals?machine=worker+a`,

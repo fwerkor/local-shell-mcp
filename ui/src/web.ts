@@ -2,6 +2,7 @@ import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
 import { createImageAddon } from "./image-support"
 import { browserShortcutSequence } from "./keyboard"
+import { measureTerminalCellAspect } from "./terminal-geometry"
 
 declare global {
   interface Window {
@@ -232,6 +233,13 @@ function sendResize(): void {
   }
 }
 
+function currentTerminalCellAspect(): number | null {
+  const screen = terminalElement.querySelector<HTMLElement>(".xterm-screen")
+  if (!screen) return null
+  const bounds = screen.getBoundingClientRect()
+  return measureTerminalCellAspect(bounds.width, bounds.height, terminal.cols, terminal.rows)
+}
+
 function clearReconnect(): void {
   if (reconnectTimer !== null) {
     window.clearTimeout(reconnectTimer)
@@ -262,6 +270,8 @@ function connect(): void {
   const url = new URL(`${scheme}//${location.host}${UI_PATH}/ws`)
   url.searchParams.set("cols", String(terminal.cols))
   url.searchParams.set("rows", String(terminal.rows))
+  const cellAspect = currentTerminalCellAspect()
+  if (cellAspect !== null) url.searchParams.set("cell_aspect", cellAspect.toFixed(4))
   const nextSocket = new WebSocket(url, websocketProtocols())
   socket = nextSocket
   nextSocket.binaryType = "arraybuffer"

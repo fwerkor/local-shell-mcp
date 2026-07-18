@@ -76,9 +76,13 @@ export const api = {
     path: string,
     columns?: number,
     rows?: number,
+    cellAspect?: number,
     signal?: AbortSignal,
   ): Promise<FilePreview> {
-    return request(`/files/preview${queryString({ machine, path, columns, rows })}`, { signal })
+    return request(
+      `/files/preview${queryString({ machine, path, columns, rows, cell_aspect: cellAspect })}`,
+      { signal },
+    )
   },
   fileContent(machine: string, path: string): Promise<FilePreview> {
     return request(`/files/content${queryString({ machine, path })}`)
