@@ -112,7 +112,9 @@ Remotes displays online and offline remote workers, capabilities, work directori
 
 ## Navigation
 
-The top category bar and contextual footer actions can be clicked with a mouse in both native terminals and the WebUI. Keyboard navigation is also available:
+The top category bar and contextual footer actions can be clicked with a mouse in both native terminals and the WebUI.
+
+Mouse-wheel input is forwarded through the WebUI terminal protocol. Lists move their selection under the pointer, while preview and detail panes scroll their own content. Keyboard navigation is also available:
 
 | Keys | Action |
 |---|---|
