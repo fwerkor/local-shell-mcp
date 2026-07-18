@@ -149,6 +149,16 @@ def wait_for_terminal_text(page: Page, needle: str, timeout_s: float = 10) -> No
     raise AssertionError(f"Terminal text did not contain {needle!r}\n{text[-5000:]}")
 
 
+def wait_for_terminal_text_absent(page: Page, needle: str, timeout_s: float = 10) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if needle not in page.locator("body").inner_text():
+            return
+        page.wait_for_timeout(100)
+    text = page.locator("body").inner_text()
+    raise AssertionError(f"Terminal text still contained {needle!r}\n{text[-5000:]}")
+
+
 def wait_for_terminal_output(
     page: Page, session_id: str, needle: str, timeout_s: float = 10
 ) -> None:
@@ -264,7 +274,8 @@ def run_browser(port: int) -> None:
             page.wait_for_timeout(500)
             assert "MCP audit · manual input excluded" in page.locator("body").inner_text()
             page.keyboard.press("F8")
-            wait_for_terminal_text(page, "F8 raw mode")
+            wait_for_terminal_text_absent(page, "RAW INPUT")
+            wait_for_terminal_text(page, "Enter a command…")
 
             page.keyboard.type(r"printf 'INPUT-CLEAR-ONE\n'")
             page.keyboard.press("Enter")
