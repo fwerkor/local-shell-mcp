@@ -25,7 +25,7 @@ describe("API client endpoint wrappers", () => {
     await api.bootstrap()
     await api.machines()
     await api.files("worker a", "src path")
-    await api.filePreview("local", "")
+    await api.filePreview("local", "", 80, 24, 2.75)
     await api.fileContent("local", "a/b")
     await api.fileAction("rename item", { path: "a", destination: "b" })
     await api.terminals("worker a")
@@ -37,6 +37,7 @@ describe("API client endpoint wrappers", () => {
       7,
     )
     await api.audit({ node: "worker a", empty: "", zero: 0, enabled: false, omitted: null })
+    await api.auditDetail("call:abc/123")
     await api.remotes()
     await api.invite({ name: "node", workdir: "/work", ttl_s: 60 })
     await api.remoteAction("rename node", { machine: "node", new_name: "next" })
@@ -45,7 +46,7 @@ describe("API client endpoint wrappers", () => {
       `${API_BASE}/bootstrap`,
       `${API_BASE}/machines`,
       `${API_BASE}/files?machine=worker+a&path=src+path`,
-      `${API_BASE}/files/preview?machine=local`,
+      `${API_BASE}/files/preview?machine=local&columns=80&rows=24&cell_aspect=2.75`,
       `${API_BASE}/files/content?machine=local&path=a%2Fb`,
       `${API_BASE}/files/rename%20item`,
       `${API_BASE}/terminals?machine=worker+a`,
@@ -54,6 +55,7 @@ describe("API client endpoint wrappers", () => {
       `${API_BASE}/todos`,
       `${API_BASE}/todos`,
       `${API_BASE}/audit?node=worker+a&zero=0&enabled=false`,
+      `${API_BASE}/audit/detail?id=call%3Aabc%2F123`,
       `${API_BASE}/remotes`,
       `${API_BASE}/remotes`,
       `${API_BASE}/remotes/rename%20node`,
@@ -66,7 +68,7 @@ describe("API client endpoint wrappers", () => {
       todos: [{ id: "a", content: "A", status: "pending", priority: "medium" }],
       expected_revision: 7,
     })
-    expect(calls[13]!.init?.method).toBe("POST")
+    expect(calls[14]!.init?.method).toBe("POST")
     expect(calls.every((call) => new Headers(call.init?.headers).get("Accept") === "application/json")).toBe(true)
     expect(calls.every((call) => new Headers(call.init?.headers).get("Content-Type") === "application/json")).toBe(true)
   })

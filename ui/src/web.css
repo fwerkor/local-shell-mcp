@@ -50,8 +50,9 @@ button { font: inherit; }
   z-index: 2;
   display: grid;
   grid-template-rows: 46px minmax(0, 1fr) 28px;
-  width: min(1540px, calc(100vw - 34px));
-  height: min(960px, calc(100vh - 34px));
+  width: calc(100vw - 34px);
+  height: calc(100vh - 34px);
+  height: calc(100dvh - 34px);
   margin: 17px auto;
   border: 1px solid var(--line-strong);
   border-radius: 18px;
@@ -85,6 +86,15 @@ button { font: inherit; }
 #terminal { width: 100%; height: 100%; min-width: 0; min-height: 0; padding: 3px; }
 #terminal .xterm { height: 100%; }
 #terminal .xterm-viewport { scrollbar-color: rgba(87, 215, 255, .36) transparent; }
+
+:fullscreen .shell {
+  width: 100vw;
+  height: 100dvh;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
 .touchbar {
   display: none;
   grid-template-columns: repeat(8, minmax(0, 1fr));

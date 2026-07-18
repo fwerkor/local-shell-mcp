@@ -24,7 +24,7 @@ from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Redire
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from .audit import query_audit, suppress_audit
+from .audit import get_audit_entry, query_audit, suppress_audit
 from .auth import Principal, require_scopes, verify_request
 from .fs_ops import (
     FileConflictError,
@@ -48,9 +48,9 @@ UI_API_PREFIX = "/api/ui"
 UI_SUBPROTOCOL = "lsm-ui"
 UI_FULL_SCOPES = ALL_OAUTH_SCOPES
 UI_MIN_COLUMNS = 20
-UI_MAX_COLUMNS = 500
+UI_MAX_COLUMNS = 1_600
 UI_MIN_ROWS = 8
-UI_MAX_ROWS = 200
+UI_MAX_ROWS = 500
 _ACTIVE_UI_TERMINALS: set[int] = set()
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,6 +91,48 @@ def _require_ui_scopes(
     require_scopes(_request_principal(request), required)
 
 
+_AUDIT_FILE_WRITE_TOOLS = frozenset(
+    {
+        "write_file",
+        "edit_file",
+        "delete_file_or_dir",
+        "apply_patch",
+        "todo_write_tool",
+    }
+)
+_AUDIT_EXECUTE_TOOLS = frozenset(
+    {
+        "run_shell_tool",
+        "run_python_tool",
+        "shell_start",
+        "shell_send",
+        "shell_kill",
+        "job_start",
+        "job_stop",
+        "job_retry",
+    }
+)
+
+
+def _audit_detail_scopes(entry: dict[str, Any]) -> tuple[str, ...]:
+    required = {"shell:read"}
+    tool = str(entry.get("tool") or "")
+    operation = str(entry.get("operation") or "")
+    if tool in _AUDIT_FILE_WRITE_TOOLS:
+        required.add("shell:write")
+    if tool in _AUDIT_EXECUTE_TOOLS or operation in {"shell", "jobs"}:
+        required.add("shell:execute")
+    if operation == "browser":
+        required.add("browser:use")
+    if operation == "transfer":
+        required.add("file:share")
+    if operation == "remote" or str(entry.get("node") or "local") != "local":
+        required.add("remote:use")
+    if operation == "other":
+        required.update(UI_FULL_SCOPES)
+    return tuple(scope for scope in UI_FULL_SCOPES if scope in required)
+
+
 def _bounded_int(
     raw: str | int | None,
     *,
@@ -107,6 +149,26 @@ def _bounded_int(
         except (TypeError, ValueError) as exc:
             raise ValueError(f"{label} must be an integer") from exc
     return max(minimum, min(value, maximum))
+
+
+def _bounded_float(
+    raw: str | float | None,
+    *,
+    default: float,
+    minimum: float,
+    maximum: float,
+    label: str,
+) -> float:
+    if raw in {None, ""}:
+        value = default
+    else:
+        try:
+            value = float(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{label} must be a number") from exc
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{label} must be between {minimum} and {maximum}")
+    return value
 
 
 def _assets_dir() -> Path:
@@ -402,13 +464,26 @@ async def api_file_preview(request: Request) -> Response:
         if path.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
             columns = max(8, min(int(request.query_params.get("columns", "96")), 200))
             rows = max(4, min(int(request.query_params.get("rows", "32")), 100))
+            cell_aspect = _bounded_float(
+                request.query_params.get("cell_aspect"),
+                default=2.0,
+                minimum=0.5,
+                maximum=5.0,
+                label="cell_aspect",
+            )
             from .tools import load_image_for_machine
 
             image, display_path = await load_image_for_machine(
                 path,
                 None if machine == "local" else machine,
             )
-            rendered = await asyncio.to_thread(make_image_preview, image, columns, rows)
+            rendered = await asyncio.to_thread(
+                make_image_preview,
+                image,
+                columns,
+                rows,
+                cell_aspect,
+            )
             return _json_ok(
                 {
                     "kind": "image",
@@ -657,6 +732,18 @@ async def api_audit(request: Request) -> Response:
             sort=params.get("sort", "desc"),
         )
         return _json_ok(result)
+    except Exception as exc:
+        return _json_error(exc)
+
+
+async def api_audit_detail(request: Request) -> Response:
+    try:
+        entry_id = str(request.query_params.get("id") or "")
+        preview = await asyncio.to_thread(get_audit_entry, entry_id, full=False)
+        _require_ui_scopes(request, *_audit_detail_scopes(preview))
+        return _json_ok(await asyncio.to_thread(get_audit_entry, entry_id))
+    except ValueError as exc:
+        return _json_error(exc, status_code=404)
     except Exception as exc:
         return _json_error(exc)
 
@@ -919,7 +1006,11 @@ class _WindowsPtyProcess:
             await asyncio.to_thread(self.process.terminate, True)
 
 
-def _spawn_tui_process(cols: int, rows: int):  # noqa: ANN201
+def _spawn_tui_process(
+    cols: int,
+    rows: int,
+    cell_aspect: float = 2.0,
+):  # noqa: ANN201
     settings = get_settings()
     env = os.environ.copy()
     env.update(
@@ -934,6 +1025,7 @@ def _spawn_tui_process(cols: int, rows: int):  # noqa: ANN201
             "LOCAL_SHELL_MCP_UI_API_BASE": f"http://127.0.0.1:{settings.port}{UI_API_PREFIX}",
             "LOCAL_SHELL_MCP_UI_MODE": "web",
             UI_LOCAL_TOKEN_ENV: get_or_create_ui_local_token(),
+            "LOCAL_SHELL_MCP_UI_CELL_ASPECT": f"{cell_aspect:.4f}",
         }
     )
     command = resolve_tui_command()
@@ -1024,7 +1116,14 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
             maximum=UI_MAX_ROWS,
             label="rows",
         )
-        process = _spawn_tui_process(cols, rows)
+        cell_aspect = _bounded_float(
+            websocket.query_params.get("cell_aspect"),
+            default=2.0,
+            minimum=0.5,
+            maximum=5.0,
+            label="cell_aspect",
+        )
+        process = _spawn_tui_process(cols, rows, cell_aspect)
     except Exception as exc:
         _ACTIVE_UI_TERMINALS.discard(marker)
         _LOGGER.exception("Unable to start the human-interface TUI process")
@@ -1157,6 +1256,7 @@ def ui_routes() -> list[Any]:
         Route(UI_API_PREFIX + "/terminals/{action}", api_terminal_action, methods=["POST"]),
         Route(UI_API_PREFIX + "/todos", api_todos, methods=["GET", "PUT"]),
         Route(UI_API_PREFIX + "/audit", api_audit, methods=["GET"]),
+        Route(UI_API_PREFIX + "/audit/detail", api_audit_detail, methods=["GET"]),
         Route(UI_API_PREFIX + "/remotes", api_remotes, methods=["GET", "POST"]),
         Route(UI_API_PREFIX + "/remotes/{action}", api_remote_action, methods=["POST"]),
     ]

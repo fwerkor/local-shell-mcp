@@ -321,7 +321,7 @@ async def test_tool_wrapper_error_paths_and_remote_disabled(tmp_path, monkeypatc
 
 def test_tool_helpers_audit_serialization_timeout_and_tail(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
-    assert tools._serialize_audit_value("x" * 501).endswith("…<truncated>")
+    assert tools._serialize_audit_value("x" * 501) == "x" * 501
     assert tools._serialize_audit_value((1, 2)) == [1, 2]
     serialized = tools._serialize_audit_value(
         {
@@ -334,7 +334,7 @@ def test_tool_helpers_audit_serialization_timeout_and_tail(tmp_path, monkeypatch
     )
     assert serialized["token"] == "secret"
     assert serialized["content"] == "body"
-    assert len(serialized["items"]) == 20
+    assert len(serialized["items"]) == 30
     assert "object at" in serialized["object"]
     assert tools._audit_tool_arguments((1, 2), {"password": "x"})["positional_count"] == 2
 

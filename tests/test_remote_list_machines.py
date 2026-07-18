@@ -1,4 +1,5 @@
-from local_shell_mcp.remote import RemoteManager, RemoteWorker
+from local_shell_mcp import __version__
+from local_shell_mcp.remote import RemoteManager, RemoteWorker, worker_info
 from local_shell_mcp.settings import get_settings
 
 
@@ -24,6 +25,16 @@ def test_list_machines_reports_counts_and_details(tmp_path, monkeypatch):
     assert result["machines"][0]["last_seen_age_s"] == 5
     assert result["machines"][0]["queue_depth"] == 1
     assert result["machines"][1]["status"] == "offline"
+
+
+def test_worker_info_reports_runtime_version(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "local_shell_mcp.remote.persistent_shell_backend_info", lambda: {"backend": "test"}
+    )
+
+    info = worker_info(str(tmp_path))
+
+    assert info["lsm_version"] == __version__
 
 
 def test_list_machines_serializes_concurrent_registry_mutations(tmp_path, monkeypatch):
