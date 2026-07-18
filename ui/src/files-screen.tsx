@@ -3,6 +3,7 @@ import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, MachineSidebar, Modal, Panel, formatBytes, useVisibleRows } from "./components"
+import { handleSelectionScroll } from "./mouse"
 import { clampIndex, payloadMatches } from "./state-utils"
 import { screenTheme, theme } from "./theme"
 import type { FileEntry, FilePreview, FilesPayload, Machine } from "./types"
@@ -51,15 +52,22 @@ function FileRows({
   selected,
   height,
   onSelect,
+  onScroll,
 }: {
   entries: FileEntry[]
   selected: number
   height: number
   onSelect?: (entry: FileEntry, index: number) => void
+  onScroll?: (delta: number) => void
 }) {
   const { rows, start } = useVisibleRows(entries, selected, height)
   return (
-    <box style={{ flexDirection: "column", flexGrow: 1 }}>
+    <box
+      onMouseScroll={(event) => {
+        if (onScroll) handleSelectionScroll(event, onScroll)
+      }}
+      style={{ flexDirection: "column", flexGrow: 1 }}
+    >
       {rows.map((entry, offset) => {
         const index = start + offset
         const active = index === selected
@@ -136,7 +144,12 @@ function Preview({ preview, entry }: { preview: FilePreview | null; entry?: File
   if (preview.kind === "directory") {
     const entries = preview.entries || []
     return (
-      <box style={{ flexDirection: "column", paddingLeft: 1, paddingRight: 1 }}>
+      <scrollbox
+        focused={false}
+        style={{ flexGrow: 1, paddingLeft: 1, paddingRight: 1 }}
+        scrollY
+        verticalScrollbarOptions={{ visible: true }}
+      >
         <text fg={colors.accent} attributes={1} content={entry.name} />
         <text fg={theme.faint} content={`${entries.length} visible entries`} />
         <text fg={theme.borderBright} content="" />
@@ -147,7 +160,7 @@ function Preview({ preview, entry }: { preview: FilePreview | null; entry?: File
             content={`${icon(item)} ${item.name}`}
           />
         ))}
-      </box>
+      </scrollbox>
     )
   }
   if (preview.kind === "image") return <ImagePreview preview={preview} entry={entry} />
@@ -566,6 +579,7 @@ export function FilesScreen({
                     selected={selected}
                     height={listHeight}
                     onSelect={(_entry, index) => setSelected(index)}
+                    onScroll={(delta) => setSelected((value) => clampIndex(value + delta, entries.length))}
                   />
                 ) : (
                   <EmptyState title="Empty directory" detail="n file · N directory" />

@@ -9,6 +9,7 @@ import {
   selectionAfterRefresh,
 } from "./audit-utils"
 import { EmptyState, KeyHint, Modal, Panel, useVisibleRows } from "./components"
+import { handleSelectionScroll } from "./mouse"
 import { clampIndex } from "./state-utils"
 import { screenTheme, theme } from "./theme"
 import type { AuditEntry, Machine } from "./types"
@@ -236,7 +237,13 @@ export function AuditScreen({
           {entries.length === 0 ? (
             <EmptyState title="No matching audit records" detail="Adjust filters or wait for MCP activity" />
           ) : (
-            <box style={{ flexDirection: "column", flexGrow: 1 }}>
+            <box
+              onMouseScroll={(event) => handleSelectionScroll(
+                event,
+                (delta) => selectIndex((value) => clampIndex(value + delta, entries.length)),
+              )}
+              style={{ flexDirection: "column", flexGrow: 1 }}
+            >
               <box style={{ height: 2, flexDirection: "row", paddingLeft: 1, paddingRight: 1 }}>
                 <text fg={theme.faint} content="TIME       " />
                 {!narrow && <text fg={theme.faint} content="NODE              " />}
