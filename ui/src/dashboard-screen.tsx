@@ -71,6 +71,14 @@ function summaryValue(value: number | undefined): string {
   return String(value || 0)
 }
 
+function formatPercent(value?: number | null): string {
+  return typeof value === "number" && Number.isFinite(value) ? `${Math.round(value)}%` : "—"
+}
+
+function activeJobCount(payload: DashboardPayload): number {
+  return [...ACTIVE_JOB_STATUSES].reduce((total, status) => total + (payload.job_counts[status] || 0), 0)
+}
+
 function MetricCard({
   title,
   value,
@@ -93,7 +101,7 @@ function MetricCard({
 function SummaryStrip({ payload, width }: { payload: DashboardPayload; width: number }) {
   const online = payload.machines.counts.online || 0
   const total = payload.machines.counts.total || payload.machines.machines.length
-  const running = payload.jobs.filter((job) => ACTIVE_JOB_STATUSES.has(job.status || "")).length
+  const running = activeJobCount(payload)
   const full = width >= 145
   return (
     <box style={{ height: width < 82 ? 4 : 5, flexDirection: "row", gap: 1 }}>
@@ -122,12 +130,13 @@ function ResourceBars({ system, width }: { system: DashboardSystem; width: numbe
     return (
       <text
         fg={theme.muted}
-        content={`CPU ${Math.round(system.cpu_percent || 0)}%  MEM ${Math.round(system.memory_percent || 0)}%  DISK ${Math.round(system.disk_percent || 0)}%`}
+        content={`CPU ${formatPercent(system.cpu_percent)}  MEM ${formatPercent(system.memory_percent)}  DISK ${formatPercent(system.disk_percent)}`}
       />
     )
   }
   const barWidth = Math.max(6, Math.min(18, width - 15))
   const bar = (value?: number | null) => {
+    if (typeof value !== "number" || !Number.isFinite(value)) return "─".repeat(barWidth)
     const percent = clampPercent(value)
     const filled = Math.round((percent / 100) * barWidth)
     return `${"█".repeat(filled)}${"░".repeat(Math.max(0, barWidth - filled))}`
@@ -137,17 +146,17 @@ function ResourceBars({ system, width }: { system: DashboardSystem; width: numbe
       <box style={{ flexDirection: "row" }}>
         <text fg={theme.faint} content="CPU   " />
         <text fg={theme.green} content={bar(system.cpu_percent)} />
-        <text fg={theme.muted} content={` ${Math.round(system.cpu_percent || 0)}%`} />
+        <text fg={theme.muted} content={` ${formatPercent(system.cpu_percent)}`} />
       </box>
       <box style={{ flexDirection: "row" }}>
         <text fg={theme.faint} content="MEM   " />
         <text fg={theme.blue} content={bar(system.memory_percent)} />
-        <text fg={theme.muted} content={` ${Math.round(system.memory_percent || 0)}%`} />
+        <text fg={theme.muted} content={` ${formatPercent(system.memory_percent)}`} />
       </box>
       <box style={{ flexDirection: "row" }}>
         <text fg={theme.faint} content="DISK  " />
         <text fg={(system.disk_percent || 0) >= 85 ? theme.yellow : theme.magenta} content={bar(system.disk_percent)} />
-        <text fg={theme.muted} content={` ${Math.round(system.disk_percent || 0)}%`} />
+        <text fg={theme.muted} content={` ${formatPercent(system.disk_percent)}`} />
       </box>
     </box>
   )
@@ -230,7 +239,7 @@ function ActiveWorkloads({ payload, width, rows }: { payload: DashboardPayload; 
   const remaining = Math.max(0, rows - jobRows.length)
   const sessions = payload.sessions.slice(0, remaining)
   return (
-    <Panel title={`Active workloads · ${payload.jobs.length + payload.sessions.length}`} style={{ flexGrow: 1, paddingTop: 1 }}>
+    <Panel title={`Active workloads · ${activeJobCount(payload) + payload.sessions.length}`} style={{ flexGrow: 1, paddingTop: 1 }}>
       {jobRows.length === 0 && sessions.length === 0 ? (
         <EmptyState title="No active workloads" detail="Jobs and sessions will appear here" />
       ) : (
@@ -336,16 +345,16 @@ function SystemTrends({
     return (
       <Panel title="System trends" active accent={colors.accent} activeBackground={colors.panel} style={{ flexGrow: 1, paddingLeft: 1, paddingRight: 1 }}>
         {[
-          ["CPU", payload.system.cpu_percent || 0, cpu, theme.green, "%"],
-          ["Memory", payload.system.memory_percent || 0, memory, theme.blue, "%"],
-          ...(width >= 52 ? [["Disk", payload.system.disk_percent || 0, history.map((sample) => sample.disk), theme.magenta, "%"]] : []),
+          ["CPU", payload.system.cpu_percent, cpu, theme.green, "%"],
+          ["Memory", payload.system.memory_percent, memory, theme.blue, "%"],
+          ...(width >= 52 ? [["Disk", payload.system.disk_percent, history.map((sample) => sample.disk), theme.magenta, "%"]] : []),
           ...(width >= 58 ? [["Network", payload.system.network_rx_bps || 0, network, theme.orange, ""]] : []),
         ].map(([label, current, values, color, suffix]) => (
           <box key={String(label)} style={{ height: 1, flexDirection: "row", alignItems: "center" }}>
             <text fg={theme.faint} content={`${String(label).padEnd(9)} `} />
             <text fg={String(color)} content={sparkline(values as number[], sparkWidth)} />
             <box style={{ flexGrow: 1 }} />
-            <text fg={theme.muted} content={label === "Network" ? formatRate(Number(current)) : `${Math.round(Number(current))}${suffix}`} />
+            <text fg={theme.muted} content={label === "Network" ? formatRate(Number(current || 0)) : formatPercent(typeof current === "number" ? current : null)} />
           </box>
         ))}
       </Panel>
@@ -357,7 +366,7 @@ function SystemTrends({
       <box style={{ flexGrow: 1, flexDirection: "row", gap: 1 }}>
         <LargeChart
           title="CPU utilization"
-          value={`${Math.round(payload.system.cpu_percent || 0)}%`}
+          value={formatPercent(payload.system.cpu_percent)}
           detail={`load ${payload.system.load_1m ?? "—"}`}
           values={cpu}
           color={theme.green}
@@ -367,7 +376,7 @@ function SystemTrends({
         />
         <LargeChart
           title="Memory pressure"
-          value={`${Math.round(payload.system.memory_percent || 0)}%`}
+          value={formatPercent(payload.system.memory_percent)}
           detail={`${formatBytes(payload.system.memory_used_bytes)} used`}
           values={memory}
           color={theme.blue}
@@ -387,7 +396,7 @@ function SystemTrends({
         />
       </box>
       <box style={{ height: 2, flexDirection: "row", alignItems: "center", paddingLeft: 1, paddingRight: 1 }}>
-        <text fg={theme.magenta} content={`Disk ${Math.round(payload.system.disk_percent || 0)}%`} />
+        <text fg={theme.magenta} content={`Disk ${formatPercent(payload.system.disk_percent)}`} />
         <text fg={theme.faint} content={`  ${formatBytes(payload.system.disk_used_bytes)} / ${formatBytes(payload.system.disk_total_bytes)}`} />
         <box style={{ flexGrow: 1 }} />
         <text fg={theme.cyan} content={`RX ${formatRate(payload.system.network_rx_bps)}  TX ${formatRate(payload.system.network_tx_bps)}`} />
@@ -459,7 +468,7 @@ function MinimalDashboard({ payload, width }: { payload: DashboardPayload; width
   const alert = payload.alerts[0]
   const workload = payload.jobs[0]
   const session = payload.sessions[0]
-  const workloadCount = payload.jobs.length + payload.sessions.length
+  const workloadCount = activeJobCount(payload) + payload.sessions.length
   return (
     <box style={{ flexGrow: 1, flexDirection: "column", gap: 1 }}>
       <Panel title="System overview" active accent={colors.accent} activeBackground={colors.panel} style={{ height: 4, paddingLeft: 1, paddingRight: 1 }}>
@@ -470,7 +479,7 @@ function MinimalDashboard({ payload, width }: { payload: DashboardPayload; width
         />
         <text
           fg={theme.muted}
-          content={`CPU ${Math.round(payload.system.cpu_percent || 0)}%  MEM ${Math.round(payload.system.memory_percent || 0)}%  DISK ${Math.round(payload.system.disk_percent || 0)}%`}
+          content={`CPU ${formatPercent(payload.system.cpu_percent)}  MEM ${formatPercent(payload.system.memory_percent)}  DISK ${formatPercent(payload.system.disk_percent)}`}
         />
       </Panel>
       <Panel title={`Active workloads · ${workloadCount}`} style={{ flexGrow: 1, paddingLeft: 1, paddingRight: 1 }}>

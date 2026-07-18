@@ -33,7 +33,7 @@ def test_linux_dashboard_readers_parse_proc_files(monkeypatch):
     }
 
     def read_text(path, *args, **kwargs):  # noqa: ANN001, ARG001
-        return samples[str(path)]
+        return samples[str(path).replace("\\", "/")]
 
     monkeypatch.setattr(ui.Path, "read_text", read_text)
 
@@ -53,7 +53,7 @@ def test_local_dashboard_snapshot_calculates_rates_and_percentages(tmp_path, mon
     monkeypatch.setattr(ui, "_read_linux_cpu_times", lambda: next(cpu))
     monkeypatch.setattr(ui, "_read_linux_memory", lambda: (1000, 500))
     monkeypatch.setattr(ui, "_read_linux_network", lambda: next(network))
-    monkeypatch.setattr(ui.os, "getloadavg", lambda: (2.0, 1.0, 0.5))
+    monkeypatch.setattr(ui.os, "getloadavg", lambda: (2.0, 1.0, 0.5), raising=False)
     monkeypatch.setattr(ui.os, "cpu_count", lambda: 4)
     monkeypatch.setattr(ui.time, "monotonic", lambda: next(monotonic))
     monkeypatch.setattr(ui.Path, "read_text", lambda *args, **kwargs: "123.4 0")
@@ -92,6 +92,7 @@ def test_dashboard_helpers_build_alerts_and_activity(tmp_path, monkeypatch):
     assert "Workspace disk is 96% full" in titles
     assert "Job seed-run failed" in titles
     assert "1 recent MCP call failure(s)" in titles
+    assert ui._remote_version({"info": {"lsm_version": "3.0.5"}}) == "3.0.5"
 
     activity = ui._dashboard_activity(
         [
@@ -206,7 +207,11 @@ def test_dashboard_api_degrades_when_optional_sources_fail(tmp_path, monkeypatch
     _configure(tmp_path, monkeypatch)
     monkeypatch.setattr(ui, "_machine_rows", lambda: {"machines": [{"name": "local", "status": "online", "info": {}}], "counts": {"online": 1, "offline": 0, "total": 1}})
     monkeypatch.setattr(ui, "_local_system_snapshot", lambda: {"timestamp": 1, "disk_percent": 1})
-    monkeypatch.setattr(ui, "todo_read", lambda: {"revision": 0, "todos": []})
+    monkeypatch.setattr(
+        ui,
+        "todo_read",
+        lambda: (_ for _ in ()).throw(RuntimeError("todos")),
+    )
 
     async def broken(*args, **kwargs):  # noqa: ANN002, ANN003
         raise RuntimeError("optional source unavailable")
@@ -224,7 +229,44 @@ def test_dashboard_api_degrades_when_optional_sources_fail(tmp_path, monkeypatch
     assert payload["sessions"] == []
     assert payload["activity"] == []
     assert {alert["title"] for alert in payload["alerts"]} == {
+        "Todo data unavailable",
         "Persistent sessions unavailable",
         "Tracked jobs unavailable",
         "Audit activity unavailable",
     }
+
+
+def test_dashboard_api_prioritizes_critical_alerts_before_truncation(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    machines = [
+        {"name": "local", "status": "online", "info": {}},
+        *[
+            {"name": f"node-{index}", "status": "online", "info": {"lsm_version": "old"}}
+            for index in range(15)
+        ],
+    ]
+    monkeypatch.setattr(
+        ui,
+        "_machine_rows",
+        lambda: {
+            "machines": machines,
+            "counts": {"online": len(machines), "offline": 0, "total": len(machines)},
+        },
+    )
+    monkeypatch.setattr(ui, "_local_system_snapshot", lambda: {"timestamp": 1, "disk_percent": 96})
+    monkeypatch.setattr(ui, "todo_read", lambda: {"revision": 0, "todos": []})
+    monkeypatch.setattr(ui, "list_shells", lambda: {"sessions": []})
+
+    async def no_jobs(include_finished=True):  # noqa: ARG001
+        return {"jobs": [], "counts": {}}
+
+    monkeypatch.setattr(ui, "list_jobs", no_jobs)
+    monkeypatch.setattr(ui, "query_audit", lambda **kwargs: {"entries": [], "total_matched": 0})
+    monkeypatch.setattr(ui, "version_info", lambda: {"version": "current"})
+
+    response = TestClient(Starlette(routes=ui.ui_routes())).get("/api/ui/dashboard")
+
+    payload = response.json()["data"]
+    assert len(payload["alerts"]) == 12
+    assert payload["alerts"][0]["severity"] == "critical"
+    assert payload["alerts"][0]["title"] == "Workspace disk is 96% full"

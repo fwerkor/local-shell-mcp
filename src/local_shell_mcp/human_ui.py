@@ -568,13 +568,25 @@ async def api_dashboard(request: Request) -> Response:
         required.append("remote:use")
     _require_ui_scopes(request, *required)
 
-    machines, system, todos = await asyncio.gather(
+    machines, system = await asyncio.gather(
         asyncio.to_thread(_machine_rows),
         asyncio.to_thread(_local_system_snapshot),
-        asyncio.to_thread(todo_read),
     )
 
     source_alerts: list[dict[str, Any]] = []
+    try:
+        todos = await asyncio.to_thread(todo_read)
+    except Exception as exc:
+        _LOGGER.debug("Dashboard todo snapshot failed", exc_info=True)
+        todos = {"revision": 0, "todos": []}
+        source_alerts.append(
+            {
+                "severity": "warning",
+                "title": "Todo data unavailable",
+                "detail": f"{type(exc).__name__}: {exc}",
+                "node": "local",
+            }
+        )
     with suppress_audit():
         try:
             terminals = await _machine_dispatch("local", list_shells, "shell_list", {})
@@ -639,9 +651,13 @@ async def api_dashboard(request: Request) -> Response:
     ]
     open_todos = [item for item in list(todos.get("todos") or []) if item.get("status") != "completed"]
     severity_rank = {"info": 0, "warning": 1, "critical": 2}
+    alerts.sort(
+        key=lambda alert: severity_rank.get(str(alert.get("severity")), 0),
+        reverse=True,
+    )
     health = "healthy"
     if alerts:
-        highest = max(severity_rank.get(str(alert.get("severity")), 0) for alert in alerts)
+        highest = severity_rank.get(str(alerts[0].get("severity")), 0)
         health = "critical" if highest >= 2 else "attention"
 
     return _json_ok(
