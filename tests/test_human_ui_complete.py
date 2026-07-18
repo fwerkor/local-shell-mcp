@@ -430,12 +430,13 @@ def test_resolve_spawn_and_tui_cli_branches(tmp_path, monkeypatch):
     os_proxy = SimpleNamespace(**{**vars(os), "name": "posix"})
     monkeypatch.setattr(ui, "os", os_proxy)
     monkeypatch.setattr(ui, "resolve_tui_command", lambda: ["/tmp/tui"])
-    ui._spawn_tui_process(80, 24)
+    ui._spawn_tui_process(80, 24, 2.75)
     assert captured["env"]["LOCAL_SHELL_MCP_UI_MODE"] == "web"
     assert captured["env"]["TERM"] == "xterm-256color"
     assert captured["env"]["COLORTERM"] == "truecolor"
     assert captured["env"]["TERM_PROGRAM"] == "vscode"
     assert captured["env"]["TERM_PROGRAM_VERSION"] == "local-shell-mcp"
+    assert captured["env"]["LOCAL_SHELL_MCP_UI_CELL_ASPECT"] == "2.7500"
 
     monkeypatch.setattr(ui, "resolve_tui_command", lambda: ["tui"])
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=7))
@@ -635,7 +636,12 @@ def test_websocket_control_flow_and_limits(tmp_path, monkeypatch):
     assert spawn_failure.closed[-1][0] == 1011
 
     process = Process([b"hello"])
-    monkeypatch.setattr(ui, "_spawn_tui_process", lambda *args: process)
+    spawn_calls = []
+    monkeypatch.setattr(
+        ui,
+        "_spawn_tui_process",
+        lambda *args: spawn_calls.append(args) or process,
+    )
     messages = [
         {"type": "websocket.receive", "bytes": b"bytes"},
         {"type": "websocket.receive", "text": "raw text"},
@@ -647,9 +653,10 @@ def test_websocket_control_flow_and_limits(tmp_path, monkeypatch):
         },
         {"type": "websocket.disconnect"},
     ]
-    socket = Socket(messages)
+    socket = Socket(messages, query={"cols": "80", "rows": "24", "cell_aspect": "2.75"})
     asyncio.run(ui.ui_terminal_websocket(socket))
     assert socket.accepted == "lsm-ui"
+    assert spawn_calls == [(80, 24, 2.75)]
     assert b"hello" in socket.sent
     assert b"bytes" in process.writes
     assert b"raw text" in process.writes

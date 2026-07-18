@@ -9,6 +9,8 @@ from .fs_ops import relative_display, resolve_path
 
 MAX_VIEW_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_PREVIEW_SOURCE_PIXELS = 25_000_000
+TERMINAL_CELL_HEIGHT_TO_WIDTH = 2.0
+SUPER_SAMPLE_PIXELS_PER_CELL = 2
 
 
 @dataclass(frozen=True)
@@ -77,16 +79,20 @@ def make_image_preview(
     image: ImageFile,
     max_columns: int,
     max_rows: int,
+    cell_height_to_width: float = TERMINAL_CELL_HEIGHT_TO_WIDTH,
 ) -> ImagePreview:
     """Decode a bounded first-frame RGBA thumbnail for OpenTUI's pixel buffer."""
 
     columns = max(2, min(int(max_columns), 200))
     rows = max(1, min(int(max_rows), 100))
-    # OpenTUI's supersampled renderer consumes a 2x2 source-pixel block for
-    # each terminal cell, so the source raster may be twice the cell bounds
-    # in both dimensions.
-    max_pixel_width = columns * 2
-    max_pixel_height = rows * 2
+    cell_aspect = max(0.5, min(float(cell_height_to_width), 5.0))
+    # OpenTUI consumes a 2x2 source-pixel block per terminal cell. Terminal
+    # cells are approximately twice as tall as they are wide, so a source
+    # raster with the image's original pixel aspect ratio appears vertically
+    # stretched. Compress the raster vertically before drawing so the final
+    # cell footprint preserves the image's visual aspect ratio.
+    max_pixel_width = columns * SUPER_SAMPLE_PIXELS_PER_CELL
+    max_pixel_height = rows * SUPER_SAMPLE_PIXELS_PER_CELL
 
     with Image.open(BytesIO(image.data)) as opened:
         opened.seek(0)
@@ -100,11 +106,20 @@ def make_image_preview(
                 f"{original_width * original_height} pixels; max is {MAX_PREVIEW_SOURCE_PIXELS}"
             )
         frame = oriented.convert("RGBA")
-        frame.thumbnail(
-            (max_pixel_width, max_pixel_height),
-            Image.Resampling.LANCZOS,
-            reducing_gap=3.0,
+        compensated_height = original_height / cell_aspect
+        scale = min(
+            1.0,
+            max_pixel_width / original_width,
+            max_pixel_height / compensated_height,
         )
+        target_width = max(1, min(max_pixel_width, int(original_width * scale)))
+        target_height = max(1, min(max_pixel_height, int(compensated_height * scale)))
+        if frame.size != (target_width, target_height):
+            frame = frame.resize(
+                (target_width, target_height),
+                Image.Resampling.LANCZOS,
+                reducing_gap=3.0,
+            )
         width, height = frame.size
         rgba = frame.tobytes()
 
