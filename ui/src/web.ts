@@ -8,6 +8,13 @@ declare global {
   interface Window {
     __LSM_UI_CONFIG__?: { uiPath?: string; apiPrefix?: string }
   }
+
+  interface Navigator {
+    keyboard?: {
+      lock?: (keys?: string[]) => Promise<void>
+      unlock?: () => void
+    }
+  }
 }
 
 const UI_PATH = (window.__LSM_UI_CONFIG__?.uiPath || "/ui").replace(/\/$/, "")
@@ -339,6 +346,12 @@ function connect(): void {
       loginButton.disabled = false
       return
     }
+    if (event.code === 4410) {
+      manualDisconnect = true
+      setConnection("error", "Disconnected")
+      terminal.write("\r\n\x1b[38;2;255;204;102mThe TUI exited. Use Reconnect to start a new session.\x1b[0m\r\n")
+      return
+    }
     if ([1011, 4400, 4408, 4429].includes(event.code)) {
       manualDisconnect = true
       const detail = event.reason ||
@@ -427,13 +440,27 @@ fullscreenButton.addEventListener("click", () => {
   else void document.documentElement.requestFullscreen()
 })
 
+function syncFullscreenKeyboardLock(): void {
+  try {
+    if (document.fullscreenElement) {
+      void navigator.keyboard?.lock?.(["Escape"])?.catch(() => undefined)
+    } else {
+      navigator.keyboard?.unlock?.()
+    }
+  } catch {
+    // Unsupported or denied keyboard locks fall back to Ctrl+[ for Escape.
+  }
+}
+
 document.addEventListener("fullscreenchange", () => {
   const label = document.fullscreenElement ? "Exit fullscreen" : "Fullscreen"
   fullscreenButton.title = label
   fullscreenButton.setAttribute("aria-label", label)
   const wideLabel = fullscreenButton.querySelector<HTMLElement>(".wide-label")
   if (wideLabel) wideLabel.textContent = label
+  terminal.focus()
   window.requestAnimationFrame(sendResize)
+  syncFullscreenKeyboardLock()
 })
 
 async function boot(): Promise<void> {

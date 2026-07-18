@@ -22,12 +22,12 @@ function Help({ close }: { close: () => void }) {
       <text fg={theme.cyan} attributes={1} content="Global navigation" />
       <text fg={theme.muted} content="Alt+1…5  switch top-level screen (F2…F6 also work)" />
       <text fg={theme.muted} content="F7        refresh machine list" />
-      <text fg={theme.muted} content="Ctrl+Q    quit the TUI" />
+      <text fg={theme.muted} content="Alt+Q     quit the TUI" />
       <text fg={theme.muted} content="F1        show this guide" />
       <text fg={theme.borderBright} content="\nScreen conventions" />
       <text fg={theme.muted} content="j/k or arrows move selection · Enter activates · Esc closes dialogs" />
       <text fg={theme.muted} content="[ / ] switches Files machines · Alt+[ / ] switches Terminal machines" />
-      <text fg={theme.muted} content="Terminals: Alt+N new · Alt+W kill · Alt+A audit · Alt+R refresh" />
+      <text fg={theme.muted} content="Terminals: Alt+N new · Alt+W kill · PgUp/PgDn scroll · Alt+R refresh" />
       <text fg={theme.muted} content="The footer on every screen lists its contextual commands." />
       <text fg={theme.borderBright} content="\nAudit policy" />
       <text fg={theme.muted} content="Audit contains MCP-originated operations. Actions typed by a human in this TUI or the WebUI are intentionally excluded." />
@@ -116,7 +116,7 @@ function App() {
 
   useKeyboard((key) => {
     if (terminalRawMode) return
-    if (key.ctrl && key.name === "q") {
+    if ((key.option || key.meta) && key.name === "q") {
       renderer.destroy()
       return
     }

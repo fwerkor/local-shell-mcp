@@ -3,6 +3,7 @@ import { useMemo } from "react"
 import { useTerminalDimensions } from "@opentui/react"
 import { layoutKeyHints } from "./key-hints"
 import type { KeyHintItem } from "./key-hints"
+import { handleSelectionScroll } from "./mouse"
 import { clampIndex } from "./state-utils"
 import type { Machine, ScreenName } from "./types"
 import { screenTheme, theme } from "./theme"
@@ -80,9 +81,20 @@ export function MachineSidebar({
   selectedColor?: string
   onSelect?: (machine: string) => void
 }) {
+  const selectedIndex = machines.findIndex((machine) => machine.name === selected)
   return (
     <box
       title={` ${title} `}
+      onMouseScroll={(event) => {
+        if (!onSelect || machines.length === 0) return
+        handleSelectionScroll(
+          event,
+          (delta) => onSelect(
+            machines[clampIndex(Math.max(0, selectedIndex) + delta, machines.length)]!.name,
+          ),
+          1,
+        )
+      }}
       style={{
         width,
         flexShrink: 0,
