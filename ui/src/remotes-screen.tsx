@@ -109,6 +109,14 @@ export function RemotesScreen({
     }
   }
 
+  const moveSelection = (delta: number) => {
+    setSelected((value) => clampIndex(value + delta, machines.length))
+  }
+  const createRemoteInvite = () => enabled && setDialog({ type: "invite" })
+  const renameCurrent = () => current && enabled && setDialog({ type: "rename", machine: current })
+  const revokeCurrent = () => current && enabled && setDialog({ type: "revoke", machine: current })
+  const footerLocked = !keyboardEnabled || dialog.type !== "none"
+
   useKeyboard((key) => {
     if (!keyboardEnabled) return
     if (dialog.type === "invite" || dialog.type === "rename") {
@@ -132,13 +140,11 @@ export function RemotesScreen({
       }
       return
     }
-    if (key.name === "j" || key.name === "down") {
-      setSelected((value) => clampIndex(value + 1, machines.length))
-    }
-    else if (key.name === "k" || key.name === "up") setSelected((value) => Math.max(0, value - 1))
-    else if (key.name === "n" && enabled) setDialog({ type: "invite" })
-    else if (key.name === "e" && current && enabled) setDialog({ type: "rename", machine: current })
-    else if (key.name === "d" && current && enabled) setDialog({ type: "revoke", machine: current })
+    if (key.name === "j" || key.name === "down") moveSelection(1)
+    else if (key.name === "k" || key.name === "up") moveSelection(-1)
+    else if (key.name === "n") createRemoteInvite()
+    else if (key.name === "e") renameCurrent()
+    else if (key.name === "d") revokeCurrent()
     else if (key.name === "r") void refresh(true)
   })
 
@@ -246,7 +252,17 @@ export function RemotesScreen({
           )}
         </Panel>
       </box>
-      <KeyHint accent={colors.accent} items={[["j/k", "move"], ["n", "new invite"], ["e", "rename"], ["d", "revoke"], ["r", "refresh"]]} />
+      <KeyHint
+        accent={colors.accent}
+        items={[
+          { key: "j", label: "down", onPress: () => moveSelection(1), disabled: footerLocked || machines.length === 0 },
+          { key: "k", label: "up", onPress: () => moveSelection(-1), disabled: footerLocked || machines.length === 0 },
+          { key: "n", label: "new invite", onPress: createRemoteInvite, disabled: footerLocked || !enabled },
+          { key: "e", label: "rename", onPress: renameCurrent, disabled: footerLocked || !enabled || !current },
+          { key: "d", label: "revoke", onPress: revokeCurrent, disabled: footerLocked || !enabled || !current },
+          { key: "r", label: "refresh", onPress: () => void refresh(true), disabled: footerLocked || loading },
+        ]}
+      />
       {dialog.type === "invite" && (
         <Modal title="Create remote invite" height={8}>
           <text fg={theme.muted} content="Enter: optional-name [optional-workdir]" />

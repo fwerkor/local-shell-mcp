@@ -169,6 +169,22 @@ export function TodosScreen({
     replaceItem(id, { content: trimmed })
   }
 
+  const moveSelection = (delta: number) => {
+    setSelected((value) => clampIndex(value + delta, visible.length))
+  }
+  const addCurrent = () => setDialog({ type: "add" })
+  const editCurrent = () => current && setDialog({ type: "edit", item: current })
+  const deleteCurrent = () => current && setDialog({ type: "delete", item: current })
+  const cycleStatus = () => current && replaceItem(
+    current.id,
+    (todo) => ({ status: nextValue(todo.status, STATUS_ORDER) }),
+  )
+  const cyclePriority = () => current && replaceItem(
+    current.id,
+    (todo) => ({ priority: nextValue(todo.priority, PRIORITY_ORDER) }),
+  )
+  const footerLocked = !keyboardEnabled || dialog.type !== "none"
+
   useKeyboard((key) => {
     if (!keyboardEnabled) return
     if (dialog.type === "add" || dialog.type === "edit") {
@@ -184,20 +200,15 @@ export function TodosScreen({
       }
       return
     }
-    if (key.name === "j" || key.name === "down") {
-      setSelected((value) => clampIndex(value + 1, visible.length))
-    } else if (key.name === "k" || key.name === "up") {
-      setSelected((value) => clampIndex(value - 1, visible.length))
-    } else if (key.name === "n") setDialog({ type: "add" })
-    else if (key.name === "e" && current) setDialog({ type: "edit", item: current })
-    else if (key.name === "d" && current) setDialog({ type: "delete", item: current })
-    else if ((key.name === "return" || key.name === "space") && current) {
-      replaceItem(current.id, (todo) => ({ status: nextValue(todo.status, STATUS_ORDER) }))
-    } else if (key.name === "p" && current) {
-      replaceItem(current.id, (todo) => ({ priority: nextValue(todo.priority, PRIORITY_ORDER) }))
-    } else if (key.name === "f") {
-      cycleFilter()
-    } else if (key.name === "r" && pendingMutations.current === 0) void load()
+    if (key.name === "j" || key.name === "down") moveSelection(1)
+    else if (key.name === "k" || key.name === "up") moveSelection(-1)
+    else if (key.name === "n") addCurrent()
+    else if (key.name === "e") editCurrent()
+    else if (key.name === "d") deleteCurrent()
+    else if (key.name === "return" || key.name === "space") cycleStatus()
+    else if (key.name === "p") cyclePriority()
+    else if (key.name === "f") cycleFilter()
+    else if (key.name === "r" && pendingMutations.current === 0) void load()
   })
 
   const counts = {
@@ -281,14 +292,15 @@ export function TodosScreen({
       <KeyHint
         accent={colors.accent}
         items={[
-          ["j/k", "move"],
-          ["Enter", "status"],
-          ["p", "priority"],
-          ["n", "add"],
-          ["e", "edit"],
-          ["d", "delete"],
-          ["f", "filter"],
-          ["r", "refresh"],
+          { key: "j", label: "down", onPress: () => moveSelection(1), disabled: footerLocked || visible.length === 0 },
+          { key: "k", label: "up", onPress: () => moveSelection(-1), disabled: footerLocked || visible.length === 0 },
+          { key: "Enter", label: "status", onPress: cycleStatus, disabled: footerLocked || !current },
+          { key: "p", label: "priority", onPress: cyclePriority, disabled: footerLocked || !current },
+          { key: "n", label: "add", onPress: addCurrent, disabled: footerLocked },
+          { key: "e", label: "edit", onPress: editCurrent, disabled: footerLocked || !current },
+          { key: "d", label: "delete", onPress: deleteCurrent, disabled: footerLocked || !current },
+          { key: "f", label: "filter", onPress: cycleFilter, disabled: footerLocked },
+          { key: "r", label: "refresh", onPress: () => void load(), disabled: footerLocked || saving },
         ]}
       />
       {saving && (
