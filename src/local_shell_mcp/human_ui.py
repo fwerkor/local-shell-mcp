@@ -109,6 +109,26 @@ def _bounded_int(
     return max(minimum, min(value, maximum))
 
 
+def _bounded_float(
+    raw: str | float | None,
+    *,
+    default: float,
+    minimum: float,
+    maximum: float,
+    label: str,
+) -> float:
+    if raw in {None, ""}:
+        value = default
+    else:
+        try:
+            value = float(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{label} must be a number") from exc
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{label} must be between {minimum} and {maximum}")
+    return value
+
+
 def _assets_dir() -> Path:
     return Path(__file__).resolve().parent / "ui_static"
 
@@ -402,13 +422,26 @@ async def api_file_preview(request: Request) -> Response:
         if path.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
             columns = max(8, min(int(request.query_params.get("columns", "96")), 200))
             rows = max(4, min(int(request.query_params.get("rows", "32")), 100))
+            cell_aspect = _bounded_float(
+                request.query_params.get("cell_aspect"),
+                default=2.0,
+                minimum=0.5,
+                maximum=5.0,
+                label="cell_aspect",
+            )
             from .tools import load_image_for_machine
 
             image, display_path = await load_image_for_machine(
                 path,
                 None if machine == "local" else machine,
             )
-            rendered = await asyncio.to_thread(make_image_preview, image, columns, rows)
+            rendered = await asyncio.to_thread(
+                make_image_preview,
+                image,
+                columns,
+                rows,
+                cell_aspect,
+            )
             return _json_ok(
                 {
                     "kind": "image",
@@ -919,7 +952,11 @@ class _WindowsPtyProcess:
             await asyncio.to_thread(self.process.terminate, True)
 
 
-def _spawn_tui_process(cols: int, rows: int):  # noqa: ANN201
+def _spawn_tui_process(
+    cols: int,
+    rows: int,
+    cell_aspect: float = 2.0,
+):  # noqa: ANN201
     settings = get_settings()
     env = os.environ.copy()
     env.update(
@@ -934,6 +971,7 @@ def _spawn_tui_process(cols: int, rows: int):  # noqa: ANN201
             "LOCAL_SHELL_MCP_UI_API_BASE": f"http://127.0.0.1:{settings.port}{UI_API_PREFIX}",
             "LOCAL_SHELL_MCP_UI_MODE": "web",
             UI_LOCAL_TOKEN_ENV: get_or_create_ui_local_token(),
+            "LOCAL_SHELL_MCP_UI_CELL_ASPECT": f"{cell_aspect:.4f}",
         }
     )
     command = resolve_tui_command()
@@ -1024,7 +1062,14 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
             maximum=UI_MAX_ROWS,
             label="rows",
         )
-        process = _spawn_tui_process(cols, rows)
+        cell_aspect = _bounded_float(
+            websocket.query_params.get("cell_aspect"),
+            default=2.0,
+            minimum=0.5,
+            maximum=5.0,
+            label="cell_aspect",
+        )
+        process = _spawn_tui_process(cols, rows, cell_aspect)
     except Exception as exc:
         _ACTIVE_UI_TERMINALS.discard(marker)
         _LOGGER.exception("Unable to start the human-interface TUI process")
