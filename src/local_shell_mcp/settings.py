@@ -355,8 +355,8 @@ if _PYDANTIC_AVAILABLE:
         ui_terminal_max_sessions: int = 8
         ui_remote_request_timeout_s: int = 30
 
-        # Skills use the fixed skills_list and skill_load tools and are read
-        # from agent_config_dir/skills. The MCP tool surface remains static.
+        # Skills use a fixed tool surface and are merged from workspace-level
+        # .agents/skills, agent_config_dir/skills, and the global universal directory.
 
         file_download_enabled: bool = True
         file_download_default_ttl_s: int = 3600
