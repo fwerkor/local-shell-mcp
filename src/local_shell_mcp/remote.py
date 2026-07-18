@@ -25,6 +25,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .audit import audit, suppress_audit
 from .fs_ops import (
     delete_path,
@@ -1426,6 +1427,7 @@ def worker_info(workdir: str) -> dict[str, Any]:
         "user": os.getenv("USER") or os.getenv("USERNAME") or "unknown",
         "cwd": os.getcwd(),
         "workdir": workdir,
+        "lsm_version": __version__,
         "python": sys.version.split()[0],
         "platform": sys.platform,
         "persistent_shell": persistent_shell_backend_info(),
