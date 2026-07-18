@@ -35,6 +35,7 @@ The WebUI includes:
 - A lightweight animated aurora fallback when the wallpaper cannot be fetched.
 - Binary terminal transport, automatic PTY resize, reconnect backoff, and fullscreen mode.
 - Mouse support on the actual OpenTUI controls, including the top category bar.
+- A mobile shortcut row whose `KB` button explicitly opens the soft keyboard; ordinary taps remain pointer actions and do not summon it.
 
 ## Native TUI
 

@@ -19,7 +19,7 @@ export function TopNav({
   width: number
   onSelect: (screen: ScreenName) => void
 }) {
-  const narrow = width < 47
+  const narrow = width < 45
   const compact = width < 88
   return (
     <box
@@ -52,7 +52,7 @@ export function TopNav({
               marginRight: narrow ? 0 : compact ? 1 : 2,
               paddingLeft: narrow ? 0 : 1,
               paddingRight: 1,
-              backgroundColor: selected ? colors.selected : undefined,
+              backgroundColor: selected ? colors.selected : theme.panel,
             }}
           >
             <text fg={selected ? colors.accent : theme.muted} attributes={selected ? 1 : 0} content={label} />
