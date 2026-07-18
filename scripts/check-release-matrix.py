@@ -22,6 +22,13 @@ def matrix_values(job: dict, key: str) -> set[str]:
     return {str(row[key]) for row in rows if key in row}
 
 
+def step_script(job: dict, name: str) -> str:
+    for step in job.get("steps", []):
+        if step.get("name") == name:
+            return str(step.get("run") or "")
+    return ""
+
+
 def main() -> int:
     workflow = yaml.safe_load(RELEASE.read_text(encoding="utf-8"))
     jobs = workflow.get("jobs", {})
@@ -36,6 +43,19 @@ def main() -> int:
         print(f"extra: {extra_binary}")
         return 1
 
+    package_script = step_script(binary_job, "Package executable")
+    if not package_script:
+        print("Release binary packaging step is missing.")
+        return 1
+    if "matrix.tui_binary" in package_script:
+        print("Release archives must not include the OpenTUI sidecar executable.")
+        return 1
+
+    smoke_script = step_script(binary_job, "Smoke test embedded OpenTUI runtime")
+    if "standalone-ui-smoke.py" not in smoke_script:
+        print("Release binaries must exercise the embedded OpenTUI runtime before packaging.")
+        return 1
+
     docker_job = jobs.get("publish-docker-platform", {})
     docker_platforms = matrix_values(docker_job, "platform")
     missing_docker = sorted(EXPECTED_DOCKER_PLATFORMS - docker_platforms)
@@ -46,7 +66,9 @@ def main() -> int:
         print(f"extra: {extra_docker}")
         return 1
 
-    print("Release build matrices cover all expected binary artifacts and Docker platforms.")
+    print(
+        "Release build matrices and single-executable packaging checks passed for all expected platforms."
+    )
     return 0
 
 

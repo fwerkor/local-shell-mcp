@@ -534,6 +534,7 @@ jobs:
           ./dist/${{ matrix.binary }} --version
           ./dist/${{ matrix.binary }} version
           ./dist/${{ matrix.binary }} --help
+          python scripts/standalone-ui-smoke.py --server ./dist/${{ matrix.binary }}
 
 
   bundled-tmux:
