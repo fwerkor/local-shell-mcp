@@ -5,10 +5,13 @@ import { api, formatError } from "./api"
 import { EmptyState, KeyHint, MachineSidebar, Modal, Panel, formatBytes, useVisibleRows } from "./components"
 import { isDoubleClick, pathBreadcrumbs, type PointerClick } from "./file-navigation"
 import { clampIndex, nextPreviewMeasurement, payloadMatches } from "./state-utils"
+import { drawClippedSuperSampleBuffer } from "./image-preview"
+import { parseTerminalCellAspect } from "./terminal-geometry"
 import { screenTheme, theme } from "./theme"
 import type { FileEntry, FilePreview, FilesPayload, Machine } from "./types"
 
 const colors = screenTheme.Files
+const terminalCellAspect = parseTerminalCellAspect(process.env.LOCAL_SHELL_MCP_UI_CELL_ASPECT)
 
 type Dialog =
   | { type: "none" }
@@ -110,14 +113,7 @@ function ImagePreview({ preview, entry }: { preview: FilePreview; entry: FileEnt
   const sourceWidth = Number(preview.original_width || pixelWidth)
   const sourceHeight = Number(preview.original_height || pixelHeight)
   const drawPixels = function (this: Renderable, buffer: OptimizedBuffer) {
-    buffer.drawSuperSampleBuffer(
-      this.screenX,
-      this.screenY,
-      pixels as never,
-      pixels.byteLength,
-      "rgba8unorm",
-      pixelWidth * 4,
-    )
+    drawClippedSuperSampleBuffer(buffer, this, pixels, pixelWidth)
   }
   return (
     <box style={{ flexGrow: 1, flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
@@ -287,7 +283,14 @@ export function FilesScreen({
     const controller = new AbortController()
     const timer = setTimeout(() => {
       void api
-        .filePreview(machine, currentPath, previewColumns, previewRows, controller.signal)
+        .filePreview(
+          machine,
+          currentPath,
+          previewColumns,
+          previewRows,
+          terminalCellAspect,
+          controller.signal,
+        )
         .then((result) => {
           if (!controller.signal.aborted) setPreview(result)
         })
