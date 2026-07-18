@@ -1,4 +1,4 @@
-import type { TextareaRenderable } from "@opentui/core"
+import type { OptimizedBuffer, Renderable, TextareaRenderable } from "@opentui/core"
 import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
@@ -90,6 +90,46 @@ function FileRows({
   )
 }
 
+function ImagePreview({ preview, entry }: { preview: FilePreview; entry: FileEntry }) {
+  const pixelWidth = Number(preview.width || 0)
+  const pixelHeight = Number(preview.height || 0)
+  const cellWidth = Number(preview.cell_width || pixelWidth * 2)
+  const cellHeight = Number(preview.cell_height || Math.ceil(pixelHeight / 2))
+  let pixels: Uint8Array
+  try {
+    pixels = Uint8Array.from(Buffer.from(String(preview.rgba || ""), "base64"))
+  } catch {
+    return <EmptyState title={entry.name} detail="Invalid image preview data" />
+  }
+  if (!pixelWidth || !pixelHeight || pixels.byteLength !== pixelWidth * pixelHeight * 4) {
+    return <EmptyState title={entry.name} detail="Invalid image preview dimensions" />
+  }
+  const sourceWidth = Number(preview.original_width || pixelWidth)
+  const sourceHeight = Number(preview.original_height || pixelHeight)
+  const drawPixels = function (this: Renderable, buffer: OptimizedBuffer) {
+    buffer.drawSuperSampleBuffer(
+      this.screenX,
+      this.screenY,
+      pixels as never,
+      pixels.byteLength,
+      "rgba8unorm",
+      pixelWidth * 4,
+    )
+  }
+  return (
+    <box style={{ flexGrow: 1, flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+      <box
+        style={{ width: cellWidth, height: cellHeight, flexShrink: 0 }}
+        renderAfter={drawPixels}
+      />
+      <text
+        fg={theme.faint}
+        content={`${sourceWidth}×${sourceHeight} · ${formatBytes(Number(preview.bytes || entry.size || 0))}`}
+      />
+    </box>
+  )
+}
+
 function Preview({ preview, entry }: { preview: FilePreview | null; entry?: FileEntry }) {
   if (!entry) return <EmptyState title="No selection" detail="Choose an entry to inspect" />
   if (!preview) return <EmptyState title={entry.name} detail="Loading preview…" />
@@ -110,6 +150,7 @@ function Preview({ preview, entry }: { preview: FilePreview | null; entry?: File
       </box>
     )
   }
+  if (preview.kind === "image") return <ImagePreview preview={preview} entry={entry} />
   const text = String(preview.content || preview.preview || "")
   return (
     <scrollbox
@@ -151,6 +192,7 @@ export function FilesScreen({
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null)
   const [busy, setBusy] = useState(false)
   const [narrowPane, setNarrowPane] = useState<"list" | "preview">("list")
+  const [previewBounds, setPreviewBounds] = useState<{ columns: number; rows: number } | null>(null)
   const editorRef = useRef<TextareaRenderable>(null)
   const refreshRequest = useRef(0)
   const refreshController = useRef<AbortController | null>(null)
@@ -174,6 +216,12 @@ export function FilesScreen({
   }, [entries.length])
   const narrow = width < 70
   const compact = width < 105
+  const fallbackPreviewColumns = Math.max(
+    8,
+    narrow ? width - 8 : compact ? Math.floor(width * 0.45) - 6 : Math.floor(width * 0.4) - 8,
+  )
+  const previewColumns = previewBounds?.columns || fallbackPreviewColumns
+  const previewRows = previewBounds?.rows || Math.max(4, listHeight - 3)
 
   const refresh = useCallback(async () => {
     const requestId = ++refreshRequest.current
@@ -224,7 +272,7 @@ export function FilesScreen({
     if (!current) return
     const timer = setTimeout(() => {
       void api
-        .filePreview(machine, current.path)
+        .filePreview(machine, current.path, previewColumns, previewRows)
         .then((result) => {
           if (!cancelled) setPreview(result)
         })
@@ -236,7 +284,7 @@ export function FilesScreen({
       cancelled = true
       clearTimeout(timer)
     }
-  }, [current?.path, machine, setStatus])
+  }, [current?.path, machine, previewColumns, previewRows, setStatus])
 
   useEffect(() => {
     onInteractionLockChange(dialog.type !== "none")
@@ -526,7 +574,22 @@ export function FilesScreen({
             )}
             {(!narrow || narrowPane === "preview") && (
               <Panel title={current ? `Preview · ${current.name}` : "Preview"} style={{ flexGrow: 1, width: narrow ? "100%" : undefined, paddingTop: 1 }}>
-                <Preview preview={preview} entry={current} />
+                <box
+                  style={{ flexGrow: 1, flexDirection: "column" }}
+                  onSizeChange={function (this: Renderable) {
+                    const next = {
+                      columns: Math.max(8, this.width),
+                      rows: Math.max(4, this.height - 1),
+                    }
+                    setPreviewBounds((currentBounds) =>
+                      currentBounds?.columns === next.columns && currentBounds.rows === next.rows
+                        ? currentBounds
+                        : next,
+                    )
+                  }}
+                >
+                  <Preview preview={preview} entry={current} />
+                </box>
               </Panel>
             )}
           </box>
