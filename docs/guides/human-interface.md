@@ -112,7 +112,7 @@ Remotes displays online and offline remote workers, capabilities, work directori
 
 ## Navigation
 
-The top category bar can be clicked with a mouse in both native terminals and the WebUI. Keyboard navigation is also available:
+The top category bar and contextual footer actions can be clicked with a mouse in both native terminals and the WebUI. Keyboard navigation is also available:
 
 | Keys | Action |
 |---|---|
@@ -124,7 +124,7 @@ The top category bar can be clicked with a mouse in both native terminals and th
 
 Terminals uses `Alt+N` for a new session, `Alt+W` to kill the selected session, `Alt+A` to toggle its audit rail, `Alt+R` to refresh, and `Alt+Left/Right` to switch sessions. The WebUI intercepts these chords before browser-level navigation or menu handling.
 
-Each screen displays its contextual shortcuts in the footer.
+Each screen displays its contextual shortcuts in the footer. Available actions are clickable, while unavailable actions are dimmed and ignore mouse input.
 
 ## Configuration
 

@@ -387,6 +387,46 @@ export function FilesScreen({
     onMachine(machines[next]!.name)
   }
 
+  const moveSelection = (delta: number) => {
+    setSelected((value) => clampIndex(value + delta, entries.length))
+  }
+  const goToParent = () => setPath(activePayload?.parent || ".")
+  const activateCurrent = () => {
+    if (current?.type === "dir") setPath(current.path)
+    else if (current) void openEditor(current)
+  }
+  const toggleNarrowPane = () => setNarrowPane((value) => (value === "list" ? "preview" : "list"))
+  const createFile = () => setDialog({
+    type: "input",
+    action: "new-file",
+    title: "New file",
+    value: "",
+    machine,
+    directory: path,
+  })
+  const createDirectory = () => setDialog({
+    type: "input",
+    action: "new-dir",
+    title: "New directory",
+    value: "",
+    machine,
+    directory: path,
+  })
+  const renameCurrent = () => current && setDialog({
+    type: "input",
+    action: "rename",
+    title: "Rename",
+    value: current.name,
+    machine,
+    directory: path,
+    entry: current,
+  })
+  const editCurrent = () => current && current.type !== "dir" && void openEditor(current)
+  const copyCurrent = () => current && setClipboard({ mode: "copy", machine, path: current.path })
+  const moveCurrent = () => current && setClipboard({ mode: "move", machine, path: current.path })
+  const deleteCurrent = () => current && setDialog({ type: "confirm-delete", machine, entry: current })
+  const footerLocked = !keyboardEnabled || dialog.type !== "none"
+
   useKeyboard((key) => {
     if (!keyboardEnabled) return
     if (dialog.type !== "none" && dialog.machine !== machine) {
@@ -445,49 +485,23 @@ export function FilesScreen({
 
     if (narrow && key.name === "tab") {
       key.preventDefault()
-      setNarrowPane((value) => (value === "list" ? "preview" : "list"))
+      toggleNarrowPane()
       return
     }
-    if (key.name === "j" || key.name === "down") {
-      setSelected((value) => clampIndex(value + 1, entries.length))
-    }
-    else if (key.name === "k" || key.name === "up") setSelected((value) => Math.max(0, value - 1))
+    if (key.name === "j" || key.name === "down") moveSelection(1)
+    else if (key.name === "k" || key.name === "up") moveSelection(-1)
     else if (key.name === "g" && key.shift) setSelected(Math.max(0, entries.length - 1))
     else if (key.name === "g") setSelected(0)
-    else if (key.name === "h" || key.name === "left" || key.name === "backspace") setPath(activePayload?.parent || ".")
-    else if (key.name === "l" || key.name === "right" || key.name === "return") {
-      if (current?.type === "dir") setPath(current.path)
-      else if (current) void openEditor(current)
-    } else if (key.name === "." || key.name === "period") setShowHidden((value) => !value)
-    else if (key.name === "r" && !key.shift) current && setDialog({
-      type: "input",
-      action: "rename",
-      title: "Rename",
-      value: current.name,
-      machine,
-      directory: path,
-      entry: current,
-    })
-    else if (key.name === "n" && key.shift) setDialog({
-      type: "input",
-      action: "new-dir",
-      title: "New directory",
-      value: "",
-      machine,
-      directory: path,
-    })
-    else if (key.name === "n") setDialog({
-      type: "input",
-      action: "new-file",
-      title: "New file",
-      value: "",
-      machine,
-      directory: path,
-    })
-    else if (key.name === "d") current && setDialog({ type: "confirm-delete", machine, entry: current })
-    else if (key.name === "e") current && current.type !== "dir" && void openEditor(current)
-    else if (key.name === "y") current && setClipboard({ mode: "copy", machine, path: current.path })
-    else if (key.name === "x") current && setClipboard({ mode: "move", machine, path: current.path })
+    else if (key.name === "h" || key.name === "left" || key.name === "backspace") goToParent()
+    else if (key.name === "l" || key.name === "right" || key.name === "return") activateCurrent()
+    else if (key.name === "." || key.name === "period") setShowHidden((value) => !value)
+    else if (key.name === "r" && !key.shift) renameCurrent()
+    else if (key.name === "n" && key.shift) createDirectory()
+    else if (key.name === "n") createFile()
+    else if (key.name === "d") deleteCurrent()
+    else if (key.name === "e") editCurrent()
+    else if (key.name === "y") copyCurrent()
+    else if (key.name === "x") moveCurrent()
     else if (key.name === "p") void pasteClipboard()
     else if (key.name === "[") switchMachine(-1)
     else if (key.name === "]") switchMachine(1)
@@ -604,15 +618,20 @@ export function FilesScreen({
       <KeyHint
         accent={colors.accent}
         items={[
-          ...(narrow ? ([['Tab', 'list/preview']] as Array<[string, string]>) : []),
-          ["j/k", "move"],
-          ["h/l", "parent/open"],
-          ["n/N", "new"],
-          ["r", "rename"],
-          ["e", "edit"],
-          ["y/x/p", "copy/move/paste"],
-          ["d", "delete"],
-          [".", "hidden"],
+          ...(narrow ? [{ key: "Tab", label: "switch pane", onPress: toggleNarrowPane, disabled: footerLocked }] : []),
+          { key: "j", label: "down", onPress: () => moveSelection(1), disabled: footerLocked || entries.length === 0 },
+          { key: "k", label: "up", onPress: () => moveSelection(-1), disabled: footerLocked || entries.length === 0 },
+          { key: "h", label: "parent", onPress: goToParent, disabled: footerLocked },
+          { key: "l", label: "open", onPress: activateCurrent, disabled: footerLocked || !current },
+          { key: "n", label: "new file", onPress: createFile, disabled: footerLocked },
+          { key: "N", label: "new dir", onPress: createDirectory, disabled: footerLocked },
+          { key: "r", label: "rename", onPress: renameCurrent, disabled: footerLocked || !current },
+          { key: "e", label: "edit", onPress: editCurrent, disabled: footerLocked || !current || current.type === "dir" },
+          { key: "y", label: "copy", onPress: copyCurrent, disabled: footerLocked || !current },
+          { key: "x", label: "move", onPress: moveCurrent, disabled: footerLocked || !current },
+          { key: "p", label: "paste", onPress: () => void pasteClipboard(), disabled: footerLocked || !clipboard },
+          { key: "d", label: "delete", onPress: deleteCurrent, disabled: footerLocked || !current },
+          { key: ".", label: "hidden", onPress: () => setShowHidden((value) => !value), disabled: footerLocked },
         ]}
       />
       {dialog.type === "input" && (

@@ -1,6 +1,8 @@
 import type { ReactNode } from "react"
 import { useMemo } from "react"
 import { useTerminalDimensions } from "@opentui/react"
+import { layoutKeyHints } from "./key-hints"
+import type { KeyHintItem } from "./key-hints"
 import { clampIndex } from "./state-utils"
 import type { Machine, ScreenName } from "./types"
 import { screenTheme, theme } from "./theme"
@@ -154,21 +156,9 @@ export function Panel({
   )
 }
 
-export function KeyHint({ items, accent = theme.cyan }: { items: Array<[string, string]>; accent?: string }) {
+export function KeyHint({ items, accent = theme.cyan }: { items: KeyHintItem[]; accent?: string }) {
   const { width } = useTerminalDimensions()
-  const keysOnly = width < 60
-  const compact = width < 92
-  const budget = Math.max(8, width - 4)
-  const visible: Array<[string, string]> = []
-  let used = 0
-  for (const [key, label] of items) {
-    const nextLabel = keysOnly ? "" : compact ? label.slice(0, 7) : label
-    const segmentLength = key.length + (nextLabel ? nextLabel.length + 1 : 0) + (visible.length ? 2 : 0)
-    if (used + segmentLength > budget - 2) break
-    visible.push([key, nextLabel])
-    used += segmentLength
-  }
-  const clipped = visible.length < items.length
+  const { items: visible, clipped, keysOnly } = layoutKeyHints(items, width)
   return (
     <box
       style={{
@@ -180,12 +170,25 @@ export function KeyHint({ items, accent = theme.cyan }: { items: Array<[string, 
         backgroundColor: theme.panelAlt,
       }}
     >
-      {visible.map(([key, label]) => (
-        <box key={`${key}-${label}`} style={{ flexDirection: "row", marginRight: keysOnly ? 1 : 2 }}>
-          <text fg={accent} attributes={1} content={key} />
-          {label && <text fg={theme.muted} content={` ${label}`} />}
-        </box>
-      ))}
+      {visible.map(({ key, label, onPress, disabled }) => {
+        const clickable = Boolean(onPress) && !disabled
+        return (
+          <box
+            key={`${key}-${label}`}
+            onMouseDown={clickable ? onPress : undefined}
+            style={{
+              flexDirection: "row",
+              marginRight: keysOnly ? 1 : 2,
+              paddingLeft: onPress ? 1 : 0,
+              paddingRight: onPress ? 1 : 0,
+              backgroundColor: clickable ? theme.panelSoft : undefined,
+            }}
+          >
+            <text fg={disabled ? theme.faint : accent} attributes={disabled ? 0 : 1} content={key} />
+            {label && <text fg={disabled ? theme.faint : theme.muted} content={` ${label}`} />}
+          </box>
+        )
+      })}
       {clipped && <text fg={theme.faint} content="…" />}
     </box>
   )
