@@ -18,6 +18,10 @@ from typing import Any
 from .settings import get_settings
 
 _AUDIT_ENABLED: ContextVar[bool] = ContextVar("local_shell_mcp_audit_enabled", default=True)
+_AUDIT_CALL_ID: ContextVar[str] = ContextVar("local_shell_mcp_audit_call_id", default="")
+_AUDIT_CALL_STATE: ContextVar[dict[str, Any] | None] = ContextVar(
+    "local_shell_mcp_audit_call_state", default=None
+)
 _AUDIT_LOCK = threading.Lock()
 _AUDIT_PREVIEW_STRING_CHARS = 2_000
 _AUDIT_PREVIEW_ITEMS = 100
@@ -28,6 +32,25 @@ _AUDIT_PAYLOAD_MARKER = "$local_shell_mcp_audit_payload"
 _AUDIT_PAYLOAD_VERSION = 1
 _AUDIT_SOURCE_INDEXES = "_audit_source_indexes"
 
+_AUDIT_FAILURE_STATUSES = frozenset(
+    {"error", "failed", "failure", "not_found", "timeout", "timed_out", "cancelled"}
+)
+_NESTED_LIFECYCLE_EVENTS = frozenset(
+    {
+        "tool_call_purpose",
+        "tool_error",
+        "tool_timeout",
+        "run_shell_start",
+        "run_shell_end",
+        "shell_start",
+        "shell_send",
+        "shell_read",
+        "shell_kill",
+        "job_start",
+        "job_stop",
+        "job_retry",
+    }
+)
 
 def _format_audit_text(value: str) -> str:
     if len(value) > _AUDIT_PREVIEW_STRING_CHARS:
@@ -244,11 +267,11 @@ def _retention_units(
     call_units: dict[str, list[tuple[int, bytes, dict[str, Any] | None, set[str]]]] = {}
     for index, (raw_line, record, payload_ids) in enumerate(parsed):
         call_id = ""
-        if isinstance(record, dict) and record.get("event") in {
-            "mcp_tool_call_start",
-            "mcp_tool_call_end",
-        }:
-            call_id = str(record.get("call_id") or "")
+        if isinstance(record, dict):
+            if record.get("event") in {"mcp_tool_call_start", "mcp_tool_call_end"}:
+                call_id = str(record.get("call_id") or "")
+            else:
+                call_id = str(record.get("parent_call_id") or "")
         if call_id:
             unit = call_units.get(call_id)
             if unit is None:
@@ -377,10 +400,36 @@ def suppress_audit() -> Iterator[None]:
         _AUDIT_ENABLED.reset(token)
 
 
+@contextmanager
+def audit_call_context(call_id: str) -> Iterator[dict[str, Any]]:
+    """Associate implementation-level audit records with one public MCP call."""
+
+    state: dict[str, Any] = {"failed": False}
+    call_token = _AUDIT_CALL_ID.set(str(call_id))
+    state_token = _AUDIT_CALL_STATE.set(state)
+    try:
+        yield state
+    finally:
+        _AUDIT_CALL_STATE.reset(state_token)
+        _AUDIT_CALL_ID.reset(call_token)
+
+
 def audit(event: str, **fields: Any) -> None:
     if not _AUDIT_ENABLED.get():
         return
     settings = get_settings()
+    parent_call_id = _AUDIT_CALL_ID.get()
+    if parent_call_id and "parent_call_id" not in fields:
+        fields["parent_call_id"] = parent_call_id
+    call_state = _AUDIT_CALL_STATE.get()
+    if call_state is not None and (
+        event in {"tool_error", "tool_timeout"} or fields.get("ok") is False
+    ):
+        call_state["failed"] = True
+        if fields.get("error"):
+            call_state["error"] = fields["error"]
+        if fields.get("error_type"):
+            call_state["error_type"] = fields["error_type"]
     path: Path = settings.audit_log_path
     with _AUDIT_LOCK:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -528,8 +577,43 @@ def _new_call_entry(record: dict[str, Any], index: int) -> dict[str, Any]:
     return entry
 
 
+def _explicit_audit_result_ok(value: Any) -> bool | None:
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        value = model_dump(mode="json", by_alias=True)
+    if not isinstance(value, dict):
+        return None
+    is_error = value.get("isError", value.get("is_error"))
+    if is_error is True:
+        return False
+    direct = value.get("ok") if isinstance(value.get("ok"), bool) else None
+    status = value.get("status")
+    if isinstance(status, str) and status.casefold() in _AUDIT_FAILURE_STATUSES:
+        return False
+    if direct is False:
+        return False
+    for key in ("structuredContent", "structured_content", "data"):
+        nested = _explicit_audit_result_ok(value.get(key))
+        if nested is not None:
+            return nested
+    return direct
+
+
+def audit_result_ok(value: Any) -> bool:
+    explicit = _explicit_audit_result_ok(value)
+    return True if explicit is None else explicit
+
+
+def _call_record_ok(record: dict[str, Any]) -> bool | None:
+    direct = record.get("ok") if isinstance(record.get("ok"), bool) else None
+    if direct is False:
+        return False
+    nested = _explicit_audit_result_ok(record.get("result"))
+    return nested if nested is not None else direct
+
+
 def _finish_call_entry(entry: dict[str, Any], record: dict[str, Any]) -> None:
-    ok = record.get("ok")
+    ok = _call_record_ok(record)
     entry["paired"] = True
     entry["ok"] = ok
     entry["status"] = "success" if ok is True else "failed" if ok is False else "completed"
@@ -565,21 +649,47 @@ def _unpaired_end_entry(record: dict[str, Any], index: int) -> dict[str, Any]:
         entry["duration_ms"] = record["duration_ms"]
     if "result" in record:
         entry["output"] = record["result"]
-    for name in ("ok", "error", "error_type"):
+    ok = _call_record_ok(record)
+    if ok is not None:
+        entry["ok"] = ok
+    for name in ("error", "error_type"):
         if name in record:
             entry[name] = record[name]
     return entry
 
 
+def _nested_semantic_event(record: dict[str, Any]) -> dict[str, Any] | None:
+    event = str(record.get("event") or "")
+    if not event or event in _NESTED_LIFECYCLE_EVENTS:
+        return None
+    return {
+        name: value
+        for name, value in record.items()
+        if name not in {"id", "ts", "parent_call_id"}
+    }
+
+
 def _coalesce_audit_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     pending_by_id: dict[str, dict[str, Any]] = {}
+    entries_by_id: dict[str, dict[str, Any]] = {}
     pending_legacy: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
 
     for index, record in enumerate(records):
         event = str(record.get("event") or "")
         if event == "auth_ok":
             continue
+        parent_call_id = str(record.get("parent_call_id") or "")
+        if parent_call_id:
+            parent = entries_by_id.get(parent_call_id)
+            if parent is not None:
+                parent[_AUDIT_SOURCE_INDEXES].append(index)
+                semantic = _nested_semantic_event(record)
+                if semantic is not None:
+                    parent.setdefault("related_events", []).append(semantic)
+                continue
+            if event in _NESTED_LIFECYCLE_EVENTS:
+                continue
         if event == "mcp_tool_call_start":
             entry = _new_call_entry(record, index)
             entry[_AUDIT_SOURCE_INDEXES] = [index]
@@ -587,6 +697,7 @@ def _coalesce_audit_records(records: list[dict[str, Any]]) -> list[dict[str, Any
             call_id = str(record.get("call_id") or "")
             if call_id:
                 pending_by_id[call_id] = entry
+                entries_by_id[call_id] = entry
             else:
                 pending_legacy.setdefault(_call_match_key(record), []).append(entry)
             continue

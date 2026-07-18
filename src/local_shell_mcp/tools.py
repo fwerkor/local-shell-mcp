@@ -18,7 +18,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 from pathspec.gitignore import GitIgnoreSpec
 from pydantic import BaseModel, ConfigDict, Field
 
-from .audit import audit
+from .audit import audit, audit_call_context, audit_result_ok
 from .auth import require_current_scopes
 from .downloads import create_share_link, list_share_links, revoke_share_link
 from .fs_ops import (
@@ -382,19 +382,28 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                 **audit_context,
             )
             try:
-                if __tool_name in NON_CANCELLABLE_TOOL_NAMES:
-                    result = await __original(*args, **kwargs)
-                else:
-                    result = await asyncio.wait_for(
-                        __original(*args, **kwargs), timeout=PUBLIC_TOOL_TIMEOUT_S
-                    )
+                with audit_call_context(call_id) as call_state:
+                    if __tool_name in NON_CANCELLABLE_TOOL_NAMES:
+                        result = await __original(*args, **kwargs)
+                    else:
+                        result = await asyncio.wait_for(
+                            __original(*args, **kwargs), timeout=PUBLIC_TOOL_TIMEOUT_S
+                        )
+                serialized_result = _serialize_audit_value(result)
+                call_ok = audit_result_ok(result) and not bool(call_state["failed"])
+                failure_context = {}
+                if not call_ok and call_state.get("error"):
+                    failure_context["error"] = call_state["error"]
+                if not call_ok and call_state.get("error_type"):
+                    failure_context["error_type"] = call_state["error_type"]
                 audit(
                     "mcp_tool_call_end",
                     call_id=call_id,
                     tool=__tool_name,
-                    ok=True,
+                    ok=call_ok,
                     duration_ms=round((time.monotonic() - started_at) * 1000),
-                    result=_serialize_audit_value(result),
+                    result=serialized_result,
+                    **failure_context,
                     **audit_context,
                 )
                 return result
@@ -406,6 +415,7 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                 audit(
                     "tool_timeout",
                     call_id=call_id,
+                    parent_call_id=call_id,
                     tool=__tool_name,
                     timeout_s=PUBLIC_TOOL_TIMEOUT_S,
                 )
