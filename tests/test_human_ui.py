@@ -20,6 +20,8 @@ from local_shell_mcp.audit import audit, query_audit, suppress_audit
 from local_shell_mcp.http_app import build_http_app
 from local_shell_mcp.human_ui import (
     UI_FULL_SCOPES,
+    UI_MAX_COLUMNS,
+    UI_MAX_ROWS,
     _authorize_websocket,
     _bounded_int,
     _idle_timeout_remaining,
@@ -47,6 +49,15 @@ def _configure(tmp_path, monkeypatch, *, auth_mode: str = "none") -> None:
     monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
     get_settings.cache_clear()
 
+
+
+def test_webui_shell_uses_available_viewport_without_fixed_desktop_cap():
+    css_path = Path(__file__).parents[1] / "src/local_shell_mcp/ui_static/web.css"
+    css = css_path.read_text(encoding="utf-8")
+
+    assert "1540px" not in css
+    assert "960px" not in css
+    assert ":fullscreen .shell" in css
 
 
 def test_ui_assets_reject_symlinks_outside_asset_root(tmp_path, monkeypatch):
@@ -372,6 +383,16 @@ def test_pyinstaller_entry_quotes_embedded_tui_paths():
 def test_terminal_dimensions_are_clamped_to_safe_limits():
     assert _bounded_int("2", default=120, minimum=20, maximum=500, label="cols") == 20
     assert _bounded_int("99999", default=120, minimum=20, maximum=500, label="cols") == 500
+    assert (
+        _bounded_int(
+            "1200", default=120, minimum=20, maximum=UI_MAX_COLUMNS, label="cols"
+        )
+        == 1200
+    )
+    assert (
+        _bounded_int("400", default=36, minimum=8, maximum=UI_MAX_ROWS, label="rows")
+        == 400
+    )
     with pytest.raises(ValueError, match="cols must be an integer"):
         _bounded_int("wide", default=120, minimum=20, maximum=500, label="cols")
 
