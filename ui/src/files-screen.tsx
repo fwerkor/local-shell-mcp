@@ -700,7 +700,7 @@ export function FilesScreen({
             initialValue={dialog.content}
             style={{ flexGrow: 1, backgroundColor: theme.bg, textColor: theme.text }}
           />
-          <text fg={theme.faint} content="Ctrl+S save · Esc cancel" />
+          <text fg={theme.faint} content="Ctrl+S save · Esc / Ctrl+[ cancel" />
         </Modal>
       )}
     </box>
