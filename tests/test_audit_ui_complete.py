@@ -121,12 +121,14 @@ def test_audit_call_helpers_cover_legacy_unpaired_and_optional_fields():
             {"id": "kept", "ts": 5, "event": "remote_worker_registered", "node": "worker-c"},
         ]
     )
-    assert len(rows) == 3
+    assert len(rows) == 5
     assert rows[0]["paired"] is True
     assert rows[0]["status"] == "failed"
-    assert rows[1]["status"] == "unpaired"
-    assert rows[2]["id"] == "kept"
-    assert rows[2]["operation"] == "remote"
+    assert rows[1]["event"] == "tool_call_purpose"
+    assert rows[2]["event"] == "run_shell_start"
+    assert rows[3]["status"] == "unpaired"
+    assert rows[4]["id"] == "kept"
+    assert rows[4]["operation"] == "remote"
 
 
 def test_query_audit_covers_tail_reading_and_filter_rejections(tmp_path, monkeypatch):

@@ -15,30 +15,15 @@ from .settings import get_settings
 
 _AUDIT_ENABLED: ContextVar[bool] = ContextVar("local_shell_mcp_audit_enabled", default=True)
 _AUDIT_CALL_ID: ContextVar[str] = ContextVar("local_shell_mcp_audit_call_id", default="")
+_AUDIT_CALL_STATE: ContextVar[dict[str, Any] | None] = ContextVar(
+    "local_shell_mcp_audit_call_state", default=None
+)
 _AUDIT_LOCK = threading.Lock()
 _AUDIT_MAX_STRING = 2_000
 
 _AUDIT_FAILURE_STATUSES = frozenset(
     {"error", "failed", "failure", "not_found", "timeout", "timed_out", "cancelled"}
 )
-
-_LEGACY_TOOL_DETAIL_EVENTS = frozenset(
-    {
-        "tool_call_purpose",
-        "tool_error",
-        "tool_timeout",
-        "run_shell_start",
-        "run_shell_end",
-        "shell_start",
-        "shell_send",
-        "shell_read",
-        "shell_kill",
-        "job_start",
-        "job_stop",
-        "job_retry",
-    }
-)
-
 
 def _format_audit_text(value: str) -> str:
     if len(value) > _AUDIT_MAX_STRING:
@@ -98,14 +83,17 @@ def suppress_audit() -> Iterator[None]:
 
 
 @contextmanager
-def audit_call_context(call_id: str) -> Iterator[None]:
+def audit_call_context(call_id: str) -> Iterator[dict[str, Any]]:
     """Associate implementation-level audit records with one public MCP call."""
 
-    token = _AUDIT_CALL_ID.set(str(call_id))
+    state: dict[str, Any] = {"failed": False}
+    call_token = _AUDIT_CALL_ID.set(str(call_id))
+    state_token = _AUDIT_CALL_STATE.set(state)
     try:
-        yield
+        yield state
     finally:
-        _AUDIT_CALL_ID.reset(token)
+        _AUDIT_CALL_STATE.reset(state_token)
+        _AUDIT_CALL_ID.reset(call_token)
 
 
 def audit(event: str, **fields: Any) -> None:
@@ -115,6 +103,13 @@ def audit(event: str, **fields: Any) -> None:
     parent_call_id = _AUDIT_CALL_ID.get()
     if parent_call_id and "parent_call_id" not in fields:
         fields["parent_call_id"] = parent_call_id
+    call_state = _AUDIT_CALL_STATE.get()
+    if call_state is not None and event in {"tool_error", "tool_timeout"}:
+        call_state["failed"] = True
+        if fields.get("error"):
+            call_state["error"] = fields["error"]
+        if fields.get("error_type"):
+            call_state["error_type"] = fields["error_type"]
     record = {
         "ts": time.time(),
         "event": _format_audit_text(event),
@@ -264,17 +259,24 @@ def _new_call_entry(record: dict[str, Any], index: int) -> dict[str, Any]:
 
 
 def _explicit_audit_result_ok(value: Any) -> bool | None:
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        value = model_dump(mode="json", by_alias=True)
     if not isinstance(value, dict):
         return None
+    is_error = value.get("isError", value.get("is_error"))
+    if is_error is True:
+        return False
     direct = value.get("ok") if isinstance(value.get("ok"), bool) else None
     status = value.get("status")
     if isinstance(status, str) and status.casefold() in _AUDIT_FAILURE_STATUSES:
         return False
     if direct is False:
         return False
-    nested = _explicit_audit_result_ok(value.get("data"))
-    if nested is not None:
-        return nested
+    for key in ("structuredContent", "structured_content", "data"):
+        nested = _explicit_audit_result_ok(value.get(key))
+        if nested is not None:
+            return nested
     return direct
 
 
@@ -347,10 +349,6 @@ def _coalesce_audit_records(records: list[dict[str, Any]]) -> list[dict[str, Any
         if event == "auth_ok":
             continue
         if record.get("parent_call_id"):
-            continue
-        if event in _LEGACY_TOOL_DETAIL_EVENTS and (
-            pending_by_id or any(pending_legacy.values())
-        ):
             continue
         if event == "mcp_tool_call_start":
             entry = _new_call_entry(record, index)

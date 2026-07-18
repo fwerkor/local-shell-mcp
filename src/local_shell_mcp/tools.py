@@ -390,7 +390,7 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                 **audit_context,
             )
             try:
-                with audit_call_context(call_id):
+                with audit_call_context(call_id) as call_state:
                     if __tool_name in NON_CANCELLABLE_TOOL_NAMES:
                         result = await __original(*args, **kwargs)
                     else:
@@ -398,13 +398,20 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                             __original(*args, **kwargs), timeout=PUBLIC_TOOL_TIMEOUT_S
                         )
                 serialized_result = _serialize_audit_value(result)
+                call_ok = audit_result_ok(result) and not bool(call_state["failed"])
+                failure_context = {}
+                if not call_ok and call_state.get("error"):
+                    failure_context["error"] = call_state["error"]
+                if not call_ok and call_state.get("error_type"):
+                    failure_context["error_type"] = call_state["error_type"]
                 audit(
                     "mcp_tool_call_end",
                     call_id=call_id,
                     tool=__tool_name,
-                    ok=audit_result_ok(serialized_result),
+                    ok=call_ok,
                     duration_ms=round((time.monotonic() - started_at) * 1000),
                     result=serialized_result,
+                    **failure_context,
                     **audit_context,
                 )
                 return result
