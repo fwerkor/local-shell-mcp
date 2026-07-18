@@ -24,7 +24,7 @@ from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Redire
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from .audit import query_audit, suppress_audit
+from .audit import get_audit_entry, query_audit, suppress_audit
 from .auth import Principal, require_scopes, verify_request
 from .fs_ops import (
     FileConflictError,
@@ -662,6 +662,17 @@ async def api_audit(request: Request) -> Response:
         return _json_error(exc)
 
 
+async def api_audit_detail(request: Request) -> Response:
+    try:
+        _require_ui_scopes(request, "shell:read")
+        entry_id = str(request.query_params.get("id") or "")
+        return _json_ok(await asyncio.to_thread(get_audit_entry, entry_id))
+    except ValueError as exc:
+        return _json_error(exc, status_code=404)
+    except Exception as exc:
+        return _json_error(exc)
+
+
 async def api_remotes(request: Request) -> Response:
     try:
         _require_ui_scopes(request, "remote:use")
@@ -1158,6 +1169,7 @@ def ui_routes() -> list[Any]:
         Route(UI_API_PREFIX + "/terminals/{action}", api_terminal_action, methods=["POST"]),
         Route(UI_API_PREFIX + "/todos", api_todos, methods=["GET", "PUT"]),
         Route(UI_API_PREFIX + "/audit", api_audit, methods=["GET"]),
+        Route(UI_API_PREFIX + "/audit/detail", api_audit_detail, methods=["GET"]),
         Route(UI_API_PREFIX + "/remotes", api_remotes, methods=["GET", "POST"]),
         Route(UI_API_PREFIX + "/remotes/{action}", api_remote_action, methods=["POST"]),
     ]

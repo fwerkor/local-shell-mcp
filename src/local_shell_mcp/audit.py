@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import contextlib
+import gzip
+import hashlib
 import json
 import os
 import threading
 import time
+import uuid
+import zlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -15,36 +19,167 @@ from .settings import get_settings
 
 _AUDIT_ENABLED: ContextVar[bool] = ContextVar("local_shell_mcp_audit_enabled", default=True)
 _AUDIT_LOCK = threading.Lock()
-_AUDIT_MAX_STRING = 2_000
+_AUDIT_PREVIEW_STRING_CHARS = 2_000
+_AUDIT_PREVIEW_ITEMS = 100
+_AUDIT_INLINE_VALUE_BYTES = 16 * 1024
+_AUDIT_PAYLOAD_DIRECTORY = "audit-payloads"
+_AUDIT_PAYLOAD_MARKER = "$audit_payload"
 
 
 def _format_audit_text(value: str) -> str:
-    if len(value) > _AUDIT_MAX_STRING:
-        return value[:_AUDIT_MAX_STRING] + "…<truncated>"
+    if len(value) > _AUDIT_PREVIEW_STRING_CHARS:
+        return value[:_AUDIT_PREVIEW_STRING_CHARS] + "…<preview>"
     return value
 
 
-def _serialize_audit_value(value: Any) -> Any:
+def _jsonable_audit_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return {str(name): _jsonable_audit_value(item) for name, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable_audit_value(item) for item in value]
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return repr(value)
+
+
+def _preview_audit_value(value: Any) -> Any:
     if isinstance(value, str):
         return _format_audit_text(value)
     if isinstance(value, dict):
         return {
-            str(name): _serialize_audit_value(item)
-            for name, item in list(value.items())[:100]
+            str(name): _preview_audit_value(item)
+            for name, item in list(value.items())[:_AUDIT_PREVIEW_ITEMS]
         }
     if isinstance(value, (list, tuple)):
-        return [_serialize_audit_value(item) for item in list(value)[:100]]
+        return [
+            _preview_audit_value(item)
+            for item in list(value)[:_AUDIT_PREVIEW_ITEMS]
+        ]
     if isinstance(value, (int, float, bool)) or value is None:
         return value
     return _format_audit_text(repr(value))
 
 
-def _trim_audit_log(path: Path, max_bytes: int) -> None:
-    if max_bytes <= 0 or not path.exists():
+def _payload_directory() -> Path:
+    directory = get_settings().state_dir / _AUDIT_PAYLOAD_DIRECTORY
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _payload_path(digest: str) -> Path:
+    return _payload_directory() / f"{digest}.json.gz"
+
+
+def _write_payload(value: Any) -> dict[str, Any]:
+    raw = json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    digest = hashlib.sha256(raw).hexdigest()
+    path = _payload_path(digest)
+    if not path.exists():
+        temporary = path.with_name(
+            f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        )
+        try:
+            temporary.write_bytes(gzip.compress(raw, compresslevel=6, mtime=0))
+            with contextlib.suppress(OSError):
+                temporary.chmod(0o600)
+            os.replace(temporary, path)
+        finally:
+            with contextlib.suppress(OSError):
+                temporary.unlink(missing_ok=True)
+    return {
+        _AUDIT_PAYLOAD_MARKER: digest,
+        "bytes": len(raw),
+        "preview": _preview_audit_value(value),
+    }
+
+
+def _serialize_audit_value(value: Any) -> Any:
+    serialized = _jsonable_audit_value(value)
+    encoded = json.dumps(
+        serialized,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    if len(encoded) <= _AUDIT_INLINE_VALUE_BYTES:
+        return serialized
+    return _write_payload(serialized)
+
+
+def _is_payload_reference(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    digest = value.get(_AUDIT_PAYLOAD_MARKER)
+    return (
+        isinstance(digest, str)
+        and len(digest) == 64
+        and all(character in "0123456789abcdef" for character in digest)
+    )
+
+
+def _resolve_payload_reference(value: Any, *, full: bool) -> Any:
+    if _is_payload_reference(value):
+        if not full:
+            return _resolve_payload_reference(value.get("preview"), full=False)
+        digest = str(value[_AUDIT_PAYLOAD_MARKER])
+        try:
+            raw = gzip.decompress(_payload_path(digest).read_bytes())
+            return json.loads(raw)
+        except (OSError, EOFError, gzip.BadGzipFile, json.JSONDecodeError, zlib.error) as exc:
+            return {
+                "error": "Audit payload is unavailable",
+                "payload_id": digest,
+                "detail": str(exc),
+                "preview": _resolve_payload_reference(value.get("preview"), full=False),
+            }
+    if isinstance(value, dict):
+        return {name: _resolve_payload_reference(item, full=full) for name, item in value.items()}
+    if isinstance(value, list):
+        return [_resolve_payload_reference(item, full=full) for item in value]
+    return value
+
+
+def _collect_payload_ids(value: Any, destination: set[str]) -> None:
+    if _is_payload_reference(value):
+        destination.add(str(value[_AUDIT_PAYLOAD_MARKER]))
         return
+    if isinstance(value, dict):
+        for item in value.values():
+            _collect_payload_ids(item, destination)
+    elif isinstance(value, list):
+        for item in value:
+            _collect_payload_ids(item, destination)
+
+
+def _prune_payload_store(log_path: Path) -> None:
+    directory = get_settings().state_dir / _AUDIT_PAYLOAD_DIRECTORY
+    if not directory.is_dir():
+        return
+    referenced: set[str] = set()
+    with contextlib.suppress(OSError):
+        for line in log_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            with contextlib.suppress(json.JSONDecodeError):
+                _collect_payload_ids(json.loads(line), referenced)
+    for payload in directory.glob("*.json.gz"):
+        digest = payload.name.removesuffix(".json.gz")
+        if digest not in referenced:
+            with contextlib.suppress(OSError):
+                payload.unlink()
+
+
+def _trim_audit_log(path: Path, max_bytes: int) -> bool:
+    if max_bytes <= 0 or not path.exists():
+        return False
     size = path.stat().st_size
     if size <= max_bytes:
-        return
+        return False
 
     keep_bytes = max(1, max_bytes // 2)
     with path.open("rb") as f:
@@ -62,6 +197,7 @@ def _trim_audit_log(path: Path, max_bytes: int) -> None:
     finally:
         with contextlib.suppress(OSError):
             tmp.unlink(missing_ok=True)
+    return True
 
 
 @contextmanager
@@ -79,22 +215,25 @@ def audit(event: str, **fields: Any) -> None:
     if not _AUDIT_ENABLED.get():
         return
     settings = get_settings()
-    record = {
-        "ts": time.time(),
-        "event": _format_audit_text(event),
-        **{name: _serialize_audit_value(value) for name, value in fields.items()},
-    }
     path: Path = settings.audit_log_path
-    encoded = json.dumps(record, ensure_ascii=False, default=str) + "\n"
     with _AUDIT_LOCK:
         path.parent.mkdir(parents=True, exist_ok=True)
-        _trim_audit_log(path, settings.max_audit_log_bytes)
+        trimmed = _trim_audit_log(path, settings.max_audit_log_bytes)
+        record = {
+            "id": uuid.uuid4().hex,
+            "ts": time.time(),
+            "event": event,
+            **{name: _serialize_audit_value(value) for name, value in fields.items()},
+        }
+        encoded = json.dumps(record, ensure_ascii=False, default=str) + "\n"
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(descriptor, "a", encoding="utf-8") as f:
             f.write(encoded)
             f.flush()
         with contextlib.suppress(OSError):
             path.chmod(0o600)
+        if trimmed:
+            _prune_payload_store(path)
 
 
 _TOOL_OPERATION_GROUPS: dict[str, frozenset[str]] = {
@@ -313,25 +452,11 @@ def _coalesce_audit_records(records: list[dict[str, Any]]) -> list[dict[str, Any
     return rows
 
 
-def query_audit(
-    *,
-    limit: int = 200,
-    node: str | None = None,
-    event: str | None = None,
-    operation: str | None = None,
-    session: str | None = None,
-    search: str | None = None,
-    start_ts: float | None = None,
-    end_ts: float | None = None,
-    sort: str = "desc",
-) -> dict[str, Any]:
-    """Read, pair, filter, and sort the bounded JSONL audit log for the human UI."""
-
+def _read_audit_records(*, full_payloads: bool) -> list[dict[str, Any]]:
     settings = get_settings()
     path = settings.audit_log_path
-    bounded_limit = max(1, min(int(limit), 2_000))
     if not path.exists():
-        return {"entries": [], "count": 0, "total_matched": 0}
+        return []
 
     max_bytes = max(1, min(settings.max_audit_tail_bytes * 4, settings.max_audit_log_bytes))
     size = path.stat().st_size
@@ -348,7 +473,28 @@ def query_audit(
         except (json.JSONDecodeError, UnicodeDecodeError):
             continue
         if isinstance(record, dict):
-            records.append(record)
+            records.append(_resolve_payload_reference(record, full=full_payloads))
+    return records
+
+
+def query_audit(
+    *,
+    limit: int = 200,
+    node: str | None = None,
+    event: str | None = None,
+    operation: str | None = None,
+    session: str | None = None,
+    search: str | None = None,
+    start_ts: float | None = None,
+    end_ts: float | None = None,
+    sort: str = "desc",
+) -> dict[str, Any]:
+    """Read, pair, filter, and sort the bounded JSONL audit log for the human UI."""
+
+    bounded_limit = max(1, min(int(limit), 2_000))
+    records = _read_audit_records(full_payloads=False)
+    if not records:
+        return {"entries": [], "count": 0, "total_matched": 0}
 
     rows = _coalesce_audit_records(records)
     needle = (search or "").casefold().strip()
@@ -387,3 +533,15 @@ def query_audit(
         "count": min(total, bounded_limit),
         "total_matched": total,
     }
+
+def get_audit_entry(entry_id: str) -> dict[str, Any]:
+    """Return one coalesced audit entry with complete external payloads materialized."""
+
+    normalized = str(entry_id).strip()
+    if not normalized:
+        raise ValueError("audit entry id is required")
+    rows = _coalesce_audit_records(_read_audit_records(full_payloads=True))
+    for row in rows:
+        if str(row.get("id") or "") == normalized:
+            return row
+    raise ValueError(f"Unknown audit entry: {normalized}")

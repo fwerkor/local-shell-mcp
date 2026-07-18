@@ -1,5 +1,6 @@
 import type {
   ApiEnvelope,
+  AuditEntry,
   AuditPayload,
   BootstrapPayload,
   FilePreview,
@@ -106,6 +107,9 @@ export const api = {
   },
   audit(filters: Record<string, string | number | boolean | null | undefined>, signal?: AbortSignal): Promise<AuditPayload> {
     return request(`/audit${queryString(filters)}`, { signal })
+  },
+  auditDetail(id: string, signal?: AbortSignal): Promise<AuditEntry> {
+    return request(`/audit/detail${queryString({ id })}`, { signal })
   },
   remotes(signal?: AbortSignal): Promise<MachinePayload> {
     return request("/remotes", { signal })

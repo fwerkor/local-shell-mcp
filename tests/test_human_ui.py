@@ -429,6 +429,65 @@ def test_audit_storage_remains_valid_under_concurrent_trim_and_append(tmp_path, 
     assert not list(tmp_path.glob(".audit.jsonl.*.tmp"))
 
 
+def test_audit_large_payloads_are_previewed_and_loaded_on_demand(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_TAIL_BYTES", "200000")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "200000")
+    get_settings.cache_clear()
+    large_input = "input:" + "x" * 30_000
+    large_output = "output:" + "y" * 40_000
+
+    audit(
+        "mcp_tool_call_start",
+        call_id="large-call",
+        tool="write_file",
+        arguments={"keyword_args": {"content": large_input}},
+    )
+    audit(
+        "mcp_tool_call_end",
+        call_id="large-call",
+        tool="write_file",
+        ok=True,
+        result={"stdout": large_output},
+    )
+
+    raw_records = [
+        json.loads(line)
+        for line in get_settings().audit_log_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert "$audit_payload" in raw_records[0]["arguments"]
+    assert "$audit_payload" in raw_records[1]["result"]
+    assert large_input not in get_settings().audit_log_path.read_text(encoding="utf-8")
+    assert len(list((get_settings().state_dir / "audit-payloads").glob("*.json.gz"))) == 2
+
+    client = TestClient(build_http_app())
+    listing = client.get("/api/ui/audit").json()["data"]["entries"][0]
+    assert listing["id"] == "call:large-call"
+    assert listing["input"]["content"].endswith("…<preview>")
+    assert listing["output"]["stdout"].endswith("…<preview>")
+
+    detail = client.get(
+        "/api/ui/audit/detail", params={"id": listing["id"]}
+    ).json()["data"]
+    assert detail["input"]["content"] == large_input
+    assert detail["output"]["stdout"] == large_output
+
+
+def test_audit_trim_prunes_unreferenced_payload_files(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "1000")
+    get_settings.cache_clear()
+
+    audit("large_event", payload="z" * 30_000)
+    payloads = list((get_settings().state_dir / "audit-payloads").glob("*.json.gz"))
+    assert len(payloads) == 1
+
+    audit("small_event", value="kept")
+
+    assert not payloads[0].exists()
+    assert query_audit()["entries"][0]["event"] == "small_event"
+
+
 def test_query_audit_pairs_calls_filters_compact_operations_and_hides_auth(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     path = tmp_path / "audit.jsonl"
