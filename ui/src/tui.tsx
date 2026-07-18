@@ -6,6 +6,8 @@ import { AuditScreen } from "./audit-screen"
 import { DashboardScreen } from "./dashboard-screen"
 import { Modal, SCREENS, TopNav } from "./components"
 import { FilesScreen } from "./files-screen"
+import { appContentHeight, appContentWidth } from "./layout"
+import { forceFullRepaint } from "./repaint"
 import { RemotesScreen } from "./remotes-screen"
 import { TerminalsScreen } from "./terminals-screen"
 import { theme } from "./theme"
@@ -21,12 +23,12 @@ function Help({ close }: { close: () => void }) {
       <text fg={theme.cyan} attributes={1} content="Global navigation" />
       <text fg={theme.muted} content="Alt+1…6  switch top-level screen (F2…F7 also work)" />
       <text fg={theme.muted} content="F9        refresh machine list" />
-      <text fg={theme.muted} content="Ctrl+Q    quit the TUI" />
+      <text fg={theme.muted} content="Alt+Q     quit the TUI" />
       <text fg={theme.muted} content="F1        show this guide" />
       <text fg={theme.borderBright} content="\nScreen conventions" />
       <text fg={theme.muted} content="j/k or arrows move selection · Enter activates · Esc closes dialogs" />
       <text fg={theme.muted} content="[ / ] switches Files machines · Alt+[ / ] switches Terminal machines" />
-      <text fg={theme.muted} content="Terminals: Alt+N new · Alt+W kill · Alt+A audit · Alt+R refresh" />
+      <text fg={theme.muted} content="Terminals: Alt+N new · Alt+W kill · PgUp/PgDn scroll · Alt+R refresh" />
       <text fg={theme.muted} content="The footer on every screen lists its contextual commands." />
       <text fg={theme.borderBright} content="\nAudit policy" />
       <text fg={theme.muted} content="Audit contains MCP-originated operations. Actions typed by a human in this TUI or the WebUI are intentionally excluded." />
@@ -109,9 +111,13 @@ function App() {
     }
   }, [loadBootstrap])
 
+  useEffect(() => {
+    forceFullRepaint(renderer)
+  }, [height, renderer, screen, width])
+
   useKeyboard((key) => {
     if (terminalRawMode) return
-    if (key.ctrl && key.name === "q") {
+    if ((key.option || key.meta) && key.name === "q") {
       renderer.destroy()
       return
     }
@@ -125,13 +131,14 @@ function App() {
   const machines: Machine[] = bootstrap?.machines.machines || [
     { name: "local", status: "online", capabilities: ["files", "terminals"] },
   ]
-  const contentHeight = Math.max(12, height - 5)
+  const contentWidth = appContentWidth(width)
+  const contentHeight = appContentHeight(height)
 
   let content
   if (screen === "Dashboard") {
     content = (
       <DashboardScreen
-        width={width}
+        width={contentWidth}
         height={contentHeight}
         setStatus={setStatus}
         keyboardEnabled={!help}
@@ -143,7 +150,7 @@ function App() {
         machines={machines}
         machine={machine}
         onMachine={setMachine}
-        width={width}
+        width={contentWidth}
         height={contentHeight}
         setStatus={setStatus}
         keyboardEnabled={!help}
@@ -156,7 +163,7 @@ function App() {
         machines={machines}
         machine={machine}
         onMachine={setMachine}
-        width={width}
+        width={contentWidth}
         height={contentHeight}
         setStatus={setStatus}
         onRawModeChange={setTerminalRawMode}
@@ -167,7 +174,7 @@ function App() {
   } else if (screen === "Todos") {
     content = (
       <TodosScreen
-        width={width}
+        width={contentWidth}
         height={contentHeight}
         setStatus={setStatus}
         keyboardEnabled={!help}
@@ -178,7 +185,7 @@ function App() {
     content = (
       <AuditScreen
         machines={machines}
-        width={width}
+        width={contentWidth}
         height={contentHeight}
         setStatus={setStatus}
         keyboardEnabled={!help}
@@ -188,7 +195,7 @@ function App() {
   } else {
     content = (
       <RemotesScreen
-        width={width}
+        width={contentWidth}
         height={contentHeight}
         setStatus={setStatus}
         keyboardEnabled={!help}
@@ -201,14 +208,19 @@ function App() {
     <box style={{ width: "100%", height: "100%", flexDirection: "column", backgroundColor: theme.bg, padding: 1 }}>
       <TopNav
         active={screen}
-        width={width}
+        width={contentWidth}
         version={String(bootstrap?.version.version || bootstrap?.version.package_version || "")}
         onSelect={(next) => {
           if (!terminalRawMode && !help && !interactionLocked) setScreen(next)
         }}
       />
-      <box style={{ flexGrow: 1, marginTop: 1 }}>{content}</box>
-      <StatusLine status={status} bootstrap={bootstrap} width={width} />
+      <box
+        key={screen}
+        style={{ flexGrow: 1, marginTop: 1, backgroundColor: theme.bg }}
+      >
+        {content}
+      </box>
+      <StatusLine status={status} bootstrap={bootstrap} width={contentWidth} />
       {help && <Help close={() => setHelp(false)} />}
     </box>
   )

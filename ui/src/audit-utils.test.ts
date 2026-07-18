@@ -47,6 +47,18 @@ describe("audit formatting", () => {
     expect(auditInput(call)).toEqual({ path: "a.txt", machine: null })
     expect(auditOutput(call)).toEqual({ ok: true, message: "", data: { bytes: 4 } })
   })
+
+  test("includes semantic child events alongside the public result", () => {
+    const call: AuditEntry = {
+      ...entry("call", 1),
+      output: { ok: true, message: "", data: { revoked: true } },
+      related_events: [{ event: "download_link_revoked", path: "/tmp/report.txt" }],
+    }
+    expect(auditOutput(call)).toEqual({
+      result: { revoked: true },
+      related_events: [{ event: "download_link_revoked", path: "/tmp/report.txt" }],
+    })
+  })
 })
 
 test("operation filters match the compact current tool groups", () => {

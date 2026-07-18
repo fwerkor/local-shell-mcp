@@ -88,21 +88,27 @@ export function auditInput(entry: AuditEntry): unknown {
 }
 
 export function auditOutput(entry: AuditEntry): unknown {
-  if (entry.output !== undefined) return entry.output
-  if (entry.result !== undefined) return entry.result
-  const output: JsonRecord = {}
-  for (const key of [
-    "ok",
-    "error",
-    "error_type",
-    "exit_code",
-    "timed_out",
-    "duration_ms",
-    "stdout",
-    "stderr",
-    "truncated",
-  ]) {
-    if (entry[key] !== undefined) output[key] = entry[key]
+  let output: unknown
+  if (entry.output !== undefined) output = entry.output
+  else if (entry.result !== undefined) output = entry.result
+  else {
+    const fallback: JsonRecord = {}
+    for (const key of [
+      "ok",
+      "error",
+      "error_type",
+      "exit_code",
+      "timed_out",
+      "duration_ms",
+      "stdout",
+      "stderr",
+      "truncated",
+    ]) {
+      if (entry[key] !== undefined) fallback[key] = entry[key]
+    }
+    output = cleanAuditValue(fallback)
   }
-  return cleanAuditValue(output)
+  const related = cleanAuditValue(entry.related_events)
+  if (related === undefined) return output
+  return cleanAuditValue({ result: unwrapToolEnvelope(output), related_events: related })
 }

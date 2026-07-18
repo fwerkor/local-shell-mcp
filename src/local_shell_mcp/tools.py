@@ -18,7 +18,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 from pathspec.gitignore import GitIgnoreSpec
 from pydantic import BaseModel, ConfigDict, Field
 
-from .audit import audit
+from .audit import audit, audit_call_context, audit_result_ok
 from .auth import require_current_scopes
 from .downloads import create_share_link, list_share_links, revoke_share_link
 from .fs_ops import (
@@ -200,7 +200,6 @@ def _oauth_security_scheme(scopes: list[str] | tuple[str, ...]) -> dict[str, Any
 OAUTH_SECURITY_SCHEMES = [_oauth_security_scheme(ALL_OAUTH_SCOPES)]
 NOAUTH_SECURITY_SCHEMES = [{"type": "noauth"}]
 PUBLIC_TOOL_TIMEOUT_S = PUBLIC_TOOL_WATCHDOG_TIMEOUT_S
-MAX_AUDIT_TOOL_ARG_STRING = 500
 MCP_INSTRUCTIONS = (
     "When a task may benefit from an installed Agent Skill, call skills_list first "
     "to discover the exact Skill name and description. Before following a Skill's "
@@ -279,20 +278,13 @@ def _serialize_audit_value(value: Any) -> Any:
     if isinstance(value, BaseModel):
         return _serialize_audit_value(value.model_dump(mode="json"))
     if isinstance(value, str):
-        if len(value) > MAX_AUDIT_TOOL_ARG_STRING:
-            return value[:MAX_AUDIT_TOOL_ARG_STRING] + "…<truncated>"
         return value
     if isinstance(value, (int, float, bool)) or value is None:
         return value
-    if isinstance(value, list):
-        return [_serialize_audit_value(item) for item in value[:20]]
-    if isinstance(value, tuple):
-        return [_serialize_audit_value(item) for item in value[:20]]
+    if isinstance(value, (list, tuple)):
+        return [_serialize_audit_value(item) for item in value]
     if isinstance(value, dict):
-        return {
-            str(name): _serialize_audit_value(item)
-            for name, item in list(value.items())[:50]
-        }
+        return {str(name): _serialize_audit_value(item) for name, item in value.items()}
     return repr(value)
 
 
@@ -390,19 +382,28 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                 **audit_context,
             )
             try:
-                if __tool_name in NON_CANCELLABLE_TOOL_NAMES:
-                    result = await __original(*args, **kwargs)
-                else:
-                    result = await asyncio.wait_for(
-                        __original(*args, **kwargs), timeout=PUBLIC_TOOL_TIMEOUT_S
-                    )
+                with audit_call_context(call_id) as call_state:
+                    if __tool_name in NON_CANCELLABLE_TOOL_NAMES:
+                        result = await __original(*args, **kwargs)
+                    else:
+                        result = await asyncio.wait_for(
+                            __original(*args, **kwargs), timeout=PUBLIC_TOOL_TIMEOUT_S
+                        )
+                serialized_result = _serialize_audit_value(result)
+                call_ok = audit_result_ok(result) and not bool(call_state["failed"])
+                failure_context = {}
+                if not call_ok and call_state.get("error"):
+                    failure_context["error"] = call_state["error"]
+                if not call_ok and call_state.get("error_type"):
+                    failure_context["error_type"] = call_state["error_type"]
                 audit(
                     "mcp_tool_call_end",
                     call_id=call_id,
                     tool=__tool_name,
-                    ok=True,
+                    ok=call_ok,
                     duration_ms=round((time.monotonic() - started_at) * 1000),
-                    result=_serialize_audit_value(result),
+                    result=serialized_result,
+                    **failure_context,
                     **audit_context,
                 )
                 return result
@@ -414,6 +415,7 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                 audit(
                     "tool_timeout",
                     call_id=call_id,
+                    parent_call_id=call_id,
                     tool=__tool_name,
                     timeout_s=PUBLIC_TOOL_TIMEOUT_S,
                 )

@@ -1,5 +1,6 @@
 import type {
   ApiEnvelope,
+  AuditEntry,
   AuditPayload,
   BootstrapPayload,
   DashboardPayload,
@@ -80,9 +81,13 @@ export const api = {
     path: string,
     columns?: number,
     rows?: number,
+    cellAspect?: number,
     signal?: AbortSignal,
   ): Promise<FilePreview> {
-    return request(`/files/preview${queryString({ machine, path, columns, rows })}`, { signal })
+    return request(
+      `/files/preview${queryString({ machine, path, columns, rows, cell_aspect: cellAspect })}`,
+      { signal },
+    )
   },
   fileContent(machine: string, path: string): Promise<FilePreview> {
     return request(`/files/content${queryString({ machine, path })}`)
@@ -116,6 +121,9 @@ export const api = {
   },
   audit(filters: Record<string, string | number | boolean | null | undefined>, signal?: AbortSignal): Promise<AuditPayload> {
     return request(`/audit${queryString(filters)}`, { signal })
+  },
+  auditDetail(id: string, signal?: AbortSignal): Promise<AuditEntry> {
+    return request(`/audit/detail${queryString({ id })}`, { signal })
   },
   remotes(signal?: AbortSignal): Promise<MachinePayload> {
     return request("/remotes", { signal })

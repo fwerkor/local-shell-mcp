@@ -2,6 +2,7 @@ import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, Modal, Panel, formatAge, useVisibleRows } from "./components"
+import { handleSelectionScroll } from "./mouse"
 import { remoteSystemInfo, remoteVersion } from "./remotes-utils"
 import { clampIndex } from "./state-utils"
 import { screenTheme, theme } from "./theme"
@@ -184,7 +185,13 @@ export function RemotesScreen({
               detail={enabled ? "Press n to create a one-time join invite" : "Enable remote workers in server configuration"}
             />
           ) : (
-            <box style={{ flexDirection: "column", flexGrow: 1 }}>
+            <box
+              onMouseScroll={(event) => handleSelectionScroll(
+                event,
+                (delta) => setSelected((value) => clampIndex(value + delta, machines.length)),
+              )}
+              style={{ flexDirection: "column", flexGrow: 1 }}
+            >
               <box style={{ height: 2, flexDirection: "row", paddingLeft: 1 }}>
                 <text
                   fg={theme.faint}
@@ -198,6 +205,7 @@ export function RemotesScreen({
                 return (
                   <box
                     key={machine.name}
+                    onMouseDown={() => setSelected(index)}
                     style={{
                       height: 2,
                       flexDirection: "row",
@@ -230,7 +238,12 @@ export function RemotesScreen({
           }}
         >
           {current ? (
-            <box style={{ flexDirection: "column" }}>
+            <scrollbox
+              focused={false}
+              style={{ flexGrow: 1 }}
+              scrollY
+              verticalScrollbarOptions={{ visible: true }}
+            >
               <text fg={current.status === "online" ? theme.green : theme.orange} attributes={1} content={current.name} />
               <text fg={theme.faint} content={`Status       ${current.status}`} />
               <text fg={theme.faint} content={`LSM version  ${remoteVersion(current)}`} />
@@ -239,7 +252,7 @@ export function RemotesScreen({
               <text fg={theme.faint} content={`Capabilities ${(current.capabilities || []).join(", ") || "—"}`} />
               <text fg={theme.borderBright} content="\nSystem information" />
               <text fg={theme.muted} content={JSON.stringify(remoteSystemInfo(current), null, 2)} />
-            </box>
+            </scrollbox>
           ) : (
             <EmptyState title="No node selected" detail="Create an invite to attach one" />
           )}
