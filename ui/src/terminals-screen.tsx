@@ -379,6 +379,21 @@ export function TerminalsScreen({
     onMachine(machines[next]!.name)
   }
 
+  const startTerminal = () => setDialog({ type: "start", machine, name: "", cwd: "." })
+  const killTerminal = () => selectedSession && setDialog({ type: "kill", machine, session: selectedSession })
+  const toggleAudit = () => setShowAudit((value) => !value)
+  const toggleRawMode = () => {
+    if (rawMode) {
+      setRawMode(false)
+      setStatus("Raw input disabled")
+    } else if (selectedSession) {
+      setRawMode(true)
+      setStatus("Raw input enabled · F8 to leave")
+    }
+  }
+  const footerLocked = !keyboardEnabled || dialog.type !== "none"
+  const standardFooterLocked = footerLocked || rawMode
+
   useKeyboard((key) => {
     if (!keyboardEnabled) return
     if (dialog.type !== "none" && dialog.machine !== machine) {
@@ -409,8 +424,7 @@ export function TerminalsScreen({
       key.preventDefault()
       key.stopPropagation()
       if (key.name === "f8") {
-        setRawMode(false)
-        setStatus("Raw input disabled")
+        toggleRawMode()
         return
       }
       const encoded = encodeRawKey(key)
@@ -418,12 +432,8 @@ export function TerminalsScreen({
       return
     }
 
-    if (key.name === "f8") {
-      if (selectedSession) {
-        setRawMode(true)
-        setStatus("Raw input enabled · F8 to leave")
-      }
-    } else if (key.name === "pageup" && selectedSession) {
+    if (key.name === "f8") toggleRawMode()
+    else if (key.name === "pageup" && selectedSession) {
       key.preventDefault()
       key.stopPropagation()
       scrollOutput(terminalRows)
@@ -435,9 +445,9 @@ export function TerminalsScreen({
     else if ((key.option || key.meta) && key.name === "]") switchMachine(1)
     else if ((key.option || key.meta) && key.name === "left") selectSession(selected - 1)
     else if ((key.option || key.meta) && key.name === "right") selectSession(selected + 1)
-    else if ((key.option || key.meta) && key.name === "n") setDialog({ type: "start", machine, name: "", cwd: "." })
-    else if ((key.option || key.meta) && key.name === "w" && selectedSession) setDialog({ type: "kill", machine, session: selectedSession })
-    else if ((key.option || key.meta) && key.name === "a") setShowAudit((value) => !value)
+    else if ((key.option || key.meta) && key.name === "n") startTerminal()
+    else if ((key.option || key.meta) && key.name === "w") killTerminal()
+    else if ((key.option || key.meta) && key.name === "a") toggleAudit()
     else if ((key.option || key.meta) && key.name === "r") void refreshOutput(true)
   })
 
@@ -553,14 +563,17 @@ export function TerminalsScreen({
       <KeyHint
         accent={colors.accent}
         items={[
-          ["Alt+←/→", "terminal"],
-          ["Alt+N", "new"],
-          ["Alt+W", "kill"],
-          ["Alt+A", "audit"],
-          ["PgUp/PgDn", "scroll"],
-          ["F8", "raw mode"],
-          ["Alt+[ / ]", "machine"],
-          ["Alt+R", "refresh"],
+          { key: "Alt+←", label: "previous", onPress: () => selectSession(selected - 1), disabled: standardFooterLocked || activeSessions.length < 2 },
+          { key: "Alt+→", label: "next", onPress: () => selectSession(selected + 1), disabled: standardFooterLocked || activeSessions.length < 2 },
+          { key: "Alt+N", label: "new", onPress: startTerminal, disabled: standardFooterLocked },
+          { key: "Alt+W", label: "kill", onPress: killTerminal, disabled: standardFooterLocked || !selectedSession },
+          { key: "Alt+A", label: "audit", onPress: toggleAudit, disabled: standardFooterLocked },
+          { key: "PgUp", label: "older", onPress: () => scrollOutput(terminalRows), disabled: standardFooterLocked || !selectedSession || safeScrollOffset >= maxScrollOffset },
+          { key: "PgDn", label: "newer", onPress: () => scrollOutput(-terminalRows), disabled: standardFooterLocked || !selectedSession || safeScrollOffset === 0 },
+          { key: "F8", label: rawMode ? "leave raw" : "raw mode", onPress: toggleRawMode, disabled: footerLocked || !selectedSession },
+          { key: "Alt+[", label: "prev machine", onPress: () => switchMachine(-1), disabled: standardFooterLocked || machines.length < 2 },
+          { key: "Alt+]", label: "next machine", onPress: () => switchMachine(1), disabled: standardFooterLocked || machines.length < 2 },
+          { key: "Alt+R", label: "refresh", onPress: () => void refreshOutput(true), disabled: standardFooterLocked || !selectedSession },
         ]}
       />
       {dialog.type === "start" && (
