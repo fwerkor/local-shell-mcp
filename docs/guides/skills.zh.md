@@ -1,37 +1,35 @@
 # Agent Skills
 
-`local-shell-mcp` 通过固定的 MCP 工具面支持基于 Markdown 的可复用 Agent Skill。安装或删除 Skill 不会增删 MCP 工具，因此客户端无需刷新 `tools/list`，也无需重新连接。
+`local-shell-mcp` 通过固定的 MCP 工具面支持基于 Markdown 的可复用 Agent Skill。安装或删除 Skill 不会改变 MCP 工具列表，因此客户端无需重新连接。
 
-## 目录结构
+## Skill 来源
 
-Skill 从以下目录读取：
+LSM 按以下优先级扫描目录：
 
 ```text
-<state_dir>/agent_config/skills/
-  debugging/
-    SKILL.md
-    checklist.md
-  pdfs/
-    SKILL.md
-    scripts/
-      render.py
+1. <workspace_root>/.agents/skills/
+2. <state_dir>/agent_config/skills/
+3. ${XDG_CONFIG_HOME:-~/.config}/agents/skills/
 ```
 
-默认工作区下的实际路径是：
+默认工作区和状态目录下，前两个路径是：
 
 ```text
+/workspace/.agents/skills
 /workspace/.local-shell-mcp/agent_config/skills
 ```
 
-每个直接子目录代表一个 Skill。目录名就是 Skill 名称，目录内必须包含普通文件 `SKILL.md`。Skills 不要求存在 `config.json`。
+每个直接子目录代表一个 Skill。目录名就是 Skill 名称，目录中必须提供 `SKILL.md`。Skill 目录、`SKILL.md`、关联文件和关联目录均可使用符号链接。
+
+同名 Skill 出现在多个来源时，项目级来源优先于 LSM 管理目录，LSM 管理目录优先于全局目录。`skills_list` 会返回每个有效 Skill 的 `source` 和 `source_path`，并通过 `skills_dirs` 给出完整的有序来源列表。
 
 ## 固定工具
 
 | 工具 | 用途 |
 |---|---|
-| `skills_list` | 重新扫描目录并列出已安装 Skill 的名称、描述、入口路径、关联文件和非致命警告，不加载完整指令。 |
-| `skill_load` | 按 `skills_list` 返回的精确名称加载完整 `SKILL.md`。关联文件返回 Skill 内相对路径。 |
-| `skill_read_file` | 使用 `skill_load` 返回的 Skill 名称和相对路径，读取一个受大小限制的关联文本文件。 |
+| `skills_list` | 重新扫描所有来源，列出 Skill 名称、描述、来源、入口路径、关联文件和非致命警告，不加载完整指令。 |
+| `skill_load` | 按 `skills_list` 返回的精确名称加载完整 `SKILL.md`。 |
+| `skill_read_file` | 使用 `skill_load` 返回的 Skill 内相对路径读取受大小限制的关联文本文件。 |
 
 推荐流程：
 
@@ -40,44 +38,53 @@ skills_list
   -> 选择相关 Skill
   -> skill_load(name)
   -> 仅在需要关联文件时调用 skill_read_file(name, path)
-  -> 按 Skill 指令调用已有 shell、Git、浏览器或远程工具
+  -> 按 Skill 指令调用现有 shell、Git、浏览器和远程工具
 ```
 
-三个工具都是固定的只读工具。`skills_list` 执行有界注册表扫描；`skill_load` 和 `skill_read_file` 只访问指定 Skill。磁盘修改会在下一次调用时生效。
+磁盘上的修改会在下一次调用时生效，不会为每个 Skill 动态注册 MCP 工具。
 
-## 安装和更新 Skill
+## 使用 Skills CLI 安装
 
-运行时有意不内置 Skill 市场或包管理器。使用普通文件或 Git 操作管理该目录，例如：
+项目级和全局来源与开放的 `skills` CLI 使用的 universal 目录一致。
+
+安装到当前 LSM 工作区：
 
 ```bash
-cp -R ./my-skill /workspace/.local-shell-mcp/agent_config/skills/my-skill
+cd /workspace
+npx skills add owner/repository --agent universal -y
 ```
 
-或者：
+安装到全局目录：
 
 ```bash
-git clone https://example.com/team/skills.git /tmp/team-skills
-cp -R /tmp/team-skills/debugging /workspace/.local-shell-mcp/agent_config/skills/debugging
+npx skills add owner/repository --agent universal --global -y
 ```
 
-更新和删除同样使用普通文件或 Git 工作流。之后调用 `skills_list` 或 `skill_load` 即可看到新内容，不会改变 MCP 工具列表。
+安装指定 Skill：
 
-## 校验与安全
+```bash
+npx skills add XiNian-dada/Fuck_My_Shit_Mountain \
+  --skill fuck-my-shit-mountain \
+  --agent universal \
+  -y
+```
 
-扫描器会：
+LSM 管理目录仍可通过普通文件或 Git 操作维护：
 
-- 拒绝逃逸出配置目录的 Skill 目录和 `SKILL.md`；
-- 拒绝符号链接形式的 Skill 目录、入口文件和关联文件；
-- 跳过缺少 `SKILL.md` 的目录并返回警告；
-- 解析有长度上限的 YAML 或 TOML front matter 描述，并支持正文和标题回退；
-- 限制入口文件大小、Skill 数量、扫描条目数、关联文件数和路径输出总量；
-- 返回 Skill 内相对路径，并通过 `skill_read_file` 读取，避免向普通文件工具暴露工作区外配置目录。
+```bash
+git clone https://example.com/team/my-skill.git \
+  /workspace/.local-shell-mcp/agent_config/skills/my-skill
+```
 
-应把 Skill 视为发布者提供的指令和代码。放入服务端目录前，先审查 `SKILL.md` 和其中脚本。
+通过 CLI、Git 或普通文件操作完成的更新和删除，会在下一次 Skill 调用时自动生效。
+
+## 校验
+
+Registry 会跳过非法 Skill 名称和缺少可读 `SKILL.md` 的目录。入口文件大小、Skill 数量、扫描条目数、关联文件数和路径输出限制仍然有效。路径遍历字符串仍会被拒绝，但文件系统符号链接会被正常跟随。
 
 ## REST 兼容接口
 
-可选 REST 接口使用同一份 Skill Registry：
+可选 REST 接口使用同一份合并后的 Registry：
 
 ```text
 GET  /tools/skills_list

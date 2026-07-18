@@ -20,15 +20,30 @@ def _skills_root(tmp_path):
     return tmp_path / ".local-shell-mcp" / "agent_config" / "skills"
 
 
+def _project_skills_root(tmp_path):
+    return tmp_path / ".agents" / "skills"
+
+
+def _global_skills_root(tmp_path):
+    return tmp_path / "home" / ".config" / "agents" / "skills"
+
+
 def _configure(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "home" / ".config"))
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
     monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
     get_settings.cache_clear()
 
 
-def _install_skill(tmp_path, name="debugging"):
-    skill_dir = _skills_root(tmp_path) / name
+def _install_skill(tmp_path, name="debugging", source="managed"):
+    roots = {
+        "project": _project_skills_root(tmp_path),
+        "managed": _skills_root(tmp_path),
+        "global": _global_skills_root(tmp_path),
+    }
+    skill_dir = roots[source] / name
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
         "---\ndescription: Diagnose failing tests safely.\n---\n\n# Debugging\n",
@@ -46,6 +61,11 @@ def test_skills_list_is_empty_when_no_skills_are_installed(tmp_path, monkeypatch
     assert payload["skills"] == []
     assert payload["warnings"] == []
     assert payload["skills_dir"] == str(_skills_root(tmp_path))
+    assert payload["skills_dirs"] == [
+        {"source": "project", "path": str(_project_skills_root(tmp_path))},
+        {"source": "managed", "path": str(_skills_root(tmp_path))},
+        {"source": "global", "path": str(_global_skills_root(tmp_path))},
+    ]
 
 
 def test_skill_load_returns_instructions_and_related_paths(tmp_path, monkeypatch):
@@ -61,11 +81,78 @@ def test_skill_load_returns_instructions_and_related_paths(tmp_path, monkeypatch
             "entry_path": "skills/debugging/SKILL.md",
             "description": "Diagnose failing tests safely.",
             "related_files": ["checklist.md"],
+            "source": "managed",
+            "source_path": str(_skills_root(tmp_path)),
         }
     ]
     assert loaded["name"] == "debugging"
     assert loaded["content"].startswith("---\ndescription:")
     assert loaded["related_files"] == ["checklist.md"]
+    assert loaded["source"] == "managed"
+    assert loaded["source_path"] == str(_skills_root(tmp_path))
+
+
+def test_skill_sources_merge_with_project_then_managed_then_global_priority(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    project = _install_skill(tmp_path, "shared", "project")
+    managed = _install_skill(tmp_path, "shared", "managed")
+    _install_skill(tmp_path, "managed-only", "managed")
+    _install_skill(tmp_path, "global-only", "global")
+    (project / "SKILL.md").write_text("# Project copy\n", encoding="utf-8")
+    (managed / "SKILL.md").write_text("# Managed copy\n", encoding="utf-8")
+
+    listed = list_installed_skills()
+    loaded = load_installed_skill("shared")
+    related = read_installed_skill_file("shared", "checklist.md")
+
+    assert [(skill["name"], skill["source"]) for skill in listed["skills"]] == [
+        ("shared", "project"),
+        ("managed-only", "managed"),
+        ("global-only", "global"),
+    ]
+    assert loaded["content"] == "# Project copy\n"
+    assert loaded["source"] == "project"
+    assert related["source"] == "project"
+    assert any("skipped duplicate Skill 'shared'" in warning for warning in listed["warnings"])
+
+
+def test_skill_sources_share_one_registry_scan_budget(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_SKILL_SCAN_ENTRIES", "3")
+    get_settings.cache_clear()
+    _install_skill(tmp_path, "project-only", "project")
+    _install_skill(tmp_path, "managed-only", "managed")
+
+    listed = list_installed_skills()
+
+    assert [(skill["name"], skill["source"]) for skill in listed["skills"]] == [
+        ("project-only", "project")
+    ]
+    assert any("stopped after 3 entries" in warning for warning in listed["warnings"])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation requires privileges on Windows")
+def test_symlinked_skill_directory_and_entry_file_are_supported(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    real_skill = tmp_path / "real-skill"
+    real_skill.mkdir()
+    real_entry = tmp_path / "real-entry.md"
+    real_entry.write_text("# Linked Skill\n", encoding="utf-8")
+    (real_skill / "SKILL.md").symlink_to(real_entry)
+    (real_skill / "guide.md").write_text("linked guide", encoding="utf-8")
+    project_root = _project_skills_root(tmp_path)
+    project_root.mkdir(parents=True)
+    (project_root / "linked-skill").symlink_to(real_skill, target_is_directory=True)
+
+    listed = list_installed_skills()
+    loaded = load_installed_skill("linked-skill")
+    related = read_installed_skill_file("linked-skill", "guide.md")
+
+    assert [(skill["name"], skill["source"]) for skill in listed["skills"]] == [
+        ("linked-skill", "project")
+    ]
+    assert loaded["content"] == "# Linked Skill\n"
+    assert related["content"] == "linked guide"
 
 
 def test_mcp_instructions_describe_the_fixed_skill_flow(tmp_path, monkeypatch):
@@ -143,9 +230,7 @@ def test_skill_load_rejects_unknown_names(tmp_path, monkeypatch):
         load_installed_skill("missing")
 
 
-def test_skill_read_file_works_when_agent_config_is_outside_workspace(
-    tmp_path, monkeypatch
-):
+def test_skill_read_file_works_when_agent_config_is_outside_workspace(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     agent_config = tmp_path / "external-agent-config"
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(workspace))
@@ -184,9 +269,7 @@ def test_skill_text_normalizes_newlines_across_platforms(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     skill_dir = _skills_root(tmp_path) / "crlf"
     skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_bytes(
-        b"---\r\ndescription: CRLF skill.\r\n---\r\n# CRLF\r\n"
-    )
+    (skill_dir / "SKILL.md").write_bytes(b"---\r\ndescription: CRLF skill.\r\n---\r\n# CRLF\r\n")
     (skill_dir / "reference.md").write_bytes(b"Line one.\r\nLine two.\r")
 
     loaded = load_installed_skill("crlf")
@@ -209,9 +292,7 @@ def test_skill_rest_rejects_non_string_arguments(tmp_path, monkeypatch):
     client = TestClient(build_http_app(), raise_server_exceptions=False)
 
     load_response = client.post("/tools/skill_load", json={"name": 123})
-    read_response = client.post(
-        "/tools/skill_read_file", json={"name": "debugging", "path": 123}
-    )
+    read_response = client.post("/tools/skill_read_file", json={"name": "debugging", "path": 123})
 
     assert load_response.status_code == 400
     assert read_response.status_code == 400
@@ -321,15 +402,18 @@ def test_skill_read_file_rejects_path_traversal(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="symlink creation requires privileges on Windows")
-def test_skill_read_file_rejects_symlinks(tmp_path, monkeypatch):
+def test_skill_read_file_follows_symlinks(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     skill_dir = _install_skill(tmp_path)
     outside = tmp_path / "outside.md"
     outside.write_text("outside", encoding="utf-8")
     (skill_dir / "linked.md").symlink_to(outside)
 
-    with pytest.raises(ValueError, match="regular file"):
-        read_installed_skill_file("debugging", "linked.md")
+    loaded = load_installed_skill("debugging")
+    related = read_installed_skill_file("debugging", "linked.md")
+
+    assert "linked.md" in loaded["related_files"]
+    assert related["content"] == "outside"
 
 
 def test_skill_path_budget_is_strict_across_registry(tmp_path, monkeypatch):
@@ -343,11 +427,7 @@ def test_skill_path_budget_is_strict_across_registry(tmp_path, monkeypatch):
         (skill_dir / "x").write_text("x", encoding="utf-8")
 
     listed = list_installed_skills()
-    returned_paths = [
-        path
-        for skill in listed["skills"]
-        for path in skill["related_files"]
-    ]
+    returned_paths = [path for skill in listed["skills"] for path in skill["related_files"]]
 
     assert sum(len(path.encode("utf-8")) for path in returned_paths) <= 1
     assert any("path budget is exhausted" in warning for warning in listed["warnings"])
