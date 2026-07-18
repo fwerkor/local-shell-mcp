@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
+from pathlib import Path
 
 import local_shell_mcp.audit as audit_module
 from local_shell_mcp.settings import get_settings
@@ -117,9 +120,27 @@ def test_query_audit_covers_tail_reading_and_filter_rejections(tmp_path, monkeyp
 
     path = get_settings().audit_log_path
     records = [
-        {"ts": 1, "event": "shell_send", "machine": "worker-a", "session": "one", "detail": "alpha"},
-        {"ts": 2, "event": "job_started", "machine": "worker-b", "session": "two", "detail": "beta"},
-        {"ts": 3, "event": "browser_capture", "machine": "worker-c", "session": "three", "detail": "gamma"},
+        {
+            "ts": 1,
+            "event": "shell_send",
+            "machine": "worker-a",
+            "session": "one",
+            "detail": "alpha",
+        },
+        {
+            "ts": 2,
+            "event": "job_started",
+            "machine": "worker-b",
+            "session": "two",
+            "detail": "beta",
+        },
+        {
+            "ts": 3,
+            "event": "browser_capture",
+            "machine": "worker-c",
+            "session": "three",
+            "detail": "gamma",
+        },
     ]
     payload = b"prefix-without-json\n" + b"x" * 500 + b"\n\xff\n"
     payload += ("\n".join(json.dumps(record) for record in records) + "\n").encode()
@@ -143,3 +164,135 @@ def test_trim_audit_log_without_newline_keeps_bounded_tail(tmp_path):
     audit_module._trim_audit_log(path, 100)
 
     assert path.read_bytes() == b"x" * 50
+
+
+def test_payload_reference_namespace_does_not_capture_user_dictionaries():
+    legacy_shaped = {
+        "$audit_payload": "a" * 64,
+        "bytes": 12,
+        "preview": "user value",
+    }
+    namespaced_but_not_internal = {
+        audit_module._AUDIT_PAYLOAD_MARKER: {
+            "version": audit_module._AUDIT_PAYLOAD_VERSION,
+            "sha256": "b" * 64,
+            "bytes": 12,
+        },
+        "preview": "user value",
+        "extra": True,
+    }
+
+    assert audit_module._resolve_payload_reference(legacy_shaped, full=True) == legacy_shaped
+    assert (
+        audit_module._resolve_payload_reference(namespaced_but_not_internal, full=True)
+        == namespaced_but_not_internal
+    )
+
+
+def test_payload_files_are_created_private_from_the_first_write(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    observed_modes: list[int] = []
+    real_open = os.open
+
+    def tracking_open(path, flags, mode=0o777):
+        if str(path).endswith(".tmp"):
+            observed_modes.append(mode)
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(audit_module.os, "open", tracking_open)
+    reference = audit_module._write_payload("secret:" + "x" * 30_000)
+    payload = audit_module._payload_path(audit_module._payload_digest(reference))
+
+    assert observed_modes
+    assert set(observed_modes) == {0o600}
+    assert stat.S_IMODE(payload.stat().st_mode) == 0o600
+
+
+def test_payload_pruning_defers_when_the_log_cannot_be_read(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    directory = get_settings().state_dir / audit_module._AUDIT_PAYLOAD_DIRECTORY
+    directory.mkdir(parents=True)
+    payload = directory / f"{'a' * 64}.json.gz"
+    payload.write_bytes(b"payload")
+    log_path = get_settings().audit_log_path
+    log_path.write_text("{}\n", encoding="utf-8")
+
+    def fail_read_text(self: Path, *args, **kwargs):
+        raise OSError("temporary read failure")
+
+    monkeypatch.setattr(Path, "read_text", fail_read_text)
+    audit_module._prune_payload_store(log_path)
+
+    assert payload.exists()
+
+
+def test_get_audit_entry_loads_only_the_selected_payloads(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_TAIL_BYTES", "200000")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "200000")
+    get_settings.cache_clear()
+
+    for call_id, fill in (("selected", "s"), ("unrelated", "u")):
+        audit_module.audit(
+            "mcp_tool_call_start",
+            call_id=call_id,
+            tool="write_file",
+            arguments={"keyword_args": {"content": fill * 30_000}},
+        )
+        audit_module.audit(
+            "mcp_tool_call_end",
+            call_id=call_id,
+            tool="write_file",
+            ok=True,
+            result={"stdout": fill * 30_000},
+        )
+
+    records = [
+        json.loads(line)
+        for line in get_settings().audit_log_path.read_text(encoding="utf-8").splitlines()
+    ]
+    unrelated_ids: set[str] = set()
+    for record in records:
+        if record.get("call_id") == "unrelated":
+            audit_module._collect_payload_ids(record, unrelated_ids)
+
+    real_payload_path = audit_module._payload_path
+
+    def guarded_payload_path(digest: str):
+        if digest in unrelated_ids:
+            raise AssertionError("unrelated payload was materialized")
+        return real_payload_path(digest)
+
+    monkeypatch.setattr(audit_module, "_payload_path", guarded_payload_path)
+    detail = audit_module.get_audit_entry("call:selected")
+
+    assert detail["input"]["content"] == "s" * 30_000
+    assert detail["output"]["stdout"] == "s" * 30_000
+
+
+def test_audit_retention_bounds_log_and_external_payload_bytes(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    max_bytes = 26_000
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_TAIL_BYTES", "200000")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", str(max_bytes))
+    get_settings.cache_clear()
+
+    first = os.urandom(18_000).hex()
+    second = os.urandom(18_000).hex()
+    audit_module.audit("first_large_event", payload=first)
+    first_payloads = set(
+        (get_settings().state_dir / audit_module._AUDIT_PAYLOAD_DIRECTORY).glob("*.json.gz")
+    )
+    assert len(first_payloads) == 1
+
+    audit_module.audit("second_large_event", payload=second)
+
+    payload_directory = get_settings().state_dir / audit_module._AUDIT_PAYLOAD_DIRECTORY
+    stored_bytes = get_settings().audit_log_path.stat().st_size + sum(
+        path.stat().st_size for path in payload_directory.glob("*.json.gz")
+    )
+    assert stored_bytes <= max_bytes
+    assert all(not path.exists() for path in first_payloads)
+    entries = audit_module.query_audit(sort="asc")["entries"]
+    assert [entry["event"] for entry in entries] == ["second_large_event"]
+    assert audit_module.get_audit_entry(entries[0]["id"])["payload"] == second
