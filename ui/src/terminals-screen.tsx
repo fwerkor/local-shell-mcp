@@ -354,7 +354,9 @@ export function TerminalsScreen({
     pendingOutputRef.current = null
     scrollOffsetRef.current = 0
     setScrollOffset(0)
-    if (commandInputRef.current) commandInputRef.current.value = ""
+    setTimeout(() => {
+      if (commandInputRef.current) commandInputRef.current.value = ""
+    }, 0)
     void send(value, true)
   }
 

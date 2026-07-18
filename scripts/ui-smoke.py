@@ -189,7 +189,12 @@ def wait_for_terminal_text_absent(page: Page, needle: str, timeout_s: float = 10
 
 
 def wait_for_terminal_output(
-    page: Page, session_id: str, needle: str, timeout_s: float = 10
+    page: Page,
+    session_id: str,
+    needle: str,
+    timeout_s: float = 10,
+    *,
+    exact_line: bool = False,
 ) -> None:
     deadline = time.monotonic() + timeout_s
     output = ""
@@ -201,7 +206,12 @@ def wait_for_terminal_output(
         response = api_request(page, path)
         assert response["status"] == 200, response
         output = response["body"]["data"]["output"]
-        if needle in output:
+        matched = (
+            any(line.strip() == needle for line in output.splitlines())
+            if exact_line
+            else needle in output
+        )
+        if matched:
             return
         page.wait_for_timeout(100)
     raise AssertionError(
@@ -231,14 +241,13 @@ def run_browser(port: int) -> None:
             page.locator("#connection-state").get_by_text("Connected").wait_for(timeout=15_000)
             assert page.locator("#auth-gate").is_hidden()
 
-            authenticated = page.evaluate(
-                """fetch('/api/ui/bootstrap', {
-                    headers: {Authorization: 'Bearer ' + sessionStorage.getItem('lsm.ui.access_token')}
-                }).then(response => response.status)"""
-            )
-            assert authenticated == 200
+            bootstrap = api_request(page, "/api/ui/bootstrap")
+            assert bootstrap["status"] == 200, bootstrap
+            version_info = bootstrap["body"]["data"]["version"]
+            displayed_version = version_info.get("version") or version_info.get("package_version")
+            assert displayed_version, version_info
             wait_for_terminal_text(page, "System health")
-            wait_for_terminal_text(page, "LSM v3.0.4")
+            wait_for_terminal_text(page, f"LSM v{displayed_version}")
             dashboard = api_request(page, "/api/ui/dashboard")
             assert dashboard["status"] == 200, dashboard
             assert dashboard["body"]["data"]["health"] in {"healthy", "attention", "critical"}
@@ -320,17 +329,36 @@ def run_browser(port: int) -> None:
             wait_for_terminal_text(page, "Enter a command…")
 
             page.keyboard.type(r"printf 'INPUT-CLEAR-ONE\n'")
-            page.keyboard.press("Enter")
-            wait_for_terminal_output(page, second_session_id, "INPUT-CLEAR-ONE")
             wait_for_terminal_text(page, "INPUT-CLEAR-ONE")
-            page.keyboard.type(r"printf 'INPUT-CLEAR-TWO\n'")
             page.keyboard.press("Enter")
-            wait_for_terminal_output(page, second_session_id, "INPUT-CLEAR-TWO")
+            wait_for_terminal_output(
+                page,
+                second_session_id,
+                "INPUT-CLEAR-ONE",
+                exact_line=True,
+            )
+            wait_for_terminal_text(page, "Enter a command…")
+            page.keyboard.type(r"printf 'INPUT-CLEAR-TWO\n'")
             wait_for_terminal_text(page, "INPUT-CLEAR-TWO")
+            page.keyboard.press("Enter")
+            wait_for_terminal_output(
+                page,
+                second_session_id,
+                "INPUT-CLEAR-TWO",
+                exact_line=True,
+            )
+            wait_for_terminal_text(page, "Enter a command…")
 
             page.keyboard.type("seq -f 'SCROLL-LINE-%03g' 1 120")
+            wait_for_terminal_text(page, "SCROLL-LINE-%03g")
             page.keyboard.press("Enter")
-            wait_for_terminal_output(page, second_session_id, "SCROLL-LINE-120")
+            wait_for_terminal_output(
+                page,
+                second_session_id,
+                "SCROLL-LINE-120",
+                exact_line=True,
+            )
+            wait_for_terminal_text(page, "Enter a command…")
             wait_for_terminal_text(page, "SCROLL-LINE-120")
             initial_bottom_lines = visible_scroll_line_numbers(page)
             assert 120 in initial_bottom_lines, initial_bottom_lines
