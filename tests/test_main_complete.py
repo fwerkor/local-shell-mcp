@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import local_shell_mcp
 import local_shell_mcp.human_ui as human_ui
 import local_shell_mcp.jobs as jobs
 import local_shell_mcp.main as main_module
@@ -159,9 +160,11 @@ def test_main_subcommands_and_version(monkeypatch, capsys):
     main_module.main(["-V"])
 
     assert calls == [("job", ["a"]), ("worker", ["b"]), ("tui", ["c"])]
-    output = capsys.readouterr().out
-    assert "version-info" in output
-    assert output.count("3.0.1") == 2
+    assert capsys.readouterr().out.splitlines() == [
+        "version-info",
+        local_shell_mcp.__version__,
+        local_shell_mcp.__version__,
+    ]
 
 
 def test_main_modes_config_and_errors(tmp_path, monkeypatch):
