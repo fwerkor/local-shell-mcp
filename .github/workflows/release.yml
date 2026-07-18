@@ -188,7 +188,7 @@ jobs:
         shell: bash
         run: scripts/build-tmux-helper.sh "src/local_shell_mcp/helpers/${{ matrix.helper_tag }}/tmux" "${{ matrix.helper_platform }}"
 
-      - name: Build OpenTUI sidecar and embedded WebUI
+      - name: Build OpenTUI runtime and embedded WebUI
         working-directory: ui
         run: |
           bun install --frozen-lockfile
@@ -216,11 +216,12 @@ jobs:
           fi
           pyinstaller "${PYINSTALLER_ARGS[@]}" scripts/pyinstaller-entry.py
 
-      - name: Smoke test executables
+      - name: Smoke test embedded OpenTUI runtime
         shell: bash
         run: |
           ./dist/${{ matrix.binary }} --help
           ./ui/dist/${{ matrix.tui_binary }} --version
+          python scripts/standalone-ui-smoke.py --server ./dist/${{ matrix.binary }}
 
       - name: Package executable
         shell: bash
@@ -228,7 +229,6 @@ jobs:
           set -euo pipefail
           mkdir -p release/local-shell-mcp-${{ matrix.artifact }}
           cp dist/${{ matrix.binary }} release/local-shell-mcp-${{ matrix.artifact }}/
-          cp ui/dist/${{ matrix.tui_binary }} release/local-shell-mcp-${{ matrix.artifact }}/
           cp README.md LICENSE release/local-shell-mcp-${{ matrix.artifact }}/
           cat > release/local-shell-mcp-${{ matrix.artifact }}/QUICKSTART.txt <<'EOF'
           Start local-shell-mcp without Docker:
@@ -239,8 +239,6 @@ jobs:
 
             ./local-shell-mcp tui
 
-          The native TUI sidecar must remain beside the main executable.
-
           Useful environment variables:
 
             LOCAL_SHELL_MCP_HOST=0.0.0.0
@@ -248,7 +246,7 @@ jobs:
             LOCAL_SHELL_MCP_WORKSPACE_ROOT=/path/to/workspace
             LOCAL_SHELL_MCP_AUTH_MODE=oauth
             LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
-            Generate and export LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN as at least 12 random characters.
+            Generate and export LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN as at least 8 random characters.
             Generate and export LOCAL_SHELL_MCP_OAUTH_JWT_SECRET as at least 32 random bytes.
           EOF
           cd release
@@ -469,7 +467,7 @@ jobs:
           ./local-shell-mcp --mode mcp
           \`\`\`
 
-          Then open \`http://127.0.0.1:8765/ui\`, or launch the included native TUI sidecar through:
+          Then open \`http://127.0.0.1:8765/ui\`, or launch the embedded native TUI through:
 
           \`\`\`bash
           ./local-shell-mcp tui
