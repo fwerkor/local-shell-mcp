@@ -30,6 +30,18 @@ def test_audit_call_context_marks_nested_records(tmp_path, monkeypatch):
     assert record["parent_call_id"] == "call-123"
 
 
+def test_audit_call_context_propagates_nested_false_outcomes(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+
+    with audit_module.audit_call_context("call-failed") as state:
+        audit_module.audit("shell_kill", ok=False, session="missing")
+
+    assert state["failed"] is True
+    record = json.loads(get_settings().audit_log_path.read_text(encoding="utf-8"))
+    assert record["parent_call_id"] == "call-failed"
+    assert record["ok"] is False
+
+
 def test_audit_call_helpers_cover_legacy_unpaired_and_optional_fields():
     assert audit_module._operation_type({"event": "run_shell_start"}) == "shell"
     assert audit_module._operation_type({"event": "job_started"}) == "jobs"
@@ -127,14 +139,48 @@ def test_audit_call_helpers_cover_legacy_unpaired_and_optional_fields():
             {"id": "kept", "ts": 5, "event": "remote_worker_registered", "node": "worker-c"},
         ]
     )
-    assert len(rows) == 5
+    assert len(rows) == 6
     assert rows[0]["paired"] is True
     assert rows[0]["status"] == "failed"
     assert rows[1]["event"] == "tool_call_purpose"
     assert rows[2]["event"] == "run_shell_start"
-    assert rows[3]["status"] == "unpaired"
-    assert rows[4]["id"] == "kept"
-    assert rows[4]["operation"] == "remote"
+    assert rows[3]["event"] == "future_internal_event"
+    assert rows[4]["status"] == "unpaired"
+    assert rows[5]["id"] == "kept"
+    assert rows[5]["operation"] == "remote"
+
+
+def test_coalescing_keeps_semantic_child_details_without_duplicate_rows():
+    records = [
+        {"ts": 1, "event": "mcp_tool_call_start", "call_id": "call-1", "tool": "revoke_file_link"},
+        {
+            "ts": 2,
+            "event": "download_link_revoked",
+            "parent_call_id": "call-1",
+            "path": "/tmp/report.txt",
+            "token": "token-1",
+        },
+        {
+            "ts": 3,
+            "event": "shell_kill",
+            "parent_call_id": "call-1",
+            "ok": False,
+        },
+        {"ts": 4, "event": "mcp_tool_call_end", "call_id": "call-1", "tool": "revoke_file_link", "ok": True},
+    ]
+
+    rows = audit_module._coalesce_audit_records(records)
+
+    assert len(rows) == 1
+    assert rows[0]["related_events"] == [
+        {"event": "download_link_revoked", "path": "/tmp/report.txt", "token": "token-1"}
+    ]
+    assert rows[0][audit_module._AUDIT_SOURCE_INDEXES] == [0, 1, 2, 3]
+    units = audit_module._retention_units(
+        [(b"line\n", record, set()) for record in records]
+    )
+    assert len(units) == 1
+    assert [item[0] for item in units[0]] == [0, 1, 2, 3]
 
 
 def test_query_audit_covers_tail_reading_and_filter_rejections(tmp_path, monkeypatch):

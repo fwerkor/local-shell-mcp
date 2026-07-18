@@ -35,6 +35,22 @@ _AUDIT_SOURCE_INDEXES = "_audit_source_indexes"
 _AUDIT_FAILURE_STATUSES = frozenset(
     {"error", "failed", "failure", "not_found", "timeout", "timed_out", "cancelled"}
 )
+_NESTED_LIFECYCLE_EVENTS = frozenset(
+    {
+        "tool_call_purpose",
+        "tool_error",
+        "tool_timeout",
+        "run_shell_start",
+        "run_shell_end",
+        "shell_start",
+        "shell_send",
+        "shell_read",
+        "shell_kill",
+        "job_start",
+        "job_stop",
+        "job_retry",
+    }
+)
 
 def _format_audit_text(value: str) -> str:
     if len(value) > _AUDIT_PREVIEW_STRING_CHARS:
@@ -251,11 +267,11 @@ def _retention_units(
     call_units: dict[str, list[tuple[int, bytes, dict[str, Any] | None, set[str]]]] = {}
     for index, (raw_line, record, payload_ids) in enumerate(parsed):
         call_id = ""
-        if isinstance(record, dict) and record.get("event") in {
-            "mcp_tool_call_start",
-            "mcp_tool_call_end",
-        }:
-            call_id = str(record.get("call_id") or "")
+        if isinstance(record, dict):
+            if record.get("event") in {"mcp_tool_call_start", "mcp_tool_call_end"}:
+                call_id = str(record.get("call_id") or "")
+            else:
+                call_id = str(record.get("parent_call_id") or "")
         if call_id:
             unit = call_units.get(call_id)
             if unit is None:
@@ -406,7 +422,9 @@ def audit(event: str, **fields: Any) -> None:
     if parent_call_id and "parent_call_id" not in fields:
         fields["parent_call_id"] = parent_call_id
     call_state = _AUDIT_CALL_STATE.get()
-    if call_state is not None and event in {"tool_error", "tool_timeout"}:
+    if call_state is not None and (
+        event in {"tool_error", "tool_timeout"} or fields.get("ok") is False
+    ):
         call_state["failed"] = True
         if fields.get("error"):
             call_state["error"] = fields["error"]
@@ -640,17 +658,38 @@ def _unpaired_end_entry(record: dict[str, Any], index: int) -> dict[str, Any]:
     return entry
 
 
+def _nested_semantic_event(record: dict[str, Any]) -> dict[str, Any] | None:
+    event = str(record.get("event") or "")
+    if not event or event in _NESTED_LIFECYCLE_EVENTS:
+        return None
+    return {
+        name: value
+        for name, value in record.items()
+        if name not in {"id", "ts", "parent_call_id"}
+    }
+
+
 def _coalesce_audit_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     pending_by_id: dict[str, dict[str, Any]] = {}
+    entries_by_id: dict[str, dict[str, Any]] = {}
     pending_legacy: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
 
     for index, record in enumerate(records):
         event = str(record.get("event") or "")
         if event == "auth_ok":
             continue
-        if record.get("parent_call_id"):
-            continue
+        parent_call_id = str(record.get("parent_call_id") or "")
+        if parent_call_id:
+            parent = entries_by_id.get(parent_call_id)
+            if parent is not None:
+                parent[_AUDIT_SOURCE_INDEXES].append(index)
+                semantic = _nested_semantic_event(record)
+                if semantic is not None:
+                    parent.setdefault("related_events", []).append(semantic)
+                continue
+            if event in _NESTED_LIFECYCLE_EVENTS:
+                continue
         if event == "mcp_tool_call_start":
             entry = _new_call_entry(record, index)
             entry[_AUDIT_SOURCE_INDEXES] = [index]
@@ -658,6 +697,7 @@ def _coalesce_audit_records(records: list[dict[str, Any]]) -> list[dict[str, Any
             call_id = str(record.get("call_id") or "")
             if call_id:
                 pending_by_id[call_id] = entry
+                entries_by_id[call_id] = entry
             else:
                 pending_legacy.setdefault(_call_match_key(record), []).append(entry)
             continue
