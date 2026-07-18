@@ -67,7 +67,7 @@ function FileRows({
         return (
           <box
             key={entry.path}
-            onMouseDown={(event) => {
+            onMouseUp={(event) => {
               if (event.button === 0) onSelect?.(entry, index)
             }}
             style={{
@@ -557,7 +557,7 @@ export function FilesScreen({
                 <box key={crumb.path} style={{ flexDirection: "row" }}>
                   {index > 0 && <text fg={theme.faint} content=" / " />}
                   <text
-                    onMouseDown={(event) => {
+                    onMouseUp={(event) => {
                       if (event.button === 0 && !active && dialog.type === "none") setPath(crumb.path)
                     }}
                     fg={active ? colors.accent : theme.muted}
