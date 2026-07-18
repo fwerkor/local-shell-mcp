@@ -340,6 +340,30 @@ def run_browser(port: int) -> None:
                 "pressed": "true",
             }
             page.dispatch_event(
+                "#touchbar [data-key='escape']",
+                "pointerdown",
+                {"pointerType": "touch", "bubbles": True},
+            )
+            page.dispatch_event("#touchbar [data-key='escape']", "click")
+            enabled_shortcut_touch = page.evaluate(
+                """(() => {
+                    const textarea = document.querySelector('.xterm-helper-textarea')
+                    return {
+                        readOnly: textarea.readOnly,
+                        inputMode: textarea.inputMode,
+                        active: document.activeElement === textarea,
+                        pressed: document.querySelector('#keyboard-button').getAttribute('aria-pressed')
+                    }
+                })()"""
+            )
+            assert enabled_shortcut_touch == {
+                "readOnly": False,
+                "inputMode": "text",
+                "active": True,
+                "pressed": "true",
+            }
+
+            page.dispatch_event(
                 "#keyboard-button",
                 "pointerdown",
                 {"pointerType": "touch", "bubbles": True},
@@ -421,7 +445,7 @@ def run_browser(port: int) -> None:
                 mobile_page.get_by_role("button", name="Approve").click()
                 mobile_page.wait_for_url("**/ui")
                 mobile_page.locator("#connection-state").get_by_text("Connected").wait_for(timeout=15_000)
-                mobile_page.locator("#terminal").click(position={"x": 40, "y": 80})
+                mobile_page.locator("#terminal").tap(position={"x": 40, "y": 80})
                 mobile_page.wait_for_timeout(100)
                 locked = mobile_page.evaluate(
                     """(() => {
@@ -441,7 +465,7 @@ def run_browser(port: int) -> None:
                     "pressed": "false",
                 }, locked
 
-                mobile_page.locator("#keyboard-button").click()
+                mobile_page.locator("#keyboard-button").tap()
                 enabled = mobile_page.evaluate(
                     """(() => {
                         const textarea = document.querySelector('.xterm-helper-textarea')
@@ -460,7 +484,7 @@ def run_browser(port: int) -> None:
                     "pressed": "true",
                 }, enabled
 
-                mobile_page.locator("#keyboard-button").click()
+                mobile_page.locator("#keyboard-button").tap()
                 assert mobile_page.locator("#keyboard-button").get_attribute("aria-pressed") == "false"
                 assert mobile_page.evaluate(
                     "document.activeElement !== document.querySelector('.xterm-helper-textarea')"

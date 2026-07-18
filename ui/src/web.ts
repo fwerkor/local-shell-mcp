@@ -370,7 +370,7 @@ touchButtons.forEach((button) => {
 function updatePointerMode(event: PointerEvent): void {
   if (event.pointerType === "touch") {
     touchInteractionActive = true
-    if (event.currentTarget !== keyboardButton) setTouchKeyboard(false)
+    if (event.currentTarget === terminalElement) setTouchKeyboard(false)
   } else if (event.pointerType === "mouse") {
     touchInteractionActive = false
     setTouchKeyboard(false)
