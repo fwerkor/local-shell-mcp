@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { clampIndex, nextValue, payloadMatches, scopedItems, updateTodo } from "./state-utils"
+import {
+  clampIndex,
+  nextPreviewMeasurement,
+  nextValue,
+  payloadMatches,
+  scopedItems,
+  updateTodo,
+} from "./state-utils"
 
 describe("clampIndex", () => {
   test("never produces a negative selection for an empty list", () => {
@@ -10,6 +17,25 @@ describe("clampIndex", () => {
   test("keeps selection inside a non-empty list", () => {
     expect(clampIndex(-2, 3)).toBe(0)
     expect(clampIndex(8, 3)).toBe(2)
+  })
+})
+
+describe("preview measurement", () => {
+  test("accepts only the first layout measurement for one viewport", () => {
+    expect(nextPreviewMeasurement("", "120x40:split", 42.8, 27.2)).toEqual({
+      viewport: "120x40:split",
+      columns: 42,
+      rows: 26,
+    })
+    expect(nextPreviewMeasurement("120x40:split", "120x40:split", 41, 26)).toBeNull()
+  })
+
+  test("measures again after the terminal viewport changes", () => {
+    expect(nextPreviewMeasurement("120x40:split", "121x40:split", 43, 27)).toEqual({
+      viewport: "121x40:split",
+      columns: 43,
+      rows: 26,
+    })
   })
 })
 

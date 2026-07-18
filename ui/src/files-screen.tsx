@@ -3,7 +3,7 @@ import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, MachineSidebar, Modal, Panel, formatBytes, useVisibleRows } from "./components"
-import { clampIndex, payloadMatches } from "./state-utils"
+import { clampIndex, nextPreviewMeasurement, payloadMatches } from "./state-utils"
 import { screenTheme, theme } from "./theme"
 import type { FileEntry, FilePreview, FilesPayload, Machine } from "./types"
 
@@ -196,6 +196,7 @@ export function FilesScreen({
   const editorRef = useRef<TextareaRenderable>(null)
   const refreshRequest = useRef(0)
   const refreshController = useRef<AbortController | null>(null)
+  const measuredPreviewViewport = useRef("")
   const machineRef = useRef(machine)
   machineRef.current = machine
   const activePayload = payloadMatches(payload, machine, path) ? payload : null
@@ -222,6 +223,7 @@ export function FilesScreen({
   )
   const previewColumns = previewBounds?.columns || fallbackPreviewColumns
   const previewRows = previewBounds?.rows || Math.max(4, listHeight - 3)
+  const previewViewport = `${width}x${height}:${narrow ? narrowPane : "split"}`
 
   const refresh = useCallback(async () => {
     const requestId = ++refreshRequest.current
@@ -267,22 +269,26 @@ export function FilesScreen({
   }, [refresh])
 
   useEffect(() => {
-    let cancelled = false
     setPreview(null)
-    if (!current) return
+  }, [current?.path, machine])
+
+  useEffect(() => {
+    const currentPath = current?.path
+    if (!currentPath) return
+    const controller = new AbortController()
     const timer = setTimeout(() => {
       void api
-        .filePreview(machine, current.path, previewColumns, previewRows)
+        .filePreview(machine, currentPath, previewColumns, previewRows, controller.signal)
         .then((result) => {
-          if (!cancelled) setPreview(result)
+          if (!controller.signal.aborted) setPreview(result)
         })
         .catch((error) => {
-          if (!cancelled) setStatus(`Preview: ${formatError(error)}`)
+          if (!controller.signal.aborted) setStatus(`Preview: ${formatError(error)}`)
         })
     }, 80)
     return () => {
-      cancelled = true
       clearTimeout(timer)
+      controller.abort()
     }
   }, [current?.path, machine, previewColumns, previewRows, setStatus])
 
@@ -591,15 +597,15 @@ export function FilesScreen({
                 <box
                   style={{ flexGrow: 1, flexDirection: "column" }}
                   onSizeChange={function (this: Renderable) {
-                    const next = {
-                      columns: Math.max(8, this.width),
-                      rows: Math.max(4, this.height - 1),
-                    }
-                    setPreviewBounds((currentBounds) =>
-                      currentBounds?.columns === next.columns && currentBounds.rows === next.rows
-                        ? currentBounds
-                        : next,
+                    const measurement = nextPreviewMeasurement(
+                      measuredPreviewViewport.current,
+                      previewViewport,
+                      this.width,
+                      this.height,
                     )
+                    if (!measurement) return
+                    measuredPreviewViewport.current = measurement.viewport
+                    setPreviewBounds({ columns: measurement.columns, rows: measurement.rows })
                   }}
                 >
                   <Preview preview={preview} entry={current} />
