@@ -15,6 +15,7 @@ describe("browserShortcutSequence", () => {
   test("maps category shortcuts to the TUI function keys", () => {
     expect(shortcut("1")).toBe("\u001bOQ")
     expect(shortcut("5")).toBe("\u001b[17~")
+    expect(shortcut("6")).toBe("\u001b[18~")
   })
 
   test("uses the physical key only for Option-modified unsupported characters", () => {

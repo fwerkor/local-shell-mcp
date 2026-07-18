@@ -12,6 +12,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -36,6 +37,7 @@ from .fs_ops import (
     write_text,
 )
 from .image_ops import make_image_preview
+from .jobs import list_jobs
 from .oauth import ALL_OAUTH_SCOPES
 from .remote import remote_manager
 from .settings import get_settings
@@ -54,6 +56,232 @@ UI_MAX_ROWS = 500
 UI_TUI_EXIT_CODE = 4410
 _ACTIVE_UI_TERMINALS: set[int] = set()
 _LOGGER = logging.getLogger(__name__)
+
+_PROCESS_STARTED_AT = time.time()
+_SYSTEM_SAMPLE_LOCK = threading.Lock()
+_CPU_SAMPLE: tuple[int, int] | None = None
+_NETWORK_SAMPLE: tuple[float, int, int] | None = None
+
+
+def _read_linux_cpu_times() -> tuple[int, int] | None:
+    try:
+        fields = Path("/proc/stat").read_text(encoding="utf-8").splitlines()[0].split()
+        values = [int(value) for value in fields[1:]]
+    except (OSError, ValueError, IndexError):
+        return None
+    if len(values) < 4:
+        return None
+    idle = values[3] + (values[4] if len(values) > 4 else 0)
+    return sum(values), idle
+
+
+def _read_linux_memory() -> tuple[int, int] | None:
+    try:
+        rows = {}
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            key, value = line.split(":", 1)
+            rows[key] = int(value.strip().split()[0]) * 1024
+        total = rows["MemTotal"]
+        available = rows.get("MemAvailable", rows.get("MemFree", 0))
+    except (OSError, ValueError, KeyError):
+        return None
+    return total, max(0, total - available)
+
+
+def _read_linux_network() -> tuple[int, int] | None:
+    try:
+        lines = Path("/proc/net/dev").read_text(encoding="utf-8").splitlines()[2:]
+        received = transmitted = 0
+        for line in lines:
+            name, values = line.split(":", 1)
+            if name.strip() == "lo":
+                continue
+            fields = values.split()
+            received += int(fields[0])
+            transmitted += int(fields[8])
+    except (OSError, ValueError, IndexError):
+        return None
+    return received, transmitted
+
+
+def _percent(used: int, total: int) -> float | None:
+    if total <= 0:
+        return None
+    return round(max(0.0, min(100.0, used * 100.0 / total)), 1)
+
+
+def _local_system_snapshot() -> dict[str, Any]:
+    global _CPU_SAMPLE, _NETWORK_SAMPLE
+
+    now = time.time()
+    monotonic_now = time.monotonic()
+    load_1m: float | None = None
+    with contextlib.suppress(OSError, AttributeError):
+        load_1m = round(float(os.getloadavg()[0]), 2)
+
+    cpu_times = _read_linux_cpu_times()
+    cpu_percent: float | None = None
+    network = _read_linux_network()
+    network_rx_bps = network_tx_bps = 0.0
+    with _SYSTEM_SAMPLE_LOCK:
+        if cpu_times is not None:
+            if _CPU_SAMPLE is not None:
+                total_delta = cpu_times[0] - _CPU_SAMPLE[0]
+                idle_delta = cpu_times[1] - _CPU_SAMPLE[1]
+                if total_delta > 0:
+                    cpu_percent = round(
+                        max(0.0, min(100.0, (total_delta - idle_delta) * 100.0 / total_delta)),
+                        1,
+                    )
+            _CPU_SAMPLE = cpu_times
+        if network is not None:
+            if _NETWORK_SAMPLE is not None:
+                elapsed = monotonic_now - _NETWORK_SAMPLE[0]
+                if elapsed > 0:
+                    network_rx_bps = max(0.0, (network[0] - _NETWORK_SAMPLE[1]) / elapsed)
+                    network_tx_bps = max(0.0, (network[1] - _NETWORK_SAMPLE[2]) / elapsed)
+            _NETWORK_SAMPLE = (monotonic_now, network[0], network[1])
+
+    cpu_count = max(1, os.cpu_count() or 1)
+    if cpu_percent is None and load_1m is not None:
+        cpu_percent = round(max(0.0, min(100.0, load_1m * 100.0 / cpu_count)), 1)
+
+    memory = _read_linux_memory()
+    memory_total = memory[0] if memory else None
+    memory_used = memory[1] if memory else None
+    try:
+        disk = shutil.disk_usage(get_settings().workspace_root)
+    except OSError:
+        disk = None
+    uptime_s = max(0.0, now - _PROCESS_STARTED_AT)
+    with contextlib.suppress(OSError, ValueError, IndexError):
+        uptime_s = float(Path("/proc/uptime").read_text(encoding="utf-8").split()[0])
+
+    return {
+        "timestamp": now,
+        "cpu_percent": cpu_percent,
+        "cpu_count": cpu_count,
+        "memory_percent": (
+            _percent(memory_used, memory_total)
+            if memory_used is not None and memory_total is not None
+            else None
+        ),
+        "memory_used_bytes": memory_used,
+        "memory_total_bytes": memory_total,
+        "disk_percent": _percent(disk.used, disk.total) if disk else None,
+        "disk_used_bytes": disk.used if disk else None,
+        "disk_total_bytes": disk.total if disk else None,
+        "load_1m": load_1m,
+        "network_rx_bps": round(network_rx_bps, 1),
+        "network_tx_bps": round(network_tx_bps, 1),
+        "uptime_s": round(uptime_s),
+    }
+
+
+def _remote_version(machine: dict[str, Any]) -> str | None:
+    info = machine.get("info") if isinstance(machine.get("info"), dict) else {}
+    direct = info.get("version") or info.get("lsm_version")
+    if direct:
+        return str(direct)
+    nested = info.get("local_shell_mcp")
+    if isinstance(nested, dict) and nested.get("version"):
+        return str(nested["version"])
+    return None
+
+
+def _dashboard_alerts(
+    machines: list[dict[str, Any]],
+    system: dict[str, Any],
+    jobs: list[dict[str, Any]],
+    audit_entries: list[dict[str, Any]],
+    current_version: str,
+) -> list[dict[str, Any]]:
+    alerts: list[dict[str, Any]] = []
+    for machine in machines:
+        if machine.get("name") == "local":
+            continue
+        if machine.get("status") != "online":
+            alerts.append(
+                {
+                    "severity": "warning",
+                    "title": f"{machine.get('name', 'remote')} is offline",
+                    "detail": "Remote worker is not currently connected",
+                    "node": machine.get("name"),
+                    "age_s": machine.get("last_seen_age_s"),
+                }
+            )
+            continue
+        remote_version = _remote_version(machine)
+        if remote_version and remote_version != current_version:
+            alerts.append(
+                {
+                    "severity": "info",
+                    "title": f"{machine.get('name')} uses LSM {remote_version}",
+                    "detail": f"Controller is running LSM {current_version}",
+                    "node": machine.get("name"),
+                }
+            )
+
+    disk_percent = system.get("disk_percent")
+    if isinstance(disk_percent, (int, float)) and disk_percent >= 85:
+        alerts.append(
+            {
+                "severity": "critical" if disk_percent >= 95 else "warning",
+                "title": f"Workspace disk is {disk_percent:.0f}% full",
+                "detail": str(get_settings().workspace_root),
+                "node": "local",
+            }
+        )
+
+    now = time.time()
+    recent_failed_jobs = [
+        job
+        for job in jobs
+        if job.get("status") in {"failed", "lost"}
+        and now - float(job.get("updated_at") or job.get("created_at") or 0) <= 86_400
+    ]
+    for job in recent_failed_jobs[:3]:
+        alerts.append(
+            {
+                "severity": "warning",
+                "title": f"Job {job.get('name') or job.get('job_id')} {job.get('status')}",
+                "detail": str(job.get("error") or job.get("command") or "Tracked job needs attention"),
+                "node": "local",
+                "age_s": max(0.0, now - float(job.get("updated_at") or now)),
+            }
+        )
+
+    failed_calls = [
+        entry
+        for entry in audit_entries
+        if entry.get("ok") is False or entry.get("status") == "failed" or entry.get("error")
+    ]
+    if failed_calls:
+        alerts.append(
+            {
+                "severity": "warning",
+                "title": f"{len(failed_calls)} recent MCP call failure(s)",
+                "detail": "Open Audit for call inputs and returned errors",
+            }
+        )
+    return alerts
+
+
+def _dashboard_activity(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = []
+    for entry in entries[:12]:
+        failed = entry.get("ok") is False or entry.get("status") == "failed" or entry.get("error")
+        running = entry.get("paired") is False or entry.get("status") in {"running", "unpaired"}
+        rows.append(
+            {
+                "timestamp": entry.get("ts"),
+                "node": entry.get("node") or "local",
+                "kind": "failed" if failed else "running" if running else "success",
+                "title": entry.get("tool") or entry.get("event") or "MCP activity",
+                "detail": entry.get("command") or entry.get("operation") or "",
+            }
+        )
+    return rows
 
 
 def _json_ok(data: Any = None, message: str = "") -> JSONResponse:
@@ -274,7 +502,11 @@ def _machine_rows() -> dict[str, Any]:
             "last_seen": time.time(),
             "last_seen_age_s": 0,
             "capabilities": ["files", "terminals"],
-            "info": {"platform": sys.platform, "local": True},
+            "info": {
+                "platform": sys.platform,
+                "local": True,
+                "version": version_info().get("version"),
+            },
         },
         *remote.get("machines", []),
     ]
@@ -387,6 +619,127 @@ async def api_bootstrap(request: Request) -> Response:
             "features": {
                 "remote": settings.remote_enabled,
                 "wallpaper": settings.ui_wallpaper,
+            },
+        }
+    )
+
+
+async def api_dashboard(request: Request) -> Response:
+    settings = get_settings()
+    required = ["shell:read"]
+    if settings.remote_enabled:
+        required.append("remote:use")
+    _require_ui_scopes(request, *required)
+
+    machines, system = await asyncio.gather(
+        asyncio.to_thread(_machine_rows),
+        asyncio.to_thread(_local_system_snapshot),
+    )
+
+    source_alerts: list[dict[str, Any]] = []
+    try:
+        todos = await asyncio.to_thread(todo_read)
+    except Exception as exc:
+        _LOGGER.debug("Dashboard todo snapshot failed", exc_info=True)
+        todos = {"revision": 0, "todos": []}
+        source_alerts.append(
+            {
+                "severity": "warning",
+                "title": "Todo data unavailable",
+                "detail": f"{type(exc).__name__}: {exc}",
+                "node": "local",
+            }
+        )
+    with suppress_audit():
+        try:
+            terminals = await _machine_dispatch("local", list_shells, "shell_list", {})
+        except Exception as exc:
+            _LOGGER.debug("Dashboard terminal snapshot failed", exc_info=True)
+            terminals = {"sessions": []}
+            source_alerts.append(
+                {
+                    "severity": "warning",
+                    "title": "Persistent sessions unavailable",
+                    "detail": f"{type(exc).__name__}: {exc}",
+                    "node": "local",
+                }
+            )
+        try:
+            jobs_payload = await list_jobs(include_finished=True)
+        except Exception as exc:
+            _LOGGER.debug("Dashboard job snapshot failed", exc_info=True)
+            jobs_payload = {"jobs": [], "counts": {}}
+            source_alerts.append(
+                {
+                    "severity": "warning",
+                    "title": "Tracked jobs unavailable",
+                    "detail": f"{type(exc).__name__}: {exc}",
+                    "node": "local",
+                }
+            )
+    try:
+        audit_payload = await asyncio.to_thread(
+            query_audit,
+            limit=160,
+            start_ts=time.time() - 86_400,
+            sort="desc",
+        )
+    except Exception as exc:
+        _LOGGER.debug("Dashboard audit snapshot failed", exc_info=True)
+        audit_payload = {"entries": [], "count": 0, "total_matched": 0}
+        source_alerts.append(
+            {
+                "severity": "warning",
+                "title": "Audit activity unavailable",
+                "detail": f"{type(exc).__name__}: {exc}",
+                "node": "local",
+            }
+        )
+
+    machine_rows = list(machines.get("machines") or [])
+    jobs = list(jobs_payload.get("jobs") or [])
+    sessions = list((terminals or {}).get("sessions") or [])
+    audit_entries = list(audit_payload.get("entries") or [])
+    version = version_info()
+    current_version = str(version.get("version") or "unknown")
+    alerts = [
+        *_dashboard_alerts(machine_rows, system, jobs, audit_entries, current_version),
+        *source_alerts,
+    ]
+    active_statuses = {"starting", "running", "stopping", "retrying"}
+    active_jobs = [job for job in jobs if job.get("status") in active_statuses]
+    job_session_ids = {str(job.get("session_id") or "") for job in active_jobs}
+    standalone_sessions = [
+        session for session in sessions if str(session.get("session_id") or "") not in job_session_ids
+    ]
+    open_todos = [item for item in list(todos.get("todos") or []) if item.get("status") != "completed"]
+    severity_rank = {"info": 0, "warning": 1, "critical": 2}
+    alerts.sort(
+        key=lambda alert: severity_rank.get(str(alert.get("severity")), 0),
+        reverse=True,
+    )
+    health = "healthy"
+    if alerts:
+        highest = severity_rank.get(str(alerts[0].get("severity")), 0)
+        health = "critical" if highest >= 2 else "attention"
+
+    return _json_ok(
+        {
+            "generated_at": time.time(),
+            "health": health,
+            "version": version,
+            "system": system,
+            "machines": machines,
+            "jobs": active_jobs[:12],
+            "job_counts": jobs_payload.get("counts") or {},
+            "sessions": standalone_sessions[:12],
+            "session_count": len(sessions),
+            "alerts": alerts[:12],
+            "activity": _dashboard_activity(audit_entries),
+            "audit_total_24h": int(audit_payload.get("total_matched") or 0),
+            "todo_counts": {
+                "total": len(list(todos.get("todos") or [])),
+                "open": len(open_todos),
             },
         }
     )
@@ -1275,6 +1628,7 @@ def ui_routes() -> list[Any]:
         Route(ui_path + "/assets/{path:path}", ui_asset, methods=["GET"]),
         WebSocketRoute(ui_path + "/ws", ui_terminal_websocket),
         Route(UI_API_PREFIX + "/bootstrap", api_bootstrap, methods=["GET"]),
+        Route(UI_API_PREFIX + "/dashboard", api_dashboard, methods=["GET"]),
         Route(UI_API_PREFIX + "/machines", api_machines, methods=["GET"]),
         Route(UI_API_PREFIX + "/files", api_files, methods=["GET"]),
         Route(UI_API_PREFIX + "/files/preview", api_file_preview, methods=["GET"]),

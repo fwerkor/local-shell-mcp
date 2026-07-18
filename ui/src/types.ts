@@ -1,4 +1,4 @@
-export type ScreenName = "Files" | "Terminals" | "Todos" | "Audit" | "Remotes"
+export type ScreenName = "Dashboard" | "Files" | "Terminals" | "Remotes" | "Audit" | "Todos"
 
 export interface Machine {
   name: string
@@ -126,6 +126,66 @@ export interface BootstrapPayload {
     remote: boolean
     wallpaper: "bing" | "aurora" | "none" | string
   }
+}
+
+export interface DashboardSystem {
+  timestamp: number
+  cpu_percent?: number | null
+  cpu_count?: number | null
+  memory_percent?: number | null
+  memory_used_bytes?: number | null
+  memory_total_bytes?: number | null
+  disk_percent?: number | null
+  disk_used_bytes?: number | null
+  disk_total_bytes?: number | null
+  load_1m?: number | null
+  network_rx_bps?: number | null
+  network_tx_bps?: number | null
+  uptime_s?: number | null
+}
+
+export interface DashboardJob {
+  job_id?: string
+  name?: string
+  status?: string
+  command?: string
+  cwd?: string
+  session_id?: string
+  created_at?: number | null
+  updated_at?: number | null
+  last_started_at?: number | null
+}
+
+export interface DashboardAlert {
+  severity: "critical" | "warning" | "info" | string
+  title: string
+  detail?: string
+  node?: string
+  age_s?: number | null
+}
+
+export interface DashboardActivity {
+  timestamp?: number | null
+  node: string
+  kind: "success" | "failed" | "running" | string
+  title: string
+  detail?: string
+}
+
+export interface DashboardPayload {
+  generated_at: number
+  health: "healthy" | "attention" | "critical" | string
+  version: Record<string, unknown>
+  system: DashboardSystem
+  machines: MachinePayload
+  jobs: DashboardJob[]
+  job_counts: Record<string, number>
+  sessions: TerminalSession[]
+  session_count: number
+  alerts: DashboardAlert[]
+  activity: DashboardActivity[]
+  audit_total_24h: number
+  todo_counts: { total: number; open: number }
 }
 
 export interface ApiEnvelope<T> {

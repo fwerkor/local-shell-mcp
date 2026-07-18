@@ -3,6 +3,7 @@ import { createRoot, useKeyboard, useRenderer, useTerminalDimensions } from "@op
 import { useCallback, useEffect, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { AuditScreen } from "./audit-screen"
+import { DashboardScreen } from "./dashboard-screen"
 import { Modal, SCREENS, TopNav } from "./components"
 import { FilesScreen } from "./files-screen"
 import { appContentHeight, appContentWidth } from "./layout"
@@ -20,8 +21,8 @@ function Help({ close }: { close: () => void }) {
   return (
     <Modal title="Keyboard guide" width={82} height={22}>
       <text fg={theme.cyan} attributes={1} content="Global navigation" />
-      <text fg={theme.muted} content="Alt+1…5  switch top-level screen (F2…F6 also work)" />
-      <text fg={theme.muted} content="F7        refresh machine list" />
+      <text fg={theme.muted} content="Alt+1…6  switch top-level screen (F2…F7 also work)" />
+      <text fg={theme.muted} content="F9        refresh machine list" />
       <text fg={theme.muted} content="Alt+Q     quit the TUI" />
       <text fg={theme.muted} content="F1        show this guide" />
       <text fg={theme.borderBright} content="\nScreen conventions" />
@@ -75,7 +76,7 @@ function StatusLine({
 function App() {
   const renderer = useRenderer()
   const { width, height } = useTerminalDimensions()
-  const [screen, setScreen] = useState<ScreenName>("Files")
+  const [screen, setScreen] = useState<ScreenName>("Dashboard")
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null)
   const [machine, setMachine] = useState("local")
   const [status, setStatus] = useState("Connecting to local-shell-mcp…")
@@ -122,9 +123,9 @@ function App() {
     }
     if (help || interactionLocked) return
     if (key.name === "f1") setHelp(true)
-    else if ((key.option || key.meta) && /^[1-5]$/.test(key.name)) setScreen(SCREENS[Number(key.name) - 1]!)
-    else if (/^f[2-6]$/.test(key.name)) setScreen(SCREENS[Number(key.name.slice(1)) - 2]!)
-    else if (key.name === "f7") void loadBootstrap()
+    else if ((key.option || key.meta) && /^[1-6]$/.test(key.name)) setScreen(SCREENS[Number(key.name) - 1]!)
+    else if (/^f[2-7]$/.test(key.name)) setScreen(SCREENS[Number(key.name.slice(1)) - 2]!)
+    else if (key.name === "f9") void loadBootstrap()
   })
 
   const machines: Machine[] = bootstrap?.machines.machines || [
@@ -134,7 +135,16 @@ function App() {
   const contentHeight = appContentHeight(height)
 
   let content
-  if (screen === "Files") {
+  if (screen === "Dashboard") {
+    content = (
+      <DashboardScreen
+        width={contentWidth}
+        height={contentHeight}
+        setStatus={setStatus}
+        keyboardEnabled={!help}
+      />
+    )
+  } else if (screen === "Files") {
     content = (
       <FilesScreen
         machines={machines}
@@ -199,6 +209,7 @@ function App() {
       <TopNav
         active={screen}
         width={contentWidth}
+        version={String(bootstrap?.version.version || bootstrap?.version.package_version || "")}
         onSelect={(next) => {
           if (!terminalRawMode && !help && !interactionLocked) setScreen(next)
         }}

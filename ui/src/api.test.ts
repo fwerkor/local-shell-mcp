@@ -23,6 +23,7 @@ describe("API client endpoint wrappers", () => {
     }) as unknown as typeof fetch
 
     await api.bootstrap()
+    await api.dashboard()
     await api.machines()
     await api.files("worker a", "src path")
     await api.filePreview("local", "", 80, 24, 2.75)
@@ -44,6 +45,7 @@ describe("API client endpoint wrappers", () => {
 
     expect(calls.map((call) => call.url)).toEqual([
       `${API_BASE}/bootstrap`,
+      `${API_BASE}/dashboard`,
       `${API_BASE}/machines`,
       `${API_BASE}/files?machine=worker+a&path=src+path`,
       `${API_BASE}/files/preview?machine=local&columns=80&rows=24&cell_aspect=2.75`,
@@ -61,14 +63,15 @@ describe("API client endpoint wrappers", () => {
       `${API_BASE}/remotes/rename%20node`,
     ])
 
-    expect(calls[5]!.init?.method).toBe("POST")
-    expect(JSON.parse(String(calls[5]!.init?.body))).toEqual({ path: "a", destination: "b" })
-    expect(calls[10]!.init?.method).toBe("PUT")
-    expect(JSON.parse(String(calls[10]!.init?.body))).toEqual({
+    expect(calls[6]!.init?.method).toBe("POST")
+    expect(JSON.parse(String(calls[6]!.init?.body))).toEqual({ path: "a", destination: "b" })
+    expect(calls[11]!.init?.method).toBe("PUT")
+    expect(JSON.parse(String(calls[11]!.init?.body))).toEqual({
       todos: [{ id: "a", content: "A", status: "pending", priority: "medium" }],
       expected_revision: 7,
     })
-    expect(calls[14]!.init?.method).toBe("POST")
+    expect(calls[15]!.init?.method).toBe("POST")
+    expect(calls[16]!.init?.method).toBe("POST")
     expect(calls.every((call) => new Headers(call.init?.headers).get("Accept") === "application/json")).toBe(true)
     expect(calls.every((call) => new Headers(call.init?.headers).get("Content-Type") === "application/json")).toBe(true)
   })

@@ -12,6 +12,7 @@ const categorySequences: Record<string, string> = {
   "3": "\u001bOS",
   "4": "\u001b[15~",
   "5": "\u001b[17~",
+  "6": "\u001b[18~",
 }
 
 export const BROWSER_QUIT_SEQUENCE = "\u001b[113;3u"

@@ -21,6 +21,11 @@ export const theme = {
 }
 
 export const screenTheme = {
+  Dashboard: {
+    accent: theme.green,
+    selected: "#19372f",
+    panel: "#10251f",
+  },
   Files: {
     accent: theme.cyan,
     selected: "#173b3a",

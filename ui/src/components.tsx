@@ -8,15 +8,17 @@ import { clampIndex } from "./state-utils"
 import type { Machine, ScreenName } from "./types"
 import { screenTheme, theme } from "./theme"
 
-export const SCREENS: ScreenName[] = ["Files", "Terminals", "Todos", "Audit", "Remotes"]
+export const SCREENS: ScreenName[] = ["Dashboard", "Files", "Terminals", "Remotes", "Audit", "Todos"]
 
 export function TopNav({
   active,
   width,
+  version,
   onSelect,
 }: {
   active: ScreenName
   width: number
+  version?: string
   onSelect: (screen: ScreenName) => void
 }) {
   const narrow = width < 45
@@ -41,7 +43,7 @@ export function TopNav({
       {SCREENS.map((screen) => {
         const selected = screen === active
         const colors = screenTheme[screen]
-        const narrowInitial = screen === "Todos" ? "D" : screen[0]
+        const narrowInitial = screen === "Todos" ? "O" : screen[0]
         const label = narrow ? narrowInitial : compact ? screen.slice(0, 3) : screen
         return (
           <box
@@ -60,6 +62,7 @@ export function TopNav({
         )
       })}
       <box style={{ flexGrow: 1 }} />
+      {version && width >= 72 && <text fg={theme.faint} content={`LSM v${version}`} />}
     </box>
   )
 }
