@@ -1,8 +1,15 @@
+import type { InputRenderable, MouseEvent as OpenTUIMouseEvent } from "@opentui/core"
 import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, MachineSidebar, Modal, Panel, formatAge } from "./components"
 import { clampIndex, scopedItems } from "./state-utils"
+import {
+  terminalDisplayRows,
+  terminalScrollLimit,
+  terminalViewportRows,
+  visibleTerminalLines,
+} from "./terminal-output"
 import { screenTheme, theme } from "./theme"
 import type { AuditEntry, Machine, TerminalSession } from "./types"
 
@@ -104,8 +111,12 @@ export function TerminalsScreen({
   const [audit, setAudit] = useState<AuditEntry[]>([])
   const [showAudit, setShowAudit] = useState(width >= 118)
   const [rawMode, setRawMode] = useState(false)
+  const [scrollOffset, setScrollOffset] = useState(0)
   const [dialog, setDialog] = useState<TerminalDialog>({ type: "none" })
   const [busy, setBusy] = useState(false)
+  const commandInputRef = useRef<InputRenderable | null>(null)
+  const scrollOffsetRef = useRef(0)
+  const pendingOutputRef = useRef<string | null>(null)
   const rawQueue = useRef<Promise<void>>(Promise.resolve())
   const sessionsRequest = useRef(0)
   const outputRequest = useRef(0)
@@ -120,6 +131,34 @@ export function TerminalsScreen({
   machineRef.current = machine
   selectedSessionIdRef.current = selectedSession?.session_id || null
   const compact = width < 96
+  const sidebarColumns = compact ? 0 : 24
+  const auditColumns = showAudit ? Math.max(30, Math.floor(width * 0.28)) + 1 : 0
+  const terminalColumns = Math.max(20, width - sidebarColumns - auditColumns - 6)
+  const terminalRows = terminalViewportRows(height)
+  const outputRows = useMemo(
+    () => terminalDisplayRows(output, terminalColumns),
+    [output, terminalColumns],
+  )
+  const maxScrollOffset = terminalScrollLimit(outputRows.length, terminalRows)
+  const safeScrollOffset = Math.min(scrollOffset, maxScrollOffset)
+  const visibleLines = visibleTerminalLines(outputRows, terminalRows, safeScrollOffset)
+
+  const scrollOutput = useCallback((delta: number) => {
+    setScrollOffset((current) => {
+      const next = Math.max(0, Math.min(maxScrollOffset, current + delta))
+      scrollOffsetRef.current = next
+      return next
+    })
+  }, [maxScrollOffset])
+
+  const handleOutputScroll = (event: OpenTUIMouseEvent) => {
+    const direction = event.scroll?.direction
+    if (direction !== "up" && direction !== "down") return
+    event.preventDefault()
+    event.stopPropagation()
+    const amount = Math.max(1, Math.ceil(Math.abs(event.scroll?.delta || 1))) * 3
+    scrollOutput(direction === "up" ? amount : -amount)
+  }
 
   const selectSession = useCallback((index: number) => {
     const nextIndex = clampIndex(index, activeSessions.length)
@@ -194,7 +233,8 @@ export function TerminalsScreen({
         selectedSessionIdRef.current !== targetSession ||
         controller.signal.aborted
       ) return
-      setOutput(terminal.output)
+      if (scrollOffsetRef.current > 0) pendingOutputRef.current = terminal.output
+      else setOutput(terminal.output)
       setAudit(records.entries)
     } catch (error) {
       if (!controller.signal.aborted) setStatus(`Terminal: ${formatError(error)}`)
@@ -211,6 +251,9 @@ export function TerminalsScreen({
     setSelectedSessionId(null)
     selectedSessionIdRef.current = null
     setOutput("")
+    pendingOutputRef.current = null
+    scrollOffsetRef.current = 0
+    setScrollOffset(0)
     setAudit([])
     setDialog({ type: "none" })
     setRawMode(false)
@@ -254,6 +297,23 @@ export function TerminalsScreen({
     if (!selectedSession && rawMode) setRawMode(false)
   }, [rawMode, selectedSession])
 
+  useEffect(() => {
+    pendingOutputRef.current = null
+    scrollOffsetRef.current = 0
+    setScrollOffset(0)
+  }, [machine, selectedSession?.session_id])
+
+  useEffect(() => {
+    const clamped = Math.min(scrollOffset, maxScrollOffset)
+    if (clamped !== scrollOffset) setScrollOffset(clamped)
+    scrollOffsetRef.current = clamped
+    if (clamped === 0 && pendingOutputRef.current !== null) {
+      const pending = pendingOutputRef.current
+      pendingOutputRef.current = null
+      setOutput(pending)
+    }
+  }, [maxScrollOffset, scrollOffset])
+
   const send = async (inputText: string, enter = true) => {
     if (!selectedSession || inputText.length === 0) return
     setBusy(true)
@@ -287,6 +347,15 @@ export function TerminalsScreen({
         })
       })
       .catch((error) => setStatus(`Raw input: ${formatError(error)}`))
+  }
+
+  const submitCommand = (value: string) => {
+    if (!selectedSession || value.length === 0) return
+    pendingOutputRef.current = null
+    scrollOffsetRef.current = 0
+    setScrollOffset(0)
+    if (commandInputRef.current) commandInputRef.current.value = ""
+    void send(value, true)
   }
 
   const startSession = async (value: string) => {
@@ -325,6 +394,9 @@ export function TerminalsScreen({
     setSelectedSessionId(null)
     selectedSessionIdRef.current = null
     setOutput("")
+    pendingOutputRef.current = null
+    scrollOffsetRef.current = 0
+    setScrollOffset(0)
     setAudit([])
     setDialog({ type: "none" })
     setRawMode(false)
@@ -385,7 +457,15 @@ export function TerminalsScreen({
     }
 
     if (key.name === "f8") toggleRawMode()
-    else if ((key.option || key.meta) && key.name === "[") switchMachine(-1)
+    else if (key.name === "pageup" && selectedSession) {
+      key.preventDefault()
+      key.stopPropagation()
+      scrollOutput(terminalRows)
+    } else if (key.name === "pagedown" && selectedSession) {
+      key.preventDefault()
+      key.stopPropagation()
+      scrollOutput(-terminalRows)
+    } else if ((key.option || key.meta) && key.name === "[") switchMachine(-1)
     else if ((key.option || key.meta) && key.name === "]") switchMachine(1)
     else if ((key.option || key.meta) && key.name === "left") selectSession(selected - 1)
     else if ((key.option || key.meta) && key.name === "right") selectSession(selected + 1)
@@ -394,10 +474,6 @@ export function TerminalsScreen({
     else if ((key.option || key.meta) && key.name === "a") toggleAudit()
     else if ((key.option || key.meta) && key.name === "r") void refreshOutput(true)
   })
-
-  const outputLines = useMemo(() => output.split("\n"), [output])
-  const terminalHeight = Math.max(8, height - 12)
-  const visibleOutput = outputLines.slice(-terminalHeight).join("\n")
 
   return (
     <box style={{ flexGrow: 1, flexDirection: "column" }}>
@@ -432,13 +508,21 @@ export function TerminalsScreen({
             />
             <box style={{ flexGrow: 1 }} />
             {rawMode && <text fg={theme.orange} attributes={1} content="RAW INPUT  " />}
+            {safeScrollOffset > 0 && <text fg={theme.yellow} content={`history -${safeScrollOffset}  `} />}
             {busy && <text fg={theme.yellow} content="sending  " />}
             <text fg={theme.faint} content={`${selectedSession?.backend || "—"}  `} />
           </box>
           <box style={{ flexGrow: 1, flexDirection: "row", gap: 1 }}>
             <Panel title="Terminal" active accent={colors.accent} activeBackground={colors.panel} style={{ flexGrow: 1, padding: 1 }}>
               {selectedSession ? (
-                <text fg={theme.text} content={visibleOutput || "Terminal is ready."} />
+                <box
+                  onMouseScroll={handleOutputScroll}
+                  style={{ flexGrow: 1, flexDirection: "column" }}
+                >
+                  {visibleLines.map((line, index) => (
+                    <text key={`${index}-${line}`} fg={theme.text} wrapMode="none" content={line || " "} />
+                  ))}
+                </box>
               ) : (
                 <EmptyState title="No persistent terminal" detail="Press Alt+N to create one" />
               )}
@@ -453,9 +537,10 @@ export function TerminalsScreen({
             <Panel title="Command" active={Boolean(selectedSession)} accent={colors.accent} activeBackground={colors.panel} style={{ flexGrow: 1, paddingLeft: 1, paddingRight: 1 }}>
               <input
                 key={selectedSession?.session_id || "no-session"}
+                ref={commandInputRef}
                 focused={Boolean(selectedSession) && !rawMode && dialog.type === "none"}
                 placeholder={selectedSession ? "Enter a command…" : "Create a terminal first"}
-                onSubmit={(value: unknown) => void send(typeof value === "string" ? value : "", true)}
+                onSubmit={(value: unknown) => submitCommand(typeof value === "string" ? value : "")}
               />
             </Panel>
           </box>
@@ -507,6 +592,8 @@ export function TerminalsScreen({
           { key: "Alt+N", label: "new", onPress: startTerminal, disabled: standardFooterLocked },
           { key: "Alt+W", label: "kill", onPress: killTerminal, disabled: standardFooterLocked || !selectedSession },
           { key: "Alt+A", label: "audit", onPress: toggleAudit, disabled: standardFooterLocked },
+          { key: "PgUp", label: "older", onPress: () => scrollOutput(terminalRows), disabled: standardFooterLocked || !selectedSession || safeScrollOffset >= maxScrollOffset },
+          { key: "PgDn", label: "newer", onPress: () => scrollOutput(-terminalRows), disabled: standardFooterLocked || !selectedSession || safeScrollOffset === 0 },
           { key: "F8", label: rawMode ? "leave raw" : "raw mode", onPress: toggleRawMode, disabled: footerLocked || !selectedSession },
           { key: "Alt+[", label: "prev machine", onPress: () => switchMachine(-1), disabled: standardFooterLocked || machines.length < 2 },
           { key: "Alt+]", label: "next machine", onPress: () => switchMachine(1), disabled: standardFooterLocked || machines.length < 2 },

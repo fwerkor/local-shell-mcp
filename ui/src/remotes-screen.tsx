@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, Modal, Panel, formatAge, useVisibleRows } from "./components"
 import { handleSelectionScroll } from "./mouse"
+import { remoteSystemInfo, remoteVersion } from "./remotes-utils"
 import { clampIndex } from "./state-utils"
 import { screenTheme, theme } from "./theme"
 import type { InvitePayload, Machine } from "./types"
@@ -38,7 +39,7 @@ export function RemotesScreen({
   const refreshController = useRef<AbortController | null>(null)
   const current = machines[selected]
   const compact = width < 92
-  const { rows, start } = useVisibleRows(machines, selected, Math.max(5, height - (compact ? 20 : 13)))
+  const { rows, start } = useVisibleRows(machines, selected, Math.max(5, height - (compact ? 21 : 13)))
 
   const refresh = useCallback(async (force = false) => {
     if (refreshController.current && !force) return
@@ -192,7 +193,10 @@ export function RemotesScreen({
               style={{ flexDirection: "column", flexGrow: 1 }}
             >
               <box style={{ height: 2, flexDirection: "row", paddingLeft: 1 }}>
-                <text fg={theme.faint} content={compact ? "STATE  NAME" : "STATE  NAME                         WORKDIR"} />
+                <text
+                  fg={theme.faint}
+                  content={compact ? "STATE  NAME" : "STATE  NAME                    VERSION     WORKDIR"}
+                />
               </box>
               {rows.map((machine, offset) => {
                 const index = start + offset
@@ -215,8 +219,9 @@ export function RemotesScreen({
                     <text
                       fg={active ? theme.text : theme.muted}
                       attributes={active ? 1 : 0}
-                      content={compact ? machine.name : machine.name.padEnd(29)}
+                      content={compact ? machine.name : machine.name.slice(0, 23).padEnd(24)}
                     />
+                    {!compact && <text fg={theme.blue} content={remoteVersion(machine).slice(0, 11).padEnd(12)} />}
                     {!compact && <text fg={theme.faint} content={machine.workdir || "—"} />}
                   </box>
                 )
@@ -228,7 +233,7 @@ export function RemotesScreen({
           title="Node details"
           style={{
             width: compact ? "100%" : "34%",
-            height: compact ? 10 : "100%",
+            height: compact ? 11 : "100%",
             padding: 1,
           }}
         >
@@ -241,11 +246,12 @@ export function RemotesScreen({
             >
               <text fg={current.status === "online" ? theme.green : theme.orange} attributes={1} content={current.name} />
               <text fg={theme.faint} content={`Status       ${current.status}`} />
+              <text fg={theme.faint} content={`LSM version  ${remoteVersion(current)}`} />
               <text fg={theme.faint} content={`Last seen    ${formatAge(current.last_seen)}`} />
               <text fg={theme.faint} content={`Workdir      ${current.workdir || "—"}`} />
               <text fg={theme.faint} content={`Capabilities ${(current.capabilities || []).join(", ") || "—"}`} />
               <text fg={theme.borderBright} content="\nSystem information" />
-              <text fg={theme.muted} content={JSON.stringify(current.info || {}, null, 2)} />
+              <text fg={theme.muted} content={JSON.stringify(remoteSystemInfo(current), null, 2)} />
             </scrollbox>
           ) : (
             <EmptyState title="No node selected" detail="Create an invite to attach one" />

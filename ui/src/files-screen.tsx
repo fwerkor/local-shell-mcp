@@ -3,12 +3,16 @@ import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, MachineSidebar, Modal, Panel, formatBytes, useVisibleRows } from "./components"
+import { isDoubleClick, pathBreadcrumbs, type PointerClick } from "./file-navigation"
 import { handleSelectionScroll } from "./mouse"
 import { clampIndex, nextPreviewMeasurement, payloadMatches } from "./state-utils"
+import { drawClippedSuperSampleBuffer } from "./image-preview"
+import { parseTerminalCellAspect } from "./terminal-geometry"
 import { screenTheme, theme } from "./theme"
 import type { FileEntry, FilePreview, FilesPayload, Machine } from "./types"
 
 const colors = screenTheme.Files
+const terminalCellAspect = parseTerminalCellAspect(process.env.LOCAL_SHELL_MCP_UI_CELL_ASPECT)
 
 type Dialog =
   | { type: "none" }
@@ -74,7 +78,9 @@ function FileRows({
         return (
           <box
             key={entry.path}
-            onMouseDown={() => onSelect?.(entry, index)}
+            onMouseUp={(event) => {
+              if (event.button === 0) onSelect?.(entry, index)
+            }}
             style={{
               height: 1,
               flexDirection: "row",
@@ -115,14 +121,7 @@ function ImagePreview({ preview, entry }: { preview: FilePreview; entry: FileEnt
   const sourceWidth = Number(preview.original_width || pixelWidth)
   const sourceHeight = Number(preview.original_height || pixelHeight)
   const drawPixels = function (this: Renderable, buffer: OptimizedBuffer) {
-    buffer.drawSuperSampleBuffer(
-      this.screenX,
-      this.screenY,
-      pixels as never,
-      pixels.byteLength,
-      "rgba8unorm",
-      pixelWidth * 4,
-    )
+    drawClippedSuperSampleBuffer(buffer, this, pixels, pixelWidth)
   }
   return (
     <box style={{ flexGrow: 1, flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
@@ -210,6 +209,7 @@ export function FilesScreen({
   const refreshRequest = useRef(0)
   const refreshController = useRef<AbortController | null>(null)
   const measuredPreviewViewport = useRef("")
+  const lastCurrentClick = useRef<PointerClick | null>(null)
   const machineRef = useRef(machine)
   machineRef.current = machine
   const activePayload = payloadMatches(payload, machine, path) ? payload : null
@@ -223,6 +223,7 @@ export function FilesScreen({
     [activePayload, showHidden],
   )
   const current = entries[selected]
+  const breadcrumbs = useMemo(() => pathBreadcrumbs(path), [path])
   const listHeight = Math.max(4, height - 10)
 
   useEffect(() => {
@@ -272,6 +273,10 @@ export function FilesScreen({
   }, [machine])
 
   useEffect(() => {
+    lastCurrentClick.current = null
+  }, [machine, path])
+
+  useEffect(() => {
     setSelected(0)
     void refresh()
     return () => {
@@ -291,7 +296,14 @@ export function FilesScreen({
     const controller = new AbortController()
     const timer = setTimeout(() => {
       void api
-        .filePreview(machine, currentPath, previewColumns, previewRows, controller.signal)
+        .filePreview(
+          machine,
+          currentPath,
+          previewColumns,
+          previewRows,
+          terminalCellAspect,
+          controller.signal,
+        )
         .then((result) => {
           if (!controller.signal.aborted) setPreview(result)
         })
@@ -404,9 +416,20 @@ export function FilesScreen({
     setSelected((value) => clampIndex(value + delta, entries.length))
   }
   const goToParent = () => setPath(activePayload?.parent || ".")
-  const activateCurrent = () => {
-    if (current?.type === "dir") setPath(current.path)
-    else if (current) void openEditor(current)
+  const activateEntry = (entry: FileEntry) => {
+    if (entry.type === "dir") setPath(entry.path)
+    else void openEditor(entry)
+  }
+  const activateCurrent = () => current && activateEntry(current)
+  const selectCurrent = (entry: FileEntry, index: number) => {
+    setSelected(index)
+    const at = Date.now()
+    if (isDoubleClick(lastCurrentClick.current, entry.path, at)) {
+      lastCurrentClick.current = null
+      activateEntry(entry)
+      return
+    }
+    lastCurrentClick.current = { target: entry.path, at }
   }
   const toggleNarrowPane = () => setNarrowPane((value) => (value === "list" ? "preview" : "list"))
   const createFile = () => setDialog({
@@ -543,8 +566,23 @@ export function FilesScreen({
         )}
         <box style={{ flexGrow: 1, flexDirection: "column" }}>
           <box style={{ height: 2, flexDirection: "row", alignItems: "center", paddingLeft: 1 }}>
-            <text fg={theme.faint} content={`${machine} / `} />
-            <text fg={colors.accent} attributes={1} content={path} />
+            <text fg={theme.faint} content={`${machine}  `} />
+            {breadcrumbs.map((crumb, index) => {
+              const active = crumb.path === path
+              return (
+                <box key={crumb.path} style={{ flexDirection: "row" }}>
+                  {index > 0 && <text fg={theme.faint} content=" / " />}
+                  <text
+                    onMouseUp={(event) => {
+                      if (event.button === 0 && !active && dialog.type === "none") setPath(crumb.path)
+                    }}
+                    fg={active ? colors.accent : theme.muted}
+                    attributes={active ? 1 : 0}
+                    content={crumb.label}
+                  />
+                </box>
+              )
+            })}
             <box style={{ flexGrow: 1 }} />
             {busy && <text fg={theme.yellow} content="syncing  " />}
             {clipboard && (
@@ -598,7 +636,7 @@ export function FilesScreen({
                     entries={entries}
                     selected={selected}
                     height={listHeight}
-                    onSelect={(_entry, index) => setSelected(index)}
+                    onSelect={selectCurrent}
                     onScroll={(delta) => setSelected((value) => clampIndex(value + delta, entries.length))}
                   />
                 ) : (

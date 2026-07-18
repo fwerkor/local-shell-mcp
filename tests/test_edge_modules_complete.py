@@ -79,7 +79,7 @@ def test_audit_serialization_trimming_and_all_filters(tmp_path, monkeypatch):
     settings = get_settings()
     sensitive_text = "Bearer abc.def configured-secret-pin ghp_" + "x" * 30
     assert audit_module._format_audit_text(sensitive_text) == sensitive_text
-    assert audit_module._format_audit_text("z" * 3000).endswith("…<truncated>")
+    assert audit_module._format_audit_text("z" * 3000).endswith("…<preview>")
 
     value = audit_module._serialize_audit_value(
         {
@@ -92,11 +92,12 @@ def test_audit_serialization_trimming_and_all_filters(tmp_path, monkeypatch):
             "object": object(),
         }
     )
+    value = audit_module._resolve_payload_reference(value, full=True)
     assert value["token"] == "hidden"
     assert value["api_token"] == "hidden"
     assert value["token_id"] == "visible"
     assert value["db_password"] == "hidden"
-    assert len(value["items"]) == 100
+    assert len(value["items"]) == 110
     assert value["tuple"] == [1, 2]
     assert "object at" in value["object"]
 

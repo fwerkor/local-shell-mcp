@@ -73,8 +73,11 @@ export function AuditScreen({
   const [session, setSession] = useState("")
   const [dialog, setDialog] = useState<AuditDialog>({ type: "none" })
   const [loading, setLoading] = useState(false)
+  const [detail, setDetail] = useState<AuditEntry | null>(null)
   const refreshRequest = useRef(0)
   const refreshController = useRef<AbortController | null>(null)
+  const detailRequest = useRef(0)
+  const detailController = useRef<AbortController | null>(null)
   const entriesRef = useRef<AuditEntry[]>([])
   const selectedRef = useRef(0)
 
@@ -83,6 +86,7 @@ export function AuditScreen({
   const selectedOperation = AUDIT_OPERATIONS[operationIndex] || ""
   const timeRange = TIME_RANGES[timeIndex] || TIME_RANGES[2]!
   const current = entries[selected]
+  const displayed = detail?.id === current?.id ? detail : current
   const narrow = width < 70
   const tableHeight = Math.max(6, height - 15)
   const { rows, start } = useVisibleRows(entries, selected, tableHeight)
@@ -156,6 +160,30 @@ export function AuditScreen({
   }, [refresh])
 
   useEffect(() => {
+    detailController.current?.abort()
+    const controller = new AbortController()
+    detailController.current = controller
+    const requestId = ++detailRequest.current
+    setDetail(null)
+    if (!current?.id) return () => controller.abort()
+    void api
+      .auditDetail(current.id, controller.signal)
+      .then((entry) => {
+        if (requestId === detailRequest.current && !controller.signal.aborted) setDetail(entry)
+      })
+      .catch((error) => {
+        if (requestId === detailRequest.current && !controller.signal.aborted) {
+          setStatus(`Audit detail: ${formatError(error)}`)
+        }
+      })
+    return () => {
+      detailRequest.current += 1
+      controller.abort()
+      if (detailController.current === controller) detailController.current = null
+    }
+  }, [current?.id, current?.paired, current?.status, setStatus])
+
+  useEffect(() => {
     onInteractionLockChange(dialog.type !== "none")
     return () => onInteractionLockChange(false)
   }, [dialog.type, onInteractionLockChange])
@@ -195,11 +223,11 @@ export function AuditScreen({
     setDialog({ type: "none" })
   }
 
-  const outputText = current
-    ? formatAuditValue(auditOutput(current), "No return value recorded")
+  const outputText = displayed
+    ? formatAuditValue(auditOutput(displayed), "No return value recorded")
     : ""
-  const inputText = current ? formatAuditValue(auditInput(current), "No input recorded") : ""
-  const duration = current ? durationLabel(current) : ""
+  const inputText = displayed ? formatAuditValue(auditInput(displayed), "No input recorded") : ""
+  const duration = displayed ? durationLabel(displayed) : ""
   const detailHeight = width >= 110 ? "100%" : Math.max(14, Math.floor(height * 0.42))
 
   return (
@@ -287,16 +315,16 @@ export function AuditScreen({
             gap: 1,
           }}
         >
-          {current ? (
+          {displayed ? (
             <>
               <box style={{ height: 1, flexDirection: "row" }}>
-                <text fg={colors.accent} attributes={1} content={current.tool || current.event} />
+                <text fg={colors.accent} attributes={1} content={displayed.tool || displayed.event} />
                 <box style={{ flexGrow: 1 }} />
-                <text fg={entryColor(current)} attributes={1} content={statusLabel(current)} />
+                <text fg={entryColor(displayed)} attributes={1} content={statusLabel(displayed)} />
               </box>
               <text
                 fg={theme.faint}
-                content={`${new Date(current.ts * 1000).toLocaleString()} · ${current.node}${duration ? ` · ${duration}` : ""}`}
+                content={`${new Date(displayed.ts * 1000).toLocaleString()} · ${displayed.node}${duration ? ` · ${duration}` : ""}`}
               />
               <Panel title="Call result" style={{ flexGrow: 1, padding: 1 }}>
                 <scrollbox focused={false} style={{ flexGrow: 1 }} scrollY verticalScrollbarOptions={{ visible: true }}>
