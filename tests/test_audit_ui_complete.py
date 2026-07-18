@@ -14,6 +14,16 @@ def _configure(tmp_path, monkeypatch) -> None:
     get_settings.cache_clear()
 
 
+def test_audit_call_context_marks_nested_records(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+
+    with audit_module.audit_call_context("call-123"):
+        audit_module.audit("run_shell_start", command="true")
+
+    record = json.loads(get_settings().audit_log_path.read_text(encoding="utf-8"))
+    assert record["parent_call_id"] == "call-123"
+
+
 def test_audit_call_helpers_cover_legacy_unpaired_and_optional_fields():
     assert audit_module._operation_type({"event": "run_shell_start"}) == "shell"
     assert audit_module._operation_type({"event": "job_started"}) == "jobs"
@@ -91,13 +101,21 @@ def test_audit_call_helpers_cover_legacy_unpaired_and_optional_fields():
         [
             {"ts": 0, "event": "auth_ok"},
             legacy_start,
+            {"ts": 1.5, "event": "tool_call_purpose", "tool": "read_file"},
+            {"ts": 1.6, "event": "run_shell_start", "command": "true"},
+            {
+                "ts": 1.7,
+                "event": "future_internal_event",
+                "parent_call_id": "nested-call",
+            },
             {
                 "ts": 3,
                 "event": "mcp_tool_call_end",
                 "tool": "read_file",
                 "machine": "worker-a",
                 "session": "term-a",
-                "ok": False,
+                "ok": True,
+                "result": {"ok": True, "data": {"ok": False}},
             },
             {"ts": 4, "event": "mcp_tool_call_end", "tool": "job_tail", "ok": True},
             {"id": "kept", "ts": 5, "event": "remote_worker_registered", "node": "worker-c"},
