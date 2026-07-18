@@ -154,11 +154,14 @@ def click_until_terminal_text(
     timeout_s: float = 10,
 ) -> None:
     deadline = time.monotonic() + timeout_s
+    retry_interval_s = 0.75
     while time.monotonic() < deadline:
+        clicked_at = time.monotonic()
         click_tui_label(page, label, rightmost=rightmost)
-        page.wait_for_timeout(200)
-        if expected in page.locator("body").inner_text():
-            return
+        while time.monotonic() - clicked_at < retry_interval_s:
+            if expected in page.locator("body").inner_text():
+                return
+            page.wait_for_timeout(100)
     text = page.locator("body").inner_text()
     raise AssertionError(
         f"Clicking terminal label {label!r} did not reveal {expected!r}\n{text[-5000:]}"
