@@ -125,7 +125,6 @@ export interface BootstrapPayload {
   features: {
     remote: boolean
     wallpaper: "bing" | "aurora" | "none" | string
-    yazi_available: boolean
   }
 }
 
