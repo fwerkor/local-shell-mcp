@@ -432,6 +432,28 @@ def run_browser(port: int) -> None:
             )
             assert hybrid_mouse == {"readOnly": False, "inputMode": "text"}
 
+            page.dispatch_event(
+                "#touchbar [data-key='tab']",
+                "pointerdown",
+                {"pointerType": "touch", "bubbles": True},
+            )
+            page.dispatch_event("#touchbar [data-key='tab']", "click")
+            first_shortcut_after_mouse = page.evaluate(
+                """(() => {
+                    const textarea = document.querySelector('.xterm-helper-textarea')
+                    return {
+                        readOnly: textarea.readOnly,
+                        inputMode: textarea.inputMode,
+                        active: document.activeElement === textarea
+                    }
+                })()"""
+            )
+            assert first_shortcut_after_mouse == {
+                "readOnly": True,
+                "inputMode": "none",
+                "active": False,
+            }
+
             mobile_context = browser.new_context(
                 viewport={"width": 390, "height": 844},
                 has_touch=True,
