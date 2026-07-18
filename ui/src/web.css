@@ -85,7 +85,8 @@ button { font: inherit; }
 .terminal-frame { position: relative; display: grid; grid-template-rows: minmax(0, 1fr); min-width: 0; min-height: 0; padding: 7px; background: linear-gradient(180deg, rgba(4, 10, 20, .68), rgba(2, 6, 14, .83)); }
 #terminal { width: 100%; height: 100%; min-width: 0; min-height: 0; padding: 3px; }
 #terminal .xterm { height: 100%; }
-#terminal .xterm-viewport { scrollbar-color: rgba(87, 215, 255, .36) transparent; }
+#terminal .xterm-viewport { scrollbar-width: none; }
+#terminal .xterm-viewport::-webkit-scrollbar { width: 0; height: 0; }
 
 :fullscreen .shell {
   width: 100vw;
