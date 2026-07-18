@@ -93,6 +93,55 @@ def test_root_redirects_to_relative_ui_path_without_auth(tmp_path, monkeypatch):
     assert response.headers["location"] == "./console/"
 
 
+def test_audit_detail_requires_scopes_before_materializing_payloads(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    calls: list[bool] = []
+    preview = {
+        "id": "call:write",
+        "tool": "write_file",
+        "operation": "files",
+        "node": "local",
+    }
+
+    def fake_get_audit_entry(entry_id: str, *, full: bool = True):
+        assert entry_id == "call:write"
+        calls.append(full)
+        return {**preview, "input": {"content": "secret"}} if full else preview
+
+    monkeypatch.setattr(ui, "get_audit_entry", fake_get_audit_entry)
+    limited = _request("/api/ui/audit/detail", query=b"id=call%3Awrite")
+    limited.state.principal = Principal(
+        email=None,
+        subject="read-only",
+        claims={"scope": "shell:read"},
+    )
+
+    denied = asyncio.run(ui.api_audit_detail(limited))
+
+    assert denied.status_code == 403
+    assert calls == [False]
+
+    allowed = _request("/api/ui/audit/detail", query=b"id=call%3Awrite")
+    allowed.state.principal = Principal(
+        email=None,
+        subject="writer",
+        claims={"scope": "shell:read shell:write"},
+    )
+
+    response = asyncio.run(ui.api_audit_detail(allowed))
+
+    assert response.status_code == 200
+    assert calls == [False, False, True]
+    assert "secret" in response.body.decode()
+    assert set(ui._audit_detail_scopes({"operation": "browser", "node": "local"})) == {
+        "shell:read",
+        "browser:use",
+    }
+    assert set(ui._audit_detail_scopes({"operation": "other", "node": "worker"})) == set(
+        ui.UI_FULL_SCOPES
+    )
+
+
 def test_index_assets_principal_and_basic_helpers(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     empty = tmp_path / "assets"

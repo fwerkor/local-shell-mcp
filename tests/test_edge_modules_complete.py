@@ -92,6 +92,7 @@ def test_audit_serialization_trimming_and_all_filters(tmp_path, monkeypatch):
             "object": object(),
         }
     )
+    value = audit_module._resolve_payload_reference(value, full=True)
     assert value["token"] == "hidden"
     assert value["api_token"] == "hidden"
     assert value["token_id"] == "visible"

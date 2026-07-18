@@ -16,6 +16,7 @@ from starlette.requests import Request
 from starlette.routing import Route
 from starlette.websockets import WebSocket
 
+import local_shell_mcp.audit as audit_module
 from local_shell_mcp.audit import audit, query_audit, suppress_audit
 from local_shell_mcp.http_app import build_http_app
 from local_shell_mcp.human_ui import (
@@ -481,6 +482,8 @@ def test_audit_trim_prunes_unreferenced_payload_files(tmp_path, monkeypatch):
     audit("large_event", payload="z" * 30_000)
     payloads = list((get_settings().audit_log_path.parent / "audit-payloads").glob("*.json.gz"))
     assert len(payloads) == 1
+    stale = time.time() - audit_module._AUDIT_PAYLOAD_PRUNE_GRACE_S - 1
+    os.utime(payloads[0], (stale, stale))
 
     audit("small_event", value="kept" * 300)
 

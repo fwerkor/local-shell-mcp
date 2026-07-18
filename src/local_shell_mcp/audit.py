@@ -22,6 +22,7 @@ _AUDIT_LOCK = threading.Lock()
 _AUDIT_PREVIEW_STRING_CHARS = 2_000
 _AUDIT_PREVIEW_ITEMS = 100
 _AUDIT_INLINE_VALUE_BYTES = 16 * 1024
+_AUDIT_PAYLOAD_PRUNE_GRACE_S = 300
 _AUDIT_PAYLOAD_DIRECTORY = "audit-payloads"
 _AUDIT_PAYLOAD_MARKER = "$local_shell_mcp_audit_payload"
 _AUDIT_PAYLOAD_VERSION = 1
@@ -121,7 +122,9 @@ def _serialize_audit_value(value: Any) -> Any:
         separators=(",", ":"),
         default=str,
     ).encode("utf-8")
-    if len(encoded) <= _AUDIT_INLINE_VALUE_BYTES:
+    retention_budget = max(1, get_settings().max_audit_log_bytes)
+    inline_limit = min(_AUDIT_INLINE_VALUE_BYTES, max(128, retention_budget // 2))
+    if len(encoded) <= inline_limit:
         return serialized
     return _write_payload(serialized)
 
@@ -195,11 +198,17 @@ def _prune_payload_store(log_path: Path) -> None:
     for line in lines:
         with contextlib.suppress(json.JSONDecodeError):
             _collect_payload_ids(json.loads(line), referenced)
+    prune_before = time.time() - _AUDIT_PAYLOAD_PRUNE_GRACE_S
     for payload in directory.glob("*.json.gz"):
         digest = payload.name.removesuffix(".json.gz")
-        if digest not in referenced:
-            with contextlib.suppress(OSError):
-                payload.unlink()
+        if digest in referenced:
+            continue
+        try:
+            if payload.stat().st_mtime > prune_before:
+                continue
+            payload.unlink()
+        except OSError:
+            continue
 
 
 def _payload_file_size(digest: str, log_path: Path | None = None) -> int:
@@ -698,8 +707,8 @@ def query_audit(
     }
 
 
-def get_audit_entry(entry_id: str) -> dict[str, Any]:
-    """Return one coalesced audit entry with complete external payloads materialized."""
+def get_audit_entry(entry_id: str, *, full: bool = True) -> dict[str, Any]:
+    """Return one coalesced audit entry, optionally materializing external payloads."""
 
     normalized = str(entry_id).strip()
     if not normalized:
@@ -713,6 +722,8 @@ def get_audit_entry(entry_id: str) -> dict[str, Any]:
     )
     if selected is None:
         raise ValueError(f"Unknown audit entry: {normalized}")
+    if not full:
+        return _public_audit_entry(selected)
 
     materialized_records = list(preview_records)
     for index in selected[_AUDIT_SOURCE_INDEXES]:

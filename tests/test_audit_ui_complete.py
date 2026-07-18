@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import time
 from pathlib import Path
 
 import pytest
@@ -211,6 +212,23 @@ def test_payload_files_are_created_private_from_the_first_write(tmp_path, monkey
         assert stat.S_IMODE(payload.stat().st_mode) == 0o600
 
 
+def test_payload_pruning_defers_recent_unreferenced_files(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    log_path = get_settings().audit_log_path
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("{}\n", encoding="utf-8")
+    reference = audit_module._write_payload("pending:" + "x" * 30_000)
+    payload = audit_module._payload_path(audit_module._payload_digest(reference))
+
+    audit_module._prune_payload_store(log_path)
+    assert payload.exists()
+
+    stale = time.time() - audit_module._AUDIT_PAYLOAD_PRUNE_GRACE_S - 1
+    os.utime(payload, (stale, stale))
+    audit_module._prune_payload_store(log_path)
+    assert not payload.exists()
+
+
 def test_payload_pruning_defers_when_the_log_cannot_be_read(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     directory = get_settings().audit_log_path.parent / audit_module._AUDIT_PAYLOAD_DIRECTORY
@@ -359,6 +377,21 @@ def test_audit_payload_helpers_cover_edge_paths(tmp_path, monkeypatch):
     assert retained["audit_payloads_omitted"] == "record exceeded audit retention limit"
 
 
+def test_small_retention_budget_externalizes_recoverable_values(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "12000")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_TAIL_BYTES", "12000")
+    get_settings.cache_clear()
+    value = "compressible:" + "x" * 10_000
+
+    audit_module.audit("budgeted_event", payload=value)
+
+    raw = json.loads(get_settings().audit_log_path.read_text(encoding="utf-8"))
+    assert audit_module._is_payload_reference(raw["payload"])
+    entry = audit_module.query_audit()["entries"][0]
+    assert audit_module.get_audit_entry(entry["id"])["payload"] == value
+
+
 def test_payload_store_follows_configured_audit_log(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     audit_path = tmp_path / "persisted-audit" / "records.jsonl"
@@ -440,6 +473,9 @@ def test_audit_retention_bounds_log_and_external_payload_bytes(tmp_path, monkeyp
         )
     )
     assert len(first_payloads) == 1
+    stale = time.time() - audit_module._AUDIT_PAYLOAD_PRUNE_GRACE_S - 1
+    for payload in first_payloads:
+        os.utime(payload, (stale, stale))
 
     audit_module.audit("second_large_event", payload=second)
 

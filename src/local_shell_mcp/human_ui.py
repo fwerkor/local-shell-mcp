@@ -91,6 +91,48 @@ def _require_ui_scopes(
     require_scopes(_request_principal(request), required)
 
 
+_AUDIT_FILE_WRITE_TOOLS = frozenset(
+    {
+        "write_file",
+        "edit_file",
+        "delete_file_or_dir",
+        "apply_patch",
+        "todo_write_tool",
+    }
+)
+_AUDIT_EXECUTE_TOOLS = frozenset(
+    {
+        "run_shell_tool",
+        "run_python_tool",
+        "shell_start",
+        "shell_send",
+        "shell_kill",
+        "job_start",
+        "job_stop",
+        "job_retry",
+    }
+)
+
+
+def _audit_detail_scopes(entry: dict[str, Any]) -> tuple[str, ...]:
+    required = {"shell:read"}
+    tool = str(entry.get("tool") or "")
+    operation = str(entry.get("operation") or "")
+    if tool in _AUDIT_FILE_WRITE_TOOLS:
+        required.add("shell:write")
+    if tool in _AUDIT_EXECUTE_TOOLS or operation in {"shell", "jobs"}:
+        required.add("shell:execute")
+    if operation == "browser":
+        required.add("browser:use")
+    if operation == "transfer":
+        required.add("file:share")
+    if operation == "remote" or str(entry.get("node") or "local") != "local":
+        required.add("remote:use")
+    if operation == "other":
+        required.update(UI_FULL_SCOPES)
+    return tuple(scope for scope in UI_FULL_SCOPES if scope in required)
+
+
 def _bounded_int(
     raw: str | int | None,
     *,
@@ -663,8 +705,9 @@ async def api_audit(request: Request) -> Response:
 
 async def api_audit_detail(request: Request) -> Response:
     try:
-        _require_ui_scopes(request, "shell:read")
         entry_id = str(request.query_params.get("id") or "")
+        preview = await asyncio.to_thread(get_audit_entry, entry_id, full=False)
+        _require_ui_scopes(request, *_audit_detail_scopes(preview))
         return _json_ok(await asyncio.to_thread(get_audit_entry, entry_id))
     except ValueError as exc:
         return _json_error(exc, status_code=404)
