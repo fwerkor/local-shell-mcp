@@ -1,7 +1,7 @@
 import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
 import { createImageAddon } from "./image-support"
-import { browserShortcutSequence } from "./keyboard"
+import { BROWSER_QUIT_SEQUENCE, browserShortcutSequence } from "./keyboard"
 
 declare global {
   interface Window {
@@ -99,6 +99,10 @@ window.addEventListener(
     if (!sequence || socket?.readyState !== WebSocket.OPEN) return
     event.preventDefault()
     event.stopImmediatePropagation()
+    if (sequence === BROWSER_QUIT_SEQUENCE) {
+      manualDisconnect = true
+      clearReconnect()
+    }
     sendTerminalInput(sequence)
   },
   { capture: true },
@@ -306,7 +310,12 @@ function connect(): void {
       terminal.write(`\r\n\x1b[38;2;255;123;139m${detail}\x1b[0m\r\nUse Reconnect after correcting the problem.\r\n`)
       return
     }
-    if (!manualDisconnect) scheduleReconnect()
+    if (manualDisconnect) {
+      setConnection("error", "Disconnected")
+      terminal.write("\r\n\x1b[38;2;255;204;102mThe TUI exited. Use Reconnect to start a new session.\x1b[0m\r\n")
+      return
+    }
+    scheduleReconnect()
   }
 }
 

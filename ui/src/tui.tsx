@@ -110,7 +110,7 @@ function App() {
 
   useKeyboard((key) => {
     if (terminalRawMode) return
-    if (key.option && key.name === "q") {
+    if ((key.option || key.meta) && key.name === "q") {
       renderer.destroy()
       return
     }
