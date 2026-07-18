@@ -205,7 +205,8 @@ def test_payload_files_are_created_private_from_the_first_write(tmp_path, monkey
 
     assert observed_modes
     assert set(observed_modes) == {0o600}
-    assert stat.S_IMODE(payload.stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(payload.stat().st_mode) == 0o600
 
 
 def test_payload_pruning_defers_when_the_log_cannot_be_read(tmp_path, monkeypatch):
