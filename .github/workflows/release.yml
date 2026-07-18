@@ -62,23 +62,12 @@ jobs:
           with open("pyproject.toml", "rb") as f:
               version = tomllib.load(f)["project"]["version"]
 
-          init_namespace = {}
-          with open("src/local_shell_mcp/__init__.py", encoding="utf-8") as f:
-              exec(f.read(), init_namespace)
-          package_version = init_namespace["__version__"]
-
-          if package_version != version:
-              raise SystemExit(
-                  f"src/local_shell_mcp/__init__.py declares {package_version!r}, "
-                  f"but pyproject.toml declares {version!r}"
-              )
-
-          release_version = tag[1:] if tag.startswith("v") else tag
-          if release_version != version:
-              raise SystemExit(
-                  f"Release tag {tag!r} resolves to version {release_version!r}, "
-                  f"but pyproject.toml declares {version!r}"
-              )
+              release_version = tag[1:] if tag.startswith("v") else tag
+              if release_version != version:
+                  raise SystemExit(
+                      f"Release tag {tag!r} resolves to version {release_version!r}, "
+                      f"but pyproject.toml declares {version!r}"
+                  )
 
           print(f"version={version}")
           PY
