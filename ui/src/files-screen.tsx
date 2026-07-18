@@ -3,6 +3,7 @@ import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, MachineSidebar, Modal, Panel, formatBytes, useVisibleRows } from "./components"
+import { isDoubleClick, pathBreadcrumbs, type PointerClick } from "./file-navigation"
 import { clampIndex, nextPreviewMeasurement, payloadMatches } from "./state-utils"
 import { screenTheme, theme } from "./theme"
 import type { FileEntry, FilePreview, FilesPayload, Machine } from "./types"
@@ -66,7 +67,9 @@ function FileRows({
         return (
           <box
             key={entry.path}
-            onMouseDown={() => onSelect?.(entry, index)}
+            onMouseDown={(event) => {
+              if (event.button === 0) onSelect?.(entry, index)
+            }}
             style={{
               height: 1,
               flexDirection: "row",
@@ -197,6 +200,7 @@ export function FilesScreen({
   const refreshRequest = useRef(0)
   const refreshController = useRef<AbortController | null>(null)
   const measuredPreviewViewport = useRef("")
+  const lastCurrentClick = useRef<PointerClick | null>(null)
   const machineRef = useRef(machine)
   machineRef.current = machine
   const activePayload = payloadMatches(payload, machine, path) ? payload : null
@@ -210,6 +214,7 @@ export function FilesScreen({
     [activePayload, showHidden],
   )
   const current = entries[selected]
+  const breadcrumbs = useMemo(() => pathBreadcrumbs(path), [path])
   const listHeight = Math.max(4, height - 10)
 
   useEffect(() => {
@@ -257,6 +262,10 @@ export function FilesScreen({
     setClipboard(null)
     setNarrowPane("list")
   }, [machine])
+
+  useEffect(() => {
+    lastCurrentClick.current = null
+  }, [machine, path])
 
   useEffect(() => {
     setSelected(0)
@@ -391,9 +400,20 @@ export function FilesScreen({
     setSelected((value) => clampIndex(value + delta, entries.length))
   }
   const goToParent = () => setPath(activePayload?.parent || ".")
-  const activateCurrent = () => {
-    if (current?.type === "dir") setPath(current.path)
-    else if (current) void openEditor(current)
+  const activateEntry = (entry: FileEntry) => {
+    if (entry.type === "dir") setPath(entry.path)
+    else void openEditor(entry)
+  }
+  const activateCurrent = () => current && activateEntry(current)
+  const selectCurrent = (entry: FileEntry, index: number) => {
+    setSelected(index)
+    const at = Date.now()
+    if (isDoubleClick(lastCurrentClick.current, entry.path, at)) {
+      lastCurrentClick.current = null
+      activateEntry(entry)
+      return
+    }
+    lastCurrentClick.current = { target: entry.path, at }
   }
   const toggleNarrowPane = () => setNarrowPane((value) => (value === "list" ? "preview" : "list"))
   const createFile = () => setDialog({
@@ -530,8 +550,23 @@ export function FilesScreen({
         )}
         <box style={{ flexGrow: 1, flexDirection: "column" }}>
           <box style={{ height: 2, flexDirection: "row", alignItems: "center", paddingLeft: 1 }}>
-            <text fg={theme.faint} content={`${machine} / `} />
-            <text fg={colors.accent} attributes={1} content={path} />
+            <text fg={theme.faint} content={`${machine}  `} />
+            {breadcrumbs.map((crumb, index) => {
+              const active = crumb.path === path
+              return (
+                <box key={crumb.path} style={{ flexDirection: "row" }}>
+                  {index > 0 && <text fg={theme.faint} content=" / " />}
+                  <text
+                    onMouseDown={(event) => {
+                      if (event.button === 0 && !active && dialog.type === "none") setPath(crumb.path)
+                    }}
+                    fg={active ? colors.accent : theme.muted}
+                    attributes={active ? 1 : 0}
+                    content={crumb.label}
+                  />
+                </box>
+              )
+            })}
             <box style={{ flexGrow: 1 }} />
             {busy && <text fg={theme.yellow} content="syncing  " />}
             {clipboard && (
@@ -585,7 +620,7 @@ export function FilesScreen({
                     entries={entries}
                     selected={selected}
                     height={listHeight}
-                    onSelect={(_entry, index) => setSelected(index)}
+                    onSelect={selectCurrent}
                   />
                 ) : (
                   <EmptyState title="Empty directory" detail="n file · N directory" />
