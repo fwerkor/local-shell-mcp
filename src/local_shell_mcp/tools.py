@@ -1135,37 +1135,45 @@ def _view_image_error_result(
     )
 
 
+async def load_image_for_machine(
+    path: str,
+    machine: str | None = None,
+) -> tuple[ImageFile, str]:
+    display_path = path
+    if machine:
+        if not get_settings().remote_enabled:
+            raise RuntimeError("Remote workers are disabled")
+        stat = await _remote_transfer_data(
+            machine,
+            "transfer_stat",
+            {"path": path, "sha256": False},
+        )
+        if not isinstance(stat, dict) or stat.get("type") != "file":
+            raise ValueError(f"source is not a file: {path}")
+        assert_view_image_size(int(stat.get("size") or 0))
+        temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".bin")
+        temporary_path = temporary["path"]
+        try:
+            await _copy_remote_file_to_local(
+                machine,
+                path,
+                temporary_path,
+                True,
+            )
+            image = await asyncio.to_thread(read_image, temporary_path)
+        finally:
+            with suppress(Exception):
+                await asyncio.to_thread(delete_path, temporary_path, False)
+        display_path = str(stat.get("path") or path)
+    else:
+        image = await asyncio.to_thread(read_image, path)
+        display_path = image.path
+    return image, display_path
+
+
 async def _view_image_result(path: str, machine: str | None = None) -> CallToolResult:
     try:
-        display_path = path
-        if machine:
-            if not get_settings().remote_enabled:
-                raise RuntimeError("Remote workers are disabled")
-            stat = await _remote_transfer_data(
-                machine,
-                "transfer_stat",
-                {"path": path, "sha256": False},
-            )
-            if not isinstance(stat, dict) or stat.get("type") != "file":
-                raise ValueError(f"source is not a file: {path}")
-            assert_view_image_size(int(stat.get("size") or 0))
-            temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".bin")
-            temporary_path = temporary["path"]
-            try:
-                await _copy_remote_file_to_local(
-                    machine,
-                    path,
-                    temporary_path,
-                    True,
-                )
-                image = await asyncio.to_thread(read_image, temporary_path)
-            finally:
-                with suppress(Exception):
-                    await asyncio.to_thread(delete_path, temporary_path, False)
-            display_path = str(stat.get("path") or path)
-        else:
-            image = await asyncio.to_thread(read_image, path)
-            display_path = image.path
+        image, display_path = await load_image_for_machine(path, machine)
         return _view_image_success_result(image, display_path, machine)
     except Exception as exc:
         return _view_image_error_result(path, machine, exc)
