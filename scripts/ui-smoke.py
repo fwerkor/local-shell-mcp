@@ -345,6 +345,43 @@ def run_browser(port: int) -> None:
                 {"pointerType": "touch", "bubbles": True},
             )
             page.dispatch_event("#keyboard-button", "click")
+            second_hybrid_keyboard_tap = page.evaluate(
+                """(() => {
+                    const textarea = document.querySelector('.xterm-helper-textarea')
+                    return {
+                        readOnly: textarea.readOnly,
+                        inputMode: textarea.inputMode,
+                        pressed: document.querySelector('#keyboard-button').getAttribute('aria-pressed')
+                    }
+                })()"""
+            )
+            assert second_hybrid_keyboard_tap == {
+                "readOnly": True,
+                "inputMode": "none",
+                "pressed": "false",
+            }
+
+            page.dispatch_event(
+                "#touchbar [data-key='escape']",
+                "pointerdown",
+                {"pointerType": "touch", "bubbles": True},
+            )
+            page.dispatch_event("#touchbar [data-key='escape']", "click")
+            hybrid_shortcut_touch = page.evaluate(
+                """(() => {
+                    const textarea = document.querySelector('.xterm-helper-textarea')
+                    return {
+                        readOnly: textarea.readOnly,
+                        inputMode: textarea.inputMode,
+                        active: document.activeElement === textarea
+                    }
+                })()"""
+            )
+            assert hybrid_shortcut_touch == {
+                "readOnly": True,
+                "inputMode": "none",
+                "active": False,
+            }
 
             page.dispatch_event(
                 "#terminal",
@@ -428,6 +465,19 @@ def run_browser(port: int) -> None:
                 assert mobile_page.evaluate(
                     "document.activeElement !== document.querySelector('.xterm-helper-textarea')"
                 )
+
+                mobile_page.dispatch_event(
+                    "#terminal",
+                    "pointerdown",
+                    {"pointerType": "mouse", "bubbles": True},
+                )
+                coarse_pointer_mouse = mobile_page.evaluate(
+                    """(() => {
+                        const textarea = document.querySelector('.xterm-helper-textarea')
+                        return {readOnly: textarea.readOnly, inputMode: textarea.inputMode}
+                    })()"""
+                )
+                assert coarse_pointer_mouse == {"readOnly": False, "inputMode": "text"}
             finally:
                 mobile_context.close()
 

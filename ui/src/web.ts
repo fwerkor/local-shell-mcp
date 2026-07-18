@@ -370,15 +370,17 @@ touchButtons.forEach((button) => {
 function updatePointerMode(event: PointerEvent): void {
   if (event.pointerType === "touch") {
     touchInteractionActive = true
-    setTouchKeyboard(false)
-  } else if (event.pointerType === "mouse" && !primaryCoarsePointer.matches) {
+    if (event.currentTarget !== keyboardButton) setTouchKeyboard(false)
+  } else if (event.pointerType === "mouse") {
     touchInteractionActive = false
     setTouchKeyboard(false)
   }
 }
 
 terminalElement.addEventListener("pointerdown", updatePointerMode, { capture: true })
-keyboardButton.addEventListener("pointerdown", updatePointerMode, { capture: true })
+touchButtons.forEach((button) => {
+  button.addEventListener("pointerdown", updatePointerMode, { capture: true })
+})
 
 terminalElement.addEventListener("pointerup", () => {
   if (!usesTouchKeyboard() || touchKeyboardEnabled) return
