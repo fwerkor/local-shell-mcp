@@ -290,9 +290,20 @@ def run_browser(port: int) -> None:
             page.keyboard.press("Enter")
             wait_for_terminal_output(page, second_session_id, "SCROLL-LINE-120")
             wait_for_terminal_text(page, "SCROLL-LINE-120")
+            initial_bottom_lines = visible_scroll_line_numbers(page)
+            assert 120 in initial_bottom_lines, initial_bottom_lines
             page.keyboard.press("PageUp")
             page.keyboard.press("PageUp")
-            wait_for_terminal_text(page, "SCROLL-LINE-080")
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline:
+                older_lines = visible_scroll_line_numbers(page)
+                if older_lines and min(older_lines) < min(initial_bottom_lines) and 120 not in older_lines:
+                    break
+                page.wait_for_timeout(100)
+            else:
+                raise AssertionError(
+                    f"PageUp did not reveal older output: {initial_bottom_lines!r}"
+                )
             page.keyboard.press("PageDown")
             page.keyboard.press("PageDown")
             wait_for_terminal_text(page, "SCROLL-LINE-120")

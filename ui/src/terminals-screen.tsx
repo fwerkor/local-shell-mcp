@@ -4,7 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, MachineSidebar, Modal, Panel, formatAge } from "./components"
 import { clampIndex, scopedItems } from "./state-utils"
-import { terminalOutputLines, terminalScrollLimit, visibleTerminalLines } from "./terminal-output"
+import {
+  appendedTerminalRows,
+  terminalDisplayRows,
+  terminalScrollLimit,
+  terminalViewportRows,
+  visibleTerminalLines,
+} from "./terminal-output"
 import { screenTheme, theme } from "./theme"
 import type { AuditEntry, Machine, TerminalSession } from "./types"
 
@@ -110,7 +116,7 @@ export function TerminalsScreen({
   const [dialog, setDialog] = useState<TerminalDialog>({ type: "none" })
   const [busy, setBusy] = useState(false)
   const commandInputRef = useRef<InputRenderable | null>(null)
-  const outputLineCountRef = useRef(0)
+  const outputRowsRef = useRef<string[]>([])
   const rawQueue = useRef<Promise<void>>(Promise.resolve())
   const sessionsRequest = useRef(0)
   const outputRequest = useRef(0)
@@ -125,11 +131,17 @@ export function TerminalsScreen({
   machineRef.current = machine
   selectedSessionIdRef.current = selectedSession?.session_id || null
   const compact = width < 96
-  const terminalRows = Math.max(1, height - 20)
-  const outputLines = useMemo(() => terminalOutputLines(output), [output])
-  const maxScrollOffset = terminalScrollLimit(outputLines.length, terminalRows)
+  const sidebarColumns = compact ? 0 : 24
+  const auditColumns = showAudit ? Math.max(30, Math.floor(width * 0.28)) + 1 : 0
+  const terminalColumns = Math.max(20, width - sidebarColumns - auditColumns - 6)
+  const terminalRows = terminalViewportRows(height)
+  const outputRows = useMemo(
+    () => terminalDisplayRows(output, terminalColumns),
+    [output, terminalColumns],
+  )
+  const maxScrollOffset = terminalScrollLimit(outputRows.length, terminalRows)
   const safeScrollOffset = Math.min(scrollOffset, maxScrollOffset)
-  const visibleLines = visibleTerminalLines(outputLines, terminalRows, safeScrollOffset)
+  const visibleLines = visibleTerminalLines(outputRows, terminalRows, safeScrollOffset)
 
   const scrollOutput = useCallback((delta: number) => {
     setScrollOffset((current) => Math.max(0, Math.min(maxScrollOffset, current + delta)))
@@ -279,22 +291,20 @@ export function TerminalsScreen({
 
   useEffect(() => {
     setScrollOffset(0)
-    outputLineCountRef.current = outputLines.length
+    outputRowsRef.current = outputRows
   }, [machine, selectedSession?.session_id])
 
   useEffect(() => {
-    const previousCount = outputLineCountRef.current
-    const nextCount = outputLines.length
-    const addedLines = Math.max(0, nextCount - previousCount)
-    if (addedLines > 0) {
+    const addedRows = appendedTerminalRows(outputRowsRef.current, outputRows)
+    if (addedRows > 0) {
       setScrollOffset((current) => current === 0
         ? 0
-        : Math.min(maxScrollOffset, current + addedLines))
+        : Math.min(maxScrollOffset, current + addedRows))
     } else {
       setScrollOffset((current) => Math.min(current, maxScrollOffset))
     }
-    outputLineCountRef.current = nextCount
-  }, [maxScrollOffset, outputLines.length])
+    outputRowsRef.current = outputRows
+  }, [maxScrollOffset, outputRows])
 
   const send = async (inputText: string, enter = true) => {
     if (!selectedSession || inputText.length === 0) return
@@ -333,6 +343,7 @@ export function TerminalsScreen({
 
   const submitCommand = (value: string) => {
     if (!selectedSession || value.length === 0) return
+    setScrollOffset(0)
     if (commandInputRef.current) commandInputRef.current.value = ""
     void send(value, true)
   }
