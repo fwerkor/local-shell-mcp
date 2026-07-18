@@ -213,7 +213,7 @@ def test_payload_files_are_created_private_from_the_first_write(tmp_path, monkey
 
 def test_payload_pruning_defers_when_the_log_cannot_be_read(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
-    directory = get_settings().state_dir / audit_module._AUDIT_PAYLOAD_DIRECTORY
+    directory = get_settings().audit_log_path.parent / audit_module._AUDIT_PAYLOAD_DIRECTORY
     directory.mkdir(parents=True)
     payload = directory / f"{'a' * 64}.json.gz"
     payload.write_bytes(b"payload")
@@ -282,6 +282,71 @@ def test_get_audit_entry_loads_only_the_selected_payloads(tmp_path, monkeypatch)
     assert detail["output"]["stdout"] == "s" * 30_000
 
 
+def test_payload_store_follows_configured_audit_log(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    audit_path = tmp_path / "persisted-audit" / "records.jsonl"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUDIT_LOG_PATH", str(audit_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / "separate-state"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "200000")
+    get_settings.cache_clear()
+
+    audit_module.audit("large_event", payload="x" * 30_000)
+
+    payloads = list((audit_path.parent / audit_module._AUDIT_PAYLOAD_DIRECTORY).glob("*.json.gz"))
+    assert len(payloads) == 1
+    assert not (get_settings().state_dir / audit_module._AUDIT_PAYLOAD_DIRECTORY).exists()
+
+
+def test_audit_retention_keeps_latest_call_pair_together(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "500000")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_TAIL_BYTES", "500000")
+    get_settings.cache_clear()
+
+    audit_module.audit("older_event", payload=os.urandom(18_000).hex())
+    latest_input = os.urandom(9_000).hex()
+    latest_output = os.urandom(9_000).hex()
+    audit_module.audit(
+        "mcp_tool_call_start",
+        call_id="latest-call",
+        tool="write_file",
+        arguments={"keyword_args": {"content": latest_input}},
+    )
+    audit_module.audit(
+        "mcp_tool_call_end",
+        call_id="latest-call",
+        tool="write_file",
+        ok=True,
+        result={"stdout": latest_output},
+    )
+
+    log_path = get_settings().audit_log_path
+    raw_lines = log_path.read_bytes().splitlines(keepends=True)
+    pair_records = [
+        json.loads(line) for line in raw_lines if json.loads(line).get("call_id") == "latest-call"
+    ]
+    pair_payloads: set[str] = set()
+    for record in pair_records:
+        audit_module._collect_payload_ids(record, pair_payloads)
+    pair_bytes = sum(
+        len(line) for line in raw_lines if json.loads(line).get("call_id") == "latest-call"
+    ) + sum(audit_module._payload_file_size(digest, log_path) for digest in pair_payloads)
+    total_bytes = log_path.stat().st_size + sum(
+        path.stat().st_size for path in audit_module._payload_directory().glob("*.json.gz")
+    )
+    assert total_bytes > pair_bytes + 100
+
+    audit_module._enforce_audit_storage_limit(log_path, pair_bytes + 100)
+
+    entries = audit_module.query_audit(sort="asc")["entries"]
+    assert len(entries) == 1
+    assert entries[0]["id"] == "call:latest-call"
+    assert entries[0]["paired"] is True
+    detail = audit_module.get_audit_entry("call:latest-call")
+    assert detail["input"]["content"] == latest_input
+    assert detail["output"]["stdout"] == latest_output
+
+
 def test_audit_retention_bounds_log_and_external_payload_bytes(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     max_bytes = 26_000
@@ -293,13 +358,15 @@ def test_audit_retention_bounds_log_and_external_payload_bytes(tmp_path, monkeyp
     second = os.urandom(18_000).hex()
     audit_module.audit("first_large_event", payload=first)
     first_payloads = set(
-        (get_settings().state_dir / audit_module._AUDIT_PAYLOAD_DIRECTORY).glob("*.json.gz")
+        (get_settings().audit_log_path.parent / audit_module._AUDIT_PAYLOAD_DIRECTORY).glob(
+            "*.json.gz"
+        )
     )
     assert len(first_payloads) == 1
 
     audit_module.audit("second_large_event", payload=second)
 
-    payload_directory = get_settings().state_dir / audit_module._AUDIT_PAYLOAD_DIRECTORY
+    payload_directory = get_settings().audit_log_path.parent / audit_module._AUDIT_PAYLOAD_DIRECTORY
     stored_bytes = get_settings().audit_log_path.stat().st_size + sum(
         path.stat().st_size for path in payload_directory.glob("*.json.gz")
     )

@@ -458,7 +458,7 @@ def test_audit_large_payloads_are_previewed_and_loaded_on_demand(tmp_path, monke
     assert "$local_shell_mcp_audit_payload" in raw_records[0]["arguments"]
     assert "$local_shell_mcp_audit_payload" in raw_records[1]["result"]
     assert large_input not in get_settings().audit_log_path.read_text(encoding="utf-8")
-    assert len(list((get_settings().state_dir / "audit-payloads").glob("*.json.gz"))) == 2
+    assert len(list((get_settings().audit_log_path.parent / "audit-payloads").glob("*.json.gz"))) == 2
 
     client = TestClient(build_http_app())
     listing = client.get("/api/ui/audit").json()["data"]["entries"][0]
@@ -479,7 +479,7 @@ def test_audit_trim_prunes_unreferenced_payload_files(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
     audit("large_event", payload="z" * 30_000)
-    payloads = list((get_settings().state_dir / "audit-payloads").glob("*.json.gz"))
+    payloads = list((get_settings().audit_log_path.parent / "audit-payloads").glob("*.json.gz"))
     assert len(payloads) == 1
 
     audit("small_event", value="kept" * 300)

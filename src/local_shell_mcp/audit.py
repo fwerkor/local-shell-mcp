@@ -61,14 +61,19 @@ def _preview_audit_value(value: Any) -> Any:
     return _format_audit_text(repr(value))
 
 
-def _payload_directory() -> Path:
-    directory = get_settings().state_dir / _AUDIT_PAYLOAD_DIRECTORY
+def _payload_directory_path(log_path: Path | None = None) -> Path:
+    audit_log_path = log_path or get_settings().audit_log_path
+    return audit_log_path.parent / _AUDIT_PAYLOAD_DIRECTORY
+
+
+def _payload_directory(log_path: Path | None = None) -> Path:
+    directory = _payload_directory_path(log_path)
     directory.mkdir(parents=True, exist_ok=True)
     return directory
 
 
-def _payload_path(digest: str) -> Path:
-    return _payload_directory() / f"{digest}.json.gz"
+def _payload_path(digest: str, log_path: Path | None = None) -> Path:
+    return _payload_directory(log_path) / f"{digest}.json.gz"
 
 
 def _write_private_bytes(path: Path, data: bytes) -> None:
@@ -179,7 +184,7 @@ def _collect_payload_ids(record: Any, destination: set[str]) -> None:
 
 
 def _prune_payload_store(log_path: Path) -> None:
-    directory = get_settings().state_dir / _AUDIT_PAYLOAD_DIRECTORY
+    directory = _payload_directory_path(log_path)
     if not directory.is_dir():
         return
     referenced: set[str] = set()
@@ -197,9 +202,9 @@ def _prune_payload_store(log_path: Path) -> None:
                 payload.unlink()
 
 
-def _payload_file_size(digest: str) -> int:
+def _payload_file_size(digest: str, log_path: Path | None = None) -> int:
     try:
-        return _payload_path(digest).stat().st_size
+        return _payload_path(digest, log_path).stat().st_size
     except OSError:
         return 0
 
@@ -221,6 +226,48 @@ def _bounded_preview_record(record: dict[str, Any], max_bytes: int) -> bytes:
     essential["audit_payloads_omitted"] = "record exceeded audit retention limit"
     encoded = _encode_audit_record(essential)
     return encoded if len(encoded) <= max_bytes else b""
+
+
+def _retention_units(
+    parsed: list[tuple[bytes, dict[str, Any] | None, set[str]]],
+) -> list[list[tuple[int, bytes, dict[str, Any] | None, set[str]]]]:
+    units: list[list[tuple[int, bytes, dict[str, Any] | None, set[str]]]] = []
+    call_units: dict[str, list[tuple[int, bytes, dict[str, Any] | None, set[str]]]] = {}
+    for index, (raw_line, record, payload_ids) in enumerate(parsed):
+        call_id = ""
+        if isinstance(record, dict) and record.get("event") in {
+            "mcp_tool_call_start",
+            "mcp_tool_call_end",
+        }:
+            call_id = str(record.get("call_id") or "")
+        if call_id:
+            unit = call_units.get(call_id)
+            if unit is None:
+                unit = []
+                call_units[call_id] = unit
+                units.append(unit)
+            unit.append((index, raw_line, record, payload_ids))
+        else:
+            units.append([(index, raw_line, record, payload_ids)])
+    units.sort(key=lambda unit: max(item[0] for item in unit))
+    return units
+
+
+def _bounded_preview_unit(
+    unit: list[tuple[int, bytes, dict[str, Any] | None, set[str]]],
+    max_bytes: int,
+) -> list[tuple[int, bytes]]:
+    if not unit:
+        return []
+    per_record = max(1, max_bytes // len(unit))
+    bounded: list[tuple[int, bytes]] = []
+    for index, _raw_line, record, _payload_ids in unit:
+        if record is None:
+            continue
+        encoded = _bounded_preview_record(record, per_record)
+        if encoded:
+            bounded.append((index, encoded))
+    return bounded if sum(len(raw_line) for _, raw_line in bounded) <= max_bytes else []
 
 
 def _enforce_audit_storage_limit(log_path: Path, max_bytes: int) -> None:
@@ -246,38 +293,39 @@ def _enforce_audit_storage_limit(log_path: Path, max_bytes: int) -> None:
             all_referenced.update(payload_ids)
         parsed.append((raw_line, record, payload_ids))
 
-    payload_sizes = {digest: _payload_file_size(digest) for digest in all_referenced}
+    payload_sizes = {digest: _payload_file_size(digest, log_path) for digest in all_referenced}
     total_bytes = sum(len(raw_line) for raw_line in raw_lines) + sum(payload_sizes.values())
     if total_bytes <= max_bytes:
         _prune_payload_store(log_path)
         return
 
     target_bytes = max(1, max_bytes // 2)
-    selected: list[bytes] = []
+    selected: list[tuple[int, bytes]] = []
     selected_payloads: set[str] = set()
     selected_bytes = 0
-    for raw_line, record, payload_ids in reversed(parsed):
-        new_payloads = payload_ids - selected_payloads
-        added_bytes = len(raw_line) + sum(payload_sizes.get(item, 0) for item in new_payloads)
+    for unit in reversed(_retention_units(parsed)):
+        unit_payloads = set().union(*(item[3] for item in unit))
+        new_payloads = unit_payloads - selected_payloads
+        added_bytes = sum(len(item[1]) for item in unit) + sum(
+            payload_sizes.get(item, 0) for item in new_payloads
+        )
         if selected and selected_bytes + added_bytes > target_bytes:
             break
         if not selected and added_bytes > max_bytes:
-            if record is None:
+            bounded = _bounded_preview_unit(unit, max_bytes)
+            if not bounded:
                 continue
-            raw_line = _bounded_preview_record(record, max_bytes)
-            if not raw_line:
-                continue
-            payload_ids = set()
-            new_payloads = set()
-            added_bytes = len(raw_line)
-        selected.append(raw_line)
-        selected_payloads.update(payload_ids)
+            selected.extend(bounded)
+            selected_bytes += sum(len(raw_line) for _, raw_line in bounded)
+            continue
+        selected.extend((index, raw_line) for index, raw_line, _record, _payload_ids in unit)
+        selected_payloads.update(unit_payloads)
         selected_bytes += added_bytes
 
-    selected.reverse()
+    selected.sort(key=lambda item: item[0])
     temporary = log_path.with_name(f".{log_path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     try:
-        _write_private_bytes(temporary, b"".join(selected))
+        _write_private_bytes(temporary, b"".join(raw_line for _, raw_line in selected))
         os.replace(temporary, log_path)
     finally:
         with contextlib.suppress(OSError):
