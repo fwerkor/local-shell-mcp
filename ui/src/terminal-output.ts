@@ -39,11 +39,26 @@ export function terminalCellWidth(grapheme: string): number {
   return hasVisible ? 1 : 0
 }
 
+function sgrResetIndex(parameters: number[]): number {
+  let lastReset = -1
+  for (let index = 0; index < parameters.length; index += 1) {
+    const parameter = parameters[index]!
+    if (parameter === 38 || parameter === 48 || parameter === 58) {
+      const mode = parameters[index + 1]
+      if (mode === 2) index += 4
+      else if (mode === 5) index += 2
+      continue
+    }
+    if (parameter === 0) lastReset = index
+  }
+  return lastReset
+}
+
 function nextSgrState(current: string, escape: string): string {
   if (!escape.endsWith("m")) return current
   const rawParameters = escape.slice(2, -1)
   const parameters = rawParameters === "" ? [0] : rawParameters.split(";").map((value) => Number(value || 0))
-  const lastReset = parameters.lastIndexOf(0)
+  const lastReset = sgrResetIndex(parameters)
   if (lastReset < 0) return current + escape
   const remaining = parameters.slice(lastReset + 1)
   return remaining.length > 0 ? `\x1b[${remaining.join(";")}m` : ""

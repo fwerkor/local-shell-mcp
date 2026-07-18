@@ -33,6 +33,14 @@ describe("terminal output viewport", () => {
       "\x1b[31mabc\x1b[0m",
       "\x1b[31mdef\x1b[0m",
     ])
+    expect(wrapTerminalLine("\x1b[38;2;0;255;0mabcdef\x1b[0m", 3)).toEqual([
+      "\x1b[38;2;0;255;0mabc\x1b[0m",
+      "\x1b[38;2;0;255;0mdef\x1b[0m",
+    ])
+    expect(wrapTerminalLine("\x1b[38;5;0mabcdef\x1b[0m", 3)).toEqual([
+      "\x1b[38;5;0mabc\x1b[0m",
+      "\x1b[38;5;0mdef\x1b[0m",
+    ])
     expect(terminalDisplayRows("abcdef\nxy", 3)).toEqual(["abc", "def", "xy"])
   })
 
