@@ -610,11 +610,12 @@ def test_websocket_control_flow_and_limits(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
 
     class Process:
-        def __init__(self, reads=None):
+        def __init__(self, reads=None, *, exit_code=None):
             self.reads = list(reads or [b""])
             self.writes = []
             self.resizes = []
             self.closed = False
+            self.return_code = exit_code
 
         async def read(self):
             if self.reads:
@@ -624,6 +625,9 @@ def test_websocket_control_flow_and_limits(tmp_path, monkeypatch):
 
         async def write(self, data):
             self.writes.append(data)
+
+        async def exit_code(self):
+            return self.return_code
 
         def resize(self, cols, rows):
             self.resizes.append((cols, rows))
@@ -683,6 +687,23 @@ def test_websocket_control_flow_and_limits(tmp_path, monkeypatch):
     asyncio.run(ui.ui_terminal_websocket(spawn_failure))
     assert b"Unable to start the TUI" in spawn_failure.sent[0]
     assert spawn_failure.closed[-1][0] == 1011
+
+    class WaitingSocket(Socket):
+        async def receive(self):
+            await asyncio.sleep(0.05)
+            return {"type": "websocket.disconnect"}
+
+    process = Process([b""], exit_code=0)
+    monkeypatch.setattr(ui, "_spawn_tui_process", lambda *args: process)
+    exited = WaitingSocket()
+    asyncio.run(ui.ui_terminal_websocket(exited))
+    assert any(code == ui.UI_TUI_EXIT_CODE for code, _ in exited.closed)
+
+    process = Process([b""], exit_code=1)
+    monkeypatch.setattr(ui, "_spawn_tui_process", lambda *args: process)
+    crashed = WaitingSocket()
+    asyncio.run(ui.ui_terminal_websocket(crashed))
+    assert all(code != ui.UI_TUI_EXIT_CODE for code, _ in crashed.closed)
 
     process = Process([b"hello"])
     spawn_calls = []

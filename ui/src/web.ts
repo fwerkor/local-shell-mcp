@@ -8,6 +8,13 @@ declare global {
   interface Window {
     __LSM_UI_CONFIG__?: { uiPath?: string; apiPrefix?: string }
   }
+
+  interface Navigator {
+    keyboard?: {
+      lock?: (keys?: string[]) => Promise<void>
+      unlock?: () => void
+    }
+  }
 }
 
 const UI_PATH = (window.__LSM_UI_CONFIG__?.uiPath || "/ui").replace(/\/$/, "")
@@ -18,6 +25,7 @@ const loginButton = document.querySelector<HTMLButtonElement>("#login-button")!
 const reconnectButton = document.querySelector<HTMLButtonElement>("#reconnect-button")!
 const fullscreenButton = document.querySelector<HTMLButtonElement>("#fullscreen-button")!
 const touchButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("#touchbar [data-key]"))
+const keyboardButton = document.querySelector<HTMLButtonElement>("#keyboard-button")!
 const stateElement = document.querySelector<HTMLElement>("#connection-state")!
 const sizeElement = document.querySelector<HTMLElement>("#terminal-size")!
 const gateDetail = document.querySelector<HTMLElement>("#gate-detail")!
@@ -71,6 +79,35 @@ const fitAddon = new FitAddon()
 terminal.loadAddon(createImageAddon())
 terminal.loadAddon(fitAddon)
 terminal.open(terminalElement)
+
+let fittedColumns = terminal.cols
+let fittedRows = terminal.rows
+const primaryCoarsePointer = window.matchMedia("(pointer: coarse)")
+let touchInteractionActive = primaryCoarsePointer.matches
+let touchKeyboardEnabled = false
+
+function usesTouchKeyboard(): boolean {
+  return touchInteractionActive
+}
+
+function setTouchKeyboard(enabled: boolean): void {
+  touchKeyboardEnabled = usesTouchKeyboard() && enabled
+  keyboardButton.setAttribute("aria-pressed", String(touchKeyboardEnabled))
+  keyboardButton.setAttribute("aria-label", touchKeyboardEnabled ? "Hide keyboard" : "Show keyboard")
+  keyboardButton.title = touchKeyboardEnabled ? "Hide keyboard" : "Show keyboard"
+  const textarea = terminal.textarea
+  if (!textarea) return
+  textarea.readOnly = usesTouchKeyboard() && !touchKeyboardEnabled
+  textarea.inputMode = touchKeyboardEnabled || !usesTouchKeyboard() ? "text" : "none"
+  if (touchKeyboardEnabled) terminal.focus()
+  else textarea.blur()
+}
+
+setTouchKeyboard(false)
+terminal.textarea?.addEventListener("focus", () => {
+  if (!usesTouchKeyboard() || touchKeyboardEnabled) return
+  terminal.textarea?.blur()
+})
 
 let socket: WebSocket | null = null
 let reconnectTimer: number | null = null
@@ -227,8 +264,12 @@ function websocketProtocols(): string[] {
 
 function sendResize(): void {
   fitAddon.fit()
+  const resized = terminal.cols !== fittedColumns || terminal.rows !== fittedRows
+  fittedColumns = terminal.cols
+  fittedRows = terminal.rows
   sizeElement.textContent = `${terminal.cols} × ${terminal.rows}`
   if (socket?.readyState === WebSocket.OPEN) {
+    if (resized) terminal.clear()
     socket.send(JSON.stringify({ type: "resize", cols: terminal.cols, rows: terminal.rows }))
   }
 }
@@ -281,7 +322,8 @@ function connect(): void {
     setConnection("connected", "Connected")
     authGate.hidden = true
     sendResize()
-    terminal.focus()
+    if (usesTouchKeyboard()) setTouchKeyboard(false)
+    else terminal.focus()
   }
   nextSocket.onmessage = async (event) => {
     if (socket !== nextSocket) return
@@ -302,6 +344,12 @@ function connect(): void {
       setConnection("error", "Authentication required")
       gateDetail.textContent = "The session expired or this service requires OAuth authentication."
       loginButton.disabled = false
+      return
+    }
+    if (event.code === 4410) {
+      manualDisconnect = true
+      setConnection("error", "Disconnected")
+      terminal.write("\r\n\x1b[38;2;255;204;102mThe TUI exited. Use Reconnect to start a new session.\x1b[0m\r\n")
       return
     }
     if ([1011, 4400, 4408, 4429].includes(event.code)) {
@@ -330,10 +378,47 @@ terminal.onBinary((data) => {
 
 touchButtons.forEach((button) => {
   button.addEventListener("click", () => {
-    const sequence = touchSequences[button.dataset.key || ""]
+    const key = button.dataset.key || ""
+    if (key === "keyboard") {
+      setTouchKeyboard(!touchKeyboardEnabled)
+      return
+    }
+    const sequence = touchSequences[key]
     if (sequence) sendTerminalInput(sequence)
-    terminal.focus()
+    if (!usesTouchKeyboard() || touchKeyboardEnabled) terminal.focus()
+    else terminal.textarea?.blur()
   })
+})
+
+function updatePointerMode(event: PointerEvent): void {
+  if (event.pointerType === "touch") {
+    const wasTouchInteraction = touchInteractionActive
+    touchInteractionActive = true
+    if (
+      event.currentTarget === terminalElement ||
+      (!wasTouchInteraction && event.currentTarget !== keyboardButton)
+    ) {
+      setTouchKeyboard(false)
+    }
+  } else if (event.pointerType === "mouse") {
+    touchInteractionActive = false
+    setTouchKeyboard(false)
+  }
+}
+
+terminalElement.addEventListener("pointerdown", updatePointerMode, { capture: true })
+touchButtons.forEach((button) => {
+  button.addEventListener("pointerdown", updatePointerMode, { capture: true })
+})
+
+terminalElement.addEventListener("pointerup", () => {
+  if (!usesTouchKeyboard() || touchKeyboardEnabled) return
+  window.requestAnimationFrame(() => terminal.textarea?.blur())
+})
+
+primaryCoarsePointer.addEventListener("change", (event) => {
+  touchInteractionActive = event.matches
+  setTouchKeyboard(false)
 })
 
 const resizeObserver = new ResizeObserver(() => window.requestAnimationFrame(sendResize))
@@ -355,13 +440,27 @@ fullscreenButton.addEventListener("click", () => {
   else void document.documentElement.requestFullscreen()
 })
 
+function syncFullscreenKeyboardLock(): void {
+  try {
+    if (document.fullscreenElement) {
+      void navigator.keyboard?.lock?.(["Escape"])?.catch(() => undefined)
+    } else {
+      navigator.keyboard?.unlock?.()
+    }
+  } catch {
+    // Unsupported or denied keyboard locks fall back to Ctrl+[ for Escape.
+  }
+}
+
 document.addEventListener("fullscreenchange", () => {
   const label = document.fullscreenElement ? "Exit fullscreen" : "Fullscreen"
   fullscreenButton.title = label
   fullscreenButton.setAttribute("aria-label", label)
   const wideLabel = fullscreenButton.querySelector<HTMLElement>(".wide-label")
   if (wideLabel) wideLabel.textContent = label
+  terminal.focus()
   window.requestAnimationFrame(sendResize)
+  syncFullscreenKeyboardLock()
 })
 
 async function boot(): Promise<void> {
