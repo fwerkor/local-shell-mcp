@@ -5,6 +5,8 @@ import os
 import stat
 from pathlib import Path
 
+import pytest
+
 import local_shell_mcp.audit as audit_module
 from local_shell_mcp.settings import get_settings
 
@@ -225,6 +227,15 @@ def test_payload_pruning_defers_when_the_log_cannot_be_read(tmp_path, monkeypatc
     audit_module._prune_payload_store(log_path)
 
     assert payload.exists()
+
+
+def test_get_audit_entry_rejects_empty_and_unknown_ids(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+
+    with pytest.raises(ValueError, match="audit entry id is required"):
+        audit_module.get_audit_entry("  ")
+    with pytest.raises(ValueError, match="Unknown audit entry: missing"):
+        audit_module.get_audit_entry("missing")
 
 
 def test_get_audit_entry_loads_only_the_selected_payloads(tmp_path, monkeypatch):
