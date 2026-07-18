@@ -208,6 +208,46 @@ def _prune_clients_locked(now: int, *, reserve_slot: bool = False) -> None:
         _CLIENTS.pop(oldest.client_id, None)
 
 
+def _registration_key(
+    client_name: str | None,
+    redirect_uris: list[str],
+) -> tuple[str | None, tuple[str, ...]]:
+    """Return the stable identity used for idempotent public-client registration."""
+
+    return client_name, tuple(sorted(set(redirect_uris)))
+
+
+def _matching_registered_client_locked(
+    client_name: str | None,
+    redirect_uris: list[str],
+) -> OAuthClient | None:
+    requested = _registration_key(client_name, redirect_uris)
+    matches = [
+        client
+        for client in _CLIENTS.values()
+        if _registration_key(client.client_name, client.redirect_uris) == requested
+    ]
+    if not matches:
+        return None
+    return min(matches, key=lambda client: (not client.approved, client.created_at, client.client_id))
+
+
+def _registration_response(client: OAuthClient, *, reused: bool) -> JSONResponse:
+    return _json(
+        {
+            "client_id": client.client_id,
+            "client_id_issued_at": client.created_at,
+            "client_name": client.client_name or "ChatGPT",
+            "redirect_uris": client.redirect_uris,
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "none",
+            "reused": reused,
+        },
+        status_code=200 if reused else 201,
+    )
+
+
 def _approve_client(client_id: str) -> OAuthClient | None:
     with _CLIENT_STORE_LOCK:
         _load_clients_locked()
@@ -350,15 +390,19 @@ async def oauth_register(request: Request) -> JSONResponse:
             {"error": "invalid_client_metadata", "error_description": "client_name is too long"},
             status_code=400,
         )
-    client_id = "local-shell-mcp-" + secrets.token_urlsafe(24)
-    client = OAuthClient(
-        client_id=client_id,
-        redirect_uris=redirect_uris,
-        client_name=client_name,
-    )
     with _CLIENT_STORE_LOCK:
         _load_clients_locked()
-        _prune_clients_locked(int(time.time()), reserve_slot=True)
+        now = int(time.time())
+        _prune_clients_locked(now)
+        existing = _matching_registered_client_locked(client_name, redirect_uris)
+        if existing is not None:
+            audit(
+                "oauth_client_reused",
+                client_id=existing.client_id,
+                redirect_uris=existing.redirect_uris,
+            )
+            return _registration_response(existing, reused=True)
+        _prune_clients_locked(now, reserve_slot=True)
         if len(_CLIENTS) >= MAX_OAUTH_CLIENTS:
             return _json(
                 {
@@ -367,20 +411,15 @@ async def oauth_register(request: Request) -> JSONResponse:
                 },
                 status_code=503,
             )
+        client_id = "local-shell-mcp-" + secrets.token_urlsafe(24)
+        client = OAuthClient(
+            client_id=client_id,
+            redirect_uris=redirect_uris,
+            client_name=client_name,
+        )
         _CLIENTS[client_id] = client
     audit("oauth_client_registered", client_id=client_id, redirect_uris=redirect_uris)
-    return _json(
-        {
-            "client_id": client_id,
-            "client_id_issued_at": client.created_at,
-            "client_name": client.client_name or "ChatGPT",
-            "redirect_uris": redirect_uris,
-            "grant_types": ["authorization_code"],
-            "response_types": ["code"],
-            "token_endpoint_auth_method": "none",
-        },
-        status_code=201,
-    )
+    return _registration_response(client, reused=False)
 
 
 def _validate_authorize_params(params: dict[str, str]) -> str | None:

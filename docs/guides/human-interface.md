@@ -141,6 +141,6 @@ Each screen displays its contextual shortcuts in the footer.
 
 - Docker images include the WebUI assets, native OpenTUI runtime, and Yazi, and configure the service to use the bundled runtime directly.
 - Standalone release executables contain the WebUI assets and a compressed platform OpenTUI runtime; neither WebUI nor native TUI requires a neighboring sidecar.
-- Release archives may retain a neighboring TUI executable for compatibility with older launchers, but current executables do not depend on it.
+- Release archives contain one standalone executable; the OpenTUI runtime is compressed inside it and extracted into PyInstaller's temporary runtime directory when needed.
 - Python wheels include the WebUI assets. A native TUI requires a release executable or a source checkout with Bun and the UI dependencies installed.
 - The WebUI is served from the same process and port as MCP; no additional web service is required.
