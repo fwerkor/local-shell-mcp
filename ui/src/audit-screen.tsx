@@ -100,6 +100,14 @@ export function AuditScreen({
   const cycleOperation = () => setOperationIndex((value) => (value + 1) % AUDIT_OPERATIONS.length)
   const cycleTime = () => setTimeIndex((value) => (value + 1) % TIME_RANGES.length)
   const toggleSort = () => setSort((value) => (value === "desc" ? "asc" : "desc"))
+  const clearFilters = () => {
+    setSearch("")
+    setEvent("")
+    setSession("")
+    setNodeIndex(0)
+    setOperationIndex(0)
+    setTimeIndex(2)
+  }
 
   const refresh = useCallback(async (force = false) => {
     if (refreshController.current && !force) return
@@ -201,16 +209,11 @@ export function AuditScreen({
     else if (key.name === "/") setDialog({ type: "search" })
     else if (key.name === "e") setDialog({ type: "event" })
     else if (key.name === "i") setDialog({ type: "session" })
-    else if (key.name === "c") {
-      setSearch("")
-      setEvent("")
-      setSession("")
-      setNodeIndex(0)
-      setOperationIndex(0)
-      setTimeIndex(2)
-    } else if (key.name === "r") void refresh(true)
+    else if (key.name === "c") clearFilters()
+    else if (key.name === "r") void refresh(true)
   })
 
+  const footerLocked = !keyboardEnabled || dialog.type !== "none"
   const applyDialog = (value: unknown) => {
     const submitted = typeof value === "string" ? value : ""
     if (dialog.type === "search") setSearch(submitted.trim())
@@ -335,14 +338,17 @@ export function AuditScreen({
       <KeyHint
         accent={colors.accent}
         items={[
-          ["j/k", "move"],
-          ["n", "node"],
-          ["o", "operation"],
-          ["t", "time"],
-          ["s", "sort"],
-          ["/", "search"],
-          ["e/i", "event/session"],
-          ["c", "clear"],
+          { key: "j", label: "down", onPress: () => selectIndex((value) => clampIndex(value + 1, entries.length)), disabled: footerLocked || entries.length === 0 },
+          { key: "k", label: "up", onPress: () => selectIndex((value) => Math.max(0, value - 1)), disabled: footerLocked || entries.length === 0 },
+          { key: "n", label: "node", onPress: cycleNode, disabled: footerLocked },
+          { key: "o", label: "operation", onPress: cycleOperation, disabled: footerLocked },
+          { key: "t", label: "time", onPress: cycleTime, disabled: footerLocked },
+          { key: "s", label: "sort", onPress: toggleSort, disabled: footerLocked },
+          { key: "/", label: "search", onPress: () => setDialog({ type: "search" }), disabled: footerLocked },
+          { key: "e", label: "event", onPress: () => setDialog({ type: "event" }), disabled: footerLocked },
+          { key: "i", label: "session", onPress: () => setDialog({ type: "session" }), disabled: footerLocked },
+          { key: "c", label: "clear", onPress: clearFilters, disabled: footerLocked },
+          { key: "r", label: "refresh", onPress: () => void refresh(true), disabled: footerLocked || loading },
         ]}
       />
       {dialog.type !== "none" && (

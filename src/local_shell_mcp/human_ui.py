@@ -324,7 +324,6 @@ async def api_bootstrap(request: Request) -> Response:
             "features": {
                 "remote": settings.remote_enabled,
                 "wallpaper": settings.ui_wallpaper,
-                "yazi_available": shutil.which("yazi") is not None,
             },
         }
     )
@@ -938,9 +937,9 @@ def _spawn_tui_process(cols: int, rows: int):  # noqa: ANN201
         {
             "TERM": "xterm-256color",
             "COLORTERM": "truecolor",
-            # The browser wrapper is xterm.js with the image addon, matching the
-            # protocol surface exposed by VS Code's xterm.js terminal. Yazi uses
-            # TERM_PROGRAM to select iTerm IIP before falling back to SIXEL.
+            # The browser wrapper is xterm.js with the image addon. Advertising
+            # VS Code terminal compatibility enables the image protocol path supported
+            # by that terminal implementation.
             "TERM_PROGRAM": "vscode",
             "TERM_PROGRAM_VERSION": "local-shell-mcp",
             "LOCAL_SHELL_MCP_UI_API_BASE": f"http://127.0.0.1:{settings.port}{UI_API_PREFIX}",

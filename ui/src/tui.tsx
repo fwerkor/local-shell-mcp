@@ -47,7 +47,7 @@ function StatusLine({
   const online = bootstrap?.machines.machines.filter((machine) => machine.status === "online").length || 0
   const narrow = width < 60
   const compact = width < 90
-  const statusBudget = Math.max(8, width - (compact ? 14 : 47))
+  const statusBudget = Math.max(8, width - (compact ? 14 : 30))
   const visibleStatus = status.length > statusBudget ? `${status.slice(0, Math.max(1, statusBudget - 1))}…` : status
   return (
     <box
@@ -65,13 +65,7 @@ function StatusLine({
       <text fg={theme.faint} content={narrow ? "  " : "  │  "} />
       <text fg={theme.muted} content={visibleStatus} />
       <box style={{ flexGrow: 1 }} />
-      {!compact && (
-        <>
-          <text fg={theme.faint} content={bootstrap?.features.yazi_available ? "Yazi available" : "Yazi UX mode"} />
-          <text fg={theme.faint} content="  │  " />
-          <text fg={theme.cyan} content="local-shell-mcp" />
-        </>
-      )}
+      {!compact && <text fg={theme.cyan} content="local-shell-mcp" />}
     </box>
   )
 }
