@@ -20,7 +20,7 @@ function Help({ close }: { close: () => void }) {
       <text fg={theme.cyan} attributes={1} content="Global navigation" />
       <text fg={theme.muted} content="Alt+1…5  switch top-level screen (F2…F6 also work)" />
       <text fg={theme.muted} content="F7        refresh machine list" />
-      <text fg={theme.muted} content="Ctrl+Q    quit the TUI" />
+      <text fg={theme.muted} content="Alt+Q     quit the TUI" />
       <text fg={theme.muted} content="F1        show this guide" />
       <text fg={theme.borderBright} content="\nScreen conventions" />
       <text fg={theme.muted} content="j/k or arrows move selection · Enter activates · Esc closes dialogs" />
@@ -110,7 +110,7 @@ function App() {
 
   useKeyboard((key) => {
     if (terminalRawMode) return
-    if (key.ctrl && key.name === "q") {
+    if ((key.option || key.meta) && key.name === "q") {
       renderer.destroy()
       return
     }

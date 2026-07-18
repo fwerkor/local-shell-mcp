@@ -270,6 +270,10 @@ def run_browser(port: int) -> None:
 
             page.keyboard.press("F8")
             wait_for_terminal_text(page, "RAW INPUT")
+            page.keyboard.press("Alt+q")
+            page.wait_for_timeout(500)
+            assert page.locator("#connection-state strong").inner_text() == "Connected"
+            wait_for_terminal_text(page, "RAW INPUT")
             page.keyboard.press("Alt+1")
             page.wait_for_timeout(500)
             assert "MCP audit · manual input excluded" in page.locator("body").inner_text()
@@ -423,6 +427,12 @@ def run_browser(port: int) -> None:
                 assert killed["status"] == 200, killed
                 assert killed["body"]["data"]["killed"] is True, killed
                 session_ids.remove(session_id)
+
+            page.locator(".xterm-helper-textarea").focus()
+            page.keyboard.press("Alt+q")
+            page.locator("#connection-state").get_by_text("Disconnected").wait_for(timeout=5_000)
+            page.wait_for_timeout(1_200)
+            assert page.locator("#connection-state strong").inner_text() == "Disconnected"
         finally:
             if not page.is_closed():
                 for session_id in session_ids:

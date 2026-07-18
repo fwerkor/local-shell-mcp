@@ -311,6 +311,12 @@ function connect(): void {
       loginButton.disabled = false
       return
     }
+    if (event.code === 4410) {
+      manualDisconnect = true
+      setConnection("error", "Disconnected")
+      terminal.write("\r\n\x1b[38;2;255;204;102mThe TUI exited. Use Reconnect to start a new session.\x1b[0m\r\n")
+      return
+    }
     if ([1011, 4400, 4408, 4429].includes(event.code)) {
       manualDisconnect = true
       const detail = event.reason ||

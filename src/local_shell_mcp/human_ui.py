@@ -51,6 +51,7 @@ UI_MIN_COLUMNS = 20
 UI_MAX_COLUMNS = 1_600
 UI_MIN_ROWS = 8
 UI_MAX_ROWS = 500
+UI_TUI_EXIT_CODE = 4410
 _ACTIVE_UI_TERMINALS: set[int] = set()
 _LOGGER = logging.getLogger(__name__)
 
@@ -941,6 +942,19 @@ class _UnixPtyProcess:
         if data:
             await asyncio.to_thread(self._write_all, data)
 
+    async def exit_code(self) -> int | None:
+        code = self.process.poll()
+        if code is not None:
+            return int(code)
+        try:
+            return int(
+                await asyncio.wait_for(
+                    asyncio.to_thread(self.process.wait), timeout=0.25
+                )
+            )
+        except TimeoutError:
+            return None
+
     async def close(self) -> None:
         with contextlib.suppress(OSError):
             os.close(self.master_fd)
@@ -1000,6 +1014,17 @@ class _WindowsPtyProcess:
         if data:
             text = data.decode("utf-8", errors="replace")
             await asyncio.to_thread(self._write_once, text)
+
+    async def exit_code(self) -> int | None:
+        for _ in range(25):
+            try:
+                if not self.process.isalive():
+                    status = getattr(self.process, "exitstatus", None)
+                    return int(status) if status is not None else None
+            except Exception:
+                return None
+            await asyncio.sleep(0.01)
+        return None
 
     async def close(self) -> None:
         with contextlib.suppress(Exception):
@@ -1140,6 +1165,10 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
         while True:
             data = await process.read()
             if not data:
+                if await process.exit_code() == 0:
+                    await websocket.close(
+                        code=UI_TUI_EXIT_CODE, reason="TUI process exited"
+                    )
                 return
             last_activity = loop.time()
             await websocket.send_bytes(data)
