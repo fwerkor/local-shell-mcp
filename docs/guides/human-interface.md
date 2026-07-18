@@ -64,6 +64,18 @@ local-shell-mcp tui --api-base http://127.0.0.1:9876/api/ui
 
 ## Shared screens
 
+### Dashboard
+
+Dashboard is the default first screen and provides a read-only operational overview. It summarizes controller health, local and remote nodes, active tracked jobs and persistent sessions, alerts, recent MCP activity, open todos, and the current LSM version.
+
+The layout adapts to the terminal rather than requiring horizontal scrolling:
+
+- Wide terminals show separate node, workload, alert, activity, system-information, and multi-chart trend regions.
+- Medium terminals use two-column summaries and compact sparklines.
+- Narrow terminals retain health, resource usage, alerts, and active-workload essentials without overflowing the viewport.
+
+Dashboard polling is treated as human-interface activity and is excluded from MCP audit records.
+
 ### Files
 
 Files is an LSM-native three-pane file manager:
@@ -116,10 +128,10 @@ The top category bar and contextual footer actions can be clicked with a mouse i
 
 | Keys | Action |
 |---|---|
-| `Alt+1` … `Alt+5` | Open Files, Terminals, Todos, Audit, or Remotes. |
-| `F2` … `F6` | Alternative category shortcuts. |
+| `Alt+1` … `Alt+6` | Open Dashboard, Files, Terminals, Remotes, Audit, or Todos. |
+| `F2` … `F7` | Alternative category shortcuts. |
 | `F1` | Open the keyboard guide. |
-| `F7` | Refresh the machine list. |
+| `F9` | Refresh the machine list. |
 | `Ctrl+Q` | Exit the native OpenTUI process. |
 
 Terminals uses `Alt+N` for a new session, `Alt+W` to kill the selected session, `Alt+A` to toggle its audit rail, `Alt+R` to refresh, and `Alt+Left/Right` to switch sessions. The WebUI intercepts these chords before browser-level navigation or menu handling.

@@ -86,7 +86,7 @@ Full setup instructions are in the [documentation](https://fwerkor.github.io/loc
 
 ## Human interface
 
-The same service now includes a human-facing OpenTUI with Files, Terminals, Todos, Audit, and Remotes screens. The browser interface is an authenticated xterm.js/PTY shell around that exact OpenTUI application rather than a separate dashboard.
+The same service now includes a human-facing OpenTUI with Dashboard, Files, Terminals, Remotes, Audit, and Todos screens. Dashboard is the default read-only overview and adapts from a dense wide-screen system view to compact terminal summaries. The browser interface is an authenticated xterm.js/PTY shell around that exact OpenTUI application rather than a separate implementation.
 
 Open the WebUI on the service origin:
 

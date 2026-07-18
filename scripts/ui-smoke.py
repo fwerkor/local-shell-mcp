@@ -167,7 +167,12 @@ def run_browser(port: int) -> None:
                 }).then(response => response.status)"""
             )
             assert authenticated == 200
-            wait_for_terminal_text(page, "Files")
+            wait_for_terminal_text(page, "System health")
+            wait_for_terminal_text(page, "LSM v3.0.4")
+            dashboard = api_request(page, "/api/ui/dashboard")
+            assert dashboard["status"] == 200, dashboard
+            assert dashboard["body"]["data"]["health"] in {"healthy", "attention", "critical"}
+            click_tui_label(page, "Files")
             wait_for_terminal_text(page, "mouse-second.txt")
             click_tui_label(page, "mouse-second.txt")
             wait_for_terminal_text(page, "Preview · mouse-second.txt")

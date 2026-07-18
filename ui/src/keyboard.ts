@@ -11,6 +11,7 @@ const categorySequences: Record<string, string> = {
   "3": "\u001bOS",
   "4": "\u001b[15~",
   "5": "\u001b[17~",
+  "6": "\u001b[18~",
 }
 
 const browserShortcutSequences: Record<string, string> = {

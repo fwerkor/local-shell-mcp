@@ -2,6 +2,7 @@ import type {
   ApiEnvelope,
   AuditPayload,
   BootstrapPayload,
+  DashboardPayload,
   FilePreview,
   FilesPayload,
   InvitePayload,
@@ -64,6 +65,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   bootstrap(): Promise<BootstrapPayload> {
     return request("/bootstrap")
+  },
+  dashboard(signal?: AbortSignal): Promise<DashboardPayload> {
+    return request("/dashboard", { signal })
   },
   machines(): Promise<MachinePayload> {
     return request("/machines")
