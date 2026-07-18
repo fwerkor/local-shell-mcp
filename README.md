@@ -94,7 +94,7 @@ Open the WebUI on the service origin:
 http://127.0.0.1:8765/ui
 ```
 
-The WebUI uses the same OAuth flow as MCP. Its responsive terminal frame supports mouse interaction on the actual OpenTUI top bar, automatic PTY resizing, reconnects, fullscreen mode, and a cached Bing background with an animated fallback.
+The WebUI uses the same OAuth flow as MCP. Its responsive terminal frame supports mouse interaction on the actual OpenTUI top bar and contextual footer actions, automatic PTY resizing, reconnects, fullscreen mode, and a cached Bing background with an animated fallback.
 
 Standalone release executables embed the native OpenTUI runtime, while Docker images provide it inside the image. Start the service, then launch it without a human login prompt:
 
@@ -102,7 +102,7 @@ Standalone release executables embed the native OpenTUI runtime, while Docker im
 local-shell-mcp tui
 ```
 
-Files follows a Yazi-derived three-pane interaction model, renders bounded PNG/JPEG/GIF/WebP thumbnails directly in OpenTUI, and Docker images include `yazi` and `ya`. Manual actions entered through either human interface are excluded from the MCP audit log; the Audit screen and terminal audit rail show model-originated MCP activity.
+Files is an LSM-native three-pane file manager for local and remote machines. It renders bounded PNG/JPEG/GIF/WebP thumbnails directly in OpenTUI and provides consistent file operations through the shared service API. Manual actions entered through either human interface are excluded from the MCP audit log; the Audit screen and terminal audit rail show model-originated MCP activity.
 
 See the [human interface guide](https://fwerkor.github.io/local-shell-mcp/guides/human-interface/).
 
