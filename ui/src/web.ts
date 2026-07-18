@@ -352,13 +352,19 @@ fullscreenButton.addEventListener("click", () => {
   else void document.documentElement.requestFullscreen()
 })
 
-async function syncFullscreenKeyboardLock(): Promise<void> {
+function syncFullscreenKeyboardLock(): void {
   try {
-    if (document.fullscreenElement) await navigator.keyboard?.lock?.(["Escape"])
-    else navigator.keyboard?.unlock?.()
+    if (document.fullscreenElement) {
+      void navigator.keyboard?.lock?.(["Escape"])?.catch(() => undefined)
+    } else {
+      navigator.keyboard?.unlock?.()
+    }
   } catch {
     // Unsupported or denied keyboard locks fall back to Ctrl+[ for Escape.
   }
+}
+
+document.addEventListener("fullscreenchange", () => {
   const label = document.fullscreenElement ? "Exit fullscreen" : "Fullscreen"
   fullscreenButton.title = label
   fullscreenButton.setAttribute("aria-label", label)
@@ -366,9 +372,8 @@ async function syncFullscreenKeyboardLock(): Promise<void> {
   if (wideLabel) wideLabel.textContent = label
   terminal.focus()
   window.requestAnimationFrame(sendResize)
-}
-
-document.addEventListener("fullscreenchange", () => void syncFullscreenKeyboardLock())
+  syncFullscreenKeyboardLock()
+})
 
 async function boot(): Promise<void> {
   try {
