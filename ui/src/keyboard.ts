@@ -16,6 +16,7 @@ const categorySequences: Record<string, string> = {
 const browserShortcutSequences: Record<string, string> = {
   a: "\u001b[97;3u",
   n: "\u001b[110;3u",
+  q: "\u001b[113;3u",
   r: "\u001b[114;3u",
   w: "\u001b[119;3u",
   arrowleft: "\u001b[1;3D",

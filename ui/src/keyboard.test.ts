@@ -13,7 +13,7 @@ describe("browserShortcutSequence", () => {
   })
 
   test("encodes terminal actions as reliable Alt key events", () => {
-    for (const [key, name] of [["n", "n"], ["w", "w"], ["a", "a"], ["r", "r"], ["[", "["], ["]", "]"]] as const) {
+    for (const [key, name] of [["n", "n"], ["w", "w"], ["a", "a"], ["q", "q"], ["r", "r"], ["[", "["], ["]", "]"]] as const) {
       const sequence = shortcut(key)
       expect(sequence).toBeDefined()
       const parsed = parseKeypress(Buffer.from(sequence!), { useKittyKeyboard: true })
