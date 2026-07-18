@@ -24,7 +24,7 @@ from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Redire
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from .audit import query_audit, suppress_audit
+from .audit import get_audit_entry, query_audit, suppress_audit
 from .auth import Principal, require_scopes, verify_request
 from .fs_ops import (
     FileConflictError,
@@ -89,6 +89,48 @@ def _require_ui_scopes(
     if machine and machine != "local":
         required.append("remote:use")
     require_scopes(_request_principal(request), required)
+
+
+_AUDIT_FILE_WRITE_TOOLS = frozenset(
+    {
+        "write_file",
+        "edit_file",
+        "delete_file_or_dir",
+        "apply_patch",
+        "todo_write_tool",
+    }
+)
+_AUDIT_EXECUTE_TOOLS = frozenset(
+    {
+        "run_shell_tool",
+        "run_python_tool",
+        "shell_start",
+        "shell_send",
+        "shell_kill",
+        "job_start",
+        "job_stop",
+        "job_retry",
+    }
+)
+
+
+def _audit_detail_scopes(entry: dict[str, Any]) -> tuple[str, ...]:
+    required = {"shell:read"}
+    tool = str(entry.get("tool") or "")
+    operation = str(entry.get("operation") or "")
+    if tool in _AUDIT_FILE_WRITE_TOOLS:
+        required.add("shell:write")
+    if tool in _AUDIT_EXECUTE_TOOLS or operation in {"shell", "jobs"}:
+        required.add("shell:execute")
+    if operation == "browser":
+        required.add("browser:use")
+    if operation == "transfer":
+        required.add("file:share")
+    if operation == "remote" or str(entry.get("node") or "local") != "local":
+        required.add("remote:use")
+    if operation == "other":
+        required.update(UI_FULL_SCOPES)
+    return tuple(scope for scope in UI_FULL_SCOPES if scope in required)
 
 
 def _bounded_int(
@@ -694,6 +736,18 @@ async def api_audit(request: Request) -> Response:
         return _json_error(exc)
 
 
+async def api_audit_detail(request: Request) -> Response:
+    try:
+        entry_id = str(request.query_params.get("id") or "")
+        preview = await asyncio.to_thread(get_audit_entry, entry_id, full=False)
+        _require_ui_scopes(request, *_audit_detail_scopes(preview))
+        return _json_ok(await asyncio.to_thread(get_audit_entry, entry_id))
+    except ValueError as exc:
+        return _json_error(exc, status_code=404)
+    except Exception as exc:
+        return _json_error(exc)
+
+
 async def api_remotes(request: Request) -> Response:
     try:
         _require_ui_scopes(request, "remote:use")
@@ -1202,6 +1256,7 @@ def ui_routes() -> list[Any]:
         Route(UI_API_PREFIX + "/terminals/{action}", api_terminal_action, methods=["POST"]),
         Route(UI_API_PREFIX + "/todos", api_todos, methods=["GET", "PUT"]),
         Route(UI_API_PREFIX + "/audit", api_audit, methods=["GET"]),
+        Route(UI_API_PREFIX + "/audit/detail", api_audit_detail, methods=["GET"]),
         Route(UI_API_PREFIX + "/remotes", api_remotes, methods=["GET", "POST"]),
         Route(UI_API_PREFIX + "/remotes/{action}", api_remote_action, methods=["POST"]),
     ]
