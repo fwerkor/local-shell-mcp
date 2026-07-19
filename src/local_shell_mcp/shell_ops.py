@@ -44,6 +44,10 @@ _SHELL_START_LOCKS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio
     weakref.WeakKeyDictionary()
 )
 NATIVE_SHELL_BUFFER_BYTES = 1_000_000
+PERSISTENT_SHELL_MIN_COLUMNS = 20
+PERSISTENT_SHELL_MAX_COLUMNS = 1_600
+PERSISTENT_SHELL_MIN_ROWS = 3
+PERSISTENT_SHELL_MAX_ROWS = 500
 
 
 @dataclass
@@ -609,6 +613,64 @@ async def _start_shell_unlocked(
 async def start_shell(cwd: str = ".", name: str | None = None, command: str | None = None) -> dict:
     async with _shell_start_lock():
         return await _start_shell_unlocked(cwd, name, command)
+
+
+def _validate_persistent_shell_size(cols: int, rows: int) -> tuple[int, int]:
+    columns = int(cols)
+    lines = int(rows)
+    if not PERSISTENT_SHELL_MIN_COLUMNS <= columns <= PERSISTENT_SHELL_MAX_COLUMNS:
+        raise ValueError(
+            f"cols must be between {PERSISTENT_SHELL_MIN_COLUMNS} and "
+            f"{PERSISTENT_SHELL_MAX_COLUMNS}"
+        )
+    if not PERSISTENT_SHELL_MIN_ROWS <= lines <= PERSISTENT_SHELL_MAX_ROWS:
+        raise ValueError(
+            f"rows must be between {PERSISTENT_SHELL_MIN_ROWS} and "
+            f"{PERSISTENT_SHELL_MAX_ROWS}"
+        )
+    return columns, lines
+
+
+async def _native_resize_shell(session_id: str, cols: int, rows: int) -> dict:
+    _get_native_session(session_id)
+    return {
+        "session_id": session_id,
+        "cols": cols,
+        "rows": rows,
+        "resized": False,
+        "backend": "native",
+    }
+
+
+async def resize_shell(session_id: str, cols: int, rows: int) -> dict:
+    columns, lines = _validate_persistent_shell_size(cols, rows)
+    if _use_windows_persistent_shell_backend():
+        if conpty_ops.has_session(session_id):
+            return await conpty_ops.resize_shell(session_id, columns, lines)
+        return await _native_resize_shell(session_id, columns, lines)
+    if session_id in _NATIVE_SHELL_SESSIONS or resolve_tmux().path is None:
+        return await _native_resize_shell(session_id, columns, lines)
+
+    result = await tmux(
+        [
+            "resize-window",
+            "-t",
+            session_id,
+            "-x",
+            str(columns),
+            "-y",
+            str(lines),
+        ]
+    )
+    if not result.ok:
+        raise RuntimeError(result.stderr or result.stdout)
+    return {
+        "session_id": session_id,
+        "cols": columns,
+        "rows": lines,
+        "resized": True,
+        "backend": "tmux",
+    }
 
 
 async def send_shell(session_id: str, input_text: str, enter: bool = True) -> dict:
