@@ -2,7 +2,7 @@ import type { OptimizedBuffer, Renderable, TextareaRenderable } from "@opentui/c
 import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
-import { EmptyState, KeyHint, MachineSidebar, Modal, Panel, formatBytes, useVisibleRows } from "./components"
+import { EmptyState, KeyHint, Loading, MachineSidebar, Modal, Panel, formatBytes, useVisibleRows } from "./components"
 import { isDoubleClick, pathBreadcrumbs, type PointerClick } from "./file-navigation"
 import { calculateFilesLayout } from "./files-layout"
 import { handleSelectionScroll } from "./mouse"
@@ -209,6 +209,7 @@ export function FilesScreen({
   const [dialog, setDialog] = useState<Dialog>({ type: "none" })
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null)
   const [busy, setBusy] = useState(false)
+  const [loadError, setLoadError] = useState<{ scope: string; message: string } | null>(null)
   const [narrowPane, setNarrowPane] = useState<"list" | "preview">("list")
   const [previewBounds, setPreviewBounds] = useState<{ columns: number; rows: number } | null>(null)
   const editorRef = useRef<TextareaRenderable>(null)
@@ -219,6 +220,8 @@ export function FilesScreen({
   const machineRef = useRef(machine)
   machineRef.current = machine
   const activePayload = payloadMatches(payload, machine, path) ? payload : null
+  const activeScope = `${machine}\u0000${path}`
+  const activeError = loadError?.scope === activeScope ? loadError.message : null
 
   const entries = useMemo(
     () => (activePayload?.entries || []).filter((entry) => showHidden || !entry.hidden),
@@ -247,19 +250,24 @@ export function FilesScreen({
 
   const refresh = useCallback(async () => {
     const requestId = ++refreshRequest.current
+    const requestScope = `${machine}\u0000${path}`
     refreshController.current?.abort()
     const controller = new AbortController()
     refreshController.current = controller
     setBusy(true)
+    setLoadError((current) => current?.scope === requestScope ? null : current)
     try {
       const next = await api.files(machine, path, controller.signal)
       if (requestId !== refreshRequest.current || controller.signal.aborted) return
       setPayload(next)
+      setLoadError(null)
       setSelected((value) => clampIndex(value, next.entries.length))
       setStatus(`${machine}:${path}`)
     } catch (error) {
       if (requestId === refreshRequest.current && !controller.signal.aborted) {
-        setStatus(`Files: ${formatError(error)}`)
+        const message = formatError(error)
+        setLoadError({ scope: requestScope, message })
+        setStatus(`Files: ${message}`)
       }
     } finally {
       if (requestId === refreshRequest.current) {
@@ -634,14 +642,18 @@ export function FilesScreen({
                   paddingTop: 1,
                 }}
               >
-                <FileRows
-                  entries={parentEntries}
-                  selected={Math.max(0, parentEntries.findIndex((entry) => entry.path === path))}
-                  height={listHeight}
-                  onSelect={(entry) => {
-                    if (entry.type === "dir") setPath(entry.path)
-                  }}
-                />
+                {!activePayload ? (
+                  activeError ? <EmptyState title="Directory unavailable" detail="Press R to try again" /> : <Loading label="Loading parent directory" />
+                ) : (
+                  <FileRows
+                    entries={parentEntries}
+                    selected={Math.max(0, parentEntries.findIndex((entry) => entry.path === path))}
+                    height={listHeight}
+                    onSelect={(entry) => {
+                      if (entry.type === "dir") setPath(entry.path)
+                    }}
+                  />
+                )}
               </Panel>
             )}
             {(!narrow || narrowPane === "list") && (
@@ -658,7 +670,9 @@ export function FilesScreen({
                   paddingTop: 1,
                 }}
               >
-                {entries.length ? (
+                {!activePayload ? (
+                  activeError ? <EmptyState title="Directory unavailable" detail="Press R to try again" /> : <Loading label="Loading directory" />
+                ) : entries.length ? (
                   <FileRows
                     entries={entries}
                     selected={selected}
@@ -699,7 +713,11 @@ export function FilesScreen({
                     setPreviewBounds({ columns: measurement.columns, rows: measurement.rows })
                   }}
                 >
-                  <Preview preview={preview} entry={current} />
+                  {!activePayload ? (
+                    activeError ? <EmptyState title="Preview unavailable" detail="The directory could not be loaded" /> : <Loading label="Loading preview" />
+                  ) : (
+                    <Preview preview={preview} entry={current} />
+                  )}
                 </box>
               </Panel>
             )}

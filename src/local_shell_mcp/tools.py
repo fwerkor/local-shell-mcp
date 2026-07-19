@@ -70,15 +70,10 @@ from .tmux_helper import persistent_shell_backend_info
 from .todo_ops import todo_read, todo_write
 from .transfer_ops import (
     normalize_chunk_size,
-    transfer_abort_write,
     transfer_alloc_temp_path,
-    transfer_begin_write,
-    transfer_finish_write,
     transfer_pack_dir,
-    transfer_read_chunk,
     transfer_stat,
     transfer_unpack_archive,
-    transfer_write_chunk,
 )
 from .version import version_info as get_version_info
 
@@ -673,89 +668,38 @@ async def _copy_local_file_to_remote(
     stat = await asyncio.to_thread(transfer_stat, source_path, True)
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {source_path}")
-    if chunk_size is None:
-        ticket = create_download_ticket(
-            source_path,
-            stat["size"],
-            stat["sha256"],
-        )
-        try:
-            finish = await _remote_transfer_data(
-                dst_machine,
-                "transfer_download_url",
-                {
-                    "url": ticket["url"],
-                    "path": dst_path,
-                    "overwrite": overwrite,
-                    "expected_bytes": stat["size"],
-                    "expected_sha256": stat["sha256"],
-                    "timeout_s": get_settings().remote_job_timeout_s,
-                },
-                get_settings().remote_job_timeout_s,
-            )
-        finally:
-            revoke_transfer_ticket(ticket["token"])
-        chunks = 1
-        effective_chunk_size = stat["size"]
-        transport = "http-stream"
-    else:
-        effective_chunk_size = normalize_chunk_size(chunk_size)
-        begin = await _remote_transfer_data(
+    effective_chunk_size = (
+        stat["size"] if chunk_size is None else normalize_chunk_size(chunk_size)
+    )
+    ticket = create_download_ticket(
+        source_path,
+        stat["size"],
+        stat["sha256"],
+    )
+    try:
+        finish = await _remote_transfer_data(
             dst_machine,
-            "transfer_begin_write",
+            "transfer_download_url",
             {
+                "url": ticket["url"],
                 "path": dst_path,
                 "overwrite": overwrite,
                 "expected_bytes": stat["size"],
+                "expected_sha256": stat["sha256"],
+                "timeout_s": get_settings().remote_job_timeout_s,
             },
+            get_settings().remote_job_timeout_s,
         )
-        offset = 0
-        chunks = 0
-        try:
-            while offset < stat["size"]:
-                chunk = await asyncio.to_thread(
-                    transfer_read_chunk, source_path, offset, effective_chunk_size
-                )
-                await _remote_transfer_data(
-                    dst_machine,
-                    "transfer_write_chunk",
-                    {
-                        "path": dst_path,
-                        "transfer_id": begin["transfer_id"],
-                        "offset": offset,
-                        "data_b64": chunk["data_b64"],
-                        "expected_sha256": chunk["sha256"],
-                    },
-                )
-                offset += chunk["bytes"]
-                chunks += 1
-            finish = await _remote_transfer_data(
-                dst_machine,
-                "transfer_finish_write",
-                {
-                    "path": dst_path,
-                    "transfer_id": begin["transfer_id"],
-                    "expected_bytes": stat["size"],
-                    "expected_sha256": stat["sha256"],
-                },
-            )
-        except BaseException:
-            with suppress(Exception):
-                await _remote_transfer_data(
-                    dst_machine,
-                    "transfer_abort_write",
-                    {"path": dst_path, "transfer_id": begin["transfer_id"]},
-                )
-            raise
-        transport = "mcp-chunks"
+    finally:
+        revoke_transfer_ticket(ticket["token"])
     return {
         "source": {"machine": "controller", "path": stat["path"]},
         "destination": {"machine": dst_machine, "path": finish["path"]},
         "bytes": stat["size"],
         "sha256": stat.get("sha256"),
-        "chunks": chunks,
+        "chunks": 1,
         "chunk_size": effective_chunk_size,
-        "transport": transport,
+        "transport": "http-stream",
     }
 
 
@@ -771,81 +715,38 @@ async def _copy_remote_file_to_local(
     )
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {src_path}")
-    if chunk_size is None:
-        ticket = create_upload_ticket(
-            destination_path,
-            stat["size"],
-            stat["sha256"],
-            overwrite,
+    effective_chunk_size = (
+        stat["size"] if chunk_size is None else normalize_chunk_size(chunk_size)
+    )
+    ticket = create_upload_ticket(
+        destination_path,
+        stat["size"],
+        stat["sha256"],
+        overwrite,
+    )
+    try:
+        finish = await _remote_transfer_data(
+            src_machine,
+            "transfer_upload_url",
+            {
+                "path": src_path,
+                "url": ticket["url"],
+                "expected_bytes": stat["size"],
+                "expected_sha256": stat["sha256"],
+                "timeout_s": get_settings().remote_job_timeout_s,
+            },
+            get_settings().remote_job_timeout_s,
         )
-        try:
-            finish = await _remote_transfer_data(
-                src_machine,
-                "transfer_upload_url",
-                {
-                    "path": src_path,
-                    "url": ticket["url"],
-                    "expected_bytes": stat["size"],
-                    "expected_sha256": stat["sha256"],
-                    "timeout_s": get_settings().remote_job_timeout_s,
-                },
-                get_settings().remote_job_timeout_s,
-            )
-        finally:
-            revoke_transfer_ticket(ticket["token"])
-        chunks = 1
-        effective_chunk_size = stat["size"]
-        transport = "http-stream"
-    else:
-        effective_chunk_size = normalize_chunk_size(chunk_size)
-        begin = await asyncio.to_thread(
-            transfer_begin_write, destination_path, overwrite, stat["size"]
-        )
-        offset = 0
-        chunks = 0
-        try:
-            while offset < stat["size"]:
-                chunk = await _remote_transfer_data(
-                    src_machine,
-                    "transfer_read_chunk",
-                    {
-                        "path": src_path,
-                        "offset": offset,
-                        "chunk_size": effective_chunk_size,
-                    },
-                )
-                await asyncio.to_thread(
-                    transfer_write_chunk,
-                    destination_path,
-                    begin["transfer_id"],
-                    offset,
-                    chunk["data_b64"],
-                    chunk["sha256"],
-                )
-                offset += chunk["bytes"]
-                chunks += 1
-            finish = await asyncio.to_thread(
-                transfer_finish_write,
-                destination_path,
-                begin["transfer_id"],
-                stat["size"],
-                stat["sha256"],
-            )
-        except BaseException:
-            with suppress(Exception):
-                await asyncio.to_thread(
-                    transfer_abort_write, destination_path, begin["transfer_id"]
-                )
-            raise
-        transport = "mcp-chunks"
+    finally:
+        revoke_transfer_ticket(ticket["token"])
     return {
         "source": {"machine": src_machine, "path": stat["path"]},
         "destination": {"machine": "controller", "path": finish["path"]},
         "bytes": stat["size"],
         "sha256": stat.get("sha256"),
-        "chunks": chunks,
+        "chunks": 1,
         "chunk_size": effective_chunk_size,
-        "transport": transport,
+        "transport": "http-stream",
     }
 
 
@@ -883,11 +784,7 @@ async def _copy_remote_file_to_remote(
         "sha256": pull["sha256"],
         "chunks": pull["chunks"] + push["chunks"],
         "chunk_size": pull["chunk_size"],
-        "transport": (
-            "mcp-chunks-via-controller"
-            if pull["transport"] == "mcp-chunks" or push["transport"] == "mcp-chunks"
-            else "http-stream-via-controller"
-        ),
+        "transport": "http-stream-via-controller",
     }
 
 
@@ -1827,7 +1724,7 @@ def _register_workspace_write_tools(mcp: FastMCP, settings: Any) -> None:
         purpose: str | None = None,
         explanation: str | None = None,
     ) -> ToolResult:
-        """Copy a file or directory between the controller and remote machines. A missing machine denotes the controller; at least one endpoint must be remote."""
+        """Copy a file or directory between the controller and remote machines using raw HTTP streaming. A missing machine denotes the controller; at least one endpoint must be remote. chunk_size is retained for API compatibility and does not change the transport."""
         _audit_tool_purpose("transfer_path", purpose, explanation)
         return await _tool_call(
             _transfer_path,
