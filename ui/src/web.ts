@@ -39,6 +39,7 @@ const encoder = new TextEncoder()
 
 const terminal = new Terminal({
   allowProposedApi: false,
+  allowTransparency: true,
   convertEol: false,
   cursorBlink: true,
   cursorStyle: "bar",
@@ -52,7 +53,7 @@ const terminal = new Terminal({
   scrollback: 6_000,
   smoothScrollDuration: 80,
   theme: {
-    background: "#080b14",
+    background: "rgba(8, 11, 20, 0.86)",
     foreground: "#edf3ff",
     cursor: "#5eead4",
     cursorAccent: "#080b14",
