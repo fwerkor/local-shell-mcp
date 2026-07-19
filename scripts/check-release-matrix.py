@@ -7,6 +7,7 @@ import yaml
 
 REPO = Path(__file__).resolve().parents[1]
 RELEASE = REPO / ".github" / "workflows" / "release.yml"
+DOCKERFILE = REPO / "Dockerfile"
 EXPECTED_BINARY_ARTIFACTS = {
     "linux-x86_64",
     "linux-aarch64",
@@ -33,6 +34,11 @@ def step_script(job: dict, name: str) -> str:
 def main() -> int:
     workflow = yaml.safe_load(RELEASE.read_text(encoding="utf-8"))
     jobs = workflow.get("jobs", {})
+
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    if "COPY requirements-agent.txt pyproject.toml hatch_build.py README.md LICENSE /app/" not in dockerfile:
+        print("Docker builds must copy hatch_build.py before installing the project.")
+        return 1
 
     python_job = jobs.get("build-python-package", {})
     python_artifacts = matrix_values(python_job, "artifact")
