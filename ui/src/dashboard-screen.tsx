@@ -508,7 +508,7 @@ export function DashboardScreen({
 }) {
   const [payload, setPayload] = useState<DashboardPayload | null>(null)
   const [history, setHistory] = useState<TrendSample[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const request = useRef(0)
   const controller = useRef<AbortController | null>(null)
   const layout = dashboardLayout(width, height)
