@@ -24,6 +24,14 @@ export function isDoubleClick(
   )
 }
 
+export function selectionIndexForPath(
+  entries: readonly { path: string }[],
+  targetPath: string,
+): number | null {
+  const index = entries.findIndex((entry) => entry.path === targetPath)
+  return index >= 0 ? index : null
+}
+
 export function pathBreadcrumbs(path: string): PathBreadcrumb[] {
   if (!path || path === ".") return [{ label: ".", path: "." }]
 
