@@ -252,7 +252,7 @@ function ActiveWorkloads({ payload, width, rows }: { payload: DashboardPayload; 
   )
 }
 
-function Alerts({ alerts, width, rows }: { alerts: DashboardAlert[]; width: number; rows: number }) {
+export function Alerts({ alerts, width, rows }: { alerts: DashboardAlert[]; width: number; rows: number }) {
   const visible = alerts.slice(0, rows)
   return (
     <Panel title={`Needs attention · ${alerts.length}`} style={{ flexGrow: 1, padding: 1 }}>
@@ -262,7 +262,10 @@ function Alerts({ alerts, width, rows }: { alerts: DashboardAlert[]; width: numb
         </box>
       ) : (
         visible.map((alert, index) => (
-          <box key={`${alert.title}-${index}`} style={{ flexDirection: "column", marginBottom: 1 }}>
+          <box
+            key={`${alert.title}-${index}`}
+            style={{ height: width >= 34 ? 2 : 1, flexDirection: "column", flexShrink: 0 }}
+          >
             <box style={{ flexDirection: "row" }}>
               <text fg={severityColor(alert.severity)} attributes={1} content={`${alert.severity.toUpperCase().slice(0, 4).padEnd(5)} `} />
               <text fg={theme.text} content={truncate(alert.title, Math.max(10, width - 11))} />
