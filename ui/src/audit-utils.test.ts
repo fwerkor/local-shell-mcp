@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import {
   AUDIT_OPERATIONS,
+  auditListLayout,
   auditInput,
   auditOutput,
+  fitAuditColumn,
   formatAuditValue,
   selectionAfterRefresh,
 } from "./audit-utils"
@@ -58,6 +60,41 @@ describe("audit formatting", () => {
       result: { revoked: true },
       related_events: [{ event: "download_link_revoked", path: "/tmp/report.txt" }],
     })
+  })
+})
+
+describe("audit wide layout", () => {
+  test("caps the list pane and leaves the majority of a wide screen to details", () => {
+    const layout = auditListLayout([
+      {
+        ...entry("wide", 1),
+        node: "remote-worker-123456",
+        operation: "transfer",
+        tool: "playwright_run_script_tool",
+      },
+    ], 198)
+
+    expect(layout.paneWidth).toBeLessThanOrEqual(86)
+    expect(198 - layout.paneWidth - 1).toBeGreaterThan(layout.paneWidth)
+  })
+
+  test("keeps ordinary node, operation, and tool names intact on wide screens", () => {
+    const call = {
+      ...entry("wide", 1),
+      node: "remote-worker-123456",
+      operation: "transfer",
+      tool: "playwright_run_script_tool",
+    }
+    const layout = auditListLayout([call], 198)
+
+    expect(fitAuditColumn(call.node, layout.nodeWidth).trimEnd()).toBe(call.node)
+    expect(fitAuditColumn(call.operation, layout.operationWidth).trimEnd()).toBe(call.operation)
+    expect(fitAuditColumn(call.tool, layout.toolWidth).trimEnd()).toBe(call.tool)
+  })
+
+  test("preserves the minimum detail width at the horizontal breakpoint", () => {
+    const layout = auditListLayout([entry("compact", 1)], 110)
+    expect(110 - layout.paneWidth - 1).toBeGreaterThanOrEqual(44)
   })
 })
 

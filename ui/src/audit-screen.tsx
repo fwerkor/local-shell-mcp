@@ -3,8 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import {
   AUDIT_OPERATIONS,
+  auditListLayout,
   auditInput,
   auditOutput,
+  fitAuditColumn,
   formatAuditValue,
   selectionAfterRefresh,
 } from "./audit-utils"
@@ -89,6 +91,8 @@ export function AuditScreen({
   const current = entries[selected]
   const displayed = detail?.id === current?.id ? detail : current
   const narrow = width < 70
+  const horizontal = width >= 110
+  const listLayout = useMemo(() => auditListLayout(entries, width), [entries, width])
   const tableHeight = Math.max(6, height - 15)
   const { rows, start } = useVisibleRows(entries, selected, tableHeight)
 
@@ -230,7 +234,7 @@ export function AuditScreen({
     : ""
   const inputText = displayed ? formatAuditValue(auditInput(displayed), "No input recorded") : ""
   const duration = displayed ? durationLabel(displayed) : ""
-  const detailHeight = width >= 110 ? "100%" : Math.max(14, Math.floor(height * 0.42))
+  const detailHeight = horizontal ? "100%" : Math.max(14, Math.floor(height * 0.42))
 
   return (
     <box style={{ flexGrow: 1, flexDirection: "column", gap: 1 }}>
@@ -265,8 +269,16 @@ export function AuditScreen({
           {session && <text fg={theme.yellow} content={`session:${session}  `} />}
         </box>
       )}
-      <box style={{ flexGrow: 1, flexDirection: width >= 110 ? "row" : "column", gap: 1 }}>
-        <Panel title={`Audit records · ${loaded ? entries.length : "—"}${loading ? " · syncing" : ""}`} active accent={colors.accent} activeBackground={colors.panel} style={{ flexGrow: 1, paddingTop: 1 }}>
+      <box style={{ flexGrow: 1, flexDirection: horizontal ? "row" : "column", gap: 1 }}>
+        <Panel
+          title={`Audit records · ${loaded ? entries.length : "—"}${loading ? " · syncing" : ""}`}
+          active
+          accent={colors.accent}
+          activeBackground={colors.panel}
+          style={horizontal
+            ? { width: listLayout.paneWidth, flexShrink: 0, paddingTop: 1 }
+            : { flexGrow: 1, paddingTop: 1 }}
+        >
           {!loaded ? (
             loading ? <Loading label="Loading audit records" /> : <EmptyState title="Audit unavailable" detail="Press r to try again" />
           ) : entries.length === 0 ? (
@@ -281,8 +293,8 @@ export function AuditScreen({
             >
               <box style={{ height: 2, flexDirection: "row", paddingLeft: 1, paddingRight: 1 }}>
                 <text fg={theme.faint} content="TIME       " />
-                {!narrow && <text fg={theme.faint} content="NODE              " />}
-                {!narrow && <text fg={theme.faint} content="OPERATION  " />}
+                {!narrow && <text fg={theme.faint} content={`${"NODE".padEnd(listLayout.nodeWidth)} `} />}
+                {!narrow && <text fg={theme.faint} content={`${"OPERATION".padEnd(listLayout.operationWidth)} `} />}
                 <text fg={theme.faint} content="EVENT / TOOL" />
               </box>
               {rows.map((entry, offset) => {
@@ -301,9 +313,13 @@ export function AuditScreen({
                     }}
                   >
                     <text fg={theme.faint} content={`${new Date(entry.ts * 1000).toLocaleTimeString().padEnd(11)} `} />
-                    {!narrow && <text fg={active ? theme.text : theme.muted} content={`${entry.node.slice(0, 16).padEnd(17)} `} />}
-                    {!narrow && <text fg={entryColor(entry)} content={`${entry.operation.slice(0, 9).padEnd(10)} `} />}
-                    <text fg={active ? theme.text : theme.muted} attributes={active ? 1 : 0} content={entry.tool || entry.event} />
+                    {!narrow && <text fg={active ? theme.text : theme.muted} content={`${fitAuditColumn(entry.node, listLayout.nodeWidth)} `} />}
+                    {!narrow && <text fg={entryColor(entry)} content={`${fitAuditColumn(entry.operation, listLayout.operationWidth)} `} />}
+                    <text
+                      fg={active ? theme.text : theme.muted}
+                      attributes={active ? 1 : 0}
+                      content={fitAuditColumn(entry.tool || entry.event, listLayout.toolWidth)}
+                    />
                   </box>
                 )
               })}
@@ -313,7 +329,7 @@ export function AuditScreen({
         <Panel
           title="Call details"
           style={{
-            width: width >= 110 ? Math.max(44, Math.floor(width * 0.38)) : "100%",
+            ...(horizontal ? { flexGrow: 1, minWidth: 44 } : { width: "100%" }),
             height: detailHeight,
             padding: 1,
             gap: 1,
