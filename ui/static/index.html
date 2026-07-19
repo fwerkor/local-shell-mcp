@@ -4,14 +4,30 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#07111f" />
+    <meta name="theme-color" content="#050a16" />
     <title>local-shell-mcp</title>
     <link rel="stylesheet" href="__LSM_UI_PATH__/assets/web.css" />
   </head>
   <body>
+    <svg class="glass-filters" aria-hidden="true" focusable="false">
+      <defs>
+        <filter id="liquid-distortion" x="-30%" y="-30%" width="160%" height="160%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.009 0.017" numOctaves="2" seed="13" result="noise">
+            <animate attributeName="baseFrequency" dur="14s" values="0.009 0.017;0.014 0.010;0.009 0.017" repeatCount="indefinite" />
+          </feTurbulence>
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="18" xChannelSelector="R" yChannelSelector="B" />
+        </filter>
+      </defs>
+    </svg>
     <div class="wallpaper" aria-hidden="true"></div>
     <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
     <main class="shell">
+      <div class="liquid-surface" aria-hidden="true">
+        <span class="liquid-lens liquid-lens--one"></span>
+        <span class="liquid-lens liquid-lens--two"></span>
+        <span class="liquid-lens liquid-lens--three"></span>
+        <span class="liquid-rim"></span>
+      </div>
       <header class="chrome">
         <div class="brand">
           <span class="brand-mark">LSM</span>

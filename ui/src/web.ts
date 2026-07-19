@@ -1,3 +1,4 @@
+import "./liquid-glass"
 import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
 import { createImageAddon } from "./image-support"
