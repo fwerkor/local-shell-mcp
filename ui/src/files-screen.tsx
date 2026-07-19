@@ -3,7 +3,12 @@ import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, MachineSidebar, Modal, Panel, formatBytes, useVisibleRows } from "./components"
-import { isDoubleClick, pathBreadcrumbs, type PointerClick } from "./file-navigation"
+import {
+  isDoubleClick,
+  pathBreadcrumbs,
+  selectionIndexForPath,
+  type PointerClick,
+} from "./file-navigation"
 import { calculateFilesLayout } from "./files-layout"
 import { handleSelectionScroll } from "./mouse"
 import { clampIndex, nextPreviewMeasurement, payloadMatches } from "./state-utils"
@@ -138,7 +143,20 @@ function ImagePreview({ preview, entry }: { preview: FilePreview; entry: FileEnt
   )
 }
 
-function Preview({ preview, entry }: { preview: FilePreview | null; entry?: FileEntry }) {
+function Preview({
+  preview,
+  entry,
+  showHidden,
+  onDirectoryEntrySelect,
+}: {
+  preview: FilePreview | null
+  entry?: FileEntry
+  showHidden: boolean
+  onDirectoryEntrySelect?: (entry: FileEntry) => void
+}) {
+  const directoryEntries = preview?.kind === "directory"
+    ? (preview.entries || []).filter((item) => showHidden || !item.hidden)
+    : []
   return (
     <box style={{ flexGrow: 1, minWidth: 0, minHeight: 0, overflow: "hidden", flexDirection: "column" }}>
       {!entry ? (
@@ -153,14 +171,21 @@ function Preview({ preview, entry }: { preview: FilePreview | null; entry?: File
           verticalScrollbarOptions={{ visible: true }}
         >
           <text fg={colors.accent} attributes={1} content={entry.name} />
-          <text fg={theme.faint} content={`${(preview.entries || []).length} visible entries`} />
+          <text fg={theme.faint} content={`${directoryEntries.length} visible entries`} />
           <text fg={theme.borderBright} content="" />
-          {(preview.entries || []).slice(0, 30).map((item) => (
-            <text
+          {directoryEntries.slice(0, 30).map((item) => (
+            <box
               key={item.path}
-              fg={item.type === "dir" ? colors.accent : theme.muted}
-              content={`${icon(item)} ${item.name}`}
-            />
+              onMouseUp={(event) => {
+                if (event.button === 0) onDirectoryEntrySelect?.(item)
+              }}
+              style={{ height: 1, flexDirection: "row" }}
+            >
+              <text
+                fg={item.type === "dir" ? colors.accent : theme.muted}
+                content={`${icon(item)} ${item.name}`}
+              />
+            </box>
           ))}
         </scrollbox>
       ) : preview.kind === "image" ? (
@@ -216,6 +241,7 @@ export function FilesScreen({
   const refreshController = useRef<AbortController | null>(null)
   const measuredPreviewViewport = useRef("")
   const lastCurrentClick = useRef<PointerClick | null>(null)
+  const pendingSelection = useRef<{ machine: string; directory: string; target: string } | null>(null)
   const machineRef = useRef(machine)
   machineRef.current = machine
   const activePayload = payloadMatches(payload, machine, path) ? payload : null
@@ -235,6 +261,20 @@ export function FilesScreen({
   useEffect(() => {
     setSelected((value) => clampIndex(value, entries.length))
   }, [entries.length])
+
+  useEffect(() => {
+    const pending = pendingSelection.current
+    if (
+      !pending
+      || pending.machine !== machine
+      || pending.directory !== path
+      || activePayload?.path !== path
+    ) return
+    pendingSelection.current = null
+    const index = selectionIndexForPath(entries, pending.target)
+    if (index !== null) setSelected(index)
+  }, [activePayload?.path, entries, machine, path])
+
   const filesLayout = useMemo(() => calculateFilesLayout(width), [width])
   const { narrow, compact } = filesLayout
   const fallbackPreviewColumns = Math.max(
@@ -270,6 +310,7 @@ export function FilesScreen({
   }, [machine, path, setStatus])
 
   useEffect(() => {
+    pendingSelection.current = null
     setPayload(null)
     setPreview(null)
     setSelected(0)
@@ -409,6 +450,7 @@ export function FilesScreen({
     if (!machines.length) return
     const index = Math.max(0, machines.findIndex((item) => item.name === machine))
     const next = (index + delta + machines.length) % machines.length
+    pendingSelection.current = null
     setPayload(null)
     setPreview(null)
     setDialog({ type: "none" })
@@ -421,9 +463,15 @@ export function FilesScreen({
   const moveSelection = (delta: number) => {
     setSelected((value) => clampIndex(value + delta, entries.length))
   }
-  const goToParent = () => setPath(activePayload?.parent || ".")
+  const navigateTo = (nextPath: string, targetPath?: string) => {
+    pendingSelection.current = targetPath
+      ? { machine, directory: nextPath, target: targetPath }
+      : null
+    setPath(nextPath)
+  }
+  const goToParent = () => navigateTo(activePayload?.parent || ".")
   const activateEntry = (entry: FileEntry) => {
-    if (entry.type === "dir") setPath(entry.path)
+    if (entry.type === "dir") navigateTo(entry.path)
     else void openEditor(entry)
   }
   const activateCurrent = () => current && activateEntry(current)
@@ -436,6 +484,11 @@ export function FilesScreen({
       return
     }
     lastCurrentClick.current = { target: entry.path, at }
+  }
+  const selectPreviewEntry = (entry: FileEntry) => {
+    if (!current || current.type !== "dir") return
+    navigateTo(current.path, entry.path)
+    if (narrow) setNarrowPane("list")
   }
   const toggleNarrowPane = () => setNarrowPane((value) => (value === "list" ? "preview" : "list"))
   const createFile = () => setDialog({
@@ -561,6 +614,7 @@ export function FilesScreen({
             selectedColor={colors.selected}
             onSelect={(nextMachine) => {
               if (nextMachine === machine) return
+              pendingSelection.current = null
               setPayload(null)
               setPreview(null)
               setDialog({ type: "none" })
@@ -580,7 +634,7 @@ export function FilesScreen({
                   {index > 0 && <text fg={theme.faint} content=" / " />}
                   <text
                     onMouseUp={(event) => {
-                      if (event.button === 0 && !active && dialog.type === "none") setPath(crumb.path)
+                      if (event.button === 0 && !active && dialog.type === "none") navigateTo(crumb.path)
                     }}
                     fg={active ? colors.accent : theme.muted}
                     attributes={active ? 1 : 0}
@@ -639,7 +693,7 @@ export function FilesScreen({
                   selected={Math.max(0, parentEntries.findIndex((entry) => entry.path === path))}
                   height={listHeight}
                   onSelect={(entry) => {
-                    if (entry.type === "dir") setPath(entry.path)
+                    if (entry.type === "dir") navigateTo(entry.path)
                   }}
                 />
               </Panel>
@@ -699,7 +753,12 @@ export function FilesScreen({
                     setPreviewBounds({ columns: measurement.columns, rows: measurement.rows })
                   }}
                 >
-                  <Preview preview={preview} entry={current} />
+                  <Preview
+                    preview={preview}
+                    entry={current}
+                    showHidden={showHidden}
+                    onDirectoryEntrySelect={selectPreviewEntry}
+                  />
                 </box>
               </Panel>
             )}

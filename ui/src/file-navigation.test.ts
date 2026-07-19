@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { DOUBLE_CLICK_WINDOW_MS, isDoubleClick, pathBreadcrumbs } from "./file-navigation"
+import {
+  DOUBLE_CLICK_WINDOW_MS,
+  isDoubleClick,
+  pathBreadcrumbs,
+  selectionIndexForPath,
+} from "./file-navigation"
 
 describe("file pointer navigation", () => {
   test("requires two presses on the same item within the double-click window", () => {
@@ -8,6 +13,15 @@ describe("file pointer navigation", () => {
     expect(isDoubleClick(first, "tests", 1_100)).toBe(false)
     expect(isDoubleClick(first, "src", 1_000 + DOUBLE_CLICK_WINDOW_MS + 1)).toBe(false)
     expect(isDoubleClick(first, "src", 999)).toBe(false)
+  })
+
+  test("restores the clicked preview entry by its full path", () => {
+    const entries = [
+      { path: "src/index.ts" },
+      { path: "src/components/index.ts" },
+    ]
+    expect(selectionIndexForPath(entries, "src/components/index.ts")).toBe(1)
+    expect(selectionIndexForPath(entries, "src/missing.ts")).toBeNull()
   })
 })
 
