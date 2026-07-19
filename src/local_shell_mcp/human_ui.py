@@ -1257,7 +1257,10 @@ def resolve_tui_command() -> list[str]:
         if candidate.is_file():
             return [str(candidate)]
 
-    embedded = materialize_embedded_tui(settings.state_dir)
+    try:
+        embedded = materialize_embedded_tui(settings.state_dir)
+    except (OSError, EOFError) as exc:
+        raise RuntimeError(f"Unable to prepare embedded OpenTUI runtime: {exc}") from exc
     if embedded is not None:
         return [str(embedded)]
 

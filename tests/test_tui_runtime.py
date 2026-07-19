@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gzip
 import os
+import stat
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -9,9 +10,11 @@ import pytest
 
 from local_shell_mcp import tui_runtime
 
+PAYLOAD_NAME = "local-shell-mcp-tui.exe.gz" if os.name == "nt" else "local-shell-mcp-tui.gz"
+
 
 def test_materialize_embedded_tui(tmp_path: Path) -> None:
-    payload = tmp_path / ("local-shell-mcp-tui.exe.gz" if os.name == "nt" else "local-shell-mcp-tui.gz")
+    payload = tmp_path / PAYLOAD_NAME
     with gzip.open(payload, "wb") as archive:
         archive.write(b"runtime")
 
@@ -22,6 +25,7 @@ def test_materialize_embedded_tui(tmp_path: Path) -> None:
     assert target.read_bytes() == b"runtime"
     if os.name != "nt":
         assert os.access(target, os.X_OK)
+        assert target.stat().st_mode & (stat.S_IXGRP | stat.S_IXOTH) == 0
     assert tui_runtime.materialize_embedded_tui(state_dir, payload=payload) == target
 
 
@@ -32,7 +36,7 @@ def test_materialize_embedded_tui_returns_none_without_payload(tmp_path: Path) -
 
 
 def test_materialize_embedded_tui_is_concurrency_safe(tmp_path: Path) -> None:
-    payload = tmp_path / "local-shell-mcp-tui.gz"
+    payload = tmp_path / PAYLOAD_NAME
     with gzip.open(payload, "wb") as archive:
         archive.write(b"runtime" * 1024)
 
@@ -54,7 +58,7 @@ def test_materialize_embedded_tui_is_concurrency_safe(tmp_path: Path) -> None:
 def test_materialize_embedded_tui_accepts_completed_windows_race(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    payload = tmp_path / "local-shell-mcp-tui.gz"
+    payload = tmp_path / PAYLOAD_NAME
     with gzip.open(payload, "wb") as archive:
         archive.write(b"runtime")
 
@@ -75,7 +79,7 @@ def test_materialize_embedded_tui_accepts_completed_windows_race(
 def test_materialize_embedded_tui_propagates_replace_failure_without_winner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    payload = tmp_path / "local-shell-mcp-tui.gz"
+    payload = tmp_path / PAYLOAD_NAME
     with gzip.open(payload, "wb") as archive:
         archive.write(b"runtime")
 

@@ -45,12 +45,7 @@ def materialize_embedded_tui(
             shutil.copyfileobj(source, destination)
     try:
         if os.name != "nt":
-            temporary.chmod(
-                temporary.stat().st_mode
-                | stat.S_IXUSR
-                | stat.S_IXGRP
-                | stat.S_IXOTH
-            )
+            temporary.chmod(temporary.stat().st_mode | stat.S_IXUSR)
         try:
             os.replace(temporary, target)
         except PermissionError:
