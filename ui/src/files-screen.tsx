@@ -3,7 +3,13 @@ import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, Loading, MachineSidebar, Modal, Panel, formatBytes, useVisibleRows } from "./components"
-import { isDoubleClick, pathBreadcrumbs, type PointerClick } from "./file-navigation"
+import {
+  isDoubleClick,
+  pathBreadcrumbs,
+  selectionIndexForPath,
+  type PointerClick,
+} from "./file-navigation"
+import { calculateFilesLayout } from "./files-layout"
 import { handleSelectionScroll } from "./mouse"
 import { clampIndex, nextPreviewMeasurement, payloadMatches } from "./state-utils"
 import { drawClippedSuperSampleBuffer } from "./image-preview"
@@ -137,42 +143,67 @@ function ImagePreview({ preview, entry }: { preview: FilePreview; entry: FileEnt
   )
 }
 
-function Preview({ preview, entry }: { preview: FilePreview | null; entry?: FileEntry }) {
-  if (!entry) return <EmptyState title="No selection" detail="Choose an entry to inspect" />
-  if (!preview) return <EmptyState title={entry.name} detail="Loading preview…" />
-  if (preview.kind === "directory") {
-    const entries = preview.entries || []
-    return (
-      <scrollbox
-        focused={false}
-        style={{ flexGrow: 1, paddingLeft: 1, paddingRight: 1 }}
-        scrollY
-        verticalScrollbarOptions={{ visible: true }}
-      >
-        <text fg={colors.accent} attributes={1} content={entry.name} />
-        <text fg={theme.faint} content={`${entries.length} visible entries`} />
-        <text fg={theme.borderBright} content="" />
-        {entries.slice(0, 30).map((item) => (
-          <text
-            key={item.path}
-            fg={item.type === "dir" ? colors.accent : theme.muted}
-            content={`${icon(item)} ${item.name}`}
-          />
-        ))}
-      </scrollbox>
-    )
-  }
-  if (preview.kind === "image") return <ImagePreview preview={preview} entry={entry} />
-  const text = String(preview.content || preview.preview || "")
+function Preview({
+  preview,
+  entry,
+  showHidden,
+  onDirectoryEntrySelect,
+}: {
+  preview: FilePreview | null
+  entry?: FileEntry
+  showHidden: boolean
+  onDirectoryEntrySelect?: (entry: FileEntry) => void
+}) {
+  const directoryEntries = preview?.kind === "directory"
+    ? (preview.entries || []).filter((item) => showHidden || !item.hidden)
+    : []
   return (
-    <scrollbox
-      focused={false}
-      style={{ flexGrow: 1, paddingLeft: 1, paddingRight: 1 }}
-      scrollY
-      verticalScrollbarOptions={{ visible: true }}
-    >
-      <text fg={preview.kind === "binary" ? theme.yellow : theme.muted} content={text || "Empty file"} />
-    </scrollbox>
+    <box style={{ flexGrow: 1, minWidth: 0, minHeight: 0, overflow: "hidden", flexDirection: "column" }}>
+      {!entry ? (
+        <EmptyState title="No selection" detail="Choose an entry to inspect" />
+      ) : !preview ? (
+        <EmptyState title={entry.name} detail="Loading preview…" />
+      ) : preview.kind === "directory" ? (
+        <scrollbox
+          focused={false}
+          style={{ flexGrow: 1, minWidth: 0, minHeight: 0, paddingLeft: 1, paddingRight: 1 }}
+          scrollY
+          verticalScrollbarOptions={{ visible: true }}
+        >
+          <text fg={colors.accent} attributes={1} content={entry.name} />
+          <text fg={theme.faint} content={`${directoryEntries.length} visible entries`} />
+          <text fg={theme.borderBright} content="" />
+          {directoryEntries.slice(0, 30).map((item) => (
+            <box
+              key={item.path}
+              onMouseUp={(event) => {
+                if (event.button === 0) onDirectoryEntrySelect?.(item)
+              }}
+              style={{ height: 1, flexDirection: "row" }}
+            >
+              <text
+                fg={item.type === "dir" ? colors.accent : theme.muted}
+                content={`${icon(item)} ${item.name}`}
+              />
+            </box>
+          ))}
+        </scrollbox>
+      ) : preview.kind === "image" ? (
+        <ImagePreview preview={preview} entry={entry} />
+      ) : (
+        <scrollbox
+          focused={false}
+          style={{ flexGrow: 1, minWidth: 0, minHeight: 0, paddingLeft: 1, paddingRight: 1 }}
+          scrollY
+          verticalScrollbarOptions={{ visible: true }}
+        >
+          <text
+            fg={preview.kind === "binary" ? theme.yellow : theme.muted}
+            content={String(preview.content || preview.preview || "") || "Empty file"}
+          />
+        </scrollbox>
+      )}
+    </box>
   )
 }
 
@@ -211,6 +242,7 @@ export function FilesScreen({
   const refreshController = useRef<AbortController | null>(null)
   const measuredPreviewViewport = useRef("")
   const lastCurrentClick = useRef<PointerClick | null>(null)
+  const pendingSelection = useRef<{ machine: string; directory: string; target: string } | null>(null)
   const machineRef = useRef(machine)
   machineRef.current = machine
   const activePayload = payloadMatches(payload, machine, path) ? payload : null
@@ -232,8 +264,22 @@ export function FilesScreen({
   useEffect(() => {
     setSelected((value) => clampIndex(value, entries.length))
   }, [entries.length])
-  const narrow = width < 70
-  const compact = width < 105
+
+  useEffect(() => {
+    const pending = pendingSelection.current
+    if (
+      !pending
+      || pending.machine !== machine
+      || pending.directory !== path
+      || activePayload?.path !== path
+    ) return
+    pendingSelection.current = null
+    const index = selectionIndexForPath(entries, pending.target)
+    if (index !== null) setSelected(index)
+  }, [activePayload?.path, entries, machine, path])
+
+  const filesLayout = useMemo(() => calculateFilesLayout(width), [width])
+  const { narrow, compact } = filesLayout
   const fallbackPreviewColumns = Math.max(
     8,
     narrow ? width - 8 : compact ? Math.floor(width * 0.45) - 6 : Math.floor(width * 0.4) - 8,
@@ -272,6 +318,7 @@ export function FilesScreen({
   }, [machine, path, setStatus])
 
   useEffect(() => {
+    pendingSelection.current = null
     setPayload(null)
     setPreview(null)
     setSelected(0)
@@ -411,6 +458,7 @@ export function FilesScreen({
     if (!machines.length) return
     const index = Math.max(0, machines.findIndex((item) => item.name === machine))
     const next = (index + delta + machines.length) % machines.length
+    pendingSelection.current = null
     setPayload(null)
     setPreview(null)
     setDialog({ type: "none" })
@@ -423,9 +471,15 @@ export function FilesScreen({
   const moveSelection = (delta: number) => {
     setSelected((value) => clampIndex(value + delta, entries.length))
   }
-  const goToParent = () => setPath(activePayload?.parent || ".")
+  const navigateTo = (nextPath: string, targetPath?: string) => {
+    pendingSelection.current = targetPath
+      ? { machine, directory: nextPath, target: targetPath }
+      : null
+    setPath(nextPath)
+  }
+  const goToParent = () => navigateTo(activePayload?.parent || ".")
   const activateEntry = (entry: FileEntry) => {
-    if (entry.type === "dir") setPath(entry.path)
+    if (entry.type === "dir") navigateTo(entry.path)
     else void openEditor(entry)
   }
   const activateCurrent = () => current && activateEntry(current)
@@ -438,6 +492,11 @@ export function FilesScreen({
       return
     }
     lastCurrentClick.current = { target: entry.path, at }
+  }
+  const selectPreviewEntry = (entry: FileEntry) => {
+    if (!current || current.type !== "dir") return
+    navigateTo(current.path, entry.path)
+    if (narrow) setNarrowPane("list")
   }
   const toggleNarrowPane = () => setNarrowPane((value) => (value === "list" ? "preview" : "list"))
   const createFile = () => setDialog({
@@ -563,6 +622,7 @@ export function FilesScreen({
             selectedColor={colors.selected}
             onSelect={(nextMachine) => {
               if (nextMachine === machine) return
+              pendingSelection.current = null
               setPayload(null)
               setPreview(null)
               setDialog({ type: "none" })
@@ -582,7 +642,7 @@ export function FilesScreen({
                   {index > 0 && <text fg={theme.faint} content=" / " />}
                   <text
                     onMouseUp={(event) => {
-                      if (event.button === 0 && !active && dialog.type === "none") setPath(crumb.path)
+                      if (event.button === 0 && !active && dialog.type === "none") navigateTo(crumb.path)
                     }}
                     fg={active ? colors.accent : theme.muted}
                     attributes={active ? 1 : 0}
@@ -626,7 +686,16 @@ export function FilesScreen({
           )}
           <box style={{ flexGrow: 1, flexDirection: "row", gap: 1 }}>
             {!compact && (
-              <Panel title="Parent" style={{ width: "24%", paddingTop: 1 }}>
+              <Panel
+                title="Parent"
+                style={{
+                  width: filesLayout.parentWidth,
+                  flexGrow: 0,
+                  flexShrink: 0,
+                  overflow: "hidden",
+                  paddingTop: 1,
+                }}
+              >
                 {!activePayload ? (
                   activeError ? <EmptyState title="Directory unavailable" detail="Press R to try again" /> : <Loading label="Loading parent directory" />
                 ) : (
@@ -635,14 +704,26 @@ export function FilesScreen({
                     selected={Math.max(0, parentEntries.findIndex((entry) => entry.path === path))}
                     height={listHeight}
                     onSelect={(entry) => {
-                      if (entry.type === "dir") setPath(entry.path)
+                      if (entry.type === "dir") navigateTo(entry.path)
                     }}
                   />
                 )}
               </Panel>
             )}
             {(!narrow || narrowPane === "list") && (
-              <Panel title="Current" active accent={colors.accent} activeBackground={colors.panel} style={{ width: narrow ? "100%" : compact ? "48%" : "38%", paddingTop: 1 }}>
+              <Panel
+                title="Current"
+                active
+                accent={colors.accent}
+                activeBackground={colors.panel}
+                style={{
+                  width: filesLayout.currentWidth,
+                  flexGrow: 0,
+                  flexShrink: 0,
+                  overflow: "hidden",
+                  paddingTop: 1,
+                }}
+              >
                 {!activePayload ? (
                   activeError ? <EmptyState title="Directory unavailable" detail="Press R to try again" /> : <Loading label="Loading directory" />
                 ) : entries.length ? (
@@ -659,9 +740,25 @@ export function FilesScreen({
               </Panel>
             )}
             {(!narrow || narrowPane === "preview") && (
-              <Panel title={current ? `Preview · ${current.name}` : "Preview"} style={{ flexGrow: 1, width: narrow ? "100%" : undefined, paddingTop: 1 }}>
+              <Panel
+                title="Preview"
+                style={{
+                  width: filesLayout.previewWidth,
+                  flexGrow: 0,
+                  flexShrink: 0,
+                  overflow: "hidden",
+                  paddingTop: 1,
+                }}
+              >
+                <box style={{ height: 1, flexShrink: 0, minWidth: 0, overflow: "hidden", paddingLeft: 1, paddingRight: 1 }}>
+                  <text
+                    fg={current ? colors.accent : theme.faint}
+                    attributes={current ? 1 : 0}
+                    content={current ? `Selected · ${current.name}` : "No selection"}
+                  />
+                </box>
                 <box
-                  style={{ flexGrow: 1, flexDirection: "column" }}
+                  style={{ flexGrow: 1, minWidth: 0, minHeight: 0, overflow: "hidden", flexDirection: "column" }}
                   onSizeChange={function (this: Renderable) {
                     const measurement = nextPreviewMeasurement(
                       measuredPreviewViewport.current,
@@ -677,7 +774,12 @@ export function FilesScreen({
                   {!activePayload ? (
                     activeError ? <EmptyState title="Preview unavailable" detail="The directory could not be loaded" /> : <Loading label="Loading preview" />
                   ) : (
-                    <Preview preview={preview} entry={current} />
+                    <Preview
+                      preview={preview}
+                      entry={current}
+                      showHidden={showHidden}
+                      onDirectoryEntrySelect={selectPreviewEntry}
+                    />
                   )}
                 </box>
               </Panel>

@@ -5,6 +5,13 @@ import { api, formatError } from "./api"
 import { EmptyState, KeyHint, Loading, MachineSidebar, Modal, Panel, formatAge } from "./components"
 import { clampIndex, scopedItems } from "./state-utils"
 import {
+  createCommandHistory,
+  navigateCommandHistory,
+  recordCommand,
+  resetCommandHistoryNavigation,
+  type CommandHistoryState,
+} from "./terminal-history"
+import {
   terminalDisplayRows,
   terminalScrollLimit,
   terminalViewportRows,
@@ -118,6 +125,8 @@ export function TerminalsScreen({
   const [dialog, setDialog] = useState<TerminalDialog>({ type: "none" })
   const [busy, setBusy] = useState(false)
   const commandInputRef = useRef<InputRenderable | null>(null)
+  const commandHistoriesRef = useRef(new Map<string, CommandHistoryState>())
+  const settingHistoryValueRef = useRef(false)
   const scrollOffsetRef = useRef(0)
   const pendingOutputRef = useRef<string | null>(null)
   const rawQueue = useRef<Promise<void>>(Promise.resolve())
@@ -135,6 +144,7 @@ export function TerminalsScreen({
   const selectedOutputError = outputError?.scope === selectedOutputScope ? outputError.message : null
   const selected = Math.max(0, activeSessions.findIndex((session) => session.session_id === selectedSession?.session_id))
   const selectedSessionIdRef = useRef<string | null>(selectedSession?.session_id || null)
+  const commandHistoryKey = selectedSession ? `${machine}\u0000${selectedSession.session_id}` : null
   machineRef.current = machine
   selectedSessionIdRef.current = selectedSession?.session_id || null
   const compact = width < 96
@@ -397,6 +407,10 @@ export function TerminalsScreen({
 
   const submitCommand = (value: string) => {
     if (!selectedSession || value.length === 0) return
+    if (commandHistoryKey) {
+      const history = commandHistoriesRef.current.get(commandHistoryKey) || createCommandHistory()
+      commandHistoriesRef.current.set(commandHistoryKey, recordCommand(history, value))
+    }
     pendingOutputRef.current = null
     scrollOffsetRef.current = 0
     setScrollOffset(0)
@@ -404,6 +418,26 @@ export function TerminalsScreen({
       if (commandInputRef.current) commandInputRef.current.value = ""
     }, 0)
     void send(value, true)
+  }
+
+  const navigateCommandInputHistory = (direction: "previous" | "next") => {
+    if (!commandHistoryKey || !commandInputRef.current) return
+    const history = commandHistoriesRef.current.get(commandHistoryKey) || createCommandHistory()
+    const navigation = navigateCommandHistory(history, direction, commandInputRef.current.value)
+    commandHistoriesRef.current.set(commandHistoryKey, navigation.history)
+    if (navigation.value === null) return
+
+    settingHistoryValueRef.current = true
+    commandInputRef.current.value = navigation.value
+    settingHistoryValueRef.current = false
+  }
+
+  const handleCommandInput = () => {
+    if (settingHistoryValueRef.current || !commandHistoryKey) return
+    const history = commandHistoriesRef.current.get(commandHistoryKey)
+    if (history && history.cursor !== null) {
+      commandHistoriesRef.current.set(commandHistoryKey, resetCommandHistoryNavigation(history))
+    }
   }
 
   const startSession = async (value: string) => {
@@ -508,7 +542,17 @@ export function TerminalsScreen({
     }
 
     if (key.name === "f8") toggleRawMode()
-    else if (key.name === "pageup" && selectedSession) {
+    else if (
+      selectedSession &&
+      !key.ctrl &&
+      !key.option &&
+      !key.meta &&
+      (key.name === "up" || key.name === "down")
+    ) {
+      key.preventDefault()
+      key.stopPropagation()
+      navigateCommandInputHistory(key.name === "up" ? "previous" : "next")
+    } else if (key.name === "pageup" && selectedSession) {
       key.preventDefault()
       key.stopPropagation()
       scrollOutput(terminalRows)
@@ -608,6 +652,7 @@ export function TerminalsScreen({
                 ref={commandInputRef}
                 focused={Boolean(selectedSession) && !rawMode && dialog.type === "none"}
                 placeholder={!sessionsReady ? "Loading terminals…" : selectedSession ? "Enter a command…" : "Create a terminal first"}
+                onInput={handleCommandInput}
                 onSubmit={(value: unknown) => submitCommand(typeof value === "string" ? value : "")}
               />
             </Panel>
