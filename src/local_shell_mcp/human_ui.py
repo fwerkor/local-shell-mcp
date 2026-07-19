@@ -41,7 +41,7 @@ from .jobs import list_jobs
 from .oauth import ALL_OAUTH_SCOPES
 from .remote import remote_manager
 from .settings import get_settings
-from .shell_ops import kill_shell, list_shells, read_shell, send_shell, start_shell
+from .shell_ops import kill_shell, list_shells, read_shell, resize_shell, send_shell, start_shell
 from .todo_ops import TodoConflictError, todo_read, todo_write
 from .ui_security import UI_LOCAL_TOKEN_ENV, get_or_create_ui_local_token
 from .version import version_info
@@ -1029,6 +1029,35 @@ async def api_terminal_action(request: Request) -> Response:
                 machine,
                 lambda: send_shell(args["session_id"], args["input_text"], args["enter"]),
                 "shell_send",
+                args,
+            )
+        elif action == "resize":
+            session_id = str(body.get("session_id") or "")
+            if not session_id:
+                raise ValueError("session_id is required")
+            if body.get("cols") is None or body.get("rows") is None:
+                raise ValueError("cols and rows are required")
+            args = {
+                "session_id": session_id,
+                "cols": _bounded_int(
+                    body.get("cols"),
+                    default=80,
+                    minimum=UI_MIN_COLUMNS,
+                    maximum=UI_MAX_COLUMNS,
+                    label="cols",
+                ),
+                "rows": _bounded_int(
+                    body.get("rows"),
+                    default=24,
+                    minimum=3,
+                    maximum=UI_MAX_ROWS,
+                    label="rows",
+                ),
+            }
+            result = await _machine_dispatch(
+                machine,
+                lambda: resize_shell(args["session_id"], args["cols"], args["rows"]),
+                "shell_resize",
                 args,
             )
         elif action == "kill":
