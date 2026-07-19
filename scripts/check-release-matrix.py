@@ -7,6 +7,7 @@ import yaml
 
 REPO = Path(__file__).resolve().parents[1]
 RELEASE = REPO / ".github" / "workflows" / "release.yml"
+DOCKERFILE = REPO / "Dockerfile"
 EXPECTED_BINARY_ARTIFACTS = {
     "linux-x86_64",
     "linux-aarch64",
@@ -14,6 +15,7 @@ EXPECTED_BINARY_ARTIFACTS = {
     "macos-aarch64",
     "windows-x86_64",
 }
+EXPECTED_PYTHON_ARTIFACTS = EXPECTED_BINARY_ARTIFACTS
 EXPECTED_DOCKER_PLATFORMS = {"linux/amd64", "linux/arm64"}
 
 
@@ -32,6 +34,36 @@ def step_script(job: dict, name: str) -> str:
 def main() -> int:
     workflow = yaml.safe_load(RELEASE.read_text(encoding="utf-8"))
     jobs = workflow.get("jobs", {})
+
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    if "COPY requirements-agent.txt pyproject.toml hatch_build.py README.md LICENSE /app/" not in dockerfile:
+        print("Docker builds must copy hatch_build.py before installing the project.")
+        return 1
+
+    python_job = jobs.get("build-python-package", {})
+    python_artifacts = matrix_values(python_job, "artifact")
+    missing_python = sorted(EXPECTED_PYTHON_ARTIFACTS - python_artifacts)
+    extra_python = sorted(python_artifacts - EXPECTED_PYTHON_ARTIFACTS)
+    if missing_python or extra_python:
+        print("Release Python wheel matrix mismatch.")
+        print(f"missing: {missing_python}")
+        print(f"extra: {extra_python}")
+        return 1
+
+    ui_build_script = step_script(python_job, "Build OpenTUI runtime and embedded WebUI")
+    if "bun run build" not in ui_build_script:
+        print("Release wheels must compile the platform-native OpenTUI runtime.")
+        return 1
+
+    wheel_build_script = step_script(python_job, "Build platform wheel")
+    if "python -m build --wheel" not in wheel_build_script:
+        print("Release wheels must be built directly from the platform checkout.")
+        return 1
+
+    wheel_smoke_script = step_script(python_job, "Install wheel and smoke test packaged UI")
+    if "standalone-ui-smoke.py" not in wheel_smoke_script:
+        print("Release wheels must exercise their packaged OpenTUI runtime.")
+        return 1
 
     binary_job = jobs.get("build-binary", {})
     binary_artifacts = matrix_values(binary_job, "artifact")
@@ -67,7 +99,7 @@ def main() -> int:
         return 1
 
     print(
-        "Release build matrices and single-executable packaging checks passed for all expected platforms."
+        "Release build matrices, platform wheels, and single-executable packaging checks passed for all expected platforms."
     )
     return 0
 

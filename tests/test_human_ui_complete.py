@@ -462,6 +462,15 @@ def test_resolve_spawn_and_tui_cli_branches(tmp_path, monkeypatch):
     assert ui.resolve_tui_command() == [str(candidate)]
     candidate.unlink()
 
+    def fail_materialize(_state_dir):
+        raise PermissionError("denied")
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(ui.Path, "is_file", lambda self: False)
+        scoped.setattr(ui, "materialize_embedded_tui", fail_materialize)
+        with pytest.raises(RuntimeError, match="Unable to prepare embedded OpenTUI runtime"):
+            ui.resolve_tui_command()
+
     source = tmp_path / "tui.tsx"
     source.write_text("x", encoding="utf-8")
     with monkeypatch.context() as scoped:

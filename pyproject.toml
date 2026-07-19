@@ -59,6 +59,9 @@ local-shell-mcp = "local_shell_mcp.main:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/local_shell_mcp"]
 
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

@@ -109,9 +109,28 @@ jobs:
           PY
 
   build-python-package:
-    name: Build Python package
-    runs-on: ubuntu-latest
+    name: Build Python package (${{ matrix.artifact }})
+    runs-on: ${{ matrix.runner }}
     needs: validate-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact: linux-x86_64
+            runner: ubuntu-latest
+            build_sdist: true
+          - artifact: linux-aarch64
+            runner: ubuntu-24.04-arm
+            build_sdist: false
+          - artifact: macos-x86_64
+            runner: macos-15-intel
+            build_sdist: false
+          - artifact: macos-aarch64
+            runner: macos-15
+            build_sdist: false
+          - artifact: windows-x86_64
+            runner: windows-latest
+            build_sdist: false
     steps:
       - uses: actions/checkout@v6
 
@@ -124,20 +143,48 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
-      - name: Build embedded WebUI assets
+      - name: Build OpenTUI runtime and embedded WebUI
         working-directory: ui
         run: |
           bun install --frozen-lockfile
-          bun run build:web
+          bun run typecheck
+          bun run build
 
-      - name: Build wheel and source distribution
+      - name: Build platform wheel
         run: |
           python -m pip install --upgrade pip build
-          python -m build
+          python -m build --wheel
+
+      - name: Build source distribution
+        if: matrix.build_sdist
+        run: python -m build --sdist
+
+      - name: Install wheel and smoke test packaged UI
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m venv /tmp/local-shell-mcp-wheel-venv
+          /tmp/local-shell-mcp-wheel-venv/bin/python -m pip install --upgrade pip
+          /tmp/local-shell-mcp-wheel-venv/bin/python -m pip install dist/*.whl
+          /tmp/local-shell-mcp-wheel-venv/bin/local-shell-mcp --version
+          /tmp/local-shell-mcp-wheel-venv/bin/python scripts/standalone-ui-smoke.py \
+            --server /tmp/local-shell-mcp-wheel-venv/bin/local-shell-mcp
+
+      - name: Install wheel and smoke test packaged UI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m venv $env:TEMP\local-shell-mcp-wheel-venv
+          & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\python.exe -m pip install --upgrade pip
+          & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\python.exe -m pip install (Get-Item dist\*.whl).FullName
+          & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\local-shell-mcp.exe --version
+          & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\python.exe scripts/standalone-ui-smoke.py `
+            --server $env:TEMP\local-shell-mcp-wheel-venv\Scripts\local-shell-mcp.exe
 
       - uses: actions/upload-artifact@v7
         with:
-          name: python-dist
+          name: python-dist-${{ matrix.artifact }}
           path: dist/*
           if-no-files-found: error
 
@@ -432,8 +479,9 @@ jobs:
       - name: Download Python package artifacts
         uses: actions/download-artifact@v8
         with:
-          name: python-dist
+          pattern: python-dist-*
           path: dist
+          merge-multiple: true
 
       - name: Download binary artifacts
         uses: actions/download-artifact@v8

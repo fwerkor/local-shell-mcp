@@ -43,6 +43,7 @@ from .remote import remote_manager
 from .settings import get_settings
 from .shell_ops import kill_shell, list_shells, read_shell, resize_shell, send_shell, start_shell
 from .todo_ops import TodoConflictError, todo_read, todo_write
+from .tui_runtime import materialize_embedded_tui
 from .ui_security import UI_LOCAL_TOKEN_ENV, get_or_create_ui_local_token
 from .version import version_info
 
@@ -1255,6 +1256,13 @@ def resolve_tui_command() -> list[str]:
     for candidate in sidecar_candidates:
         if candidate.is_file():
             return [str(candidate)]
+
+    try:
+        embedded = materialize_embedded_tui(settings.state_dir)
+    except (OSError, EOFError) as exc:
+        raise RuntimeError(f"Unable to prepare embedded OpenTUI runtime: {exc}") from exc
+    if embedded is not None:
+        return [str(embedded)]
 
     source = _tui_source_path()
     bun = shutil.which("bun")

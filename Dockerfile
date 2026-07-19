@@ -121,7 +121,7 @@ ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 RUN npm install -g yarn@1.22.22 pnpm@9.15.9 typescript@5.7.3 ts-node@10.9.2
 
 WORKDIR /app
-COPY requirements-agent.txt pyproject.toml README.md LICENSE /app/
+COPY requirements-agent.txt pyproject.toml hatch_build.py README.md LICENSE /app/
 RUN pip install --no-cache-dir -r requirements-agent.txt
 COPY src /app/src
 COPY --from=tmux-builder /out/tmux /tmp/local-shell-mcp-tmux
