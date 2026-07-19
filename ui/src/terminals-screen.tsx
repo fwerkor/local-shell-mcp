@@ -304,6 +304,26 @@ export function TerminalsScreen({
   }, [machine, selectedSession?.session_id])
 
   useEffect(() => {
+    if (!selectedSession) return
+    const targetMachine = machine
+    const sessionId = selectedSession.session_id
+    const timer = setTimeout(() => {
+      void api.terminalAction("resize", {
+        machine: targetMachine,
+        session_id: sessionId,
+        cols: terminalColumns,
+        rows: terminalRows,
+      }).catch((error) => {
+        if (
+          machineRef.current === targetMachine
+          && selectedSessionIdRef.current === sessionId
+        ) setStatus(`Resize: ${formatError(error)}`)
+      })
+    }, 120)
+    return () => clearTimeout(timer)
+  }, [machine, selectedSession?.session_id, setStatus, terminalColumns, terminalRows])
+
+  useEffect(() => {
     const clamped = Math.min(scrollOffset, maxScrollOffset)
     if (clamped !== scrollOffset) setScrollOffset(clamped)
     scrollOffsetRef.current = clamped
