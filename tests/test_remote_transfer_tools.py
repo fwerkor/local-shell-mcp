@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -69,7 +70,8 @@ class FakeRemoteManager:
                 data = transfer_abort_write(args["path"], args["transfer_id"])
             elif tool == "transfer_upload_url":
                 source = resolve_path(args["path"], must_exist=True)
-                response = self.client.put(
+                response = await asyncio.to_thread(
+                    self.client.put,
                     urlsplit(args["url"]).path,
                     content=source.read_bytes(),
                 )
@@ -78,7 +80,7 @@ class FakeRemoteManager:
                     raise RuntimeError(payload)
                 data = payload["data"]
             elif tool == "transfer_download_url":
-                response = self.client.get(urlsplit(args["url"]).path)
+                response = await asyncio.to_thread(self.client.get, urlsplit(args["url"]).path)
                 if response.status_code >= 400:
                     raise RuntimeError(response.json())
                 begin = transfer_begin_write(
@@ -137,17 +139,42 @@ async def test_remote_copy_file_streams_between_workers(tmp_path, monkeypatch):
     root = _workspace(tmp_path, monkeypatch)
     (root / "src-machine").mkdir()
     (root / "dst-machine").mkdir()
-    data = b"abcdef" * 1000
+    data = bytes(range(256)) * 24_000
     (root / "src-machine" / "payload.bin").write_bytes(data)
+    calls: list[str] = []
+    transfer = tools._remote_transfer_data
+
+    async def record_transfer(machine, tool, args, timeout_s=None):
+        calls.append(tool)
+        return await transfer(machine, tool, args, timeout_s)
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", record_transfer)
 
     result = await tools._copy_remote_file_to_remote(
         "src", "src-machine/payload.bin", "dst", "dst-machine/payload.bin", True, 128
     )
 
-    assert result["chunks"] > 2
-    assert result["transport"] == "mcp-chunks-via-controller"
+    assert result["chunks"] == 2
+    assert result["chunk_size"] == 128
+    assert result["transport"] == "http-stream-via-controller"
     assert result["bytes"] == len(data)
+    assert calls == [
+        "transfer_stat",
+        "transfer_upload_url",
+        "transfer_download_url",
+    ]
     assert (root / "dst-machine" / "payload.bin").read_bytes() == data
+
+
+@pytest.mark.asyncio
+async def test_streaming_transfer_preserves_chunk_size_validation(tmp_path, monkeypatch):
+    root = _workspace(tmp_path, monkeypatch)
+    (root / "payload.bin").write_bytes(b"content")
+
+    with pytest.raises(ValueError, match="chunk_size must be greater than zero"):
+        await tools._copy_local_file_to_remote(
+            "payload.bin", "dst", "copied.bin", True, 0
+        )
 
 
 @pytest.mark.asyncio

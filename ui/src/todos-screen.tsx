@@ -1,10 +1,11 @@
 import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
-import { EmptyState, KeyHint, Modal, Panel, useVisibleRows } from "./components"
+import { EmptyState, KeyHint, Loading, Modal, Panel, useVisibleRows } from "./components"
 import { handleSelectionScroll } from "./mouse"
 import { clampIndex, nextValue, updateTodo } from "./state-utils"
 import { screenTheme, theme } from "./theme"
+import { TODO_ROW_HEIGHT, todoVisibleRowCount } from "./todos-layout"
 import type { TodoItem, TodoPayload } from "./types"
 
 const colors = screenTheme.Todos
@@ -55,6 +56,8 @@ export function TodosScreen({
   const [filter, setFilter] = useState<"all" | "open" | "completed">("all")
   const [dialog, setDialog] = useState<TodoDialog>({ type: "none" })
   const [saving, setSaving] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [loaded, setLoaded] = useState(false)
   const stateRef = useRef<{ todos: TodoItem[]; revision: number }>({ todos: [], revision: 0 })
   const mutationQueue = useRef<Promise<void>>(Promise.resolve())
   const pendingMutations = useRef(0)
@@ -66,8 +69,8 @@ export function TodosScreen({
     return todos
   }, [filter, todos])
   const current = visible[clampIndex(selected, visible.length)]
-  const listHeight = Math.max(5, height - 13)
-  const { rows, start } = useVisibleRows(visible, selected, listHeight)
+  const visibleRowCount = todoVisibleRowCount(width, height)
+  const { rows, start } = useVisibleRows(visible, selected, visibleRowCount)
 
   const selectFilter = (next: "all" | "open" | "completed") => {
     setFilter(next)
@@ -89,10 +92,14 @@ export function TodosScreen({
   }, [])
 
   const load = useCallback(async () => {
+    setLoading(true)
     try {
       applyPayload(await api.todos())
+      if (mounted.current) setLoaded(true)
     } catch (error) {
       if (mounted.current) setStatus(`Todos: ${formatError(error)}`)
+    } finally {
+      if (mounted.current) setLoading(false)
     }
   }, [applyPayload, setStatus])
 
@@ -222,9 +229,9 @@ export function TodosScreen({
       {width < 76 ? (
         <Panel title="Summary" active accent={colors.accent} activeBackground={colors.panel} style={{ height: 3, alignItems: "center", justifyContent: "center" }}>
           <box style={{ flexDirection: "row" }}>
-            <text onMouseDown={() => selectFilter("all")} fg={colors.accent} content={`A:${counts.total}  `} />
-            <text onMouseDown={() => selectFilter("open")} fg={theme.yellow} content={`O:${counts.open}  `} />
-            <text onMouseDown={() => selectFilter("completed")} fg={theme.green} content={`D:${counts.completed}  `} />
+            <text onMouseDown={() => selectFilter("all")} fg={colors.accent} content={`A:${loaded ? counts.total : "—"}  `} />
+            <text onMouseDown={() => selectFilter("open")} fg={theme.yellow} content={`O:${loaded ? counts.open : "—"}  `} />
+            <text onMouseDown={() => selectFilter("completed")} fg={theme.green} content={`D:${loaded ? counts.completed : "—"}  `} />
             <text onMouseDown={cycleFilter} fg={theme.muted} content={`V:${filter.slice(0, 1).toUpperCase()}`} />
           </box>
         </Panel>
@@ -236,7 +243,7 @@ export function TodosScreen({
             { label: "Done", value: counts.completed, color: theme.green, filter: "completed" as const },
           ].map(({ label, value, color, filter: nextFilter }) => (
             <Panel key={label} title={label} onMouseDown={() => selectFilter(nextFilter)} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
-              <text fg={color} attributes={1} content={String(value)} />
+              <text fg={color} attributes={1} content={loaded ? String(value) : "—"} />
             </Panel>
           ))}
           <Panel title="View" active accent={colors.accent} activeBackground={colors.panel} onMouseDown={cycleFilter} style={{ width: Math.max(20, Math.floor(width * 0.2)), alignItems: "center", justifyContent: "center" }}>
@@ -244,8 +251,16 @@ export function TodosScreen({
           </Panel>
         </box>
       )}
-      <Panel title={`Todos · ${visible.length}`} active accent={colors.accent} activeBackground={colors.panel} style={{ flexGrow: 1, paddingTop: 1 }}>
-        {visible.length === 0 ? (
+      <Panel
+        title={`Todos · ${loaded ? visible.length : "—"}`}
+        active
+        accent={colors.accent}
+        activeBackground={colors.panel}
+        style={{ flexGrow: 1, paddingTop: 1, overflow: "hidden" }}
+      >
+        {!loaded ? (
+          loading ? <Loading label="Loading todos" /> : <EmptyState title="Todos unavailable" detail="Press r to try again" />
+        ) : visible.length === 0 ? (
           <EmptyState title="No matching todos" detail="Press n to add an item" />
         ) : (
           <box
@@ -253,7 +268,7 @@ export function TodosScreen({
               event,
               (delta) => setSelected((value) => clampIndex(value + delta, visible.length)),
             )}
-            style={{ flexDirection: "column", flexGrow: 1 }}
+            style={{ flexDirection: "column", flexGrow: 1, flexShrink: 1, overflow: "hidden" }}
           >
             {rows.map((todo, offset) => {
               const index = start + offset
@@ -263,16 +278,27 @@ export function TodosScreen({
                   key={todo.id}
                   onMouseDown={() => setSelected(index)}
                   style={{
-                    height: 3,
+                    height: TODO_ROW_HEIGHT,
+                    flexShrink: 0,
                     flexDirection: "row",
                     alignItems: "center",
                     paddingLeft: 1,
                     paddingRight: 1,
+                    overflow: "hidden",
                     backgroundColor: active ? colors.selected : index % 2 ? theme.panelAlt : undefined,
                   }}
                 >
                   <text fg={statusColor(todo.status)} attributes={1} content={`${statusIcon(todo.status)} `} />
-                  <box style={{ flexDirection: "column", flexGrow: 1 }}>
+                  <box
+                    style={{
+                      width: 0,
+                      height: 2,
+                      flexDirection: "column",
+                      flexGrow: 1,
+                      flexShrink: 1,
+                      overflow: "hidden",
+                    }}
+                  >
                     <text
                       fg={todo.status === "completed" ? theme.faint : active ? theme.text : theme.muted}
                       attributes={active ? 1 : 0}
@@ -280,7 +306,7 @@ export function TodosScreen({
                     />
                     <text fg={theme.faint} content={todo.id} />
                   </box>
-                  <box style={{ width: 10, alignItems: "center", justifyContent: "center", backgroundColor: theme.panelSoft }}>
+                  <box style={{ width: 10, flexShrink: 0, alignItems: "center", justifyContent: "center", backgroundColor: theme.panelSoft }}>
                     <text fg={priorityColor(todo.priority)} attributes={1} content={todo.priority.toUpperCase()} />
                   </box>
                 </box>
@@ -300,7 +326,7 @@ export function TodosScreen({
           { key: "e", label: "edit", onPress: editCurrent, disabled: footerLocked || !current },
           { key: "d", label: "delete", onPress: deleteCurrent, disabled: footerLocked || !current },
           { key: "f", label: "filter", onPress: cycleFilter, disabled: footerLocked },
-          { key: "r", label: "refresh", onPress: () => void load(), disabled: footerLocked || saving },
+          { key: "r", label: loading ? "refreshing" : "refresh", onPress: () => void load(), disabled: footerLocked || saving || loading },
         ]}
       />
       {saving && (

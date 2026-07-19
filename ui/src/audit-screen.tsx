@@ -10,7 +10,7 @@ import {
   formatAuditValue,
   selectionAfterRefresh,
 } from "./audit-utils"
-import { EmptyState, KeyHint, Modal, Panel, useVisibleRows } from "./components"
+import { EmptyState, KeyHint, Loading, Modal, Panel, useVisibleRows } from "./components"
 import { handleSelectionScroll } from "./mouse"
 import { clampIndex } from "./state-utils"
 import { screenTheme, theme } from "./theme"
@@ -74,7 +74,8 @@ export function AuditScreen({
   const [event, setEvent] = useState("")
   const [session, setSession] = useState("")
   const [dialog, setDialog] = useState<AuditDialog>({ type: "none" })
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [loaded, setLoaded] = useState(false)
   const [detail, setDetail] = useState<AuditEntry | null>(null)
   const refreshRequest = useRef(0)
   const refreshController = useRef<AbortController | null>(null)
@@ -142,6 +143,7 @@ export function AuditScreen({
       selectedRef.current = nextSelected
       setEntries(payload.entries)
       setSelected(nextSelected)
+      setLoaded(true)
       setStatus(`Audit: ${payload.total_matched} matching calls and events`)
     } catch (error) {
       if (requestId === refreshRequest.current && !controller.signal.aborted) {
@@ -269,7 +271,7 @@ export function AuditScreen({
       )}
       <box style={{ flexGrow: 1, flexDirection: horizontal ? "row" : "column", gap: 1 }}>
         <Panel
-          title={`Audit records · ${entries.length}${loading ? " · syncing" : ""}`}
+          title={`Audit records · ${loaded ? entries.length : "—"}${loading ? " · syncing" : ""}`}
           active
           accent={colors.accent}
           activeBackground={colors.panel}
@@ -277,7 +279,9 @@ export function AuditScreen({
             ? { width: listLayout.paneWidth, flexShrink: 0, paddingTop: 1 }
             : { flexGrow: 1, paddingTop: 1 }}
         >
-          {entries.length === 0 ? (
+          {!loaded ? (
+            loading ? <Loading label="Loading audit records" /> : <EmptyState title="Audit unavailable" detail="Press r to try again" />
+          ) : entries.length === 0 ? (
             <EmptyState title="No matching audit records" detail="Adjust filters or wait for MCP activity" />
           ) : (
             <box
@@ -353,6 +357,8 @@ export function AuditScreen({
                 </scrollbox>
               </Panel>
             </>
+          ) : !loaded ? (
+            loading ? <Loading label="Loading audit details" /> : <EmptyState title="Audit unavailable" detail="Press r to try again" />
           ) : (
             <EmptyState title="No record selected" detail="Use j/k to inspect entries" />
           )}
