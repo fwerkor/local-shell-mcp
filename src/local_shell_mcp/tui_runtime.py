@@ -51,7 +51,14 @@ def materialize_embedded_tui(
                 | stat.S_IXGRP
                 | stat.S_IXOTH
             )
-        os.replace(temporary, target)
+        try:
+            os.replace(temporary, target)
+        except PermissionError:
+            # Windows can reject replacing a target that another concurrent
+            # materializer has just completed. Accept that winner only after
+            # confirming the fully written target now exists.
+            if not target.is_file():
+                raise
     finally:
         with contextlib.suppress(OSError):
             temporary.unlink()
