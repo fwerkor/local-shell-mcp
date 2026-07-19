@@ -251,6 +251,28 @@ async def start_shell(
     }
 
 
+async def resize_shell(session_id: str, cols: int, rows: int) -> dict:
+    session = await _get_session(session_id)
+    resize = getattr(session.process, "setwinsize", None)
+    if not callable(resize):
+        return {
+            "session_id": session_id,
+            "cols": cols,
+            "rows": rows,
+            "resized": False,
+            "backend": "conpty",
+        }
+    async with session.lock:
+        await asyncio.to_thread(resize, rows, cols)
+    return {
+        "session_id": session_id,
+        "cols": cols,
+        "rows": rows,
+        "resized": True,
+        "backend": "conpty",
+    }
+
+
 async def send_shell(session_id: str, input_text: str, enter: bool = True) -> dict:
     session = await _get_session(session_id)
     data = input_text + ("\r" if enter else "")

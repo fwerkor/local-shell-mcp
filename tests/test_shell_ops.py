@@ -16,6 +16,7 @@ from local_shell_mcp.shell_ops import (
     PUBLIC_TOOL_WATCHDOG_TIMEOUT_S,
     _close_process_transport,
     public_run_shell_timeout,
+    resize_shell,
     run_shell,
     send_shell,
 )
@@ -231,6 +232,52 @@ async def test_run_shell_timeout_marks_result_and_cleans_up(tmp_path, monkeypatc
 
     assert result.ok is False
     assert result.timed_out is True
+
+
+@pytest.mark.asyncio
+async def test_resize_shell_resizes_tmux_window(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "local_shell_mcp.shell_ops._use_windows_persistent_shell_backend", lambda: False
+    )
+    monkeypatch.setattr(
+        "local_shell_mcp.shell_ops.resolve_tmux",
+        lambda: TmuxSelection("tmux", "system"),
+    )
+
+    async def fake_tmux(args: list[str], timeout_s: int = 10):
+        calls.append((args, timeout_s))
+        return CommandResult(
+            ok=True,
+            exit_code=0,
+            timed_out=False,
+            duration_ms=1,
+            cwd=".",
+            command="tmux",
+        )
+
+    monkeypatch.setattr("local_shell_mcp.shell_ops.tmux", fake_tmux)
+
+    result = await resize_shell("session-1", 180, 42)
+
+    assert result == {
+        "session_id": "session-1",
+        "cols": 180,
+        "rows": 42,
+        "resized": True,
+        "backend": "tmux",
+    }
+    assert calls == [
+        (["resize-window", "-t", "session-1", "-x", "180", "-y", "42"], 10)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resize_shell_rejects_invalid_dimensions():
+    with pytest.raises(ValueError, match="cols must be between"):
+        await resize_shell("session-1", 10, 24)
+    with pytest.raises(ValueError, match="rows must be between"):
+        await resize_shell("session-1", 80, 2)
 
 
 @pytest.mark.asyncio
