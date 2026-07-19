@@ -2,10 +2,49 @@ import type { AuditEntry } from "./types"
 
 export const AUDIT_OPERATIONS = ["", "files", "shell", "jobs", "transfer", "browser", "remote", "agent"] as const
 
+const AUDIT_LIST_MIN_WIDTH = 58
+const AUDIT_LIST_MAX_WIDTH = 86
+const AUDIT_DETAIL_MIN_WIDTH = 44
+
+export interface AuditListLayout {
+  paneWidth: number
+  nodeWidth: number
+  operationWidth: number
+  toolWidth: number
+}
+
 type JsonRecord = Record<string, unknown>
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function contentWidth(values: string[], minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, ...values.map((value) => value.length)))
+}
+
+export function auditListLayout(entries: AuditEntry[], screenWidth: number): AuditListLayout {
+  const nodeWidth = contentWidth(entries.map((entry) => entry.node), 8, 24)
+  const operationWidth = contentWidth(entries.map((entry) => entry.operation), 10, 16)
+  const toolWidth = contentWidth(entries.map((entry) => entry.tool || entry.event), 18, 28)
+  const desiredWidth = 18 + nodeWidth + operationWidth + toolWidth
+  const availableWidth = Math.max(
+    AUDIT_LIST_MIN_WIDTH,
+    Math.min(AUDIT_LIST_MAX_WIDTH, screenWidth - AUDIT_DETAIL_MIN_WIDTH - 1),
+  )
+
+  return {
+    paneWidth: Math.min(Math.max(AUDIT_LIST_MIN_WIDTH, desiredWidth), availableWidth),
+    nodeWidth,
+    operationWidth,
+    toolWidth,
+  }
+}
+
+export function fitAuditColumn(value: string, width: number): string {
+  if (value.length <= width) return value.padEnd(width)
+  if (width <= 1) return value.slice(0, width)
+  return `${value.slice(0, width - 1)}…`
 }
 
 export function auditEntryKey(entry: AuditEntry): string {
