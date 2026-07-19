@@ -459,7 +459,7 @@ When `machine` is supplied, the call additionally requires `remote:use` and runs
 
 ### `transfer_path`
 
-Copy a file or directory between the controller and remote machines. A missing machine denotes the controller; at least one endpoint must be remote.
+Copy a file or directory between the controller and remote machines using one-time raw binary HTTP streams. A missing machine denotes the controller; at least one endpoint must be remote.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -468,7 +468,7 @@ Copy a file or directory between the controller and remote machines. A missing m
 | `source_machine` | `string \| null` | `null` |  |
 | `destination_machine` | `string \| null` | `null` |  |
 | `overwrite` | `boolean` | `false` |  |
-| `chunk_size` | `integer \| null` | `null` |  |
+| `chunk_size` | `integer \| null` | `null` | Compatibility parameter; validated and reported but does not change the raw HTTP streaming transport. |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 
