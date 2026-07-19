@@ -2,7 +2,7 @@ import type { InputRenderable, MouseEvent as OpenTUIMouseEvent } from "@opentui/
 import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
-import { EmptyState, KeyHint, MachineSidebar, Modal, Panel, formatAge } from "./components"
+import { EmptyState, KeyHint, Loading, MachineSidebar, Modal, Panel, formatAge } from "./components"
 import { clampIndex, scopedItems } from "./state-utils"
 import {
   terminalDisplayRows,
@@ -106,8 +106,11 @@ export function TerminalsScreen({
 }) {
   const [sessions, setSessions] = useState<TerminalSession[]>([])
   const [sessionsMachine, setSessionsMachine] = useState<string | null>(null)
+  const [sessionsError, setSessionsError] = useState<string | null>(null)
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [output, setOutput] = useState("")
+  const [outputScope, setOutputScope] = useState<string | null>(null)
+  const [outputError, setOutputError] = useState<{ scope: string; message: string } | null>(null)
   const [audit, setAudit] = useState<AuditEntry[]>([])
   const [showAudit, setShowAudit] = useState(width >= 118)
   const [rawMode, setRawMode] = useState(false)
@@ -123,9 +126,13 @@ export function TerminalsScreen({
   const sessionsController = useRef<AbortController | null>(null)
   const outputController = useRef<AbortController | null>(null)
   const machineRef = useRef(machine)
+  const sessionsReady = sessionsMachine === machine
   const activeSessions = scopedItems(sessionsMachine, machine, sessions)
   const selectedSession = activeSessions.find((session) => session.session_id === selectedSessionId)
     || activeSessions[0]
+  const selectedOutputScope = selectedSession ? `${machine}\u0000${selectedSession.session_id}` : null
+  const outputReady = selectedOutputScope !== null && outputScope === selectedOutputScope
+  const selectedOutputError = outputError?.scope === selectedOutputScope ? outputError.message : null
   const selected = Math.max(0, activeSessions.findIndex((session) => session.session_id === selectedSession?.session_id))
   const selectedSessionIdRef = useRef<string | null>(selectedSession?.session_id || null)
   machineRef.current = machine
@@ -174,6 +181,7 @@ export function TerminalsScreen({
     sessionsController.current = controller
     const requestId = ++sessionsRequest.current
     const targetMachine = machine
+    setSessionsError(null)
     try {
       const payload = await api.terminals(targetMachine, controller.signal)
       if (
@@ -183,6 +191,7 @@ export function TerminalsScreen({
       ) return []
       setSessions(payload.sessions)
       setSessionsMachine(targetMachine)
+      setSessionsError(null)
       setSelectedSessionId((current) => {
         const preferred = selectedSessionIdRef.current || current
         const nextSessionId = preferred && payload.sessions.some((session) => session.session_id === preferred)
@@ -193,7 +202,11 @@ export function TerminalsScreen({
       })
       return payload.sessions
     } catch (error) {
-      if (!controller.signal.aborted) setStatus(`Terminals: ${formatError(error)}`)
+      if (!controller.signal.aborted && machineRef.current === targetMachine) {
+        const message = formatError(error)
+        setSessionsError(message)
+        setStatus(`Terminals: ${message}`)
+      }
       return []
     } finally {
       if (sessionsController.current === controller) sessionsController.current = null
@@ -211,9 +224,13 @@ export function TerminalsScreen({
     if (!targetSession) {
       outputController.current = null
       setOutput("")
+      setOutputScope(null)
+      setOutputError(null)
       setAudit([])
       return
     }
+    const targetScope = `${targetMachine}\u0000${targetSession}`
+    setOutputError((current) => current?.scope === targetScope ? null : current)
     try {
       const [terminal, records] = await Promise.all([
         api.terminalRead(
@@ -235,9 +252,15 @@ export function TerminalsScreen({
       ) return
       if (scrollOffsetRef.current > 0) pendingOutputRef.current = terminal.output
       else setOutput(terminal.output)
+      setOutputScope(targetScope)
+      setOutputError(null)
       setAudit(records.entries)
     } catch (error) {
-      if (!controller.signal.aborted) setStatus(`Terminal: ${formatError(error)}`)
+      if (!controller.signal.aborted && machineRef.current === targetMachine && selectedSessionIdRef.current === targetSession) {
+        const message = formatError(error)
+        setOutputError({ scope: targetScope, message })
+        setStatus(`Terminal: ${message}`)
+      }
     } finally {
       if (outputController.current === controller) outputController.current = null
     }
@@ -247,10 +270,13 @@ export function TerminalsScreen({
     sessionsRequest.current += 1
     outputRequest.current += 1
     setSessions([])
-    setSessionsMachine(machine)
+    setSessionsMachine(null)
+    setSessionsError(null)
     setSelectedSessionId(null)
     selectedSessionIdRef.current = null
     setOutput("")
+    setOutputScope(null)
+    setOutputError(null)
     pendingOutputRef.current = null
     scrollOffsetRef.current = 0
     setScrollOffset(0)
@@ -413,9 +439,12 @@ export function TerminalsScreen({
     const next = (index + delta + machines.length) % machines.length
     setSessions([])
     setSessionsMachine(null)
+    setSessionsError(null)
     setSelectedSessionId(null)
     selectedSessionIdRef.current = null
     setOutput("")
+    setOutputScope(null)
+    setOutputError(null)
     pendingOutputRef.current = null
     scrollOffsetRef.current = 0
     setScrollOffset(0)
@@ -510,9 +539,12 @@ export function TerminalsScreen({
               if (nextMachine === machine) return
               setSessions([])
               setSessionsMachine(null)
+              setSessionsError(null)
               setSelectedSessionId(null)
               selectedSessionIdRef.current = null
               setOutput("")
+              setOutputScope(null)
+              setOutputError(null)
               setAudit([])
               setDialog({ type: "none" })
               setRawMode(false)
@@ -526,7 +558,7 @@ export function TerminalsScreen({
             <text
               fg={selectedSession ? colors.accent : theme.faint}
               attributes={selectedSession ? 1 : 0}
-              content={selectedSession?.session_id || "no terminal"}
+              content={sessionsReady ? selectedSession?.session_id || "no terminal" : sessionsError ? "unavailable" : "loading terminals"}
             />
             <box style={{ flexGrow: 1 }} />
             {rawMode && <text fg={theme.orange} attributes={1} content="RAW INPUT  " />}
@@ -536,22 +568,36 @@ export function TerminalsScreen({
           </box>
           <box style={{ flexGrow: 1, flexDirection: "row", gap: 1 }}>
             <Panel title="Terminal" active accent={colors.accent} activeBackground={colors.panel} style={{ flexGrow: 1, padding: 1 }}>
-              {selectedSession ? (
-                <box
-                  onMouseScroll={handleOutputScroll}
-                  style={{ flexGrow: 1, flexDirection: "column" }}
-                >
-                  {visibleLines.map((line, index) => (
-                    <text key={`${index}-${line}`} fg={theme.text} wrapMode="none" content={line || " "} />
-                  ))}
-                </box>
+              {!sessionsReady ? (
+                sessionsError ? <EmptyState title="Terminals unavailable" detail="Switch machines or retry shortly" /> : <Loading label="Loading terminals" />
+              ) : selectedSession ? (
+                !outputReady ? (
+                  selectedOutputError ? <EmptyState title="Terminal output unavailable" detail="Press Alt+R to try again" /> : <Loading label="Loading terminal output" />
+                ) : (
+                  <box
+                    onMouseScroll={handleOutputScroll}
+                    style={{ flexGrow: 1, flexDirection: "column" }}
+                  >
+                    {visibleLines.map((line, index) => (
+                      <text key={`${index}-${line}`} fg={theme.text} wrapMode="none" content={line || " "} />
+                    ))}
+                  </box>
+                )
               ) : (
                 <EmptyState title="No persistent terminal" detail="Press Alt+N to create one" />
               )}
             </Panel>
             {showAudit && (
               <Panel title="MCP audit · manual input excluded" style={{ width: Math.max(30, Math.floor(width * 0.28)) }}>
-                <AuditRail entries={audit} />
+                {!sessionsReady ? (
+                  sessionsError ? <EmptyState title="Audit unavailable" detail="Terminal sessions could not be loaded" /> : <Loading label="Loading terminal activity" />
+                ) : !selectedSession ? (
+                  <EmptyState title="No terminal selected" detail="Create or select a terminal first" />
+                ) : !outputReady ? (
+                  selectedOutputError ? <EmptyState title="Audit unavailable" detail="Press Alt+R to try again" /> : <Loading label="Loading terminal activity" />
+                ) : (
+                  <AuditRail entries={audit} />
+                )}
               </Panel>
             )}
           </box>
@@ -561,7 +607,7 @@ export function TerminalsScreen({
                 key={selectedSession?.session_id || "no-session"}
                 ref={commandInputRef}
                 focused={Boolean(selectedSession) && !rawMode && dialog.type === "none"}
-                placeholder={selectedSession ? "Enter a command…" : "Create a terminal first"}
+                placeholder={!sessionsReady ? "Loading terminals…" : selectedSession ? "Enter a command…" : "Create a terminal first"}
                 onSubmit={(value: unknown) => submitCommand(typeof value === "string" ? value : "")}
               />
             </Panel>
@@ -598,7 +644,9 @@ export function TerminalsScreen({
                 />
               </box>
             ))}
-            {activeSessions.length === 0 && <text fg={theme.faint} content="No sessions" />}
+            {!sessionsReady
+              ? <text fg={sessionsError ? theme.red : theme.faint} content={sessionsError ? "Sessions unavailable" : "Loading sessions…"} />
+              : activeSessions.length === 0 && <text fg={theme.faint} content="No sessions" />}
             <box style={{ flexGrow: 1 }} />
             {selectedSession?.created && (
               <text fg={theme.faint} content={formatAge(Number(selectedSession.created))} />

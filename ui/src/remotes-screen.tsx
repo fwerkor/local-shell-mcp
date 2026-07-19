@@ -1,7 +1,7 @@
 import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { api, formatError } from "./api"
-import { EmptyState, KeyHint, Modal, Panel, formatAge, useVisibleRows } from "./components"
+import { EmptyState, KeyHint, Loading, Modal, Panel, formatAge, useVisibleRows } from "./components"
 import { handleSelectionScroll } from "./mouse"
 import { remoteSystemInfo, remoteVersion } from "./remotes-utils"
 import { clampIndex } from "./state-utils"
@@ -34,7 +34,8 @@ export function RemotesScreen({
   const [enabled, setEnabled] = useState(true)
   const [selected, setSelected] = useState(0)
   const [dialog, setDialog] = useState<RemoteDialog>({ type: "none" })
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [loaded, setLoaded] = useState(false)
   const refreshRequest = useRef(0)
   const refreshController = useRef<AbortController | null>(null)
   const current = machines[selected]
@@ -54,6 +55,7 @@ export function RemotesScreen({
       setMachines(payload.machines)
       setEnabled(payload.enabled !== false)
       setSelected((value) => clampIndex(value, payload.machines.length))
+      setLoaded(true)
       setStatus(
         payload.enabled === false
           ? "Remote worker support is disabled"
@@ -158,28 +160,32 @@ export function RemotesScreen({
         <Panel title="Remote status" active accent={colors.accent} activeBackground={colors.panel} style={{ height: 3, alignItems: "center", justifyContent: "center" }}>
           <text
             fg={theme.muted}
-            content={`On ${online}  │  Off ${offline}  │  Total ${machines.length}  │  ${loading ? "SYNC" : "READY"}`}
+            content={loaded
+              ? `On ${online}  │  Off ${offline}  │  Total ${machines.length}  │  ${loading ? "SYNC" : "READY"}`
+              : `On —  │  Off —  │  Total —  │  ${loading ? "SYNC" : "ERROR"}`}
           />
         </Panel>
       ) : (
         <box style={{ height: compact ? 2 : 4, flexDirection: "row", gap: 1 }}>
           <Panel title={compact ? "On" : "Online"} active accent={colors.accent} activeBackground={colors.panel} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
-            <text fg={theme.green} attributes={1} content={String(online)} />
+            <text fg={theme.green} attributes={1} content={loaded ? String(online) : "—"} />
           </Panel>
           <Panel title={compact ? "Off" : "Offline"} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
-            <text fg={offline ? theme.orange : theme.faint} attributes={1} content={String(offline)} />
+            <text fg={offline ? theme.orange : theme.faint} attributes={1} content={loaded ? String(offline) : "—"} />
           </Panel>
           <Panel title="Total" style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
-            <text fg={colors.accent} attributes={1} content={String(machines.length)} />
+            <text fg={colors.accent} attributes={1} content={loaded ? String(machines.length) : "—"} />
           </Panel>
           <Panel title={compact ? "Ctl" : "Controller"} style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
-            <text fg={theme.blue} content={loading ? (compact ? "SYNC" : "SYNCING") : "READY"} />
+            <text fg={theme.blue} content={loading ? (compact ? "SYNC" : "SYNCING") : loaded ? "READY" : "ERROR"} />
           </Panel>
         </box>
       )}
       <box style={{ flexGrow: 1, flexDirection: compact ? "column" : "row", gap: 1 }}>
         <Panel title="Remote nodes" active accent={colors.accent} activeBackground={colors.panel} style={{ flexGrow: 1, paddingTop: 1 }}>
-          {machines.length === 0 ? (
+          {!loaded ? (
+            loading ? <Loading label="Loading remote nodes" /> : <EmptyState title="Remotes unavailable" detail="Press r to try again" />
+          ) : machines.length === 0 ? (
             <EmptyState
               title={enabled ? "No remote nodes" : "Remote workers disabled"}
               detail={enabled ? "Press n to create a one-time join invite" : "Enable remote workers in server configuration"}
@@ -253,6 +259,8 @@ export function RemotesScreen({
               <text fg={theme.borderBright} content="\nSystem information" />
               <text fg={theme.muted} content={JSON.stringify(remoteSystemInfo(current), null, 2)} />
             </scrollbox>
+          ) : !loaded ? (
+            loading ? <Loading label="Loading node details" /> : <EmptyState title="Remotes unavailable" detail="Press r to try again" />
           ) : (
             <EmptyState title="No node selected" detail="Create an invite to attach one" />
           )}
