@@ -884,16 +884,16 @@ button:focus-visible {
 
   .terminal-frame {
     grid-template-rows: minmax(0, 1fr) 44px;
-    padding: 4px;
+    padding: 2px;
   }
 
   .terminal-frame::before {
-    inset: 3px;
+    inset: 2px;
     border-radius: 12px;
   }
 
   #terminal {
-    padding: 5px;
+    padding: 2px;
   }
 
   .touchbar {
