@@ -19,6 +19,7 @@ class FakePtyProcess:
         self.output = [b"ready\r\n"]
         self.writes = []
         self.close_calls = []
+        self.sizes = []
         FakePtyProcess.spawned.append(self)
 
     @classmethod
@@ -36,6 +37,9 @@ class FakePtyProcess:
     def write(self, data):
         self.writes.append(data)
         self.output.append(f"wrote:{data}\r\n".encode())
+
+    def setwinsize(self, rows, cols):
+        self.sizes.append((rows, cols))
 
     def terminate(self, force=False):  # noqa: ARG002
         self.alive = False
@@ -73,6 +77,7 @@ async def test_windows_prefers_conpty_and_supports_session_ops(tmp_path, monkeyp
     assert session["backend"] == "conpty"
     assert FakePtyProcess.spawned
 
+    resized = await ops.resize_shell(session["session_id"], 132, 38)
     await ops.send_shell(session["session_id"], "echo ok")
     data = {"output": ""}
     for _ in range(20):
@@ -82,6 +87,14 @@ async def test_windows_prefers_conpty_and_supports_session_ops(tmp_path, monkeyp
         await asyncio.sleep(0.02)
 
     assert "wrote:echo ok" in data["output"]
+    assert resized == {
+        "session_id": session["session_id"],
+        "cols": 132,
+        "rows": 38,
+        "resized": True,
+        "backend": "conpty",
+    }
+    assert FakePtyProcess.spawned[0].sizes == [(38, 132)]
     assert FakePtyProcess.spawned[0].writes == ["echo ok\r"]
 
     listed = await ops.list_shells()
@@ -98,6 +111,25 @@ async def test_windows_prefers_conpty_and_supports_session_ops(tmp_path, monkeyp
     assert killed == {"session_id": session["session_id"], "killed": True, "stderr": ""}
     assert FakePtyProcess.spawned[0].close_calls == [True]
     assert await ops.list_shells() == {"sessions": []}
+
+
+@pytest.mark.asyncio
+async def test_conpty_resize_reports_unsupported_process(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    monkeypatch.setattr(conpty_ops, "winpty", SimpleNamespace(PtyProcess=FakePtyProcess))
+
+    session = await conpty_ops.start_shell(name="no-resize")
+    process = FakePtyProcess.spawned[0]
+    process.setwinsize = None
+
+    assert await conpty_ops.resize_shell(session["session_id"], 120, 35) == {
+        "session_id": session["session_id"],
+        "cols": 120,
+        "rows": 35,
+        "resized": False,
+        "backend": "conpty",
+    }
 
 
 @pytest.mark.asyncio

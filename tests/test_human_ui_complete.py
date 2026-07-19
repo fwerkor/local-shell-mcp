@@ -374,6 +374,7 @@ def test_remote_file_terminal_todo_audit_and_admin_routes(tmp_path, monkeypatch)
     for action, body in (
         ("start", {}),
         ("send", {"session_id": "s", "input_text": "x"}),
+        ("resize", {"session_id": "s", "cols": 132, "rows": 38}),
         ("kill", {"session_id": "s"}),
     ):
         assert client.post(
@@ -381,6 +382,14 @@ def test_remote_file_terminal_todo_audit_and_admin_routes(tmp_path, monkeypatch)
         ).status_code == 200
     assert client.post(
         "/api/ui/terminals/send", json={"machine": "win-node"}
+    ).status_code == 400
+    assert client.post(
+        "/api/ui/terminals/resize",
+        json={"machine": "win-node", "session_id": "s"},
+    ).status_code == 400
+    assert client.post(
+        "/api/ui/terminals/resize",
+        json={"machine": "win-node", "session_id": "s", "cols": "bad", "rows": 24},
     ).status_code == 400
     assert client.post(
         "/api/ui/terminals/kill", json={"machine": "win-node"}

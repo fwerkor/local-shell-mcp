@@ -52,6 +52,7 @@ from .shell_ops import (
     public_run_shell_timeout,
     quote_shell_argument,
     read_shell,
+    resize_shell,
     run_shell,
     send_shell,
     start_shell,
@@ -948,6 +949,7 @@ WORKER_SHELL_TOOLS = frozenset(
         "shell_start",
         "shell_send",
         "shell_read",
+        "shell_resize",
         "shell_kill",
         "shell_list",
     }
@@ -1191,6 +1193,9 @@ async def _execute_shell_worker_tool(tool: str, args: dict[str, Any]) -> Any:
 
     if tool == "shell_read":
         return await read_shell(args["session_id"], args.get("lines", 200))
+
+    if tool == "shell_resize":
+        return await resize_shell(args["session_id"], args["cols"], args["rows"])
 
     if tool == "shell_kill":
         return await kill_shell(args["session_id"])
