@@ -256,7 +256,7 @@ def run_browser(port: int) -> None:
             click_until_terminal_text(
                 page,
                 "mouse-second.txt",
-                "Preview · mouse-second.txt",
+                "Selected · mouse-second.txt",
                 rightmost=True,
             )
 

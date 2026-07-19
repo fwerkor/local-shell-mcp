@@ -751,7 +751,11 @@ export function FilesScreen({
                 }}
               >
                 <box style={{ height: 1, flexShrink: 0, minWidth: 0, overflow: "hidden", paddingLeft: 1, paddingRight: 1 }}>
-                  <text fg={current ? colors.accent : theme.faint} attributes={current ? 1 : 0} content={current?.name || "No selection"} />
+                  <text
+                    fg={current ? colors.accent : theme.faint}
+                    attributes={current ? 1 : 0}
+                    content={current ? `Selected · ${current.name}` : "No selection"}
+                  />
                 </box>
                 <box
                   style={{ flexGrow: 1, minWidth: 0, minHeight: 0, overflow: "hidden", flexDirection: "column" }}
