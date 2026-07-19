@@ -33,6 +33,7 @@ nav:
       - Configuration: reference/configuration.md
       - REST API: reference/rest-api.md
   - Security: security.md
+  - FAQ: faq.md
   - Troubleshooting: troubleshooting.md
 markdown_extensions:
   - admonition
@@ -93,6 +94,7 @@ plugins:
             Configuration: 配置
             REST API: REST API
             Security: 安全
+            FAQ: FAQ
             Troubleshooting: 故障排查
         - locale: zh-Hant
           name: 繁體中文
@@ -127,6 +129,7 @@ plugins:
             Configuration: 設定
             REST API: REST API
             Security: 安全
+            FAQ: FAQ
             Troubleshooting: 疑難排解
         - locale: ja
           name: 日本語
@@ -161,6 +164,7 @@ plugins:
             Configuration: 設定
             REST API: REST API
             Security: セキュリティ
+            FAQ: FAQ
             Troubleshooting: トラブルシューティング
         - locale: ko
           name: 한국어
@@ -195,6 +199,7 @@ plugins:
             Configuration: 설정
             REST API: REST API
             Security: 보안
+            FAQ: FAQ
             Troubleshooting: 문제 해결
         - locale: es
           name: Español
@@ -229,6 +234,7 @@ plugins:
             Configuration: Configuración
             REST API: REST API
             Security: Seguridad
+            FAQ: FAQ
             Troubleshooting: Solución de problemas
         - locale: fr
           name: Français
@@ -263,6 +269,7 @@ plugins:
             Configuration: Configuration
             REST API: REST API
             Security: Sécurité
+            FAQ: FAQ
             Troubleshooting: Dépannage
         - locale: de
           name: Deutsch
@@ -297,6 +304,7 @@ plugins:
             Configuration: Konfiguration
             REST API: REST API
             Security: Sicherheit
+            FAQ: FAQ
             Troubleshooting: Fehlerbehebung
         - locale: ru
           name: Русский
@@ -331,6 +339,7 @@ plugins:
             Configuration: Конфигурация
             REST API: REST API
             Security: Безопасность
+            FAQ: FAQ
             Troubleshooting: Диагностика
         - locale: pt-BR
           name: Português
@@ -365,6 +374,7 @@ plugins:
             Configuration: Configuração
             REST API: REST API
             Security: Segurança
+            FAQ: FAQ
             Troubleshooting: Solução de problemas
         - locale: it
           name: Italiano
@@ -399,6 +409,7 @@ plugins:
             Configuration: Configurazione
             REST API: REST API
             Security: Sicurezza
+            FAQ: FAQ
             Troubleshooting: Risoluzione dei problemi
         - locale: ar
           name: العربية
@@ -433,6 +444,7 @@ plugins:
             Configuration: الإعدادات
             REST API: REST API
             Security: الأمان
+            FAQ: FAQ
             Troubleshooting: استكشاف الأخطاء
         - locale: hi
           name: हिन्दी
@@ -467,6 +479,7 @@ plugins:
             Configuration: कॉन्फ़िगरेशन
             REST API: REST API
             Security: सुरक्षा
+            FAQ: FAQ
             Troubleshooting: समस्या निवारण
         - locale: id
           name: Bahasa Indonesia
@@ -501,6 +514,7 @@ plugins:
             Configuration: Konfigurasi
             REST API: REST API
             Security: Keamanan
+            FAQ: FAQ
             Troubleshooting: Pemecahan masalah
         - locale: vi
           name: Tiếng Việt
@@ -535,6 +549,7 @@ plugins:
             Configuration: Cấu hình
             REST API: REST API
             Security: Bảo mật
+            FAQ: FAQ
             Troubleshooting: Xử lý sự cố
         - locale: tr
           name: Türkçe
@@ -569,6 +584,7 @@ plugins:
             Configuration: Yapılandırma
             REST API: REST API
             Security: Güvenlik
+            FAQ: FAQ
             Troubleshooting: Sorun giderme
         - locale: pl
           name: Polski
@@ -603,6 +619,7 @@ plugins:
             Configuration: Konfiguracja
             REST API: REST API
             Security: Bezpieczeństwo
+            FAQ: FAQ
             Troubleshooting: Rozwiązywanie problemów
 theme:
   name: material
