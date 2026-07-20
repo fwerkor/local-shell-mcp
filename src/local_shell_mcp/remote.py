@@ -46,6 +46,8 @@ from .playwright_ops import browser_capture, browser_get_text, playwright_run_sc
 from .search_ops import grep, tree
 from .settings import get_settings, safe_settings_dump
 from .shell_ops import (
+    PUBLIC_RUN_SHELL_DEFAULT_TIMEOUT_S,
+    PUBLIC_RUN_SHELL_TIMEOUT_CAP_S,
     kill_shell,
     list_shells,
     public_run_shell,
@@ -1148,6 +1150,9 @@ async def execute_worker_tool(tool: str, args: dict[str, Any]) -> Any:
 
 async def _execute_environment_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "environment_info":
+        public_settings = safe_settings_dump()
+        public_settings["default_timeout_s"] = PUBLIC_RUN_SHELL_DEFAULT_TIMEOUT_S
+        public_settings["max_timeout_s"] = PUBLIC_RUN_SHELL_TIMEOUT_CAP_S
         python = quote_shell_argument(get_settings().python_bin)
         git = quote_shell_argument(get_settings().git_bin)
         result = await run_shell(
@@ -1158,7 +1163,7 @@ async def _execute_environment_worker_tool(tool: str, args: dict[str, Any]) -> A
         )
         return {
             "version": get_version_info(),
-            "settings": safe_settings_dump(),
+            "settings": public_settings,
             "persistent_shell": persistent_shell_backend_info(),
             "probe": result.model_dump(),
         }

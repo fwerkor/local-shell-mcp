@@ -114,6 +114,8 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
     content, structured = await mcp.call_tool("environment_info", {})
     assert content
     assert structured["ok"] is True
+    assert structured["data"]["settings"]["default_timeout_s"] == 10
+    assert structured["data"]["settings"]["max_timeout_s"] == 120
 
 
 
