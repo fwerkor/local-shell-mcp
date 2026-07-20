@@ -50,6 +50,8 @@ from .remote_transfer import (
 from .search_ops import grep, tree
 from .settings import get_settings, safe_settings_dump
 from .shell_ops import (
+    PUBLIC_RUN_SHELL_DEFAULT_TIMEOUT_S,
+    PUBLIC_RUN_SHELL_TIMEOUT_CAP_S,
     PUBLIC_TOOL_WATCHDOG_TIMEOUT_S,
     kill_shell,
     list_shells,
@@ -1223,6 +1225,9 @@ def _register_environment_tools(
         if machine:
             return await _remote_call(settings, machine, "environment_info", {})
         try:
+            public_settings = safe_settings_dump(settings)
+            public_settings["default_timeout_s"] = PUBLIC_RUN_SHELL_DEFAULT_TIMEOUT_S
+            public_settings["max_timeout_s"] = PUBLIC_RUN_SHELL_TIMEOUT_CAP_S
             python = quote_shell_argument(settings.python_bin)
             git = quote_shell_argument(settings.git_bin)
             result = await run_shell(
@@ -1234,7 +1239,7 @@ def _register_environment_tools(
             return _ok(
                 {
                     "version": get_version_info(),
-                    "settings": safe_settings_dump(settings),
+                    "settings": public_settings,
                     "persistent_shell": persistent_shell_backend_info(),
                     "probe": result.model_dump(),
                 }
