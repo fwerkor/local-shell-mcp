@@ -34,7 +34,7 @@ export function TopNav({
         border: true,
         borderStyle: "rounded",
         borderColor: theme.border,
-        backgroundColor: theme.panel,
+        backgroundColor: theme.canvas,
       }}
     >
       <text fg={theme.text} attributes={1} content={compact ? "LSM" : "LOCAL SHELL"} />
@@ -54,7 +54,7 @@ export function TopNav({
               marginRight: narrow ? 0 : compact ? 1 : 2,
               paddingLeft: narrow ? 0 : 1,
               paddingRight: 1,
-              backgroundColor: selected ? colors.selected : theme.panel,
+              backgroundColor: selected ? colors.selected : theme.canvas,
             }}
           >
             <text fg={selected ? colors.accent : theme.muted} attributes={selected ? 1 : 0} content={label} />
@@ -105,7 +105,7 @@ export function MachineSidebar({
         border: true,
         borderStyle: "rounded",
         borderColor: theme.border,
-        backgroundColor: theme.panel,
+        backgroundColor: theme.canvas,
         paddingTop: 1,
       }}
     >
@@ -162,7 +162,7 @@ export function Panel({
         border: true,
         borderStyle: "rounded",
         borderColor: active ? accent : theme.border,
-        backgroundColor: active ? activeBackground : theme.panel,
+        backgroundColor: active ? activeBackground : theme.canvas,
         ...style,
       }}
     >

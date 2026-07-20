@@ -1,5 +1,12 @@
+const baseBackground = "#080b14"
+
+export function canvasBackground(mode = process.env.LOCAL_SHELL_MCP_UI_MODE): string {
+  return mode === "web" ? "transparent" : baseBackground
+}
+
 export const theme = {
-  bg: "#080b14",
+  bg: baseBackground,
+  canvas: canvasBackground(),
   panel: "#111827",
   panelAlt: "#172033",
   panelSoft: "#1d2940",
@@ -58,7 +65,7 @@ export const borders = {
     border: true,
     borderStyle: "rounded" as const,
     borderColor: theme.border,
-    backgroundColor: theme.panel,
+    backgroundColor: theme.canvas,
   },
   active: {
     border: true,
