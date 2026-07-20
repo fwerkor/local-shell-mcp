@@ -356,6 +356,47 @@ async def test_worker_job_sends_heartbeats_while_running(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_worker_result_submission_sends_heartbeats_while_retrying(monkeypatch):
+    result_attempts = 0
+    heartbeat_calls = []
+    result = {"job_id": "job-1", "ok": True, "data": {"done": True}}
+    headers = {"Authorization": "Bearer token"}
+
+    def fake_post(url, payload, request_headers=None, timeout=None):
+        nonlocal result_attempts
+        assert request_headers == headers
+        assert timeout == 30
+        if url.endswith("/result"):
+            assert payload == result
+            result_attempts += 1
+            if result_attempts < 3:
+                raise RuntimeError(f"temporary result failure {result_attempts}")
+            return {"ok": True, "data": {"accepted": True}}
+        assert url.endswith("/heartbeat")
+        assert payload == {}
+        heartbeat_calls.append(url)
+        return {"ok": True, "data": {"accepted": True}}
+
+    monkeypatch.setattr(remote, "_worker_post_json", fake_post)
+    monkeypatch.setattr(remote, "_WORKER_RETRY_INITIAL_DELAY_S", 0.02)
+    monkeypatch.setattr(remote, "_WORKER_RETRY_MAX_DELAY_S", 0.02)
+
+    response = await remote._submit_worker_result_with_heartbeat(  # noqa: SLF001
+        result,
+        "https://example.test",
+        headers,
+        0.005,
+    )
+
+    assert response == {"ok": True, "data": {"accepted": True}}
+    assert result_attempts == 3
+    assert heartbeat_calls
+    heartbeat_count = len(heartbeat_calls)
+    await asyncio.sleep(0.02)
+    assert len(heartbeat_calls) == heartbeat_count
+
+
+@pytest.mark.asyncio
 async def test_remote_result_must_come_from_assigned_worker(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
