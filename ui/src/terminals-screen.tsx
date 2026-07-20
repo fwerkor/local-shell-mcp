@@ -665,7 +665,7 @@ export function TerminalsScreen({
               border: true,
               borderStyle: "rounded",
               borderColor: theme.border,
-              backgroundColor: theme.panel,
+              backgroundColor: theme.canvas,
               paddingLeft: 1,
               paddingRight: 1,
             }}

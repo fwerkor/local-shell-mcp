@@ -60,7 +60,7 @@ function StatusLine({
         alignItems: "center",
         paddingLeft: 1,
         paddingRight: 1,
-        backgroundColor: theme.bg,
+        backgroundColor: theme.canvas,
       }}
     >
       <text fg={theme.green} content="● " />
@@ -205,7 +205,7 @@ function App() {
   }
 
   return (
-    <box style={{ width: "100%", height: "100%", flexDirection: "column", backgroundColor: theme.bg, padding: 1 }}>
+    <box style={{ width: "100%", height: "100%", flexDirection: "column", backgroundColor: theme.canvas, padding: 1 }}>
       <TopNav
         active={screen}
         width={contentWidth}
@@ -216,7 +216,7 @@ function App() {
       />
       <box
         key={screen}
-        style={{ flexGrow: 1, marginTop: 1, backgroundColor: theme.bg }}
+        style={{ flexGrow: 1, marginTop: 1, backgroundColor: theme.canvas }}
       >
         {content}
       </box>
