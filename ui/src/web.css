@@ -293,19 +293,23 @@ button.nav-item.active { color: white; background: #232d42; box-shadow: inset 3p
 .todo-row small { display: block; margin-top: 3px; color: #929aaa; font-size: 8px; }
 .priority-chip { padding: 4px 7px; color: #736b7d; background: #f2f3f6; border-radius: 999px; font-size: 7px; text-transform: uppercase; }
 .priority-chip.high { color: #a05f12; background: #fff0d5; }
-.console-content { grid-column: 2; min-height: 100vh; height: 100vh; overflow: hidden; padding: 28px 32px; background: #f5f6fa; }
+.console-content { position: relative; isolation: isolate; grid-column: 2; min-height: 100vh; height: 100vh; overflow: hidden; padding: 28px 32px; color: #edf3ff; background: #080b14; }
 .console-content[hidden] { display: none; }
+.console-wallpaper { position: absolute; z-index: 0; inset: 0; pointer-events: none; background-size: cover; background-position: center; filter: saturate(.88) contrast(1.04); transform: scale(1.015); }
+.console-wallpaper::after { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at 18% 20%, rgba(32,175,227,.13), transparent 34%), radial-gradient(circle at 82% 76%, rgba(81,85,255,.15), transparent 36%), linear-gradient(to bottom, rgba(1,5,13,.08), rgba(1,5,13,.46)); }
+.console-header, .terminal-card { position: relative; z-index: 1; }
 .console-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-.console-header p { margin: 0 0 5px; color: #929aaa; font-size: 10px; }
+.console-header p { margin: 0 0 5px; color: #a0aec6; font-size: 10px; }
 .console-header h1 { margin: 0; }
 .console-actions { display: flex; align-items: center; gap: 8px; }
-.connection { display: flex; align-items: center; gap: 7px; margin-right: 6px; color: #7a8496; font-size: 10px; }
+.connection { display: flex; align-items: center; gap: 7px; margin-right: 6px; color: #a0aec6; font-size: 10px; }
 .connection span { width: 7px; height: 7px; border-radius: 50%; background: #d5a13e; }
 .connection.connected span { background: #28b47d; box-shadow: 0 0 0 4px #e5f7f0; }
 .connection.error span { background: #dc5c69; box-shadow: 0 0 0 4px #fce9eb; }
-.terminal-card { display: grid; grid-template-rows: minmax(0,1fr) auto auto; height: calc(100vh - 113px); overflow: hidden; background: #0d1422; border: 1px solid #222c3f; border-radius: 14px; box-shadow: 0 18px 55px rgba(16,24,40,.16); }
+.terminal-card { display: grid; grid-template-rows: minmax(0,1fr) auto auto; height: calc(100vh - 113px); overflow: hidden; background: rgba(8,11,20,.66); border: 1px solid rgba(123,145,183,.28); border-radius: 14px; box-shadow: 0 18px 55px rgba(0,0,0,.34); backdrop-filter: blur(14px) saturate(1.08); }
 #terminal { min-width: 0; min-height: 0; padding: 12px; }
-#terminal .xterm { height: 100%; }
+#terminal .xterm { height: 100%; background: transparent !important; }
+#terminal .xterm-screen, #terminal .xterm-viewport { background: transparent !important; }
 #terminal .xterm-viewport { scrollbar-width: thin; }
 .touchbar { display: none; grid-template-columns: repeat(9,minmax(0,1fr)); gap: 4px; padding: 5px; border-top: 1px solid #263047; }
 .touchbar button { height: 34px; color: #d7deeb; background: #192235; border: 1px solid #2c3850; border-radius: 7px; }

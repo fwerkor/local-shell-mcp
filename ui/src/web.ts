@@ -3,7 +3,8 @@ import { Terminal } from "@xterm/xterm"
 import { createImageAddon } from "./image-support"
 import { browserSelectionShortcut, browserShortcutSequence } from "./keyboard"
 import { measureTerminalCellAspect } from "./terminal-geometry"
-import { hashForView, interfaceModeForView, viewFromHash, type WebViewName } from "./web-mode"
+import { todoTitle, visibleWorkloadCount } from "./web-data"
+import { hashForView, interfaceModeForView, oauthReturnView, viewFromHash, type WebViewName } from "./web-mode"
 
 declare global {
   interface Window {
@@ -91,6 +92,7 @@ const gateDetail = document.querySelector<HTMLElement>("#gate-detail")!
 const viewRoot = document.querySelector<HTMLElement>("#view-root")!
 const webView = document.querySelector<HTMLElement>("#web-view")!
 const consoleView = document.querySelector<HTMLElement>("#console-view")!
+const consoleWallpaper = document.querySelector<HTMLElement>(".console-wallpaper")!
 const pageName = document.querySelector<HTMLElement>("#page-name")!
 const pageTitle = document.querySelector<HTMLElement>("#page-title")!
 const pageDescription = document.querySelector<HTMLElement>("#page-description")!
@@ -108,6 +110,9 @@ const controllerOrigin = document.querySelector<HTMLElement>("#controller-origin
 const footerVersion = document.querySelector<HTMLElement>("#footer-version")!
 const footerHealth = document.querySelector<HTMLElement>("#footer-health")!
 const footerChecked = document.querySelector<HTMLElement>("#footer-checked")!
+
+consoleWallpaper.style.backgroundImage =
+  `linear-gradient(145deg, rgba(2, 7, 17, 0.16), rgba(2, 7, 17, 0.52)), url("${UI_PATH}/wallpaper")`
 
 let activeView: WebViewName = "overview"
 let lastWebView: Exclude<WebViewName, "console"> = "overview"
@@ -307,7 +312,7 @@ async function startOAuth(returnView: WebViewName): Promise<void> {
       verifier,
       state,
       redirect_uri: callback,
-      return_hash: location.hash || hashForView(returnView),
+      return_hash: hashForView(oauthReturnView(location.hash, returnView)),
     }))
     const authorize = new URL("/oauth/authorize", location.origin)
     authorize.searchParams.set("response_type", "code")
@@ -511,6 +516,7 @@ function overviewTemplate(data: DashboardData): string {
   const totalMachines = data.machines?.counts?.total ?? machines.length
   const activeJobs = data.jobs?.length || 0
   const sessions = data.session_count ?? data.sessions?.length ?? 0
+  const activeWorkloads = visibleWorkloadCount(data)
   const openTodos = data.todo_counts?.open || 0
   const version = versionLabel(data.version)
   pushMetric(metricHistory.cpu, system.cpu_percent, 0)
@@ -533,7 +539,7 @@ function overviewTemplate(data: DashboardData): string {
     <article class="panel attention-panel"><div class="panel-header compact"><div><h3>Needs attention</h3><p>Alerts and open todos</p></div><span class="count-badge">${alerts.length + openTodos}</span></div><div class="attention-list">${alertItems(alerts)}</div><button class="full-width-link" type="button" data-view="activity">Open alerts & activity</button></article>
   </section>
   <section class="dashboard-grid lower-grid">
-    <article class="panel workloads-panel"><div class="panel-header"><div><h3>Active workloads</h3><p>Tracked jobs and persistent shell sessions</p></div><button class="text-button" type="button" data-view="workloads">View all →</button></div><div class="workload-list">${workloadRows(data)}</div><button class="full-width-link" type="button" data-view="workloads">View all ${activeJobs + sessions} workloads</button></article>
+    <article class="panel workloads-panel"><div class="panel-header"><div><h3>Active workloads</h3><p>Tracked jobs and persistent shell sessions</p></div><button class="text-button" type="button" data-view="workloads">View all →</button></div><div class="workload-list">${workloadRows(data)}</div><button class="full-width-link" type="button" data-view="workloads">View all ${activeWorkloads} workloads</button></article>
     <article class="panel activity-panel"><div class="panel-header compact"><div><h3>Recent activity</h3><p>Latest MCP calls across all nodes</p></div><span class="tag">${version}</span></div><div class="activity-list">${activityRows(data.activity || [])}</div><button class="full-width-link" type="button" data-view="activity">Open audit activity</button></article>
   </section>`
 }
@@ -543,7 +549,7 @@ function machinesTemplate(data: DashboardData): string {
 }
 
 function workloadsTemplate(data: DashboardData): string {
-  const count = (data.jobs?.length || 0) + (data.session_count ?? data.sessions?.length ?? 0)
+  const count = visibleWorkloadCount(data)
   return `<section class="page-stack"><article class="panel page-panel"><div class="panel-header"><div><h3>Active workloads</h3><p>Tracked jobs and persistent terminal sessions</p></div><span class="count-badge">${count}</span></div><div class="workload-list">${workloadRows(data, 100)}</div></article></section>`
 }
 
@@ -561,7 +567,7 @@ function todosTemplate(data: BootstrapData | null): string {
   const rows = todos.length ? todos.map((todo) => {
     const status = stringValue(todo.status, "open")
     const priority = stringValue(todo.priority, "normal")
-    const title = stringValue(todo.title) || stringValue(todo.text) || stringValue(todo.description) || "Untitled todo"
+    const title = todoTitle(todo)
     const detail = stringValue(todo.description) || stringValue(todo.notes) || status
     return `<div class="todo-row ${status === "completed" ? "completed" : ""}"><div class="todo-check">${status === "completed" ? ICONS.check : '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>'}</div><div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(detail)}</small></div><span class="priority-chip ${priority === "high" ? "high" : ""}">${escapeHtml(priority)}</span></div>`
   }).join("") : '<div class="empty-state">No todos have been created.</div>'
@@ -638,9 +644,9 @@ function showView(
 function syncChrome(data: DashboardData): void {
   const machines = data.machines?.machines || []
   const machineCount = data.machines?.counts?.total ?? machines.length
-  const workloadCount = (data.jobs?.length || 0) + (data.session_count ?? data.sessions?.length ?? 0)
+  const activeWorkloadCount = visibleWorkloadCount(data)
   machineNavCount.textContent = String(machineCount)
-  workloadNavCount.textContent = String(workloadCount)
+  workloadNavCount.textContent = String(activeWorkloadCount)
   todoNavCount.textContent = String(data.todo_counts?.open || 0)
   const version = versionLabel(data.version)
   controllerVersion.textContent = version
@@ -881,7 +887,7 @@ function initializeTerminal(): void {
   terminalInitialized = true
   terminal = new Terminal({
     allowProposedApi: false,
-    allowTransparency: false,
+    allowTransparency: true,
     convertEol: false,
     cursorBlink: true,
     cursorStyle: "bar",
@@ -894,7 +900,7 @@ function initializeTerminal(): void {
     scrollback: 6_000,
     smoothScrollDuration: 80,
     theme: {
-      background: "#0d1422",
+      background: "rgba(0, 0, 0, 0)",
       foreground: "#edf3ff",
       cursor: "#7568e8",
       cursorAccent: "#0d1422",

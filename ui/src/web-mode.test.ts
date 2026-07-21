@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { hashForView, interfaceModeForView, viewFromHash } from "./web-mode"
+import { hashForView, interfaceModeForView, oauthReturnView, viewFromHash } from "./web-mode"
 
 describe("WebUI mode routing", () => {
   test("parses native WebUI and OpenTUI routes", () => {
@@ -25,5 +25,11 @@ describe("WebUI mode routing", () => {
     expect(interfaceModeForView("overview")).toBe("web")
     expect(interfaceModeForView("activity")).toBe("web")
     expect(interfaceModeForView("console")).toBe("tui")
+  })
+
+  test("preserves compatible bookmarks without overriding an explicit interface choice", () => {
+    expect(oauthReturnView("#/todos", "overview")).toBe("todos")
+    expect(oauthReturnView("#/console", "overview")).toBe("overview")
+    expect(oauthReturnView("#/overview", "console")).toBe("console")
   })
 })

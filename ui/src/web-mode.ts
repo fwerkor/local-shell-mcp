@@ -24,3 +24,10 @@ export function hashForView(view: WebViewName): string {
 export function interfaceModeForView(view: WebViewName): InterfaceMode {
   return view === "console" ? "tui" : "web"
 }
+
+export function oauthReturnView(hash: string, requestedView: WebViewName): WebViewName {
+  const currentView = viewFromHash(hash)
+  return currentView && interfaceModeForView(currentView) === interfaceModeForView(requestedView)
+    ? currentView
+    : requestedView
+}
