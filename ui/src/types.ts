@@ -47,6 +47,7 @@ export interface FilePreview {
   original_height?: number
   entries?: FileEntry[]
   size?: number
+  bytes?: number
   path?: string
   truncated?: boolean
   sha256?: string | null
@@ -99,6 +100,8 @@ export interface AuditEntry {
   arguments?: unknown
   error?: string
   error_type?: string
+  image_preview?: FilePreview
+  image_preview_error?: string
   [key: string]: unknown
 }
 

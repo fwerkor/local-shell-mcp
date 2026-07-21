@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import contextlib
 import json
 import logging
@@ -36,7 +37,7 @@ from .fs_ops import (
     resolve_path,
     write_text,
 )
-from .image_ops import make_image_preview
+from .image_ops import ImageFile, assert_view_image_size, detect_image_type, make_image_preview
 from .jobs import list_jobs
 from .oauth import ALL_OAUTH_SCOPES
 from .remote import remote_manager
@@ -361,6 +362,81 @@ def _audit_detail_scopes(entry: dict[str, Any]) -> tuple[str, ...]:
     if operation == "other":
         required.update(UI_FULL_SCOPES)
     return tuple(scope for scope in UI_FULL_SCOPES if scope in required)
+
+
+def _audit_view_image_detail(
+    entry: dict[str, Any],
+    *,
+    columns: int,
+    rows: int,
+    cell_aspect: float,
+) -> dict[str, Any]:
+    if str(entry.get("tool") or "") != "view_image":
+        return entry
+    output = entry.get("output")
+    if not isinstance(output, dict):
+        return entry
+    content = output.get("content")
+    if not isinstance(content, list):
+        return entry
+
+    image_index = next(
+        (
+            index
+            for index, item in enumerate(content)
+            if isinstance(item, dict)
+            and item.get("type") == "image"
+            and isinstance(item.get("data"), str)
+        ),
+        None,
+    )
+    if image_index is None:
+        return entry
+
+    source_item = content[image_index]
+    assert isinstance(source_item, dict)
+    sanitized_item = {name: value for name, value in source_item.items() if name != "data"}
+    sanitized_content = list(content)
+    sanitized_content[image_index] = sanitized_item
+    detail = {**entry, "output": {**output, "content": sanitized_content}}
+
+    try:
+        raw = base64.b64decode(str(source_item["data"]), validate=True)
+        assert_view_image_size(len(raw))
+        image_format, mime_type = detect_image_type(raw[:16])
+        structured = output.get("structuredContent")
+        if not isinstance(structured, dict):
+            structured = output.get("structured_content")
+        path = (
+            str(structured.get("path") or "image result")
+            if isinstance(structured, dict)
+            else "image result"
+        )
+        image = ImageFile(
+            path=path,
+            data=raw,
+            format=image_format,
+            mime_type=mime_type,
+            size=len(raw),
+        )
+        rendered = make_image_preview(image, columns, rows, cell_aspect)
+        sanitized_item["bytes"] = image.size
+        detail["image_preview"] = {
+            "kind": "image",
+            "path": path,
+            "bytes": image.size,
+            "mime_type": image.mime_type,
+            "rgba": base64.b64encode(rendered.rgba).decode("ascii"),
+            "width": rendered.width,
+            "height": rendered.height,
+            "cell_width": rendered.cell_width,
+            "cell_height": rendered.cell_height,
+            "original_width": rendered.original_width,
+            "original_height": rendered.original_height,
+        }
+    except (ValueError, OSError, binascii.Error) as exc:
+        detail["image_preview_error"] = str(exc)
+    return detail
 
 
 def _bounded_int(
@@ -1125,7 +1201,37 @@ async def api_audit_detail(request: Request) -> Response:
         entry_id = str(request.query_params.get("id") or "")
         preview = await asyncio.to_thread(get_audit_entry, entry_id, full=False)
         _require_ui_scopes(request, *_audit_detail_scopes(preview))
-        return _json_ok(await asyncio.to_thread(get_audit_entry, entry_id))
+        detail = await asyncio.to_thread(get_audit_entry, entry_id)
+        columns = _bounded_int(
+            request.query_params.get("columns"),
+            default=96,
+            minimum=8,
+            maximum=200,
+            label="columns",
+        )
+        rows = _bounded_int(
+            request.query_params.get("rows"),
+            default=32,
+            minimum=4,
+            maximum=100,
+            label="rows",
+        )
+        cell_aspect = _bounded_float(
+            request.query_params.get("cell_aspect"),
+            default=2.0,
+            minimum=0.5,
+            maximum=5.0,
+            label="cell_aspect",
+        )
+        return _json_ok(
+            await asyncio.to_thread(
+                _audit_view_image_detail,
+                detail,
+                columns=columns,
+                rows=rows,
+                cell_aspect=cell_aspect,
+            )
+        )
     except ValueError as exc:
         return _json_error(exc, status_code=404)
     except Exception as exc:

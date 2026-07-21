@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import signal
@@ -140,6 +141,87 @@ def test_audit_detail_requires_scopes_before_materializing_payloads(tmp_path, mo
     assert set(ui._audit_detail_scopes({"operation": "other", "node": "worker"})) == set(
         ui.UI_FULL_SCOPES
     )
+
+
+def test_audit_detail_renders_view_image_without_returning_raw_data(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    encoded = (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+    preview = {
+        "id": "call:image",
+        "tool": "view_image",
+        "operation": "files",
+        "node": "local",
+    }
+    detail = {
+        **preview,
+        "output": {
+            "content": [
+                {"type": "image", "data": encoded, "mimeType": "image/png"},
+                {"type": "text", "text": "pixel.png (image/png, 68 bytes)"},
+            ],
+            "structuredContent": {
+                "ok": True,
+                "path": "pixel.png",
+                "mime_type": "image/png",
+                "bytes": len(base64.b64decode(encoded)),
+            },
+            "isError": False,
+        },
+    }
+
+    def fake_get_audit_entry(entry_id: str, *, full: bool = True):
+        assert entry_id == "call:image"
+        return dict(detail if full else preview)
+
+    monkeypatch.setattr(ui, "get_audit_entry", fake_get_audit_entry)
+    request = _request(
+        "/api/ui/audit/detail",
+        query=b"id=call%3Aimage&columns=20&rows=10&cell_aspect=2",
+    )
+    request.state.principal = Principal(
+        email=None,
+        subject="reader",
+        claims={"scope": "shell:read"},
+    )
+
+    response = asyncio.run(ui.api_audit_detail(request))
+    payload = json.loads(response.body)["data"]
+
+    assert response.status_code == 200
+    assert payload["image_preview"]["kind"] == "image"
+    assert payload["image_preview"]["path"] == "pixel.png"
+    assert base64.b64decode(payload["image_preview"]["rgba"])
+    assert "data" not in payload["output"]["content"][0]
+    assert payload["output"]["content"][0]["bytes"] == len(base64.b64decode(encoded))
+    assert encoded not in response.body.decode()
+
+
+def test_audit_view_image_detail_keeps_non_images_and_sanitizes_invalid_data():
+    ordinary = {"tool": "read_file", "output": {"content": []}}
+    assert ui._audit_view_image_detail(ordinary, columns=20, rows=10, cell_aspect=2) is ordinary
+
+    for incomplete in (
+        {"tool": "view_image"},
+        {"tool": "view_image", "output": "invalid"},
+        {"tool": "view_image", "output": {"content": "invalid"}},
+        {"tool": "view_image", "output": {"content": [{"type": "text", "text": "none"}]}},
+    ):
+        assert ui._audit_view_image_detail(incomplete, columns=20, rows=10, cell_aspect=2) is incomplete
+
+    invalid = {
+        "tool": "view_image",
+        "output": {
+            "content": [{"type": "image", "data": "not-base64", "mimeType": "image/png"}],
+            "structured_content": {"path": "broken.png"},
+        },
+    }
+    result = ui._audit_view_image_detail(invalid, columns=20, rows=10, cell_aspect=2)
+
+    assert "data" not in result["output"]["content"][0]
+    assert result["image_preview_error"]
+    assert "image_preview" not in result
 
 
 def test_index_assets_principal_and_basic_helpers(tmp_path, monkeypatch):
