@@ -70,6 +70,43 @@ async def test_timed_out_remote_job_is_skipped_on_next_poll(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_poll_requires_upgrade_before_dequeuing_jobs(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    manager = remote.RemoteManager()
+    worker = remote.RemoteWorker(name="worker-a", token="token-a")
+    manager.workers[worker.name] = worker
+    manager.tokens[worker.token] = worker.name
+    worker.queue.put_nowait({"id": "job-valid", "tool": "list_files", "args": {}})
+
+    mismatch = await manager.poll(
+        worker.token,
+        {
+            "protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+            "worker_version": "0.0.0",
+        },
+    )
+
+    assert mismatch == {
+        "job": None,
+        "upgrade": {"required": True, "version": remote.__version__},
+    }
+    assert worker.queue.qsize() == 1
+    assert worker.info["lsm_version"] == "0.0.0"
+
+    matched = await manager.poll(
+        worker.token,
+        {
+            "protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+            "worker_version": remote.__version__,
+        },
+    )
+    assert matched["job"]["id"] == "job-valid"
+    assert matched["upgrade"] == {"required": False, "version": remote.__version__}
+
+
+@pytest.mark.asyncio
 async def test_remote_queue_is_bounded_per_worker(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
@@ -216,6 +253,62 @@ def test_worker_post_json_urllib_reports_non_2xx_body(monkeypatch):
 
 def test_worker_retry_delay_is_capped():
     assert [remote._worker_retry_delay(i) for i in range(7)] == [1.0, 2.0, 4.0, 8.0, 16.0, 30.0, 30.0]  # noqa: SLF001
+
+
+def test_reexec_updated_worker_runtime_prefers_installed_bundle(tmp_path, monkeypatch):
+    from local_shell_mcp import remote_worker_cli
+
+    state_dir = tmp_path / "state"
+    runtime = state_dir / "runtime"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKER_STATE_DIR", str(state_dir))
+    monkeypatch.setenv("PYTHONPATH", "/old/runtime:/other")
+    monkeypatch.setattr(
+        remote_worker_cli,
+        "_worker_run_exec_argv",
+        lambda: [sys.executable, "-m", "local_shell_mcp.main", "worker", "run"],
+    )
+    calls = []
+    monkeypatch.setattr(remote.os, "execv", lambda executable, argv: calls.append((executable, argv)))
+
+    remote._reexec_updated_worker_runtime()  # noqa: SLF001
+
+    pythonpath = remote.os.environ["PYTHONPATH"].split(remote.os.pathsep)
+    assert pythonpath[:2] == [str(runtime), str(runtime / "vendor")]
+    assert pythonpath[2:] == ["/old/runtime", "/other"]
+    assert calls == [
+        (
+            sys.executable,
+            [sys.executable, "-m", "local_shell_mcp.main", "worker", "run"],
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_upgrade_worker_runtime_validates_manifest_version(monkeypatch):
+    from local_shell_mcp import remote_worker_installer
+
+    monkeypatch.setattr(
+        remote_worker_installer,
+        "install_or_update_runtime",
+        lambda server: {"version": "3.1.0"},
+    )
+    monkeypatch.setattr(
+        remote,
+        "_reexec_updated_worker_runtime",
+        lambda: pytest.fail("re-executed mismatched runtime"),
+    )
+    with pytest.raises(RuntimeError, match="manifest provides 3.1.0"):
+        await remote._upgrade_worker_runtime("https://example.test", "3.2.0")  # noqa: SLF001
+
+    calls = []
+    monkeypatch.setattr(
+        remote_worker_installer,
+        "install_or_update_runtime",
+        lambda server: {"version": "3.2.0"},
+    )
+    monkeypatch.setattr(remote, "_reexec_updated_worker_runtime", lambda: calls.append("reexec"))
+    await remote._upgrade_worker_runtime("https://example.test", "3.2.0")  # noqa: SLF001
+    assert calls == ["reexec"]
 
 
 def test_worker_cli_keyboard_interrupt_exits_cleanly():

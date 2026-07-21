@@ -128,10 +128,14 @@ def test_fetch_bytes_uses_urlopen(monkeypatch):
     monkeypatch.setattr(
         installer.urllib.request,
         "urlopen",
-        lambda url, timeout=60: captured.append((url, timeout)) or Response(),
+        lambda request, timeout=60: captured.append((request, timeout)) or Response(),
     )
     assert installer._fetch_bytes("https://example.test/file", timeout=7) == b"payload"  # noqa: SLF001
-    assert captured == [("https://example.test/file", 7)]
+    request, timeout = captured[0]
+    assert request.full_url == "https://example.test/file"
+    assert request.headers["Cache-control"] == "no-cache"
+    assert request.headers["Pragma"] == "no-cache"
+    assert timeout == 7
 
 
 def test_install_without_existing_config_rejects_incomplete_bundle(tmp_path, monkeypatch):
