@@ -299,6 +299,8 @@ def _scan_related_files(
             with os.scandir(current) as iterator:
                 entries = []
                 for entry in iterator:
+                    if entry.name == ".git":
+                        continue
                     if scanned_entries >= scan_limit:
                         _append_warning(
                             warnings,
