@@ -261,7 +261,7 @@ def test_reexec_updated_worker_runtime_prefers_installed_bundle(tmp_path, monkey
     state_dir = tmp_path / "state"
     runtime = state_dir / "runtime"
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKER_STATE_DIR", str(state_dir))
-    monkeypatch.setenv("PYTHONPATH", "/old/runtime:/other")
+    monkeypatch.setenv("PYTHONPATH", remote.os.pathsep.join(("/old/runtime", "/other")))
     monkeypatch.setattr(
         remote_worker_cli,
         "_worker_run_exec_argv",
