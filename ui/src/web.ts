@@ -818,6 +818,9 @@ function connectTerminal(): void {
       authGate.hidden = false
       appShell.hidden = true
       stopRefreshTimer()
+      gateDetail.textContent = "The session expired or this service requires OAuth authentication."
+      loginButton.disabled = false
+      loginWebButton.disabled = false
       return
     }
     if (event.code === 4410) {
@@ -947,7 +950,19 @@ function initializeTerminal(): void {
 async function copyTerminalSelection(): Promise<void> {
   const selection = terminal?.getSelection()
   if (!selection) return
-  await navigator.clipboard.writeText(selection).catch(() => undefined)
+  try {
+    await navigator.clipboard.writeText(selection)
+  } catch {
+    const textarea = document.createElement("textarea")
+    textarea.value = selection
+    textarea.style.position = "fixed"
+    textarea.style.opacity = "0"
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand("copy")
+    textarea.remove()
+    terminal?.focus()
+  }
 }
 
 window.addEventListener("keydown", (event) => {

@@ -310,6 +310,20 @@ button.nav-item.active { color: white; background: #232d42; box-shadow: inset 3p
 .touchbar { display: none; grid-template-columns: repeat(9,minmax(0,1fr)); gap: 4px; padding: 5px; border-top: 1px solid #263047; }
 .touchbar button { height: 34px; color: #d7deeb; background: #192235; border: 1px solid #2c3850; border-radius: 7px; }
 .terminal-footer { display: flex; justify-content: space-between; padding: 8px 12px; color: #758197; border-top: 1px solid #263047; font: 9px ui-monospace,SFMono-Regular,Menlo,monospace; }
+:fullscreen .shell,
+.shell:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  padding: 18px;
+  border-radius: 0;
+}
+:fullscreen .shell .terminal-card,
+.shell:fullscreen .terminal-card {
+  height: calc(100vh - 70px);
+  height: calc(100dvh - 70px);
+  border-radius: 0;
+}
 .refreshing #refresh-button svg { animation: spin .75s linear infinite; }
 @media (max-width: 1050px) {
   .app-shell { grid-template-columns: 78px minmax(0,1fr); }
