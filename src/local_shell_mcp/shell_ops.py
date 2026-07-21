@@ -179,6 +179,15 @@ def quote_shell_argument(value: str) -> str:
     return shlex.quote(value)
 
 
+def quote_shell_executable(value: str) -> str:
+    quoted = quote_shell_argument(value)
+    name = _shell_program_name(get_settings().shell_executable)
+    powershell = "power" + "shell"
+    if name in {powershell + ".exe", powershell, "pwsh.exe", "pwsh"}:
+        return f"& {quoted}"
+    return quoted
+
+
 def _shell_command_args(command: str) -> list[str]:
     return shell_command_args(get_settings().shell_executable, command)
 

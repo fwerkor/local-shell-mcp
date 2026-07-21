@@ -59,6 +59,7 @@ from .shell_ops import (
     public_run_shell,
     public_run_shell_timeout,
     quote_shell_argument,
+    quote_shell_executable,
     read_shell,
     run_shell,
     send_shell,
@@ -160,7 +161,7 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict:
     await asyncio.to_thread(patch_path.write_bytes, normalized_patch.encode("utf-8"))
     quoted = quote_shell_argument(str(patch_path))
     git_bin = get_settings().git_bin
-    git = quote_shell_argument(git_bin)
+    git = quote_shell_executable(git_bin)
     prefix = await asyncio.to_thread(git_apply_prefix, git_bin, cwd)
     quoted_prefix = quote_shell_argument(prefix) if prefix else None
     check_result = await run_shell(
