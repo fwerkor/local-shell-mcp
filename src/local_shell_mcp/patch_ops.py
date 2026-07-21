@@ -50,11 +50,12 @@ def git_apply_command(
     quoted_git: str,
     quoted_patch: str,
     quoted_prefix: str | None = None,
+    *,
+    check: bool = False,
 ) -> str:
+    check_flag = " --check" if check else ""
     directory = f" --directory={quoted_prefix}" if quoted_prefix else ""
-    check = f"{quoted_git} apply --check{directory} {quoted_patch}"
-    apply = f"{quoted_git} apply{directory} {quoted_patch}"
-    return f"{check} && {apply}"
+    return f"{quoted_git} apply{check_flag}{directory} {quoted_patch}"
 
 
 def normalize_patch_text(patch: str, cwd: str = ".") -> str:

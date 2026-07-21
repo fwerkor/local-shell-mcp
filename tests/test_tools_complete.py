@@ -368,6 +368,46 @@ def test_tool_helpers_audit_serialization_timeout_and_tail(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_apply_patch_stops_after_failed_preflight(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    target = tmp_path / "sample.py"
+    original = "value = 1\n"
+    target.write_text(original, encoding="utf-8")
+    commands: list[str] = []
+
+    async def fail_check(command, **kwargs):
+        commands.append(command)
+        return CommandResult(
+            ok=False,
+            exit_code=1,
+            timed_out=False,
+            duration_ms=1,
+            cwd=str(tmp_path),
+            command=command,
+            stdout="",
+            stderr="patch does not apply",
+            truncated=False,
+        )
+
+    monkeypatch.setattr(tools, "run_shell", fail_check)
+    patch = """*** Begin Patch
+*** Update File: sample.py
+@@
+-value = 1
++value = 2
+*** End Patch
+"""
+
+    result = await tools._apply_patch_text(patch, str(tmp_path))
+
+    assert result["exit_code"] == 1
+    assert len(commands) == 1
+    assert " apply --check" in commands[0]
+    assert "&&" not in commands[0]
+    assert target.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.asyncio
 async def test_apply_patch_honors_nested_cwd_in_git_worktree(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)

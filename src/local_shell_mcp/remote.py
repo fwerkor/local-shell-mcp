@@ -914,6 +914,15 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
     quoted_patch = quote_shell_argument(str(patch_path))
     prefix = await asyncio.to_thread(git_apply_prefix, git_bin, cwd)
     quoted_prefix = quote_shell_argument(prefix) if prefix else None
+    check_result = await run_shell(
+        git_apply_command(git, quoted_patch, quoted_prefix, check=True),
+        cwd=cwd,
+        timeout_s=60,
+        max_output_bytes=500_000,
+    )
+    if check_result.exit_code != 0 or check_result.timed_out:
+        return {**check_result.model_dump(), "patch_path": relative_display(patch_path)}
+
     result = await run_shell(
         git_apply_command(git, quoted_patch, quoted_prefix),
         cwd=cwd,
