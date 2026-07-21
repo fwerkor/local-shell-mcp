@@ -42,7 +42,7 @@ from .fs_ops import (
 )
 from .jobs import list_jobs, retry_job, start_job, stop_job, tail_job
 from .models import ok_result as _ok
-from .patch_ops import normalize_patch_text
+from .patch_ops import git_apply_command, git_apply_prefix, normalize_patch_text
 from .playwright_ops import browser_capture, browser_get_text, playwright_run_script
 from .search_ops import grep, tree
 from .settings import get_settings, safe_settings_dump
@@ -909,11 +909,13 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
     patch_path = temp_dir() / f"remote-patch-{uuid.uuid4().hex}.diff"
     patch_path.parent.mkdir(parents=True, exist_ok=True)
     await asyncio.to_thread(patch_path.write_bytes, normalized_patch.encode("utf-8"))
+    git_bin = get_settings().git_bin
+    git = quote_shell_argument(git_bin)
+    quoted_patch = quote_shell_argument(str(patch_path))
+    prefix = await asyncio.to_thread(git_apply_prefix, git_bin, cwd)
+    quoted_prefix = quote_shell_argument(prefix) if prefix else None
     result = await run_shell(
-        f"{quote_shell_argument(get_settings().git_bin)} apply --check "
-        f"{quote_shell_argument(str(patch_path))} && "
-        f"{quote_shell_argument(get_settings().git_bin)} apply "
-        f"{quote_shell_argument(str(patch_path))}",
+        git_apply_command(git, quoted_patch, quoted_prefix),
         cwd=cwd,
         timeout_s=60,
         max_output_bytes=500_000,

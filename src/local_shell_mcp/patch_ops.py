@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import difflib
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -26,6 +27,34 @@ class _FileState:
     original: str | None
     current: str | None
     mode: str
+
+
+def git_apply_prefix(git_bin: str, cwd: str) -> str | None:
+    try:
+        result = subprocess.run(
+            [git_bin, "rev-parse", "--show-prefix"],
+            cwd=Path(cwd).resolve(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    prefix = result.stdout.rstrip("\r\n")
+    return prefix.removesuffix("/") or None
+
+
+def git_apply_command(
+    quoted_git: str,
+    quoted_patch: str,
+    quoted_prefix: str | None = None,
+) -> str:
+    directory = f" --directory={quoted_prefix}" if quoted_prefix else ""
+    check = f"{quoted_git} apply --check{directory} {quoted_patch}"
+    apply = f"{quoted_git} apply{directory} {quoted_patch}"
+    return f"{check} && {apply}"
 
 
 def normalize_patch_text(patch: str, cwd: str = ".") -> str:
@@ -199,12 +228,11 @@ def _apply_update(action: _PatchAction, text: str) -> str:
     trailing_newline = text.endswith(("\n", "\r"))
     lines = text.splitlines()
     cursor = 0
+    changed = False
 
     for hunk_number, (hunk, must_end_at_eof) in enumerate(hunks, start=1):
         old_lines = [line[1:] for line in hunk if not line.startswith("+")]
         new_lines = [line[1:] for line in hunk if not line.startswith("-")]
-        if old_lines == new_lines:
-            raise ValueError(f"hunk {hunk_number} for {action.path} contains no changes")
 
         if old_lines:
             matches = [
@@ -226,8 +254,17 @@ def _apply_update(action: _PatchAction, text: str) -> str:
 
         if must_end_at_eof and start + len(old_lines) != len(lines):
             raise ValueError(f"hunk {hunk_number} does not match the end of {action.path}")
+
+        if old_lines == new_lines:
+            cursor = start + len(old_lines)
+            continue
+
         lines[start : start + len(old_lines)] = new_lines
         cursor = start + len(new_lines)
+        changed = True
+
+    if not changed:
+        raise ValueError(f"update action for {action.path} contains no changes")
 
     return newline.join(lines) + (newline if trailing_newline and lines else "")
 

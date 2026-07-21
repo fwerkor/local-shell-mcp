@@ -612,6 +612,35 @@ def test_worker_upload_protocol_and_generated_execution_edges(tmp_path, monkeypa
     assert remote._handled_remote_exception(ValueError("bad"))["error"] == "ValueError"
 
 
+@pytest.mark.asyncio
+async def test_worker_apply_patch_honors_nested_cwd_in_git_worktree(
+    tmp_path, monkeypatch
+):
+    _configure(tmp_path, monkeypatch)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    target = nested / "sample.py"
+    target.write_text(
+        "def helper():\n    return 0\n\n\ndef target():\n    return 1\n",
+        encoding="utf-8",
+    )
+    patch = """*** Begin Patch
+*** Update File: sample.py
+@@
+ def target():
+@@
+-    return 1
++    return 2
+*** End Patch
+"""
+
+    result = await remote._apply_patch_text(patch, str(nested))
+
+    assert result["exit_code"] == 0
+    assert target.read_text(encoding="utf-8").endswith("def target():\n    return 2\n")
+
+
 def test_worker_resume_identity_and_curl_post_failures(tmp_path, monkeypatch, capsys):
     _configure(
         tmp_path,
