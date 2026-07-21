@@ -133,7 +133,8 @@ def test_audit_serialization_trimming_and_all_filters(tmp_path, monkeypatch):
     assert audit_module._operation_type({}) == "other"
     assert audit_module._operation_type({"event": "remote_worker_registered"}) == "remote"
     assert audit_module._operation_type({"tool": "job_tail"}) == "jobs"
-    assert audit_module._operation_type({"tool": "create_file_link"}) == "transfer"
+    assert audit_module._operation_type({"tool": "create_file_link"}) == "files"
+    assert audit_module._operation_type({"tool": "transfer_path"}) == "remote"
 
 
 def test_auth_scopes_hosts_tokens_and_metadata(tmp_path, monkeypatch):

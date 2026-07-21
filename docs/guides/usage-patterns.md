@@ -94,7 +94,7 @@ Good practice:
 
 - Name machines clearly with `remote_invite` or `remote_rename_machine`.
 - Call `environment_info(machine=...)` before acting.
-- Use `transfer_path` for all controller/worker and worker/worker file or directory transfers.
+- Use `transfer_path` to start tracked controller/worker and worker/worker file or directory transfers, then manage them with the normal `job_*` tools.
 - Revoke workers after the task with `remote_revoke_machine`.
 
 ## Anti-patterns

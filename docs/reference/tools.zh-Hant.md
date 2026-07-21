@@ -32,7 +32,7 @@ Git 不再擁有專用 MCP 工具。請透過 `run_shell_tool` 執行標準 Git 
 
 - `read_file.path` 可以是單一路徑，也可以是路徑陣列。
 - `edit_file.edits` 接受一個或多個精確替換項，不再區分單次與批次編輯工具。
-- `transfer_path` 自動判斷來源是檔案還是目錄，並支援控制端到 worker、worker 到控制端以及 worker 到 worker。`source_machine` 或 `destination_machine` 至少指定一個。
+- `transfer_path` 自動判斷來源是檔案還是目錄，並立即建立一個可追蹤的傳輸 job，支援控制端到 worker、worker 到控制端以及 worker 到 worker。使用 `job_list`、`job_tail`、`job_stop` 和 `job_retry` 查看、停止或重試；worker 到控制端的上傳使用可續傳的原始二進位分塊。`source_machine` 或 `destination_machine` 至少指定一個。
 
 ### 瀏覽器自動化
 

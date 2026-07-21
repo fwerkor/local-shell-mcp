@@ -7,6 +7,7 @@ import json
 import subprocess
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
@@ -36,7 +37,16 @@ from .fs_ops import (
     write_text,
 )
 from .image_ops import ImageFile, assert_view_image_size, read_image
-from .jobs import list_jobs, retry_job, start_job, stop_job, tail_job
+from .jobs import (
+    ManagedJobContext,
+    list_jobs,
+    register_managed_job_handler,
+    retry_job,
+    start_job,
+    start_managed_job,
+    stop_job,
+    tail_job,
+)
 from .models import ToolResult
 from .models import ok_result as _ok
 from .oauth import ALL_OAUTH_SCOPES
@@ -46,6 +56,7 @@ from .remote import remote_manager
 from .remote_transfer import (
     create_download_ticket,
     create_upload_ticket,
+    get_upload_ticket_status,
     revoke_transfer_ticket,
 )
 from .search_ops import grep, tree
@@ -73,6 +84,7 @@ from .skill_ops import (
 from .tmux_helper import persistent_shell_backend_info
 from .todo_ops import todo_read, todo_write
 from .transfer_ops import (
+    DEFAULT_TRANSFER_CHUNK_BYTES,
     normalize_chunk_size,
     transfer_alloc_temp_path,
     transfer_pack_dir,
@@ -204,6 +216,7 @@ SECRET_PATTERNS = {
     "private_key": r"-----BEGIN (?:RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----",
     "generic_assignment": r"(?i)(token|secret|password|passwd|api_key|apikey)\s*[:=]\s*['\"][^'\"]{8,}['\"]",
 }
+
 
 def _oauth_security_scheme(scopes: list[str] | tuple[str, ...]) -> dict[str, Any]:
     return {"type": "oauth2", "scopes": list(ALL_OAUTH_SCOPES)}
@@ -657,6 +670,14 @@ class RemoteTransferError(RuntimeError):
     pass
 
 
+TransferProgress = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+async def _report_transfer_progress(progress: TransferProgress | None, **fields: Any) -> None:
+    if progress is not None:
+        await progress(fields)
+
+
 def _unwrap_remote_transfer_result(result: dict, *, machine: str, tool: str) -> Any:
     if not result.get("ok", False):
         raise RemoteTransferError(f"{tool} on {machine} failed: {result.get('message') or result}")
@@ -681,13 +702,12 @@ async def _copy_local_file_to_remote(
     dst_path: str,
     overwrite: bool = True,
     chunk_size: int | None = None,
+    progress: TransferProgress | None = None,
 ) -> dict:
     stat = await asyncio.to_thread(transfer_stat, source_path, True)
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {source_path}")
-    effective_chunk_size = (
-        stat["size"] if chunk_size is None else normalize_chunk_size(chunk_size)
-    )
+    effective_chunk_size = stat["size"] if chunk_size is None else normalize_chunk_size(chunk_size)
     ticket = create_download_ticket(
         source_path,
         stat["size"],
@@ -709,6 +729,14 @@ async def _copy_local_file_to_remote(
         )
     finally:
         revoke_transfer_ticket(ticket["token"])
+    await _report_transfer_progress(
+        progress,
+        phase="transferring",
+        bytes_transferred=stat["size"],
+        total_bytes=stat["size"],
+        chunks=1,
+        chunk_size=effective_chunk_size,
+    )
     return {
         "source": {"machine": "controller", "path": stat["path"]},
         "destination": {"machine": dst_machine, "path": finish["path"]},
@@ -726,44 +754,110 @@ async def _copy_remote_file_to_local(
     destination_path: str,
     overwrite: bool = True,
     chunk_size: int | None = None,
+    progress: TransferProgress | None = None,
 ) -> dict:
     stat = await _remote_transfer_data(
         src_machine, "transfer_stat", {"path": src_path, "sha256": True}
     )
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {src_path}")
-    effective_chunk_size = (
-        stat["size"] if chunk_size is None else normalize_chunk_size(chunk_size)
+    total_bytes = int(stat["size"])
+    effective_chunk_size = normalize_chunk_size(
+        DEFAULT_TRANSFER_CHUNK_BYTES if chunk_size is None else chunk_size
     )
+    chunk_timeout_s = min(int(get_settings().remote_job_timeout_s), 300)
     ticket = create_upload_ticket(
         destination_path,
-        stat["size"],
+        total_bytes,
         stat["sha256"],
         overwrite,
     )
+    chunks = 0
+    finish: dict[str, Any] | None = None
     try:
-        finish = await _remote_transfer_data(
-            src_machine,
-            "transfer_upload_url",
-            {
-                "path": src_path,
-                "url": ticket["url"],
-                "expected_bytes": stat["size"],
-                "expected_sha256": stat["sha256"],
-                "timeout_s": get_settings().remote_job_timeout_s,
-            },
-            get_settings().remote_job_timeout_s,
+        status = get_upload_ticket_status(ticket["token"])
+        offset = int(status["received_bytes"])
+        await _report_transfer_progress(
+            progress,
+            phase="transferring",
+            bytes_transferred=offset,
+            total_bytes=total_bytes,
+            chunks=chunks,
+            chunk_size=effective_chunk_size,
         )
+        while offset < total_bytes or (total_bytes == 0 and chunks == 0):
+            expected_end = min(total_bytes, offset + effective_chunk_size)
+            last_error: Exception | None = None
+            for attempt in range(3):
+                try:
+                    response = await _remote_transfer_data(
+                        src_machine,
+                        "transfer_upload_url",
+                        {
+                            "path": src_path,
+                            "url": ticket["url"],
+                            "expected_bytes": total_bytes,
+                            "expected_sha256": stat["sha256"],
+                            "timeout_s": chunk_timeout_s,
+                            "offset": offset,
+                            "chunk_size": effective_chunk_size,
+                        },
+                        chunk_timeout_s,
+                    )
+                except Exception as exc:
+                    last_error = exc
+                    status = get_upload_ticket_status(ticket["token"])
+                    acknowledged = int(status["received_bytes"])
+                    if acknowledged == expected_end or (
+                        total_bytes == 0 and status.get("completed")
+                    ):
+                        response = status
+                    elif acknowledged != offset or attempt == 2:
+                        raise
+                    else:
+                        await asyncio.sleep(1)
+                        continue
+
+                acknowledged = int(response.get("received_bytes", -1))
+                if total_bytes == 0:
+                    if not response.get("completed"):
+                        raise RemoteTransferError("empty upload was not completed")
+                elif acknowledged != expected_end:
+                    raise RemoteTransferError(
+                        f"upload acknowledged offset {acknowledged}, expected {expected_end}"
+                    )
+                offset = acknowledged
+                chunks += 1
+                finish = response
+                await _report_transfer_progress(
+                    progress,
+                    phase="transferring",
+                    bytes_transferred=offset,
+                    total_bytes=total_bytes,
+                    chunks=chunks,
+                    chunk_size=effective_chunk_size,
+                )
+                break
+            else:
+                assert last_error is not None
+                raise last_error
+            if finish.get("completed"):
+                break
+
+        if finish is None or not finish.get("completed"):
+            finish = get_upload_ticket_status(ticket["token"])
+        if not finish.get("completed"):
+            raise RemoteTransferError(f"upload did not complete: {finish}")
     finally:
         revoke_transfer_ticket(ticket["token"])
     return {
         "source": {"machine": src_machine, "path": stat["path"]},
         "destination": {"machine": "controller", "path": finish["path"]},
-        "bytes": stat["size"],
+        "bytes": total_bytes,
         "sha256": stat.get("sha256"),
-        "chunks": 1,
+        "chunks": chunks,
         "chunk_size": effective_chunk_size,
-        "transport": "http-stream",
+        "transport": "http-chunks",
     }
 
 
@@ -774,6 +868,7 @@ async def _copy_remote_file_to_remote(
     dst_path: str,
     overwrite: bool = True,
     chunk_size: int | None = None,
+    progress: TransferProgress | None = None,
 ) -> dict:
     temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".bin")
     try:
@@ -783,6 +878,7 @@ async def _copy_remote_file_to_remote(
             temporary["path"],
             True,
             chunk_size,
+            progress,
         )
         push = await _copy_local_file_to_remote(
             temporary["path"],
@@ -790,6 +886,7 @@ async def _copy_remote_file_to_remote(
             dst_path,
             overwrite,
             chunk_size,
+            progress,
         )
     finally:
         with suppress(Exception):
@@ -801,7 +898,7 @@ async def _copy_remote_file_to_remote(
         "sha256": pull["sha256"],
         "chunks": pull["chunks"] + push["chunks"],
         "chunk_size": pull["chunk_size"],
-        "transport": "http-stream-via-controller",
+        "transport": "http-chunks-via-controller",
     }
 
 
@@ -819,6 +916,7 @@ async def _copy_packed_dir_to_remote(
     dst_path: str,
     overwrite: bool,
     chunk_size: int | None,
+    progress: TransferProgress | None = None,
 ) -> dict:
     dst_archive = await _remote_transfer_data(
         dst_machine, "transfer_alloc_temp_path", {"suffix": ".tar.gz"}
@@ -832,6 +930,7 @@ async def _copy_packed_dir_to_remote(
                 dst_archive["path"],
                 True,
                 chunk_size,
+                progress,
             )
         else:
             copy_result = await _copy_local_file_to_remote(
@@ -840,6 +939,7 @@ async def _copy_packed_dir_to_remote(
                 dst_archive["path"],
                 True,
                 chunk_size,
+                progress,
             )
         unpack = await _remote_transfer_data(
             dst_machine,
@@ -877,7 +977,9 @@ async def _copy_remote_dir_to_remote(
     dst_path: str,
     overwrite: bool = True,
     chunk_size: int | None = None,
+    progress: TransferProgress | None = None,
 ) -> dict:
+    await _report_transfer_progress(progress, phase="packing", bytes_transferred=0)
     pack = await _remote_transfer_data(
         src_machine, "transfer_pack_dir", {"path": src_path, "compression": "gz"}
     )
@@ -888,6 +990,7 @@ async def _copy_remote_dir_to_remote(
         dst_path,
         overwrite,
         chunk_size,
+        progress,
     )
 
 
@@ -897,14 +1000,28 @@ async def _copy_remote_dir_to_local(
     destination_path: str,
     overwrite: bool = True,
     chunk_size: int | None = None,
+    progress: TransferProgress | None = None,
 ) -> dict:
+    await _report_transfer_progress(progress, phase="packing", bytes_transferred=0)
     pack = await _remote_transfer_data(
         src_machine, "transfer_pack_dir", {"path": src_path, "compression": "gz"}
     )
     archive = await asyncio.to_thread(transfer_alloc_temp_path, ".tar.gz")
     try:
         copy_result = await _copy_remote_file_to_local(
-            src_machine, pack["archive_path"], archive["path"], True, chunk_size
+            src_machine,
+            pack["archive_path"],
+            archive["path"],
+            True,
+            chunk_size,
+            progress,
+        )
+        await _report_transfer_progress(
+            progress,
+            phase="unpacking",
+            bytes_transferred=pack["bytes"],
+            total_bytes=pack["bytes"],
+            chunks=copy_result["chunks"],
         )
         unpack = await asyncio.to_thread(
             transfer_unpack_archive, archive["path"], destination_path, overwrite, True
@@ -929,7 +1046,9 @@ async def _copy_local_dir_to_remote(
     dst_path: str,
     overwrite: bool = True,
     chunk_size: int | None = None,
+    progress: TransferProgress | None = None,
 ) -> dict:
+    await _report_transfer_progress(progress, phase="packing", bytes_transferred=0)
     pack = await asyncio.to_thread(transfer_pack_dir, source_path, "gz")
     return await _copy_packed_dir_to_remote(
         pack,
@@ -938,16 +1057,18 @@ async def _copy_local_dir_to_remote(
         dst_path,
         overwrite,
         chunk_size,
+        progress,
     )
 
 
-async def _transfer_path(
+async def _execute_transfer_path(
     source_path: str,
     destination_path: str,
     source_machine: str | None = None,
     destination_machine: str | None = None,
     overwrite: bool = False,
     chunk_size: int | None = None,
+    progress: TransferProgress | None = None,
 ) -> dict:
     if not source_machine and not destination_machine:
         raise ValueError("At least one transfer endpoint must be a remote machine")
@@ -968,38 +1089,116 @@ async def _transfer_path(
         operation = (
             _copy_remote_dir_to_remote if source_type == "dir" else _copy_remote_file_to_remote
         )
-        result = await operation(
+        arguments = (
             source_machine,
             source_path,
             destination_machine,
             destination_path,
-            overwrite,
-            chunk_size,
         )
     elif source_machine:
         operation = (
             _copy_remote_dir_to_local if source_type == "dir" else _copy_remote_file_to_local
         )
-        result = await operation(
-            source_machine,
-            source_path,
-            destination_path,
-            overwrite,
-            chunk_size,
-        )
+        arguments = (source_machine, source_path, destination_path)
     else:
         assert destination_machine is not None
         operation = (
             _copy_local_dir_to_remote if source_type == "dir" else _copy_local_file_to_remote
         )
-        result = await operation(
-            source_path,
-            destination_machine,
-            destination_path,
-            overwrite,
-            chunk_size,
-        )
+        arguments = (source_path, destination_machine, destination_path)
+
+    result = await operation(
+        *arguments,
+        overwrite,
+        chunk_size,
+        progress,
+    )
     return {"type": source_type, **result}
+
+
+_transfer_path = _execute_transfer_path
+
+
+def _transfer_endpoint(machine: str | None, path: str) -> str:
+    return f"{machine or 'controller'}:{path}"
+
+
+async def _run_transfer_job(context: ManagedJobContext, payload: dict[str, Any]) -> dict[str, Any]:
+    source_path = str(payload["source_path"])
+    destination_path = str(payload["destination_path"])
+    source_machine = payload.get("source_machine")
+    destination_machine = payload.get("destination_machine")
+    source = _transfer_endpoint(source_machine, source_path)
+    destination = _transfer_endpoint(destination_machine, destination_path)
+    await context.log(f"transfer started: {source} -> {destination}")
+    await context.update_progress(phase="preparing", bytes_transferred=0)
+
+    async def report(fields: dict[str, Any]) -> None:
+        await context.update_progress(**fields)
+        phase = str(fields.get("phase") or "transferring")
+        done = fields.get("bytes_transferred")
+        total = fields.get("total_bytes")
+        chunks = fields.get("chunks")
+        if isinstance(done, int) and isinstance(total, int):
+            await context.log(
+                f"{phase}: {done}/{total} bytes"
+                + (f" in {chunks} chunks" if isinstance(chunks, int) else "")
+            )
+        else:
+            await context.log(phase)
+
+    result = await _execute_transfer_path(
+        source_path,
+        destination_path,
+        source_machine,
+        destination_machine,
+        bool(payload.get("overwrite", False)),
+        payload.get("chunk_size"),
+        report,
+    )
+    completed_bytes = result.get("bytes", result.get("archive_bytes"))
+    await context.update_progress(
+        phase="completed",
+        bytes_transferred=completed_bytes,
+        total_bytes=completed_bytes,
+        chunks=result.get("chunks"),
+    )
+    await context.log(f"transfer completed: {source} -> {destination}")
+    return result
+
+
+async def _start_transfer_job(
+    source_path: str,
+    destination_path: str,
+    source_machine: str | None = None,
+    destination_machine: str | None = None,
+    overwrite: bool = False,
+    chunk_size: int | None = None,
+) -> dict[str, Any]:
+    if not source_machine and not destination_machine:
+        raise ValueError("At least one transfer endpoint must be a remote machine")
+    if chunk_size is not None:
+        normalize_chunk_size(chunk_size)
+    payload = {
+        "source_path": source_path,
+        "destination_path": destination_path,
+        "source_machine": source_machine,
+        "destination_machine": destination_machine,
+        "overwrite": overwrite,
+        "chunk_size": chunk_size,
+    }
+    source = _transfer_endpoint(source_machine, source_path)
+    destination = _transfer_endpoint(destination_machine, destination_path)
+    name = f"transfer-{Path(destination_path).name or 'path'}"
+    return await start_managed_job(
+        "transfer",
+        payload,
+        name=name,
+        command=f"transfer {source} -> {destination}",
+    )
+
+
+register_managed_job_handler("transfer", _run_transfer_job)
 
 
 def _view_image_success_result(
@@ -1744,10 +1943,10 @@ def _register_workspace_write_tools(mcp: FastMCP, settings: Any) -> None:
         purpose: str | None = None,
         explanation: str | None = None,
     ) -> ToolResult:
-        """Copy a file or directory between the controller and remote machines using raw HTTP streaming. A missing machine denotes the controller; at least one endpoint must be remote. chunk_size is retained for API compatibility and does not change the transport."""
+        """Start a tracked job that copies a file or directory between the controller and remote machines. Remote uploads use resumable raw-binary chunks; use job_list, job_tail, job_stop, and job_retry to manage the transfer."""
         _audit_tool_purpose("transfer_path", purpose, explanation)
         return await _tool_call(
-            _transfer_path,
+            _start_transfer_job,
             source_path,
             destination_path,
             source_machine,

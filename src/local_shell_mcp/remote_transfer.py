@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import hashlib
 import os
+import re
 import secrets
 import threading
 import time
@@ -21,6 +22,7 @@ from .audit import audit
 from .fs_ops import relative_display, resolve_path
 from .settings import get_settings
 from .transfer_ops import (
+    MAX_TRANSFER_CHUNK_BYTES,
     transfer_abort_write,
     transfer_begin_write,
     transfer_finish_write,
@@ -31,6 +33,7 @@ REMOTE_TRANSFER_PREFIX = "/remote/transfer"
 REMOTE_TRANSFER_UPLOAD_PREFIX = f"{REMOTE_TRANSFER_PREFIX}/upload/"
 REMOTE_TRANSFER_DOWNLOAD_PREFIX = f"{REMOTE_TRANSFER_PREFIX}/download/"
 _TRANSFER_CHUNK_BYTES = 1024 * 1024
+_CONTENT_RANGE_RE = re.compile(r"^bytes (\d+)-(\d+)/(\d+)$")
 _TICKET_LOCK = threading.RLock()
 
 
@@ -47,6 +50,9 @@ class _TransferTicket:
     display_path: str | None = None
     cleanup_path: str | None = None
     claimed: bool = False
+    transfer_id: str | None = None
+    received_bytes: int = 0
+    completed_data: dict[str, Any] | None = None
 
 
 _TICKETS: dict[str, _TransferTicket] = {}
@@ -87,6 +93,10 @@ def _validate_expected(expected_bytes: int, expected_sha256: str) -> tuple[int, 
 
 
 def _cleanup_ticket_file(ticket: _TransferTicket) -> None:
+    if ticket.direction == "upload" and ticket.transfer_id:
+        with contextlib.suppress(Exception):
+            transfer_abort_write(ticket.path, ticket.transfer_id)
+        ticket.transfer_id = None
     if not ticket.cleanup_path:
         return
     with contextlib.suppress(OSError):
@@ -96,7 +106,7 @@ def _cleanup_ticket_file(ticket: _TransferTicket) -> None:
 def _prune_locked(now: float | None = None) -> None:
     current = _now() if now is None else now
     for token, ticket in list(_TICKETS.items()):
-        if ticket.expires_at <= current:
+        if ticket.expires_at <= current and not ticket.claimed:
             removed = _TICKETS.pop(token, None)
             if removed is not None:
                 _cleanup_ticket_file(removed)
@@ -112,6 +122,7 @@ def _create_ticket(
     token: str | None = None,
     display_path: Path | None = None,
     cleanup_path: Path | None = None,
+    transfer_id: str | None = None,
 ) -> dict[str, Any]:
     size, digest = _validate_expected(expected_bytes, expected_sha256)
     token = token or secrets.token_urlsafe(32)
@@ -127,6 +138,7 @@ def _create_ticket(
         expires_at=now + _ticket_ttl_s(),
         display_path=str(display_path or path),
         cleanup_path=str(cleanup_path) if cleanup_path is not None else None,
+        transfer_id=transfer_id,
     )
     with _TICKET_LOCK:
         _prune_locked(now)
@@ -155,7 +167,19 @@ def create_upload_ticket(
     overwrite: bool = True,
 ) -> dict[str, Any]:
     destination = resolve_path(destination_path, follow_final_symlink=False)
-    return _create_ticket("upload", destination, expected_bytes, expected_sha256, overwrite)
+    begin = transfer_begin_write(str(destination), overwrite, expected_bytes)
+    try:
+        return _create_ticket(
+            "upload",
+            destination,
+            expected_bytes,
+            expected_sha256,
+            overwrite,
+            transfer_id=begin["transfer_id"],
+        )
+    except Exception:
+        transfer_abort_write(str(destination), begin["transfer_id"])
+        raise
 
 
 def _download_snapshot_path(token: str) -> Path:
@@ -270,6 +294,85 @@ def _release_ticket(token: str) -> None:
         ticket = _TICKETS.get(token)
         if ticket is not None:
             ticket.claimed = False
+            ticket.expires_at = _now() + _ticket_ttl_s()
+
+
+def _upload_ticket_data(ticket: _TransferTicket) -> dict[str, Any]:
+    if ticket.completed_data is not None:
+        return dict(ticket.completed_data)
+    return {
+        "path": relative_display(Path(ticket.display_path or ticket.path)),
+        "bytes": ticket.expected_bytes,
+        "sha256": ticket.expected_sha256,
+        "received_bytes": ticket.received_bytes,
+        "completed": False,
+        "transport": "http-chunks",
+    }
+
+
+def get_upload_ticket_status(token: str) -> dict[str, Any]:
+    with _TICKET_LOCK:
+        _prune_locked()
+        ticket = _TICKETS.get(token)
+        if ticket is None:
+            raise FileNotFoundError("transfer ticket does not exist or has expired")
+        if ticket.direction != "upload":
+            raise PermissionError("transfer ticket direction mismatch")
+        ticket.expires_at = _now() + _ticket_ttl_s()
+        return _upload_ticket_data(ticket)
+
+
+def _complete_upload_ticket(
+    token: str, ticket: _TransferTicket, finish: dict[str, Any]
+) -> dict[str, Any]:
+    data = {
+        "path": finish["path"],
+        "bytes": finish["bytes"],
+        "sha256": finish["sha256"],
+        "received_bytes": finish["bytes"],
+        "completed": True,
+        "transport": "http-chunks",
+    }
+    with _TICKET_LOCK:
+        ticket.transfer_id = None
+        ticket.received_bytes = finish["bytes"]
+        ticket.completed_data = data
+        ticket.claimed = False
+        ticket.expires_at = _now() + _ticket_ttl_s()
+    audit(
+        "remote_transfer_completed",
+        direction="upload",
+        path=finish["path"],
+        bytes=finish["bytes"],
+        token_id=_token_id(token),
+    )
+    return data
+
+
+def _write_upload_chunk(
+    ticket: _TransferTicket,
+    start: int,
+    end: int,
+    payload: bytes,
+) -> None:
+    if ticket.transfer_id is None:
+        raise RuntimeError("upload transaction is unavailable")
+    transfer_write_bytes(ticket.path, ticket.transfer_id, start, payload)
+    with _TICKET_LOCK:
+        ticket.received_bytes = end
+        ticket.expires_at = _now() + _ticket_ttl_s()
+
+
+def _finish_upload_transaction(token: str, ticket: _TransferTicket) -> dict[str, Any]:
+    if ticket.transfer_id is None:
+        raise RuntimeError("upload transaction is unavailable")
+    finish = transfer_finish_write(
+        ticket.path,
+        ticket.transfer_id,
+        ticket.expected_bytes,
+        ticket.expected_sha256,
+    )
+    return _complete_upload_ticket(token, ticket, finish)
 
 
 def _complete_ticket(token: str) -> None:
@@ -302,6 +405,32 @@ def _content_disposition(filename: str) -> str:
     return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
 
 
+def _upload_range(request: Request, ticket: _TransferTicket) -> tuple[int, int, bool]:
+    raw_range = request.headers.get("content-range")
+    if not raw_range:
+        return 0, ticket.expected_bytes, True
+    match = _CONTENT_RANGE_RE.fullmatch(raw_range.strip())
+    if match is None:
+        raise ValueError("Content-Range must use 'bytes start-end/total'")
+    start, inclusive_end, total = (int(value) for value in match.groups())
+    if total != ticket.expected_bytes:
+        raise ValueError(f"Content-Range total must be {ticket.expected_bytes}")
+    if inclusive_end < start or inclusive_end >= total:
+        raise ValueError("Content-Range bounds are invalid")
+    return start, inclusive_end + 1, False
+
+
+async def upload_status_endpoint(request: Request) -> JSONResponse:
+    token = request.path_params["token"]
+    try:
+        data = get_upload_ticket_status(token)
+    except FileNotFoundError as exc:
+        return _error_response(404, "transfer_not_found", str(exc))
+    except PermissionError as exc:
+        return _error_response(409, "transfer_unavailable", str(exc))
+    return JSONResponse({"ok": True, "data": data})
+
+
 async def upload_endpoint(request: Request) -> JSONResponse:
     token = request.path_params["token"]
     try:
@@ -311,88 +440,88 @@ async def upload_endpoint(request: Request) -> JSONResponse:
     except (PermissionError, RuntimeError) as exc:
         return _error_response(409, "transfer_unavailable", str(exc))
 
-    raw_length = request.headers.get("content-length")
-    if raw_length:
-        try:
-            content_length = int(raw_length)
-        except ValueError:
+    if ticket.completed_data is not None:
+        data = _upload_ticket_data(ticket)
+        _release_ticket(token)
+        return JSONResponse({"ok": True, "data": data})
+
+    try:
+        start, end, legacy_full_upload = _upload_range(request, ticket)
+        expected_chunk_bytes = end - start
+        if expected_chunk_bytes > MAX_TRANSFER_CHUNK_BYTES:
+            detail = (
+                "legacy full-file upload exceeds the supported request size; update the remote worker"
+                if legacy_full_upload
+                else "upload chunk exceeds the supported request size"
+            )
+            raise ValueError(f"{detail}: maximum is {MAX_TRANSFER_CHUNK_BYTES} bytes")
+        raw_length = request.headers.get("content-length")
+        if raw_length:
+            try:
+                content_length = int(raw_length)
+            except ValueError as exc:
+                raise ValueError("Content-Length is invalid") from exc
+            if content_length != expected_chunk_bytes:
+                raise ValueError(
+                    f"Expected {expected_chunk_bytes} bytes, got Content-Length {content_length}"
+                )
+        if start != ticket.received_bytes:
+            data = _upload_ticket_data(ticket)
             _release_ticket(token)
-            return _error_response(400, "invalid_content_length", "Content-Length is invalid")
-        if content_length != ticket.expected_bytes:
-            _release_ticket(token)
-            return _error_response(
-                400,
-                "size_mismatch",
-                f"Expected {ticket.expected_bytes} bytes, got Content-Length {content_length}",
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": "offset_mismatch",
+                    "message": f"Expected upload offset {ticket.received_bytes}, got {start}",
+                    "data": data,
+                },
+                status_code=409,
             )
 
-    begin: dict[str, Any] | None = None
-    offset = 0
-    digest = hashlib.sha256()
-    try:
-        begin = await asyncio.to_thread(
-            transfer_begin_write,
-            ticket.path,
-            ticket.overwrite,
-            ticket.expected_bytes,
-        )
+        payload = bytearray()
         async for chunk in request.stream():
             if not chunk:
                 continue
-            if offset + len(chunk) > ticket.expected_bytes:
-                raise ValueError("upload exceeds expected transfer size")
-            digest.update(chunk)
-            await asyncio.to_thread(
-                transfer_write_bytes,
-                ticket.path,
-                begin["transfer_id"],
-                offset,
-                chunk,
+            if len(payload) + len(chunk) > expected_chunk_bytes:
+                raise ValueError("upload exceeds declared chunk size")
+            payload.extend(chunk)
+        if len(payload) != expected_chunk_bytes:
+            raise ValueError(f"size mismatch: expected {expected_chunk_bytes}, got {len(payload)}")
+
+        expected_chunk_sha256 = request.headers.get("x-chunk-sha256")
+        actual_chunk_sha256 = hashlib.sha256(payload).hexdigest()
+        if expected_chunk_sha256 and actual_chunk_sha256 != expected_chunk_sha256.lower():
+            raise ValueError("chunk sha256 mismatch")
+        await asyncio.to_thread(
+            _write_upload_chunk,
+            ticket,
+            start,
+            end,
+            bytes(payload),
+        )
+
+        if end == ticket.expected_bytes:
+            data = await asyncio.to_thread(
+                _finish_upload_transaction,
+                token,
+                ticket,
             )
-            offset += len(chunk)
-        if offset != ticket.expected_bytes:
-            raise ValueError(f"size mismatch: expected {ticket.expected_bytes}, got {offset}")
-        actual_sha256 = digest.hexdigest()
-        if actual_sha256 != ticket.expected_sha256:
-            raise ValueError("file sha256 mismatch")
-        finish = await asyncio.to_thread(
-            transfer_finish_write,
-            ticket.path,
-            begin["transfer_id"],
-            ticket.expected_bytes,
-            ticket.expected_sha256,
-        )
-        _complete_ticket(token)
-        return JSONResponse(
-            {
-                "ok": True,
-                "data": {
-                    "path": finish["path"],
-                    "bytes": finish["bytes"],
-                    "sha256": finish["sha256"],
-                    "transport": "http-stream",
-                },
-            }
-        )
+            return JSONResponse({"ok": True, "data": data})
+
+        data = _upload_ticket_data(ticket)
+        _release_ticket(token)
+        return JSONResponse({"ok": True, "data": data})
     except asyncio.CancelledError:
-        if begin is not None:
-            with contextlib.suppress(Exception):
-                await asyncio.to_thread(
-                    transfer_abort_write,
-                    ticket.path,
-                    begin["transfer_id"],
-                )
         _release_ticket(token)
         raise
     except Exception as exc:
-        if begin is not None:
-            with contextlib.suppress(Exception):
-                await asyncio.to_thread(
-                    transfer_abort_write,
-                    ticket.path,
-                    begin["transfer_id"],
-                )
-        _release_ticket(token)
+        if ticket.received_bytes == ticket.expected_bytes:
+            with _TICKET_LOCK:
+                removed = _TICKETS.pop(token, None)
+            if removed is not None:
+                _cleanup_ticket_file(removed)
+        else:
+            _release_ticket(token)
         audit(
             "remote_transfer_upload_failed",
             token_id=_token_id(token),
@@ -464,6 +593,11 @@ def remote_transfer_routes() -> list[Any]:
             f"{REMOTE_TRANSFER_PREFIX}/upload/{{token}}",
             upload_endpoint,
             methods=["PUT"],
+        ),
+        Route(
+            f"{REMOTE_TRANSFER_PREFIX}/upload/{{token}}",
+            upload_status_endpoint,
+            methods=["GET"],
         ),
         Route(
             f"{REMOTE_TRANSFER_PREFIX}/download/{{token}}",

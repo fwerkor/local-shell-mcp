@@ -12,7 +12,7 @@ MCP client -> control server -> outbound polling worker -> remote machine
 2. Run the generated command on the remote machine.
 3. Confirm registration with `remote_list_machines`.
 4. Call normal tools with `machine="<worker-name>"`, for example `environment_info`, `run_shell_tool`, `read_file`, or `browser_capture_tool`.
-5. Use `transfer_path` for controller-to-worker, worker-to-controller, or worker-to-worker file and directory transfers.
+5. Use `transfer_path` to start a tracked controller-to-worker, worker-to-controller, or worker-to-worker file or directory transfer. Follow it with `job_list` or `job_tail`; stop or retry it with `job_stop` or `job_retry`.
 6. Rename or revoke workers with `remote_rename_machine` and `remote_revoke_machine`.
 
 Only worker administration uses `remote_*` names. Execution, shell, job, filesystem, patch, and browser operations share the same schema locally and remotely. Supplying a machine additionally requires the `remote:use` OAuth scope.

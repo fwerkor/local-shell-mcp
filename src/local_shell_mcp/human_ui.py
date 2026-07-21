@@ -343,6 +343,9 @@ _AUDIT_EXECUTE_TOOLS = frozenset(
         "job_retry",
     }
 )
+_AUDIT_FILE_SHARE_TOOLS = frozenset(
+    {"create_file_link", "list_file_links", "revoke_file_link"}
+)
 
 
 def _audit_detail_scopes(entry: dict[str, Any]) -> tuple[str, ...]:
@@ -355,7 +358,7 @@ def _audit_detail_scopes(entry: dict[str, Any]) -> tuple[str, ...]:
         required.add("shell:execute")
     if operation == "browser":
         required.add("browser:use")
-    if operation == "transfer":
+    if tool in _AUDIT_FILE_SHARE_TOOLS:
         required.add("file:share")
     if operation == "remote" or str(entry.get("node") or "local") != "local":
         required.add("remote:use")

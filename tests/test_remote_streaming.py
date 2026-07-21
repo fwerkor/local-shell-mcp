@@ -27,7 +27,7 @@ def _client(tmp_path, monkeypatch, *, request_limit: int = 1024) -> TestClient:
     return TestClient(app)
 
 
-def test_stream_upload_bypasses_json_body_limit_and_is_one_time(tmp_path, monkeypatch):
+def test_stream_upload_bypasses_json_body_limit_and_retains_status(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch, request_limit=1024)
     data = (b"streamed-binary-data" * 131072)[:2_000_000]
     digest = hashlib.sha256(data).hexdigest()
@@ -36,9 +36,59 @@ def test_stream_upload_bypasses_json_body_limit_and_is_one_time(tmp_path, monkey
     response = client.put(ticket["url"], content=data)
 
     assert response.status_code == 200
-    assert response.json()["data"]["transport"] == "http-stream"
+    assert response.json()["data"]["transport"] == "http-chunks"
     assert (tmp_path / "artifact.bin").read_bytes() == data
-    assert client.put(ticket["url"], content=data).status_code == 404
+    repeated = client.put(ticket["url"], content=data)
+    assert repeated.status_code == 200
+    assert repeated.json()["data"]["completed"] is True
+    assert revoke_transfer_ticket(ticket["token"])["revoked"] is True
+    assert client.get(ticket["url"]).status_code == 404
+
+
+def test_chunk_upload_tracks_offset_and_rejects_overlap(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    first = b"first-half"
+    second = b"second-half"
+    data = first + second
+    ticket = create_upload_ticket("artifact.bin", len(data), hashlib.sha256(data).hexdigest())
+    path = ticket["url"]
+
+    response = client.put(
+        path,
+        content=first,
+        headers={
+            "Content-Range": f"bytes 0-{len(first) - 1}/{len(data)}",
+            "X-Chunk-SHA256": hashlib.sha256(first).hexdigest(),
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["received_bytes"] == len(first)
+    assert response.json()["data"]["completed"] is False
+    assert client.get(path).json()["data"]["received_bytes"] == len(first)
+
+    overlap = client.put(
+        path,
+        content=first,
+        headers={
+            "Content-Range": f"bytes 0-{len(first) - 1}/{len(data)}",
+            "X-Chunk-SHA256": hashlib.sha256(first).hexdigest(),
+        },
+    )
+    assert overlap.status_code == 409
+    assert overlap.json()["data"]["received_bytes"] == len(first)
+
+    response = client.put(
+        path,
+        content=second,
+        headers={
+            "Content-Range": f"bytes {len(first)}-{len(data) - 1}/{len(data)}",
+            "X-Chunk-SHA256": hashlib.sha256(second).hexdigest(),
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["completed"] is True
+    assert (tmp_path / "artifact.bin").read_bytes() == data
+    revoke_transfer_ticket(ticket["token"])
 
 
 def test_stream_upload_hash_failure_is_transactional(tmp_path, monkeypatch):
@@ -82,9 +132,8 @@ def _worker_identity(tmp_path):
     return path
 
 
-def test_worker_upload_uses_raw_stream_endpoint(tmp_path, monkeypatch):
+def test_worker_upload_uses_raw_chunk_endpoint(tmp_path, monkeypatch):
     import subprocess
-    from pathlib import Path
     from urllib.parse import urlsplit
 
     import local_shell_mcp.remote as remote
@@ -99,21 +148,36 @@ def test_worker_upload_uses_raw_stream_endpoint(tmp_path, monkeypatch):
     monkeypatch.setattr(remote.shutil, "which", lambda name: "/usr/bin/curl")
 
     def fake_run(command, **kwargs):
-        del kwargs
-        upload_path = Path(command[command.index("--upload-file") + 1])
-        response = client.put(urlsplit(command[-1]).path, content=upload_path.read_bytes())
+        headers = {}
+        for index, value in enumerate(command):
+            if value == "-H":
+                name, header_value = command[index + 1].split(":", 1)
+                headers[name] = header_value.strip()
+        response = client.put(
+            urlsplit(command[-1]).path,
+            content=kwargs["input"],
+            headers=headers,
+        )
+        stdout = response.text + f"\n__LSM_HTTP_STATUS__:{response.status_code}"
         return subprocess.CompletedProcess(
             command,
-            0 if response.status_code < 400 else 22,
-            stdout=response.text,
-            stderr="",
+            0,
+            stdout=stdout.encode(),
+            stderr=b"",
         )
 
     monkeypatch.setattr(remote.subprocess, "run", fake_run)
 
-    result = remote._worker_upload_url("source.bin", ticket["url"], len(data), digest, 60)
+    result = remote._worker_upload_url(
+        "source.bin",
+        ticket["url"],
+        len(data),
+        digest,
+        60,
+        chunk_size=len(data),
+    )
 
-    assert result["transport"] == "http-stream"
+    assert result["transport"] == "http-chunks"
     assert (tmp_path / "destination.bin").read_bytes() == data
 
 
