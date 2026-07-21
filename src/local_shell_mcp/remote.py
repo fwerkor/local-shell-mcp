@@ -82,6 +82,7 @@ from .version import version_info as get_version_info
 REMOTE_JOIN_PATH = "/join"
 REMOTE_API_PREFIX = "/remote"
 REMOTE_WORKER_BUNDLE_PATH = "/remote/worker-bundle.tgz"
+REMOTE_WORKER_POLL_PROTOCOL_VERSION = 1
 # The remote worker is designed to start on machines that only have Python, curl,
 # and tar. Keep this empty unless a dependency is pure Python and imported on the
 # worker startup path. Tool-specific dependencies such as Playwright should be
@@ -495,21 +496,38 @@ class RemoteManager:
             self._cancel_job_locked(job_id)
             return True
 
-    async def poll(self, token: str) -> dict[str, Any]:
+    async def poll(
+        self, token: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         worker = self._worker_by_token(token)
+        payload = payload or {}
+        worker_version = str(payload.get("worker_version") or "")
+        protocol_version = int(payload.get("protocol_version") or 0)
+        upgrade = None
+        if protocol_version >= REMOTE_WORKER_POLL_PROTOCOL_VERSION:
+            upgrade = {
+                "required": worker_version != __version__,
+                "version": __version__,
+            }
         with self._state_lock:
             worker.status = "online"
             worker.last_seen = _utc()
+            if worker_version:
+                worker.info["lsm_version"] = worker_version
+            if protocol_version:
+                worker.info["poll_protocol_version"] = protocol_version
+        if upgrade and upgrade["required"]:
+            return {"job": None, "upgrade": upgrade}
         loop = asyncio.get_running_loop()
         deadline = loop.time() + get_settings().remote_poll_timeout_s
         while True:
             remaining = deadline - loop.time()
             if remaining <= 0:
-                return {"job": None, "heartbeat": True}
+                return {"job": None, "heartbeat": True, "upgrade": upgrade}
             try:
                 job = await asyncio.wait_for(worker.queue.get(), timeout=remaining)
             except TimeoutError:
-                return {"job": None, "heartbeat": True}
+                return {"job": None, "heartbeat": True, "upgrade": upgrade}
             job_id = str(job.get("id") or "")
             with self._state_lock:
                 self._prune_cancelled_jobs_locked()
@@ -517,7 +535,7 @@ class RemoteManager:
                     self.cancelled_jobs.pop(job_id, None)
                     continue
                 self.claimed_jobs.add(job_id)
-            return {"job": job}
+            return {"job": job, "upgrade": upgrade}
 
     async def heartbeat(self, token: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         worker = self._worker_by_token(token)
@@ -851,7 +869,9 @@ async def poll_endpoint(request: Any):  # noqa: ANN201
     from starlette.responses import JSONResponse
 
     try:
-        return JSONResponse(_ok(await remote_manager().poll(_bearer_token(request))))
+        return JSONResponse(
+            _ok(await remote_manager().poll(_bearer_token(request), await request.json()))
+        )
     except Exception as exc:
         return _error(str(exc), type(exc).__name__, 401)
 
@@ -1513,6 +1533,45 @@ def worker_info(workdir: str) -> dict[str, Any]:
     }
 
 
+def _worker_poll_payload() -> dict[str, Any]:
+    return {
+        "protocol_version": REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+        "worker_version": __version__,
+    }
+
+
+def _reexec_updated_worker_runtime() -> None:
+    from .remote_worker_cli import _worker_run_exec_argv
+    from .remote_worker_state import worker_runtime_dir
+
+    runtime = worker_runtime_dir()
+    preferred = [str(runtime), str(runtime / "vendor")]
+    current = [entry for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep) if entry]
+    os.environ["PYTHONPATH"] = os.pathsep.join(
+        preferred + [entry for entry in current if entry not in preferred]
+    )
+    argv = _worker_run_exec_argv()
+    os.execv(argv[0], argv)
+
+
+async def _upgrade_worker_runtime(server: str, target_version: str) -> None:
+    from .remote_worker_installer import install_or_update_runtime
+
+    result = await asyncio.to_thread(install_or_update_runtime, server)
+    installed_version = str(result.get("version") or "")
+    if target_version and installed_version != target_version:
+        raise RuntimeError(
+            f"controller requested worker {target_version}, but manifest provides "
+            f"{installed_version or 'no version'}"
+        )
+    print(
+        f"Status: worker runtime updated to {installed_version or 'unknown'}; restarting...",
+        file=sys.stderr,
+        flush=True,
+    )
+    _reexec_updated_worker_runtime()
+
+
 def _parse_worker_http_json(url: str, status_code: int, response_body: str) -> dict[str, Any]:
     if not 200 <= status_code < 300:
         detail = response_body.strip() or "<empty response body>"
@@ -1880,11 +1939,28 @@ async def run_worker(
         flush=True,
     )
     headers = {"Author" + "ization": "B" + "earer " + access}
+    upgrade_attempt = 0
     while True:
         poll_body = await _worker_post_json_forever(
-            f"{server}{REMOTE_API_PREFIX}/poll", {}, headers, None, "poll"
+            f"{server}{REMOTE_API_PREFIX}/poll",
+            _worker_poll_payload(),
+            headers,
+            None,
+            "poll",
         )
         payload = poll_body.get("data", {})
+        upgrade = payload.get("upgrade") if isinstance(payload, dict) else None
+        if isinstance(upgrade, dict) and upgrade.get("required"):
+            target_version = str(upgrade.get("version") or "")
+            try:
+                await _upgrade_worker_runtime(server, target_version)
+            except Exception as exc:  # noqa: BLE001
+                delay_s = _worker_retry_delay(upgrade_attempt)
+                upgrade_attempt += 1
+                _worker_log_retry("worker upgrade", exc, delay_s)
+                await asyncio.sleep(delay_s)
+            continue
+        upgrade_attempt = 0
         job = payload.get("job")
         if not job:
             continue

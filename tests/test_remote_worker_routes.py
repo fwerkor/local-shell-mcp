@@ -24,12 +24,17 @@ async def test_worker_bundle_and_manifest_are_stable(tmp_path, monkeypatch):
     response = await routes.worker_manifest(None)  # type: ignore[arg-type]
     data = json.loads(response.body)
     assert data["sha256"] == hashlib.sha256(first).hexdigest()
-    assert data["url"] == "https://example.test/remote/worker-bundle.tgz"
+    assert data["url"] == (
+        "https://example.test/remote/worker-bundle.tgz?sha256=" + data["sha256"]
+    )
+    assert response.headers["cache-control"] == "no-store"
 
     public_manifest = await routes.worker_bundle(SimpleNamespace(query_params={"manifest": "1"}))
     assert json.loads(public_manifest.body) == data
+    assert public_manifest.headers["cache-control"] == "no-store"
     bundle = await routes.worker_bundle(None)  # type: ignore[arg-type]
     assert bundle.body == first
+    assert bundle.headers["cache-control"] == "no-store"
 
 
 @pytest.mark.asyncio
