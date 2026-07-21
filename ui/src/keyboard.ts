@@ -4,7 +4,10 @@ export interface BrowserShortcutEvent {
   altKey: boolean
   ctrlKey: boolean
   metaKey: boolean
+  shiftKey?: boolean
 }
+
+export type BrowserSelectionShortcut = "select-all" | "copy"
 
 const categorySequences: Record<string, string> = {
   "1": "\u001bOQ",
@@ -37,6 +40,14 @@ function physicalShortcutKey(code: string | undefined): string | undefined {
   if (code === "BracketRight") return "]"
   if (code === "ArrowLeft") return "arrowleft"
   if (code === "ArrowRight") return "arrowright"
+  return undefined
+}
+
+export function browserSelectionShortcut(event: BrowserShortcutEvent): BrowserSelectionShortcut | undefined {
+  if (event.altKey || !event.shiftKey || (!event.ctrlKey && !event.metaKey)) return undefined
+  const key = event.key.toLowerCase()
+  if (key === "a") return "select-all"
+  if (key === "c") return "copy"
   return undefined
 }
 

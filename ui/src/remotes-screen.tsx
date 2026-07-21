@@ -17,6 +17,33 @@ type RemoteDialog =
   | { type: "rename"; machine: Machine }
   | { type: "revoke"; machine: Machine }
 
+export function RemoteInviteResultDialog({ invite, width }: { invite: InvitePayload; width: number }) {
+  return (
+    <Modal title="Remote join command" width={Math.max(38, Math.min(88, width - 6))} height={15}>
+      <text style={{ height: 1, flexShrink: 0 }} fg={theme.green} attributes={1} content="Invite ready" />
+      <text style={{ height: 1, flexShrink: 0 }} fg={theme.muted} content="Run this command on the remote node:" />
+      <box
+        style={{
+          flexGrow: 1,
+          minHeight: 4,
+          border: true,
+          borderColor: theme.borderBright,
+          backgroundColor: theme.bg,
+          paddingLeft: 1,
+          paddingRight: 1,
+        }}
+      >
+        <text style={{ flexShrink: 0 }} fg={colors.accent} content={invite.command} />
+      </box>
+      <text
+        style={{ height: 1, flexShrink: 0 }}
+        fg={theme.faint}
+        content={`Expires ${new Date(invite.expires_at * 1000).toLocaleTimeString()} · Enter/Esc close`}
+      />
+    </Modal>
+  )
+}
+
 export function RemotesScreen({
   width,
   height,
@@ -278,38 +305,31 @@ export function RemotesScreen({
         ]}
       />
       {dialog.type === "invite" && (
-        <Modal title="Create remote invite" height={8}>
-          <text fg={theme.muted} content="Enter: optional-name [optional-workdir]" />
-          <box style={{ height: 3, border: true, borderColor: theme.borderBright, paddingLeft: 1, paddingRight: 1 }}>
+        <Modal title="Create remote invite" height={9}>
+          <text style={{ height: 1, flexShrink: 0 }} fg={theme.muted} content="Enter: optional-name [optional-workdir]" />
+          <box style={{ height: 3, flexShrink: 0, border: true, borderColor: theme.borderBright, paddingLeft: 1, paddingRight: 1 }}>
             <input focused placeholder="build-host /workspace" onSubmit={(value: unknown) => void createInvite(typeof value === "string" ? value : "")} />
           </box>
-          <text fg={theme.faint} content="Invite expires automatically · Enter create · Esc cancel" />
+          <text style={{ height: 1, flexShrink: 0 }} fg={theme.faint} content="Invite expires automatically · Enter create · Esc cancel" />
         </Modal>
       )}
       {dialog.type === "invite-result" && (
-        <Modal title="Remote join command" width={Math.max(38, Math.min(88, width - 6))} height={12}>
-          <text fg={theme.green} attributes={1} content="Invite ready" />
-          <text fg={theme.muted} content="Run this command on the remote node:" />
-          <box style={{ flexGrow: 1, border: true, borderColor: theme.borderBright, backgroundColor: theme.bg, padding: 1 }}>
-            <text fg={colors.accent} content={dialog.invite.command} />
-          </box>
-          <text fg={theme.faint} content={`Expires ${new Date(dialog.invite.expires_at * 1000).toLocaleTimeString()} · Enter/Esc close`} />
-        </Modal>
+        <RemoteInviteResultDialog invite={dialog.invite} width={width} />
       )}
       {dialog.type === "rename" && (
-        <Modal title="Rename remote" height={7}>
-          <text fg={theme.muted} content={`Current name: ${dialog.machine.name}`} />
-          <box style={{ height: 3, border: true, borderColor: theme.borderBright, paddingLeft: 1, paddingRight: 1 }}>
+        <Modal title="Rename remote" height={9}>
+          <text style={{ height: 1, flexShrink: 0 }} fg={theme.muted} content={`Current name: ${dialog.machine.name}`} />
+          <box style={{ height: 3, flexShrink: 0, border: true, borderColor: theme.borderBright, paddingLeft: 1, paddingRight: 1 }}>
             <input focused value={dialog.machine.name} onSubmit={(value: unknown) => void rename(typeof value === "string" ? value : "")} />
           </box>
-          <text fg={theme.faint} content="Enter save · Esc cancel" />
+          <text style={{ height: 1, flexShrink: 0 }} fg={theme.faint} content="Enter save · Esc cancel" />
         </Modal>
       )}
       {dialog.type === "revoke" && (
-        <Modal title="Revoke remote" height={7}>
-          <text fg={theme.red} attributes={1} content={`Revoke ${dialog.machine.name}?`} />
-          <text fg={theme.muted} content="Its persistent identity will no longer reconnect." />
-          <text fg={theme.faint} content="y / Enter confirm · n / Esc cancel" />
+        <Modal title="Revoke remote" height={8}>
+          <text style={{ height: 1, flexShrink: 0 }} fg={theme.red} attributes={1} content={`Revoke ${dialog.machine.name}?`} />
+          <text style={{ height: 1, flexShrink: 0 }} fg={theme.muted} content="Its persistent identity will no longer reconnect." />
+          <text style={{ height: 1, flexShrink: 0 }} fg={theme.faint} content="y / Enter confirm · n / Esc cancel" />
         </Modal>
       )}
     </box>
