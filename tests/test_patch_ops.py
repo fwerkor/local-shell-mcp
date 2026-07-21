@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from local_shell_mcp.patch_ops import normalize_patch_text
+from local_shell_mcp.patch_ops import git_apply_command, normalize_patch_text
 
 
 def _git_apply(root: Path, patch: str) -> None:
@@ -14,6 +14,13 @@ def _git_apply(root: Path, patch: str) -> None:
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
     subprocess.run(["git", "apply", "--check", str(patch_path)], cwd=root, check=True)
     subprocess.run(["git", "apply", str(patch_path)], cwd=root, check=True)
+
+
+def test_git_apply_command_keeps_directory_as_separate_argument() -> None:
+    command = git_apply_command("git", "'patch file.diff'", "'nested dir'", check=True)
+
+    assert command == "git apply --check --directory 'nested dir' 'patch file.diff'"
+    assert "--directory=" not in command
 
 
 def test_standard_unified_diff_passes_through() -> None:
@@ -66,6 +73,83 @@ def test_envelope_supports_multiple_hunks_and_eof_append(tmp_path: Path) -> None
     _git_apply(tmp_path, normalize_patch_text(patch, str(tmp_path)))
 
     assert target.read_text(encoding="utf-8") == "ALPHA\nbeta\ngamma\ndelta\n"
+
+
+def test_envelope_supports_context_only_section_anchors(tmp_path: Path) -> None:
+    target = tmp_path / "sample.py"
+    target.write_text(
+        "from package import (\n"
+        "    Existing,\n"
+        ")\n"
+        "\n"
+        "def helper():\n"
+        "    return 1\n"
+        "\n"
+        "\n"
+        "def test_target():\n"
+        "    result = helper()\n"
+        "    assert result == 1\n",
+        encoding="utf-8",
+    )
+    patch = """*** Begin Patch
+*** Update File: sample.py
+@@
+ from package import (
++    Added,
+     Existing,
+@@
+ def test_target():
+@@
+     assert result == 1
++
++
++def test_added():
++    assert Added is not None
+*** End Patch
+"""
+
+    _git_apply(tmp_path, normalize_patch_text(patch, str(tmp_path)))
+
+    assert target.read_text(encoding="utf-8") == (
+        "from package import (\n"
+        "    Added,\n"
+        "    Existing,\n"
+        ")\n"
+        "\n"
+        "def helper():\n"
+        "    return 1\n"
+        "\n"
+        "\n"
+        "def test_target():\n"
+        "    result = helper()\n"
+        "    assert result == 1\n"
+        "\n"
+        "\n"
+        "def test_added():\n"
+        "    assert Added is not None\n"
+    )
+
+
+def test_envelope_rejects_ambiguous_context_anchor_without_touching_files(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "sample.py"
+    original = "def target():\n    return 1\n\ndef target():\n    return 2\n"
+    target.write_text(original, encoding="utf-8")
+    patch = """*** Begin Patch
+*** Update File: sample.py
+@@
+ def target():
+@@
+-    return 2
++    return 3
+*** End Patch
+"""
+
+    with pytest.raises(ValueError, match="multiple locations"):
+        normalize_patch_text(patch, str(tmp_path))
+
+    assert target.read_text(encoding="utf-8") == original
 
 
 def test_envelope_rejects_ambiguous_hunk_without_touching_files(tmp_path: Path) -> None:

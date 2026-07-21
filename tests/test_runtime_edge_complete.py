@@ -303,6 +303,9 @@ def test_shell_buffers_arguments_timeouts_and_reader_helpers(tmp_path, monkeypat
     monkeypatch.setenv("LOCAL_SHELL_MCP_SHELL_EXECUTABLE", "powershell.exe")
     get_settings.cache_clear()
     assert shell.quote_shell_argument("a'b") == "'a''b'"
+    assert shell.quote_shell_executable("C:\\Program Files\\Git\\git.exe") == (
+        "& 'C:\\Program Files\\Git\\git.exe'"
+    )
     monkeypatch.setenv("LOCAL_SHELL_MCP_SHELL_EXECUTABLE", "cmd.exe")
     get_settings.cache_clear()
     assert "a b" in shell.quote_shell_argument("a b")
