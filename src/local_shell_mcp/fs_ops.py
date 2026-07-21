@@ -316,15 +316,25 @@ def glob_paths(pattern: str, cwd: str = ".", max_results: int = 500) -> list[str
     return results
 
 
-def _is_probably_binary(sample: bytes) -> bool:
+def _is_probably_binary(sample: bytes, *, continuation: bytes = b"") -> bool:
     if not sample:
         return False
     if b"\x00" in sample:
         return True
     try:
         sample.decode("utf-8")
-    except UnicodeDecodeError:
-        return True
+    except UnicodeDecodeError as exc:
+        if exc.reason != "unexpected end of data" or exc.end != len(sample):
+            return True
+
+        lead = sample[exc.start]
+        width = 2 if lead < 0xE0 else 3 if lead < 0xF0 else 4
+        missing = width - (len(sample) - exc.start)
+        sequence = sample[exc.start:] + continuation[:missing]
+        try:
+            sequence.decode("utf-8")
+        except UnicodeDecodeError:
+            return True
 
     control_bytes = 0
     for byte in sample:
@@ -362,8 +372,10 @@ def _binary_metadata(p: Path, size: int, preview: str | None = None, preview_byt
 
 def _assert_text_file(p: Path) -> None:
     with p.open("rb") as fh:
-        sample = fh.read(BINARY_CHECK_BYTES)
-    if _is_probably_binary(sample):
+        probe = fh.read(BINARY_CHECK_BYTES + 3)
+    sample = probe[:BINARY_CHECK_BYTES]
+    continuation = probe[BINARY_CHECK_BYTES:]
+    if _is_probably_binary(sample, continuation=continuation):
         raise ValueError(BINARY_MESSAGE)
 
 
@@ -378,8 +390,10 @@ def read_text(
     p = resolve_path(path, must_exist=True)
     size = p.stat().st_size
     with p.open("rb") as fh:
-        sample = fh.read(BINARY_CHECK_BYTES)
-        if _is_probably_binary(sample):
+        probe = fh.read(BINARY_CHECK_BYTES + 3)
+        sample = probe[:BINARY_CHECK_BYTES]
+        continuation = probe[BINARY_CHECK_BYTES:]
+        if _is_probably_binary(sample, continuation=continuation):
             return _binary_metadata(p, size, binary_preview, binary_preview_bytes)
         fh.seek(0)
         data = fh.read(settings.max_file_read_bytes + 1)

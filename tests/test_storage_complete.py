@@ -60,6 +60,9 @@ def test_filesystem_binary_glob_context_and_limits(tmp_path, monkeypatch):
     assert fs._is_probably_binary(b"") is False
     assert fs._is_probably_binary(b"a\x00b") is True
     assert fs._is_probably_binary(b"\xff") is True
+    assert fs._is_probably_binary(b"plain\xe6") is True
+    assert fs._is_probably_binary(b"plain\xe6", continuation=b"\xa8\xa1") is False
+    assert fs._is_probably_binary(b"plain\xe6", continuation=b"x") is True
     assert fs._is_probably_binary(bytes([1, 2, 3, 65])) is True
     assert fs._is_probably_binary(b"plain\ntext") is False
 
