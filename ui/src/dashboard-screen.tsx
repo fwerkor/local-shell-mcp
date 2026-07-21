@@ -268,10 +268,14 @@ export function Alerts({ alerts, width, rows }: { alerts: DashboardAlert[]; widt
           >
             <box style={{ flexDirection: "row" }}>
               <text fg={severityColor(alert.severity)} attributes={1} content={`${alert.severity.toUpperCase().slice(0, 4).padEnd(5)} `} />
-              <text fg={theme.text} content={truncate(alert.title, Math.max(10, width - 11))} />
+              <text fg={theme.text} wrapMode="none" content={truncate(alert.title, Math.max(10, width - 11))} />
             </box>
             {width >= 34 && (
-              <text fg={theme.faint} content={truncate(`${alert.detail || ""}${alert.age_s ? ` · ${formatDuration(alert.age_s)}` : ""}`, Math.max(10, width - 3))} />
+              <text
+                fg={theme.faint}
+                wrapMode="none"
+                content={truncate(`${alert.detail || ""}${alert.age_s ? ` · ${formatDuration(alert.age_s)}` : ""}`, Math.max(10, width - 5))}
+              />
             )}
           </box>
         ))
