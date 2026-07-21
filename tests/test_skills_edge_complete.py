@@ -200,6 +200,32 @@ def test_related_scan_budgets_symlinks_and_failures(tmp_path, monkeypatch):
     assert any("Could not scan" in warning for warning in warnings)
 
 
+def test_related_scan_ignores_git_metadata_without_using_budget(tmp_path):
+    skill = tmp_path / "skill"
+    skill.mkdir()
+    entry = skill / "SKILL.md"
+    entry.write_text("entry", encoding="utf-8")
+    (skill / "guide.md").write_text("guide", encoding="utf-8")
+    git_dir = skill / ".git"
+    git_dir.mkdir()
+    (git_dir / "config").write_text("config", encoding="utf-8")
+    objects = git_dir / "objects"
+    objects.mkdir()
+    (objects / "pack").write_text("pack", encoding="utf-8")
+
+    related, warnings, scanned = skills._scan_related_files(
+        skill,
+        entry.resolve(),
+        max_related_files=10,
+        max_scan_entries=2,
+        max_path_bytes=1000,
+    )
+
+    assert related == ["guide.md"]
+    assert warnings == []
+    assert scanned == 2
+
+
 def test_scan_load_read_and_legacy_activation(tmp_path):
     config = tmp_path / "config"
     skills_dir = config / "skills"
