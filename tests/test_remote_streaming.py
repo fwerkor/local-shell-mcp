@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 
+import pytest
 from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
+import local_shell_mcp.remote_transfer as remote_transfer
 from local_shell_mcp.auth import RequestBodyLimitMiddleware
 from local_shell_mcp.remote_transfer import (
     _content_disposition,
@@ -89,6 +91,94 @@ def test_chunk_upload_tracks_offset_and_rejects_overlap(tmp_path, monkeypatch):
     assert response.json()["data"]["completed"] is True
     assert (tmp_path / "artifact.bin").read_bytes() == data
     revoke_transfer_ticket(ticket["token"])
+
+
+@pytest.mark.parametrize(
+    "content_range",
+    [
+        "invalid",
+        "bytes 0-0/2",
+        "bytes 1-0/1",
+        "bytes 0-1/1",
+    ],
+)
+def test_chunk_upload_rejects_invalid_ranges(tmp_path, monkeypatch, content_range):
+    client = _client(tmp_path, monkeypatch)
+    data = b"x"
+    ticket = create_upload_ticket("artifact.bin", len(data), hashlib.sha256(data).hexdigest())
+
+    response = client.put(
+        ticket["url"],
+        content=data,
+        headers={"Content-Range": content_range},
+    )
+
+    assert response.status_code == 400
+    assert revoke_transfer_ticket(ticket["token"])["revoked"] is True
+
+
+def test_chunk_upload_rejects_bad_hash_and_oversized_legacy_request(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    data = b"payload"
+    ticket = create_upload_ticket("artifact.bin", len(data), hashlib.sha256(data).hexdigest())
+
+    response = client.put(
+        ticket["url"],
+        content=data,
+        headers={
+            "Content-Range": f"bytes 0-{len(data) - 1}/{len(data)}",
+            "X-Chunk-SHA256": "0" * 64,
+        },
+    )
+    assert response.status_code == 400
+    revoke_transfer_ticket(ticket["token"])
+
+    oversized = remote_transfer.MAX_TRANSFER_CHUNK_BYTES + 1
+    ticket = create_upload_ticket("oversized.bin", oversized, "0" * 64)
+    response = client.put(ticket["url"], content=b"")
+    assert response.status_code == 400
+    assert "update the remote worker" in response.json()["message"]
+    revoke_transfer_ticket(ticket["token"])
+
+
+def test_upload_status_and_claim_conflicts(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    data = b"payload"
+    upload = create_upload_ticket("artifact.bin", len(data), hashlib.sha256(data).hexdigest())
+    remote_transfer._claim_ticket(upload["token"], "upload")
+    try:
+        response = client.put(upload["url"], content=data)
+        assert response.status_code == 409
+    finally:
+        remote_transfer._release_ticket(upload["token"])
+        revoke_transfer_ticket(upload["token"])
+
+    source = tmp_path / "source.bin"
+    source.write_bytes(data)
+    download = create_download_ticket("source.bin", len(data), hashlib.sha256(data).hexdigest())
+    status_url = download["url"].replace("/download/", "/upload/")
+    assert client.get(status_url).status_code == 409
+    revoke_transfer_ticket(download["token"])
+
+
+def test_ticket_creation_failures_cleanup_transactions(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    digest = hashlib.sha256(b"payload").hexdigest()
+
+    def fail_create(*args, **kwargs):  # noqa: ARG001
+        raise RuntimeError("ticket creation failed")
+
+    monkeypatch.setattr(remote_transfer, "_create_ticket", fail_create)
+    with pytest.raises(RuntimeError, match="ticket creation failed"):
+        create_upload_ticket("upload.bin", 7, digest)
+    assert not list(tmp_path.glob(".upload.bin.local-shell-mcp-transfer-*.tmp"))
+
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    with pytest.raises(RuntimeError, match="ticket creation failed"):
+        create_download_ticket("source.bin", 7, digest)
+    transfer_dir = tmp_path / ".state" / "remote-transfers"
+    assert not transfer_dir.exists() or not list(transfer_dir.iterdir())
 
 
 def test_stream_upload_hash_failure_is_transactional(tmp_path, monkeypatch):

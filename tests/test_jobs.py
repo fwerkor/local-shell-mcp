@@ -152,7 +152,10 @@ async def test_managed_jobs_track_tail_stop_and_retry(tmp_path, monkeypatch):
     for _ in range(50):
         await asyncio.sleep(0.01)
         tail = await tail_job(job["job_id"])
-        if "started 7" in tail["output"]:
+        if (
+            "started 7" in tail["output"]
+            and tail["job"]["progress"] == {"phase": "waiting", "value": 7}
+        ):
             break
     assert tail["job"]["progress"] == {"phase": "waiting", "value": 7}
 
@@ -171,6 +174,82 @@ async def test_managed_jobs_track_tail_stop_and_retry(tmp_path, monkeypatch):
             break
     assert current["status"] == "succeeded"
     assert current["result"] == {"value": 7}
+
+
+def test_managed_job_validation_and_lost_recovery():
+    async def first_handler(context, payload):  # noqa: ARG001
+        return payload
+
+    async def second_handler(context, payload):  # noqa: ARG001
+        return payload
+
+    with pytest.raises(ValueError, match="must not be empty"):
+        register_managed_job_handler("   ", first_handler)
+
+    register_managed_job_handler("validation-managed", first_handler)
+    register_managed_job_handler("validation-managed", first_handler)
+    with pytest.raises(ValueError, match="already registered"):
+        register_managed_job_handler("validation-managed", second_handler)
+
+    with pytest.raises(ValueError, match="unknown managed job kind"):
+        asyncio.run(start_managed_job("missing-managed", {}))
+
+    running = jobs_module._refresh_job_status(
+        {"job_id": "managed-running", "kind": "managed", "status": "running"},
+        set(),
+        now=10.0,
+    )
+    assert running["status"] == "lost"
+    assert running["completed_at"] == 10.0
+    assert "retry it" in running["error"]
+
+    stopping = jobs_module._refresh_job_status(
+        {"job_id": "managed-stopping", "kind": "managed", "status": "stopping"},
+        set(),
+        now=11.0,
+    )
+    assert stopping["status"] == "stopped"
+    assert stopping["error"] is None
+
+
+@pytest.mark.asyncio
+async def test_managed_job_failure_and_launch_cleanup(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".state"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+
+    async def failing_handler(context, payload):  # noqa: ARG001
+        raise RuntimeError("managed failure")
+
+    register_managed_job_handler("failing-managed", failing_handler)
+    failed = await start_managed_job("failing-managed", {})
+    for _ in range(50):
+        await asyncio.sleep(0.01)
+        current = (await list_jobs())["jobs"][0]
+        if current["status"] == "failed":
+            break
+    assert current["status"] == "failed"
+    assert current["exit_code"] == 1
+    assert current["error"] == "RuntimeError: managed failure"
+    assert "managed failure" in (await tail_job(failed["job_id"]))["output"]
+
+    async def idle_handler(context, payload):  # noqa: ARG001
+        return payload
+
+    register_managed_job_handler("launch-failure-managed", idle_handler)
+    def fail_launch(*args, **kwargs):  # noqa: ARG001
+        raise RuntimeError("launch failed")
+
+    monkeypatch.setattr(jobs_module, "_launch_managed_job", fail_launch)
+    with pytest.raises(RuntimeError, match="launch failed"):
+        await start_managed_job("launch-failure-managed", {})
+
+    stored = json.loads((state_dir / jobs_module.JOB_STORE_FILE_NAME).read_text(encoding="utf-8"))
+    assert [job["job_id"] for job in stored["jobs"]] == [failed["job_id"]]
+    assert [path.name for path in (state_dir / "jobs").glob("*-attempt-1.log")] == [
+        f"{failed['job_id']}-attempt-1.log"
+    ]
 
 
 @pytest.mark.asyncio
