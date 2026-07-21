@@ -4,6 +4,7 @@ import { api, formatError } from "./api"
 import {
   AUDIT_OPERATIONS,
   auditListLayout,
+  auditStackedVisibleRows,
   auditInput,
   auditOutput,
   fitAuditColumn,
@@ -93,7 +94,11 @@ export function AuditScreen({
   const narrow = width < 70
   const horizontal = width >= 110
   const listLayout = useMemo(() => auditListLayout(entries, width), [entries, width])
-  const tableHeight = Math.max(6, height - 15)
+  const stackedDetailHeight = Math.max(14, Math.floor(height * 0.42))
+  const hasFilterSummary = Boolean(search || event || session)
+  const tableHeight = horizontal
+    ? Math.max(6, height - 15)
+    : auditStackedVisibleRows(height, stackedDetailHeight, hasFilterSummary)
   const { rows, start } = useVisibleRows(entries, selected, tableHeight)
 
   const selectIndex = useCallback((next: number | ((value: number) => number)) => {
@@ -234,7 +239,7 @@ export function AuditScreen({
     : ""
   const inputText = displayed ? formatAuditValue(auditInput(displayed), "No input recorded") : ""
   const duration = displayed ? durationLabel(displayed) : ""
-  const detailHeight = horizontal ? "100%" : Math.max(14, Math.floor(height * 0.42))
+  const detailHeight = horizontal ? "100%" : stackedDetailHeight
 
   return (
     <box style={{ flexGrow: 1, flexDirection: "column", gap: 1 }}>
