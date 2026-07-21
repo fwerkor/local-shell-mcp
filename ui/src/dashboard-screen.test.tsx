@@ -1,12 +1,52 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/react/test-utils"
+import { act, useState } from "react"
 import { Alerts } from "./dashboard-screen"
 import type { DashboardAlert } from "./types"
 
 const renderers: Array<{ destroy: () => void }> = []
 
+const reportedAlerts: DashboardAlert[] = [
+  {
+    severity: "warning",
+    title: "Job release-v3.1.0-watch lost",
+    detail: "job session exited without a completion record",
+    age_s: 4_860,
+  },
+  {
+    severity: "error",
+    title: "Job pr96-coverage-fix failed",
+    detail: "export PYTHONPATH=/workspace/lsm-transfer-clean-test/src",
+  },
+  {
+    severity: "error",
+    title: "Job lsm-transfer-clean-full-tests failed",
+    detail: "export PYTHONPATH=/workspace/lsm-transfer-clean-test/src",
+  },
+  {
+    severity: "warning",
+    title: "14 recent MCP call failure(s)",
+    detail: "Open Audit for call inputs and returned errors",
+  },
+]
+
+function destroyRenderer(renderer: { destroy: () => void }) {
+  const reactTestGlobal = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  reactTestGlobal.IS_REACT_ACT_ENVIRONMENT = false
+  renderer.destroy()
+}
+
+function populatedPanelLines(frame: string): string[] {
+  const lines = frame.split("\n")
+  if (lines.at(-1) === "") lines.pop()
+  return lines
+    .slice(1, -1)
+    .map((line) => line.slice(1, -1).trim())
+    .filter(Boolean)
+}
+
 afterEach(() => {
-  for (const renderer of renderers.splice(0)) renderer.destroy()
+  for (const renderer of renderers.splice(0)) destroyRenderer(renderer)
 })
 
 describe("Dashboard alerts", () => {
@@ -94,5 +134,104 @@ describe("Dashboard alerts", () => {
     expect(lines).toContainEqual(expect.stringContaining("WARN  Job release-v3.0.8-watch lost"))
     expect(lines).toContainEqual(expect.stringContaining("WARN  Job release-v3.0.8 lost"))
     expect(lines).toContainEqual(expect.stringContaining("WARN  18 recent MCP call failure(s)"))
+  })
+
+  test("keeps alert rows isolated across narrow, regular, and wide panels", async () => {
+    const dimensions = [
+      { width: 24, rows: 1 },
+      { width: 28, rows: 2 },
+      { width: 32, rows: 4 },
+      { width: 33, rows: 3 },
+      { width: 34, rows: 1 },
+      { width: 35, rows: 2 },
+      { width: 36, rows: 4 },
+      { width: 38, rows: 3 },
+      { width: 40, rows: 4 },
+      { width: 42, rows: 2 },
+      { width: 44, rows: 4 },
+      { width: 48, rows: 3 },
+      { width: 52, rows: 4 },
+      { width: 58, rows: 4 },
+      { width: 64, rows: 2 },
+      { width: 72, rows: 4 },
+      { width: 96, rows: 4 },
+    ]
+
+    for (const { width, rows } of dimensions) {
+      const detailRows = width >= 34 ? 1 : 0
+      const shown = Math.min(rows, reportedAlerts.length)
+      const hasOverflow = shown < reportedAlerts.length
+      const height = 4 + shown * (1 + detailRows) + (hasOverflow ? 1 : 0)
+      const setup = await testRender(<Alerts alerts={reportedAlerts} width={width} rows={rows} />, {
+        width,
+        height,
+      })
+      try {
+        await act(async () => setup.renderOnce())
+        const frame = setup.captureCharFrame()
+        const lines = frame.split("\n")
+        if (lines.at(-1) === "") lines.pop()
+        const populated = populatedPanelLines(frame)
+
+        expect(lines.every((line) => Array.from(line).length === width)).toBe(true)
+        expect(populated).toHaveLength(shown * (1 + detailRows) + (hasOverflow ? 1 : 0))
+        for (let index = 0; index < shown; index += 1) {
+          const titleLine = populated[index * (1 + detailRows)]!
+          expect(titleLine).toMatch(/^(WARN|ERRO)  /)
+          if (detailRows) {
+            const detailLine = populated[index * 2 + 1]!
+            expect(detailLine).not.toMatch(/^(WARN|ERRO)  /)
+            expect(detailLine).not.toContain(" failed")
+          }
+        }
+        if (hasOverflow) expect(populated.at(-1)).toBe(`+${reportedAlerts.length - shown} more alerts`)
+      } finally {
+        destroyRenderer(setup.renderer)
+      }
+    }
+  })
+
+  test("clears prior alert text after repeated live updates", async () => {
+    const sequences: DashboardAlert[][] = [
+      [
+        { severity: "warning", title: "OLD-A failed", detail: "old-detail-alpha" },
+        { severity: "warning", title: "OLD-B failed", detail: "old-detail-beta" },
+      ],
+      [
+        { severity: "error", title: "NEW-A failed", detail: "new-detail-alpha" },
+        { severity: "error", title: "NEW-B failed", detail: "new-detail-beta" },
+        { severity: "warning", title: "NEW-C lost", detail: "new-detail-gamma" },
+      ],
+      [{ severity: "warning", title: "FINAL alert", detail: "final-detail" }],
+      reportedAlerts,
+    ]
+
+    for (const width of [34, 36, 40, 48, 58, 72]) {
+      let replaceAlerts = (_alerts: DashboardAlert[]) => {}
+      function Harness() {
+        const [alerts, setAlerts] = useState(sequences[0]!)
+        replaceAlerts = setAlerts
+        return <Alerts alerts={alerts} width={width} rows={4} />
+      }
+
+      const setup = await testRender(<Harness />, { width, height: 14 })
+      try {
+        await act(async () => setup.renderOnce())
+
+        for (const alerts of sequences.slice(1)) {
+          act(() => replaceAlerts(alerts))
+          await act(async () => setup.renderOnce())
+          const frame = setup.captureCharFrame()
+          const populated = populatedPanelLines(frame)
+          expect(frame).not.toContain("OLD-A")
+          expect(frame).not.toContain("OLD-B")
+          expect(frame).not.toContain("old-detail")
+          expect(populated.every((line) => !line.includes("detail") || !line.includes("  Job"))).toBe(true)
+          expect(populated.filter((line) => /^(WARN|ERRO)  /.test(line))).toHaveLength(Math.min(4, alerts.length))
+        }
+      } finally {
+        destroyRenderer(setup.renderer)
+      }
+    }
   })
 })
