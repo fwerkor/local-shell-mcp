@@ -1,4 +1,4 @@
-import { useKeyboard } from "@opentui/react"
+import { useKeyboard, useRenderer } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, Panel, formatAge, formatBytes } from "./components"
@@ -14,6 +14,7 @@ import {
   type TrendSample,
 } from "./dashboard-utils"
 import { screenTheme, theme } from "./theme"
+import { forceFullRepaint } from "./repaint"
 import type {
   DashboardActivity,
   DashboardAlert,
@@ -254,6 +255,7 @@ function ActiveWorkloads({ payload, width, rows }: { payload: DashboardPayload; 
 
 export function Alerts({ alerts, width, rows }: { alerts: DashboardAlert[]; width: number; rows: number }) {
   const visible = alerts.slice(0, rows)
+  const contentWidth = Math.max(1, width - 4)
   return (
     <Panel title={`Needs attention · ${alerts.length}`} style={{ flexGrow: 1, padding: 1 }}>
       {visible.length === 0 ? (
@@ -263,18 +265,23 @@ export function Alerts({ alerts, width, rows }: { alerts: DashboardAlert[]; widt
       ) : (
         visible.map((alert, index) => (
           <box
-            key={`${alert.title}-${index}`}
-            style={{ height: width >= 34 ? 2 : 1, flexDirection: "column", flexShrink: 0 }}
+            key={`${alert.severity}-${alert.title}-${alert.detail || ""}-${index}`}
+            style={{ width: "100%", height: width >= 34 ? 2 : 1, flexDirection: "column", flexShrink: 0 }}
           >
-            <box style={{ flexDirection: "row" }}>
-              <text fg={severityColor(alert.severity)} attributes={1} content={`${alert.severity.toUpperCase().slice(0, 4).padEnd(5)} `} />
-              <text fg={theme.text} wrapMode="none" content={truncate(alert.title, Math.max(10, width - 11))} />
-            </box>
+            <text style={{ width: "100%", height: 1 }} wrapMode="none">
+              <span fg={severityColor(alert.severity)} attributes={1}>
+                {`${alert.severity.toUpperCase().slice(0, 4).padEnd(5)} `}
+              </span>
+              <span fg={theme.text}>
+                {truncate(alert.title, Math.max(1, contentWidth - 6))}
+              </span>
+            </text>
             {width >= 34 && (
               <text
                 fg={theme.faint}
+                style={{ width: "100%", height: 1 }}
                 wrapMode="none"
-                content={truncate(`${alert.detail || ""}${alert.age_s ? ` · ${formatDuration(alert.age_s)}` : ""}`, Math.max(10, width - 5))}
+                content={truncate(`${alert.detail || ""}${alert.age_s ? ` · ${formatDuration(alert.age_s)}` : ""}`, contentWidth)}
               />
             )}
           </box>
@@ -513,12 +520,25 @@ export function DashboardScreen({
   setStatus: (message: string) => void
   keyboardEnabled: boolean
 }) {
+  const renderer = useRenderer()
   const [payload, setPayload] = useState<DashboardPayload | null>(null)
   const [history, setHistory] = useState<TrendSample[]>([])
   const [loading, setLoading] = useState(true)
   const request = useRef(0)
   const controller = useRef<AbortController | null>(null)
   const layout = dashboardLayout(width, height)
+  const alertFingerprint = payload === null
+    ? null
+    : JSON.stringify(payload.alerts.map((alert) => [
+      alert.severity,
+      alert.title,
+      alert.detail || "",
+      alert.age_s ? formatDuration(alert.age_s) : "",
+    ]))
+
+  useEffect(() => {
+    if (alertFingerprint !== null) forceFullRepaint(renderer)
+  }, [alertFingerprint, renderer])
 
   const refresh = useCallback(async (force = false) => {
     if (controller.current && !force) return

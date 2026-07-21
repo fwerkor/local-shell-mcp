@@ -61,6 +61,22 @@ def test_webui_shell_uses_available_viewport_without_fixed_desktop_cap():
     assert ":fullscreen .shell" in css
 
 
+def test_webui_visual_regressions_are_packaged():
+    asset_root = Path(__file__).parents[1] / "src/local_shell_mcp/ui_static"
+    html = (asset_root / "index.html").read_text(encoding="utf-8")
+    css = (asset_root / "web.css").read_text(encoding="utf-8")
+    script = (asset_root / "web.js").read_text(encoding="utf-8")
+
+    assert "<strong>TUI</strong><small>Terminal interface</small>" in html
+    assert "<strong>OpenTUI</strong><small>Terminal interface</small>" not in html
+    assert "scrollbar-width:none" in css
+    assert "::-webkit-scrollbar{display:none}" in css
+    dark_mode = "@media (prefers-color-scheme:dark)"
+    assert dark_mode in css
+    assert css.rindex(dark_mode) > css.rindex(".todo-row{display:grid")
+    assert "row-menu" not in script
+
+
 def test_ui_assets_reject_symlinks_outside_asset_root(tmp_path, monkeypatch):
     assets = tmp_path / "assets"
     assets.mkdir()

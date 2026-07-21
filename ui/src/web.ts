@@ -403,7 +403,7 @@ function machineIcon(machine: Machine): string {
 }
 
 function machineRows(machines: Machine[], localCpu?: unknown): string {
-  if (!machines.length) return '<tr><td colspan="6"><div class="empty-state">No machines are registered.</div></td></tr>'
+  if (!machines.length) return '<tr><td colspan="5"><div class="empty-state">No machines are registered.</div></td></tr>'
   return machines.map((machine, index) => {
     const info = machine.info || {}
     const status = stringValue(machine.status, "unknown")
@@ -418,7 +418,6 @@ function machineRows(machines: Machine[], localCpu?: unknown): string {
       <td>${cpu === null ? '<span class="last-seen">Not reported</span>' : `<div class="resource-mini"><span><i style="width:${Math.max(0, Math.min(100, cpu))}%"></i></span><small>CPU ${Math.round(cpu)}%</small></div>`}</td>
       <td><div class="tag-row">${capabilities.map((item) => `<span class="tag">${escapeHtml(item)}</span>`).join("") || '<span class="last-seen">None reported</span>'}</div></td>
       <td><span class="last-seen ${online ? "now" : ""}">${relativeTime(machine.last_seen, machine.last_seen_age_s)}</span></td>
-      <td><button class="row-menu" type="button" aria-label="More actions">•••</button></td>
     </tr>`
   }).join("")
 }
@@ -426,7 +425,7 @@ function machineRows(machines: Machine[], localCpu?: unknown): string {
 function machineTable(data: DashboardData, full = false): string {
   const machines = data.machines?.machines || []
   return `<div class="table-wrap"><table class="${full ? "large-table" : ""}">
-    <thead><tr><th>Machine</th><th>Status</th><th>Resources</th><th>Capabilities</th><th>Last seen</th><th></th></tr></thead>
+    <thead><tr><th>Machine</th><th>Status</th><th>Resources</th><th>Capabilities</th><th>Last seen</th></tr></thead>
     <tbody>${machineRows(machines, data.system?.cpu_percent)}</tbody>
   </table></div>`
 }
