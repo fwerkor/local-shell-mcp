@@ -14,6 +14,7 @@ import {
 import { EmptyState, KeyHint, Loading, Modal, Panel, useVisibleRows } from "./components"
 import { handleSelectionScroll } from "./mouse"
 import { clampIndex } from "./state-utils"
+import { HighlightedText } from "./syntax-highlight"
 import { screenTheme, theme } from "./theme"
 import type { AuditEntry, Machine } from "./types"
 
@@ -353,12 +354,12 @@ export function AuditScreen({
               />
               <Panel title="Call result" style={{ flexGrow: 1, padding: 1 }}>
                 <scrollbox focused={false} style={{ flexGrow: 1 }} scrollY verticalScrollbarOptions={{ visible: true }}>
-                  <text fg={theme.muted} content={outputText} />
+                  <HighlightedText content={outputText} baseColor={theme.muted} />
                 </scrollbox>
               </Panel>
               <Panel title="Call input" style={{ flexGrow: 1, padding: 1 }}>
                 <scrollbox focused={false} style={{ flexGrow: 1 }} scrollY verticalScrollbarOptions={{ visible: true }}>
-                  <text fg={theme.faint} content={inputText} />
+                  <HighlightedText content={inputText} baseColor={theme.faint} />
                 </scrollbox>
               </Panel>
             </>
