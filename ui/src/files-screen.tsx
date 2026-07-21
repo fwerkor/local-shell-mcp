@@ -12,6 +12,7 @@ import {
 import { calculateFilesLayout } from "./files-layout"
 import { handleSelectionScroll } from "./mouse"
 import { clampIndex, nextPreviewMeasurement, payloadMatches } from "./state-utils"
+import { HighlightedText } from "./syntax-highlight"
 import { drawClippedSuperSampleBuffer } from "./image-preview"
 import { parseTerminalCellAspect } from "./terminal-geometry"
 import { screenTheme, theme } from "./theme"
@@ -197,10 +198,17 @@ function Preview({
           scrollY
           verticalScrollbarOptions={{ visible: true }}
         >
-          <text
-            fg={preview.kind === "binary" ? theme.yellow : theme.muted}
-            content={String(preview.content || preview.preview || "") || "Empty file"}
-          />
+          {preview.kind === "binary" ? (
+            <text
+              fg={theme.yellow}
+              content={String(preview.content || preview.preview || "") || "Empty file"}
+            />
+          ) : (
+            <HighlightedText
+              content={String(preview.content || preview.preview || "") || "Empty file"}
+              filename={entry.name}
+            />
+          )}
         </scrollbox>
       )}
     </box>
