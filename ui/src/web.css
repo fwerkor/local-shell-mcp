@@ -4,7 +4,7 @@
   color-scheme: dark;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: #080b14;
-  --glass: rgba(8, 11, 20, 0.76);
+  --glass: rgba(8, 11, 20, 0.66);
   --line: rgba(123, 145, 183, 0.26);
   --line-strong: rgba(94, 234, 212, 0.5);
   --cyan: #5eead4;
@@ -83,9 +83,10 @@ button { font: inherit; }
 .chrome-actions button, .gate button { border: 1px solid var(--line); color: var(--text); background: rgba(14, 32, 54, .72); border-radius: 8px; padding: 6px 10px; cursor: pointer; transition: border-color .18s, background .18s, transform .18s; }
 .chrome-actions button:hover, .gate button:hover { border-color: var(--cyan); background: rgba(23, 61, 89, .9); transform: translateY(-1px); }
 
-.terminal-frame { position: relative; display: grid; grid-template-rows: minmax(0, 1fr); min-width: 0; min-height: 0; padding: 7px; background: linear-gradient(180deg, rgba(4, 10, 20, .24), rgba(2, 6, 14, .36)); }
+.terminal-frame { position: relative; display: grid; grid-template-rows: minmax(0, 1fr); min-width: 0; min-height: 0; padding: 7px; background: rgba(2, 6, 14, .06); }
 #terminal { width: 100%; height: 100%; min-width: 0; min-height: 0; padding: 3px; }
-#terminal .xterm { height: 100%; }
+#terminal .xterm { height: 100%; background: transparent !important; }
+#terminal .xterm-screen, #terminal .xterm-viewport { background: transparent !important; }
 #terminal .xterm-viewport { scrollbar-width: none; }
 #terminal .xterm-viewport::-webkit-scrollbar { width: 0; height: 0; }
 
