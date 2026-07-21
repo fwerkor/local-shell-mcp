@@ -12,13 +12,16 @@ import {
   selectionAfterRefresh,
 } from "./audit-utils"
 import { EmptyState, KeyHint, Loading, Modal, Panel, useVisibleRows } from "./components"
+import { ImagePreviewView } from "./image-preview-view"
 import { handleSelectionScroll } from "./mouse"
 import { clampIndex } from "./state-utils"
 import { HighlightedText } from "./syntax-highlight"
+import { parseTerminalCellAspect } from "./terminal-geometry"
 import { screenTheme, theme } from "./theme"
 import type { AuditEntry, Machine } from "./types"
 
 const colors = screenTheme.Audit
+const terminalCellAspect = parseTerminalCellAspect(process.env.LOCAL_SHELL_MCP_UI_CELL_ASPECT)
 
 type AuditDialog = { type: "none" } | { type: "search" } | { type: "event" } | { type: "session" }
 
@@ -101,6 +104,14 @@ export function AuditScreen({
     ? Math.max(6, height - 15)
     : auditStackedVisibleRows(height, stackedDetailHeight, hasFilterSummary)
   const { rows, start } = useVisibleRows(entries, selected, tableHeight)
+  const previewColumns = Math.max(
+    8,
+    Math.min(200, horizontal ? width - listLayout.paneWidth - 8 : width - 8),
+  )
+  const previewRows = Math.max(
+    4,
+    Math.min(100, Math.floor((horizontal ? height - 12 : stackedDetailHeight - 8) / 2)),
+  )
 
   const selectIndex = useCallback((next: number | ((value: number) => number)) => {
     const resolved = typeof next === "function" ? next(selectedRef.current) : next
@@ -179,7 +190,7 @@ export function AuditScreen({
     setDetail(null)
     if (!current?.id) return () => controller.abort()
     void api
-      .auditDetail(current.id, controller.signal)
+      .auditDetail(current.id, previewColumns, previewRows, terminalCellAspect, controller.signal)
       .then((entry) => {
         if (requestId === detailRequest.current && !controller.signal.aborted) setDetail(entry)
       })
@@ -193,7 +204,7 @@ export function AuditScreen({
       controller.abort()
       if (detailController.current === controller) detailController.current = null
     }
-  }, [current?.id, current?.paired, current?.status, setStatus])
+  }, [current?.id, current?.paired, current?.status, previewColumns, previewRows, setStatus])
 
   useEffect(() => {
     onInteractionLockChange(dialog.type !== "none")
@@ -353,9 +364,16 @@ export function AuditScreen({
                 content={`${new Date(displayed.ts * 1000).toLocaleString()} · ${displayed.node}${duration ? ` · ${duration}` : ""}`}
               />
               <Panel title="Call result" style={{ flexGrow: 1, padding: 1 }}>
-                <scrollbox focused={false} style={{ flexGrow: 1 }} scrollY verticalScrollbarOptions={{ visible: true }}>
-                  <HighlightedText content={outputText} baseColor={theme.muted} />
-                </scrollbox>
+                {displayed.image_preview?.kind === "image" ? (
+                  <ImagePreviewView
+                    preview={displayed.image_preview}
+                    title={String(displayed.image_preview.path || "Image result")}
+                  />
+                ) : (
+                  <scrollbox focused={false} style={{ flexGrow: 1 }} scrollY verticalScrollbarOptions={{ visible: true }}>
+                    <HighlightedText content={outputText} baseColor={theme.muted} />
+                  </scrollbox>
+                )}
               </Panel>
               <Panel title="Call input" style={{ flexGrow: 1, padding: 1 }}>
                 <scrollbox focused={false} style={{ flexGrow: 1 }} scrollY verticalScrollbarOptions={{ visible: true }}>
