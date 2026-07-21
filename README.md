@@ -86,15 +86,18 @@ Full setup instructions are in the [documentation](https://fwerkor.github.io/loc
 
 ## Human interface
 
-The same service now includes a human-facing OpenTUI with Dashboard, Files, Terminals, Remotes, Audit, and Todos screens. Dashboard is the default read-only overview and adapts from a dense wide-screen system view to compact terminal summaries. The browser interface is an authenticated xterm.js/PTY shell around that exact OpenTUI application rather than a separate implementation.
+The service includes two compatible human interfaces backed by the same authenticated API and state:
 
-Open the WebUI on the service origin:
+- **Web UI** is a native browser dashboard for system health, machines, workloads, recent MCP activity, alerts, and todos.
+- **OpenTUI** is the full terminal-oriented interface with Dashboard, Files, Terminals, Remotes, Audit, and Todos screens. It remains available in the browser as a selectable console and as the native `local-shell-mcp tui` command.
+
+Open the browser interface on the service origin:
 
 ```text
 http://127.0.0.1:8765/ui
 ```
 
-The WebUI uses the same OAuth flow as MCP. Its responsive terminal frame supports mouse interaction on the actual OpenTUI top bar and contextual footer actions, automatic PTY resizing, reconnects, fullscreen mode, and a cached Bing background with an animated fallback.
+The OAuth screen lets you choose Web UI or OpenTUI before authorization. After login, switch modes at any time from the interface selector. Native Web UI routes use URL hashes such as `#/overview` and `#/console`, so a selected mode or page can be bookmarked. The OpenTUI console retains the existing authenticated xterm.js/PTY transport, mouse interaction, automatic resizing, reconnects, fullscreen mode, and mobile shortcut row.
 
 Standalone release executables embed the native OpenTUI runtime, while Docker images provide it inside the image. Start the service, then launch it without a human login prompt:
 
@@ -102,7 +105,7 @@ Standalone release executables embed the native OpenTUI runtime, while Docker im
 local-shell-mcp tui
 ```
 
-Files is an LSM-native three-pane file manager for local and remote machines. It renders bounded PNG/JPEG/GIF/WebP thumbnails directly in OpenTUI and provides consistent file operations through the shared service API. Manual actions entered through either human interface are excluded from the MCP audit log; the Audit screen and terminal audit rail show model-originated MCP activity.
+Files remains an LSM-native three-pane file manager inside OpenTUI for local and remote machines. It renders bounded PNG/JPEG/GIF/WebP thumbnails and provides consistent file operations through the shared service API. Manual actions entered through either human interface are excluded from the MCP audit log; Activity, Audit, and the terminal audit rail show model-originated MCP activity.
 
 See the [human interface guide](https://fwerkor.github.io/local-shell-mcp/guides/human-interface/).
 
@@ -206,7 +209,7 @@ Important options:
 | `LOCAL_SHELL_MCP_REMOTE_ENABLED` | Enable or disable remote worker control tools. |
 | `LOCAL_SHELL_MCP_UI_ENABLED` | Mount or disable the shared OpenTUI/WebUI human interface. |
 | `LOCAL_SHELL_MCP_UI_PATH` | WebUI mount path on the same service; default `/ui`. |
-| `LOCAL_SHELL_MCP_UI_WALLPAPER` | Select `bing`, `aurora`, or `none` for the browser shell. |
+| `LOCAL_SHELL_MCP_UI_WALLPAPER` | Select `bing`, `aurora`, or `none` for the OpenTUI browser console background. |
 | `LOCAL_SHELL_MCP_SHELL_ENV_BLOCKLIST` | Environment variables removed from spawned shell processes. |
 | `LOCAL_SHELL_MCP_FILE_DOWNLOAD_ENABLED` | Enable tokenized file download links. |
 

@@ -1,0 +1,27 @@
+@media (max-width: 720px) {
+  .console-content {
+    padding: 10px 3px 0;
+  }
+
+  .console-header {
+    min-height: 36px;
+    margin-bottom: 8px;
+    padding: 0 8px;
+  }
+
+  .console-header p {
+    display: none;
+  }
+
+  .console-header h1 {
+    font-size: 18px;
+  }
+
+  .console-content .terminal-card {
+    height: calc(100vh - 118px);
+  }
+
+  #terminal {
+    padding: 3px;
+  }
+}
