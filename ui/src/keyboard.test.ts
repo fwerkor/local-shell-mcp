@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { parseKeypress } from "@opentui/core"
-import { browserShortcutSequence } from "./keyboard"
+import { browserSelectionShortcut, browserShortcutSequence } from "./keyboard"
 
 function shortcut(key: string, code?: string) {
   return browserShortcutSequence({ key, code, altKey: true, ctrlKey: false, metaKey: false })
@@ -48,5 +48,18 @@ describe("browserShortcutSequence", () => {
     expect(browserShortcutSequence({ key: "n", code: "KeyN", altKey: true, ctrlKey: true, metaKey: false })).toBeUndefined()
     expect(browserShortcutSequence({ key: "q", code: "KeyQ", altKey: true, ctrlKey: false, metaKey: true })).toBeUndefined()
     expect(browserShortcutSequence({ key: "Escape", altKey: true, ctrlKey: false, metaKey: false })).toBeUndefined()
+  })
+})
+
+describe("browserSelectionShortcut", () => {
+  test("keeps select-all and copy inside xterm", () => {
+    expect(browserSelectionShortcut({ key: "a", altKey: false, ctrlKey: true, metaKey: false, shiftKey: true })).toBe("select-all")
+    expect(browserSelectionShortcut({ key: "C", altKey: false, ctrlKey: false, metaKey: true, shiftKey: true })).toBe("copy")
+  })
+
+  test("does not replace ordinary terminal or browser shortcuts", () => {
+    expect(browserSelectionShortcut({ key: "a", altKey: false, ctrlKey: true, metaKey: false, shiftKey: false })).toBeUndefined()
+    expect(browserSelectionShortcut({ key: "c", altKey: true, ctrlKey: true, metaKey: false, shiftKey: true })).toBeUndefined()
+    expect(browserSelectionShortcut({ key: "v", altKey: false, ctrlKey: true, metaKey: false, shiftKey: true })).toBeUndefined()
   })
 })

@@ -1,7 +1,7 @@
 import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
 import { createImageAddon } from "./image-support"
-import { browserShortcutSequence } from "./keyboard"
+import { browserSelectionShortcut, browserShortcutSequence } from "./keyboard"
 import { measureTerminalCellAspect } from "./terminal-geometry"
 
 declare global {
@@ -131,9 +131,36 @@ function sendTerminalInput(sequence: string): void {
   if (socket?.readyState !== WebSocket.OPEN) return
   socket.send(encoder.encode(sequence))
 }
+
+async function copyTerminalSelection(): Promise<void> {
+  const selection = terminal.getSelection()
+  if (!selection) return
+  try {
+    await navigator.clipboard.writeText(selection)
+  } catch {
+    const textarea = document.createElement("textarea")
+    textarea.value = selection
+    textarea.style.position = "fixed"
+    textarea.style.opacity = "0"
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand("copy")
+    textarea.remove()
+    terminal.focus()
+  }
+}
+
 window.addEventListener(
   "keydown",
   (event) => {
+    const selectionShortcut = browserSelectionShortcut(event)
+    if (selectionShortcut) {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      if (selectionShortcut === "select-all") terminal.selectAll()
+      else void copyTerminalSelection()
+      return
+    }
     const sequence = browserShortcutSequence(event)
     if (!sequence || socket?.readyState !== WebSocket.OPEN) return
     event.preventDefault()
