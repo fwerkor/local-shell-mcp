@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import hashlib
 import importlib.metadata as importlib_metadata
 import json
 import os
@@ -63,6 +64,8 @@ from .shell_ops import (
 )
 from .tmux_helper import persistent_shell_backend_info
 from .transfer_ops import (
+    DEFAULT_TRANSFER_CHUNK_BYTES,
+    normalize_chunk_size,
     transfer_abort_write,
     transfer_alloc_temp_path,
     transfer_begin_write,
@@ -1052,49 +1055,99 @@ def _worker_upload_url(
     expected_bytes: int,
     expected_sha256: str,
     timeout_s: int | None = None,
+    offset: int = 0,
+    chunk_size: int | None = None,
 ) -> dict[str, Any]:
     _worker_validate_transfer_url(url)
     source = resolve_path(path, must_exist=True)
-    stat = transfer_stat(str(source), True)
+    stat = transfer_stat(str(source), False)
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {path}")
-    if stat["size"] != int(expected_bytes):
-        raise ValueError(f"size mismatch: expected {expected_bytes}, got {stat['size']}")
-    if str(stat.get("sha256") or "").lower() != str(expected_sha256).lower():
-        raise ValueError("file sha256 mismatch before upload")
+    total = int(expected_bytes)
+    if stat["size"] != total:
+        raise ValueError(f"size mismatch: expected {total}, got {stat['size']}")
+    start = int(offset)
+    if start < 0 or start > total:
+        raise ValueError("offset is outside the source file")
+    if start == 0:
+        digest = transfer_stat(str(source), True).get("sha256")
+        if str(digest or "").lower() != str(expected_sha256).lower():
+            raise ValueError("file sha256 mismatch before upload")
+
+    effective_chunk_size = normalize_chunk_size(
+        DEFAULT_TRANSFER_CHUNK_BYTES if chunk_size is None else chunk_size
+    )
+    with source.open("rb") as handle:
+        handle.seek(start)
+        data = handle.read(min(effective_chunk_size, total - start))
+    end = start + len(data)
+
     curl = shutil.which("curl")
     if not curl:
         raise FileNotFoundError("curl is required for remote file streaming")
-    completed = subprocess.run(  # noqa: S603
+    marker = "\n__LSM_HTTP_STATUS__:"
+    command = [
+        curl,
+        "-sS",
+        "--http1.1",
+        "--connect-timeout",
+        "15",
+        "--max-time",
+        str(_worker_curl_timeout(timeout_s)),
+        "-X",
+        "PUT",
+        "-H",
+        "Expect:",
+        "-H",
+        "Content-Type: application/octet-stream",
+        "-H",
+        f"X-Chunk-SHA256: {hashlib.sha256(data).hexdigest()}",
+    ]
+    if total:
+        command.extend(["-H", f"Content-Range: bytes {start}-{end - 1}/{total}"])
+    command.extend(
         [
-            curl,
-            "-fsS",
-            "--connect-timeout",
-            "15",
-            "--max-time",
-            str(_worker_curl_timeout(timeout_s)),
-            "-H",
-            "Expect:",
-            "-H",
-            "Content-Type: application/octet-stream",
-            "--upload-file",
-            str(source),
+            "--data-binary",
+            "@-",
+            "--write-out",
+            marker + "%{http_code}",
             url,
-        ],
+        ]
+    )
+    completed = subprocess.run(  # noqa: S603
+        command,
+        input=data,
         capture_output=True,
-        text=True,
         check=False,
     )
+    raw_stdout = completed.stdout or b""
+    raw_stderr = completed.stderr or b""
+    stdout = raw_stdout.encode() if isinstance(raw_stdout, str) else raw_stdout
+    stderr = (
+        raw_stderr
+        if isinstance(raw_stderr, str)
+        else raw_stderr.decode(errors="replace")
+    )
+    raw_marker = marker.encode("ascii")
+    body, separator, raw_status = stdout.rpartition(raw_marker)
     if completed.returncode != 0:
-        detail = completed.stderr.strip() or completed.stdout.strip()
-        raise RuntimeError(f"stream upload failed with curl exit {completed.returncode}: {detail}")
+        raise RuntimeError(
+            f"chunk upload failed with curl exit {completed.returncode}: {stderr.strip()}"
+        )
+    if not separator:
+        raise RuntimeError("chunk upload returned an invalid response")
     try:
-        payload = json.loads(completed.stdout)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("stream upload returned invalid JSON") from exc
-    if not isinstance(payload, dict) or not payload.get("ok"):
-        raise RuntimeError(f"stream upload failed: {payload}")
-    return dict(payload.get("data") or {})
+        status_code = int(raw_status.strip())
+        payload = json.loads(body)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError("chunk upload returned an invalid response") from exc
+    if status_code >= 400 or not isinstance(payload, dict) or not payload.get("ok"):
+        raise RuntimeError(f"chunk upload failed with HTTP {status_code}: {payload}")
+    result = dict(payload.get("data") or {})
+    result["offset"] = start
+    result["chunk_bytes"] = len(data)
+    result["chunk_size"] = effective_chunk_size
+    return result
 
 
 def _worker_download_url(
@@ -1371,6 +1424,8 @@ async def _execute_transfer_worker_tool(tool: str, args: dict[str, Any]) -> Any:
             args["expected_bytes"],
             args["expected_sha256"],
             args.get("timeout_s"),
+            args.get("offset", 0),
+            args.get("chunk_size"),
         )
 
     if tool == "transfer_download_url":
@@ -1841,9 +1896,7 @@ async def run_worker(
                 "error": "TimeoutError",
                 "message": "remote job expired before execution",
             }
-            await _submit_worker_result_with_heartbeat(
-                out, server, headers, heartbeat_interval_s
-            )
+            await _submit_worker_result_with_heartbeat(out, server, headers, heartbeat_interval_s)
             continue
         try:
             result = await _execute_worker_job_with_heartbeat(

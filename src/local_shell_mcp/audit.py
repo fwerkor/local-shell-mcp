@@ -465,6 +465,9 @@ _TOOL_OPERATION_GROUPS: dict[str, frozenset[str]] = {
             "delete_file_or_dir",
             "apply_patch",
             "secret_scan",
+            "create_file_link",
+            "list_file_links",
+            "revoke_file_link",
         }
     ),
     "shell": frozenset(
@@ -479,9 +482,6 @@ _TOOL_OPERATION_GROUPS: dict[str, frozenset[str]] = {
         }
     ),
     "jobs": frozenset({"job_start", "job_list", "job_tail", "job_stop", "job_retry"}),
-    "transfer": frozenset(
-        {"create_file_link", "list_file_links", "revoke_file_link", "transfer_path"}
-    ),
     "browser": frozenset(
         {"browser_capture_tool", "browser_get_text_tool", "playwright_run_script_tool"}
     ),
@@ -491,6 +491,7 @@ _TOOL_OPERATION_GROUPS: dict[str, frozenset[str]] = {
             "remote_list_machines",
             "remote_revoke_machine",
             "remote_rename_machine",
+            "transfer_path",
         }
     ),
     "agent": frozenset(
@@ -524,8 +525,10 @@ def _operation_type(record: dict[str, Any]) -> str:
         return "browser"
     if event.startswith("remote_"):
         return "remote"
-    if event.startswith(("download_", "file_link_", "transfer_")):
-        return "transfer"
+    if event.startswith(("download_", "file_link_")):
+        return "files"
+    if event.startswith("transfer_"):
+        return "remote"
     return "other"
 
 

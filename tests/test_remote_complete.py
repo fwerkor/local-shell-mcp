@@ -589,16 +589,19 @@ def test_worker_upload_protocol_and_generated_execution_edges(tmp_path, monkeypa
             args[0], 0, stdout="not-json", stderr=""
         ),
     )
-    with pytest.raises(RuntimeError, match="invalid JSON"):
+    with pytest.raises(RuntimeError, match="invalid response"):
         remote._worker_upload_url("source.bin", url, 7, digest)
     monkeypatch.setattr(
         remote.subprocess,
         "run",
         lambda *args, **kwargs: subprocess.CompletedProcess(
-            args[0], 0, stdout='{"ok":false,"message":"bad"}', stderr=""
+            args[0],
+            0,
+            stdout='{"ok":false,"message":"bad"}\n__LSM_HTTP_STATUS__:400',
+            stderr="",
         ),
     )
-    with pytest.raises(RuntimeError, match="stream upload failed"):
+    with pytest.raises(RuntimeError, match="HTTP 400"):
         remote._worker_upload_url("source.bin", url, 7, digest)
 
     async def fake_run_shell(command, **kwargs):

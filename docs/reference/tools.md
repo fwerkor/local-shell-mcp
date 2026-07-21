@@ -459,7 +459,7 @@ When `machine` is supplied, the call additionally requires `remote:use` and runs
 
 ### `transfer_path`
 
-Copy a file or directory between the controller and remote machines using one-time raw binary HTTP streams. A missing machine denotes the controller; at least one endpoint must be remote.
+Start a tracked job that copies a file or directory between the controller and remote machines. A missing machine denotes the controller; at least one endpoint must be remote. The call returns immediately with a job record; use `job_list`, `job_tail`, `job_stop`, and `job_retry` to follow or control it.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -468,13 +468,13 @@ Copy a file or directory between the controller and remote machines using one-ti
 | `source_machine` | `string \| null` | `null` |  |
 | `destination_machine` | `string \| null` | `null` |  |
 | `overwrite` | `boolean` | `false` |  |
-| `chunk_size` | `integer \| null` | `null` | Compatibility parameter; validated and reported but does not change the raw HTTP streaming transport. |
+| `chunk_size` | `integer \| null` | `null` | Raw-binary chunk size for worker-to-controller upload legs. Defaults to 1 MiB and is capped at 4 MiB. |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 
 OAuth scopes: `remote:use, shell:read, shell:write`.
 
-At least one of `source_machine` and `destination_machine` must be supplied. Omitted endpoints refer to the controller workspace; the source may be either a file or a directory.
+At least one of `source_machine` and `destination_machine` must be supplied. Omitted endpoints refer to the controller workspace; the source may be either a file or a directory. Worker-to-controller upload legs use transactional, resumable raw-binary chunks with per-chunk and final SHA-256 validation.
 
 ### `create_file_link`
 

@@ -107,7 +107,7 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
         "retry_job",
         "tree",
         "_apply_patch_text",
-        "_transfer_path",
+        "_start_transfer_job",
         "_secret_scan",
         "browser_capture",
         "browser_get_text",
@@ -258,7 +258,7 @@ async def test_tool_wrapper_error_paths_and_remote_disabled(tmp_path, monkeypatc
     monkeypatch.setattr(tools, "edit_text", fail_sync)
     monkeypatch.setattr(tools, "delete_path", fail_sync)
     monkeypatch.setattr(tools, "_apply_patch_text", fail_async)
-    monkeypatch.setattr(tools, "_transfer_path", fail_async)
+    monkeypatch.setattr(tools, "_start_transfer_job", fail_async)
     monkeypatch.setattr(tools, "_secret_scan", fail_async)
     monkeypatch.setattr(tools, "todo_read", fail_sync)
     monkeypatch.setattr(tools, "todo_write", fail_sync)

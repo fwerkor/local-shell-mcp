@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import base64
 import contextlib
 import json
@@ -12,6 +13,7 @@ import sys
 import threading
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -34,6 +36,11 @@ JOB_STORE_LEGACY_VERSIONS = {1}
 TERMINAL_STATUSES = {"succeeded", "failed", "exited", "stopped", "lost"}
 _JOB_STORE_THREAD_LOCK = threading.RLock()
 _ACTIVE_JOB_OPERATIONS: set[str] = set()
+ManagedJobHandler = Callable[
+    ["ManagedJobContext", dict[str, Any]], Awaitable[dict[str, Any] | None]
+]
+_MANAGED_JOB_HANDLERS: dict[str, ManagedJobHandler] = {}
+_MANAGED_JOB_TASKS: dict[str, asyncio.Task[None]] = {}
 
 
 def _utc() -> float:
@@ -398,6 +405,25 @@ def _refresh_job_status(
         return job
 
     updated = now or _utc()
+    if job.get("kind") == "managed":
+        task = _MANAGED_JOB_TASKS.get(str(job.get("job_id") or ""))
+        if task is not None and not task.done():
+            return job
+        job.update(
+            {
+                "status": "stopped" if status == "stopping" else "lost",
+                "updated_at": updated,
+                "completed_at": updated,
+                "exit_code": None,
+                "error": (
+                    None
+                    if status == "stopping"
+                    else "managed job is no longer running; retry it to resume the operation"
+                ),
+            }
+        )
+        return job
+
     if status == "starting" and _job_operation_is_active(job, "start"):
         return job
     if status == "retrying" and _job_operation_is_active(job, "retry"):
@@ -508,6 +534,7 @@ def _refresh_job_status(
 def _public_job(job: dict[str, Any]) -> dict[str, Any]:
     return {
         "job_id": job.get("job_id"),
+        "kind": job.get("kind", "shell"),
         "name": job.get("name"),
         "status": job.get("status"),
         "command": job.get("command"),
@@ -523,6 +550,8 @@ def _public_job(job: dict[str, Any]) -> dict[str, Any]:
         "log_truncated": bool(job.get("log_truncated", False)),
         "output_bytes": int(job.get("output_bytes") or 0),
         "attempts": job.get("attempts", 1),
+        "progress": job.get("progress"),
+        "result": job.get("result"),
     }
 
 
@@ -552,6 +581,190 @@ def _read_log_tail(path: str | None, lines: int) -> str:
         if data.endswith((b"\n", b"\r")) and text:
             text += "\n"
     return text
+
+
+def register_managed_job_handler(kind: str, handler: ManagedJobHandler) -> None:
+    normalized = kind.strip()
+    if not normalized:
+        raise ValueError("managed job kind must not be empty")
+    existing = _MANAGED_JOB_HANDLERS.get(normalized)
+    if existing is not None and existing is not handler:
+        raise ValueError(f"managed job handler already registered: {normalized}")
+    _MANAGED_JOB_HANDLERS[normalized] = handler
+
+
+def _append_managed_log(path: str, message: str) -> None:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    payload = message if message.endswith("\n") else message + "\n"
+    max_bytes = max(1, int(get_settings().max_job_log_bytes))
+    encoded = payload.encode("utf-8", errors="replace")
+    with target.open("a+b") as handle:
+        with contextlib.suppress(OSError):
+            target.chmod(0o600)
+        handle.write(encoded)
+        handle.flush()
+        truncated = _compact_log(handle, max_bytes)
+    with _store_transaction() as store:
+        job_id = target.name.split("-attempt-", 1)[0]
+        with contextlib.suppress(KeyError):
+            job = _find_job(store, job_id)
+            job["output_bytes"] = int(job.get("output_bytes") or 0) + len(encoded)
+            job["log_truncated"] = bool(job.get("log_truncated")) or truncated
+
+
+def _update_managed_progress(job_id: str, progress: dict[str, Any]) -> None:
+    with _store_transaction() as store:
+        job = _find_job(store, job_id)
+        if job.get("status") in {"starting", "running", "stopping", "retrying"}:
+            job["progress"] = dict(progress)
+            job["updated_at"] = _utc()
+
+
+class ManagedJobContext:
+    def __init__(self, job_id: str, log_path: str):
+        self.job_id = job_id
+        self.log_path = log_path
+
+    async def log(self, message: str) -> None:
+        await asyncio.to_thread(_append_managed_log, self.log_path, message)
+
+    async def update_progress(self, **progress: Any) -> None:
+        await asyncio.to_thread(_update_managed_progress, self.job_id, progress)
+
+
+def _finish_managed_job(
+    job_id: str,
+    *,
+    status: str,
+    exit_code: int | None,
+    error: str | None,
+    result: dict[str, Any] | None = None,
+) -> None:
+    with _store_transaction() as store:
+        job = _find_job(store, job_id)
+        if job.get("status") not in {"starting", "running", "stopping", "retrying"}:
+            return
+        completed_at = _utc()
+        job.update(
+            {
+                "status": status,
+                "updated_at": completed_at,
+                "completed_at": completed_at,
+                "exit_code": exit_code,
+                "error": error,
+            }
+        )
+        if result is not None:
+            job["result"] = result
+
+
+async def _run_managed_job(
+    job_id: str,
+    kind: str,
+    payload: dict[str, Any],
+    log_path: str,
+) -> None:
+    context = ManagedJobContext(job_id, log_path)
+    handler = _MANAGED_JOB_HANDLERS[kind]
+    try:
+        result = await handler(context, dict(payload))
+    except asyncio.CancelledError:
+        await asyncio.to_thread(_append_managed_log, log_path, "job cancelled")
+        await asyncio.to_thread(
+            _finish_managed_job,
+            job_id,
+            status="stopped",
+            exit_code=None,
+            error=None,
+        )
+        raise
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        await asyncio.to_thread(_append_managed_log, log_path, error)
+        await asyncio.to_thread(
+            _finish_managed_job,
+            job_id,
+            status="failed",
+            exit_code=1,
+            error=error,
+        )
+    else:
+        await asyncio.to_thread(
+            _finish_managed_job,
+            job_id,
+            status="succeeded",
+            exit_code=0,
+            error=None,
+            result=result,
+        )
+    finally:
+        _MANAGED_JOB_TASKS.pop(job_id, None)
+
+
+def _launch_managed_job(
+    job_id: str,
+    kind: str,
+    payload: dict[str, Any],
+    log_path: str,
+) -> None:
+    task = asyncio.create_task(
+        _run_managed_job(job_id, kind, payload, log_path),
+        name=f"managed-job-{job_id}",
+    )
+    _MANAGED_JOB_TASKS[job_id] = task
+
+
+async def start_managed_job(
+    kind: str,
+    payload: dict[str, Any],
+    *,
+    name: str | None = None,
+    command: str | None = None,
+) -> dict[str, Any]:
+    normalized = kind.strip()
+    if normalized not in _MANAGED_JOB_HANDLERS:
+        raise ValueError(f"unknown managed job kind: {normalized}")
+    job_id = _new_job_id()
+    display_name = name or f"{normalized}-{job_id}"
+    paths = _attempt_paths(job_id, 1)
+    _private_write_text(paths["log"], "")
+    now = _utc()
+    job = {
+        "job_id": job_id,
+        "kind": "managed",
+        "managed_kind": normalized,
+        "managed_payload": dict(payload),
+        "name": display_name,
+        "status": "running",
+        "command": command or normalized,
+        "cwd": ".",
+        "session_id": None,
+        "backend": "managed",
+        "command_path": None,
+        "log_path": str(paths["log"]),
+        "status_path": None,
+        "created_at": now,
+        "updated_at": now,
+        "last_started_at": now,
+        "completed_at": None,
+        "exit_code": None,
+        "error": None,
+        "log_truncated": False,
+        "output_bytes": 0,
+        "attempts": 1,
+    }
+    try:
+        with _store_transaction() as store:
+            store["jobs"].append(job)
+        _launch_managed_job(job_id, normalized, payload, str(paths["log"]))
+    except BaseException:
+        _remove_attempt_files(job_id)
+        with contextlib.suppress(Exception), _store_transaction() as store:
+            store["jobs"] = [row for row in store.get("jobs", []) if row.get("job_id") != job_id]
+        raise
+    audit("job_start", job_id=job_id, backend="managed", kind=normalized)
+    return _public_job(job)
 
 
 async def start_job(command: str, cwd: str = ".", name: str | None = None) -> dict[str, Any]:
@@ -674,7 +887,7 @@ async def tail_job(job_id: str, lines: int = 200) -> dict[str, Any]:
         session_id = str(job.get("session_id") or "")
         status = str(job.get("status") or "")
     output = _read_log_tail(log_path, lines)
-    if not output and status == "running":
+    if not output and status == "running" and public_job.get("backend") != "managed":
         try:
             tail = await read_shell(session_id, lines)
             output = str(tail.get("output", ""))
@@ -700,7 +913,99 @@ async def tail_job(job_id: str, lines: int = 200) -> dict[str, Any]:
     return result
 
 
+async def _stop_managed_job(job_id: str) -> dict[str, Any]:
+    with _store_transaction() as store:
+        job = _refresh_job_status(_find_job(store, job_id), set())
+        if job.get("status") != "running":
+            return {"job": _public_job(job), "killed": False, "stderr": ""}
+        job["status"] = "stopping"
+        job["updated_at"] = _utc()
+
+    task = _MANAGED_JOB_TASKS.get(job_id)
+    killed = task is not None and not task.done()
+    if killed:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    else:
+        await asyncio.to_thread(
+            _finish_managed_job,
+            job_id,
+            status="stopped",
+            exit_code=None,
+            error=None,
+        )
+
+    with _store_transaction() as store:
+        job = _find_job(store, job_id)
+        if job.get("status") == "stopping":
+            completed_at = _utc()
+            job.update(
+                {
+                    "status": "stopped",
+                    "updated_at": completed_at,
+                    "completed_at": completed_at,
+                    "exit_code": None,
+                    "error": None,
+                }
+            )
+        public_job = _public_job(job)
+    audit("job_stop", job_id=job_id, backend="managed", killed=killed)
+    return {"job": public_job, "killed": killed, "stderr": ""}
+
+
+async def _retry_managed_job(job_id: str) -> dict[str, Any]:
+    with _store_transaction() as store:
+        job = _refresh_job_status(_find_job(store, job_id), set())
+        if job.get("status") in {"starting", "running", "stopping", "retrying"}:
+            raise RuntimeError(f"job is still active: {job_id}")
+        kind = str(job.get("managed_kind") or "")
+        if kind not in _MANAGED_JOB_HANDLERS:
+            raise RuntimeError(f"managed job handler is unavailable: {kind}")
+        payload = dict(job.get("managed_payload") or {})
+        attempts = int(job.get("attempts") or 1) + 1
+        paths = _attempt_paths(job_id, attempts)
+        _private_write_text(paths["log"], "")
+        started_at = _utc()
+        job.update(
+            {
+                "status": "running",
+                "updated_at": started_at,
+                "last_started_at": started_at,
+                "completed_at": None,
+                "exit_code": None,
+                "error": None,
+                "log_path": str(paths["log"]),
+                "log_truncated": False,
+                "output_bytes": 0,
+                "attempts": attempts,
+                "progress": None,
+                "result": None,
+            }
+        )
+        public_job = _public_job(job)
+    _remove_attempt_files(job_id, keep_attempt=attempts)
+    try:
+        _launch_managed_job(job_id, kind, payload, str(paths["log"]))
+    except BaseException as exc:
+        error = f"retry failed: {type(exc).__name__}: {exc}"
+        await asyncio.to_thread(
+            _finish_managed_job,
+            job_id,
+            status="failed",
+            exit_code=1,
+            error=error,
+        )
+        raise
+    audit("job_retry", job_id=job_id, backend="managed", attempts=attempts)
+    return public_job
+
+
 async def stop_job(job_id: str) -> dict[str, Any]:
+    with _store_transaction() as store:
+        managed = _find_job(store, job_id).get("kind") == "managed"
+    if managed:
+        return await _stop_managed_job(job_id)
     active = _active_session_ids(await list_shells())
     session_id = ""
     operation_id = ""
@@ -766,6 +1071,10 @@ async def stop_job(job_id: str) -> dict[str, Any]:
 
 
 async def retry_job(job_id: str) -> dict[str, Any]:
+    with _store_transaction() as store:
+        managed = _find_job(store, job_id).get("kind") == "managed"
+    if managed:
+        return await _retry_managed_job(job_id)
     active = _active_session_ids(await list_shells())
     operation_id = ""
     try:

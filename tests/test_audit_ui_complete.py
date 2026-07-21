@@ -46,7 +46,9 @@ def test_audit_call_helpers_cover_legacy_unpaired_and_optional_fields():
     assert audit_module._operation_type({"event": "run_shell_start"}) == "shell"
     assert audit_module._operation_type({"event": "job_started"}) == "jobs"
     assert audit_module._operation_type({"event": "browser_capture"}) == "browser"
-    assert audit_module._operation_type({"event": "download_created"}) == "transfer"
+    assert audit_module._operation_type({"event": "download_created"}) == "files"
+    assert audit_module._operation_type({"event": "transfer_completed"}) == "remote"
+    assert audit_module._operation_type({"tool": "transfer_path"}) == "remote"
     assert audit_module._call_input({"arguments": "invalid"}) is None
     assert audit_module._call_input({"arguments": {"positional_count": 2}}) == {
         "positional_count": 2
@@ -221,7 +223,7 @@ def test_query_audit_covers_tail_reading_and_filter_rejections(tmp_path, monkeyp
     assert audit_module.query_audit(end_ts=1.5)["entries"][0]["ts"] == 1
     assert audit_module.query_audit(node="missing")["total_matched"] == 0
     assert audit_module.query_audit(event="missing")["total_matched"] == 0
-    assert audit_module.query_audit(operation="transfer")["total_matched"] == 0
+    assert audit_module.query_audit(operation="remote")["total_matched"] == 0
     assert audit_module.query_audit(session="missing")["total_matched"] == 0
     assert audit_module.query_audit(search="missing")["total_matched"] == 0
 
