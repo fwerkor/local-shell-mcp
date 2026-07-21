@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from local_shell_mcp.fs_ops import (
+    BINARY_CHECK_BYTES,
     FileConflictError,
     delete_path,
     edit_text,
@@ -275,6 +276,31 @@ def test_read_text_handles_truncated_utf8_sequence(tmp_path, monkeypatch):
     assert result["truncated"] is True
     assert result["bytes_read"] == 4
     assert result["content"] == "你�"
+
+
+def test_read_text_allows_utf8_character_split_at_binary_sample_boundary(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    content = "a" * (BINARY_CHECK_BYTES - 1) + "模型"
+    (tmp_path / "utf8-boundary.txt").write_text(content, encoding="utf-8")
+
+    result = read_text("utf8-boundary.txt")
+
+    assert result["binary"] is False
+    assert result["content"] == content
+
+
+def test_read_text_rejects_invalid_utf8_after_binary_sample_boundary(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    payload = b"a" * (BINARY_CHECK_BYTES - 1) + b"\xe6x"
+    (tmp_path / "invalid-boundary.bin").write_bytes(payload)
+
+    result = read_text("invalid-boundary.bin")
+
+    assert result["binary"] is True
 
 
 def test_path_lock_state_and_lock_files_are_bounded(tmp_path, monkeypatch):
