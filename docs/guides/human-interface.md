@@ -1,6 +1,11 @@
 # Human interface
 
-`local-shell-mcp` includes one OpenTUI application for human operators. It can run directly in a terminal or inside the browser. The browser does not implement a separate dashboard: it authenticates, opens a PTY over WebSocket, and renders the same OpenTUI application with xterm.js.
+`local-shell-mcp` provides two compatible human interfaces on top of the same service API, workspace, persistent terminal registry, remote-worker registry, todo store, and MCP audit log:
+
+- **Web UI** is a native browser dashboard optimized for fast operational inspection.
+- **OpenTUI** is the full terminal-oriented application and remains available both inside the browser and as a native terminal command.
+
+Neither mode creates a separate control plane. Switching interfaces does not change the connected machines, sessions, jobs, todos, permissions, or audit data.
 
 ## Start the service
 
@@ -10,9 +15,7 @@ Start `local-shell-mcp` normally:
 local-shell-mcp --mode mcp
 ```
 
-The human interface shares the same service, workspace, persistent terminal registry, remote-worker registry, todo store, and MCP audit log.
-
-## WebUI
+## Browser interface
 
 Open:
 
@@ -26,18 +29,76 @@ For a public deployment, use the configured HTTPS origin:
 https://your-public-host.example.com/ui
 ```
 
-The WebUI uses the same OAuth server as MCP. The page shell and static assets are public so the login screen can load, while `/api/ui/*` and the terminal WebSocket remain protected. After authorization, the browser stores the access token in session storage and starts the OpenTUI process through an authenticated PTY.
+The browser interface uses the same OAuth server and scopes as MCP. The page shell and static assets are public so the login screen can load, while `/api/ui/*` and the OpenTUI terminal WebSocket remain protected. Access tokens are stored only in browser session storage.
 
-The WebUI includes:
+### Choose an interface
 
-- A responsive glass terminal frame that fills desktop and mobile viewports.
-- A cached Bing daily background when `ui_wallpaper=bing` is enabled.
-- A lightweight animated aurora fallback when the wallpaper cannot be fetched.
-- Binary terminal transport, automatic PTY resize, reconnect backoff, and fullscreen mode.
-- Mouse support on the actual OpenTUI controls, including the top category bar.
-- A mobile shortcut row whose `KB` button explicitly opens the soft keyboard; ordinary taps remain pointer actions and do not summon it.
+The OAuth screen offers two entry points:
 
-## Native TUI
+- **Open Web UI** authorizes and opens the native dashboard.
+- **Continue to OpenTUI** authorizes and opens the terminal interface, preserving the previous browser behavior.
+
+After authorization, the interface selector in the sidebar switches between Web UI and OpenTUI without a new login. The current native page is remembered when moving temporarily to OpenTUI.
+
+Routes are bookmarkable:
+
+```text
+/ui/#/overview
+/ui/#/machines
+/ui/#/workloads
+/ui/#/activity
+/ui/#/todos
+/ui/#/console
+```
+
+`#/web` and `#/dashboard` are aliases for Overview. `#/tui` and `#/opentui` are aliases for Console.
+
+## Native Web UI
+
+The native Web UI polls the existing human-interface API every five seconds and renders browser-native controls instead of terminal cells. It does not start a PTY until OpenTUI is selected.
+
+### Overview
+
+Overview presents the highest-priority operational information first:
+
+- Controller health and current LSM version.
+- Online and offline machine counts.
+- Active tracked jobs and persistent terminal sessions.
+- CPU, memory, workspace disk, load, network throughput, and uptime.
+- Alerts generated from worker state, resource thresholds, failed jobs, and failed MCP calls.
+- Recent model-originated MCP activity.
+- Open todo counts.
+
+### Machines
+
+Machines lists the local controller and connected remote workers with status, platform, version, work directory, capabilities, and last-seen information.
+
+### Workloads
+
+Workloads combines active tracked jobs and standalone persistent shell sessions. The Web UI remains read-only for these records; use OpenTUI for interactive session management.
+
+### Activity
+
+Activity combines current alerts with recent MCP audit activity. Human-entered commands and file operations remain excluded from the MCP audit log.
+
+### Todos
+
+Todos displays the persistent todo store shared with MCP. Full create, edit, status, priority, and deletion controls remain available in OpenTUI.
+
+## Browser OpenTUI
+
+Selecting **OpenTUI** lazily starts the same OpenTUI application used by the native terminal launcher. The browser console retains:
+
+- Authenticated binary PTY transport over WebSocket.
+- Automatic terminal resizing and reconnect backoff.
+- Mouse interaction with OpenTUI controls.
+- Fullscreen mode and browser-safe keyboard shortcuts.
+- Mobile shortcut keys and explicit soft-keyboard control.
+- SIXEL and inline-image support through xterm.js.
+
+The browser does not create an OpenTUI PTY while the user remains in native Web UI mode.
+
+## Native OpenTUI
 
 Standalone release executables embed the platform OpenTUI runtime. Keep only the main executable, start the service, then run:
 
@@ -63,71 +124,35 @@ Use `--api-base` only when the local service uses a non-default port:
 local-shell-mcp tui --api-base http://127.0.0.1:9876/api/ui
 ```
 
-## Shared screens
+## OpenTUI screens
 
 ### Dashboard
 
-Dashboard is the default first screen and provides a read-only operational overview. It summarizes controller health, local and remote nodes, active tracked jobs and persistent sessions, alerts, recent MCP activity, open todos, and the current LSM version.
-
-The layout adapts to the terminal rather than requiring horizontal scrolling:
-
-- Wide terminals show separate node, workload, alert, activity, system-information, and multi-chart trend regions.
-- Medium terminals use two-column summaries and compact sparklines.
-- Narrow terminals retain health, resource usage, alerts, and active-workload essentials without overflowing the viewport.
-
-Dashboard polling is treated as human-interface activity and is excluded from MCP audit records.
+Dashboard is the OpenTUI operational overview. Wide terminals show separate node, workload, alert, activity, system-information, and trend regions; narrower terminals collapse them into compact summaries without horizontal scrolling.
 
 ### Files
 
-Files is an LSM-native three-pane file manager:
-
-- The left sidebar selects `local` or any connected remote machine.
-- The parent pane shows the current directory in context.
-- The current pane lists directories before files and supports mouse selection.
-- The preview pane displays directory contents, text, or a bounded binary preview.
-- File operations include create, edit, rename, copy, move, paste, delete, hidden-file toggle, and refresh.
-
-The same service API powers file operations on local and remote machines, so the interaction model and conflict handling remain consistent across both targets.
+Files is an LSM-native three-pane file manager for local and remote machines. It provides create, edit, rename, copy, move, paste, delete, hidden-file toggle, refresh, text preview, binary preview, and bounded image thumbnails.
 
 ### Terminals
 
-Terminals manages the existing persistent terminal sessions:
-
-- The left sidebar selects a local or remote machine.
-- The bottom bar selects a session on that machine by keyboard or mouse.
-- The main panel displays recent terminal output.
-- The command field sends complete commands.
-- Raw input mode forwards terminal control keys for interactive programs.
-- The right audit rail can be collapsed and shows MCP activity associated with the selected session.
-
-Commands and file operations entered manually through the TUI or WebUI are intentionally excluded from MCP audit records. The audit rail therefore represents model-originated MCP operations rather than a keylogger for human activity.
+Terminals manages persistent shell sessions on local and remote machines. It supports complete-command input, raw interactive input, session switching, session creation and termination, recent output, and a collapsible MCP audit rail.
 
 ### Todos
 
-Todos provides persistent create, edit, delete, filtering, status changes, and priority changes using the same todo store exposed to MCP. Todo rows and summary filters are mouse-selectable.
+Todos provides persistent create, edit, delete, filtering, status changes, and priority changes through the same todo store exposed to MCP.
 
 ### Audit
 
-Audit reads the bounded JSONL audit log and supports:
-
-- Node filtering.
-- Operation-type filtering.
-- Event and session filtering.
-- Free-text search.
-- Time ranges.
-- Ascending or descending time order.
-- Record detail inspection.
-- Mouse selection for filter cards and audit rows.
+Audit reads the bounded JSONL audit log and supports node, operation, event, session, search, time-range, and sort filters together with record-detail inspection.
 
 ### Remotes
 
 Remotes displays online and offline remote workers, capabilities, work directories, and system metadata. It can create a one-time join invite, rename a node, or revoke its persistent identity.
 
-## Navigation
+## OpenTUI navigation
 
-The top category bar and contextual footer actions can be clicked with a mouse in both native terminals and the WebUI.
-
-Mouse-wheel input is forwarded through the WebUI terminal protocol. Lists move their selection under the pointer, while preview and detail panes scroll their own content. Keyboard navigation is also available:
+The top category bar and contextual footer actions can be clicked with a mouse in both native terminals and the browser console.
 
 | Keys | Action |
 |---|---|
@@ -137,25 +162,22 @@ Mouse-wheel input is forwarded through the WebUI terminal protocol. Lists move t
 | `F9` | Refresh the machine list. |
 | `Alt+Q` | Exit the native OpenTUI process without invoking a browser-reserved Ctrl shortcut. |
 
-Terminals uses `Alt+N` for a new session, `Alt+W` to kill the selected session, `Alt+A` to toggle its audit rail, `Alt+R` to refresh, and `Alt+Left/Right` to switch sessions. The WebUI intercepts these chords before browser-level navigation or menu handling.
-
-Each screen displays its contextual shortcuts in the footer. Available actions are clickable, while unavailable actions are dimmed and ignore mouse input.
+Terminals uses `Alt+N` for a new session, `Alt+W` to kill the selected session, `Alt+A` to toggle its audit rail, `Alt+R` to refresh, and `Alt+Left/Right` to switch sessions. The browser console intercepts these chords before browser-level navigation or menu handling.
 
 ## Configuration
 
 | YAML key | Environment variable | Default | Purpose |
 |---|---|---|---|
-| `ui_enabled` | `LOCAL_SHELL_MCP_UI_ENABLED` | `true` | Mount or disable the human interface. |
-| `ui_path` | `LOCAL_SHELL_MCP_UI_PATH` | `/ui` | WebUI mount path on the MCP service. |
+| `ui_enabled` | `LOCAL_SHELL_MCP_UI_ENABLED` | `true` | Mount or disable the human interfaces. |
+| `ui_path` | `LOCAL_SHELL_MCP_UI_PATH` | `/ui` | Browser interface mount path on the MCP service. |
 | `ui_tui_command` | `LOCAL_SHELL_MCP_UI_TUI_COMMAND` | auto | Override native OpenTUI executable resolution. |
-| `ui_wallpaper` | `LOCAL_SHELL_MCP_UI_WALLPAPER` | `bing` | Use `bing`, `aurora`, or `none`. |
-| `ui_terminal_idle_timeout_s` | `LOCAL_SHELL_MCP_UI_TERMINAL_IDLE_TIMEOUT_S` | `3600` | Close an inactive browser PTY after this many seconds; `0` disables the timeout. |
-| `ui_terminal_max_sessions` | `LOCAL_SHELL_MCP_UI_TERMINAL_MAX_SESSIONS` | `8` | Maximum concurrent browser PTY sessions. |
+| `ui_wallpaper` | `LOCAL_SHELL_MCP_UI_WALLPAPER` | `bing` | Wallpaper setting retained for OpenTUI browser-console deployments. |
+| `ui_terminal_idle_timeout_s` | `LOCAL_SHELL_MCP_UI_TERMINAL_IDLE_TIMEOUT_S` | `3600` | Close an inactive browser OpenTUI PTY after this many seconds; `0` disables the timeout. |
+| `ui_terminal_max_sessions` | `LOCAL_SHELL_MCP_UI_TERMINAL_MAX_SESSIONS` | `8` | Maximum concurrent browser OpenTUI PTY sessions. |
 
 ## Packaging notes
 
-- Docker images include the WebUI assets and native OpenTUI runtime, and configure the service to use the bundled runtime directly.
-- Standalone release executables contain the WebUI assets and a compressed platform OpenTUI runtime; neither WebUI nor native TUI requires a neighboring sidecar.
-- Release archives contain one standalone executable; the OpenTUI runtime is compressed inside it and extracted into PyInstaller's temporary runtime directory when needed.
-- Python wheels include the WebUI assets. A native TUI requires a release executable or a source checkout with Bun and the UI dependencies installed.
-- The WebUI is served from the same process and port as MCP; no additional web service is required.
+- Docker images include the Web UI assets and native OpenTUI runtime.
+- Standalone executables embed the Web UI assets and a compressed platform OpenTUI runtime.
+- Python wheels include the browser assets; native OpenTUI requires a release executable or a source checkout with Bun dependencies installed.
+- Both interfaces are served from the same process and port as MCP; no additional web service is required.

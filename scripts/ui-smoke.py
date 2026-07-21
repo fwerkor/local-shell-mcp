@@ -240,6 +240,14 @@ def run_browser(port: int) -> None:
             page.wait_for_url("**/ui")
             page.locator("#connection-state").get_by_text("Connected").wait_for(timeout=15_000)
             assert page.locator("#auth-gate").is_hidden()
+            wallpaper_background = page.locator(".console-wallpaper").evaluate(
+                "element => getComputedStyle(element).backgroundImage"
+            )
+            assert "/ui/wallpaper" in wallpaper_background, wallpaper_background
+            terminal_background = page.locator("#terminal .xterm-viewport").evaluate(
+                "element => getComputedStyle(element).backgroundColor"
+            )
+            assert terminal_background == "rgba(0, 0, 0, 0)", terminal_background
 
             bootstrap = api_request(page, "/api/ui/bootstrap")
             assert bootstrap["status"] == 200, bootstrap
@@ -274,6 +282,13 @@ def run_browser(port: int) -> None:
                 {"todos": todo_items, "expected_revision": todo_seed["body"]["data"]["revision"]},
             )
             assert todo_write["status"] == 200, todo_write
+
+            page.locator('[data-interface-mode="web"]').click()
+            page.locator('.nav-item[data-view="todos"]').click()
+            page.get_by_text("mouse todo second", exact=True).wait_for(timeout=8_000)
+            assert "Untitled todo" not in page.locator("#view-root").inner_text()
+            page.locator('[data-interface-mode="tui"]').click()
+            page.locator("#connection-state").get_by_text("Connected").wait_for(timeout=8_000)
 
             session_name = f"ui-smoke-{os.getpid()}"
             created = page.evaluate(
