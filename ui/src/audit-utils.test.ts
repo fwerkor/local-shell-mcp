@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   AUDIT_OPERATIONS,
   auditListLayout,
+  auditStackedVisibleRows,
   auditInput,
   auditOutput,
   fitAuditColumn,
@@ -95,6 +96,16 @@ describe("audit wide layout", () => {
   test("preserves the minimum detail width at the horizontal breakpoint", () => {
     const layout = auditListLayout([entry("compact", 1)], 110)
     expect(110 - layout.paneWidth - 1).toBeGreaterThanOrEqual(44)
+  })
+})
+
+describe("audit stacked layout", () => {
+  test("limits records to the rows above the detail panel", () => {
+    expect(auditStackedVisibleRows(37, 15, false)).toBe(9)
+  })
+
+  test("accounts for the active filter summary", () => {
+    expect(auditStackedVisibleRows(37, 15, true)).toBe(6)
   })
 })
 

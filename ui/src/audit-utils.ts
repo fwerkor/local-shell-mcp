@@ -13,6 +13,15 @@ export interface AuditListLayout {
   toolWidth: number
 }
 
+export function auditStackedVisibleRows(
+  screenHeight: number,
+  detailHeight: number,
+  hasFilterSummary: boolean,
+): number {
+  // Filters, key hints, gaps, and the list panel chrome consume 13 rows.
+  return Math.max(1, screenHeight - detailHeight - 13 - (hasFilterSummary ? 3 : 0))
+}
+
 type JsonRecord = Record<string, unknown>
 
 function isRecord(value: unknown): value is JsonRecord {
