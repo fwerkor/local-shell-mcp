@@ -115,7 +115,7 @@ def _parse_envelope(patch: str, root: Path) -> list[_PatchAction]:
 
 def _normalize_patch_path(raw_path: str, root: Path) -> str:
     path = raw_path.strip()
-    if not path or "\\" in path:
+    if not path:
         raise ValueError(f"invalid patch path: {raw_path!r}")
 
     filesystem_path = Path(path)
@@ -128,10 +128,12 @@ def _normalize_patch_path(raw_path: str, root: Path) -> str:
             raise ValueError(f"invalid patch path: {raw_path!r}")
         return relative.as_posix()
 
+    if "\\" in path:
+        raise ValueError(f"invalid patch path: {raw_path!r}")
     candidate = PurePosixPath(path)
     if ".." in candidate.parts:
         raise ValueError(f"patch path must stay within cwd: {raw_path!r}")
-    if any(part in {"", "."} for part in candidate.parts):
+    if candidate == PurePosixPath("."):
         raise ValueError(f"invalid patch path: {raw_path!r}")
     return candidate.as_posix()
 

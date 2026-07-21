@@ -157,7 +157,7 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict:
     await asyncio.to_thread(prune_temp_dir)
     patch_path = temp_dir() / f"patch-{uuid.uuid4().hex}.diff"
     patch_path.parent.mkdir(parents=True, exist_ok=True)
-    await asyncio.to_thread(patch_path.write_text, normalized_patch, encoding="utf-8")
+    await asyncio.to_thread(patch_path.write_bytes, normalized_patch.encode("utf-8"))
     quoted = quote_shell_argument(str(patch_path))
     git = quote_shell_argument(get_settings().git_bin)
     result = await run_shell(
