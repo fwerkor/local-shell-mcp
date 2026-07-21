@@ -70,6 +70,7 @@ button { font: inherit; }
   background: rgba(4, 11, 22, 0.7);
 }
 .footer { border-bottom: 0; border-top: 1px solid var(--line); justify-content: space-between; color: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.selection-help { flex: 1; text-align: center; }
 .brand { display: flex; align-items: center; min-width: 230px; gap: 10px; }
 .brand-mark { display: grid; place-items: center; width: 34px; height: 24px; border: 1px solid rgba(87, 215, 255, 0.54); border-radius: 7px; color: var(--cyan); background: rgba(19, 66, 89, 0.52); font: 700 11px ui-monospace, monospace; letter-spacing: .09em; box-shadow: 0 0 18px rgba(87, 215, 255, .12); }
 .brand-name { font-size: 13px; font-weight: 650; letter-spacing: .02em; }
@@ -139,6 +140,7 @@ button { font: inherit; }
   .touchbar { display: grid; }
   .scanline { inset: 3px 3px 43px; }
   .gate-card { padding: 25px 20px; }
+  .selection-help { display: none; }
 }
 
 @media (pointer: coarse) and (min-width: 761px) {
