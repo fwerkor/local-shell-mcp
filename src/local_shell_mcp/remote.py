@@ -42,6 +42,7 @@ from .fs_ops import (
 )
 from .jobs import list_jobs, retry_job, start_job, stop_job, tail_job
 from .models import ok_result as _ok
+from .patch_ops import normalize_patch_text
 from .playwright_ops import browser_capture, browser_get_text, playwright_run_script
 from .search_ops import grep, tree
 from .settings import get_settings, safe_settings_dump
@@ -903,10 +904,11 @@ def _handled_remote_exception(exc: Exception) -> dict[str, Any]:
 
 async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
     _assert_worker_text_input_size("patch", patch)
+    normalized_patch = await asyncio.to_thread(normalize_patch_text, patch, cwd)
     await asyncio.to_thread(prune_temp_dir)
     patch_path = temp_dir() / f"remote-patch-{uuid.uuid4().hex}.diff"
     patch_path.parent.mkdir(parents=True, exist_ok=True)
-    await asyncio.to_thread(patch_path.write_text, patch, encoding="utf-8")
+    await asyncio.to_thread(patch_path.write_bytes, normalized_patch.encode("utf-8"))
     result = await run_shell(
         f"{quote_shell_argument(get_settings().git_bin)} apply --check "
         f"{quote_shell_argument(str(patch_path))} && "

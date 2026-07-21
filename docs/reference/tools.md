@@ -443,7 +443,7 @@ When `machine` is supplied, the call additionally requires `remote:use` and runs
 
 ### `apply_patch`
 
-Check and apply a unified diff locally or on a remote machine.
+Check and apply a standard unified diff or a `*** Begin Patch` envelope locally or on a remote machine.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|

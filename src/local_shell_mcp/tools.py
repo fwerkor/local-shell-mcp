@@ -40,6 +40,7 @@ from .jobs import list_jobs, retry_job, start_job, stop_job, tail_job
 from .models import ToolResult
 from .models import ok_result as _ok
 from .oauth import ALL_OAUTH_SCOPES
+from .patch_ops import normalize_patch_text
 from .playwright_ops import browser_capture, browser_get_text, playwright_run_script
 from .remote import remote_manager
 from .remote_transfer import (
@@ -152,10 +153,11 @@ def _assert_text_input_size(label: str, text: str, limit: int | None = None) -> 
 
 async def _apply_patch_text(patch: str, cwd: str = ".") -> dict:
     _assert_text_input_size("patch", patch)
+    normalized_patch = await asyncio.to_thread(normalize_patch_text, patch, cwd)
     await asyncio.to_thread(prune_temp_dir)
     patch_path = temp_dir() / f"patch-{uuid.uuid4().hex}.diff"
     patch_path.parent.mkdir(parents=True, exist_ok=True)
-    await asyncio.to_thread(patch_path.write_text, patch, encoding="utf-8")
+    await asyncio.to_thread(patch_path.write_bytes, normalized_patch.encode("utf-8"))
     quoted = quote_shell_argument(str(patch_path))
     git = quote_shell_argument(get_settings().git_bin)
     result = await run_shell(
@@ -1707,7 +1709,7 @@ def _register_workspace_write_tools(mcp: FastMCP, settings: Any) -> None:
         explanation: str | None = None,
         machine: str | None = None,
     ) -> ToolResult:
-        """Check and apply a unified diff locally or on a remote machine."""
+        """Check and apply a unified diff or an apply_patch envelope locally or remotely."""
         _audit_tool_purpose("apply_patch", purpose, explanation)
         if machine:
             return await _remote_call(
