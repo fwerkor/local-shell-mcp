@@ -53,7 +53,7 @@ const terminal = new Terminal({
   scrollback: 6_000,
   smoothScrollDuration: 80,
   theme: {
-    background: "rgba(8, 11, 20, 0.74)",
+    background: "rgba(0, 0, 0, 0)",
     foreground: "#edf3ff",
     cursor: "#5eead4",
     cursorAccent: "#080b14",
