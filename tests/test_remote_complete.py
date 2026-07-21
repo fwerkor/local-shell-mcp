@@ -637,7 +637,7 @@ async def test_worker_apply_patch_honors_nested_cwd_in_git_worktree(
 
     result = await remote._apply_patch_text(patch, str(nested))
 
-    assert result["exit_code"] == 0
+    assert result["exit_code"] == 0, result
     assert target.read_text(encoding="utf-8").endswith("def target():\n    return 2\n")
 
 

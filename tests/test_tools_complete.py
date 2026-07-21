@@ -430,7 +430,7 @@ async def test_apply_patch_honors_nested_cwd_in_git_worktree(tmp_path, monkeypat
 
     result = await tools._apply_patch_text(patch, str(nested))
 
-    assert result["exit_code"] == 0
+    assert result["exit_code"] == 0, result
     assert target.read_text(encoding="utf-8").endswith("def target():\n    return 2\n")
 
 

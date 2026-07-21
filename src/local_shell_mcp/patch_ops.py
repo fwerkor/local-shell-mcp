@@ -54,7 +54,7 @@ def git_apply_command(
     check: bool = False,
 ) -> str:
     check_flag = " --check" if check else ""
-    directory = f" --directory={quoted_prefix}" if quoted_prefix else ""
+    directory = f" --directory {quoted_prefix}" if quoted_prefix else ""
     return f"{quoted_git} apply{check_flag}{directory} {quoted_patch}"
 
 
