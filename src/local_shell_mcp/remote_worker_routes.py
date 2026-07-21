@@ -59,12 +59,13 @@ def _worker_manifest_data() -> dict[str, Any]:
     settings = get_settings()
     server = (settings.public_base_url or f"http://{settings.host}:{settings.port}").rstrip("/")
     payload = worker_bundle_bytes()
+    digest = hashlib.sha256(payload).hexdigest()
     return {
         "schema_version": 1,
         "bundle_version": __version__,
-        "sha256": hashlib.sha256(payload).hexdigest(),
+        "sha256": digest,
         "size": len(payload),
-        "url": server + remote.REMOTE_WORKER_BUNDLE_PATH,
+        "url": server + remote.REMOTE_WORKER_BUNDLE_PATH + f"?sha256={digest}",
     }
 
 
@@ -73,14 +74,18 @@ async def worker_bundle(request: Any):  # noqa: ANN201
 
     query = getattr(request, "query_params", {}) if request is not None else {}
     if query.get("manifest") == "1":
-        return JSONResponse(_worker_manifest_data())
-    return Response(worker_bundle_bytes(), media_type="application/gzip")
+        return JSONResponse(_worker_manifest_data(), headers={"Cache-Control": "no-store"})
+    return Response(
+        worker_bundle_bytes(),
+        media_type="application/gzip",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 async def worker_manifest(request: Any):  # noqa: ARG001, ANN201
     from starlette.responses import JSONResponse
 
-    return JSONResponse(_worker_manifest_data())
+    return JSONResponse(_worker_manifest_data(), headers={"Cache-Control": "no-store"})
 
 
 async def join_script(request: Any):  # noqa: ARG001, ANN201

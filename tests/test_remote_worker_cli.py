@@ -76,6 +76,48 @@ async def test_run_worker_overrides_stale_scope(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_worker_reports_version_and_applies_poll_upgrade(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "false")
+    monkeypatch.setattr(cli.remote, "worker_capabilities", lambda: [])
+    monkeypatch.setattr(cli.remote, "worker_info", lambda workdir: {})
+    monkeypatch.setattr(cli.remote, "_read_worker_identity", lambda server, name=None: None)
+    monkeypatch.setattr(cli.remote, "_write_worker_identity", lambda data: None)
+    calls = []
+
+    async def fake_post(url, payload, headers=None, timeout=None, operation="request"):
+        calls.append((url, payload, headers, timeout, operation))
+        if url.endswith("/remote/register"):
+            return {"ok": True, "data": {"token": "access", "name": "worker"}}
+        return {
+            "ok": True,
+            "data": {
+                "job": None,
+                "upgrade": {"required": True, "version": "9.9.9"},
+            },
+        }
+
+    async def fake_upgrade(server, target_version):
+        assert server == "https://example.test"
+        assert target_version == "9.9.9"
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli.remote, "_worker_post_json_forever", fake_post)
+    monkeypatch.setattr(cli.remote, "_upgrade_worker_runtime", fake_upgrade)
+
+    with pytest.raises(SystemExit):
+        await cli.remote.run_worker(
+            "https://example.test", "invite", workdir=str(tmp_path)
+        )
+
+    poll_payload = calls[1][1]
+    assert poll_payload == {
+        "protocol_version": cli.remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+        "worker_version": cli.remote.__version__,
+    }
+
+
+@pytest.mark.asyncio
 async def test_enroll_worker_registers_and_persists(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setattr(cli.remote, "worker_capabilities", lambda: ["shell"])

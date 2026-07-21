@@ -22,7 +22,11 @@ _WORKER_MANIFEST_PATH = "/remote/worker-bundle.tgz?manifest=1"
 
 
 def _fetch_bytes(url: str, timeout: float = 60) -> bytes:
-    with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310
+    request = urllib.request.Request(
+        url,
+        headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
         return response.read()
 
 
