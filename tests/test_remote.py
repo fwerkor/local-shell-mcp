@@ -91,6 +91,7 @@ async def test_poll_requires_upgrade_before_dequeuing_jobs(tmp_path, monkeypatch
     assert mismatch == {
         "job": None,
         "upgrade": {"required": True, "version": remote.__version__},
+        "poll_timeout_s": 25.0,
     }
     assert worker.queue.qsize() == 1
     assert worker.info["lsm_version"] == "0.0.0"
@@ -104,6 +105,34 @@ async def test_poll_requires_upgrade_before_dequeuing_jobs(tmp_path, monkeypatch
     )
     assert matched["job"]["id"] == "job-valid"
     assert matched["upgrade"] == {"required": False, "version": remote.__version__}
+    assert matched["poll_timeout_s"] == 25.0
+
+
+@pytest.mark.asyncio
+async def test_poll_clamps_to_worker_timeout_and_returns_current_controller_value(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_POLL_TIMEOUT_S", "50")
+    get_settings.cache_clear()
+    manager = remote.RemoteManager()
+    worker = remote.RemoteWorker(name="worker-a", token="token-a")
+    manager.workers[worker.name] = worker
+    manager.tokens[worker.token] = worker.name
+    captured = []
+
+    async def fake_wait_for(awaitable, timeout):  # noqa: ANN001
+        captured.append(timeout)
+        awaitable.close()
+        raise TimeoutError
+
+    monkeypatch.setattr(remote.asyncio, "wait_for", fake_wait_for)
+
+    result = await manager.poll(worker.token, {"poll_timeout_s": 10})
+
+    assert captured == [pytest.approx(10)]
+    assert result["poll_timeout_s"] == 50.0
 
 
 @pytest.mark.asyncio
@@ -277,6 +306,14 @@ def test_worker_poll_request_timeout_uses_only_advertised_values():
     assert remote._worker_poll_request_timeout_s({}) is None  # noqa: SLF001
     for value in (None, 0, -1, "invalid", float("nan")):
         assert remote._worker_poll_request_timeout_s({"poll_timeout_s": value}) is None  # noqa: SLF001
+
+
+def test_worker_poll_payload_advertises_current_long_poll_budget():
+    assert remote._worker_poll_payload() == {  # noqa: SLF001
+        "protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+        "worker_version": remote.__version__,
+    }
+    assert remote._worker_poll_payload(27)["poll_timeout_s"] == 17  # noqa: SLF001
 
 
 def test_worker_retry_delay_is_capped():

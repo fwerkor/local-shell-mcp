@@ -119,6 +119,7 @@ async def test_run_worker_reports_version_and_applies_poll_upgrade(tmp_path, mon
     assert poll_payload == {
         "protocol_version": cli.remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
         "worker_version": cli.remote.__version__,
+        "poll_timeout_s": 17,
     }
 
 

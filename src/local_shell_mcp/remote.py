@@ -508,6 +508,14 @@ class RemoteManager:
         payload = payload or {}
         worker_version = str(payload.get("worker_version") or "")
         protocol_version = int(payload.get("protocol_version") or 0)
+        configured_poll_timeout_s = float(get_settings().remote_poll_timeout_s)
+        effective_poll_timeout_s = configured_poll_timeout_s
+        try:
+            worker_poll_timeout_s = float(payload.get("poll_timeout_s") or 0)
+        except (TypeError, ValueError):
+            worker_poll_timeout_s = 0
+        if math.isfinite(worker_poll_timeout_s) and worker_poll_timeout_s > 0:
+            effective_poll_timeout_s = min(configured_poll_timeout_s, worker_poll_timeout_s)
         upgrade = None
         if protocol_version >= REMOTE_WORKER_POLL_PROTOCOL_VERSION:
             upgrade = {
@@ -522,17 +530,31 @@ class RemoteManager:
             if protocol_version:
                 worker.info["poll_protocol_version"] = protocol_version
         if upgrade and upgrade["required"]:
-            return {"job": None, "upgrade": upgrade}
+            return {
+                "job": None,
+                "upgrade": upgrade,
+                "poll_timeout_s": configured_poll_timeout_s,
+            }
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + get_settings().remote_poll_timeout_s
+        deadline = loop.time() + effective_poll_timeout_s
         while True:
             remaining = deadline - loop.time()
             if remaining <= 0:
-                return {"job": None, "heartbeat": True, "upgrade": upgrade}
+                return {
+                    "job": None,
+                    "heartbeat": True,
+                    "upgrade": upgrade,
+                    "poll_timeout_s": configured_poll_timeout_s,
+                }
             try:
                 job = await asyncio.wait_for(worker.queue.get(), timeout=remaining)
             except TimeoutError:
-                return {"job": None, "heartbeat": True, "upgrade": upgrade}
+                return {
+                    "job": None,
+                    "heartbeat": True,
+                    "upgrade": upgrade,
+                    "poll_timeout_s": configured_poll_timeout_s,
+                }
             job_id = str(job.get("id") or "")
             with self._state_lock:
                 self._prune_cancelled_jobs_locked()
@@ -540,7 +562,11 @@ class RemoteManager:
                     self.cancelled_jobs.pop(job_id, None)
                     continue
                 self.claimed_jobs.add(job_id)
-            return {"job": job, "upgrade": upgrade}
+            return {
+                "job": job,
+                "upgrade": upgrade,
+                "poll_timeout_s": configured_poll_timeout_s,
+            }
 
     async def heartbeat(self, token: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         worker = self._worker_by_token(token)
@@ -1538,11 +1564,16 @@ def worker_info(workdir: str) -> dict[str, Any]:
     }
 
 
-def _worker_poll_payload() -> dict[str, Any]:
-    return {
+def _worker_poll_payload(poll_request_timeout_s: float | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "protocol_version": REMOTE_WORKER_POLL_PROTOCOL_VERSION,
         "worker_version": __version__,
     }
+    if poll_request_timeout_s is not None:
+        payload["poll_timeout_s"] = max(
+            0.001, poll_request_timeout_s - _WORKER_POLL_TIMEOUT_GRACE_S
+        )
+    return payload
 
 
 def _reexec_updated_worker_runtime() -> None:
@@ -1992,12 +2023,15 @@ async def _run_worker_locked(
     while True:
         poll_body = await _worker_post_json_forever(
             f"{server}{REMOTE_API_PREFIX}/poll",
-            _worker_poll_payload(),
+            _worker_poll_payload(poll_request_timeout_s),
             headers,
             poll_request_timeout_s,
             "poll",
         )
         payload = poll_body.get("data", {})
+        updated_poll_request_timeout_s = _worker_poll_request_timeout_s(payload)
+        if updated_poll_request_timeout_s is not None:
+            poll_request_timeout_s = updated_poll_request_timeout_s
         upgrade = payload.get("upgrade") if isinstance(payload, dict) else None
         if isinstance(upgrade, dict) and upgrade.get("required"):
             target_version = str(upgrade.get("version") or "")
