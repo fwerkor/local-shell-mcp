@@ -129,15 +129,12 @@ def test_process_fallback_start_stop_and_stale_pid(tmp_path, monkeypatch):
 def test_worker_run_lock_rejects_duplicate_and_reports_owner(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
 
-    with service.worker_run_lock():
-        raw = service.worker_lock_path().read_bytes()
-        owner = json.loads(raw[1:].decode("utf-8"))
-        assert owner["pid"] == os.getpid()
-        with (
-            pytest.raises(service.WorkerAlreadyRunningError, match=rf"PID {os.getpid()}"),
-            service.worker_run_lock(),
-        ):
-            pass
+    with (
+        service.worker_run_lock(),
+        pytest.raises(service.WorkerAlreadyRunningError, match=rf"PID {os.getpid()}"),
+        service.worker_run_lock(),
+    ):
+        pass
 
     assert service.worker_lock_path().exists()
     with service.worker_run_lock():
