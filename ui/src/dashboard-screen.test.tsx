@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/react/test-utils"
 import { act, useState } from "react"
-import { Alerts } from "./dashboard-screen"
-import type { DashboardAlert } from "./types"
+import { Alerts, MinimalDashboard } from "./dashboard-screen"
+import type { DashboardAlert, DashboardPayload } from "./types"
 
 const renderers: Array<{ destroy: () => void }> = []
 
@@ -141,8 +141,8 @@ describe("Dashboard alerts", () => {
       <Alerts
         alerts={[{
           severity: "warning",
-          title: "\u001b[31mJob coverage-fix\rfailed\u001b[0m",
-          detail: "set -euo\tpipefail\r\nexport PYTHONPATH=/workspace/src",
+          title: "\u001b]8;;https://example.test\u0007Job coverage-fix\u001b]8;;\u0007\rfailed\u009b31m now\u009b0m",
+          detail: "set -euo\tpipefail\r\n\u001bPprivate metadata\u001b\\export PYTHONPATH=/workspace/src",
         }]}
         width={58}
         rows={1}
@@ -156,9 +156,36 @@ describe("Dashboard alerts", () => {
     const populated = populatedPanelLines(frame)
 
     expect(frame).not.toContain("\u001b")
-    expect(populated).toContainEqual(expect.stringContaining("WARN  Job coverage-fix failed"))
+    expect(populated).toContainEqual(expect.stringContaining("WARN  Job coverage-fix failed now"))
     expect(populated).toContainEqual(expect.stringContaining("set -euo pipefail export PYTHONPATH=/workspace/src"))
     expect(populated.filter((line) => line.includes("Job coverage-fix"))).toHaveLength(1)
+    expect(frame).not.toContain("example.test")
+    expect(frame).not.toContain("private metadata")
+  })
+
+  test("normalizes alert text in the minimal dashboard", async () => {
+    const payload = {
+      alerts: [{
+        severity: "warning",
+        title: "\u001b]8;;https://example.test\u0007Job compact\u001b]8;;\u0007\rfailed",
+      }],
+      jobs: [],
+      sessions: [],
+      job_counts: {},
+      system: { cpu_percent: 1, memory_percent: 2, disk_percent: 3 },
+    } as unknown as DashboardPayload
+    const setup = await testRender(<MinimalDashboard payload={payload} width={60} />, {
+      width: 60,
+      height: 12,
+    })
+    renderers.push(setup.renderer)
+
+    await act(async () => setup.renderOnce())
+    const frame = setup.captureCharFrame()
+
+    expect(frame).toContain("! Job compact failed")
+    expect(frame).not.toContain("example.test")
+    expect(frame).not.toContain("\u001b")
   })
 
   test("keeps alert rows isolated across narrow, regular, and wide panels", async () => {

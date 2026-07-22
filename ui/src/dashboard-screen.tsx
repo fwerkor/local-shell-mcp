@@ -27,10 +27,12 @@ import type {
 
 const colors = screenTheme.Dashboard
 const ACTIVE_JOB_STATUSES = new Set(["starting", "running", "stopping", "retrying"])
-const ANSI_ESCAPE = /\u001b\[[0-?]*[ -/]*[@-~]/g
+const ANSI_CONTROL_STRING = /(?:\u001b\]|\u001b[P^_X]|[\u0090\u0098\u009d\u009e\u009f])[\s\S]*?(?:\u0007|\u001b\\|\u009c|$)/g
+const ANSI_ESCAPE = /(?:\u001b\[[0-?]*[ -/]*[@-~]|\u009b[0-?]*[ -/]*[@-~]|\u001b[@-_])/g
 
 function alertText(value?: string): string {
   return String(value || "")
+    .replace(ANSI_CONTROL_STRING, "")
     .replace(ANSI_ESCAPE, "")
     .replace(/[\r\n\t]+/g, " ")
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
@@ -294,7 +296,7 @@ export function Alerts({ alerts, width, rows }: { alerts: DashboardAlert[]; widt
                 />
                 <text
                   fg={theme.text}
-                  style={{ width: titleWidth, height: 1, flexShrink: 0 }}
+                  style={{ minWidth: 0, height: 1, flexGrow: 1, flexShrink: 1 }}
                   wrapMode="none"
                   content={truncate(title, titleWidth)}
                 />
@@ -302,7 +304,7 @@ export function Alerts({ alerts, width, rows }: { alerts: DashboardAlert[]; widt
               {width >= 34 && (
                 <text
                   fg={theme.faint}
-                  style={{ width: contentWidth, height: 1, flexShrink: 0 }}
+                  style={{ width: "100%", height: 1, flexShrink: 1 }}
                   wrapMode="none"
                   content={truncate(detailLine, contentWidth)}
                 />
@@ -502,7 +504,7 @@ function CompactDashboard({ payload, history, width, height }: { payload: Dashbo
   )
 }
 
-function MinimalDashboard({ payload, width }: { payload: DashboardPayload; width: number }) {
+export function MinimalDashboard({ payload, width }: { payload: DashboardPayload; width: number }) {
   const alert = payload.alerts[0]
   const workload = payload.jobs[0]
   const session = payload.sessions[0]
@@ -511,9 +513,9 @@ function MinimalDashboard({ payload, width }: { payload: DashboardPayload; width
     <box style={{ flexGrow: 1, flexDirection: "column", gap: 1 }}>
       <Panel title="System overview" active accent={colors.accent} activeBackground={colors.panel} style={{ height: 4, paddingLeft: 1, paddingRight: 1 }}>
         <text
-          fg={alert ? severityColor(alert.severity) : theme.green}
+          fg={alert ? severityColor(alertText(alert.severity) || "info") : theme.green}
           attributes={1}
-          content={truncate(alert ? `! ${alert.title}` : "✓ No active alerts", Math.max(10, width - 5))}
+          content={truncate(alert ? `! ${alertText(alert.title) || "Untitled alert"}` : "✓ No active alerts", Math.max(10, width - 5))}
         />
         <text
           fg={theme.muted}
