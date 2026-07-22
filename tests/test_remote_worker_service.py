@@ -215,12 +215,27 @@ def test_worker_run_lock_survives_reexec(tmp_path, monkeypatch):
     script.write_text(
         """
 import os
+import subprocess
 import sys
 
-from local_shell_mcp.remote_worker_service import prepare_worker_lock_reexec, worker_run_lock
+from local_shell_mcp.remote_worker_service import (
+    WorkerAlreadyRunningError,
+    prepare_worker_lock_reexec,
+    worker_run_lock,
+)
+
+if len(sys.argv) > 1 and sys.argv[1] == "probe":
+    try:
+        with worker_run_lock():
+            raise SystemExit(0)
+    except WorkerAlreadyRunningError:
+        raise SystemExit(2)
 
 if os.environ.get("LSM_LOCK_REEXEC_STAGE") == "2":
     with worker_run_lock():
+        probe = subprocess.run([sys.executable, __file__, "probe"], check=False)
+        if probe.returncode != 2:
+            raise SystemExit(f"competing worker acquired inherited lock: {probe.returncode}")
         print("lock inherited", flush=True)
 else:
     with worker_run_lock():

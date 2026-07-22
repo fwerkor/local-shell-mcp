@@ -33,6 +33,7 @@ _LAUNCHD_LABEL = "com.fwerkor.local-shell-mcp-worker"
 _WORKER_MANAGED_ENV = "LOCAL_SHELL_MCP_WORKER_MANAGED"
 _WORKER_LOCK_FD_ENV = "LOCAL_SHELL_MCP_WORKER_LOCK_FD"
 _WORKER_LOCK_RETRY_S = 5.0
+_WORKER_LOCK_HANDOFF_RETRY_S = 0.1
 _active_worker_lock_handle: Any | None = None
 
 
@@ -109,7 +110,9 @@ def worker_run_lock():  # noqa: ANN201
     path = worker_lock_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = _adopt_worker_lock_handle()
-    locked = handle is not None
+    inherited = handle is not None
+    windows_handoff = inherited and os.name == "nt"
+    locked = inherited and not windows_handoff
     if handle is None:
         fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
         handle = os.fdopen(fd, "r+b", buffering=0)
@@ -124,19 +127,23 @@ def worker_run_lock():  # noqa: ANN201
             except OSError as exc:
                 if not _worker_lock_is_contended(exc):
                     raise
-                if os.getenv(_WORKER_MANAGED_ENV) != "1":
+                managed = os.getenv(_WORKER_MANAGED_ENV) == "1"
+                if not managed and not windows_handoff:
                     raise WorkerAlreadyRunningError(
                         "remote worker is already running; stop the existing process or use "
                         "`local-shell-mcp worker restart`"
                     ) from exc
-                if not waiting:
+                if managed and not waiting:
                     print(
                         "Status: another worker process is active; managed worker is waiting...",
                         file=sys.stderr,
                         flush=True,
                     )
                     waiting = True
-                time.sleep(_WORKER_LOCK_RETRY_S)
+                retry_s = (
+                    _WORKER_LOCK_HANDOFF_RETRY_S if windows_handoff else _WORKER_LOCK_RETRY_S
+                )
+                time.sleep(retry_s)
         with contextlib.suppress(OSError):
             os.chmod(path, 0o600)
         _active_worker_lock_handle = handle
