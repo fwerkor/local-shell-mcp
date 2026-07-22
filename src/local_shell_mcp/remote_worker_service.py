@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import plistlib
+import re
 import shlex
 import shutil
 import signal
@@ -73,6 +74,42 @@ def _worker_lock_is_contended(exc: OSError) -> bool:
     return os.name == "nt" and getattr(exc, "winerror", None) in {32, 33}
 
 
+def _managed_service_pid() -> int | None:
+    system = platform.system()
+    if system == "Linux" and _systemd_unit_path().exists() and shutil.which("systemctl"):
+        result = _run(
+            [
+                "systemctl",
+                "--user",
+                "show",
+                "--property",
+                "MainPID",
+                "--value",
+                f"{_SERVICE_NAME}.service",
+            ],
+            check=False,
+        )
+        value = result.stdout.strip()
+        if result.returncode == 0 and value.isdigit() and int(value) > 0:
+            return int(value)
+    if system == "Darwin" and _launchd_plist_path().exists() and shutil.which("launchctl"):
+        result = _run(
+            ["launchctl", "print", f"gui/{_user_id()}/{_LAUNCHD_LABEL}"],
+            check=False,
+        )
+        if result.returncode == 0:
+            match = re.search(r"(?m)^\s*pid\s*=\s*(\d+)\s*$", result.stdout)
+            if match and int(match.group(1)) > 0:
+                return int(match.group(1))
+    return None
+
+
+def _current_worker_is_managed() -> bool:
+    if os.getenv(_WORKER_MANAGED_ENV) == "1":
+        return True
+    return _managed_service_pid() == os.getpid()
+
+
 def prepare_worker_lock_reexec() -> int | None:
     handle = _active_worker_lock_handle
     if handle is None:
@@ -127,7 +164,7 @@ def worker_run_lock():  # noqa: ANN201
             except OSError as exc:
                 if not _worker_lock_is_contended(exc):
                     raise
-                managed = os.getenv(_WORKER_MANAGED_ENV) == "1"
+                managed = _current_worker_is_managed()
                 if not managed and not windows_handoff:
                     raise WorkerAlreadyRunningError(
                         "remote worker is already running; stop the existing process or use "

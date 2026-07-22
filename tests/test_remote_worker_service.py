@@ -167,6 +167,58 @@ def test_managed_worker_waits_for_existing_lock(tmp_path, monkeypatch):
     assert sleeps == [5.0]
 
 
+@pytest.mark.parametrize(
+    ("system", "command_output"),
+    [
+        ("Linux", "123\n"),
+        ("Darwin", "service = {\n    pid = 123\n}\n"),
+    ],
+)
+def test_legacy_managed_service_is_identified_by_pid(
+    tmp_path, monkeypatch, system, command_output
+):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.delenv("LOCAL_SHELL_MCP_WORKER_MANAGED", raising=False)
+    monkeypatch.setattr(service.platform, "system", lambda: system)
+    monkeypatch.setattr(service.os, "getpid", lambda: 123)
+    monkeypatch.setattr(service.os, "getuid", lambda: 501, raising=False)
+    monkeypatch.setattr(service.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        service,
+        "_run",
+        lambda command, check=False: subprocess.CompletedProcess(
+            command, 0, stdout=command_output, stderr=""
+        ),
+    )
+    if system == "Linux":
+        service._systemd_unit_path().parent.mkdir(parents=True, exist_ok=True)  # noqa: SLF001
+        service._systemd_unit_path().touch()  # noqa: SLF001
+    else:
+        service._launchd_plist_path().parent.mkdir(parents=True, exist_ok=True)  # noqa: SLF001
+        service._launchd_plist_path().touch()  # noqa: SLF001
+
+    assert service._current_worker_is_managed() is True  # noqa: SLF001
+
+
+def test_manual_worker_is_not_mistaken_for_managed_service(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.delenv("LOCAL_SHELL_MCP_WORKER_MANAGED", raising=False)
+    monkeypatch.setattr(service.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(service.os, "getpid", lambda: 456)
+    monkeypatch.setattr(service.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        service,
+        "_run",
+        lambda command, check=False: subprocess.CompletedProcess(
+            command, 0, stdout="123\n", stderr=""
+        ),
+    )
+    service._systemd_unit_path().parent.mkdir(parents=True, exist_ok=True)  # noqa: SLF001
+    service._systemd_unit_path().touch()  # noqa: SLF001
+
+    assert service._current_worker_is_managed() is False  # noqa: SLF001
+
+
 def test_worker_run_lock_propagates_non_contention_errors(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKER_MANAGED", "1")
