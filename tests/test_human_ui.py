@@ -69,8 +69,10 @@ def test_webui_visual_regressions_are_packaged():
 
     assert "<strong>TUI</strong><small>Terminal interface</small>" in html
     assert "<strong>OpenTUI</strong><small>Terminal interface</small>" not in html
-    assert "scrollbar-width:none" in css
-    assert "::-webkit-scrollbar{display:none}" in css
+    assert "scrollbar-width:none!important" in css
+    assert "-ms-overflow-style:none" in css
+    scrollbar_rule = css.split("#terminal .xterm-viewport::-webkit-scrollbar{", 1)[1].split("}", 1)[0]
+    assert {"width:0", "height:0", "display:none"}.issubset(scrollbar_rule.split(";"))
     dark_mode = "@media (prefers-color-scheme:dark)"
     assert dark_mode in css
     assert css.rindex(dark_mode) > css.rindex(".todo-row{display:grid")

@@ -136,6 +136,31 @@ describe("Dashboard alerts", () => {
     expect(lines).toContainEqual(expect.stringContaining("WARN  18 recent MCP call failure(s)"))
   })
 
+  test("normalizes terminal control characters before rendering alerts", async () => {
+    const setup = await testRender(
+      <Alerts
+        alerts={[{
+          severity: "warning",
+          title: "\u001b[31mJob coverage-fix\rfailed\u001b[0m",
+          detail: "set -euo\tpipefail\r\nexport PYTHONPATH=/workspace/src",
+        }]}
+        width={58}
+        rows={1}
+      />,
+      { width: 58, height: 6 },
+    )
+    renderers.push(setup.renderer)
+
+    await act(async () => setup.renderOnce())
+    const frame = setup.captureCharFrame()
+    const populated = populatedPanelLines(frame)
+
+    expect(frame).not.toContain("\u001b")
+    expect(populated).toContainEqual(expect.stringContaining("WARN  Job coverage-fix failed"))
+    expect(populated).toContainEqual(expect.stringContaining("set -euo pipefail export PYTHONPATH=/workspace/src"))
+    expect(populated.filter((line) => line.includes("Job coverage-fix"))).toHaveLength(1)
+  })
+
   test("keeps alert rows isolated across narrow, regular, and wide panels", async () => {
     const dimensions = [
       { width: 24, rows: 1 },
@@ -152,7 +177,7 @@ describe("Dashboard alerts", () => {
       { width: 48, rows: 3 },
       { width: 52, rows: 4 },
       { width: 58, rows: 4 },
-      { width: 64, rows: 2 },
+      { width: 64, rows: 4 },
       { width: 72, rows: 4 },
       { width: 96, rows: 4 },
     ]
