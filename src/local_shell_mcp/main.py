@@ -78,6 +78,10 @@ def _build_mcp_http_app(mcp):  # noqa: ANN001
 def run_mcp() -> None:
     import uvicorn
 
+    from .deprecated_tools import install_deprecated_tool_tombstones
+
+    install_deprecated_tool_tombstones()
+
     from .settings import get_settings, validate_public_oauth_configuration
     from .tools import build_mcp
 
