@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import subprocess
@@ -164,6 +165,20 @@ def test_managed_worker_waits_for_existing_lock(tmp_path, monkeypatch):
 
     assert attempts == 2
     assert sleeps == [5.0]
+
+
+def test_worker_run_lock_propagates_non_contention_errors(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKER_MANAGED", "1")
+    monkeypatch.setattr(
+        service,
+        "_lock_worker_file",
+        lambda handle: (_ for _ in ()).throw(OSError(errno.EIO, "lock unavailable")),
+    )
+    monkeypatch.setattr(service.time, "sleep", lambda delay: pytest.fail("retried lock error"))
+
+    with pytest.raises(OSError, match="lock unavailable"), service.worker_run_lock():
+        pass
 
 
 def test_worker_run_lock_recovers_after_process_exit(tmp_path, monkeypatch):

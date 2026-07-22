@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import hashlib
 import json
 import os
@@ -65,6 +66,12 @@ def _unlock_worker_file(handle: Any) -> None:
     fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+def _worker_lock_is_contended(exc: OSError) -> bool:
+    if isinstance(exc, BlockingIOError) or exc.errno in {errno.EACCES, errno.EAGAIN}:
+        return True
+    return os.name == "nt" and getattr(exc, "winerror", None) in {32, 33}
+
+
 def prepare_worker_lock_reexec() -> int | None:
     handle = _active_worker_lock_handle
     if handle is None:
@@ -115,6 +122,8 @@ def worker_run_lock():  # noqa: ANN201
                 _lock_worker_file(handle)
                 locked = True
             except OSError as exc:
+                if not _worker_lock_is_contended(exc):
+                    raise
                 if os.getenv(_WORKER_MANAGED_ENV) != "1":
                     raise WorkerAlreadyRunningError(
                         "remote worker is already running; stop the existing process or use "
