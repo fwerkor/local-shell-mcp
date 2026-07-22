@@ -6,6 +6,7 @@ import os
 import pytest
 
 from local_shell_mcp import remote_worker_cli as cli
+from local_shell_mcp import remote_worker_service as service
 from local_shell_mcp import remote_worker_state as state
 
 
@@ -358,6 +359,22 @@ def test_prepare_worker_start_installs_runtime_before_launcher(tmp_path, monkeyp
         ("launcher", None),
         ("path", None),
     ]
+
+
+@pytest.mark.asyncio
+async def test_connect_rejects_duplicate_before_enrollment(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    args = cli._parser().parse_args(  # noqa: SLF001
+        ["connect", "--server", "https://example.test", "--invite", "invite"]
+    )
+    monkeypatch.setattr(
+        cli,
+        "enroll_worker",
+        lambda **kwargs: pytest.fail("consumed invitation before acquiring worker lock"),
+    )
+
+    with cli.worker_run_lock(), pytest.raises(service.WorkerAlreadyRunningError):
+        await cli._connect(args)  # noqa: SLF001
 
 
 def test_all_remaining_lifecycle_command_branches(tmp_path, monkeypatch, capsys):

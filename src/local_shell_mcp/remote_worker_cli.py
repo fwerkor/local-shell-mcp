@@ -11,11 +11,14 @@ from typing import Any
 from . import remote
 from .remote_worker_installer import install_or_update_runtime
 from .remote_worker_service import (
+    cancel_worker_lock_reexec,
     install_service,
+    prepare_worker_lock_reexec,
     service_status,
     start_service,
     stop_service,
     uninstall_service,
+    worker_run_lock,
 )
 from .remote_worker_state import (
     ensure_user_bin_on_path,
@@ -156,19 +159,24 @@ def _worker_run_exec_argv() -> list[str]:
 
 def _reexec_worker_run() -> None:
     argv = _worker_run_exec_argv()
-    os.execv(argv[0], argv)
+    lock_fd = prepare_worker_lock_reexec()
+    try:
+        os.execv(argv[0], argv)
+    finally:
+        cancel_worker_lock_reexec(lock_fd)
 
 
 async def _connect(args: argparse.Namespace) -> None:
-    await enroll_worker(
-        server=args.server,
-        invite=_read_invite(args),
-        name=args.name,
-        workdir=args.workdir,
-        runtime_digest=args.runtime_digest,
-        runtime_version=args.runtime_version,
-    )
-    _reexec_worker_run()
+    with worker_run_lock():
+        await enroll_worker(
+            server=args.server,
+            invite=_read_invite(args),
+            name=args.name,
+            workdir=args.workdir,
+            runtime_digest=args.runtime_digest,
+            runtime_version=args.runtime_version,
+        )
+        _reexec_worker_run()
 
 
 def _prepare_worker_start() -> None:
