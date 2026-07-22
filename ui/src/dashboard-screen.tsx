@@ -27,6 +27,18 @@ import type {
 
 const colors = screenTheme.Dashboard
 const ACTIVE_JOB_STATUSES = new Set(["starting", "running", "stopping", "retrying"])
+const ANSI_CONTROL_STRING = /(?:\u001b\]|\u001b[P^_X]|[\u0090\u0098\u009d\u009e\u009f])[\s\S]*?(?:\u0007|\u001b\\|\u009c|$)/g
+const ANSI_ESCAPE = /(?:\u001b\[[0-?]*[ -/]*[@-~]|\u009b[0-?]*[ -/]*[@-~]|\u001b[ -/]*[0-~])/g
+
+function alertText(value?: string): string {
+  return String(value || "")
+    .replace(ANSI_CONTROL_STRING, "")
+    .replace(ANSI_ESCAPE, "")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+}
 
 function versionFrom(payload: DashboardPayload | null): string {
   return String(payload?.version.version || payload?.version.package_version || "—")
@@ -256,6 +268,7 @@ function ActiveWorkloads({ payload, width, rows }: { payload: DashboardPayload; 
 export function Alerts({ alerts, width, rows }: { alerts: DashboardAlert[]; width: number; rows: number }) {
   const visible = alerts.slice(0, rows)
   const contentWidth = Math.max(1, width - 4)
+  const titleWidth = Math.max(1, contentWidth - 6)
   return (
     <Panel title={`Needs attention · ${alerts.length}`} style={{ flexGrow: 1, padding: 1 }}>
       {visible.length === 0 ? (
@@ -263,29 +276,42 @@ export function Alerts({ alerts, width, rows }: { alerts: DashboardAlert[]; widt
           <text fg={theme.green} content={width >= 44 ? "✓ No active alerts" : "✓ No issues"} />
         </box>
       ) : (
-        visible.map((alert, index) => (
-          <box
-            key={`${alert.severity}-${alert.title}-${alert.detail || ""}-${index}`}
-            style={{ width: "100%", height: width >= 34 ? 2 : 1, flexDirection: "column", flexShrink: 0 }}
-          >
-            <text style={{ width: "100%", height: 1 }} wrapMode="none">
-              <span fg={severityColor(alert.severity)} attributes={1}>
-                {`${alert.severity.toUpperCase().slice(0, 4).padEnd(5)} `}
-              </span>
-              <span fg={theme.text}>
-                {truncate(alert.title, Math.max(1, contentWidth - 6))}
-              </span>
-            </text>
-            {width >= 34 && (
-              <text
-                fg={theme.faint}
-                style={{ width: "100%", height: 1 }}
-                wrapMode="none"
-                content={truncate(`${alert.detail || ""}${alert.age_s ? ` · ${formatDuration(alert.age_s)}` : ""}`, contentWidth)}
-              />
-            )}
-          </box>
-        ))
+        visible.map((alert, index) => {
+          const severity = alertText(alert.severity) || "info"
+          const title = alertText(alert.title) || "Untitled alert"
+          const detail = alertText(alert.detail)
+          const detailLine = `${detail}${alert.age_s ? `${detail ? " · " : ""}${formatDuration(alert.age_s)}` : ""}`
+          return (
+            <box
+              key={`${severity}-${title}-${detail}-${index}`}
+              style={{ width: "100%", height: width >= 34 ? 2 : 1, flexDirection: "column", flexShrink: 0 }}
+            >
+              <box style={{ width: "100%", height: 1, flexDirection: "row", flexShrink: 0 }}>
+                <text
+                  fg={severityColor(severity)}
+                  attributes={1}
+                  style={{ width: 6, height: 1, flexShrink: 0 }}
+                  wrapMode="none"
+                  content={`${severity.toUpperCase().slice(0, 4).padEnd(5)} `}
+                />
+                <text
+                  fg={theme.text}
+                  style={{ minWidth: 0, height: 1, flexGrow: 1, flexShrink: 1 }}
+                  wrapMode="none"
+                  content={truncate(title, titleWidth)}
+                />
+              </box>
+              {width >= 34 && (
+                <text
+                  fg={theme.faint}
+                  style={{ width: "100%", height: 1, flexShrink: 1 }}
+                  wrapMode="none"
+                  content={truncate(detailLine, contentWidth)}
+                />
+              )}
+            </box>
+          )
+        })
       )}
       {alerts.length > visible.length && <text fg={theme.blue} content={`+${alerts.length - visible.length} more alerts`} />}
     </Panel>
@@ -478,7 +504,7 @@ function CompactDashboard({ payload, history, width, height }: { payload: Dashbo
   )
 }
 
-function MinimalDashboard({ payload, width }: { payload: DashboardPayload; width: number }) {
+export function MinimalDashboard({ payload, width }: { payload: DashboardPayload; width: number }) {
   const alert = payload.alerts[0]
   const workload = payload.jobs[0]
   const session = payload.sessions[0]
@@ -487,9 +513,9 @@ function MinimalDashboard({ payload, width }: { payload: DashboardPayload; width
     <box style={{ flexGrow: 1, flexDirection: "column", gap: 1 }}>
       <Panel title="System overview" active accent={colors.accent} activeBackground={colors.panel} style={{ height: 4, paddingLeft: 1, paddingRight: 1 }}>
         <text
-          fg={alert ? severityColor(alert.severity) : theme.green}
+          fg={alert ? severityColor(alertText(alert.severity) || "info") : theme.green}
           attributes={1}
-          content={truncate(alert ? `! ${alert.title}` : "✓ No active alerts", Math.max(10, width - 5))}
+          content={truncate(alert ? `! ${alertText(alert.title) || "Untitled alert"}` : "✓ No active alerts", Math.max(10, width - 5))}
         />
         <text
           fg={theme.muted}

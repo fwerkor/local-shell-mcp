@@ -311,8 +311,15 @@ button.nav-item.active { color: white; background: #232d42; box-shadow: inset 3p
 #terminal { min-width: 0; min-height: 0; padding: 12px; }
 #terminal .xterm { height: 100%; background: transparent !important; }
 #terminal .xterm-screen, #terminal .xterm-viewport { background: transparent !important; }
-#terminal .xterm-viewport { scrollbar-width: none; }
-#terminal .xterm-viewport::-webkit-scrollbar { display: none; }
+#terminal .xterm-viewport {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none;
+}
+#terminal .xterm-viewport::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
 .touchbar { display: none; grid-template-columns: repeat(9,minmax(0,1fr)); gap: 4px; padding: 5px; border-top: 1px solid #263047; }
 .touchbar button { height: 34px; color: #d7deeb; background: #192235; border: 1px solid #2c3850; border-radius: 7px; }
 .terminal-footer { display: flex; justify-content: space-between; padding: 8px 12px; color: #758197; border-top: 1px solid #263047; font: 9px ui-monospace,SFMono-Regular,Menlo,monospace; }
