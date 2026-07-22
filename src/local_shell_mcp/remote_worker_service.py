@@ -20,6 +20,7 @@ from .remote_worker_state import (
     install_launcher,
     user_home,
     worker_launcher_path,
+    worker_lock_path,
     worker_log_path,
     worker_pid_path,
     worker_runtime_dir,
@@ -28,6 +29,85 @@ from .remote_worker_state import (
 
 _SERVICE_NAME = "local-shell-mcp-worker"
 _LAUNCHD_LABEL = "com.fwerkor.local-shell-mcp-worker"
+
+
+class WorkerAlreadyRunningError(RuntimeError):
+    pass
+
+
+def _lock_worker_file(handle: Any) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock_worker_file(handle: Any) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _read_worker_lock_owner(handle: Any) -> dict[str, Any]:
+    try:
+        handle.seek(1)
+        raw = handle.read().decode("utf-8", errors="replace").strip()
+        data = json.loads(raw)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+@contextlib.contextmanager
+def worker_run_lock():  # noqa: ANN201
+    path = worker_lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    handle = os.fdopen(fd, "r+b", buffering=0)
+    locked = False
+    try:
+        if path.stat().st_size == 0:
+            handle.write(b"\0")
+        try:
+            _lock_worker_file(handle)
+            locked = True
+        except OSError as exc:
+            owner = _read_worker_lock_owner(handle)
+            pid = owner.get("pid")
+            pid_detail = f" (PID {pid})" if isinstance(pid, int) and pid > 0 else ""
+            raise WorkerAlreadyRunningError(
+                f"remote worker is already running{pid_detail}; stop the existing process or use "
+                "`local-shell-mcp worker restart`"
+            ) from exc
+        handle.seek(1)
+        handle.truncate(1)
+        handle.write(
+            json.dumps(
+                {"version": 1, "pid": os.getpid(), "started_at": time.time()},
+                sort_keys=True,
+            ).encode("utf-8")
+        )
+        with contextlib.suppress(OSError):
+            os.chmod(path, 0o600)
+        yield
+    finally:
+        if locked:
+            with contextlib.suppress(OSError):
+                _unlock_worker_file(handle)
+        handle.close()
 
 
 def _systemd_unit_path() -> Path:

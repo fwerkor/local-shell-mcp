@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -122,6 +124,52 @@ def test_process_fallback_start_stop_and_stale_pid(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "_process_identity", lambda pid: "different")
     assert service.service_status()["pid"] is None
     assert not service.worker_pid_path().exists()
+
+
+def test_worker_run_lock_rejects_duplicate_and_reports_owner(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+
+    with service.worker_run_lock():
+        raw = service.worker_lock_path().read_bytes()
+        owner = json.loads(raw[1:].decode("utf-8"))
+        assert owner["pid"] == os.getpid()
+        with (
+            pytest.raises(service.WorkerAlreadyRunningError, match=rf"PID {os.getpid()}"),
+            service.worker_run_lock(),
+        ):
+            pass
+
+    assert service.worker_lock_path().exists()
+    with service.worker_run_lock():
+        pass
+
+
+def test_worker_run_lock_recovers_after_process_exit(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    environment = os.environ.copy()
+    source_root = str(Path(__file__).resolve().parents[1] / "src")
+    environment["PYTHONPATH"] = os.pathsep.join(
+        part for part in (source_root, environment.get("PYTHONPATH", "")) if part
+    )
+    code = """
+import os
+from local_shell_mcp.remote_worker_service import worker_run_lock
+
+lock = worker_run_lock()
+lock.__enter__()
+os._exit(0)
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    with service.worker_run_lock():
+        pass
 
 
 def test_process_environment_scrubs_inherited_worker_scope(tmp_path, monkeypatch):

@@ -1886,6 +1886,19 @@ async def run_worker(
     name: str | None = None,
     workdir: str | None = None,
     persist: bool = False,
+) -> None:
+    from .remote_worker_service import worker_run_lock
+
+    with worker_run_lock():
+        await _run_worker_locked(server, invite, name, workdir, persist)
+
+
+async def _run_worker_locked(
+    server: str,
+    invite: str,
+    name: str | None = None,
+    workdir: str | None = None,
+    persist: bool = False,
 ) -> None:  # noqa: ARG001
     workdir = str(Path(workdir or os.getcwd()).expanduser().resolve())
     os.environ["LOCAL_SHELL_MCP_WORKSPACE_ROOT"] = workdir
