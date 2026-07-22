@@ -34,7 +34,17 @@ export function ImagePreviewView({
   }
 
   return (
-    <box style={{ flexGrow: 1, flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+    <box
+      style={{
+        flexGrow: 1,
+        minWidth: 0,
+        minHeight: 0,
+        overflow: "hidden",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
       <box
         style={{ width: cellWidth, height: cellHeight, flexShrink: 0 }}
         renderAfter={drawPixels}
