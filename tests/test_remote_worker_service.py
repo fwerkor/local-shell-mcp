@@ -33,6 +33,7 @@ def test_install_and_manage_systemd_service(tmp_path, monkeypatch):
     result = service.install_service(start=True)
     assert result["kind"] == "systemd"
     assert service._systemd_unit_path().exists()  # noqa: SLF001
+    assert "Environment=LOCAL_SHELL_MCP_WORKER_MANAGED=1" in service._systemd_unit_path().read_text()
     assert any(command[:3] == ["systemctl", "--user", "enable"] for command, _ in calls)
 
     status = service.service_status()
@@ -77,6 +78,7 @@ def test_launchd_install_start_and_status(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "_run", fake_run)
     service.install_service(start=True)
     assert service._launchd_plist_path().exists()  # noqa: SLF001
+    assert b"LOCAL_SHELL_MCP_WORKER_MANAGED" in service._launchd_plist_path().read_bytes()
     assert service.service_status()["running"] is True
     service.start_service()
     service.stop_service()
@@ -131,7 +133,7 @@ def test_worker_run_lock_rejects_duplicate_and_reports_owner(tmp_path, monkeypat
 
     with (
         service.worker_run_lock(),
-        pytest.raises(service.WorkerAlreadyRunningError, match=rf"PID {os.getpid()}"),
+        pytest.raises(service.WorkerAlreadyRunningError, match="already running"),
         service.worker_run_lock(),
     ):
         pass
@@ -139,6 +141,29 @@ def test_worker_run_lock_rejects_duplicate_and_reports_owner(tmp_path, monkeypat
     assert service.worker_lock_path().exists()
     with service.worker_run_lock():
         pass
+
+
+def test_managed_worker_waits_for_existing_lock(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKER_MANAGED", "1")
+    attempts = 0
+    sleeps = []
+
+    def fake_lock(handle):  # noqa: ANN001, ARG001
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise BlockingIOError
+
+    monkeypatch.setattr(service, "_lock_worker_file", fake_lock)
+    monkeypatch.setattr(service, "_unlock_worker_file", lambda handle: None)
+    monkeypatch.setattr(service.time, "sleep", sleeps.append)
+
+    with service.worker_run_lock():
+        pass
+
+    assert attempts == 2
+    assert sleeps == [5.0]
 
 
 def test_worker_run_lock_recovers_after_process_exit(tmp_path, monkeypatch):
@@ -169,6 +194,45 @@ os._exit(0)
         pass
 
 
+def test_worker_run_lock_survives_reexec(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    script = tmp_path / "reexec-lock.py"
+    script.write_text(
+        """
+import os
+import sys
+
+from local_shell_mcp.remote_worker_service import prepare_worker_lock_reexec, worker_run_lock
+
+if os.environ.get("LSM_LOCK_REEXEC_STAGE") == "2":
+    with worker_run_lock():
+        print("lock inherited", flush=True)
+else:
+    with worker_run_lock():
+        os.environ["LSM_LOCK_REEXEC_STAGE"] = "2"
+        prepare_worker_lock_reexec()
+        os.execv(sys.executable, [sys.executable, __file__])
+""",
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    source_root = str(Path(__file__).resolve().parents[1] / "src")
+    environment["PYTHONPATH"] = os.pathsep.join(
+        part for part in (source_root, environment.get("PYTHONPATH", "")) if part
+    )
+
+    completed = subprocess.run(
+        [sys.executable, str(script)],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "lock inherited"
+
+
 def test_process_environment_scrubs_inherited_worker_scope(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", "/stale/workspace")
@@ -177,6 +241,7 @@ def test_process_environment_scrubs_inherited_worker_scope(tmp_path, monkeypatch
     assert "LOCAL_SHELL_MCP_WORKSPACE_ROOT" not in env
     assert "LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER" not in env
     assert env["LOCAL_SHELL_MCP_WORKER_STATE_DIR"] == str((tmp_path / "state").resolve())
+    assert env["LOCAL_SHELL_MCP_WORKER_MANAGED"] == "1"
 
 
 def test_process_fallback_is_reported_without_native_service_file(tmp_path, monkeypatch):

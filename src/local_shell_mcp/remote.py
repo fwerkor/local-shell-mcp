@@ -1548,6 +1548,7 @@ def _worker_poll_payload() -> dict[str, Any]:
 
 def _reexec_updated_worker_runtime() -> None:
     from .remote_worker_cli import _worker_run_exec_argv
+    from .remote_worker_service import cancel_worker_lock_reexec, prepare_worker_lock_reexec
     from .remote_worker_state import worker_runtime_dir
 
     runtime = worker_runtime_dir()
@@ -1557,7 +1558,11 @@ def _reexec_updated_worker_runtime() -> None:
         preferred + [entry for entry in current if entry not in preferred]
     )
     argv = _worker_run_exec_argv()
-    os.execv(argv[0], argv)
+    lock_fd = prepare_worker_lock_reexec()
+    try:
+        os.execv(argv[0], argv)
+    finally:
+        cancel_worker_lock_reexec(lock_fd)
 
 
 async def _upgrade_worker_runtime(server: str, target_version: str) -> None:

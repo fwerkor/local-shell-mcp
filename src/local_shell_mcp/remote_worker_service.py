@@ -29,6 +29,10 @@ from .remote_worker_state import (
 
 _SERVICE_NAME = "local-shell-mcp-worker"
 _LAUNCHD_LABEL = "com.fwerkor.local-shell-mcp-worker"
+_WORKER_MANAGED_ENV = "LOCAL_SHELL_MCP_WORKER_MANAGED"
+_WORKER_LOCK_FD_ENV = "LOCAL_SHELL_MCP_WORKER_LOCK_FD"
+_WORKER_LOCK_RETRY_S = 5.0
+_active_worker_lock_handle: Any | None = None
 
 
 class WorkerAlreadyRunningError(RuntimeError):
@@ -61,49 +65,76 @@ def _unlock_worker_file(handle: Any) -> None:
     fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
-def _read_worker_lock_owner(handle: Any) -> dict[str, Any]:
+def prepare_worker_lock_reexec() -> int | None:
+    handle = _active_worker_lock_handle
+    if handle is None:
+        return None
+    fd = handle.fileno()
+    os.set_inheritable(fd, True)
+    os.environ[_WORKER_LOCK_FD_ENV] = str(fd)
+    return fd
+
+
+def cancel_worker_lock_reexec(fd: int | None) -> None:
+    if fd is None:
+        return
+    os.environ.pop(_WORKER_LOCK_FD_ENV, None)
+    with contextlib.suppress(OSError):
+        os.set_inheritable(fd, False)
+
+
+def _adopt_worker_lock_handle() -> Any | None:
+    raw_fd = os.environ.pop(_WORKER_LOCK_FD_ENV, "")
+    if not raw_fd:
+        return None
     try:
-        handle.seek(1)
-        raw = handle.read().decode("utf-8", errors="replace").strip()
-        data = json.loads(raw)
-    except (OSError, ValueError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
+        fd = int(raw_fd)
+        os.fstat(fd)
+    except (OSError, ValueError):
+        return None
+    return os.fdopen(fd, "r+b", buffering=0)
 
 
 @contextlib.contextmanager
 def worker_run_lock():  # noqa: ANN201
+    global _active_worker_lock_handle
+
     path = worker_lock_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
-    handle = os.fdopen(fd, "r+b", buffering=0)
-    locked = False
+    handle = _adopt_worker_lock_handle()
+    locked = handle is not None
+    if handle is None:
+        fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+        handle = os.fdopen(fd, "r+b", buffering=0)
     try:
         if path.stat().st_size == 0:
             handle.write(b"\0")
-        try:
-            _lock_worker_file(handle)
-            locked = True
-        except OSError as exc:
-            owner = _read_worker_lock_owner(handle)
-            pid = owner.get("pid")
-            pid_detail = f" (PID {pid})" if isinstance(pid, int) and pid > 0 else ""
-            raise WorkerAlreadyRunningError(
-                f"remote worker is already running{pid_detail}; stop the existing process or use "
-                "`local-shell-mcp worker restart`"
-            ) from exc
-        handle.seek(1)
-        handle.truncate(1)
-        handle.write(
-            json.dumps(
-                {"version": 1, "pid": os.getpid(), "started_at": time.time()},
-                sort_keys=True,
-            ).encode("utf-8")
-        )
+        waiting = False
+        while not locked:
+            try:
+                _lock_worker_file(handle)
+                locked = True
+            except OSError as exc:
+                if os.getenv(_WORKER_MANAGED_ENV) != "1":
+                    raise WorkerAlreadyRunningError(
+                        "remote worker is already running; stop the existing process or use "
+                        "`local-shell-mcp worker restart`"
+                    ) from exc
+                if not waiting:
+                    print(
+                        "Status: another worker process is active; managed worker is waiting...",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    waiting = True
+                time.sleep(_WORKER_LOCK_RETRY_S)
         with contextlib.suppress(OSError):
             os.chmod(path, 0o600)
+        _active_worker_lock_handle = handle
         yield
     finally:
+        if _active_worker_lock_handle is handle:
+            _active_worker_lock_handle = None
         if locked:
             with contextlib.suppress(OSError):
                 _unlock_worker_file(handle)
@@ -157,6 +188,7 @@ ExecStart={launcher} worker run
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
+Environment=LOCAL_SHELL_MCP_WORKER_MANAGED=1
 
 [Install]
 WantedBy=default.target
@@ -173,6 +205,7 @@ def _write_launchd_plist() -> Path:
         "ProgramArguments": [str(worker_launcher_path()), "worker", "run"],
         "RunAtLoad": True,
         "KeepAlive": True,
+        "EnvironmentVariables": {_WORKER_MANAGED_ENV: "1"},
         "StandardOutPath": str(worker_log_path()),
         "StandardErrorPath": str(worker_log_path()),
     }
@@ -303,6 +336,7 @@ def _process_environment() -> dict[str, str]:
     pythonpath = os.pathsep.join((str(runtime), str(runtime / "vendor")))
     env["PYTHONPATH"] = pythonpath + (os.pathsep + current if current else "")
     env["LOCAL_SHELL_MCP_WORKER_STATE_DIR"] = str(worker_state_dir().resolve())
+    env[_WORKER_MANAGED_ENV] = "1"
     return env
 
 
