@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import hashlib
 import json
 import os
 import platform
 import plistlib
+import re
 import shlex
 import shutil
 import signal
@@ -20,6 +22,7 @@ from .remote_worker_state import (
     install_launcher,
     user_home,
     worker_launcher_path,
+    worker_lock_path,
     worker_log_path,
     worker_pid_path,
     worker_runtime_dir,
@@ -28,6 +31,167 @@ from .remote_worker_state import (
 
 _SERVICE_NAME = "local-shell-mcp-worker"
 _LAUNCHD_LABEL = "com.fwerkor.local-shell-mcp-worker"
+_WORKER_MANAGED_ENV = "LOCAL_SHELL_MCP_WORKER_MANAGED"
+_WORKER_LOCK_FD_ENV = "LOCAL_SHELL_MCP_WORKER_LOCK_FD"
+_WORKER_LOCK_RETRY_S = 5.0
+_WORKER_LOCK_HANDOFF_RETRY_S = 0.1
+_active_worker_lock_handle: Any | None = None
+
+
+class WorkerAlreadyRunningError(RuntimeError):
+    pass
+
+
+def _lock_worker_file(handle: Any) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock_worker_file(handle: Any) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _worker_lock_is_contended(exc: OSError) -> bool:
+    if isinstance(exc, BlockingIOError) or exc.errno in {errno.EACCES, errno.EAGAIN}:
+        return True
+    return os.name == "nt" and getattr(exc, "winerror", None) in {32, 33}
+
+
+def _managed_service_pid() -> int | None:
+    system = platform.system()
+    if system == "Linux" and _systemd_unit_path().exists() and shutil.which("systemctl"):
+        result = _run(
+            [
+                "systemctl",
+                "--user",
+                "show",
+                "--property",
+                "MainPID",
+                "--value",
+                f"{_SERVICE_NAME}.service",
+            ],
+            check=False,
+        )
+        value = result.stdout.strip()
+        if result.returncode == 0 and value.isdigit() and int(value) > 0:
+            return int(value)
+    if system == "Darwin" and _launchd_plist_path().exists() and shutil.which("launchctl"):
+        result = _run(
+            ["launchctl", "print", f"gui/{_user_id()}/{_LAUNCHD_LABEL}"],
+            check=False,
+        )
+        if result.returncode == 0:
+            match = re.search(r"(?m)^\s*pid\s*=\s*(\d+)\s*$", result.stdout)
+            if match and int(match.group(1)) > 0:
+                return int(match.group(1))
+    return None
+
+
+def _current_worker_is_managed() -> bool:
+    if os.getenv(_WORKER_MANAGED_ENV) == "1":
+        return True
+    return _managed_service_pid() == os.getpid()
+
+
+def prepare_worker_lock_reexec() -> int | None:
+    handle = _active_worker_lock_handle
+    if handle is None:
+        return None
+    fd = handle.fileno()
+    os.set_inheritable(fd, True)
+    os.environ[_WORKER_LOCK_FD_ENV] = str(fd)
+    return fd
+
+
+def cancel_worker_lock_reexec(fd: int | None) -> None:
+    if fd is None:
+        return
+    os.environ.pop(_WORKER_LOCK_FD_ENV, None)
+    with contextlib.suppress(OSError):
+        os.set_inheritable(fd, False)
+
+
+def _adopt_worker_lock_handle() -> Any | None:
+    raw_fd = os.environ.pop(_WORKER_LOCK_FD_ENV, "")
+    if not raw_fd:
+        return None
+    try:
+        fd = int(raw_fd)
+        os.fstat(fd)
+    except (OSError, ValueError):
+        return None
+    return os.fdopen(fd, "r+b", buffering=0)
+
+
+@contextlib.contextmanager
+def worker_run_lock():  # noqa: ANN201
+    global _active_worker_lock_handle
+
+    path = worker_lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = _adopt_worker_lock_handle()
+    inherited = handle is not None
+    windows_handoff = inherited and os.name == "nt"
+    locked = inherited and not windows_handoff
+    if handle is None:
+        fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+        handle = os.fdopen(fd, "r+b", buffering=0)
+    try:
+        if path.stat().st_size == 0:
+            handle.write(b"\0")
+        waiting = False
+        while not locked:
+            try:
+                _lock_worker_file(handle)
+                locked = True
+            except OSError as exc:
+                if not _worker_lock_is_contended(exc):
+                    raise
+                managed = _current_worker_is_managed()
+                if not managed and not windows_handoff:
+                    raise WorkerAlreadyRunningError(
+                        "remote worker is already running; stop the existing process or use "
+                        "`local-shell-mcp worker restart`"
+                    ) from exc
+                if managed and not waiting:
+                    print(
+                        "Status: another worker process is active; managed worker is waiting...",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    waiting = True
+                retry_s = (
+                    _WORKER_LOCK_HANDOFF_RETRY_S if windows_handoff else _WORKER_LOCK_RETRY_S
+                )
+                time.sleep(retry_s)
+        with contextlib.suppress(OSError):
+            os.chmod(path, 0o600)
+        _active_worker_lock_handle = handle
+        yield
+    finally:
+        if _active_worker_lock_handle is handle:
+            _active_worker_lock_handle = None
+        if locked:
+            with contextlib.suppress(OSError):
+                _unlock_worker_file(handle)
+        handle.close()
 
 
 def _systemd_unit_path() -> Path:
@@ -77,6 +241,7 @@ ExecStart={launcher} worker run
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
+Environment=LOCAL_SHELL_MCP_WORKER_MANAGED=1
 
 [Install]
 WantedBy=default.target
@@ -93,6 +258,7 @@ def _write_launchd_plist() -> Path:
         "ProgramArguments": [str(worker_launcher_path()), "worker", "run"],
         "RunAtLoad": True,
         "KeepAlive": True,
+        "EnvironmentVariables": {_WORKER_MANAGED_ENV: "1"},
         "StandardOutPath": str(worker_log_path()),
         "StandardErrorPath": str(worker_log_path()),
     }
@@ -223,6 +389,7 @@ def _process_environment() -> dict[str, str]:
     pythonpath = os.pathsep.join((str(runtime), str(runtime / "vendor")))
     env["PYTHONPATH"] = pythonpath + (os.pathsep + current if current else "")
     env["LOCAL_SHELL_MCP_WORKER_STATE_DIR"] = str(worker_state_dir().resolve())
+    env[_WORKER_MANAGED_ENV] = "1"
     return env
 
 

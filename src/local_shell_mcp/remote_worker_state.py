@@ -48,6 +48,10 @@ def worker_pid_path() -> Path:
     return worker_state_dir() / "worker.pid"
 
 
+def worker_lock_path() -> Path:
+    return worker_state_dir() / "worker.lock"
+
+
 def worker_launcher_path() -> Path:
     configured = os.getenv("LOCAL_SHELL_MCP_WORKER_BIN_DIR")
     root = Path(configured).expanduser() if configured else user_home() / ".local" / "bin"

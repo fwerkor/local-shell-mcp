@@ -6,6 +6,7 @@ import os
 import pytest
 
 from local_shell_mcp import remote_worker_cli as cli
+from local_shell_mcp import remote_worker_service as service
 from local_shell_mcp import remote_worker_state as state
 
 
@@ -88,7 +89,10 @@ async def test_run_worker_reports_version_and_applies_poll_upgrade(tmp_path, mon
     async def fake_post(url, payload, headers=None, timeout=None, operation="request"):
         calls.append((url, payload, headers, timeout, operation))
         if url.endswith("/remote/register"):
-            return {"ok": True, "data": {"token": "access", "name": "worker"}}
+            return {
+                "ok": True,
+                "data": {"token": "access", "name": "worker", "poll_timeout_s": 17},
+            }
         return {
             "ok": True,
             "data": {
@@ -110,10 +114,12 @@ async def test_run_worker_reports_version_and_applies_poll_upgrade(tmp_path, mon
             "https://example.test", "invite", workdir=str(tmp_path)
         )
 
+    assert calls[1][3] == 27
     poll_payload = calls[1][1]
     assert poll_payload == {
         "protocol_version": cli.remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
         "worker_version": cli.remote.__version__,
+        "poll_timeout_s": 17,
     }
 
 
@@ -354,6 +360,22 @@ def test_prepare_worker_start_installs_runtime_before_launcher(tmp_path, monkeyp
         ("launcher", None),
         ("path", None),
     ]
+
+
+@pytest.mark.asyncio
+async def test_connect_rejects_duplicate_before_enrollment(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    args = cli._parser().parse_args(  # noqa: SLF001
+        ["connect", "--server", "https://example.test", "--invite", "invite"]
+    )
+    monkeypatch.setattr(
+        cli,
+        "enroll_worker",
+        lambda **kwargs: pytest.fail("consumed invitation before acquiring worker lock"),
+    )
+
+    with cli.worker_run_lock(), pytest.raises(service.WorkerAlreadyRunningError):
+        await cli._connect(args)  # noqa: SLF001
 
 
 def test_all_remaining_lifecycle_command_branches(tmp_path, monkeypatch, capsys):
