@@ -28,7 +28,7 @@ import type {
 const colors = screenTheme.Dashboard
 const ACTIVE_JOB_STATUSES = new Set(["starting", "running", "stopping", "retrying"])
 const ANSI_CONTROL_STRING = /(?:\u001b\]|\u001b[P^_X]|[\u0090\u0098\u009d\u009e\u009f])[\s\S]*?(?:\u0007|\u001b\\|\u009c|$)/g
-const ANSI_ESCAPE = /(?:\u001b\[[0-?]*[ -/]*[@-~]|\u009b[0-?]*[ -/]*[@-~]|\u001b[@-_])/g
+const ANSI_ESCAPE = /(?:\u001b\[[0-?]*[ -/]*[@-~]|\u009b[0-?]*[ -/]*[@-~]|\u001b[ -/]*[0-~])/g
 
 function alertText(value?: string): string {
   return String(value || "")

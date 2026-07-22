@@ -141,7 +141,7 @@ describe("Dashboard alerts", () => {
       <Alerts
         alerts={[{
           severity: "warning",
-          title: "\u001b]8;;https://example.test\u0007Job coverage-fix\u001b]8;;\u0007\rfailed\u009b31m now\u009b0m",
+          title: "\u001b(B\u001b7\u001b]8;;https://example.test\u0007Job coverage-fix\u001b]8;;\u0007\rfailed\u009b31m now\u009b0m",
           detail: "set -euo\tpipefail\r\n\u001bPprivate metadata\u001b\\export PYTHONPATH=/workspace/src",
         }]}
         width={58}
@@ -161,6 +161,7 @@ describe("Dashboard alerts", () => {
     expect(populated.filter((line) => line.includes("Job coverage-fix"))).toHaveLength(1)
     expect(frame).not.toContain("example.test")
     expect(frame).not.toContain("private metadata")
+    expect(frame).not.toContain("(B")
   })
 
   test("normalizes alert text in the minimal dashboard", async () => {
