@@ -230,7 +230,7 @@ def test_worker_post_json_falls_back_to_urllib_when_curl_unavailable(monkeypatch
     monkeypatch.setattr(remote.urllib.request, "urlopen", fake_urlopen)
 
     result = remote._worker_post_json(  # noqa: SLF001
-        "https://example.test/remote/poll",
+        "https://example.test/remote/heartbeat",
         {},
         {"Authorization": "Bearer token"},
         12,
@@ -240,6 +240,18 @@ def test_worker_post_json_falls_back_to_urllib_when_curl_unavailable(monkeypatch
     assert captured["timeout"] == 12
     assert captured["request"].headers["Authorization"] == "Bearer token"
     assert captured["request"].data == b"{}"
+
+
+def test_worker_post_json_requires_curl_for_bounded_poll(monkeypatch):
+    monkeypatch.setattr(remote.shutil, "which", lambda name: None)
+
+    with pytest.raises(RuntimeError, match="curl is required"):
+        remote._worker_post_json(  # noqa: SLF001
+            "https://example.test/remote/poll",
+            {},
+            {"Authorization": "Bearer token"},
+            35,
+        )
 
 
 def test_worker_post_json_urllib_reports_non_2xx_body(monkeypatch):
@@ -259,11 +271,12 @@ def test_worker_post_json_urllib_reports_non_2xx_body(monkeypatch):
         remote._worker_post_json("https://example.test/remote/result", {"job_id": "job_1"})  # noqa: SLF001
 
 
-def test_worker_poll_request_timeout_uses_advertised_value_and_safe_default():
+def test_worker_poll_request_timeout_uses_only_advertised_values():
     assert remote._worker_poll_request_timeout_s({"poll_timeout_s": 25}) == 35  # noqa: SLF001
     assert remote._worker_poll_request_timeout_s({"poll_timeout_s": 4.5}) == 14.5  # noqa: SLF001
+    assert remote._worker_poll_request_timeout_s({}) is None  # noqa: SLF001
     for value in (None, 0, -1, "invalid", float("nan")):
-        assert remote._worker_poll_request_timeout_s({"poll_timeout_s": value}) == 35  # noqa: SLF001
+        assert remote._worker_poll_request_timeout_s({"poll_timeout_s": value}) is None  # noqa: SLF001
 
 
 def test_worker_retry_delay_is_capped():

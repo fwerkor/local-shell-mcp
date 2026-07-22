@@ -85,7 +85,6 @@ REMOTE_API_PREFIX = "/remote"
 REMOTE_WORKER_BUNDLE_PATH = "/remote/worker-bundle.tgz"
 REMOTE_WORKER_POLL_PROTOCOL_VERSION = 1
 _WORKER_CONNECT_TIMEOUT_S = 10.0
-_WORKER_DEFAULT_POLL_TIMEOUT_S = 25.0
 _WORKER_POLL_TIMEOUT_GRACE_S = 10.0
 # The remote worker is designed to start on machines that only have Python, curl,
 # and tar. Keep this empty unless a dependency is pure Python and imported on the
@@ -1687,6 +1686,8 @@ def _worker_post_json(
         return _worker_post_json_with_curl(
             url, body, request_headers, timeout, connect_timeout
         )
+    if timeout is not None and parsed.path.endswith(f"{REMOTE_API_PREFIX}/poll"):
+        raise RuntimeError("curl is required for bounded worker poll requests")
     return _worker_post_json_with_urllib(url, body, request_headers, timeout)
 
 
@@ -1694,13 +1695,15 @@ _WORKER_RETRY_INITIAL_DELAY_S = 1.0
 _WORKER_RETRY_MAX_DELAY_S = 30.0
 
 
-def _worker_poll_request_timeout_s(data: dict[str, Any]) -> float:
+def _worker_poll_request_timeout_s(data: dict[str, Any]) -> float | None:
+    if "poll_timeout_s" not in data:
+        return None
     try:
-        poll_timeout_s = float(data.get("poll_timeout_s", _WORKER_DEFAULT_POLL_TIMEOUT_S))
+        poll_timeout_s = float(data["poll_timeout_s"])
     except (TypeError, ValueError):
-        poll_timeout_s = _WORKER_DEFAULT_POLL_TIMEOUT_S
+        return None
     if not math.isfinite(poll_timeout_s) or poll_timeout_s <= 0:
-        poll_timeout_s = _WORKER_DEFAULT_POLL_TIMEOUT_S
+        return None
     return poll_timeout_s + _WORKER_POLL_TIMEOUT_GRACE_S
 
 
