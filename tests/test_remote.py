@@ -175,7 +175,15 @@ def test_worker_post_json_uses_curl_and_parses_success(monkeypatch):
 
     assert result == {"ok": True, "data": {"registered": True}}
     command, body, check = calls[0]
-    assert command[:4] == ["/usr/bin/curl", "--max-time", "30", "-sS"]
+    assert command[:7] == [
+        "/usr/bin/curl",
+        "--connect-timeout",
+        "10",
+        "--max-time",
+        "30",
+        "-sS",
+        "-L",
+    ]
     assert ["-H", "Authorization: Bearer token"] in [command[index : index + 2] for index in range(len(command) - 1)]
     assert command[-1] == "https://example.test/remote/register"
     assert body == b'{"invite": "abc"}'
@@ -249,6 +257,13 @@ def test_worker_post_json_urllib_reports_non_2xx_body(monkeypatch):
 
     with pytest.raises(RuntimeError, match="failed with 403: <html>Cloudflare 1010</html>"):
         remote._worker_post_json("https://example.test/remote/result", {"job_id": "job_1"})  # noqa: SLF001
+
+
+def test_worker_poll_request_timeout_uses_advertised_value_and_safe_default():
+    assert remote._worker_poll_request_timeout_s({"poll_timeout_s": 25}) == 35  # noqa: SLF001
+    assert remote._worker_poll_request_timeout_s({"poll_timeout_s": 4.5}) == 14.5  # noqa: SLF001
+    for value in (None, 0, -1, "invalid", float("nan")):
+        assert remote._worker_poll_request_timeout_s({"poll_timeout_s": value}) == 35  # noqa: SLF001
 
 
 def test_worker_retry_delay_is_capped():

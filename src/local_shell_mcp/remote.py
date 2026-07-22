@@ -6,6 +6,7 @@ import contextlib
 import hashlib
 import importlib.metadata as importlib_metadata
 import json
+import math
 import os
 import re
 import secrets
@@ -83,6 +84,9 @@ REMOTE_JOIN_PATH = "/join"
 REMOTE_API_PREFIX = "/remote"
 REMOTE_WORKER_BUNDLE_PATH = "/remote/worker-bundle.tgz"
 REMOTE_WORKER_POLL_PROTOCOL_VERSION = 1
+_WORKER_CONNECT_TIMEOUT_S = 10.0
+_WORKER_DEFAULT_POLL_TIMEOUT_S = 25.0
+_WORKER_POLL_TIMEOUT_GRACE_S = 10.0
 # The remote worker is designed to start on machines that only have Python, curl,
 # and tar. Keep this empty unless a dependency is pure Python and imported on the
 # worker startup path. Tool-specific dependencies such as Playwright should be
@@ -420,6 +424,7 @@ class RemoteManager:
             "token": token,
             "name": name,
             "poll_interval_s": 0,
+            "poll_timeout_s": get_settings().remote_poll_timeout_s,
             "heartbeat_interval_s": _remote_heartbeat_interval_s(),
         }
 
@@ -447,6 +452,7 @@ class RemoteManager:
             "token": access,
             "name": name,
             "poll_interval_s": 0,
+            "poll_timeout_s": get_settings().remote_poll_timeout_s,
             "heartbeat_interval_s": _remote_heartbeat_interval_s(),
         }
 
@@ -1589,29 +1595,37 @@ def _parse_worker_http_json(url: str, status_code: int, response_body: str) -> d
 
 
 def _worker_post_json_with_curl(
-    url: str, body: bytes, headers: dict[str, str], timeout: float | None = None
+    url: str,
+    body: bytes,
+    headers: dict[str, str],
+    timeout: float | None = None,
+    connect_timeout: float | None = _WORKER_CONNECT_TIMEOUT_S,
 ) -> dict[str, Any]:
     curl = shutil.which("curl")
     if not curl:
         raise FileNotFoundError("curl is not available")
     status_marker = "\nLOCAL_SHELL_MCP_HTTP_STATUS:"
-    command = [
-        curl,
-        "-sS",
-        "-L",
-        "-X",
-        "POST",
-        "-H",
-        "Content-Type: application/json",
-        "--data-binary",
-        "@-",
-        "-w",
-        f"{status_marker}%{{http_code}}",
-    ]
+    command = [curl]
+    if connect_timeout is not None:
+        command.extend(["--connect-timeout", f"{connect_timeout:g}"])
+    if timeout is not None:
+        command.extend(["--max-time", f"{timeout:g}"])
+    command.extend(
+        [
+            "-sS",
+            "-L",
+            "-X",
+            "POST",
+            "-H",
+            "Content-Type: application/json",
+            "--data-binary",
+            "@-",
+            "-w",
+            f"{status_marker}%{{http_code}}",
+        ]
+    )
     for name, value in headers.items():
         command.extend(["-H", f"{name}: {value}"])
-    if timeout is not None:
-        command[1:1] = ["--max-time", str(timeout)]
     command.append(url)
 
     completed = subprocess.run(  # noqa: S603
@@ -1657,6 +1671,7 @@ def _worker_post_json(
     payload: dict[str, Any],
     headers: dict[str, str] | None = None,
     timeout: float | None = None,
+    connect_timeout: float | None = _WORKER_CONNECT_TIMEOUT_S,
 ) -> dict[str, Any]:
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -1664,12 +1679,24 @@ def _worker_post_json(
     body = json.dumps(payload).encode("utf-8")
     request_headers = headers or {}
     if shutil.which("curl"):
-        return _worker_post_json_with_curl(url, body, request_headers, timeout)
+        return _worker_post_json_with_curl(
+            url, body, request_headers, timeout, connect_timeout
+        )
     return _worker_post_json_with_urllib(url, body, request_headers, timeout)
 
 
 _WORKER_RETRY_INITIAL_DELAY_S = 1.0
 _WORKER_RETRY_MAX_DELAY_S = 30.0
+
+
+def _worker_poll_request_timeout_s(data: dict[str, Any]) -> float:
+    try:
+        poll_timeout_s = float(data.get("poll_timeout_s", _WORKER_DEFAULT_POLL_TIMEOUT_S))
+    except (TypeError, ValueError):
+        poll_timeout_s = _WORKER_DEFAULT_POLL_TIMEOUT_S
+    if not math.isfinite(poll_timeout_s) or poll_timeout_s <= 0:
+        poll_timeout_s = _WORKER_DEFAULT_POLL_TIMEOUT_S
+    return poll_timeout_s + _WORKER_POLL_TIMEOUT_GRACE_S
 
 
 def _worker_retry_delay(attempt: int) -> float:
@@ -1939,6 +1966,7 @@ async def _run_worker_locked(
         data = body["data"]
         machine_name = data["name"]
     heartbeat_interval_s = float(data.get("heartbeat_interval_s") or _remote_heartbeat_interval_s())
+    poll_request_timeout_s = _worker_poll_request_timeout_s(data)
     _write_worker_identity(
         {"server": server, "name": machine_name, "access": access, "workdir": workdir}
     )
@@ -1958,7 +1986,7 @@ async def _run_worker_locked(
             f"{server}{REMOTE_API_PREFIX}/poll",
             _worker_poll_payload(),
             headers,
-            None,
+            poll_request_timeout_s,
             "poll",
         )
         payload = poll_body.get("data", {})

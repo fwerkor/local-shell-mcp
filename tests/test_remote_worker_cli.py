@@ -88,7 +88,10 @@ async def test_run_worker_reports_version_and_applies_poll_upgrade(tmp_path, mon
     async def fake_post(url, payload, headers=None, timeout=None, operation="request"):
         calls.append((url, payload, headers, timeout, operation))
         if url.endswith("/remote/register"):
-            return {"ok": True, "data": {"token": "access", "name": "worker"}}
+            return {
+                "ok": True,
+                "data": {"token": "access", "name": "worker", "poll_timeout_s": 17},
+            }
         return {
             "ok": True,
             "data": {
@@ -110,6 +113,7 @@ async def test_run_worker_reports_version_and_applies_poll_upgrade(tmp_path, mon
             "https://example.test", "invite", workdir=str(tmp_path)
         )
 
+    assert calls[1][3] == 27
     poll_payload = calls[1][1]
     assert poll_payload == {
         "protocol_version": cli.remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,

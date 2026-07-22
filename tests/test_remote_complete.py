@@ -111,6 +111,7 @@ def test_controller_registration_resume_rename_revoke_and_defaults(tmp_path, mon
         )
     )
     assert registration["name"] == "alice@host"
+    assert registration["poll_timeout_s"] == 1
     token = registration["token"]
 
     with pytest.raises(ValueError, match="invalid invite"):
@@ -123,6 +124,7 @@ def test_controller_registration_resume_rename_revoke_and_defaults(tmp_path, mon
         )
     )
     assert resumed["name"] == "alice@host"
+    assert resumed["poll_timeout_s"] == 1
     assert manager.workers["alice@host"].workdir == "/new"
     with pytest.raises(ValueError, match="belongs"):
         asyncio.run(manager.resume_worker(token, {"name": "other"}))
