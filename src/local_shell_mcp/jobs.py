@@ -655,20 +655,48 @@ def _append_managed_log(path: str, message: str) -> None:
         handle.write(encoded)
         handle.flush()
         truncated = _compact_log(handle, max_bytes)
-    with _store_transaction() as store:
-        job_id = target.name.split("-attempt-", 1)[0]
+    job_id = target.name.split("-attempt-", 1)[0]
+
+    def update(store: dict[str, Any]) -> None:
         with contextlib.suppress(KeyError):
             job = _find_job(store, job_id)
             job["output_bytes"] = int(job.get("output_bytes") or 0) + len(encoded)
             job["log_truncated"] = bool(job.get("log_truncated")) or truncated
 
+    _managed_store_update("append_log", job_id, update)
+
 
 def _update_managed_progress(job_id: str, progress: dict[str, Any]) -> None:
-    with _store_transaction() as store:
+    def update(store: dict[str, Any]) -> None:
         job = _find_job(store, job_id)
         if job.get("status") in {"starting", "running", "stopping", "retrying"}:
             job["progress"] = dict(progress)
             job["updated_at"] = _utc()
+
+    _managed_store_update("update_progress", job_id, update)
+
+
+def _managed_store_update(
+    operation: str,
+    job_id: str,
+    update: Callable[[dict[str, Any]], None],
+) -> None:
+    attempts = 0
+    while True:
+        try:
+            with _store_transaction() as store:
+                update(store)
+            return
+        except TimeoutError:
+            attempts += 1
+            if attempts == 1 or attempts % 20 == 0:
+                audit(
+                    "managed_job_store_update_deferred",
+                    job_id=job_id,
+                    operation=operation,
+                    attempts=attempts,
+                )
+            time.sleep(JOB_STORE_LOCK_RETRY_INTERVAL_S)
 
 
 class ManagedJobContext:
@@ -691,7 +719,7 @@ def _finish_managed_job(
     error: str | None,
     result: dict[str, Any] | None = None,
 ) -> None:
-    with _store_transaction() as store:
+    def update(store: dict[str, Any]) -> None:
         job = _find_job(store, job_id)
         if job.get("status") not in {"starting", "running", "stopping", "retrying"}:
             return
@@ -707,6 +735,8 @@ def _finish_managed_job(
         )
         if result is not None:
             job["result"] = result
+
+    _managed_store_update("finish", job_id, update)
 
 
 async def _run_managed_job(

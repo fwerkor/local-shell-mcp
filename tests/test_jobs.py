@@ -193,6 +193,72 @@ async def test_jobs_track_tail_stop_and_retry(tmp_path, monkeypatch):
     assert retried["session_id"] != job["session_id"]
 
 
+
+
+def test_managed_job_state_updates_retry_store_contention(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".state"
+    runtime_dir = state_dir / "jobs"
+    runtime_dir.mkdir(parents=True)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    job_id = "job_managed_retry"
+    log_path = runtime_dir / f"{job_id}-attempt-1.log"
+    row = {
+        "job_id": job_id,
+        "kind": "managed",
+        "name": "managed-retry",
+        "status": "running",
+        "command": "managed retry",
+        "cwd": ".",
+        "created_at": time.time(),
+        "updated_at": time.time(),
+        "attempts": 1,
+        "log_path": str(log_path),
+        "output_bytes": 0,
+        "log_truncated": False,
+    }
+    (state_dir / jobs_module.JOB_STORE_FILE_NAME).write_text(
+        json.dumps({"version": jobs_module.JOB_STORE_VERSION, "jobs": [row]}),
+        encoding="utf-8",
+    )
+    original_transaction = jobs_module._store_transaction
+    failures = 0
+
+    @jobs_module.contextlib.contextmanager
+    def flaky_transaction():
+        nonlocal failures
+        if failures > 0:
+            failures -= 1
+            raise TimeoutError("busy")
+        with original_transaction() as store:
+            yield store
+
+    monkeypatch.setattr(jobs_module, "_store_transaction", flaky_transaction)
+    monkeypatch.setattr(jobs_module.time, "sleep", lambda _seconds: None)
+
+    failures = 1
+    jobs_module._append_managed_log(str(log_path), "hello")
+    failures = 1
+    jobs_module._update_managed_progress(job_id, {"phase": "copying"})
+    failures = 1
+    jobs_module._finish_managed_job(
+        job_id,
+        status="succeeded",
+        exit_code=0,
+        error=None,
+        result={"copied": True},
+    )
+
+    stored = json.loads(
+        (state_dir / jobs_module.JOB_STORE_FILE_NAME).read_text(encoding="utf-8")
+    )["jobs"][0]
+    assert stored["output_bytes"] == len(b"hello\n")
+    assert stored["progress"] == {"phase": "copying"}
+    assert stored["status"] == "succeeded"
+    assert stored["result"] == {"copied": True}
+
+
 @pytest.mark.asyncio
 async def test_managed_jobs_track_tail_stop_and_retry(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
