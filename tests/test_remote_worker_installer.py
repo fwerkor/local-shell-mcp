@@ -135,6 +135,7 @@ def test_fetch_bytes_uses_urlopen(monkeypatch):
     assert request.full_url == "https://example.test/file"
     assert request.headers["Cache-control"] == "no-cache"
     assert request.headers["Pragma"] == "no-cache"
+    assert request.headers["User-agent"] == f"local-shell-mcp-worker/{installer.__version__}"
     assert timeout == 7
 
 
