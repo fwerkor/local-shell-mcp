@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import base64
 import contextlib
+import errno
 import json
 import os
 import re
@@ -33,6 +34,8 @@ JOB_STORE_FILE_NAME = "jobs.json"
 JOB_STORE_BACKUP_FILE_NAME = "jobs.json.bak"
 JOB_STORE_VERSION = 2
 JOB_STORE_LEGACY_VERSIONS = {1}
+JOB_STORE_LOCK_TIMEOUT_S = 2.0
+JOB_STORE_LOCK_RETRY_INTERVAL_S = 0.05
 TERMINAL_STATUSES = {"succeeded", "failed", "exited", "stopped", "lost"}
 _JOB_STORE_THREAD_LOCK = threading.RLock()
 _ACTIVE_JOB_OPERATIONS: set[str] = set()
@@ -71,20 +74,43 @@ def _job_store_lock_path() -> Path:
     return path
 
 
-def _lock_store_file(handle: BinaryIO) -> None:
+def _try_lock_store_file(handle: BinaryIO) -> bool:
+    handle.seek(0)
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        if exc.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+            return False
+        raise
+    return True
+
+
+def _lock_store_file(handle: BinaryIO, timeout_s: float | None = None) -> None:
     handle.seek(0, os.SEEK_END)
     if handle.tell() == 0:
         handle.write(b"\0")
         handle.flush()
-    handle.seek(0)
-    if os.name == "nt":
-        import msvcrt
 
-        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-    else:
-        import fcntl
-
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    timeout_s = (
+        JOB_STORE_LOCK_TIMEOUT_S
+        if timeout_s is None
+        else max(0.0, float(timeout_s))
+    )
+    deadline = time.monotonic() + timeout_s
+    while not _try_lock_store_file(handle):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(
+                f"timed out after {timeout_s:g}s acquiring the job store lock"
+            )
+        time.sleep(min(JOB_STORE_LOCK_RETRY_INTERVAL_S, remaining))
 
 
 def _unlock_store_file(handle: BinaryIO) -> None:
@@ -211,20 +237,44 @@ def _save_store(store: dict[str, Any]) -> None:
         backup_tmp_path.unlink(missing_ok=True)
 
 
+def _job_store_busy_error(lock_path: Path, *, lock_kind: str) -> TimeoutError:
+    audit(
+        "job_store_lock_timeout",
+        path=str(lock_path),
+        timeout_s=JOB_STORE_LOCK_TIMEOUT_S,
+        lock_kind=lock_kind,
+    )
+    return TimeoutError(
+        f"job store is busy: {lock_path}; another local-shell-mcp operation or process "
+        "may be using the same state directory"
+    )
+
+
 @contextlib.contextmanager
 def _store_transaction():  # noqa: ANN201
-    with _JOB_STORE_THREAD_LOCK:
-        lock_path = _job_store_lock_path()
+    lock_path = _job_store_lock_path()
+    started = time.monotonic()
+    if not _JOB_STORE_THREAD_LOCK.acquire(timeout=JOB_STORE_LOCK_TIMEOUT_S):
+        raise _job_store_busy_error(lock_path, lock_kind="thread")
+    try:
         with lock_path.open("a+b") as handle:
             with contextlib.suppress(OSError):
                 lock_path.chmod(0o600)
-            _lock_store_file(handle)
+            remaining = max(
+                0.0, JOB_STORE_LOCK_TIMEOUT_S - (time.monotonic() - started)
+            )
+            try:
+                _lock_store_file(handle, timeout_s=remaining)
+            except TimeoutError as exc:
+                raise _job_store_busy_error(lock_path, lock_kind="file") from exc
             try:
                 store = _load_store()
                 yield store
                 _save_store(store)
             finally:
                 _unlock_store_file(handle)
+    finally:
+        _JOB_STORE_THREAD_LOCK.release()
 
 
 def _new_job_id() -> str:

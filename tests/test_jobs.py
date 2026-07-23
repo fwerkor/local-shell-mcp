@@ -21,6 +21,74 @@ from local_shell_mcp.jobs import (
 from local_shell_mcp.settings import get_settings
 
 
+def test_job_store_lock_retries_then_succeeds(tmp_path, monkeypatch):
+    lock_path = tmp_path / "jobs.lock"
+    attempts = 0
+
+    def fake_try_lock(handle):  # noqa: ARG001
+        nonlocal attempts
+        attempts += 1
+        return attempts == 3
+
+    monkeypatch.setattr(jobs_module, "_try_lock_store_file", fake_try_lock)
+    monkeypatch.setattr(jobs_module.time, "sleep", lambda _seconds: None)
+
+    with lock_path.open("a+b") as handle:
+        jobs_module._lock_store_file(handle, timeout_s=1)
+
+    assert attempts == 3
+
+
+def test_job_store_lock_timeout_is_actionable(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".state"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    monkeypatch.setattr(jobs_module, "JOB_STORE_LOCK_TIMEOUT_S", 0.0)
+    monkeypatch.setattr(jobs_module, "_try_lock_store_file", lambda _handle: False)
+    get_settings.cache_clear()
+
+    with (
+        pytest.raises(
+            TimeoutError, match="another local-shell-mcp operation or process"
+        ),
+        jobs_module._store_transaction(),
+    ):
+        raise AssertionError("transaction body must not run")
+
+
+def test_job_store_thread_lock_timeout_is_actionable(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".state"
+    acquired = threading.Event()
+    release = threading.Event()
+
+    def hold_lock():
+        with jobs_module._JOB_STORE_THREAD_LOCK:
+            acquired.set()
+            release.wait(timeout=5)
+
+    holder = threading.Thread(target=hold_lock)
+    holder.start()
+    assert acquired.wait(timeout=1)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    monkeypatch.setattr(jobs_module, "JOB_STORE_LOCK_TIMEOUT_S", 0.01)
+    get_settings.cache_clear()
+
+    try:
+        with (
+            pytest.raises(
+                TimeoutError, match="another local-shell-mcp operation or process"
+            ),
+            jobs_module._store_transaction(),
+        ):
+            raise AssertionError("transaction body must not run")
+    finally:
+        release.set()
+        holder.join(timeout=1)
+
+    assert not holder.is_alive()
+
+
 def test_runner_command_invokes_powershell_executable_and_quotes_arguments():
     command = jobs_module._runner_command(
         [
