@@ -11,6 +11,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .remote_worker_state import (
     read_worker_config,
     update_runtime_metadata,
@@ -24,7 +25,11 @@ _WORKER_MANIFEST_PATH = "/remote/worker-bundle.tgz?manifest=1"
 def _fetch_bytes(url: str, timeout: float = 60) -> bytes:
     request = urllib.request.Request(
         url,
-        headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+        headers={
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "User-Agent": f"local-shell-mcp-worker/{__version__}",
+        },
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
         return response.read()
