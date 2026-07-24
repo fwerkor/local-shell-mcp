@@ -9,7 +9,7 @@ from mcp.types import CallToolResult
 
 import local_shell_mcp.downloads as downloads
 import local_shell_mcp.tools as tools
-from local_shell_mcp.fs_ops import PathNotFoundError
+from local_shell_mcp.errors import PathNotFoundError
 from local_shell_mcp.models import CommandResult
 from local_shell_mcp.settings import get_settings
 
@@ -499,3 +499,37 @@ def test_handled_error_missing_path_and_sync(monkeypatch, tmp_path):
         assert tools._sync(value()) == 42
     finally:
         loop.close()
+
+
+@pytest.mark.asyncio
+async def test_remote_shell_failure_returns_mcp_error(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+
+    class FailedRemoteManager:
+        async def call(self, machine, tool, args, timeout_s=None):  # noqa: ARG002
+            return {
+                "ok": False,
+                "message": "Shell executable not found: missing-shell",
+                "data": {
+                    "status": "executable_not_found",
+                    "error_type": "FileNotFoundError",
+                    "message": "Shell executable not found: missing-shell",
+                    "executable": "missing-shell",
+                    "command": "echo ok",
+                    "cwd": "/workspace",
+                    "original_error": "[WinError 2]",
+                },
+            }
+
+    monkeypatch.setattr(tools, "remote_manager", lambda: FailedRemoteManager())
+
+    result = await tools.build_mcp().call_tool(
+        "run_shell_tool",
+        {"command": "echo ok", "machine": "node"},
+    )
+
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    assert result.structuredContent["ok"] is False
+    assert result.structuredContent["data"]["status"] == "executable_not_found"
+    assert result.structuredContent["data"]["executable"] == "missing-shell"

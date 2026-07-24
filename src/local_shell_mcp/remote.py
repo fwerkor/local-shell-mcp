@@ -29,11 +29,17 @@ from typing import Any
 
 from . import __version__
 from .audit import audit, suppress_audit
+from .errors import (
+    PathNotFoundError,
+    ShellExecutableNotFoundError,
+    workspace_path_not_found_error,
+)
 from .fs_ops import (
     delete_path,
     edit_text,
     glob_paths,
     list_dir,
+    missing_path_context,
     perform_file_action,
     prune_temp_dir,
     read_texts,
@@ -683,13 +689,18 @@ class RemoteManager:
                     self.pending_machines.pop(job_id, None)
                     self.claimed_jobs.discard(job_id)
         if not result.get("ok", False):
-            return _ok(
-                {
+            data = result.get("data")
+            if not isinstance(data, dict):
+                data = {
                     "status": "error",
                     "error_type": result.get("error", "remote_error"),
                     "message": result.get("message", "remote job failed"),
                 }
-            )
+            return {
+                "ok": False,
+                "message": result.get("message", data.get("message", "remote job failed")),
+                "data": data,
+            }
         return _ok(result.get("data"))
 
     def list_machines(self) -> dict[str, Any]:
@@ -954,7 +965,41 @@ def _assert_worker_text_input_size(label: str, text: str) -> None:
 
 
 def _handled_remote_exception(exc: Exception) -> dict[str, Any]:
-    return {"ok": False, "error": type(exc).__name__, "message": str(exc)}
+    if isinstance(exc, ShellExecutableNotFoundError):
+        message = f"Shell executable not found: {exc.executable}"
+        data = {
+            "status": "executable_not_found",
+            "error_type": "FileNotFoundError",
+            "message": str(exc),
+            "executable": exc.executable,
+            "command": exc.command,
+            "cwd": exc.cwd,
+            "original_error": exc.original_error,
+        }
+        return {"ok": False, "error": "FileNotFoundError", "message": message, "data": data}
+
+    path_error = exc if isinstance(exc, PathNotFoundError) else None
+    if isinstance(exc, FileNotFoundError) and path_error is None:
+        path_error = workspace_path_not_found_error(exc, get_settings().workspace_root)
+    if path_error is not None:
+        with contextlib.suppress(Exception):
+            context = missing_path_context(path_error.path)
+            message = f"Path not found: {context['path']}"
+            data = {
+                "status": "not_found",
+                "error_type": "FileNotFoundError",
+                "message": str(exc),
+                **context,
+            }
+            return {"ok": False, "error": "FileNotFoundError", "message": message, "data": data}
+
+    message = str(exc) or type(exc).__name__
+    data = {
+        "status": "error",
+        "error_type": type(exc).__name__,
+        "message": message,
+    }
+    return {"ok": False, "error": type(exc).__name__, "message": message, "data": data}
 
 
 async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:

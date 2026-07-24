@@ -14,18 +14,13 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from .errors import PathNotFoundError
 from .settings import get_settings
 
 BINARY_CHECK_BYTES = 8192
 BINARY_CONTROL_RATIO = 0.30
 BINARY_PREVIEW_BYTES = 256
 BINARY_MESSAGE = "Refusing to read binary file as text"
-
-
-class PathNotFoundError(FileNotFoundError):
-    def __init__(self, path: str | Path) -> None:
-        self.path = Path(path)
-        super().__init__(str(self.path))
 
 
 class FileConflictError(RuntimeError):

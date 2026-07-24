@@ -17,6 +17,7 @@ from pathlib import Path
 
 from . import conpty_ops
 from .audit import audit
+from .errors import process_start_not_found_error
 from .fs_ops import relative_display, resolve_path
 from .models import CommandResult
 from .settings import get_settings
@@ -80,17 +81,6 @@ class NativeShellSession:
     output: TailBuffer
     readers: list
     lock: object
-
-
-class ShellExecutableNotFoundError(FileNotFoundError):
-    """Raised when the configured shell executable cannot be started."""
-
-    def __init__(self, executable: str, command: str, cwd: str, original_error: str) -> None:
-        self.executable = executable
-        self.command = command
-        self.cwd = cwd
-        self.original_error = original_error
-        super().__init__(f"Shell executable not found: {executable}")
 
 
 def check_command_policy(command: str) -> None:
@@ -227,7 +217,12 @@ async def _spawn_process(command: str, cwd: str) -> asyncio.subprocess.Process:
             start_new_session=(sys.platform != "win32"),
         )
     except FileNotFoundError as exc:
-        raise ShellExecutableNotFoundError(str(args[0]), command, cwd, str(exc)) from exc
+        raise process_start_not_found_error(
+            exc,
+            executable=str(args[0]),
+            command=command,
+            cwd=cwd,
+        ) from exc
 
 
 async def _read_stream_tail(stream: asyncio.StreamReader | None, tail: TailBuffer) -> None:
@@ -474,8 +469,11 @@ async def _native_start_shell(
             start_new_session=(sys.platform != "win32"),
         )
     except FileNotFoundError as exc:
-        raise ShellExecutableNotFoundError(
-            str(args[0]), initial, str(resolved_cwd), str(exc)
+        raise process_start_not_found_error(
+            exc,
+            executable=str(args[0]),
+            command=initial,
+            cwd=resolved_cwd,
         ) from exc
     session = NativeShellSession(
         session_id=session_id,

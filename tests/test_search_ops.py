@@ -5,7 +5,7 @@ import pytest
 from mcp.types import CallToolResult
 
 import local_shell_mcp.search_ops as search_ops_module
-from local_shell_mcp.fs_ops import PathNotFoundError
+from local_shell_mcp.errors import PathNotFoundError
 from local_shell_mcp.search_ops import grep, tree
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.tools import _handled_error
@@ -100,6 +100,20 @@ def test_os_file_not_found_message_is_not_treated_as_workspace_path(tmp_path, mo
     assert data["error_type"] == "FileNotFoundError"
     assert "path" not in data
     assert str(tmp_path) not in result.structuredContent["message"]
+
+
+def test_syscall_file_not_found_inside_workspace_keeps_path_context(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    missing = tmp_path / "removed-during-read.txt"
+
+    result = _handled_error(FileNotFoundError(2, "No such file or directory", str(missing)))
+
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    data = result.structuredContent["data"]
+    assert data["status"] == "not_found"
+    assert data["path"] == str(missing)
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,7 @@ import pytest
 
 import local_shell_mcp.conpty_ops as conpty_ops
 import local_shell_mcp.shell_ops as ops
+from local_shell_mcp.errors import ShellExecutableNotFoundError
 from local_shell_mcp.settings import get_settings
 
 
@@ -148,6 +149,29 @@ async def test_windows_falls_back_to_native_when_pywinpty_unavailable(tmp_path, 
 
     assert session["session_id"] == "native-fallback"
     assert session["backend"] == "native"
+
+
+@pytest.mark.asyncio
+async def test_conpty_reports_missing_shell_executable(tmp_path, monkeypatch):
+    executable = "missing-conpty-shell"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_SHELL_EXECUTABLE", executable)
+    get_settings.cache_clear()
+    monkeypatch.setattr(ops, "_use_native_persistent_shell_backend", lambda: True)
+
+    class MissingPtyProcess:
+        @classmethod
+        def spawn(cls, argv, cwd=None, env=None):  # noqa: ARG003
+            raise FileNotFoundError(2, "The system cannot find the file specified", executable)
+
+    monkeypatch.setattr(conpty_ops, "winpty", SimpleNamespace(PtyProcess=MissingPtyProcess))
+
+    with pytest.raises(ShellExecutableNotFoundError) as raised:
+        await ops.start_shell(cwd=".", name="missing-conpty")
+
+    assert raised.value.executable == executable
+    assert raised.value.command == executable
+    assert raised.value.cwd == str(tmp_path)
 
 
 @pytest.mark.asyncio

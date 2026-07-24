@@ -8,7 +8,9 @@ from fastapi.testclient import TestClient
 from mcp.types import CallToolResult, TextContent
 
 import local_shell_mcp.http_app as http_app_module
+import local_shell_mcp.shell_ops as shell_ops_module
 import local_shell_mcp.tools as tools_module
+from local_shell_mcp.errors import PathNotFoundError
 from local_shell_mcp.http_app import build_http_app
 from local_shell_mcp.models import CommandResult
 from local_shell_mcp.settings import get_settings
@@ -236,6 +238,21 @@ async def test_run_shell_tool_reports_missing_shell_executable(tmp_path, monkeyp
     assert data["command"] == "echo ok"
     assert "path" not in data
     assert str(tmp_path) not in result.structuredContent["message"]
+
+
+@pytest.mark.asyncio
+async def test_spawn_process_reports_vanished_cwd_as_path_error(tmp_path, monkeypatch):
+    missing_cwd = tmp_path / "vanished"
+
+    async def fail_spawn(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
+        raise FileNotFoundError(2, "No such file or directory", str(missing_cwd))
+
+    monkeypatch.setattr(shell_ops_module.asyncio, "create_subprocess_exec", fail_spawn)
+
+    with pytest.raises(PathNotFoundError) as raised:
+        await shell_ops_module._spawn_process("echo ok", str(missing_cwd))
+
+    assert raised.value.path == missing_cwd
 
 
 @pytest.mark.asyncio
