@@ -5,9 +5,11 @@ import json
 import subprocess
 
 import pytest
+from mcp.types import CallToolResult
 
 import local_shell_mcp.downloads as downloads
 import local_shell_mcp.tools as tools
+from local_shell_mcp.fs_ops import PathNotFoundError
 from local_shell_mcp.models import CommandResult
 from local_shell_mcp.settings import get_settings
 
@@ -40,6 +42,12 @@ def _raw_tool(mcp, name: str):
     wrapped = mcp._tool_manager._tools[name].fn
     original = wrapped.__kwdefaults__["__original"]
     return original
+
+
+def _handled_error_data(result: CallToolResult) -> dict:
+    assert result.isError is True
+    assert result.structuredContent["ok"] is False
+    return result.structuredContent["data"]
 
 
 class FakeRemoteManager:
@@ -310,7 +318,8 @@ async def test_tool_wrapper_error_paths_and_remote_disabled(tmp_path, monkeypatc
         if name in {"search", "fetch"}:
             assert isinstance(result, str)
         else:
-            assert result["data"]["status"] == "error", name
+            assert isinstance(result, CallToolResult), name
+            assert _handled_error_data(result)["status"] == "error", name
 
     _configure(tmp_path, monkeypatch, remote_enabled=False)
     disabled = tools.build_mcp()
@@ -354,7 +363,8 @@ def test_tool_helpers_audit_serialization_timeout_and_tail(tmp_path, monkeypatch
     fetch = json.loads(tools._timeout_payload_for_tool("fetch", TimeoutError("x")))
     assert fetch["metadata"]["error"] == "TimeoutError"
     generic = tools._timeout_payload_for_tool("other", TimeoutError("x"))
-    assert generic["data"]["status"] == "error"
+    assert isinstance(generic, CallToolResult)
+    assert _handled_error_data(generic)["status"] == "error"
 
     audit_path = tmp_path / "audit.jsonl"
     audit_path.write_text(
@@ -474,11 +484,11 @@ def test_transport_security_secret_helpers_and_remote_unwrap(tmp_path, monkeypat
 
 def test_handled_error_missing_path_and_sync(monkeypatch, tmp_path):
     _configure(tmp_path, monkeypatch)
-    result = tools._handled_error(FileNotFoundError("missing.txt"))
-    assert result["data"]["status"] == "not_found"
-    assert result["data"]["path"].endswith("missing.txt")
+    result = tools._handled_error(PathNotFoundError("missing.txt"))
+    assert _handled_error_data(result)["status"] == "not_found"
+    assert _handled_error_data(result)["path"].endswith("missing.txt")
     generic = tools._handled_error(ValueError("bad"))
-    assert generic["data"]["error_type"] == "ValueError"
+    assert _handled_error_data(generic)["error_type"] == "ValueError"
 
     async def value():
         return 42

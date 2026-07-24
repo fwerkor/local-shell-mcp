@@ -23,6 +23,7 @@ from .audit import audit, audit_call_context, audit_result_ok
 from .auth import require_current_scopes
 from .downloads import create_share_link, list_share_links, revoke_share_link
 from .fs_ops import (
+    PathNotFoundError,
     delete_path,
     edit_text,
     glob_paths,
@@ -65,6 +66,7 @@ from .shell_ops import (
     PUBLIC_RUN_SHELL_DEFAULT_TIMEOUT_S,
     PUBLIC_RUN_SHELL_TIMEOUT_CAP_S,
     PUBLIC_TOOL_WATCHDOG_TIMEOUT_S,
+    ShellExecutableNotFoundError,
     kill_shell,
     list_shells,
     public_run_shell,
@@ -118,27 +120,56 @@ class ViewImageResult(BaseModel):
     error_type: str | None = None
 
 
-def _handled_error(exc: Exception) -> dict:
+def _error_call_result(data: dict[str, Any], message: str) -> CallToolResult:
+    structured = {"ok": False, "message": message, "data": data}
+    return CallToolResult(
+        content=[
+            TextContent(
+                type="text",
+                text=json.dumps(structured, ensure_ascii=False, indent=2),
+            )
+        ],
+        structuredContent=structured,
+        isError=True,
+    )
+
+
+def _handled_error(exc: Exception) -> CallToolResult:
     audit("tool_error", error=repr(exc))
-    if isinstance(exc, FileNotFoundError) and str(exc):
+    if isinstance(exc, ShellExecutableNotFoundError):
+        message = f"Shell executable not found: {exc.executable}"
+        return _error_call_result(
+            {
+                "status": "executable_not_found",
+                "error_type": "FileNotFoundError",
+                "message": str(exc),
+                "executable": exc.executable,
+                "command": exc.command,
+                "cwd": exc.cwd,
+                "original_error": exc.original_error,
+            },
+            message,
+        )
+    if isinstance(exc, PathNotFoundError):
         with suppress(Exception):
-            context = missing_path_context(str(exc))
-            return _ok(
+            context = missing_path_context(exc.path)
+            return _error_call_result(
                 {
                     "status": "not_found",
-                    "error_type": type(exc).__name__,
+                    "error_type": "FileNotFoundError",
                     "message": str(exc),
                     **context,
                 },
-                message=f"Path not found: {context['path']}",
+                f"Path not found: {context['path']}",
             )
-    return _ok(
+    message = str(exc) or type(exc).__name__
+    return _error_call_result(
         {
             "status": "error",
             "error_type": type(exc).__name__,
-            "message": str(exc),
+            "message": message,
         },
-        message=f"Tool handled {type(exc).__name__}",
+        message,
     )
 
 
