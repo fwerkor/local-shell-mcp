@@ -5,6 +5,7 @@ import asyncio
 import base64
 import contextlib
 import errno
+import itertools
 import json
 import os
 import re
@@ -42,6 +43,7 @@ MANAGED_DEFERRED_APPLIED_KEY = "managed_deferred_update_ids"
 TERMINAL_STATUSES = {"succeeded", "failed", "exited", "stopped", "lost"}
 _JOB_STORE_THREAD_LOCK = threading.RLock()
 _ACTIVE_JOB_OPERATIONS: set[str] = set()
+_MANAGED_DEFERRED_SEQUENCE = itertools.count()
 ManagedJobHandler = Callable[
     ["ManagedJobContext", dict[str, Any]], Awaitable[dict[str, Any] | None]
 ]
@@ -245,7 +247,9 @@ def _save_store(store: dict[str, Any]) -> None:
 
 
 def _write_managed_deferred_update(job_id: str, operation: str, payload: dict[str, Any]) -> Path:
-    update_id = f"{time.time_ns()}-{uuid.uuid4().hex}"
+    update_id = (
+        f"{time.time_ns():020d}-{next(_MANAGED_DEFERRED_SEQUENCE):020d}-{uuid.uuid4().hex}"
+    )
     directory = _managed_deferred_update_dir()
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{update_id}.json"

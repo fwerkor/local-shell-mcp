@@ -298,6 +298,7 @@ def test_managed_job_state_updates_defer_after_bounded_contention(tmp_path, monk
 
     monkeypatch.setattr(jobs_module, "_store_transaction", busy_transaction)
     monkeypatch.setattr(jobs_module.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(jobs_module.time, "time_ns", lambda: 1)
 
     jobs_module._append_managed_log(str(log_path), "hello")
     jobs_module._update_managed_progress(job_id, {"phase": "copying"})
@@ -311,7 +312,12 @@ def test_managed_job_state_updates_defer_after_bounded_contention(tmp_path, monk
 
     assert attempts == jobs_module.MANAGED_JOB_STORE_RETRY_ATTEMPTS * 3
     deferred_dir = runtime_dir / "deferred"
-    assert len(list(deferred_dir.glob("*.json"))) == 3
+    deferred_paths = sorted(deferred_dir.glob("*.json"))
+    assert len(deferred_paths) == 3
+    assert [
+        json.loads(path.read_text(encoding="utf-8"))["operation"]
+        for path in deferred_paths
+    ] == ["append_log", "update_progress", "finish"]
 
     monkeypatch.setattr(jobs_module, "_store_transaction", original_transaction)
     original_remove = jobs_module._remove_managed_deferred_updates
@@ -348,6 +354,168 @@ def test_managed_job_state_updates_defer_after_bounded_contention(tmp_path, monk
     assert stored["status"] == "succeeded"
     assert stored["result"] == {"copied": True}
     assert jobs_module.MANAGED_DEFERRED_APPLIED_KEY not in stored
+
+
+def test_managed_deferred_update_records_are_validated(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".state"
+    deferred_dir = state_dir / "jobs" / "deferred"
+    deferred_dir.mkdir(parents=True)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+
+    def write_record(name, record):
+        (deferred_dir / f"{name}.json").write_text(
+            json.dumps(record), encoding="utf-8"
+        )
+
+    write_record("not-object", [])
+    write_record(
+        "bad-version",
+        {
+            "version": 99,
+            "update_id": "bad-version",
+            "job_id": "job_test",
+            "operation": "append_log",
+            "payload": {},
+        },
+    )
+    write_record(
+        "missing-update-id",
+        {
+            "version": jobs_module.MANAGED_DEFERRED_UPDATE_VERSION,
+            "job_id": "job_test",
+            "operation": "append_log",
+            "payload": {},
+        },
+    )
+    write_record(
+        "mismatched-update-id",
+        {
+            "version": jobs_module.MANAGED_DEFERRED_UPDATE_VERSION,
+            "update_id": "different-id",
+            "job_id": "job_test",
+            "operation": "append_log",
+            "payload": {},
+        },
+    )
+    write_record(
+        "missing-job-id",
+        {
+            "version": jobs_module.MANAGED_DEFERRED_UPDATE_VERSION,
+            "update_id": "missing-job-id",
+            "operation": "append_log",
+            "payload": {},
+        },
+    )
+    write_record(
+        "bad-operation",
+        {
+            "version": jobs_module.MANAGED_DEFERRED_UPDATE_VERSION,
+            "update_id": "bad-operation",
+            "job_id": "job_test",
+            "operation": "unknown",
+            "payload": {},
+        },
+    )
+    write_record(
+        "bad-payload",
+        {
+            "version": jobs_module.MANAGED_DEFERRED_UPDATE_VERSION,
+            "update_id": "bad-payload",
+            "job_id": "job_test",
+            "operation": "append_log",
+            "payload": [],
+        },
+    )
+    (deferred_dir / "invalid-json.json").write_text("{", encoding="utf-8")
+    (deferred_dir / "unreadable.json").mkdir()
+
+    rows = jobs_module._read_managed_deferred_updates()
+    records = {path.name: (record, removable) for path, record, removable in rows}
+
+    assert len(records) == 9
+    assert records["unreadable.json"] == (None, False)
+    assert all(
+        record is None and removable
+        for name, (record, removable) in records.items()
+        if name != "unreadable.json"
+    )
+
+
+def test_managed_deferred_reconciliation_handles_stale_records(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".state"
+    deferred_dir = state_dir / "jobs" / "deferred"
+    deferred_dir.mkdir(parents=True)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    job_id = "job_test"
+    duplicate_id = "00000000000000000001-00000000000000000001-duplicate"
+    job = {
+        "job_id": job_id,
+        "status": "running",
+        "output_bytes": 0,
+        jobs_module.MANAGED_DEFERRED_APPLIED_KEY: [duplicate_id],
+    }
+
+    def write_record(update_id, target_job_id, operation, payload):
+        (deferred_dir / f"{update_id}.json").write_text(
+            json.dumps(
+                {
+                    "version": jobs_module.MANAGED_DEFERRED_UPDATE_VERSION,
+                    "update_id": update_id,
+                    "job_id": target_job_id,
+                    "operation": operation,
+                    "payload": payload,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    write_record(duplicate_id, job_id, "append_log", {"bytes": 10})
+    write_record(
+        "00000000000000000002-00000000000000000002-missing",
+        "job_missing",
+        "update_progress",
+        {"progress": {"phase": "missing"}},
+    )
+    write_record(
+        "00000000000000000003-00000000000000000003-invalid",
+        job_id,
+        "append_log",
+        {"bytes": "invalid"},
+    )
+    (deferred_dir / "invalid-json.json").write_text("{", encoding="utf-8")
+
+    removable = jobs_module._reconcile_managed_deferred_updates({"jobs": [job]})
+
+    assert {path.name for path in removable} == {
+        f"{duplicate_id}.json",
+        "00000000000000000002-00000000000000000002-missing.json",
+        "00000000000000000003-00000000000000000003-invalid.json",
+        "invalid-json.json",
+    }
+    assert job["output_bytes"] == 0
+    assert job[jobs_module.MANAGED_DEFERRED_APPLIED_KEY] == [duplicate_id]
+    with pytest.raises(ValueError, match="unsupported managed update operation"):
+        jobs_module._apply_managed_update(job, "unknown", {})
+
+
+def test_managed_store_updates_handle_missing_jobs(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".state"
+    runtime_dir = state_dir / "jobs"
+    runtime_dir.mkdir(parents=True)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    log_path = runtime_dir / "job_missing-attempt-1.log"
+
+    jobs_module._append_managed_log(str(log_path), "orphaned")
+
+    assert not (runtime_dir / "deferred").exists()
+    with pytest.raises(KeyError, match="job not found"):
+        jobs_module._update_managed_progress("job_missing", {"phase": "missing"})
 
 
 @pytest.mark.asyncio
