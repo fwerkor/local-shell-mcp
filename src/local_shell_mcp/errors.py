@@ -44,6 +44,7 @@ def workspace_path_not_found_error(
     workspace_root: str | Path,
 ) -> PathNotFoundError | None:
     root = Path(os.path.abspath(workspace_root))
+    candidates: list[Path] = []
     for value in (exc.filename, exc.filename2):
         if not value:
             continue
@@ -55,5 +56,8 @@ def workspace_path_not_found_error(
             lexical.relative_to(root)
         except ValueError:
             continue
-        return PathNotFoundError(lexical)
+        candidates.append(lexical)
+    for candidate in candidates:
+        if not candidate.exists():
+            return PathNotFoundError(candidate)
     return None
