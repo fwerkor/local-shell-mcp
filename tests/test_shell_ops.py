@@ -5,9 +5,12 @@ import time
 import pytest
 from conftest import python_shell_command
 from fastapi.testclient import TestClient
+from mcp.types import CallToolResult, TextContent
 
 import local_shell_mcp.http_app as http_app_module
+import local_shell_mcp.shell_ops as shell_ops_module
 import local_shell_mcp.tools as tools_module
+from local_shell_mcp.errors import PathNotFoundError
 from local_shell_mcp.http_app import build_http_app
 from local_shell_mcp.models import CommandResult
 from local_shell_mcp.settings import get_settings
@@ -22,6 +25,11 @@ from local_shell_mcp.shell_ops import (
 )
 from local_shell_mcp.tmux_helper import TmuxSelection
 from local_shell_mcp.tools import build_mcp
+
+
+def _mcp_error_text(result: CallToolResult) -> str:
+    assert result.isError is True
+    return next(item.text for item in result.content if isinstance(item, TextContent))
 
 
 def test_public_tool_watchdog_allows_shell_timeout_cleanup():
@@ -62,7 +70,8 @@ async def test_run_shell_tool_rejects_timeout_above_public_cap(tmp_path, monkeyp
     response = await build_mcp().call_tool(
         "run_shell_tool", {"command": "echo ok", "timeout_s": 3600}
     )
-    payload = response[0][0].text
+    assert isinstance(response, CallToolResult)
+    payload = _mcp_error_text(response)
 
     assert "timeout_s must be <= 120 seconds for public run_shell" in payload
 
@@ -79,7 +88,8 @@ async def test_mcp_tool_watchdog_returns_handled_timeout(tmp_path, monkeypatch):
     monkeypatch.setattr(tools_module, "tree", hanging_tree)
 
     response = await build_mcp().call_tool("tree_view", {"cwd": "."})
-    payload = response[0][0].text
+    assert isinstance(response, CallToolResult)
+    payload = _mcp_error_text(response)
 
     assert "tree_view exceeded 0.01 second public tool timeout" in payload
 
@@ -132,7 +142,8 @@ async def test_mcp_tool_watchdog_times_out_sync_tool(tmp_path, monkeypatch):
     monkeypatch.setattr(tools_module, "list_dir", blocking_list_dir)
 
     response = await build_mcp().call_tool("list_files", {"path": "."})
-    payload = response[0][0].text
+    assert isinstance(response, CallToolResult)
+    payload = _mcp_error_text(response)
 
     assert "list_files exceeded 0.01 second public tool timeout" in payload
 
@@ -204,6 +215,44 @@ async def test_run_shell_fast_command_succeeds(tmp_path, monkeypatch):
     assert result.ok is True
     assert result.timed_out is False
     assert "ok" in result.stdout
+
+
+@pytest.mark.asyncio
+async def test_run_shell_tool_reports_missing_shell_executable(tmp_path, monkeypatch):
+    executable = "local-shell-mcp-missing-shell-issue-106"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_SHELL_EXECUTABLE", executable)
+    get_settings.cache_clear()
+
+    result = await build_mcp().call_tool("run_shell_tool", {"command": "echo ok"})
+
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    assert result.structuredContent["ok"] is False
+    assert result.structuredContent["message"] == f"Shell executable not found: {executable}"
+    data = result.structuredContent["data"]
+    assert data["status"] == "executable_not_found"
+    assert data["error_type"] == "FileNotFoundError"
+    assert data["executable"] == executable
+    assert data["command"] == "echo ok"
+    assert "path" not in data
+    assert str(tmp_path) not in result.structuredContent["message"]
+
+
+@pytest.mark.asyncio
+async def test_spawn_process_reports_vanished_cwd_as_path_error(tmp_path, monkeypatch):
+    missing_cwd = tmp_path / "vanished"
+
+    async def fail_spawn(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
+        raise FileNotFoundError(2, "No such file or directory", str(missing_cwd))
+
+    monkeypatch.setattr(shell_ops_module.asyncio, "create_subprocess_exec", fail_spawn)
+
+    with pytest.raises(PathNotFoundError) as raised:
+        await shell_ops_module._spawn_process("echo ok", str(missing_cwd))
+
+    assert raised.value.path == missing_cwd
 
 
 @pytest.mark.asyncio

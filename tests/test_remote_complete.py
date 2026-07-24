@@ -13,6 +13,7 @@ from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
 import local_shell_mcp.remote as remote
+from local_shell_mcp.errors import ShellExecutableNotFoundError
 from local_shell_mcp.models import CommandResult
 from local_shell_mcp.settings import get_settings
 
@@ -180,6 +181,7 @@ def test_controller_poll_result_errors_and_cancellation(tmp_path, monkeypatch):
         return await task
 
     failed = asyncio.run(failed_call())
+    assert failed["ok"] is False
     assert failed["data"]["status"] == "error"
     assert failed["data"]["error_type"] == "Boom"
 
@@ -615,6 +617,13 @@ def test_worker_upload_protocol_and_generated_execution_edges(tmp_path, monkeypa
     script = asyncio.run(remote._run_python("print('ok')", ".", 5))
     assert script["script_path"].endswith(".py")
     assert remote._handled_remote_exception(ValueError("bad"))["error"] == "ValueError"
+    shell_error = remote._handled_remote_exception(
+        ShellExecutableNotFoundError("missing-shell", "echo ok", ".", "[WinError 2]")
+    )
+    assert shell_error["ok"] is False
+    assert shell_error["data"]["status"] == "executable_not_found"
+    assert shell_error["data"]["executable"] == "missing-shell"
+    assert shell_error["data"]["command"] == "echo ok"
 
 
 @pytest.mark.asyncio

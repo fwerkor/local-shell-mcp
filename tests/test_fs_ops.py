@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from mcp.types import CallToolResult
 
 from local_shell_mcp.fs_ops import (
     BINARY_CHECK_BYTES,
@@ -238,9 +239,15 @@ async def test_read_file_rejects_too_many_files(tmp_path, monkeypatch):
     (tmp_path / "b.txt").write_text("b", encoding="utf-8")
 
     response = await build_mcp().call_tool("read_file", {"path": ["a.txt", "b.txt"]})
-    payload = response[0][0].text
 
-    assert "Refusing to read 2 files; max is 1" in payload
+    assert isinstance(response, CallToolResult)
+    assert response.isError is True
+    assert response.structuredContent["ok"] is False
+    assert response.structuredContent["data"] == {
+        "status": "error",
+        "error_type": "ValueError",
+        "message": "Refusing to read 2 files; max is 1",
+    }
 
 
 def test_reject_path_escape(tmp_path, monkeypatch):

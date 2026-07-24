@@ -2,8 +2,10 @@ import asyncio
 import shutil
 
 import pytest
+from mcp.types import CallToolResult
 
 import local_shell_mcp.search_ops as search_ops_module
+from local_shell_mcp.errors import PathNotFoundError
 from local_shell_mcp.search_ops import grep, tree
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.tools import _handled_error
@@ -54,31 +56,64 @@ async def test_tree_returns_context_for_missing_directory(tmp_path, monkeypatch)
     assert "Path does not exist" in result["message"]
 
 
-def test_tool_error_returns_successful_not_found_result(tmp_path, monkeypatch):
+def test_tool_error_returns_failed_not_found_result(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     get_settings.cache_clear()
     (tmp_path / "actual").mkdir()
 
-    result = _handled_error(FileNotFoundError(str(tmp_path / "missing" / "project")))
+    result = _handled_error(PathNotFoundError(tmp_path / "missing" / "project"))
 
-    assert result["ok"] is True
-    assert result["data"]["status"] == "not_found"
-    assert result["data"]["error_type"] == "FileNotFoundError"
-    assert result["data"]["exists"] is False
-    assert result["data"]["nearest_existing_parent"] == str(tmp_path)
-    assert "actual/" in result["data"]["nearest_parent_entries"]
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    assert result.structuredContent["ok"] is False
+    data = result.structuredContent["data"]
+    assert data["status"] == "not_found"
+    assert data["error_type"] == "FileNotFoundError"
+    assert data["exists"] is False
+    assert data["nearest_existing_parent"] == str(tmp_path)
+    assert "actual/" in data["nearest_parent_entries"]
 
 
-def test_tool_error_returns_successful_error_result():
+def test_tool_error_returns_failed_error_result():
     result = _handled_error(ValueError("bad input"))
 
-    assert result["ok"] is True
-    assert "error" not in result
-    assert result["data"] == {
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    assert result.structuredContent["ok"] is False
+    assert result.structuredContent["data"] == {
         "status": "error",
         "error_type": "ValueError",
         "message": "bad input",
     }
+
+
+def test_os_file_not_found_message_is_not_treated_as_workspace_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+
+    result = _handled_error(FileNotFoundError(2, "The system cannot find the file specified"))
+
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    data = result.structuredContent["data"]
+    assert data["status"] == "error"
+    assert data["error_type"] == "FileNotFoundError"
+    assert "path" not in data
+    assert str(tmp_path) not in result.structuredContent["message"]
+
+
+def test_syscall_file_not_found_inside_workspace_keeps_path_context(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    missing = tmp_path / "removed-during-read.txt"
+
+    result = _handled_error(FileNotFoundError(2, "No such file or directory", str(missing)))
+
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    data = result.structuredContent["data"]
+    assert data["status"] == "not_found"
+    assert data["path"] == str(missing)
 
 
 @pytest.mark.asyncio
