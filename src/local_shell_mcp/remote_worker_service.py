@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import plistlib
+import posixpath
 import re
 import shlex
 import shutil
@@ -32,6 +33,19 @@ from .remote_worker_state import (
 _SERVICE_NAME = "local-shell-mcp-worker"
 _LAUNCHD_LABEL = "com.fwerkor.local-shell-mcp-worker"
 _WORKER_MANAGED_ENV = "LOCAL_SHELL_MCP_WORKER_MANAGED"
+_LAUNCHD_PATH_SEPARATOR = ":"
+_LAUNCHD_HOMEBREW_DIRS = (
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    "/usr/local/bin",
+    "/usr/local/sbin",
+)
+_LAUNCHD_SYSTEM_DIRS = (
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+)
 _WORKER_LOCK_FD_ENV = "LOCAL_SHELL_MCP_WORKER_LOCK_FD"
 _WORKER_LOCK_RETRY_S = 5.0
 _WORKER_LOCK_HANDOFF_RETRY_S = 0.1
@@ -251,20 +265,83 @@ WantedBy=default.target
     return path
 
 
-def _write_launchd_plist() -> Path:
+def _launchd_session_path_entries() -> tuple[str, ...]:
+    if platform.system() != "Darwin" or not shutil.which("launchctl"):
+        return ()
+    result = _run(["launchctl", "getenv", "PATH"], check=False)
+    if result.returncode:
+        return ()
+    return tuple(
+        entry
+        for entry in result.stdout.strip().split(_LAUNCHD_PATH_SEPARATOR)
+        if entry and posixpath.isabs(entry)
+    )
+
+
+def _installed_launchd_launcher_path() -> Path | None:
+    try:
+        payload = plistlib.loads(_launchd_plist_path().read_bytes())
+    except (OSError, TypeError, ValueError, plistlib.InvalidFileException):
+        return None
+    arguments = payload.get("ProgramArguments")
+    if not isinstance(arguments, list) or not arguments:
+        return None
+    launcher = arguments[0]
+    if not isinstance(launcher, str):
+        return None
+    path = Path(launcher)
+    return path if path.is_absolute() else None
+
+
+def _launchd_path(launcher: Path | None = None) -> str:
+    launcher = launcher or worker_launcher_path()
+    directories = (
+        str(launcher.parent),
+        *_LAUNCHD_HOMEBREW_DIRS,
+        *_launchd_session_path_entries(),
+        *_LAUNCHD_SYSTEM_DIRS,
+    )
+    return _LAUNCHD_PATH_SEPARATOR.join(dict.fromkeys(directories))
+
+
+def _write_launchd_plist(launcher: Path | None = None) -> Path:
+    launcher = launcher or worker_launcher_path()
     path = _launchd_plist_path()
     payload = {
         "Label": _LAUNCHD_LABEL,
-        "ProgramArguments": [str(worker_launcher_path()), "worker", "run"],
+        "ProgramArguments": [str(launcher), "worker", "run"],
         "RunAtLoad": True,
         "KeepAlive": True,
-        "EnvironmentVariables": {_WORKER_MANAGED_ENV: "1"},
+        "EnvironmentVariables": {
+            _WORKER_MANAGED_ENV: "1",
+            "PATH": _launchd_path(launcher),
+        },
         "StandardOutPath": str(worker_log_path()),
         "StandardErrorPath": str(worker_log_path()),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(plistlib.dumps(payload, fmt=plistlib.FMT_XML, sort_keys=False))
     return path
+
+
+def refresh_installed_service_definition() -> Path | None:
+    if service_kind() != "launchd" or not _launchd_plist_path().exists():
+        return None
+    launcher = _installed_launchd_launcher_path() or worker_launcher_path()
+    return _write_launchd_plist(launcher)
+
+
+def prepare_worker_service_environment() -> Path | None:
+    if (
+        platform.system() != "Darwin"
+        or service_kind() != "launchd"
+        or not _launchd_plist_path().exists()
+        or not _current_worker_is_managed()
+    ):
+        return None
+    launcher = _installed_launchd_launcher_path() or worker_launcher_path()
+    os.environ["PATH"] = _launchd_path(launcher)
+    return _write_launchd_plist(launcher)
 
 
 def _pid_is_running(pid: int) -> bool:
@@ -466,7 +543,7 @@ def install_service(*, start: bool = True) -> dict[str, Any]:
         _run(command)
     elif kind == "launchd":
         _stop_process()
-        service_file = _write_launchd_plist()
+        service_file = _write_launchd_plist(launcher)
         domain = f"gui/{_user_id()}"
         _run(["launchctl", "bootout", domain, str(service_file)], check=False)
         if start:

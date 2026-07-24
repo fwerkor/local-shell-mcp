@@ -14,6 +14,8 @@ from .remote_worker_service import (
     cancel_worker_lock_reexec,
     install_service,
     prepare_worker_lock_reexec,
+    prepare_worker_service_environment,
+    refresh_installed_service_definition,
     service_status,
     start_service,
     stop_service,
@@ -184,6 +186,7 @@ def _prepare_worker_start() -> None:
     install_or_update_runtime(str(config["server"]))
     install_launcher()
     ensure_user_bin_on_path()
+    refresh_installed_service_definition()
 
 
 def _add_enrollment_arguments(parser: argparse.ArgumentParser) -> None:
@@ -238,6 +241,7 @@ def _run_command(args: argparse.Namespace) -> None:
     elif args.command == "connect":
         asyncio.run(_connect(args))
     elif args.command == "run":
+        prepare_worker_service_environment()
         asyncio.run(run_enrolled_worker())
     elif args.command == "start":
         _prepare_worker_start()
@@ -254,9 +258,11 @@ def _run_command(args: argparse.Namespace) -> None:
         config = _load_config_or_migrate()
         before = service_status()
         result = install_or_update_runtime(str(config["server"]), force=args.force)
-        if result["updated"] and before["running"]:
-            stop_service()
-            start_service()
+        if result["updated"]:
+            refresh_installed_service_definition()
+            if before["running"]:
+                stop_service()
+                start_service()
         _print_result(result)
     elif args.command == "install-service":
         config = _load_config_or_migrate()
