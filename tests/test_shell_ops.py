@@ -402,31 +402,39 @@ async def test_run_shell_shares_total_budget_between_streams(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_tmux_command_uses_selected_binary_and_private_socket(monkeypatch):
+async def test_tmux_command_uses_selected_binary_and_private_socket(tmp_path, monkeypatch):
     from local_shell_mcp import shell_ops
     from local_shell_mcp.tmux_helper import TmuxSelection
 
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_SHELL_EXECUTABLE", "/bin/bash")
+    get_settings.cache_clear()
     calls = []
 
-    async def fake_run_shell(command, cwd=".", timeout_s=None, max_output_bytes=None):
-        calls.append((command, cwd, timeout_s, max_output_bytes))
+    async def fake_run_exec(
+        argv, *, cwd=".", timeout_s=10, env=None, bypass_limit=False
+    ):
+        calls.append((argv, cwd, timeout_s, env, bypass_limit))
         return CommandResult(
             ok=True,
             exit_code=0,
             timed_out=False,
             duration_ms=1,
             cwd=cwd,
-            command=command,
+            command="tmux",
         )
 
     monkeypatch.setattr(shell_ops, "resolve_tmux", lambda: TmuxSelection("/opt/lsm/tmux", "bundled"))
     monkeypatch.setattr(shell_ops, "tmux_socket_name", lambda: "lsm-test")
-    monkeypatch.setattr(shell_ops, "run_shell", fake_run_shell)
+    monkeypatch.setattr(shell_ops, "_run_exec", fake_run_exec)
 
     result = await shell_ops.tmux(["list-sessions"], timeout_s=5)
 
     assert result.ok is True
-    assert calls == [("/opt/lsm/tmux -L lsm-test list-sessions", ".", 5, None)]
+    assert calls[0][:3] == (["/opt/lsm/tmux", "-L", "lsm-test", "list-sessions"], ".", 5)
+    assert calls[0][3]["SHELL"] == "/bin/bash"
+    assert calls[0][4] is False
 
 
 @pytest.mark.asyncio
