@@ -22,6 +22,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from .audit import audit, audit_call_context, audit_result_ok
 from .auth import require_current_scopes
 from .downloads import create_share_link, list_share_links, revoke_share_link
+from .errors import (
+    PathNotFoundError,
+    ShellExecutableNotFoundError,
+    workspace_path_not_found_error,
+)
 from .fs_ops import (
     delete_path,
     edit_text,
@@ -118,27 +123,59 @@ class ViewImageResult(BaseModel):
     error_type: str | None = None
 
 
-def _handled_error(exc: Exception) -> dict:
+def _error_call_result(data: dict[str, Any], message: str) -> CallToolResult:
+    structured = {"ok": False, "message": message, "data": data}
+    return CallToolResult(
+        content=[
+            TextContent(
+                type="text",
+                text=json.dumps(structured, ensure_ascii=False, indent=2),
+            )
+        ],
+        structuredContent=structured,
+        isError=True,
+    )
+
+
+def _handled_error(exc: Exception) -> CallToolResult:
     audit("tool_error", error=repr(exc))
-    if isinstance(exc, FileNotFoundError) and str(exc):
+    if isinstance(exc, ShellExecutableNotFoundError):
+        message = f"Shell executable not found: {exc.executable}"
+        return _error_call_result(
+            {
+                "status": "executable_not_found",
+                "error_type": "FileNotFoundError",
+                "message": str(exc),
+                "executable": exc.executable,
+                "command": exc.command,
+                "cwd": exc.cwd,
+                "original_error": exc.original_error,
+            },
+            message,
+        )
+    path_error = exc if isinstance(exc, PathNotFoundError) else None
+    if isinstance(exc, FileNotFoundError) and path_error is None:
+        path_error = workspace_path_not_found_error(exc, get_settings().workspace_root)
+    if path_error is not None:
         with suppress(Exception):
-            context = missing_path_context(str(exc))
-            return _ok(
+            context = missing_path_context(path_error.path)
+            return _error_call_result(
                 {
                     "status": "not_found",
-                    "error_type": type(exc).__name__,
+                    "error_type": "FileNotFoundError",
                     "message": str(exc),
                     **context,
                 },
-                message=f"Path not found: {context['path']}",
+                f"Path not found: {context['path']}",
             )
-    return _ok(
+    message = str(exc) or type(exc).__name__
+    return _error_call_result(
         {
             "status": "error",
             "error_type": type(exc).__name__,
-            "message": str(exc),
+            "message": message,
         },
-        message=f"Tool handled {type(exc).__name__}",
+        message,
     )
 
 
@@ -1343,7 +1380,24 @@ async def _remote_call(
     try:
         if not settings.remote_enabled:
             raise RuntimeError("Remote workers are disabled")
-        return await remote_manager().call(machine, tool, args, timeout_s)
+        result = await remote_manager().call(machine, tool, args, timeout_s)
+        data = result.get("data") if isinstance(result, dict) else None
+        failed_status = (
+            isinstance(data, dict)
+            and data.get("status") in {"error", "not_found", "executable_not_found"}
+        )
+        if not result.get("ok", False) or failed_status:
+            if not isinstance(data, dict):
+                data = {
+                    "status": "error",
+                    "error_type": "remote_error",
+                    "message": result.get("message", "remote job failed"),
+                }
+            return _error_call_result(
+                data,
+                result.get("message") or data.get("message") or "Remote tool failed",
+            )
+        return result
     except Exception as exc:
         return _handled_error(exc)
 

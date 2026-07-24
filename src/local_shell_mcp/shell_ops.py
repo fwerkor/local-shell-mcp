@@ -17,6 +17,7 @@ from pathlib import Path
 
 from . import conpty_ops
 from .audit import audit
+from .errors import process_start_not_found_error
 from .fs_ops import relative_display, resolve_path
 from .models import CommandResult
 from .settings import get_settings
@@ -205,14 +206,23 @@ def _use_windows_persistent_shell_backend() -> bool:
 
 
 async def _spawn_process(command: str, cwd: str) -> asyncio.subprocess.Process:
-    return await asyncio.create_subprocess_exec(
-        *_shell_command_args(command),
-        cwd=cwd,
-        env=subprocess_env(),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        start_new_session=(sys.platform != "win32"),
-    )
+    args = _shell_command_args(command)
+    try:
+        return await asyncio.create_subprocess_exec(
+            *args,
+            cwd=cwd,
+            env=subprocess_env(),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=(sys.platform != "win32"),
+        )
+    except FileNotFoundError as exc:
+        raise process_start_not_found_error(
+            exc,
+            executable=str(args[0]),
+            command=command,
+            cwd=cwd,
+        ) from exc
 
 
 async def _read_stream_tail(stream: asyncio.StreamReader | None, tail: TailBuffer) -> None:
@@ -447,15 +457,24 @@ async def _native_start_shell(
 
     initial = command or get_settings().shell_executable
     check_command_policy(initial)
-    proc = await asyncio.create_subprocess_exec(
-        *_persistent_shell_args(command),
-        cwd=str(resolved_cwd),
-        env=subprocess_env(),
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-        start_new_session=(sys.platform != "win32"),
-    )
+    args = _persistent_shell_args(command)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            cwd=str(resolved_cwd),
+            env=subprocess_env(),
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            start_new_session=(sys.platform != "win32"),
+        )
+    except FileNotFoundError as exc:
+        raise process_start_not_found_error(
+            exc,
+            executable=str(args[0]),
+            command=initial,
+            cwd=resolved_cwd,
+        ) from exc
     session = NativeShellSession(
         session_id=session_id,
         process=proc,

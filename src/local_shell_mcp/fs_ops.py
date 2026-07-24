@@ -14,6 +14,7 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from .errors import PathNotFoundError
 from .settings import get_settings
 
 BINARY_CHECK_BYTES = 8192
@@ -223,9 +224,9 @@ def resolve_path(
 
     exists = resolved.exists() if follow_final_symlink else os.path.lexists(resolved)
     if must_exist and not exists:
-        raise FileNotFoundError(str(resolved))
+        raise PathNotFoundError(resolved)
     if not allow_missing_parent and not resolved.parent.exists():
-        raise FileNotFoundError(str(resolved.parent))
+        raise PathNotFoundError(resolved.parent)
     return resolved
 
 
@@ -560,7 +561,7 @@ def perform_file_action(
     )
     with _path_locks([source, target]):
         if not os.path.lexists(source):
-            raise FileNotFoundError(str(source))
+            raise PathNotFoundError(source)
         if os.path.lexists(target):
             raise FileExistsError(str(target))
         if source == target:
@@ -659,7 +660,7 @@ def delete_path(path: str, recursive: bool = False) -> dict:
     p = resolve_path(path, must_exist=True, follow_final_symlink=False)
     with _path_lock(p):
         if not os.path.lexists(p):
-            raise FileNotFoundError(str(p))
+            raise PathNotFoundError(p)
         if p.is_symlink():
             p.unlink()
             return {"path": relative_display(p), "deleted": "link"}

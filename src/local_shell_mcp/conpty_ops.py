@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .audit import audit
+from .errors import process_start_not_found_error
 from .fs_ops import relative_display, resolve_path
 from .settings import get_settings
 from .shell_environment import (
@@ -227,7 +228,16 @@ async def start_shell(
     initial = command or get_settings().shell_executable
     if check_command_policy is not None:
         check_command_policy(initial)
-    process = await asyncio.to_thread(_spawn_pty, _persistent_shell_args(command), resolved_cwd)
+    args = _persistent_shell_args(command)
+    try:
+        process = await asyncio.to_thread(_spawn_pty, args, resolved_cwd)
+    except FileNotFoundError as exc:
+        raise process_start_not_found_error(
+            exc,
+            executable=str(args[0]),
+            command=initial,
+            cwd=resolved_cwd,
+        ) from exc
     session = ConPtyShellSession(
         session_id=session_id,
         process=process,
