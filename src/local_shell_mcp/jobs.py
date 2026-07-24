@@ -248,7 +248,7 @@ def _save_store(store: dict[str, Any]) -> None:
 
 def _write_managed_deferred_update(job_id: str, operation: str, payload: dict[str, Any]) -> Path:
     update_id = (
-        f"{time.time_ns():020d}-{next(_MANAGED_DEFERRED_SEQUENCE):020d}-{uuid.uuid4().hex}"
+        f"{next(_MANAGED_DEFERRED_SEQUENCE):020d}-{time.time_ns():020d}-{uuid.uuid4().hex}"
     )
     directory = _managed_deferred_update_dir()
     directory.mkdir(parents=True, exist_ok=True)
@@ -396,8 +396,6 @@ def _remove_managed_deferred_updates(paths: list[Path]) -> None:
     for path in paths:
         with contextlib.suppress(OSError):
             path.unlink()
-    with contextlib.suppress(OSError):
-        _managed_deferred_update_dir().rmdir()
 
 
 def _job_store_busy_error(lock_path: Path, *, lock_kind: str) -> TimeoutError:

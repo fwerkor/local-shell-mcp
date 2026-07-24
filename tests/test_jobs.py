@@ -298,7 +298,8 @@ def test_managed_job_state_updates_defer_after_bounded_contention(tmp_path, monk
 
     monkeypatch.setattr(jobs_module, "_store_transaction", busy_transaction)
     monkeypatch.setattr(jobs_module.time, "sleep", lambda _seconds: None)
-    monkeypatch.setattr(jobs_module.time, "time_ns", lambda: 1)
+    wall_clock = iter([3, 2, 1])
+    monkeypatch.setattr(jobs_module.time, "time_ns", lambda: next(wall_clock))
 
     jobs_module._append_managed_log(str(log_path), "hello")
     jobs_module._update_managed_progress(job_id, {"phase": "copying"})
@@ -342,7 +343,8 @@ def test_managed_job_state_updates_defer_after_bounded_contention(tmp_path, monk
     )
     with original_transaction():
         pass
-    assert not deferred_dir.exists()
+    assert deferred_dir.is_dir()
+    assert not list(deferred_dir.iterdir())
     with original_transaction():
         pass
 
@@ -557,7 +559,9 @@ async def test_stop_managed_job_finishes_after_deferred_cancellation_updates(tmp
     assert stopped["killed"] is True
     assert stopped["job"]["status"] == "stopped"
     assert job["job_id"] not in jobs_module._MANAGED_JOB_TASKS
-    assert not (state_dir / "jobs" / "deferred").exists()
+    deferred_dir = state_dir / "jobs" / "deferred"
+    assert deferred_dir.is_dir()
+    assert not list(deferred_dir.iterdir())
 
 
 @pytest.mark.asyncio
