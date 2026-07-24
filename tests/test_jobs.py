@@ -259,6 +259,139 @@ def test_managed_job_state_updates_retry_store_contention(tmp_path, monkeypatch)
     assert stored["result"] == {"copied": True}
 
 
+def test_managed_job_state_updates_defer_after_bounded_contention(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".state"
+    runtime_dir = state_dir / "jobs"
+    runtime_dir.mkdir(parents=True)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    job_id = "job_managed_deferred"
+    log_path = runtime_dir / f"{job_id}-attempt-1.log"
+    row = {
+        "job_id": job_id,
+        "kind": "managed",
+        "name": "managed-deferred",
+        "status": "running",
+        "command": "managed deferred",
+        "cwd": ".",
+        "created_at": time.time(),
+        "updated_at": time.time(),
+        "attempts": 1,
+        "log_path": str(log_path),
+        "output_bytes": 0,
+        "log_truncated": False,
+    }
+    (state_dir / jobs_module.JOB_STORE_FILE_NAME).write_text(
+        json.dumps({"version": jobs_module.JOB_STORE_VERSION, "jobs": [row]}),
+        encoding="utf-8",
+    )
+    original_transaction = jobs_module._store_transaction
+    attempts = 0
+
+    @jobs_module.contextlib.contextmanager
+    def busy_transaction():
+        nonlocal attempts
+        attempts += 1
+        raise TimeoutError("busy")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(jobs_module, "_store_transaction", busy_transaction)
+    monkeypatch.setattr(jobs_module.time, "sleep", lambda _seconds: None)
+
+    jobs_module._append_managed_log(str(log_path), "hello")
+    jobs_module._update_managed_progress(job_id, {"phase": "copying"})
+    jobs_module._finish_managed_job(
+        job_id,
+        status="succeeded",
+        exit_code=0,
+        error=None,
+        result={"copied": True},
+    )
+
+    assert attempts == jobs_module.MANAGED_JOB_STORE_RETRY_ATTEMPTS * 3
+    deferred_dir = runtime_dir / "deferred"
+    assert len(list(deferred_dir.glob("*.json"))) == 3
+
+    monkeypatch.setattr(jobs_module, "_store_transaction", original_transaction)
+    original_remove = jobs_module._remove_managed_deferred_updates
+    monkeypatch.setattr(
+        jobs_module,
+        "_remove_managed_deferred_updates",
+        lambda _paths: None,
+    )
+    with original_transaction():
+        pass
+    assert len(list(deferred_dir.glob("*.json"))) == 3
+
+    stored_after_interrupted_cleanup = json.loads(
+        (state_dir / jobs_module.JOB_STORE_FILE_NAME).read_text(encoding="utf-8")
+    )["jobs"][0]
+    assert stored_after_interrupted_cleanup["output_bytes"] == len(b"hello\n")
+
+    monkeypatch.setattr(
+        jobs_module,
+        "_remove_managed_deferred_updates",
+        original_remove,
+    )
+    with original_transaction():
+        pass
+    assert not deferred_dir.exists()
+    with original_transaction():
+        pass
+
+    stored = json.loads((state_dir / jobs_module.JOB_STORE_FILE_NAME).read_text(encoding="utf-8"))[
+        "jobs"
+    ][0]
+    assert stored["output_bytes"] == len(b"hello\n")
+    assert stored["progress"] == {"phase": "copying"}
+    assert stored["status"] == "succeeded"
+    assert stored["result"] == {"copied": True}
+    assert jobs_module.MANAGED_DEFERRED_APPLIED_KEY not in stored
+
+
+@pytest.mark.asyncio
+async def test_stop_managed_job_finishes_after_deferred_cancellation_updates(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".state"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    started = asyncio.Event()
+    blocked = asyncio.Event()
+
+    async def handler(context, payload):  # noqa: ARG001
+        started.set()
+        await blocked.wait()
+
+    kind = f"test-managed-deferred-stop-{time.time_ns()}"
+    register_managed_job_handler(kind, handler)
+    job = await start_managed_job(kind, {}, name="managed-deferred-stop")
+    await asyncio.wait_for(started.wait(), timeout=1)
+
+    original_transaction = jobs_module._store_transaction
+    attempts = 0
+
+    @jobs_module.contextlib.contextmanager
+    def cancellation_contention():
+        nonlocal attempts
+        attempts += 1
+        if 3 <= attempts <= 6:
+            raise TimeoutError("busy")
+        with original_transaction() as store:
+            yield store
+
+    monkeypatch.setattr(jobs_module, "_store_transaction", cancellation_contention)
+    monkeypatch.setattr(jobs_module.time, "sleep", lambda _seconds: None)
+
+    stopped = await asyncio.wait_for(stop_job(job["job_id"]), timeout=1)
+
+    assert attempts == 7
+    assert stopped["killed"] is True
+    assert stopped["job"]["status"] == "stopped"
+    assert job["job_id"] not in jobs_module._MANAGED_JOB_TASKS
+    assert not (state_dir / "jobs" / "deferred").exists()
+
+
 @pytest.mark.asyncio
 async def test_managed_jobs_track_tail_stop_and_retry(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))

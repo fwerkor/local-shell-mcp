@@ -36,6 +36,9 @@ JOB_STORE_VERSION = 2
 JOB_STORE_LEGACY_VERSIONS = {1}
 JOB_STORE_LOCK_TIMEOUT_S = 2.0
 JOB_STORE_LOCK_RETRY_INTERVAL_S = 0.05
+MANAGED_JOB_STORE_RETRY_ATTEMPTS = 2
+MANAGED_DEFERRED_UPDATE_VERSION = 1
+MANAGED_DEFERRED_APPLIED_KEY = "managed_deferred_update_ids"
 TERMINAL_STATUSES = {"succeeded", "failed", "exited", "stopped", "lost"}
 _JOB_STORE_THREAD_LOCK = threading.RLock()
 _ACTIVE_JOB_OPERATIONS: set[str] = set()
@@ -66,6 +69,10 @@ def _job_runtime_dir() -> Path:
     path = get_settings().state_dir / "jobs"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _managed_deferred_update_dir() -> Path:
+    return get_settings().state_dir / "jobs" / "deferred"
 
 
 def _job_store_lock_path() -> Path:
@@ -237,6 +244,158 @@ def _save_store(store: dict[str, Any]) -> None:
         backup_tmp_path.unlink(missing_ok=True)
 
 
+def _write_managed_deferred_update(job_id: str, operation: str, payload: dict[str, Any]) -> Path:
+    update_id = f"{time.time_ns()}-{uuid.uuid4().hex}"
+    directory = _managed_deferred_update_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{update_id}.json"
+    temporary = path.with_suffix(".tmp")
+    record = {
+        "version": MANAGED_DEFERRED_UPDATE_VERSION,
+        "update_id": update_id,
+        "job_id": job_id,
+        "operation": operation,
+        "payload": payload,
+    }
+    try:
+        temporary.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+        with contextlib.suppress(OSError):
+            temporary.chmod(0o600)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    audit(
+        "managed_job_store_update_deferred",
+        job_id=job_id,
+        operation=operation,
+        update_id=update_id,
+        path=str(path),
+    )
+    return path
+
+
+def _read_managed_deferred_updates() -> list[tuple[Path, dict[str, Any] | None, bool]]:
+    rows: list[tuple[Path, dict[str, Any] | None, bool]] = []
+    for path in sorted(_managed_deferred_update_dir().glob("*.json")):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(record, dict):
+                raise ValueError("record is not an object")
+            if record.get("version") != MANAGED_DEFERRED_UPDATE_VERSION:
+                raise ValueError("unsupported deferred update version")
+            if not str(record.get("update_id") or ""):
+                raise ValueError("missing update id")
+            if str(record["update_id"]) != path.stem:
+                raise ValueError("update id does not match filename")
+            if not str(record.get("job_id") or ""):
+                raise ValueError("missing job id")
+            if record.get("operation") not in {
+                "append_log",
+                "update_progress",
+                "finish",
+            }:
+                raise ValueError("unsupported operation")
+            if not isinstance(record.get("payload"), dict):
+                raise ValueError("payload is not an object")
+        except OSError as exc:
+            audit("managed_job_deferred_update_unreadable", path=str(path), error=repr(exc))
+            rows.append((path, None, False))
+            continue
+        except (ValueError, json.JSONDecodeError) as exc:
+            audit("managed_job_deferred_update_invalid", path=str(path), error=repr(exc))
+            rows.append((path, None, True))
+            continue
+        rows.append((path, record, True))
+    return rows
+
+
+def _apply_managed_update(job: dict[str, Any], operation: str, payload: dict[str, Any]) -> None:
+    if operation == "append_log":
+        job["output_bytes"] = int(job.get("output_bytes") or 0) + max(
+            0, int(payload.get("bytes") or 0)
+        )
+        job["log_truncated"] = bool(job.get("log_truncated")) or bool(payload.get("truncated"))
+        return
+    if operation == "update_progress":
+        if job.get("status") in {"starting", "running", "stopping", "retrying"}:
+            job["progress"] = dict(payload.get("progress") or {})
+            job["updated_at"] = float(payload.get("updated_at") or _utc())
+        return
+    if operation == "finish":
+        if job.get("status") not in {"starting", "running", "stopping", "retrying"}:
+            return
+        completed_at = float(payload.get("completed_at") or _utc())
+        job.update(
+            {
+                "status": str(payload.get("status") or "failed"),
+                "updated_at": completed_at,
+                "completed_at": completed_at,
+                "exit_code": payload.get("exit_code"),
+                "error": payload.get("error"),
+            }
+        )
+        if payload.get("has_result"):
+            job["result"] = payload.get("result")
+        return
+    raise ValueError(f"unsupported managed update operation: {operation}")
+
+
+def _reconcile_managed_deferred_updates(store: dict[str, Any]) -> list[Path]:
+    rows = _read_managed_deferred_updates()
+    active_ids = {path.stem for path, _record, _removable in rows}
+    for job in store.get("jobs", []):
+        applied = [
+            str(update_id)
+            for update_id in job.get(MANAGED_DEFERRED_APPLIED_KEY, [])
+            if str(update_id) in active_ids
+        ]
+        if applied:
+            job[MANAGED_DEFERRED_APPLIED_KEY] = applied
+        else:
+            job.pop(MANAGED_DEFERRED_APPLIED_KEY, None)
+
+    removable: list[Path] = []
+    for path, record, should_remove in rows:
+        if should_remove:
+            removable.append(path)
+        if record is None:
+            continue
+        job_id = str(record["job_id"])
+        try:
+            job = _find_job(store, job_id)
+        except KeyError:
+            continue
+        update_id = str(record["update_id"])
+        applied = [str(item) for item in job.get(MANAGED_DEFERRED_APPLIED_KEY, [])]
+        if update_id in applied:
+            continue
+        try:
+            _apply_managed_update(
+                job,
+                str(record["operation"]),
+                dict(record["payload"]),
+            )
+        except (TypeError, ValueError) as exc:
+            audit(
+                "managed_job_deferred_update_invalid",
+                path=str(path),
+                job_id=job_id,
+                error=repr(exc),
+            )
+            continue
+        applied.append(update_id)
+        job[MANAGED_DEFERRED_APPLIED_KEY] = applied
+    return removable
+
+
+def _remove_managed_deferred_updates(paths: list[Path]) -> None:
+    for path in paths:
+        with contextlib.suppress(OSError):
+            path.unlink()
+    with contextlib.suppress(OSError):
+        _managed_deferred_update_dir().rmdir()
+
+
 def _job_store_busy_error(lock_path: Path, *, lock_kind: str) -> TimeoutError:
     audit(
         "job_store_lock_timeout",
@@ -269,8 +428,10 @@ def _store_transaction():  # noqa: ANN201
                 raise _job_store_busy_error(lock_path, lock_kind="file") from exc
             try:
                 store = _load_store()
+                deferred_paths = _reconcile_managed_deferred_updates(store)
                 yield store
                 _save_store(store)
+                _remove_managed_deferred_updates(deferred_paths)
             finally:
                 _unlock_store_file(handle)
     finally:
@@ -656,47 +817,48 @@ def _append_managed_log(path: str, message: str) -> None:
         handle.flush()
         truncated = _compact_log(handle, max_bytes)
     job_id = target.name.split("-attempt-", 1)[0]
-
-    def update(store: dict[str, Any]) -> None:
-        with contextlib.suppress(KeyError):
-            job = _find_job(store, job_id)
-            job["output_bytes"] = int(job.get("output_bytes") or 0) + len(encoded)
-            job["log_truncated"] = bool(job.get("log_truncated")) or truncated
-
-    _managed_store_update("append_log", job_id, update)
+    _managed_store_update(
+        "append_log",
+        job_id,
+        {"bytes": len(encoded), "truncated": truncated},
+    )
 
 
 def _update_managed_progress(job_id: str, progress: dict[str, Any]) -> None:
-    def update(store: dict[str, Any]) -> None:
-        job = _find_job(store, job_id)
-        if job.get("status") in {"starting", "running", "stopping", "retrying"}:
-            job["progress"] = dict(progress)
-            job["updated_at"] = _utc()
-
-    _managed_store_update("update_progress", job_id, update)
+    _managed_store_update(
+        "update_progress",
+        job_id,
+        {"progress": dict(progress), "updated_at": _utc()},
+    )
 
 
 def _managed_store_update(
     operation: str,
     job_id: str,
-    update: Callable[[dict[str, Any]], None],
+    payload: dict[str, Any],
 ) -> None:
-    attempts = 0
-    while True:
+    for attempt in range(1, MANAGED_JOB_STORE_RETRY_ATTEMPTS + 1):
         try:
             with _store_transaction() as store:
-                update(store)
+                try:
+                    job = _find_job(store, job_id)
+                except KeyError:
+                    if operation == "append_log":
+                        return
+                    raise
+                _apply_managed_update(job, operation, payload)
             return
         except TimeoutError:
-            attempts += 1
-            if attempts == 1 or attempts % 20 == 0:
-                audit(
-                    "managed_job_store_update_deferred",
-                    job_id=job_id,
-                    operation=operation,
-                    attempts=attempts,
-                )
+            if attempt == MANAGED_JOB_STORE_RETRY_ATTEMPTS:
+                break
+            audit(
+                "managed_job_store_update_retry",
+                job_id=job_id,
+                operation=operation,
+                attempt=attempt,
+            )
             time.sleep(JOB_STORE_LOCK_RETRY_INTERVAL_S)
+    _write_managed_deferred_update(job_id, operation, payload)
 
 
 class ManagedJobContext:
@@ -719,24 +881,18 @@ def _finish_managed_job(
     error: str | None,
     result: dict[str, Any] | None = None,
 ) -> None:
-    def update(store: dict[str, Any]) -> None:
-        job = _find_job(store, job_id)
-        if job.get("status") not in {"starting", "running", "stopping", "retrying"}:
-            return
-        completed_at = _utc()
-        job.update(
-            {
-                "status": status,
-                "updated_at": completed_at,
-                "completed_at": completed_at,
-                "exit_code": exit_code,
-                "error": error,
-            }
-        )
-        if result is not None:
-            job["result"] = result
-
-    _managed_store_update("finish", job_id, update)
+    _managed_store_update(
+        "finish",
+        job_id,
+        {
+            "status": status,
+            "completed_at": _utc(),
+            "exit_code": exit_code,
+            "error": error,
+            "has_result": result is not None,
+            "result": result,
+        },
+    )
 
 
 async def _run_managed_job(
