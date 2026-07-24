@@ -169,6 +169,10 @@ The public MCP surface includes:
 
 The detailed tool reference, including purpose, inputs, returns, combinations, and notes for every tool, is available in the [docs](https://fwerkor.github.io/local-shell-mcp/reference/tools/).
 
+## Session-oriented community fork
+
+Users who prefer an explicit session abstraction, including those who do not use ChatGPT Memory, may prefer the independently maintained [rijuyuezhu/local-shell-mcp](https://github.com/rijuyuezhu/local-shell-mcp) fork. It binds workspace context, jobs, todos, and transfers to sessions and has its own tool surface and release lifecycle.
+
 ## Security model
 
 This project intentionally exposes powerful tools. Treat the connected model as having control of the container or VM.
