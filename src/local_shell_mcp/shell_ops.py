@@ -4,6 +4,7 @@ import asyncio
 import os
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -392,18 +393,142 @@ async def public_run_shell(
     return await run_shell(command, cwd, public_run_shell_timeout(timeout_s), max_output_bytes)
 
 
+async def _run_exec(
+    argv: list[str],
+    *,
+    cwd: str = ".",
+    timeout_s: int = 10,
+    env: dict[str, str] | None = None,
+    bypass_limit: bool = False,
+) -> CommandResult:
+    resolved_cwd = resolve_path(cwd, must_exist=True)
+    command = shlex.join(argv)
+    check_command_policy(command)
+    start = time.time()
+    audit("run_shell_start", command=command, cwd=str(resolved_cwd))
+    timeout = clamp_timeout(timeout_s)
+    output_limit = _effective_output_limit()
+    stdout_tail = TailBuffer(output_limit, bytearray())
+    stderr_tail = TailBuffer(output_limit, bytearray())
+    reader_tasks: list[asyncio.Task[None]] = []
+    proc: asyncio.subprocess.Process | None = None
+    timed_out = False
+    termination_error = ""
+
+    async def spawn_and_wait() -> None:
+        nonlocal proc
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            cwd=str(resolved_cwd),
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=(sys.platform != "win32"),
+        )
+        reader_tasks.extend(
+            [
+                asyncio.create_task(_read_stream_tail(proc.stdout, stdout_tail)),
+                asyncio.create_task(_read_stream_tail(proc.stderr, stderr_tail)),
+            ]
+        )
+        await proc.wait()
+
+    semaphore = None if bypass_limit else _command_semaphore()
+    acquired = False
+    try:
+        try:
+            if semaphore is not None:
+                await asyncio.wait_for(semaphore.acquire(), timeout=timeout)
+                acquired = True
+                elapsed = max(0.0, time.time() - start)
+                timeout = max(0.001, timeout - elapsed)
+            await asyncio.wait_for(spawn_and_wait(), timeout=timeout)
+        except TimeoutError:
+            timed_out = True
+            if proc is None:
+                termination_error = "Timed out while starting subprocess"
+            else:
+                termination_error = await _terminate_process_group(proc)
+        except asyncio.CancelledError:
+            if proc is not None:
+                await asyncio.shield(_terminate_process_group(proc))
+            raise
+    finally:
+        if acquired and semaphore is not None:
+            semaphore.release()
+
+    try:
+        if reader_tasks:
+            await _finish_reader_tasks(reader_tasks)
+    finally:
+        if proc is not None:
+            await _close_process_transport(proc)
+
+    if termination_error:
+        stderr_tail.append(termination_error.encode())
+    stdout_b, stderr_b, total_truncated = _shared_tail_bytes(
+        bytes(stdout_tail.data), bytes(stderr_tail.data), output_limit
+    )
+    duration_ms = int((time.time() - start) * 1000)
+    result = CommandResult(
+        ok=(proc is not None and proc.returncode == 0 and not timed_out),
+        exit_code=proc.returncode if proc is not None else None,
+        timed_out=timed_out,
+        duration_ms=duration_ms,
+        cwd=relative_display(resolved_cwd),
+        command=command,
+        stdout=stdout_b.decode(errors="replace"),
+        stderr=stderr_b.decode(errors="replace"),
+        truncated=stdout_tail.truncated or stderr_tail.truncated or total_truncated,
+    )
+    audit(
+        "run_shell_end",
+        command=command,
+        cwd=str(resolved_cwd),
+        exit_code=proc.returncode if proc is not None else None,
+        timed_out=timed_out,
+        duration_ms=duration_ms,
+        truncated=result.truncated,
+    )
+    return result
+
+
 def _tmux_session_name(name: str | None = None) -> str:
     base = name or f"mcp-{uuid.uuid4().hex[:8]}"
     cleaned = re.sub(r"[^A-Za-z0-9_.-]", "-", base.strip())[:64].strip(".-")
     return cleaned or f"mcp-{uuid.uuid4().hex[:8]}"
 
 
-async def tmux(args: list[str], timeout_s: int = 10) -> CommandResult:
+def _tmux_session_cwd(args: list[str]) -> str:
+    if args and args[0] == "new-session":
+        with suppress(ValueError, IndexError):
+            return args[args.index("-c") + 1]
+    return "."
+
+
+def _resolved_tmux_shell(session_cwd: str = ".") -> str:
+    configured = os.path.expanduser(get_settings().shell_executable)
+    candidate = shutil.which(configured) or configured
+    if os.path.isabs(candidate):
+        return candidate
+    return os.path.abspath(os.path.join(session_cwd, candidate))
+
+
+async def tmux(
+    args: list[str], timeout_s: int = 10, *, bypass_limit: bool = False
+) -> CommandResult:
     selection = resolve_tmux()
     if selection.path is None:
         raise RuntimeError("tmux is unavailable and no bundled helper matches this platform")
-    cmd = " ".join(shlex.quote(x) for x in [selection.path, "-L", tmux_socket_name(), *args])
-    return await run_shell(cmd, cwd=".", timeout_s=timeout_s)
+    env = subprocess_env()
+    env["SHELL"] = _resolved_tmux_shell(_tmux_session_cwd(args))
+    return await _run_exec(
+        [selection.path, "-L", tmux_socket_name(), *args],
+        cwd=".",
+        timeout_s=timeout_s,
+        env=env,
+        bypass_limit=bypass_limit,
+    )
 
 
 async def _read_native_shell_stream(
@@ -628,6 +753,22 @@ async def _start_shell_unlocked(
     result = await tmux(cmd)
     if not result.ok:
         raise RuntimeError(result.stderr or result.stdout)
+    if not command:
+        alive = await tmux(
+            ["has-session", "-t", f"={session}"], timeout_s=5, bypass_limit=True
+        )
+        if not alive.ok:
+            with suppress(Exception):
+                await tmux(
+                    ["kill-session", "-t", f"={session}"],
+                    timeout_s=5,
+                    bypass_limit=True,
+                )
+            detail = (alive.stderr or alive.stdout).strip()
+            message = f"Persistent shell session exited during startup: {session}"
+            if detail:
+                message += f" ({detail})"
+            raise RuntimeError(message)
     backend = f"tmux-{selection.source}"
     audit("shell_start", session=session, cwd=str(resolved_cwd), command=initial, backend=backend)
     return {
