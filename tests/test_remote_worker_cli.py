@@ -243,6 +243,20 @@ def test_cli_legacy_and_lifecycle_dispatch(tmp_path, monkeypatch, capsys):
     assert calls == ["prepare", "start", "stop", "prepare", "start"]
 
 
+def test_cli_run_prepares_managed_service_environment(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        cli, "prepare_worker_service_environment", lambda: calls.append("prepare")
+    )
+
+    async def fake_run():
+        calls.append("run")
+
+    monkeypatch.setattr(cli, "run_enrolled_worker", fake_run)
+    cli.run_worker_cli(["run"])
+    assert calls == ["prepare", "run"]
+
+
 def test_cli_update_restarts_running_service(tmp_path, monkeypatch, capsys):
     _configure(tmp_path, monkeypatch)
     state.write_worker_config(server="https://example.test", name="worker", workdir=str(tmp_path))
@@ -253,11 +267,38 @@ def test_cli_update_restarts_running_service(tmp_path, monkeypatch, capsys):
         "install_or_update_runtime",
         lambda server, force=False: {"updated": True, "server": server, "force": force},
     )
+    monkeypatch.setattr(
+        cli,
+        "refresh_installed_service_definition",
+        lambda: calls.append("refresh"),
+    )
     monkeypatch.setattr(cli, "stop_service", lambda: calls.append("stop"))
     monkeypatch.setattr(cli, "start_service", lambda: calls.append("start"))
     cli.run_worker_cli(["update", "--force"])
-    assert calls == ["stop", "start"]
+    assert calls == ["refresh", "stop", "start"]
     assert '"force": true' in capsys.readouterr().out
+
+
+def test_cli_update_refreshes_stopped_service_definition(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    state.write_worker_config(server="https://example.test", name="worker", workdir=str(tmp_path))
+    calls = []
+    monkeypatch.setattr(cli, "service_status", lambda: {"running": False})
+    monkeypatch.setattr(
+        cli,
+        "install_or_update_runtime",
+        lambda server, force=False: {"updated": True, "server": server, "force": force},
+    )
+    monkeypatch.setattr(
+        cli,
+        "refresh_installed_service_definition",
+        lambda: calls.append("refresh"),
+    )
+    monkeypatch.setattr(cli, "stop_service", lambda: pytest.fail("stopped inactive service"))
+    monkeypatch.setattr(cli, "start_service", lambda: pytest.fail("started inactive service"))
+
+    cli.run_worker_cli(["update"])
+    assert calls == ["refresh"]
 
 
 def test_cli_errors_are_clean(monkeypatch, capsys):

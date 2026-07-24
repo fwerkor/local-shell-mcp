@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import json
 import os
+import plistlib
 import subprocess
 import sys
 from pathlib import Path
@@ -78,12 +79,121 @@ def test_launchd_install_start_and_status(tmp_path, monkeypatch):
 
     monkeypatch.setattr(service, "_run", fake_run)
     service.install_service(start=True)
-    assert service._launchd_plist_path().exists()  # noqa: SLF001
-    assert b"LOCAL_SHELL_MCP_WORKER_MANAGED" in service._launchd_plist_path().read_bytes()
+    plist_path = service._launchd_plist_path()  # noqa: SLF001
+    assert plist_path.exists()
+    environment = plistlib.loads(plist_path.read_bytes())["EnvironmentVariables"]
+    assert environment["LOCAL_SHELL_MCP_WORKER_MANAGED"] == "1"
+    assert environment["PATH"] == ":".join(
+        [
+            str(service.worker_launcher_path().parent),
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            "/usr/local/sbin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+        ]
+    )
     assert service.service_status()["running"] is True
     service.start_service()
     service.stop_service()
     assert any(command[1] == "bootstrap" for command, _ in calls if command[0] == "launchctl")
+
+
+def test_launchd_plist_path_does_not_inherit_installer_environment(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    first = service._write_launchd_plist().read_bytes()  # noqa: SLF001
+    monkeypatch.setenv("PATH", "/tmp/transient-bin:/usr/bin")
+    second = service._write_launchd_plist().read_bytes()  # noqa: SLF001
+
+    assert second == first
+    path = plistlib.loads(second)["EnvironmentVariables"]["PATH"]
+    assert "/tmp/transient-bin" not in path
+
+
+def test_launchd_path_preserves_sanitized_session_entries(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(service.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(service.shutil, "which", lambda name: "/bin/launchctl")
+
+    def fake_run(command, *, check=True):
+        assert command == ["launchctl", "getenv", "PATH"]
+        assert check is False
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout="/nix/var/nix/profiles/default/bin:relative::/opt/local/bin:/usr/bin\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(service, "_run", fake_run)
+    assert service._launchd_path() == ":".join(  # noqa: SLF001
+        [
+            str(service.worker_launcher_path().parent),
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            "/usr/local/sbin",
+            "/nix/var/nix/profiles/default/bin",
+            "/opt/local/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+        ]
+    )
+
+
+def test_prepare_launchd_worker_environment_preserves_custom_launcher(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    custom_launcher = tmp_path / "custom-bin" / "local-shell-mcp"
+    plist_path = service._launchd_plist_path()  # noqa: SLF001
+    plist_path.parent.mkdir(parents=True, exist_ok=True)
+    plist_path.write_bytes(
+        plistlib.dumps(
+            {
+                "Label": "com.fwerkor.local-shell-mcp-worker",
+                "ProgramArguments": [str(custom_launcher), "worker", "run"],
+            }
+        )
+    )
+    monkeypatch.setattr(service.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(service, "service_kind", lambda: "launchd")
+    monkeypatch.setattr(service, "_current_worker_is_managed", lambda: True)
+    monkeypatch.setattr(
+        service, "_launchd_session_path_entries", lambda: ("/opt/local/bin",)
+    )
+
+    assert service.prepare_worker_service_environment() == plist_path
+    expected_path = [
+        str(custom_launcher.parent),
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        "/usr/local/sbin",
+        "/opt/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+    ]
+    assert os.environ["PATH"] == ":".join(expected_path)
+    payload = plistlib.loads(plist_path.read_bytes())
+    assert payload["ProgramArguments"][0] == str(custom_launcher)
+    assert payload["EnvironmentVariables"]["PATH"] == ":".join(expected_path)
+
+
+def test_prepare_worker_environment_ignores_darwin_process_fallback(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("PATH", "/custom/bin:/usr/bin")
+    monkeypatch.setattr(service.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(service, "service_kind", lambda: "process")
+    monkeypatch.setattr(service, "_current_worker_is_managed", lambda: True)
+
+    assert service.prepare_worker_service_environment() is None
+    assert os.environ["PATH"] == "/custom/bin:/usr/bin"
 
 
 def test_process_fallback_start_stop_and_stale_pid(tmp_path, monkeypatch):
