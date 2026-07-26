@@ -586,9 +586,9 @@ export function FilesScreen({
       return
     }
     if (moveOrScroll(key)) return
-    if (key.name === "g" && key.shift && narrowPane === "list") setSelected(Math.max(0, entries.length - 1))
-    else if (key.name === "g") setSelected(0)
-    else if (key.name === "h" || key.name === "left" || key.name === "backspace") goToParent()
+    if (key.name === "g" && narrowPane === "list") {
+      setSelected(key.shift ? Math.max(0, entries.length - 1) : 0)
+    } else if (key.name === "h" || key.name === "left" || key.name === "backspace") goToParent()
     else if (key.name === "l" || key.name === "right" || key.name === "return") activateCurrent()
     else if (key.name === "." || key.name === "period") setShowHidden((value) => !value)
     else if (key.name === "r" && !key.shift) renameCurrent()

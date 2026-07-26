@@ -17,8 +17,8 @@ describe("pane navigation", () => {
       scrollBy(delta: number, unit?: string) {
         calls.push(["by", delta, unit])
       },
-      scrollTo(position: number) {
-        calls.push(["to", position])
+      scrollTo(position: number, unit?: string) {
+        calls.push(["to", position, unit])
       },
     } as unknown as ScrollBoxRenderable
 
