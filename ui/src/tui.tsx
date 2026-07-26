@@ -26,7 +26,8 @@ function Help({ close }: { close: () => void }) {
       <text fg={theme.muted} content="Alt+Q     quit the TUI" />
       <text fg={theme.muted} content="F1        show this guide" />
       <text fg={theme.borderBright} content="\nScreen conventions" />
-      <text fg={theme.muted} content="j/k or arrows move selection · Enter activates · Esc closes dialogs" />
+      <text fg={theme.muted} content="Tab chooses a pane · j/k or arrows select rows or scroll the active pane" />
+      <text fg={theme.muted} content="Enter activates · PgUp/PgDn/Home/End scroll read-only panes · Esc closes dialogs" />
       <text fg={theme.muted} content="[ / ] switches Files machines · Alt+[ / ] switches Terminal machines" />
       <text fg={theme.muted} content="Terminals: Alt+N new · Alt+W kill · PgUp/PgDn scroll · Alt+R refresh" />
       <text fg={theme.muted} content="The footer on every screen lists its contextual commands." />

@@ -1,14 +1,19 @@
+import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { api, formatError } from "./api"
 import { EmptyState, KeyHint, Loading, Modal, Panel, formatAge, useVisibleRows } from "./components"
 import { handleSelectionScroll } from "./mouse"
+import { cyclePane, scrollPaneForKey } from "./pane-navigation"
 import { remoteSystemInfo, remoteVersion } from "./remotes-utils"
 import { clampIndex } from "./state-utils"
 import { screenTheme, theme } from "./theme"
 import type { InvitePayload, Machine } from "./types"
 
 const colors = screenTheme.Remotes
+
+type RemotePane = "list" | "details"
+const REMOTE_PANES = ["list", "details"] as const satisfies readonly RemotePane[]
 
 type RemoteDialog =
   | { type: "none" }
@@ -60,10 +65,12 @@ export function RemotesScreen({
   const [machines, setMachines] = useState<Machine[]>([])
   const [enabled, setEnabled] = useState(true)
   const [selected, setSelected] = useState(0)
+  const [activePane, setActivePane] = useState<RemotePane>("list")
   const [dialog, setDialog] = useState<RemoteDialog>({ type: "none" })
   const [loading, setLoading] = useState(true)
   const [loaded, setLoaded] = useState(false)
   const refreshRequest = useRef(0)
+  const detailsScrollRef = useRef<ScrollBoxRenderable | null>(null)
   const refreshController = useRef<AbortController | null>(null)
   const current = machines[selected]
   const compact = width < 92
@@ -111,6 +118,10 @@ export function RemotesScreen({
   }, [refresh])
 
   useEffect(() => {
+    detailsScrollRef.current?.scrollTo(0)
+  }, [current?.name])
+
+  useEffect(() => {
     onInteractionLockChange(dialog.type !== "none")
     return () => onInteractionLockChange(false)
   }, [dialog.type, onInteractionLockChange])
@@ -142,6 +153,21 @@ export function RemotesScreen({
   const moveSelection = (delta: number) => {
     setSelected((value) => clampIndex(value + delta, machines.length))
   }
+  const cycleActivePane = (delta = 1) => {
+    setActivePane((value) => cyclePane(REMOTE_PANES, value, delta))
+  }
+  const moveOrScroll = (key: { name: string; shift?: boolean }) => {
+    if (activePane === "details") return scrollPaneForKey(detailsScrollRef.current, key)
+    if (key.name === "j" || key.name === "down") {
+      moveSelection(1)
+      return true
+    }
+    if (key.name === "k" || key.name === "up") {
+      moveSelection(-1)
+      return true
+    }
+    return false
+  }
   const createRemoteInvite = () => enabled && setDialog({ type: "invite" })
   const renameCurrent = () => current && enabled && setDialog({ type: "rename", machine: current })
   const revokeCurrent = () => current && enabled && setDialog({ type: "revoke", machine: current })
@@ -170,8 +196,12 @@ export function RemotesScreen({
       }
       return
     }
-    if (key.name === "j" || key.name === "down") moveSelection(1)
-    else if (key.name === "k" || key.name === "up") moveSelection(-1)
+    if (key.name === "tab") {
+      key.preventDefault()
+      cycleActivePane(key.shift ? -1 : 1)
+    } else if (key.name === "left") cycleActivePane(-1)
+    else if (key.name === "right") cycleActivePane(1)
+    else if (moveOrScroll(key)) return
     else if (key.name === "n") createRemoteInvite()
     else if (key.name === "e") renameCurrent()
     else if (key.name === "d") revokeCurrent()
@@ -209,7 +239,14 @@ export function RemotesScreen({
         </box>
       )}
       <box style={{ flexGrow: 1, flexDirection: compact ? "column" : "row", gap: 1 }}>
-        <Panel title="Remote nodes" active accent={colors.accent} activeBackground={colors.panel} style={{ flexGrow: 1, paddingTop: 1 }}>
+        <Panel
+          title="Remote nodes"
+          active={activePane === "list"}
+          accent={colors.accent}
+          activeBackground={colors.panel}
+          onMouseDown={() => setActivePane("list")}
+          style={{ flexGrow: 1, minHeight: 0, paddingTop: 1, overflow: "hidden" }}
+        >
           {!loaded ? (
             loading ? <Loading label="Loading remote nodes" /> : <EmptyState title="Remotes unavailable" detail="Press r to try again" />
           ) : machines.length === 0 ? (
@@ -264,6 +301,10 @@ export function RemotesScreen({
         </Panel>
         <Panel
           title="Node details"
+          active={activePane === "details"}
+          accent={colors.accent}
+          activeBackground={colors.panel}
+          onMouseDown={() => setActivePane("details")}
           style={{
             width: compact ? "100%" : "34%",
             height: compact ? 11 : "100%",
@@ -272,6 +313,7 @@ export function RemotesScreen({
         >
           {current ? (
             <scrollbox
+              ref={detailsScrollRef}
               focused={false}
               style={{ flexGrow: 1 }}
               scrollY
@@ -296,8 +338,9 @@ export function RemotesScreen({
       <KeyHint
         accent={colors.accent}
         items={[
-          { key: "j", label: "down", onPress: () => moveSelection(1), disabled: footerLocked || machines.length === 0 },
-          { key: "k", label: "up", onPress: () => moveSelection(-1), disabled: footerLocked || machines.length === 0 },
+          { key: "Tab", label: "pane", onPress: () => cycleActivePane(1), disabled: footerLocked },
+          { key: "j", label: activePane === "details" ? "scroll down" : "down", onPress: () => moveOrScroll({ name: "j" }), disabled: footerLocked || (activePane === "list" && machines.length === 0) },
+          { key: "k", label: activePane === "details" ? "scroll up" : "up", onPress: () => moveOrScroll({ name: "k" }), disabled: footerLocked || (activePane === "list" && machines.length === 0) },
           { key: "n", label: "new invite", onPress: createRemoteInvite, disabled: footerLocked || !enabled },
           { key: "e", label: "rename", onPress: renameCurrent, disabled: footerLocked || !enabled || !current },
           { key: "d", label: "revoke", onPress: revokeCurrent, disabled: footerLocked || !enabled || !current },

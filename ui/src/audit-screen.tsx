@@ -1,4 +1,4 @@
-import type { Renderable } from "@opentui/core"
+import type { Renderable, ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
@@ -15,6 +15,7 @@ import {
 import { EmptyState, KeyHint, Loading, Modal, Panel, useVisibleRows } from "./components"
 import { ImagePreviewView } from "./image-preview-view"
 import { handleSelectionScroll } from "./mouse"
+import { cyclePane, scrollPaneForKey } from "./pane-navigation"
 import { clampIndex, nextPreviewMeasurement } from "./state-utils"
 import { HighlightedText } from "./syntax-highlight"
 import { parseTerminalCellAspect } from "./terminal-geometry"
@@ -25,6 +26,8 @@ const colors = screenTheme.Audit
 const terminalCellAspect = parseTerminalCellAspect(process.env.LOCAL_SHELL_MCP_UI_CELL_ASPECT)
 
 type AuditDialog = { type: "none" } | { type: "search" } | { type: "event" } | { type: "session" }
+type AuditPane = "list" | "output" | "input"
+const AUDIT_PANES = ["list", "output", "input"] as const satisfies readonly AuditPane[]
 
 const TIME_RANGES = [
   { label: "15m", seconds: 15 * 60 },
@@ -83,6 +86,7 @@ export function AuditScreen({
   const [loading, setLoading] = useState(true)
   const [loaded, setLoaded] = useState(false)
   const [detail, setDetail] = useState<AuditEntry | null>(null)
+  const [activePane, setActivePane] = useState<AuditPane>("list")
   const [previewBounds, setPreviewBounds] = useState({ columns: 8, rows: 4 })
   const refreshRequest = useRef(0)
   const refreshController = useRef<AbortController | null>(null)
@@ -91,6 +95,8 @@ export function AuditScreen({
   const entriesRef = useRef<AuditEntry[]>([])
   const selectedRef = useRef(0)
   const measuredPreviewViewport = useRef("")
+  const outputScrollRef = useRef<ScrollBoxRenderable | null>(null)
+  const inputScrollRef = useRef<ScrollBoxRenderable | null>(null)
 
   const nodes = useMemo(() => ["", ...machines.map((machine) => machine.name)], [machines])
   const selectedNode = nodes[nodeIndex] || ""
@@ -225,17 +231,43 @@ export function AuditScreen({
     return () => clearInterval(timer)
   }, [refresh])
 
+  useEffect(() => {
+    outputScrollRef.current?.scrollTo(0)
+    inputScrollRef.current?.scrollTo(0)
+  }, [displayed?.id])
+
+  const cycleActivePane = (delta = 1) => {
+    setActivePane((value) => cyclePane(AUDIT_PANES, value, delta))
+  }
+
+  const moveOrScroll = (key: { name: string; shift?: boolean }) => {
+    if (activePane === "list") {
+      if (key.name === "j" || key.name === "down") {
+        selectIndex((value) => clampIndex(value + 1, entries.length))
+        return true
+      }
+      if (key.name === "k" || key.name === "up") {
+        selectIndex((value) => Math.max(0, value - 1))
+        return true
+      }
+      return false
+    }
+    return scrollPaneForKey(activePane === "output" ? outputScrollRef.current : inputScrollRef.current, key)
+  }
+
   useKeyboard((key) => {
     if (!keyboardEnabled) return
     if (dialog.type !== "none") {
       if (key.name === "escape") setDialog({ type: "none" })
       return
     }
-    if (key.name === "j" || key.name === "down") {
-      selectIndex((value) => clampIndex(value + 1, entries.length))
-    } else if (key.name === "k" || key.name === "up") {
-      selectIndex((value) => Math.max(0, value - 1))
-    } else if (key.name === "n") cycleNode()
+    if (key.name === "tab") {
+      key.preventDefault()
+      cycleActivePane(key.shift ? -1 : 1)
+    } else if (key.name === "left") cycleActivePane(-1)
+    else if (key.name === "right") cycleActivePane(1)
+    else if (moveOrScroll(key)) return
+    else if (key.name === "n") cycleNode()
     else if (key.name === "o") cycleOperation()
     else if (key.name === "t") cycleTime()
     else if (key.name === "s") toggleSort()
@@ -298,9 +330,10 @@ export function AuditScreen({
       <box style={{ flexGrow: 1, flexDirection: horizontal ? "row" : "column", gap: 1 }}>
         <Panel
           title={`Audit records · ${loaded ? entries.length : "—"}${loading ? " · syncing" : ""}`}
-          active
+          active={activePane === "list"}
           accent={colors.accent}
           activeBackground={colors.panel}
+          onMouseDown={() => setActivePane("list")}
           style={horizontal
             ? { width: listLayout.paneWidth, flexShrink: 0, paddingTop: 1 }
             : { flexGrow: 1, paddingTop: 1 }}
@@ -374,6 +407,10 @@ export function AuditScreen({
               />
               <Panel
                 title="Call result"
+                active={activePane === "output"}
+                accent={colors.accent}
+                activeBackground={colors.panel}
+                onMouseDown={() => setActivePane("output")}
                 style={{ flexGrow: 1, minHeight: 0, overflow: "hidden", padding: 1 }}
               >
                 <box
@@ -406,6 +443,7 @@ export function AuditScreen({
                     />
                   ) : (
                     <scrollbox
+                      ref={outputScrollRef}
                       focused={false}
                       style={{ flexGrow: 1, minWidth: 0, minHeight: 0 }}
                       scrollY
@@ -418,9 +456,14 @@ export function AuditScreen({
               </Panel>
               <Panel
                 title="Call input"
+                active={activePane === "input"}
+                accent={colors.accent}
+                activeBackground={colors.panel}
+                onMouseDown={() => setActivePane("input")}
                 style={{ flexGrow: 1, minHeight: 0, overflow: "hidden", padding: 1 }}
               >
                 <scrollbox
+                  ref={inputScrollRef}
                   focused={false}
                   style={{ flexGrow: 1, minWidth: 0, minHeight: 0 }}
                   scrollY
@@ -440,8 +483,9 @@ export function AuditScreen({
       <KeyHint
         accent={colors.accent}
         items={[
-          { key: "j", label: "down", onPress: () => selectIndex((value) => clampIndex(value + 1, entries.length)), disabled: footerLocked || entries.length === 0 },
-          { key: "k", label: "up", onPress: () => selectIndex((value) => Math.max(0, value - 1)), disabled: footerLocked || entries.length === 0 },
+          { key: "Tab", label: "pane", onPress: () => cycleActivePane(1), disabled: footerLocked },
+          { key: "j", label: activePane === "list" ? "down" : "scroll down", onPress: () => moveOrScroll({ name: "j" }), disabled: footerLocked || (activePane === "list" && entries.length === 0) },
+          { key: "k", label: activePane === "list" ? "up" : "scroll up", onPress: () => moveOrScroll({ name: "k" }), disabled: footerLocked || (activePane === "list" && entries.length === 0) },
           { key: "n", label: "node", onPress: cycleNode, disabled: footerLocked },
           { key: "o", label: "operation", onPress: cycleOperation, disabled: footerLocked },
           { key: "t", label: "time", onPress: cycleTime, disabled: footerLocked },

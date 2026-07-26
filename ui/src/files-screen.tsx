@@ -1,4 +1,4 @@
-import type { Renderable, TextareaRenderable } from "@opentui/core"
+import type { Renderable, ScrollBoxRenderable, TextareaRenderable } from "@opentui/core"
 import { useKeyboard } from "@opentui/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api, formatError } from "./api"
@@ -11,6 +11,7 @@ import {
 } from "./file-navigation"
 import { calculateFilesLayout } from "./files-layout"
 import { handleSelectionScroll } from "./mouse"
+import { scrollPaneForKey } from "./pane-navigation"
 import { clampIndex, nextPreviewMeasurement, payloadMatches } from "./state-utils"
 import { HighlightedText } from "./syntax-highlight"
 import { ImagePreviewView } from "./image-preview-view"
@@ -116,11 +117,13 @@ function Preview({
   entry,
   showHidden,
   onDirectoryEntrySelect,
+  scrollRef,
 }: {
   preview: FilePreview | null
   entry?: FileEntry
   showHidden: boolean
   onDirectoryEntrySelect?: (entry: FileEntry) => void
+  scrollRef: { current: ScrollBoxRenderable | null }
 }) {
   const directoryEntries = preview?.kind === "directory"
     ? (preview.entries || []).filter((item) => showHidden || !item.hidden)
@@ -133,6 +136,7 @@ function Preview({
         <EmptyState title={entry.name} detail="Loading preview…" />
       ) : preview.kind === "directory" ? (
         <scrollbox
+          ref={scrollRef}
           focused={false}
           style={{ flexGrow: 1, minWidth: 0, minHeight: 0, paddingLeft: 1, paddingRight: 1 }}
           scrollY
@@ -160,6 +164,7 @@ function Preview({
         <ImagePreviewView preview={preview} title={entry.name} fallbackBytes={Number(entry.size || 0)} />
       ) : (
         <scrollbox
+          ref={scrollRef}
           focused={false}
           style={{ flexGrow: 1, minWidth: 0, minHeight: 0, paddingLeft: 1, paddingRight: 1 }}
           scrollY
@@ -213,6 +218,7 @@ export function FilesScreen({
   const [narrowPane, setNarrowPane] = useState<"list" | "preview">("list")
   const [previewBounds, setPreviewBounds] = useState<{ columns: number; rows: number } | null>(null)
   const editorRef = useRef<TextareaRenderable>(null)
+  const previewScrollRef = useRef<ScrollBoxRenderable | null>(null)
   const refreshRequest = useRef(0)
   const refreshController = useRef<AbortController | null>(null)
   const measuredPreviewViewport = useRef("")
@@ -318,6 +324,7 @@ export function FilesScreen({
 
   useEffect(() => {
     setPreview(null)
+    previewScrollRef.current?.scrollTo(0)
   }, [current?.path, machine])
 
   useEffect(() => {
@@ -474,6 +481,18 @@ export function FilesScreen({
     if (narrow) setNarrowPane("list")
   }
   const toggleNarrowPane = () => setNarrowPane((value) => (value === "list" ? "preview" : "list"))
+  const moveOrScroll = (key: { name: string; shift?: boolean }) => {
+    if (narrowPane === "preview") return scrollPaneForKey(previewScrollRef.current, key)
+    if (key.name === "j" || key.name === "down") {
+      moveSelection(1)
+      return true
+    }
+    if (key.name === "k" || key.name === "up") {
+      moveSelection(-1)
+      return true
+    }
+    return false
+  }
   const createFile = () => setDialog({
     type: "input",
     action: "new-file",
@@ -561,14 +580,13 @@ export function FilesScreen({
       return
     }
 
-    if (narrow && key.name === "tab") {
+    if (key.name === "tab") {
       key.preventDefault()
       toggleNarrowPane()
       return
     }
-    if (key.name === "j" || key.name === "down") moveSelection(1)
-    else if (key.name === "k" || key.name === "up") moveSelection(-1)
-    else if (key.name === "g" && key.shift) setSelected(Math.max(0, entries.length - 1))
+    if (moveOrScroll(key)) return
+    if (key.name === "g" && key.shift && narrowPane === "list") setSelected(Math.max(0, entries.length - 1))
     else if (key.name === "g") setSelected(0)
     else if (key.name === "h" || key.name === "left" || key.name === "backspace") goToParent()
     else if (key.name === "l" || key.name === "right" || key.name === "return") activateCurrent()
@@ -688,9 +706,10 @@ export function FilesScreen({
             {(!narrow || narrowPane === "list") && (
               <Panel
                 title="Current"
-                active
+                active={narrowPane === "list"}
                 accent={colors.accent}
                 activeBackground={colors.panel}
+                onMouseDown={() => setNarrowPane("list")}
                 style={{
                   width: filesLayout.currentWidth,
                   flexGrow: 0,
@@ -717,6 +736,10 @@ export function FilesScreen({
             {(!narrow || narrowPane === "preview") && (
               <Panel
                 title="Preview"
+                active={narrowPane === "preview"}
+                accent={colors.accent}
+                activeBackground={colors.panel}
+                onMouseDown={() => setNarrowPane("preview")}
                 style={{
                   width: filesLayout.previewWidth,
                   flexGrow: 0,
@@ -754,6 +777,7 @@ export function FilesScreen({
                       entry={current}
                       showHidden={showHidden}
                       onDirectoryEntrySelect={selectPreviewEntry}
+                      scrollRef={previewScrollRef}
                     />
                   )}
                 </box>
@@ -765,9 +789,9 @@ export function FilesScreen({
       <KeyHint
         accent={colors.accent}
         items={[
-          ...(narrow ? [{ key: "Tab", label: "switch pane", onPress: toggleNarrowPane, disabled: footerLocked }] : []),
-          { key: "j", label: "down", onPress: () => moveSelection(1), disabled: footerLocked || entries.length === 0 },
-          { key: "k", label: "up", onPress: () => moveSelection(-1), disabled: footerLocked || entries.length === 0 },
+          { key: "Tab", label: "pane", onPress: toggleNarrowPane, disabled: footerLocked },
+          { key: "j", label: narrowPane === "preview" ? "scroll down" : "down", onPress: () => moveOrScroll({ name: "j" }), disabled: footerLocked || (narrowPane === "list" && entries.length === 0) },
+          { key: "k", label: narrowPane === "preview" ? "scroll up" : "up", onPress: () => moveOrScroll({ name: "k" }), disabled: footerLocked || (narrowPane === "list" && entries.length === 0) },
           { key: "h", label: "parent", onPress: goToParent, disabled: footerLocked },
           { key: "l", label: "open", onPress: activateCurrent, disabled: footerLocked || !current },
           { key: "n", label: "new file", onPress: createFile, disabled: footerLocked },
