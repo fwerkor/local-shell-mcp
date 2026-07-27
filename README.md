@@ -2,6 +2,8 @@
 
 # local-shell-mcp
 
+[![MCP Toplist](https://mcptoplist.com/badge/pulsemcp%2Ffwerkor-local-shell.svg)](https://mcptoplist.com/server/pulsemcp%2Ffwerkor-local-shell)
+
 **A ChatGPT-ready MCP control plane for shell, files, browser automation, file links, and remote machines.**
 
 [![Docs](https://img.shields.io/badge/docs-fwerkor.github.io%2Flocal--shell--mcp-7c3aed?logo=materialformkdocs&logoColor=white)](https://fwerkor.github.io/local-shell-mcp/)
