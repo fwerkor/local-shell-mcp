@@ -1,7 +1,7 @@
 # General-purpose data and utility packages for the agent workspace.
 numpy>=1.26.0
 pandas>=2.2.0
-scipy>=1.12.0
+scipy>=1.17.1
 scikit-learn>=1.4.0
 statsmodels>=0.14.0
 requests>=2.32.0
