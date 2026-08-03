@@ -131,7 +131,7 @@
     "test": "npm run compile && node --test test/*.test.cjs"
   },
   "devDependencies": {
-    "@types/node": "^20.14.10",
+    "@types/node": "^26.1.2",
     "@types/vscode": "^1.92.0",
     "@vscode/vsce": "3.6.2",
     "typescript": "^5.5.4"
