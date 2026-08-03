@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@opentui/core": "0.4.3",
-    "@opentui/react": "0.4.3",
+    "@opentui/react": "0.4.5",
     "@xterm/addon-fit": "0.10.0",
     "@xterm/addon-image": "0.8.0",
     "@xterm/xterm": "5.5.0",
