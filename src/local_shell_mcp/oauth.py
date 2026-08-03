@@ -6,11 +6,13 @@ import hashlib
 import hmac
 import html as html_lib
 import json
+import math
 import os
 import re
 import secrets
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from functools import lru_cache
 from importlib.resources import files
@@ -59,6 +61,8 @@ MAX_CLIENT_NAME_LENGTH = 200
 OAUTH_PENDING_CLIENT_TTL_S = 24 * 60 * 60
 OAUTH_CLIENT_STORE_VERSION = 1
 OAUTH_CLIENT_STORE_FILE_NAME = "oauth-clients.json"
+OAUTH_PIN_FAILURE_LIMIT = 5
+OAUTH_PIN_FAILURE_WINDOW_S = 5 * 60
 ALL_OAUTH_SCOPES = (
     "shell:read",
     "shell:write",
@@ -70,6 +74,8 @@ ALL_OAUTH_SCOPES = (
 _LEGACY_CLIENT_ID_RE = re.compile(r"local-shell-mcp-[A-Za-z0-9_-]{16,128}\Z")
 _CLIENT_STORE_LOCK = threading.RLock()
 _LOADED_CLIENT_STORE_PATH: Path | None = None
+_PIN_FAILURE_LOCK = threading.Lock()
+_PIN_FAILURES: dict[str, deque[float]] = {}
 
 
 def public_base_url(request: Request | None = None) -> str:
@@ -498,7 +504,13 @@ def _scope_items(scope: str) -> str:
     return "\n".join(items)
 
 
-def _authorize_form(params: dict[str, str], error: str | None = None) -> HTMLResponse:
+def _authorize_form(
+    params: dict[str, str],
+    error: str | None = None,
+    *,
+    status_code: int = 200,
+    headers: dict[str, str] | None = None,
+) -> HTMLResponse:
     settings = get_settings()
     scope = _scope_value()
     resource = params.get("resource") or resource_url()
@@ -534,7 +546,59 @@ def _authorize_form(params: dict[str, str], error: str | None = None) -> HTMLRes
         pin_field=pin_field,
         security_notice=html_lib.escape(security_notice),
     )
-    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+    response_headers = {"Cache-Control": "no-store", **(headers or {})}
+    return HTMLResponse(html, status_code=status_code, headers=response_headers)
+
+
+def _pin_source(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _prune_pin_failures_locked(now: float) -> None:
+    cutoff = now - OAUTH_PIN_FAILURE_WINDOW_S
+    for source, failures in list(_PIN_FAILURES.items()):
+        while failures and failures[0] <= cutoff:
+            failures.popleft()
+        if not failures:
+            _PIN_FAILURES.pop(source, None)
+
+
+def _pin_retry_after_locked(failures: deque[float], now: float) -> int:
+    if len(failures) < OAUTH_PIN_FAILURE_LIMIT:
+        return 0
+    return max(1, math.ceil(failures[0] + OAUTH_PIN_FAILURE_WINDOW_S - now))
+
+
+def _pin_retry_after(source: str) -> int:
+    now = time.monotonic()
+    with _PIN_FAILURE_LOCK:
+        _prune_pin_failures_locked(now)
+        failures = _PIN_FAILURES.get(source)
+        return _pin_retry_after_locked(failures, now) if failures else 0
+
+
+def _record_pin_failure(source: str) -> int:
+    now = time.monotonic()
+    with _PIN_FAILURE_LOCK:
+        _prune_pin_failures_locked(now)
+        failures = _PIN_FAILURES.setdefault(source, deque())
+        failures.append(now)
+        return _pin_retry_after_locked(failures, now)
+
+
+def _clear_pin_failures(source: str) -> None:
+    with _PIN_FAILURE_LOCK:
+        _PIN_FAILURES.pop(source, None)
+
+
+def _pin_rate_limited_form(params: dict[str, str], source: str, retry_after: int) -> HTMLResponse:
+    audit("oauth_pin_rate_limited", client_id=params.get("client_id"), source_ip=source)
+    return _authorize_form(
+        params,
+        error="Too many failed PIN attempts. Try again later.",
+        status_code=429,
+        headers={"Retry-After": str(retry_after)},
+    )
 
 
 def _make_redirect(redirect_uri: str, query: dict[str, str]) -> RedirectResponse:
@@ -560,9 +624,18 @@ async def oauth_authorize_post(request: Request) -> Response:
     settings = get_settings()
     expected_pin = settings.oauth_admin_pin
     submitted_pin = str(form.get("pin") or "")
-    if expected_pin and not hmac.compare_digest(submitted_pin, expected_pin):
-        audit("oauth_pin_failed", client_id=params.get("client_id"))
-        return _authorize_form(params, error="Invalid admin PIN")
+    if expected_pin:
+        source = _pin_source(request)
+        retry_after = _pin_retry_after(source)
+        if retry_after:
+            return _pin_rate_limited_form(params, source, retry_after)
+        if not hmac.compare_digest(submitted_pin, expected_pin):
+            audit("oauth_pin_failed", client_id=params.get("client_id"), source_ip=source)
+            retry_after = _record_pin_failure(source)
+            if retry_after:
+                return _pin_rate_limited_form(params, source, retry_after)
+            return _authorize_form(params, error="Invalid admin PIN")
+        _clear_pin_failures(source)
 
     client = _approve_client(params["client_id"])
     if client is None:

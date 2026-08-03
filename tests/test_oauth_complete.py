@@ -29,6 +29,7 @@ def _configure(tmp_path, monkeypatch, **env):
     get_settings.cache_clear()
     oauth._CLIENTS.clear()
     oauth._CODES.clear()
+    oauth._PIN_FAILURES.clear()
 
 
 def _app() -> Starlette:
@@ -315,6 +316,70 @@ def test_authorize_validation_and_pin_failures(tmp_path, monkeypatch):
     assert wrong_pin.status_code == 200
     assert "Invalid admin PIN" in wrong_pin.text
     assert not oauth._CODES
+
+
+def test_pin_failures_are_rate_limited_by_source(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    now = [1_000.0]
+    monkeypatch.setattr(oauth.time, "monotonic", lambda: now[0])
+
+    app = _app()
+    blocked = TestClient(app, client=("198.51.100.10", 50_000))
+    other = TestClient(app, client=("198.51.100.11", 50_000))
+    recovering = TestClient(app, client=("198.51.100.12", 50_000))
+    client_id = _register(blocked)
+    params = {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": "https://client.test/callback",
+        "code_challenge": "challenge",
+        "code_challenge_method": "S256",
+    }
+
+    for _ in range(oauth.OAUTH_PIN_FAILURE_LIMIT - 1):
+        response = blocked.post("/oauth/authorize", data={**params, "pin": "wrong"})
+        assert response.status_code == 200
+        assert "Invalid admin PIN" in response.text
+
+    limited = blocked.post("/oauth/authorize", data={**params, "pin": "wrong"})
+    assert limited.status_code == 429
+    assert limited.headers["retry-after"] == str(oauth.OAUTH_PIN_FAILURE_WINDOW_S)
+    assert "Too many failed PIN attempts" in limited.text
+    assert not oauth._CODES
+
+    still_limited = blocked.post(
+        "/oauth/authorize",
+        data={**params, "pin": "correct-admin-pin"},
+        follow_redirects=False,
+    )
+    assert still_limited.status_code == 429
+
+    other_source = other.post(
+        "/oauth/authorize",
+        data={**params, "pin": "correct-admin-pin"},
+        follow_redirects=False,
+    )
+    assert other_source.status_code == 302
+
+    one_failure = recovering.post("/oauth/authorize", data={**params, "pin": "wrong"})
+    assert one_failure.status_code == 200
+    assert "198.51.100.12" in oauth._PIN_FAILURES
+    recovered_early = recovering.post(
+        "/oauth/authorize",
+        data={**params, "pin": "correct-admin-pin"},
+        follow_redirects=False,
+    )
+    assert recovered_early.status_code == 302
+    assert "198.51.100.12" not in oauth._PIN_FAILURES
+
+    now[0] += oauth.OAUTH_PIN_FAILURE_WINDOW_S + 1
+    recovered_after_window = blocked.post(
+        "/oauth/authorize",
+        data={**params, "pin": "correct-admin-pin"},
+        follow_redirects=False,
+    )
+    assert recovered_after_window.status_code == 302
+    assert "198.51.100.10" not in oauth._PIN_FAILURES
 
 
 def test_complete_authorization_code_flow_and_token_failures(tmp_path, monkeypatch):
