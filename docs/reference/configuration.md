@@ -28,6 +28,7 @@ For local-only testing, `auth_bypass_localhost` is enabled by default. Do not ex
 |---|---|---|---|
 | `host` | `LOCAL_SHELL_MCP_HOST` | `'0.0.0.0'` |  |
 | `port` | `LOCAL_SHELL_MCP_PORT` | `8765` |  |
+| `forwarded_allow_ips` | `LOCAL_SHELL_MCP_FORWARDED_ALLOW_IPS` | `'127.0.0.1'` | Comma-separated trusted proxy IPs for Uvicorn forwarded-header handling. Use `*` only when direct ingress is restricted. |
 | `mode` | `LOCAL_SHELL_MCP_MODE` | `'mcp'` | `mcp`, `http`, `stdio`, or reserved `both` value. |
 | `workspace_root` | `LOCAL_SHELL_MCP_WORKSPACE_ROOT` | `PosixPath('/workspace')` |  |
 | `state_dir` | `LOCAL_SHELL_MCP_STATE_DIR` | `PosixPath('/workspace/.local-shell-mcp')` |  |

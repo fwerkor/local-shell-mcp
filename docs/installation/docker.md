@@ -103,6 +103,7 @@ http://local-shell-mcp:8765
 ```
 
 This is Cloudflare Tunnel, not Cloudflare Access. `local-shell-mcp` still handles its own OAuth for ChatGPT.
+The Compose service trusts forwarded headers because its published port is restricted to localhost; this preserves the public caller address for OAuth PIN rate limiting. If you expose the container port directly, replace `LOCAL_SHELL_MCP_FORWARDED_ALLOW_IPS=*` with the explicit addresses of your trusted reverse proxies.
 
 ## Reverse proxy without tunnel sidecar
 

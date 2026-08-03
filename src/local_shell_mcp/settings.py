@@ -306,6 +306,7 @@ if _PYDANTIC_AVAILABLE:
 
         host: str = "0.0.0.0"
         port: int = 8765
+        forwarded_allow_ips: str = "127.0.0.1"
         mode: Literal["mcp", "http", "both", "stdio"] = "mcp"
 
         workspace_root: Path = DEFAULT_WORKSPACE_ROOT
@@ -513,6 +514,7 @@ else:
 
         host: str = "0.0.0.0"
         port: int = 8765
+        forwarded_allow_ips: str = "127.0.0.1"
         mode: Literal["mcp", "http", "both", "stdio"] = "mcp"
 
         workspace_root: Path = DEFAULT_WORKSPACE_ROOT

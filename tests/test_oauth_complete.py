@@ -382,6 +382,19 @@ def test_pin_failures_are_rate_limited_by_source(tmp_path, monkeypatch):
     assert "198.51.100.10" not in oauth._PIN_FAILURES
 
 
+def test_pin_failure_sources_are_bounded(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(oauth, "MAX_OAUTH_PIN_SOURCES", 2)
+    monkeypatch.setattr(oauth.time, "monotonic", lambda: 1_000.0)
+
+    oauth._record_pin_failure("source-a")
+    oauth._record_pin_failure("source-b")
+    oauth._record_pin_failure("source-a")
+    oauth._record_pin_failure("source-c")
+
+    assert list(oauth._PIN_FAILURES) == ["source-a", "source-c"]
+
+
 def test_complete_authorization_code_flow_and_token_failures(tmp_path, monkeypatch):
     _configure(
         tmp_path,

@@ -94,7 +94,12 @@ def run_mcp() -> None:
         return
 
     if hasattr(mcp, "streamable_http_app"):
-        uvicorn.run(_build_mcp_http_app(mcp), host=settings.host, port=settings.port)
+        uvicorn.run(
+            _build_mcp_http_app(mcp),
+            host=settings.host,
+            port=settings.port,
+            forwarded_allow_ips=settings.forwarded_allow_ips,
+        )
         return
     if hasattr(mcp, "sse_app"):
         from .auth import AuthMiddleware, RequestBodyLimitMiddleware
@@ -103,7 +108,12 @@ def run_mcp() -> None:
         if settings.auth_mode != "none":
             app.add_middleware(AuthMiddleware)
         app.add_middleware(RequestBodyLimitMiddleware)
-        uvicorn.run(app, host=settings.host, port=settings.port)
+        uvicorn.run(
+            app,
+            host=settings.host,
+            port=settings.port,
+            forwarded_allow_ips=settings.forwarded_allow_ips,
+        )
         return
 
     try:
@@ -121,7 +131,12 @@ def run_http() -> None:
     settings = get_settings()
     validate_public_oauth_configuration(settings)
     app = build_http_app()
-    uvicorn.run(app, host=settings.host, port=settings.port)
+    uvicorn.run(
+        app,
+        host=settings.host,
+        port=settings.port,
+        forwarded_allow_ips=settings.forwarded_allow_ips,
+    )
 
 
 def main(argv: list[str] | None = None) -> None:

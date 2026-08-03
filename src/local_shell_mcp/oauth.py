@@ -12,7 +12,7 @@ import re
 import secrets
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from functools import lru_cache
 from importlib.resources import files
@@ -63,6 +63,7 @@ OAUTH_CLIENT_STORE_VERSION = 1
 OAUTH_CLIENT_STORE_FILE_NAME = "oauth-clients.json"
 OAUTH_PIN_FAILURE_LIMIT = 5
 OAUTH_PIN_FAILURE_WINDOW_S = 5 * 60
+MAX_OAUTH_PIN_SOURCES = 4_096
 ALL_OAUTH_SCOPES = (
     "shell:read",
     "shell:write",
@@ -75,7 +76,7 @@ _LEGACY_CLIENT_ID_RE = re.compile(r"local-shell-mcp-[A-Za-z0-9_-]{16,128}\Z")
 _CLIENT_STORE_LOCK = threading.RLock()
 _LOADED_CLIENT_STORE_PATH: Path | None = None
 _PIN_FAILURE_LOCK = threading.Lock()
-_PIN_FAILURES: dict[str, deque[float]] = {}
+_PIN_FAILURES: OrderedDict[str, deque[float]] = OrderedDict()
 
 
 def public_base_url(request: Request | None = None) -> str:
@@ -574,6 +575,8 @@ def _pin_retry_after(source: str) -> int:
     with _PIN_FAILURE_LOCK:
         _prune_pin_failures_locked(now)
         failures = _PIN_FAILURES.get(source)
+        if failures is not None:
+            _PIN_FAILURES.move_to_end(source)
         return _pin_retry_after_locked(failures, now) if failures else 0
 
 
@@ -581,7 +584,14 @@ def _record_pin_failure(source: str) -> int:
     now = time.monotonic()
     with _PIN_FAILURE_LOCK:
         _prune_pin_failures_locked(now)
-        failures = _PIN_FAILURES.setdefault(source, deque())
+        failures = _PIN_FAILURES.get(source)
+        if failures is None:
+            while len(_PIN_FAILURES) >= MAX_OAUTH_PIN_SOURCES:
+                _PIN_FAILURES.popitem(last=False)
+            failures = deque()
+            _PIN_FAILURES[source] = failures
+        else:
+            _PIN_FAILURES.move_to_end(source)
         failures.append(now)
         return _pin_retry_after_locked(failures, now)
 

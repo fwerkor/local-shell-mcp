@@ -36,6 +36,7 @@ def _settings(**updates):
         "mode": "mcp",
         "host": "127.0.0.1",
         "port": 9876,
+        "forwarded_allow_ips": "10.0.0.2",
         "auth_mode": "none",
         "remote_enabled": False,
         "mcp_session_idle_timeout_s": 9,
@@ -75,7 +76,10 @@ def test_run_mcp_streamable_and_sse(monkeypatch):
     monkeypatch.setattr(settings_module, "get_settings", lambda: _settings())
     monkeypatch.setattr(tools, "build_mcp", lambda: streamable)
     main_module.run_mcp()
-    assert runs.pop() == (("wrapped", streamable), {"host": "127.0.0.1", "port": 9876})
+    assert runs.pop() == (
+        ("wrapped", streamable),
+        {"host": "127.0.0.1", "port": 9876, "forwarded_allow_ips": "10.0.0.2"},
+    )
 
     class FakeApp:
         def __init__(self):
@@ -91,7 +95,11 @@ def test_run_mcp_streamable_and_sse(monkeypatch):
         monkeypatch.setattr(tools, "build_mcp", lambda item=sse: item)
         main_module.run_mcp()
         app, kwargs = runs.pop()
-        assert kwargs == {"host": "127.0.0.1", "port": 9876}
+        assert kwargs == {
+            "host": "127.0.0.1",
+            "port": 9876,
+            "forwarded_allow_ips": "10.0.0.2",
+        }
         assert len(app.middleware) == expected_middleware_count
 
 
@@ -142,7 +150,13 @@ def test_run_http(monkeypatch):
 
     main_module.run_http()
 
-    assert calls == [("validate", settings), ("http-app", {"host": "127.0.0.1", "port": 9876})]
+    assert calls == [
+        ("validate", settings),
+        (
+            "http-app",
+            {"host": "127.0.0.1", "port": 9876, "forwarded_allow_ips": "10.0.0.2"},
+        ),
+    ]
 
 
 def test_main_subcommands_and_version(monkeypatch, capsys):
