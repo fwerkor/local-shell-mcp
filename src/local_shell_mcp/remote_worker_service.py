@@ -32,6 +32,8 @@ from .remote_worker_state import (
 
 _SERVICE_NAME = "local-shell-mcp-worker"
 _LAUNCHD_LABEL = "com.fwerkor.local-shell-mcp-worker"
+_WINDOWS_TASK_NAME = "local-shell-mcp-worker"
+_WINDOWS_TASK_STATE_RUNNING = 4
 _WORKER_MANAGED_ENV = "LOCAL_SHELL_MCP_WORKER_MANAGED"
 _LAUNCHD_PATH_SEPARATOR = ":"
 _LAUNCHD_HOMEBREW_DIRS = (
@@ -216,8 +218,27 @@ def _launchd_plist_path() -> Path:
     return user_home() / "Library" / "LaunchAgents" / f"{_LAUNCHD_LABEL}.plist"
 
 
+def _windows_task_launcher_path() -> Path:
+    return worker_state_dir() / "worker-service.cmd"
+
+
 def _run(command: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, check=check, capture_output=True, text=True)  # noqa: S603
+
+
+def _powershell_executable() -> str | None:
+    return shutil.which("pwsh") or shutil.which("powershell")
+
+
+def _powershell_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _run_powershell(script: str, *, check: bool = True) -> subprocess.CompletedProcess[str]:
+    shell = _powershell_executable()
+    if not shell:
+        raise RuntimeError("PowerShell is required to manage the Windows remote worker task")
+    return _run([shell, "-NoProfile", "-NonInteractive", "-Command", script], check=check)
 
 
 def _user_id() -> int:
@@ -238,6 +259,8 @@ def service_kind() -> str:
         return "systemd"
     if system == "Darwin" and shutil.which("launchctl"):
         return "launchd"
+    if system == "Windows" and _powershell_executable():
+        return "scheduled-task"
     return "process"
 
 
@@ -324,11 +347,135 @@ def _write_launchd_plist(launcher: Path | None = None) -> Path:
     return path
 
 
-def refresh_installed_service_definition() -> Path | None:
-    if service_kind() != "launchd" or not _launchd_plist_path().exists():
+def _batch_path(path: Path) -> str:
+    return str(path).replace("%", "%%")
+
+
+def _write_windows_task_launcher(launcher: Path | None = None) -> Path:
+    launcher = launcher or worker_launcher_path()
+    path = _windows_task_launcher_path()
+    content = f'''@echo off
+setlocal
+set "PYTHONUNBUFFERED=1"
+set "{_WORKER_MANAGED_ENV}=1"
+set "LOCAL_SHELL_MCP_WORKER_STATE_DIR={_batch_path(worker_state_dir().resolve())}"
+call "{_batch_path(launcher.resolve())}" worker run >> "{_batch_path(worker_log_path().resolve())}" 2>&1
+exit /b %ERRORLEVEL%
+'''
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def _installed_windows_launcher_path() -> Path | None:
+    try:
+        content = _windows_task_launcher_path().read_text(encoding="utf-8")
+    except OSError:
         return None
-    launcher = _installed_launchd_launcher_path() or worker_launcher_path()
-    return _write_launchd_plist(launcher)
+    match = re.search(r'^call "([^"\r\n]+)" worker run >> ', content, re.MULTILINE)
+    if not match:
+        return None
+    path = Path(match.group(1).replace("%%", "%"))
+    return path if path.is_absolute() else None
+
+
+def _register_windows_task(service_file: Path) -> None:
+    action_arguments = f'/d /c ""{service_file.resolve()}""'
+    script = "\n".join(
+        [
+            "$ErrorActionPreference = 'Stop'",
+            "$user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name",
+            (
+                "$action = New-ScheduledTaskAction -Execute $env:ComSpec "
+                f"-Argument {_powershell_literal(action_arguments)} "
+                f"-WorkingDirectory {_powershell_literal(str(worker_state_dir().resolve()))}"
+            ),
+            "$trigger = New-ScheduledTaskTrigger -AtLogOn -User $user",
+            (
+                "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries "
+                "-DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) "
+                "-MultipleInstances IgnoreNew -RestartCount 999 "
+                "-RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable"
+            ),
+            (
+                "$principal = New-ScheduledTaskPrincipal -UserId $user "
+                "-LogonType Interactive -RunLevel Limited"
+            ),
+            (
+                f"Register-ScheduledTask -TaskName {_powershell_literal(_WINDOWS_TASK_NAME)} "
+                "-Action $action -Trigger $trigger -Settings $settings -Principal $principal "
+                f"-Description {_powershell_literal('local-shell-mcp remote worker')} "
+                "-Force | Out-Null"
+            ),
+        ]
+    )
+    _run_powershell(script)
+
+
+def _windows_task_status() -> dict[str, Any] | None:
+    script = "\n".join(
+        [
+            "$ErrorActionPreference = 'Stop'",
+            (
+                "$tasks = @(Get-ScheduledTask -TaskPath '\\' -ErrorAction Stop | "
+                f"Where-Object {{ $_.TaskName -eq {_powershell_literal(_WINDOWS_TASK_NAME)} }})"
+            ),
+            "if ($tasks.Count -eq 0) { exit 3 }",
+            "if ($tasks.Count -ne 1) { throw 'multiple matching scheduled tasks found' }",
+            "$task = $tasks[0]",
+            (
+                "[Console]::Out.Write(([pscustomobject]@{state=[int]$task.State; "
+                "state_name=$task.State.ToString()} | ConvertTo-Json -Compress))"
+            ),
+        ]
+    )
+    result = _run_powershell(script, check=False)
+    if result.returncode == 3:
+        return None
+    if result.returncode:
+        detail = result.stderr.strip() or result.stdout.strip() or f"exit code {result.returncode}"
+        raise RuntimeError(f"failed to query Windows remote worker task: {detail}")
+    try:
+        payload = json.loads(result.stdout)
+        return {
+            "state": int(payload["state"]),
+            "state_name": str(payload["state_name"]),
+        }
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("Windows remote worker task returned invalid status data") from exc
+
+
+def _start_windows_task() -> None:
+    _run_powershell(
+        f"Start-ScheduledTask -TaskName {_powershell_literal(_WINDOWS_TASK_NAME)}"
+    )
+
+
+def _stop_windows_task() -> None:
+    _run_powershell(
+        f"Stop-ScheduledTask -TaskName {_powershell_literal(_WINDOWS_TASK_NAME)} "
+        "-ErrorAction SilentlyContinue",
+        check=False,
+    )
+
+
+def _unregister_windows_task() -> None:
+    _run_powershell(
+        f"Unregister-ScheduledTask -TaskName {_powershell_literal(_WINDOWS_TASK_NAME)} "
+        "-Confirm:$false -ErrorAction SilentlyContinue",
+        check=False,
+    )
+
+
+def refresh_installed_service_definition() -> Path | None:
+    kind = service_kind()
+    if kind == "launchd" and _launchd_plist_path().exists():
+        launcher = _installed_launchd_launcher_path() or worker_launcher_path()
+        return _write_launchd_plist(launcher)
+    if kind == "scheduled-task" and _windows_task_status() is not None:
+        launcher = _installed_windows_launcher_path() or worker_launcher_path()
+        return _write_windows_task_launcher(launcher)
+    return None
 
 
 def prepare_worker_service_environment() -> Path | None:
@@ -381,14 +528,14 @@ def _linux_process_identity(pid: int) -> str | None:
 
 
 def _windows_process_identity(pid: int) -> str | None:
-    shell = shutil.which("pwsh") or shutil.which("powershell")
+    shell = _powershell_executable()
     if not shell:
         return None
     script = (
         f'$p=Get-CimInstance Win32_Process -Filter "ProcessId = {pid}"; '
         'if ($p) { Write-Output ($p.CreationDate + "|" + $p.CommandLine) }'
     )
-    result = _run([shell, "-NoProfile", "-Command", script], check=False)
+    result = _run([shell, "-NoProfile", "-NonInteractive", "-Command", script], check=False)
     value = result.stdout.strip()
     if result.returncode or "|" not in value:
         return None
@@ -548,6 +695,14 @@ def install_service(*, start: bool = True) -> dict[str, Any]:
         _run(["launchctl", "bootout", domain, str(service_file)], check=False)
         if start:
             _run(["launchctl", "bootstrap", domain, str(service_file)])
+    elif kind == "scheduled-task":
+        _stop_process()
+        if _windows_task_status() is not None:
+            _stop_windows_task()
+        service_file = _write_windows_task_launcher(launcher)
+        _register_windows_task(service_file)
+        if start:
+            _start_windows_task()
     else:
         service_file = None
         if start:
@@ -570,6 +725,12 @@ def uninstall_service() -> dict[str, Any]:
         _run(["systemctl", "--user", "daemon-reload"], check=False)
     if _launchd_plist_path().exists():
         _launchd_plist_path().unlink(missing_ok=True)
+    if platform.system() == "Windows" and (
+        kind == "scheduled-task" or _windows_task_launcher_path().exists()
+    ):
+        if _powershell_executable():
+            _unregister_windows_task()
+        _windows_task_launcher_path().unlink(missing_ok=True)
     return {"kind": kind, "uninstalled": True}
 
 
@@ -582,6 +743,8 @@ def start_service() -> dict[str, Any]:
         result = _run(["launchctl", "kickstart", "-k", f"{domain}/{_LAUNCHD_LABEL}"], check=False)
         if result.returncode:
             _run(["launchctl", "bootstrap", domain, str(_launchd_plist_path())])
+    elif kind == "scheduled-task" and _windows_task_status() is not None:
+        _start_windows_task()
     else:
         _start_process()
     return service_status()
@@ -596,6 +759,8 @@ def stop_service() -> dict[str, Any]:
             ["launchctl", "bootout", f"gui/{_user_id()}", str(_launchd_plist_path())],
             check=False,
         )
+    elif kind == "scheduled-task" and _windows_task_status() is not None:
+        _stop_windows_task()
     else:
         _stop_process()
     return service_status()
@@ -624,6 +789,17 @@ def service_status() -> dict[str, Any]:
         )
         running = result.returncode == 0
         detail = result.stdout.strip() or result.stderr.strip()
+    elif native_kind == "scheduled-task":
+        task = _windows_task_status()
+        if task is not None:
+            installed = True
+            running = task["state"] == _WINDOWS_TASK_STATE_RUNNING
+            detail = task["state_name"]
+        else:
+            kind = "process"
+            installed = worker_launcher_path().exists()
+            pid = _read_pid()
+            running = pid is not None
     else:
         kind = "process"
         installed = worker_launcher_path().exists()

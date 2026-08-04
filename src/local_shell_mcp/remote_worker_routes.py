@@ -195,11 +195,179 @@ exec python3 -m local_shell_mcp.remote_worker run
     return PlainTextResponse(script, media_type="text/x-shellscript")
 
 
+async def powershell_join_script(request: Any):  # noqa: ARG001, ANN201
+    from starlette.responses import PlainTextResponse
+
+    settings = get_settings()
+    server = (settings.public_base_url or f"http://{settings.host}:{settings.port}").rstrip("/")
+    script = r'''param(
+  [Parameter(Mandatory = $true)][string]$Invite,
+  [string]$Name = "",
+  [string]$Workdir = "",
+  [switch]$Background,
+  [switch]$Persist
+)
+$ErrorActionPreference = "Stop"
+$Server = __SERVER__
+$ManifestUrl = "$Server__PUBLIC_MANIFEST_URL__"
+if (-not $Workdir) { $Workdir = (Get-Location).Path }
+
+$PythonExe = $null
+$PythonPrefix = @()
+$PythonCandidates = @(
+  [pscustomobject]@{ Name = "python.exe"; Prefix = @() }
+  [pscustomobject]@{ Name = "py.exe"; Prefix = @("-3") }
+)
+foreach ($Candidate in $PythonCandidates) {
+  $PythonCommand = Get-Command $Candidate.Name -ErrorAction SilentlyContinue
+  if ($null -eq $PythonCommand) { continue }
+  $ProbeArgs = @($Candidate.Prefix) + @(
+    "-c",
+    "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"
+  )
+  & $PythonCommand.Source @ProbeArgs
+  if ($LASTEXITCODE -eq 0) {
+    $PythonExe = $PythonCommand.Source
+    $PythonPrefix = @($Candidate.Prefix)
+    break
+  }
+}
+if ($null -eq $PythonExe) { throw "Python 3.11 or newer is required" }
+
+$TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("local-shell-mcp-worker-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $TempDir | Out-Null
+try {
+  $Manifest = (Invoke-WebRequest -UseBasicParsing -Uri $ManifestUrl).Content | ConvertFrom-Json
+  $BundleUrl = [string]$Manifest.url
+  $RemoteDigest = ([string]$Manifest.sha256).ToLowerInvariant()
+  $RemoteVersion = [string]$Manifest.bundle_version
+  if ($env:LOCAL_SHELL_MCP_WORKER_STATE_DIR) {
+    $StateHome = $env:LOCAL_SHELL_MCP_WORKER_STATE_DIR
+  } else {
+    $StateHome = Join-Path $HOME ".local\state\local-shell-mcp-worker"
+  }
+  $RuntimeRoot = Join-Path $TempDir "runtime"
+  $Persistent = $Background -or $Persist
+  if ($Persistent) {
+    $RuntimeRoot = Join-Path $StateHome "runtime"
+    $DigestPath = Join-Path $StateHome "bundle.sha256"
+    $LocalDigest = ""
+    if (Test-Path $DigestPath) { $LocalDigest = (Get-Content -Raw $DigestPath).Trim() }
+    $RuntimePackage = Join-Path $RuntimeRoot "local_shell_mcp"
+    if (-not (Test-Path $RuntimePackage) -or $LocalDigest -ne $RemoteDigest) {
+      Write-Host "Downloading worker bundle..."
+      $BundlePath = Join-Path $TempDir "worker.tgz"
+      Invoke-WebRequest -UseBasicParsing -Uri $BundleUrl -OutFile $BundlePath
+      $ActualDigest = (Get-FileHash -Algorithm SHA256 $BundlePath).Hash.ToLowerInvariant()
+      if ($ActualDigest -ne $RemoteDigest) { throw "worker bundle checksum mismatch" }
+      New-Item -ItemType Directory -Force -Path $StateHome | Out-Null
+      $RuntimeNext = "$RuntimeRoot.next.$PID"
+      $RuntimePrevious = "$RuntimeRoot.previous.$PID"
+      Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $RuntimeNext, $RuntimePrevious
+      New-Item -ItemType Directory -Path $RuntimeNext | Out-Null
+      $ExtractArgs = @($PythonPrefix) + @(
+        "-c",
+        "import sys,tarfile; tarfile.open(sys.argv[1], 'r:gz').extractall(sys.argv[2])",
+        $BundlePath,
+        $RuntimeNext
+      )
+      & $PythonExe @ExtractArgs
+      if ($LASTEXITCODE -ne 0) { throw "worker bundle extraction failed" }
+      if (Test-Path $RuntimeRoot) { Move-Item $RuntimeRoot $RuntimePrevious }
+      try {
+        Move-Item $RuntimeNext $RuntimeRoot
+      } catch {
+        if (Test-Path $RuntimePrevious) { Move-Item $RuntimePrevious $RuntimeRoot }
+        throw
+      }
+      Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $RuntimePrevious
+      Set-Content -Encoding Ascii -Path $DigestPath -Value $RemoteDigest
+    } else {
+      Write-Host "Worker bundle is already current ($RemoteVersion)."
+    }
+  } else {
+    Write-Host "Downloading worker bundle..."
+    $BundlePath = Join-Path $TempDir "worker.tgz"
+    Invoke-WebRequest -UseBasicParsing -Uri $BundleUrl -OutFile $BundlePath
+    $ActualDigest = (Get-FileHash -Algorithm SHA256 $BundlePath).Hash.ToLowerInvariant()
+    if ($ActualDigest -ne $RemoteDigest) { throw "worker bundle checksum mismatch" }
+    New-Item -ItemType Directory -Path $RuntimeRoot | Out-Null
+    $ExtractArgs = @($PythonPrefix) + @(
+      "-c",
+      "import sys,tarfile; tarfile.open(sys.argv[1], 'r:gz').extractall(sys.argv[2])",
+      $BundlePath,
+      $RuntimeRoot
+    )
+    & $PythonExe @ExtractArgs
+    if ($LASTEXITCODE -ne 0) { throw "worker bundle extraction failed" }
+  }
+
+  $env:LOCAL_SHELL_MCP_WORKER_STATE_DIR = $StateHome
+  $WorkerPythonPath = "$RuntimeRoot;$RuntimeRoot\vendor"
+  if ($env:PYTHONPATH) { $WorkerPythonPath += ";$env:PYTHONPATH" }
+  $env:PYTHONPATH = $WorkerPythonPath
+  $EnrollArgs = @($PythonPrefix) + @(
+    "-m", "local_shell_mcp.remote_worker", "enroll",
+    "--server", $Server,
+    "--invite-stdin",
+    "--workdir", $Workdir,
+    "--runtime-digest", $RemoteDigest,
+    "--runtime-version", $RemoteVersion
+  )
+  if ($Name) { $EnrollArgs += @("--name", $Name) }
+  $Invite | & $PythonExe @EnrollArgs
+  if ($LASTEXITCODE -ne 0) { throw "worker enrollment failed" }
+  $Invite = $null
+
+  if ($Persist) {
+    $InstallArgs = @($PythonPrefix) + @("-m", "local_shell_mcp.remote_worker", "install-service")
+    & $PythonExe @InstallArgs
+    if ($LASTEXITCODE -ne 0) { throw "worker service installation failed" }
+    if ($env:LOCAL_SHELL_MCP_WORKER_BIN_DIR) {
+      $WorkerBinDir = $env:LOCAL_SHELL_MCP_WORKER_BIN_DIR
+    } else {
+      $WorkerBinDir = Join-Path $HOME ".local\bin"
+    }
+    $env:PATH = "$WorkerBinDir;$env:PATH"
+    Write-Host "local-shell-mcp worker installed and started."
+    Write-Host "Management: local-shell-mcp worker status"
+    return
+  }
+  if ($Background) {
+    $LauncherArgs = @($PythonPrefix) + @("-m", "local_shell_mcp.remote_worker", "install-launcher")
+    & $PythonExe @LauncherArgs
+    if ($LASTEXITCODE -ne 0) { throw "worker launcher installation failed" }
+    $StartArgs = @($PythonPrefix) + @("-m", "local_shell_mcp.remote_worker", "start")
+    & $PythonExe @StartArgs
+    if ($LASTEXITCODE -ne 0) { throw "worker startup failed" }
+    if ($env:LOCAL_SHELL_MCP_WORKER_BIN_DIR) {
+      $WorkerBinDir = $env:LOCAL_SHELL_MCP_WORKER_BIN_DIR
+    } else {
+      $WorkerBinDir = Join-Path $HOME ".local\bin"
+    }
+    $env:PATH = "$WorkerBinDir;$env:PATH"
+    Write-Host "local-shell-mcp worker started in background."
+    Write-Host "Management: local-shell-mcp worker status"
+    return
+  }
+  $RunArgs = @($PythonPrefix) + @("-m", "local_shell_mcp.remote_worker", "run")
+  & $PythonExe @RunArgs
+  if ($LASTEXITCODE -ne 0) { throw "worker exited with status $LASTEXITCODE" }
+} finally {
+  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $TempDir
+}
+'''
+    script = script.replace("__SERVER__", remote._powershell_quote(server))  # noqa: SLF001
+    script = script.replace("__PUBLIC_MANIFEST_URL__", REMOTE_WORKER_PUBLIC_MANIFEST_URL)
+    return PlainTextResponse(script, media_type="text/plain")
+
+
 def remote_routes() -> list[Any]:
     from starlette.routing import Route
 
     return [
         Route(remote.REMOTE_JOIN_PATH, join_script, methods=["GET"]),
+        Route(remote.REMOTE_POWERSHELL_JOIN_PATH, powershell_join_script, methods=["GET"]),
         Route(REMOTE_WORKER_MANIFEST_PATH, worker_manifest, methods=["GET"]),
         Route(remote.REMOTE_WORKER_BUNDLE_PATH, worker_bundle, methods=["GET"]),
         Route(f"{remote.REMOTE_API_PREFIX}/register", remote.register_endpoint, methods=["POST"]),

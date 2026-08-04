@@ -87,6 +87,7 @@ from .transfer_ops import (
 from .version import version_info as get_version_info
 
 REMOTE_JOIN_PATH = "/join"
+REMOTE_POWERSHELL_JOIN_PATH = REMOTE_JOIN_PATH + ".ps1"
 REMOTE_API_PREFIX = "/remote"
 REMOTE_WORKER_BUNDLE_PATH = "/remote/worker-bundle.tgz"
 REMOTE_WORKER_POLL_PROTOCOL_VERSION = 1
@@ -190,6 +191,10 @@ def _validate_machine_name(value: str) -> str:
     if any(ord(character) < 32 or character in {"/", "\\"} for character in name):
         raise ValueError("machine name contains unsupported characters")
     return name
+
+
+def _powershell_quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
 
 
 def _error(message: str, error: str = "remote_error", status_code: int = 400):  # noqa: ANN201
@@ -381,6 +386,16 @@ class RemoteManager:
             command += f" --name {shlex.quote(normalized_name)}"
         if workdir:
             command += f" --workdir {shlex.quote(workdir)}"
+        powershell_join_url = join_url.removesuffix(REMOTE_JOIN_PATH) + REMOTE_POWERSHELL_JOIN_PATH
+        powershell_command = (
+            "$script = (Invoke-WebRequest -UseBasicParsing "
+            f"{_powershell_quote(powershell_join_url)}).Content; "
+            f"& ([scriptblock]::Create($script)) -Invite {_powershell_quote(code)}"
+        )
+        if normalized_name:
+            powershell_command += f" -Name {_powershell_quote(normalized_name)}"
+        if workdir:
+            powershell_command += f" -Workdir {_powershell_quote(workdir)}"
         return {
             "code": code,
             "name": normalized_name,
@@ -389,6 +404,10 @@ class RemoteManager:
             "ttl_s": ttl,
             "join_url": join_url,
             "command": command,
+            "persistent_command": command + " --persist",
+            "powershell_join_url": powershell_join_url,
+            "powershell_command": powershell_command,
+            "powershell_persistent_command": powershell_command + " -Persist",
         }
 
     async def register_worker(self, payload: dict[str, Any]) -> dict[str, Any]:

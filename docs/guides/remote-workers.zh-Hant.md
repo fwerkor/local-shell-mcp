@@ -17,6 +17,27 @@ MCP 客戶端 -> 控制服務 -> 出站輪詢 worker -> 遠端機器
 
 只有 worker 管理繼續使用 `remote_*` 名稱。執行、shell、job、檔案、patch 和瀏覽器操作在本地與遠端使用同一 Schema。指定 `machine` 時會額外要求 `remote:use` OAuth scope。
 
+## 持久化 worker
+
+邀請結果會同時回傳適用於不同平台的命令：
+
+- `persistent_command` 在 Linux 或 macOS 上安裝並啟動使用者服務。
+- `powershell_persistent_command` 透過 PowerShell 在 Windows 上安裝並啟動使用者排程工作。
+
+在 Windows 上，`local-shell-mcp worker install-service` 會為目前使用者註冊 `local-shell-mcp-worker` 排程工作。工作會立即啟動，並在重新開機後該使用者登入時再次啟動；它允許使用電池時執行、忽略重複啟動，並在異常結束後重試。此方式不需要系統管理員權限，但不會在使用者登入前執行。
+
+所有平台使用相同的生命週期命令：
+
+```text
+local-shell-mcp worker status
+local-shell-mcp worker start
+local-shell-mcp worker stop
+local-shell-mcp worker restart
+local-shell-mcp worker uninstall-service
+```
+
+worker 日誌位於 worker 狀態目錄中的 `worker.log`。
+
 ## 能力與安全
 
 worker 支援 shell、持久終端、tracked job、檔案操作、傳輸、Python、patch，以及已安裝相依套件時的 Playwright。Git 透過 `run_shell_tool(machine=...)` 執行標準 CLI。

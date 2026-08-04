@@ -17,6 +17,27 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 Only worker administration uses `remote_*` names. Execution, shell, job, filesystem, patch, and browser operations share the same schema locally and remotely. Supplying a machine additionally requires the `remote:use` OAuth scope.
 
+## Persistent workers
+
+The invite result contains platform-specific commands:
+
+- `persistent_command` installs and starts a user service on Linux or macOS.
+- `powershell_persistent_command` installs and starts a Windows user task from PowerShell.
+
+On Windows, `local-shell-mcp worker install-service` registers the `local-shell-mcp-worker` task for the current user. It starts immediately, starts again when that user logs on after a reboot, permits battery operation, ignores duplicate starts, and retries failed runs. It does not require administrator rights and does not run before the user signs in.
+
+Use the same lifecycle commands on every platform:
+
+```text
+local-shell-mcp worker status
+local-shell-mcp worker start
+local-shell-mcp worker stop
+local-shell-mcp worker restart
+local-shell-mcp worker uninstall-service
+```
+
+The worker log is stored under the worker state directory as `worker.log`.
+
 ## Capabilities
 
 Workers support shell and persistent shell sessions, tracked jobs, filesystem operations, transfer internals, Python execution, patches, and Playwright where dependencies are installed. Git uses standard commands through `run_shell_tool(machine=...)`.

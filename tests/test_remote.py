@@ -38,6 +38,10 @@ async def test_remote_invites_use_requested_origin_prune_expired_entries_and_val
 
     assert result["join_url"] == "https://control.example.test/join"
     assert "https://control.example.test/join" in result["command"]
+    assert result["persistent_command"].endswith(" --persist")
+    assert result["powershell_join_url"] == "https://control.example.test/join.ps1"
+    assert "https://control.example.test/join.ps1" in result["powershell_command"]
+    assert result["powershell_persistent_command"].endswith(" -Persist")
     assert "expired" not in manager.invites
     with pytest.raises(ValueError, match="unsupported characters"):
         await manager.create_invite("bad/name")

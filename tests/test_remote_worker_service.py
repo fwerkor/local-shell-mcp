@@ -67,6 +67,154 @@ def test_service_kind_detects_launchd_and_process(monkeypatch):
     assert service.service_kind() == "process"
 
 
+def test_service_kind_detects_windows_scheduled_task(monkeypatch):
+    monkeypatch.setattr(service.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(service, "_powershell_executable", lambda: "powershell.exe")
+    assert service.service_kind() == "scheduled-task"
+    monkeypatch.setattr(service, "_powershell_executable", lambda: None)
+    assert service.service_kind() == "process"
+
+
+def test_run_powershell_uses_available_shell_and_requires_one(monkeypatch):
+    calls = []
+    monkeypatch.setattr(service, "_powershell_executable", lambda: "powershell.exe")
+    monkeypatch.setattr(
+        service,
+        "_run",
+        lambda command, check=True: calls.append((command, check))
+        or subprocess.CompletedProcess(command, 0, stdout="ok", stderr=""),
+    )
+    result = service._run_powershell("Write-Output ok", check=False)  # noqa: SLF001
+    assert result.stdout == "ok"
+    assert calls == [
+        (["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Write-Output ok"], False)
+    ]
+
+    monkeypatch.setattr(service, "_powershell_executable", lambda: None)
+    with pytest.raises(RuntimeError, match="PowerShell is required"):
+        service._run_powershell("Write-Output ok")  # noqa: SLF001
+
+
+def test_install_and_manage_windows_scheduled_task(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    launcher = tmp_path / "bin" / "local-shell-mcp.cmd"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("@echo off\n", encoding="utf-8")
+    monkeypatch.setattr(service, "install_launcher", lambda: launcher)
+    monkeypatch.setattr(service, "ensure_user_bin_on_path", lambda: [])
+    monkeypatch.setattr(service.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(service, "service_kind", lambda: "scheduled-task")
+    monkeypatch.setattr(service, "_powershell_executable", lambda: "powershell.exe")
+    state = {"installed": False, "value": 3}
+    scripts = []
+
+    def fake_status():
+        if not state["installed"]:
+            return None
+        name = "Running" if state["value"] == 4 else "Ready"
+        return {"state": state["value"], "state_name": name}
+
+    def fake_powershell(script, *, check=True):
+        scripts.append((script, check))
+        if "Unregister-ScheduledTask" in script:
+            state["installed"] = False
+        elif "Register-ScheduledTask" in script:
+            state["installed"] = True
+            state["value"] = 3
+        elif "Start-ScheduledTask" in script:
+            state["value"] = 4
+        elif "Stop-ScheduledTask" in script:
+            state["value"] = 3
+        return subprocess.CompletedProcess(["powershell"], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(service, "_windows_task_status", fake_status)
+    monkeypatch.setattr(service, "_run_powershell", fake_powershell)
+
+    result = service.install_service(start=True)
+    service_file = service._windows_task_launcher_path()  # noqa: SLF001
+    assert result["kind"] == "scheduled-task"
+    assert result["service_file"] == str(service_file)
+    assert service_file.exists()
+    launcher_text = service_file.read_text(encoding="utf-8")
+    assert "LOCAL_SHELL_MCP_WORKER_MANAGED=1" in launcher_text
+    assert "LOCAL_SHELL_MCP_WORKER_STATE_DIR=" in launcher_text
+    registration = next(script for script, _ in scripts if "Register-ScheduledTask" in script)
+    assert "New-ScheduledTaskTrigger -AtLogOn -User $user" in registration
+    assert "-LogonType Interactive -RunLevel Limited" in registration
+    assert "-RestartCount 999" in registration
+    assert service.service_status()["running"] is True
+
+    assert service.stop_service()["running"] is False
+    assert service.start_service()["running"] is True
+    assert service.uninstall_service()["uninstalled"] is True
+    assert state["installed"] is False
+    assert not service_file.exists()
+
+
+def test_windows_task_status_parses_state_and_handles_missing_task(monkeypatch):
+    monkeypatch.setattr(
+        service,
+        "_run_powershell",
+        lambda script, check=False: subprocess.CompletedProcess(
+            ["powershell"], 0, stdout='{"state":4,"state_name":"Running"}', stderr=""
+        ),
+    )
+    assert service._windows_task_status() == {"state": 4, "state_name": "Running"}  # noqa: SLF001
+
+    monkeypatch.setattr(
+        service,
+        "_run_powershell",
+        lambda script, check=False: subprocess.CompletedProcess(
+            ["powershell"], 3, stdout="", stderr="missing"
+        ),
+    )
+    assert service._windows_task_status() is None  # noqa: SLF001
+
+    monkeypatch.setattr(
+        service,
+        "_run_powershell",
+        lambda script, check=False: subprocess.CompletedProcess(
+            ["powershell"], 0, stdout="unexpected output", stderr=""
+        ),
+    )
+    with pytest.raises(RuntimeError, match="invalid status data"):
+        service._windows_task_status()  # noqa: SLF001
+
+    monkeypatch.setattr(
+        service,
+        "_run_powershell",
+        lambda script, check=False: subprocess.CompletedProcess(
+            ["powershell"], 1, stdout="", stderr="access denied"
+        ),
+    )
+    with pytest.raises(RuntimeError, match="access denied"):
+        service._windows_task_status()  # noqa: SLF001
+
+
+def test_windows_service_refresh_and_process_fallback(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    custom_launcher = tmp_path / "custom-bin" / "local-shell-mcp.cmd"
+    service._write_windows_task_launcher(custom_launcher)  # noqa: SLF001
+    monkeypatch.setattr(service, "service_kind", lambda: "scheduled-task")
+    monkeypatch.setattr(
+        service,
+        "_windows_task_status",
+        lambda: {"state": 3, "state_name": "Ready"},
+    )
+    refreshed = service.refresh_installed_service_definition()
+    assert refreshed == service._windows_task_launcher_path()  # noqa: SLF001
+    assert refreshed.exists()
+    assert f'call "{custom_launcher.resolve()}" worker run' in refreshed.read_text(encoding="utf-8")
+    assert service._installed_windows_launcher_path() == custom_launcher.resolve()  # noqa: SLF001
+
+    monkeypatch.setattr(service, "_windows_task_status", lambda: None)
+    monkeypatch.setattr(service, "_read_pid", lambda: 42)
+    status = service.service_status()
+    assert status["kind"] == "process"
+    assert status["pid"] == 42
+    assert status["running"] is True
+
+
 def test_launchd_install_start_and_status(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     calls = []
