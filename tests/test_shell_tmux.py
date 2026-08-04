@@ -159,7 +159,7 @@ def test_run_exec_reports_timeout_before_process_creation(tmp_path, monkeypatch)
 
 def test_run_exec_terminates_process_after_timeout(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
-    monkeypatch.setattr(shell, "clamp_timeout", lambda timeout_s: 0.1)
+    monkeypatch.setattr(shell, "clamp_timeout", lambda timeout_s: 1.0)
 
     result = asyncio.run(
         shell._run_exec(
