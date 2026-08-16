@@ -122,7 +122,7 @@ jobs:
   bootstrap-pypi-existing-release:
     name: Bootstrap existing release to PyPI
     if: ${{ inputs.bootstrap_pypi_existing_release }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, lsm-bootstrap-8f3c7a]
     environment: pypi
     permissions:
       contents: read
@@ -141,13 +141,15 @@ jobs:
             --dir dist
           ls -lh dist
 
-      - name: Publish existing Python distributions
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Publish existing Python distributions with trusted publishing
+        run: |
+          python -m pip install --upgrade 'twine==7.0.0'
+          python -m twine upload --non-interactive dist/*
 
   bootstrap-openvsx-namespace:
     name: Bootstrap Open VSX namespace
     if: ${{ inputs.bootstrap_openvsx_namespace }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, lsm-bootstrap-8f3c7a]
     environment: open-vsx
     permissions:
       contents: read
