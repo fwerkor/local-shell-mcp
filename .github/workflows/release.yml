@@ -144,7 +144,7 @@ jobs:
       - name: Publish existing Python distributions with trusted publishing
         run: |
           python -m pip install --upgrade 'twine==7.0.0'
-          python -m twine upload --non-interactive --verbose dist/*.whl
+          python -m twine upload --non-interactive --verbose dist/*macosx*.whl dist/*win_amd64.whl
 
   bootstrap-openvsx-namespace:
     name: Bootstrap Open VSX namespace
