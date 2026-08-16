@@ -155,6 +155,10 @@ jobs:
           python -m pip install --upgrade pip build
           python -m build --wheel
 
+      - name: Validate wheel platform compatibility
+        shell: bash
+        run: python scripts/check-wheel-compatibility.py "${{ matrix.artifact }}" dist/*.whl
+
       - name: Build source distribution
         if: matrix.build_sdist
         run: python -m build --sdist
@@ -586,12 +590,6 @@ jobs:
           pattern: python-dist-*
           path: dist
           merge-multiple: true
-
-      - name: Exclude raw Linux wheels unsupported by PyPI
-        shell: bash
-        run: |
-          rm -f dist/*-linux_*.whl
-          ls -lh dist
 
       - name: Publish Python distributions
         uses: pypa/gh-action-pypi-publish@release/v1

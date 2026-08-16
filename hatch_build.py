@@ -1,10 +1,38 @@
 from __future__ import annotations
 
 import os
+import platform
+import sys
 from pathlib import Path
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 from packaging.tags import sys_tags
+
+MANYLINUX_BASELINE = "2_17"
+
+
+def wheel_platform_tag() -> str:
+    """Return the platform tag for the native runtime bundled in the wheel."""
+
+    if sys.platform.startswith("linux"):
+        machine = platform.machine().lower()
+        architectures = {
+            "amd64": "x86_64",
+            "x86_64": "x86_64",
+            "arm64": "aarch64",
+            "aarch64": "aarch64",
+        }
+        try:
+            architecture = architectures[machine]
+        except KeyError as exc:
+            raise RuntimeError(f"Unsupported Linux wheel architecture: {machine}") from exc
+        return f"manylinux_{MANYLINUX_BASELINE}_{architecture}"
+
+    return next(
+        tag.platform
+        for tag in sys_tags()
+        if "manylinux" not in tag.platform and "musllinux" not in tag.platform
+    )
 
 
 class CustomBuildHook(BuildHookInterface):
@@ -27,12 +55,7 @@ class CustomBuildHook(BuildHookInterface):
             # workflows compile the runtime before invoking the wheel builder.
             return
 
-        platform_tag = next(
-            tag.platform
-            for tag in sys_tags()
-            if "manylinux" not in tag.platform and "musllinux" not in tag.platform
-        )
-        build_data["tag"] = f"py3-none-{platform_tag}"
+        build_data["tag"] = f"py3-none-{wheel_platform_tag()}"
         build_data["pure_python"] = False
         build_data["force_include"][str(payload)] = (
             f"local_shell_mcp/ui_runtime/{payload.name}"

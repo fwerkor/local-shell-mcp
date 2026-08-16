@@ -443,6 +443,10 @@ jobs:
           python -m pip install --upgrade pip build
           python -m build --wheel
 
+      - name: Validate wheel platform compatibility
+        shell: bash
+        run: python scripts/check-wheel-compatibility.py "${{ matrix.artifact }}" dist/*.whl
+
       - name: Build source distribution
         if: matrix.artifact == 'wheel-linux-x86_64'
         run: python -m build --sdist

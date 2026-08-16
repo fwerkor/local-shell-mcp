@@ -60,6 +60,11 @@ def main() -> int:
         print("Release wheels must be built directly from the platform checkout.")
         return 1
 
+    wheel_validation_script = step_script(python_job, "Validate wheel platform compatibility")
+    if "check-wheel-compatibility.py" not in wheel_validation_script:
+        print("Release wheels must validate their platform tags and native runtime compatibility.")
+        return 1
+
     wheel_smoke_script = step_script(python_job, "Install wheel and smoke test packaged UI")
     if "standalone-ui-smoke.py" not in wheel_smoke_script:
         print("Release wheels must exercise their packaged OpenTUI runtime.")
@@ -109,9 +114,8 @@ def main() -> int:
     if pypi_job.get("environment") != "pypi":
         print("Release workflow must publish Python artifacts from the protected pypi environment.")
         return 1
-    pypi_filter_script = step_script(pypi_job, "Exclude raw Linux wheels unsupported by PyPI")
-    if "dist/*-linux_*.whl" not in pypi_filter_script:
-        print("PyPI publishing must exclude raw linux_* wheels until compliant manylinux wheels are built.")
+    if step_script(pypi_job, "Exclude raw Linux wheels unsupported by PyPI"):
+        print("PyPI publishing must not discard validated manylinux wheels.")
         return 1
 
     smoke_script = step_script(binary_job, "Smoke test embedded OpenTUI runtime")
