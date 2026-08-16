@@ -21,8 +21,8 @@
   ],
   "type": "module",
   "bin": {
-    "local-shell-mcp": "./bin/local-shell-mcp.js",
-    "lsm": "./bin/local-shell-mcp.js"
+    "local-shell-mcp": "bin/local-shell-mcp.js",
+    "lsm": "bin/local-shell-mcp.js"
   },
   "files": [
     "bin/",
