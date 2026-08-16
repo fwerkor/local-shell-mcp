@@ -1,0 +1,43 @@
+{
+  "name": "local-shell-mcp",
+  "version": "0.0.0-dev",
+  "description": "Official npm launcher for local-shell-mcp, a ChatGPT-ready MCP control plane for shell, files, browser automation, and remote machines.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fwerkor/local-shell-mcp.git",
+    "directory": "npm"
+  },
+  "homepage": "https://github.com/fwerkor/local-shell-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/fwerkor/local-shell-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "chatgpt",
+    "shell",
+    "coding-agent",
+    "playwright"
+  ],
+  "type": "module",
+  "bin": {
+    "local-shell-mcp": "./bin/local-shell-mcp.js",
+    "lsm": "./bin/local-shell-mcp.js"
+  },
+  "files": [
+    "bin/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "localShellMcp": {
+    "releaseTag": "v0.0.0-dev"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

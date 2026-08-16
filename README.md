@@ -46,6 +46,16 @@ The intended safety boundary is the container or VM, not the host.
 
 ## Quick start
 
+Install the official launcher or Python package when you want a host runtime:
+
+```bash
+npx local-shell-mcp --help
+pipx install local-shell-mcp
+lsm --help
+```
+
+The npm and Python distributions both expose `local-shell-mcp`; installed packages also expose `lsm` as the short command. The npm distribution is only a verified launcher for the matching standalone release binary, not a second server implementation.
+
 Clone the repository and prepare configuration:
 
 ```bash
@@ -143,7 +153,7 @@ See the [DeepSeek Harness integration guide](https://fwerkor.github.io/local-she
 
 ## VS Code extension runtime
 
-Release assets include `local-shell-mcp-vscode-<version>.vsix`. The extension is a runtime launcher for the current VS Code workspace. It starts the same server, checks `/healthz`, copies the MCP URL, and copies a ready-to-paste ChatGPT setup prompt.
+Release assets include `local-shell-mcp-<version>.vsix`. The extension is a runtime launcher for the current VS Code workspace. It starts the same server, checks `/healthz`, copies the MCP URL, and copies a ready-to-paste ChatGPT setup prompt.
 
 Basic flow:
 

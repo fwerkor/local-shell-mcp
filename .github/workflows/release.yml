@@ -168,6 +168,7 @@ jobs:
           /tmp/local-shell-mcp-wheel-venv/bin/python -m pip install --upgrade pip
           /tmp/local-shell-mcp-wheel-venv/bin/python -m pip install dist/*.whl
           /tmp/local-shell-mcp-wheel-venv/bin/local-shell-mcp --version
+          /tmp/local-shell-mcp-wheel-venv/bin/lsm --version
           /tmp/local-shell-mcp-wheel-venv/bin/python scripts/standalone-ui-smoke.py \
             --server /tmp/local-shell-mcp-wheel-venv/bin/local-shell-mcp
 
@@ -179,6 +180,7 @@ jobs:
           & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\python.exe -m pip install --upgrade pip
           & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\python.exe -m pip install (Get-Item dist\*.whl).FullName
           & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\local-shell-mcp.exe --version
+          & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\lsm.exe --version
           & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\python.exe scripts/standalone-ui-smoke.py `
             --server $env:TEMP\local-shell-mcp-wheel-venv\Scripts\local-shell-mcp.exe
 
@@ -307,6 +309,12 @@ jobs:
             Generate and export LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN as at least 8 random characters.
             Generate and export LOCAL_SHELL_MCP_OAUTH_JWT_SECRET as at least 32 random bytes.
           EOF
+          raw_name="local-shell-mcp-${{ matrix.artifact }}"
+          if [[ "${{ matrix.binary }}" == *.exe ]]; then
+            raw_name="${raw_name}.exe"
+          fi
+          cp "dist/${{ matrix.binary }}" "release/${raw_name}"
+
           cd release
           if [[ "${{ matrix.archive }}" == "zip" ]]; then
             7z a local-shell-mcp-${{ matrix.artifact }}.zip local-shell-mcp-${{ matrix.artifact }} >/dev/null
@@ -319,7 +327,7 @@ jobs:
         with:
           name: binary-${{ matrix.artifact }}
           path: |
-            release/local-shell-mcp-${{ matrix.artifact }}.*
+            release/local-shell-mcp-${{ matrix.artifact }}*
           if-no-files-found: error
 
 
@@ -361,7 +369,7 @@ jobs:
         with:
           name: vscode-extension
           path: |
-            dist/local-shell-mcp-vscode-*.vsix
+            dist/local-shell-mcp-*.vsix
           if-no-files-found: error
 
   publish-docker-platform:
@@ -497,6 +505,13 @@ jobs:
           path: dist
 
 
+      - name: Generate SHA256 checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum * > SHA256SUMS
+
       - name: Create release notes
         run: |
           # shellcheck disable=SC2006
@@ -535,7 +550,7 @@ jobs:
           VS Code extension download:
 
           \`\`\`text
-          local-shell-mcp-vscode-${{ needs.validate-release.outputs.version }}.vsix
+          local-shell-mcp-${{ needs.validate-release.outputs.version }}.vsix
           \`\`\`
 
           Python package artifacts, executable archives, and the VS Code extension are attached below.
@@ -552,3 +567,113 @@ jobs:
           generate_release_notes: true
           body_path: RELEASE_NOTES.md
           files: dist/*
+
+  publish-pypi:
+    name: Publish to PyPI
+    if: ${{ vars.PYPI_PUBLISH_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    needs:
+      - validate-release
+      - github-release
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Download Python package artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: python-dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish Python distributions
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-npm:
+    name: Publish npm launcher
+    if: ${{ vars.NPM_PUBLISH_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    needs:
+      - validate-release
+      - github-release
+    environment: npm
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Prepare npm launcher version
+        working-directory: npm
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag }}
+          RELEASE_VERSION: ${{ needs.validate-release.outputs.version }}
+        run: |
+          npm version "$RELEASE_VERSION" --no-git-tag-version --allow-same-version
+          npm pkg set "localShellMcp.releaseTag=$RELEASE_TAG"
+
+      - name: Test npm launcher
+        working-directory: npm
+        run: npm test
+
+      - name: Publish npm launcher
+        working-directory: npm
+        run: |
+          npm install --global npm@11
+          npm publish --provenance
+
+  publish-vscode-marketplace:
+    name: Publish VS Code Marketplace extension
+    if: ${{ vars.VSCODE_MARKETPLACE_PUBLISH_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    needs:
+      - validate-release
+      - github-release
+    environment: vscode-marketplace
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download VSIX
+        uses: actions/download-artifact@v8
+        with:
+          name: vscode-extension
+          path: dist
+
+      - name: Publish extension
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx --yes @vscode/vsce@3.6.2 publish --packagePath "dist/local-shell-mcp-${{ needs.validate-release.outputs.version }}.vsix" -p "$VSCE_PAT"
+
+  publish-open-vsx:
+    name: Publish Open VSX extension
+    if: ${{ vars.OPENVSX_PUBLISH_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    needs:
+      - validate-release
+      - github-release
+    environment: open-vsx
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download VSIX
+        uses: actions/download-artifact@v8
+        with:
+          name: vscode-extension
+          path: dist
+
+      - name: Publish extension
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: npx --yes ovsx publish "dist/local-shell-mcp-${{ needs.validate-release.outputs.version }}.vsix" -p "$OVSX_PAT"

@@ -456,6 +456,7 @@ jobs:
           /tmp/local-shell-mcp-wheel-venv/bin/python -m pip install --upgrade pip
           /tmp/local-shell-mcp-wheel-venv/bin/python -m pip install dist/*.whl
           /tmp/local-shell-mcp-wheel-venv/bin/local-shell-mcp --version
+          /tmp/local-shell-mcp-wheel-venv/bin/lsm --version
           /tmp/local-shell-mcp-wheel-venv/bin/local-shell-mcp version
           /tmp/local-shell-mcp-wheel-venv/bin/python scripts/standalone-ui-smoke.py \
             --server /tmp/local-shell-mcp-wheel-venv/bin/local-shell-mcp
@@ -468,6 +469,7 @@ jobs:
           & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\python.exe -m pip install --upgrade pip
           & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\python.exe -m pip install (Get-Item dist\*.whl).FullName
           & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\local-shell-mcp.exe --version
+          & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\lsm.exe --version
           & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\local-shell-mcp.exe version
           & $env:TEMP\local-shell-mcp-wheel-venv\Scripts\python.exe scripts/standalone-ui-smoke.py `
             --server $env:TEMP\local-shell-mcp-wheel-venv\Scripts\local-shell-mcp.exe
@@ -706,6 +708,32 @@ jobs:
           path: dist/*.vsix
           if-no-files-found: error
 
+  npm-launcher:
+    name: npm launcher
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: npm/package-lock.json
+
+      - name: Install launcher metadata
+        working-directory: npm
+        run: npm ci --ignore-scripts
+
+      - name: Test launcher
+        working-directory: npm
+        run: npm test
+
+      - name: Inspect publish tarball
+        working-directory: npm
+        run: npm pack --dry-run
+
   ci-summary:
     name: CI / all matrix jobs passed
     runs-on: ubuntu-24.04
@@ -723,6 +751,7 @@ jobs:
       - compose
       - binary-release-matrix
       - vscode-extension
+      - npm-launcher
     if: always()
     steps:
       - name: Check aggregate result

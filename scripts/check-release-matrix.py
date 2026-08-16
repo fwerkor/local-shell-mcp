@@ -82,6 +82,33 @@ def main() -> int:
     if "matrix.tui_binary" in package_script:
         print("Release archives must not include the OpenTUI sidecar executable.")
         return 1
+    if 'raw_name="local-shell-mcp-${{ matrix.artifact }}"' not in package_script:
+        print("Release binaries must publish raw platform executables for the npm launcher.")
+        return 1
+
+    upload_steps = binary_job.get("steps", [])
+    binary_upload = next((step for step in upload_steps if step.get("uses", "").startswith("actions/upload-artifact@")), None)
+    upload_path = str((binary_upload or {}).get("with", {}).get("path", ""))
+    if "release/local-shell-mcp-${{ matrix.artifact }}*" not in upload_path:
+        print("Release binary artifact upload must include extensionless raw executables.")
+        return 1
+
+    github_release_job = jobs.get("github-release", {})
+    checksum_script = step_script(github_release_job, "Generate SHA256 checksums")
+    if "sha256sum * > SHA256SUMS" not in checksum_script:
+        print("GitHub releases must publish SHA256SUMS for npm launcher verification.")
+        return 1
+
+    npm_job = jobs.get("publish-npm", {})
+    npm_publish_script = step_script(npm_job, "Publish npm launcher")
+    if "npm publish" not in npm_publish_script or npm_job.get("environment") != "npm":
+        print("Release workflow must publish the npm launcher from the protected npm environment.")
+        return 1
+
+    pypi_job = jobs.get("publish-pypi", {})
+    if pypi_job.get("environment") != "pypi":
+        print("Release workflow must publish Python artifacts from the protected pypi environment.")
+        return 1
 
     smoke_script = step_script(binary_job, "Smoke test embedded OpenTUI runtime")
     if "standalone-ui-smoke.py" not in smoke_script:

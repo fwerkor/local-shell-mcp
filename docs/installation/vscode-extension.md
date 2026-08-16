@@ -48,7 +48,7 @@ or download the release binary for your OS and put it on `PATH`.
 Then install the VSIX release asset:
 
 ```bash
-code --install-extension local-shell-mcp-vscode-<version>.vsix
+code --install-extension local-shell-mcp-<version>.vsix
 ```
 
 Alternatively, use **Extensions: Install from VSIX...** in the command palette.

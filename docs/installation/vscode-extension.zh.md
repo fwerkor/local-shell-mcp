@@ -48,7 +48,7 @@ pipx install local-shell-mcp
 然后安装 VSIX release 资产：
 
 ```bash
-code --install-extension local-shell-mcp-vscode-<version>.vsix
+code --install-extension local-shell-mcp-<version>.vsix
 ```
 
 也可以在命令面板中使用 **Extensions: Install from VSIX...**。

@@ -61,6 +61,7 @@ Repository = "https://github.com/fwerkor/local-shell-mcp"
 
 [project.scripts]
 local-shell-mcp = "local_shell_mcp.main:main"
+lsm = "local_shell_mcp.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/local_shell_mcp"]
