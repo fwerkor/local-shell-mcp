@@ -17,6 +17,16 @@ on:
         required: true
         default: true
         type: boolean
+      bootstrap_pypi_existing_release:
+        description: "One-time: publish Python artifacts from an existing GitHub release to PyPI"
+        required: true
+        default: false
+        type: boolean
+      bootstrap_openvsx_namespace:
+        description: "One-time: create/confirm the fwerkor Open VSX namespace"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -37,6 +47,7 @@ env:
 jobs:
   validate-release:
     name: Validate release input
+    if: ${{ !inputs.bootstrap_pypi_existing_release && !inputs.bootstrap_openvsx_namespace }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -107,6 +118,48 @@ jobs:
           print(f"dockerhub_tags={json.dumps(tags_for(os.environ['DOCKERHUB_IMAGE_NAME']))}")
           print(f"ghcr_tags={json.dumps(tags_for(os.environ['GHCR_IMAGE_NAME']))}")
           PY
+
+  bootstrap-pypi-existing-release:
+    name: Bootstrap existing release to PyPI
+    if: ${{ inputs.bootstrap_pypi_existing_release }}
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download Python artifacts from the existing GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$RELEASE_TAG" \
+            --repo "${{ github.repository }}" \
+            --pattern 'local_shell_mcp-*' \
+            --dir dist
+          ls -lh dist
+
+      - name: Publish existing Python distributions
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  bootstrap-openvsx-namespace:
+    name: Bootstrap Open VSX namespace
+    if: ${{ inputs.bootstrap_openvsx_namespace }}
+    runs-on: ubuntu-latest
+    environment: open-vsx
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Create namespace
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: npx --yes ovsx create-namespace fwerkor -p "$OVSX_PAT"
 
   build-python-package:
     name: Build Python package (${{ matrix.artifact }})
