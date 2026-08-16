@@ -587,6 +587,12 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Exclude raw Linux wheels unsupported by PyPI
+        shell: bash
+        run: |
+          rm -f dist/*-linux_*.whl
+          ls -lh dist
+
       - name: Publish Python distributions
         uses: pypa/gh-action-pypi-publish@release/v1
 

@@ -109,6 +109,10 @@ def main() -> int:
     if pypi_job.get("environment") != "pypi":
         print("Release workflow must publish Python artifacts from the protected pypi environment.")
         return 1
+    pypi_filter_script = step_script(pypi_job, "Exclude raw Linux wheels unsupported by PyPI")
+    if "dist/*-linux_*.whl" not in pypi_filter_script:
+        print("PyPI publishing must exclude raw linux_* wheels until compliant manylinux wheels are built.")
+        return 1
 
     smoke_script = step_script(binary_job, "Smoke test embedded OpenTUI runtime")
     if "standalone-ui-smoke.py" not in smoke_script:
