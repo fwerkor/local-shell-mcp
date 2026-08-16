@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark" />
   <title>Authorize local-shell-mcp</title>
+  <link rel="icon" type="image/svg+xml" href="$favicon_url" />
   <style>
     :root {
       color-scheme: dark;
@@ -53,13 +54,11 @@
       place-items: center;
       width: 34px;
       height: 34px;
-      border: 1px solid rgba(94, 234, 212, .28);
+      overflow: hidden;
       border-radius: 10px;
-      background: rgba(13, 148, 136, .12);
-      color: #5eead4;
-      font: 700 16px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-      box-shadow: inset 0 1px rgba(255,255,255,.06);
+      box-shadow: 0 8px 24px rgba(99, 102, 241, .24);
     }
+    .brand-mark img { display: block; width: 100%; height: 100%; }
     .card {
       overflow: hidden;
       border: 1px solid rgba(148, 163, 184, .18);
@@ -231,7 +230,7 @@
 </head>
 <body>
   <main>
-    <div class="brand"><span class="brand-mark" aria-hidden="true">&gt;_</span><span>local-shell-mcp</span></div>
+    <div class="brand"><span class="brand-mark" aria-hidden="true"><img src="$logo_url" alt="" /></span><span>local-shell-mcp</span></div>
     <section class="card" aria-labelledby="authorization-title">
       <header class="card-header">
         <p class="eyebrow">OAuth authorization</p>

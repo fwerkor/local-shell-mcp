@@ -44,12 +44,14 @@ await Bun.write(
 )
 await rm(nativeCssPath, { force: true })
 await rm(consoleCssPath, { force: true })
-await Bun.write(resolve(staticDir, "index.html"), Bun.file(resolve(root, "static/index.html")))
+for (const asset of ["index.html", "logo.svg", "favicon.svg"]) {
+  await Bun.write(resolve(staticDir, asset), Bun.file(resolve(root, "static", asset)))
+}
 const liveScriptPath = resolve(staticDir, "live-workspace.js")
 const liveStylePath = resolve(staticDir, "live-workspace.css")
 const liveScript = (await Bun.file(liveScriptPath).text()).replaceAll("</script", "<\\/script")
 const liveStyle = (await Bun.file(liveStylePath).text()).replaceAll("</style", "<\\/style")
-const liveHtml = `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/><style>${liveStyle}</style></head><body><script type="module">${liveScript}</script></body></html>`
+const liveHtml = `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/><title>local-shell-mcp Live Workspace</title><style>${liveStyle}</style></head><body><script type="module">${liveScript}</script></body></html>`
   .replace(/[ \t]+$/gm, "")
 await Bun.write(resolve(staticDir, "live-workspace.html"), liveHtml)
 await rm(liveScriptPath, { force: true })

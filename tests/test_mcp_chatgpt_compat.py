@@ -92,7 +92,12 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
 
     mcp = build_mcp()
     assert "local-shell-mcp.example.com" in mcp.settings.transport_security.allowed_hosts
-    assert mcp._mcp_server.create_initialization_options().server_version == __version__
+    initialization = mcp._mcp_server.create_initialization_options()
+    assert initialization.server_version == __version__
+    assert initialization.website_url == "https://fwerkor.github.io/local-shell-mcp/"
+    assert initialization.icons
+    assert initialization.icons[0].src == "https://fwerkor.github.io/local-shell-mcp/assets/logo.svg"
+    assert initialization.icons[0].mimeType == "image/svg+xml"
 
     tools = {tool.name: tool for tool in await mcp.list_tools()}
     assert tools["environment_get"].meta["securitySchemes"][0]["type"] == "oauth2"

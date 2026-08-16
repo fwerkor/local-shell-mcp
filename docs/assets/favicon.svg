@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">local-shell-mcp logo</title>
+  <desc id="desc">A terminal prompt connected to a small network of nodes, representing a shell control plane.</desc>
+  <defs>
+    <linearGradient id="surface" x1="40" y1="36" x2="218" y2="222" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8B5CF6"/>
+      <stop offset="0.48" stop-color="#6366F1"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="72" y1="64" x2="196" y2="176" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="20" y="20" width="216" height="216" rx="54" fill="url(#surface)"/>
+  <path d="M55 20h127c30 0 54 24 54 54v25C184 57 119 40 55 52V20Z" fill="url(#glow)"/>
+  <rect x="20.75" y="20.75" width="214.5" height="214.5" rx="53.25" fill="none" stroke="#FFFFFF" stroke-opacity="0.2" stroke-width="1.5"/>
+
+  <path d="M63 83L103 116L63 149" fill="none" stroke="#FFFFFF" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M103 158H137" fill="none" stroke="#FFFFFF" stroke-width="13" stroke-linecap="round"/>
+
+  <path d="M152 112L184 82M156 118L197 124M153 124L180 167" fill="none" stroke="#FFFFFF" stroke-opacity="0.76" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="151" cy="117" r="11" fill="#FFFFFF"/>
+  <circle cx="188" cy="78" r="10" fill="#FFFFFF"/>
+  <circle cx="203" cy="125" r="10" fill="#FFFFFF"/>
+  <circle cx="184" cy="174" r="10" fill="#FFFFFF"/>
+
+  <circle cx="151" cy="117" r="4" fill="#6366F1"/>
+  <circle cx="188" cy="78" r="3.5" fill="#6366F1"/>
+  <circle cx="203" cy="125" r="3.5" fill="#4F63EE"/>
+  <circle cx="184" cy="174" r="3.5" fill="#4268ED"/>
+</svg>

@@ -69,7 +69,8 @@ svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width:
 
 .topbar { flex: 0 0 auto; min-height: 50px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 7px 11px; border-bottom: 1px solid var(--ls-border); background: color-mix(in srgb, var(--ls-bg-elevated) 92%, transparent); backdrop-filter: blur(18px); }
 .brand-area { display: flex; align-items: center; min-width: 0; gap: 10px; }
-.brand-mark { display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 30px; border-radius: 8px; background: linear-gradient(145deg, var(--ls-accent), color-mix(in srgb, var(--ls-accent) 55%, #4f8eff)); color: white; font-size: 10px; font-weight: 800; letter-spacing: -0.02em; box-shadow: 0 5px 18px color-mix(in srgb, var(--ls-accent) 22%, transparent); }
+.brand-mark { display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 30px; overflow: hidden; border-radius: 8px; box-shadow: 0 5px 18px color-mix(in srgb, var(--ls-accent) 22%, transparent); }
+.brand-mark .brand-logo { display: block; width: 30px; height: 30px; }
 .brand-copy { min-width: 0; }
 .title-row { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 13px; }
 .title-row strong { font-size: 14px; letter-spacing: -0.015em; }

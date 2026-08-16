@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
+from mcp.types import CallToolResult, Icon, ImageContent, TextContent, ToolAnnotations
 from pathspec.gitignore import GitIgnoreSpec
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
@@ -3431,6 +3431,14 @@ def build_mcp() -> FastMCP:
     mcp = FastMCP(
         "local-shell-mcp",
         instructions=MCP_INSTRUCTIONS,
+        website_url="https://fwerkor.github.io/local-shell-mcp/",
+        icons=[
+            Icon(
+                src="https://fwerkor.github.io/local-shell-mcp/assets/logo.svg",
+                mimeType="image/svg+xml",
+                sizes=["any"],
+            )
+        ],
         transport_security=_transport_security_settings(),
     )
     # FastMCP currently leaves the low-level server version unset, which makes

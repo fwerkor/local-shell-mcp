@@ -548,6 +548,13 @@ def _authorize_template() -> Template:
     return Template(template)
 
 
+@lru_cache(maxsize=1)
+def _oauth_logo_data_uri() -> str:
+    logo = files("local_shell_mcp").joinpath("ui_static", "logo.svg").read_bytes()
+    encoded = base64.b64encode(logo).decode("ascii")
+    return f"data:image/svg+xml;base64,{encoded}"
+
+
 _SCOPE_DETAILS = {
     "shell:read": (
         "Read workspace",
@@ -619,7 +626,10 @@ def _authorize_form(
         </div>"""
         security_notice = "This service currently allows approval without an admin PIN."
     normalized_params = {**params, "scope": scope}
+    logo_data_uri = html_lib.escape(_oauth_logo_data_uri(), quote=True)
     html = _authorize_template().substitute(
+        logo_url=logo_data_uri,
+        favicon_url=logo_data_uri,
         client_name=html_lib.escape(client_name),
         scope_items=_scope_items(scope),
         resource_title=html_lib.escape(resource, quote=True),

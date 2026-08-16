@@ -6,12 +6,13 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#111827" />
     <title>local-shell-mcp Human Interface</title>
+    <link rel="icon" type="image/svg+xml" href="__LSM_UI_PATH__/assets/favicon.svg" />
     <link rel="stylesheet" href="__LSM_UI_PATH__/assets/web.css" />
   </head>
   <body>
     <section class="auth-gate" id="auth-gate" hidden>
       <div class="auth-card">
-        <div class="auth-mark" aria-hidden="true">LS</div>
+        <div class="auth-mark" aria-hidden="true"><img src="__LSM_UI_PATH__/assets/logo.svg" alt="" /></div>
         <p class="auth-eyebrow">Protected control plane</p>
         <h1>Connect to local-shell-mcp</h1>
         <p>Authenticate with the same OAuth service used by MCP. Credentials remain in this browser session.</p>
@@ -26,9 +27,7 @@
     <div class="app-shell" id="app-shell" hidden>
       <aside class="sidebar">
         <div class="brand-block">
-          <div class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M5 7.5A2.5 2.5 0 0 1 7.5 5h9A2.5 2.5 0 0 1 19 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 5 16.5z"/><path d="m8.5 9 2.25 2.25L8.5 13.5M12.5 14h3"/></svg>
-          </div>
+          <div class="brand-mark" aria-hidden="true"><img src="__LSM_UI_PATH__/assets/logo.svg" alt="" /></div>
           <div>
             <div class="brand-name">local-shell-mcp</div>
             <div class="brand-subtitle">Control plane</div>

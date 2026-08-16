@@ -5,6 +5,7 @@
   "version": "2.3.1",
   "publisher": "fwerkor",
   "license": "MIT",
+  "icon": "media/icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/fwerkor/local-shell-mcp"

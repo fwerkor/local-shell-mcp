@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/assets/logo.svg" alt="local-shell-mcp logo" width="152">
+
 # local-shell-mcp
 
 **A ChatGPT-ready MCP control plane for shell, files, browser automation, file links, and remote machines.**
