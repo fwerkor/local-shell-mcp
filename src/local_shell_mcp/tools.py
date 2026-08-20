@@ -10,7 +10,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
 from mcp.server.transport_security import TransportSecuritySettings
@@ -42,6 +42,7 @@ from .fs_ops import (
     relative_display,
     resolve_path,
     temp_dir,
+    write_content,
     write_text,
 )
 from .image_ops import ImageFile, assert_view_image_size, read_image
@@ -2852,20 +2853,30 @@ def _register_workspace_write_tools(mcp: FastMCP, settings: Any) -> None:
         path: str,
         content: str,
         overwrite: bool = True,
+        encoding: Literal["utf-8", "base64"] = "utf-8",
         purpose: str | None = None,
         explanation: str | None = None,
         machine: str | None = None,
     ) -> ToolResult:
-        """Write a UTF-8 text file locally or on a remote machine."""
+        """Write a UTF-8 text file or base64-encoded binary file locally or remotely."""
         _audit_tool_purpose("file_write", purpose, explanation)
         if machine:
             return await _remote_call(
                 settings,
                 machine,
                 "write_file",
-                {"path": path, "content": content, "overwrite": overwrite},
+                {
+                    "path": path,
+                    "content": content,
+                    "overwrite": overwrite,
+                    "encoding": encoding,
+                },
             )
-        return await _tool_call(asyncio.to_thread, write_text, path, content, overwrite)
+        if encoding == "utf-8":
+            return await _tool_call(asyncio.to_thread, write_text, path, content, overwrite)
+        return await _tool_call(
+            asyncio.to_thread, write_content, path, content, overwrite, None, encoding
+        )
 
     @mcp.tool(structured_output=True, meta=shell_write_meta)
     async def file_edit(

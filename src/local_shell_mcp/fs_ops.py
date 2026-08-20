@@ -470,14 +470,13 @@ def read_texts(
     return {"files": files, "total_content_bytes": total_content_bytes}
 
 
-def write_text(
+def _write_bytes(
     path: str,
-    content: str,
+    data: bytes,
     overwrite: bool = True,
     expected_sha256: str | None = None,
 ) -> dict:
     settings = get_settings()
-    data = content.encode("utf-8")
     if len(data) > settings.max_file_write_bytes:
         raise ValueError(f"Refusing to write {len(data)} bytes; max is {settings.max_file_write_bytes}")
     p = resolve_path(path)
@@ -516,6 +515,34 @@ def write_text(
         "created": created,
         "sha256": hashlib.sha256(data).hexdigest(),
     }
+
+
+def write_text(
+    path: str,
+    content: str,
+    overwrite: bool = True,
+    expected_sha256: str | None = None,
+) -> dict:
+    return _write_bytes(path, content.encode("utf-8"), overwrite, expected_sha256)
+
+
+def write_content(
+    path: str,
+    content: str,
+    overwrite: bool = True,
+    expected_sha256: str | None = None,
+    encoding: str = "utf-8",
+) -> dict:
+    if encoding == "utf-8":
+        data = content.encode("utf-8")
+    elif encoding == "base64":
+        try:
+            data = base64.b64decode(content, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("content is not valid base64") from exc
+    else:
+        raise ValueError("encoding must be 'utf-8' or 'base64'")
+    return _write_bytes(path, data, overwrite, expected_sha256)
 
 
 def perform_file_action(

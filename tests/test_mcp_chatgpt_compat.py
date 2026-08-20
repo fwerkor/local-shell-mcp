@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import json
 
 import pytest
@@ -120,6 +122,7 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
     assert all(tool.outputSchema is not None for tool in tools.values())
     assert tools["run_shell"].outputSchema["title"] == "ToolResult"
     assert set(tools["run_shell"].outputSchema["properties"]) == {"ok", "message", "data"}
+    assert tools["file_write"].inputSchema["properties"]["encoding"]["enum"] == ["utf-8", "base64"]
 
     content, structured = await mcp.call_tool("environment_get", {})
     assert content
@@ -161,6 +164,23 @@ async def test_mcp_tool_execution_uses_one_full_scope_bundle(tmp_path, monkeypat
         _CURRENT_PRINCIPAL.reset(full_token)
 
     assert (tmp_path / "written.txt").read_text(encoding="utf-8") == "yes"
+
+
+@pytest.mark.asyncio
+async def test_file_write_accepts_base64_binary_content(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    payload = b"\x00\x01binary\xff"
+    encoded = base64.b64encode(payload).decode("ascii")
+
+    _, result = await build_mcp().call_tool(
+        "file_write",
+        {"path": "blob.bin", "content": encoded, "encoding": "base64"},
+    )
+
+    assert result["ok"] is True
+    assert result["data"]["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert (tmp_path / "blob.bin").read_bytes() == payload
 
 
 @pytest.mark.asyncio

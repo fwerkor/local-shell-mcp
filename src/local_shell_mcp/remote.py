@@ -47,6 +47,7 @@ from .fs_ops import (
     relative_display,
     resolve_path,
     temp_dir,
+    write_content,
     write_text,
 )
 from .jobs import list_jobs, retry_job, start_job, stop_job, tail_job
@@ -1554,12 +1555,22 @@ async def _execute_file_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         )
 
     if tool == "write_file":
+        encoding = args.get("encoding", "utf-8")
+        if encoding == "utf-8":
+            return await asyncio.to_thread(
+                write_text,
+                args["path"],
+                args["content"],
+                args.get("overwrite", True),
+                args.get("expected_sha256"),
+            )
         return await asyncio.to_thread(
-            write_text,
+            write_content,
             args["path"],
             args["content"],
             args.get("overwrite", True),
             args.get("expected_sha256"),
+            encoding,
         )
 
     if tool == "edit_file":

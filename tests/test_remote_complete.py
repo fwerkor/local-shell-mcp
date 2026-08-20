@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import io
 import subprocess
@@ -235,6 +236,24 @@ def test_remote_http_routes_success_and_errors(tmp_path, monkeypatch):
     assert "--invite is required" in join.text
     bundle = client.get(remote.REMOTE_WORKER_BUNDLE_PATH)
     assert bundle.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_file_worker_write_file_accepts_base64_binary_content(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    payload = b"\x00\x01remote\xff"
+
+    result = await remote._execute_file_worker_tool(
+        "write_file",
+        {
+            "path": "blob.bin",
+            "content": base64.b64encode(payload).decode("ascii"),
+            "encoding": "base64",
+        },
+    )
+
+    assert result["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert (tmp_path / "blob.bin").read_bytes() == payload
 
 
 @pytest.mark.asyncio

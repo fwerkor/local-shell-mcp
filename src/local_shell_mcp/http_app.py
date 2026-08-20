@@ -28,6 +28,7 @@ from .fs_ops import (
     glob_paths,
     list_dir,
     read_texts,
+    write_content,
     write_text,
 )
 from .human_ui import ui_routes
@@ -296,8 +297,18 @@ def _register_workspace_routes(app: FastAPI) -> None:
 
     @app.post("/tools/write_file")
     async def api_write_file(body: dict, _: Principal = PRINCIPAL_DEP):
+        encoding = body.get("encoding", "utf-8")
+        if encoding == "utf-8":
+            return await asyncio.to_thread(
+                write_text, body["path"], body["content"], _body_bool(body, "overwrite", True)
+            )
         return await asyncio.to_thread(
-            write_text, body["path"], body["content"], _body_bool(body, "overwrite", True)
+            write_content,
+            body["path"],
+            body["content"],
+            _body_bool(body, "overwrite", True),
+            None,
+            encoding,
         )
 
     @app.post("/tools/edit_file")

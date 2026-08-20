@@ -1,4 +1,5 @@
 
+import base64
 import hashlib
 import os
 import re
@@ -18,6 +19,7 @@ from local_shell_mcp.fs_ops import (
     perform_file_action,
     read_text,
     resolve_path,
+    write_content,
     write_text,
 )
 from local_shell_mcp.settings import get_settings
@@ -115,6 +117,47 @@ def test_read_text_reports_original_size_and_truncation(tmp_path, monkeypatch):
     assert result["truncated_bytes"] == 6
     assert result["truncated"] is True
     assert result["content"] == "hello"
+
+
+def test_write_content_decodes_base64_without_changing_bytes(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    payload = b"\x89PNG\r\n\x1a\n\x00\xffbinary"
+    encoded = base64.b64encode(payload).decode("ascii")
+
+    result = write_content("image.png", encoded, encoding="base64")
+
+    assert (tmp_path / "image.png").read_bytes() == payload
+    assert result["bytes"] == len(payload)
+    assert result["sha256"] == hashlib.sha256(payload).hexdigest()
+
+
+def test_write_content_rejects_invalid_base64(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+
+    with pytest.raises(ValueError, match="content is not valid base64"):
+        write_content("blob.bin", "not base64!", encoding="base64")
+
+    assert not (tmp_path / "blob.bin").exists()
+
+
+def test_write_content_applies_limit_to_decoded_bytes(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_FILE_WRITE_BYTES", "3")
+    get_settings.cache_clear()
+    encoded = base64.b64encode(b"1234").decode("ascii")
+
+    with pytest.raises(ValueError, match="Refusing to write 4 bytes; max is 3"):
+        write_content("blob.bin", encoded, encoding="base64")
+
+
+def test_write_content_rejects_unknown_encoding(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+
+    with pytest.raises(ValueError, match="encoding must be 'utf-8' or 'base64'"):
+        write_content("blob.bin", "data", encoding="hex")
 
 
 def test_write_text_does_not_read_existing_file_before_overwrite(tmp_path, monkeypatch):
