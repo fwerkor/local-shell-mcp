@@ -4,6 +4,7 @@ import contextlib
 import threading
 import uuid
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -78,7 +79,15 @@ class FileStateStore:
 
 
 _MEMORY_VALUES: dict[str, bytes] = {}
-_MEMORY_LOCKS: dict[str, threading.RLock] = {}
+
+
+@dataclass
+class _MemoryLockEntry:
+    lock: threading.RLock
+    users: int = 0
+
+
+_MEMORY_LOCKS: dict[str, _MemoryLockEntry] = {}
 _MEMORY_GUARD = threading.RLock()
 
 
@@ -89,25 +98,35 @@ class MemoryStateStore:
     def _key(self, key: str) -> str:
         return f"{self._namespace}:{key}"
 
-    def _lock_for(self, key: str) -> threading.RLock:
-        key = self._key(key)
+    @contextlib.contextmanager
+    def _locked_key(self, key: str) -> Iterator[str]:
+        namespaced = self._key(key)
         with _MEMORY_GUARD:
-            return _MEMORY_LOCKS.setdefault(key, threading.RLock())
+            entry = _MEMORY_LOCKS.get(namespaced)
+            if entry is None:
+                entry = _MemoryLockEntry(threading.RLock())
+                _MEMORY_LOCKS[namespaced] = entry
+            entry.users += 1
+        try:
+            with entry.lock:
+                yield namespaced
+        finally:
+            with _MEMORY_GUARD:
+                entry.users -= 1
+                if entry.users == 0 and _MEMORY_LOCKS.get(namespaced) is entry:
+                    _MEMORY_LOCKS.pop(namespaced, None)
 
     def read_bytes(self, key: str) -> bytes | None:
-        namespaced = self._key(key)
-        with self._lock_for(key):
+        with self._locked_key(key) as namespaced:
             value = _MEMORY_VALUES.get(namespaced)
             return None if value is None else bytes(value)
 
     def write_bytes(self, key: str, value: bytes) -> None:
-        namespaced = self._key(key)
-        with self._lock_for(key):
+        with self._locked_key(key) as namespaced:
             _MEMORY_VALUES[namespaced] = bytes(value)
 
     def delete(self, key: str) -> None:
-        namespaced = self._key(key)
-        with self._lock_for(key):
+        with self._locked_key(key) as namespaced:
             _MEMORY_VALUES.pop(namespaced, None)
 
     def list_keys(self, prefix: str = "") -> list[str]:
@@ -123,7 +142,7 @@ class MemoryStateStore:
 
     @contextlib.contextmanager
     def lock(self, key: str) -> Iterator[None]:
-        with self._lock_for(key):
+        with self._locked_key(key):
             yield
 
 

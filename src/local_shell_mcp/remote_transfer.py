@@ -35,6 +35,9 @@ REMOTE_TRANSFER_DOWNLOAD_PREFIX = f"{REMOTE_TRANSFER_PREFIX}/download/"
 _TRANSFER_CHUNK_BYTES = 1024 * 1024
 _CONTENT_RANGE_RE = re.compile(r"^bytes (\d+)-(\d+)/(\d+)$")
 _TICKET_LOCK = threading.RLock()
+_ACTIVE_SNAPSHOT_TEMPORARIES: set[str] = set()
+_ORPHAN_PRUNE_INTERVAL_S = 60.0
+_LAST_ORPHAN_PRUNE_AT = 0.0
 
 
 @dataclass
@@ -103,6 +106,30 @@ def _cleanup_ticket_file(ticket: _TransferTicket) -> None:
         Path(ticket.cleanup_path).unlink(missing_ok=True)
 
 
+def _prune_orphan_download_snapshots_locked(now: float) -> None:
+    directory = get_settings().state_dir / "remote-transfers"
+    if not directory.is_dir():
+        return
+    referenced = {
+        str(Path(ticket.cleanup_path))
+        for ticket in _TICKETS.values()
+        if ticket.cleanup_path
+    }
+    referenced.update(_ACTIVE_SNAPSHOT_TEMPORARIES)
+    cutoff = now - _ticket_ttl_s()
+    for path in directory.iterdir():
+        if not path.is_file() or str(path) in referenced:
+            continue
+        if path.suffix != ".bin" and not path.name.endswith(".tmp"):
+            continue
+        try:
+            if path.stat().st_mtime > cutoff:
+                continue
+            path.unlink(missing_ok=True)
+        except OSError:
+            continue
+
+
 def _prune_locked(now: float | None = None) -> None:
     current = _now() if now is None else now
     for token, ticket in list(_TICKETS.items()):
@@ -110,6 +137,14 @@ def _prune_locked(now: float | None = None) -> None:
             removed = _TICKETS.pop(token, None)
             if removed is not None:
                 _cleanup_ticket_file(removed)
+
+
+def _maybe_prune_orphan_download_snapshots_locked(now: float) -> None:
+    global _LAST_ORPHAN_PRUNE_AT
+    if _LAST_ORPHAN_PRUNE_AT and now < _LAST_ORPHAN_PRUNE_AT + _ORPHAN_PRUNE_INTERVAL_S:
+        return
+    _LAST_ORPHAN_PRUNE_AT = now
+    _prune_orphan_download_snapshots_locked(now)
 
 
 def _create_ticket(
@@ -142,6 +177,7 @@ def _create_ticket(
     )
     with _TICKET_LOCK:
         _prune_locked(now)
+        _maybe_prune_orphan_download_snapshots_locked(now)
         _TICKETS[token] = ticket
     audit(
         "remote_transfer_ticket_created",
@@ -196,6 +232,8 @@ def _create_download_snapshot(
     snapshot = _download_snapshot_path(token)
     temporary = snapshot.with_name(snapshot.name + f".{secrets.token_hex(8)}.tmp")
     digest = hashlib.sha256()
+    with _TICKET_LOCK:
+        _ACTIVE_SNAPSHOT_TEMPORARIES.add(str(temporary))
     try:
         with source.open("rb") as source_handle, temporary.open("xb") as output:
             before = os.fstat(source_handle.fileno())
@@ -232,6 +270,8 @@ def _create_download_snapshot(
         os.replace(temporary, snapshot)
         return snapshot
     finally:
+        with _TICKET_LOCK:
+            _ACTIVE_SNAPSHOT_TEMPORARIES.discard(str(temporary))
         temporary.unlink(missing_ok=True)
 
 

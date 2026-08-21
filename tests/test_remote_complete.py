@@ -446,6 +446,7 @@ def test_remote_registry_invite_and_registration_edge_cases(tmp_path, monkeypatc
         "[]",
         '{"version":2,"workers":[]}',
         '{"version":1,"workers":{}}',
+        '{"version":1,"workers":[],"invites":{}}',
     ):
         invalid.write_text(payload, encoding="utf-8")
         with pytest.raises(ValueError, match="registry"):

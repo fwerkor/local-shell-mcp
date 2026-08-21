@@ -1421,6 +1421,17 @@ async def _remote_transfer_data(
     return _unwrap_remote_transfer_result(result, machine=machine, tool=tool)
 
 
+def _revoke_cancelled_snapshot_ticket(task: asyncio.Task[dict[str, Any]]) -> None:
+    if task.cancelled():
+        return
+    try:
+        ticket = task.result()
+    except Exception:
+        return
+    with suppress(Exception):
+        revoke_transfer_ticket(ticket["token"])
+
+
 async def _copy_local_file_to_remote(
     source_path: str,
     dst_machine: str,
@@ -1433,11 +1444,19 @@ async def _copy_local_file_to_remote(
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {source_path}")
     effective_chunk_size = stat["size"] if chunk_size is None else normalize_chunk_size(chunk_size)
-    ticket = create_download_ticket(
-        source_path,
-        stat["size"],
-        stat["sha256"],
+    ticket_task = asyncio.create_task(
+        asyncio.to_thread(
+            create_download_ticket,
+            source_path,
+            stat["size"],
+            stat["sha256"],
+        )
     )
+    try:
+        ticket = await asyncio.shield(ticket_task)
+    except asyncio.CancelledError:
+        ticket_task.add_done_callback(_revoke_cancelled_snapshot_ticket)
+        raise
     try:
         finish = await _remote_transfer_data(
             dst_machine,
@@ -1790,6 +1809,27 @@ def _s3_transfer_client():  # noqa: ANN202
     )
 
 
+async def _delete_s3_transfer_object(client: Any, bucket: str, key: str) -> str | None:
+    last_error: str | None = None
+    for attempt in range(3):
+        try:
+            await asyncio.to_thread(client.delete_object, Bucket=bucket, Key=key)
+            return None
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+            if attempt < 2:
+                await asyncio.sleep(0.05 * (2**attempt))
+    with suppress(Exception):
+        audit(
+            "remote_transfer_object_cleanup_failed",
+            bucket=bucket,
+            key=key,
+            error=last_error,
+            attempts=3,
+        )
+    return last_error
+
+
 async def _copy_remote_file_via_object_store(
     src_machine: str,
     src_path: str,
@@ -1819,6 +1859,7 @@ async def _copy_remote_file_via_object_store(
         ExpiresIn=ttl,
         HttpMethod="PUT",
     )
+    cleanup_error: str | None = None
     try:
         await _remote_transfer_data(
             src_machine,
@@ -1853,8 +1894,7 @@ async def _copy_remote_file_via_object_store(
             settings.remote_job_timeout_s,
         )
     finally:
-        with suppress(Exception):
-            await asyncio.to_thread(client.delete_object, Bucket=bucket, Key=key)
+        cleanup_error = await _delete_s3_transfer_object(client, bucket, key)
     await _report_transfer_progress(
         progress,
         phase="transferring",
@@ -1863,7 +1903,7 @@ async def _copy_remote_file_via_object_store(
         chunks=1,
         chunk_size=total_bytes,
     )
-    return {
+    result = {
         "source": {"machine": src_machine, "path": stat["path"]},
         "destination": {"machine": dst_machine, "path": finish["path"]},
         "bytes": total_bytes,
@@ -1872,6 +1912,9 @@ async def _copy_remote_file_via_object_store(
         "chunk_size": total_bytes,
         "transport": "s3-presigned",
     }
+    if cleanup_error:
+        result["cleanup_error"] = cleanup_error
+    return result
 
 
 async def _copy_remote_file_to_remote(

@@ -146,6 +146,18 @@ def test_file_and_memory_state_store_round_trip(tmp_path):
         assert first.read_bytes("key") == b"one"
     first.delete("key")
     assert first.read_bytes("key") is None
+    assert state_store_module._MEMORY_LOCKS == {}
+
+    with first.lock("held"):
+        first.write_bytes("held", b"value")
+        assert len(state_store_module._MEMORY_LOCKS) == 1
+    assert state_store_module._MEMORY_LOCKS == {}
+
+    for index in range(1_000):
+        key = f"ephemeral/{index}"
+        first.write_bytes(key, b"value")
+        first.delete(key)
+    assert state_store_module._MEMORY_LOCKS == {}
 
 
 def test_redis_state_store_round_trip_and_lock(monkeypatch):
@@ -383,6 +395,229 @@ async def test_memory_stateless_remote_identity_is_invalid_after_cold_start(tmp_
             },
         )
     assert not get_settings().state_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_shared_state_remote_invite_survives_manager_restart(tmp_path, monkeypatch):
+    _configure_stateless(tmp_path, monkeypatch)
+    first = remote_module.RemoteManager()
+    invite = await first.create_invite(name="worker-a", workdir="/srv/work")
+
+    second = remote_module.RemoteManager()
+    registered = await second.register_worker(
+        {
+            "invite": invite["code"],
+            "name": "worker-a",
+            "workdir": "/srv/work",
+        }
+    )
+
+    assert registered["token"].startswith("lsmcp_wk_")
+    third = remote_module.RemoteManager()
+    resumed = await third.resume_worker(registered["token"], {"name": "worker-a"})
+    assert resumed["name"] == "worker-a"
+
+
+@pytest.mark.asyncio
+async def test_shared_state_warm_manager_refreshes_invite_before_registration(
+    tmp_path, monkeypatch
+):
+    _configure_stateless(tmp_path, monkeypatch)
+    creator = remote_module.RemoteManager()
+    warm = remote_module.RemoteManager()
+    assert warm.list_machines()["machines"] == []
+
+    invite = await creator.create_invite(name="worker-a", workdir="/srv/work")
+    registered = await warm.register_worker(
+        {
+            "invite": invite["code"],
+            "name": "worker-a",
+            "workdir": "/srv/work",
+        }
+    )
+
+    assert registered["token"].startswith("lsmcp_wk_")
+
+
+@pytest.mark.asyncio
+async def test_shared_state_invite_is_consumed_once_across_warm_managers(tmp_path, monkeypatch):
+    _configure_stateless(tmp_path, monkeypatch)
+    first = remote_module.RemoteManager()
+    invite = await first.create_invite(name="worker-a", workdir="/srv/work")
+    second = remote_module.RemoteManager()
+    second.list_machines()
+
+    registered = await first.register_worker(
+        {
+            "invite": invite["code"],
+            "name": "worker-a",
+            "workdir": "/srv/work",
+        }
+    )
+    with pytest.raises(ValueError, match="invalid invite code"):
+        await second.register_worker(
+            {
+                "invite": invite["code"],
+                "name": "worker-b",
+                "workdir": "/srv/work",
+            }
+        )
+
+    reloaded = remote_module.RemoteManager()
+    resumed = await reloaded.resume_worker(registered["token"], {"name": "worker-a"})
+    assert resumed["name"] == "worker-a"
+
+
+@pytest.mark.asyncio
+async def test_remote_registration_rolls_back_on_registry_commit_failure(tmp_path, monkeypatch):
+    _configure_stateless(tmp_path, monkeypatch)
+    manager = remote_module.RemoteManager()
+    invite = await manager.create_invite(name="worker-a", workdir="/srv/work")
+
+    def fail_save():
+        raise OSError("state unavailable")
+
+    monkeypatch.setattr(manager, "_save_registry_unlocked", fail_save)
+    with pytest.raises(OSError, match="state unavailable"):
+        await manager.register_worker(
+            {
+                "invite": invite["code"],
+                "name": "worker-a",
+                "workdir": "/srv/work",
+            }
+        )
+
+    assert invite["code"] in manager.invites
+    assert manager.invites[invite["code"]].used is False
+    assert "worker-a" not in manager.workers
+    assert manager.tokens == {}
+
+
+@pytest.mark.asyncio
+async def test_remote_registry_backup_failure_does_not_undo_primary_commit(tmp_path, monkeypatch):
+    _configure_stateless(tmp_path, monkeypatch)
+    store = get_state_store()
+    original_write = store.write_bytes
+
+    def fail_secondary_writes(key: str, value: bytes) -> None:
+        if key in {remote_module.REMOTE_WORKER_REGISTRY_BACKUP_FILE_NAME, "audit.jsonl"}:
+            raise OSError("secondary storage unavailable")
+        original_write(key, value)
+
+    monkeypatch.setattr(store, "write_bytes", fail_secondary_writes)
+    manager = remote_module.RemoteManager()
+    invite = await manager.create_invite(name="worker-a", workdir="/srv/work")
+    registered = await manager.register_worker(
+        {
+            "invite": invite["code"],
+            "name": "worker-a",
+            "workdir": "/srv/work",
+        }
+    )
+
+    monkeypatch.setattr(store, "write_bytes", original_write)
+    reloaded = remote_module.RemoteManager()
+    resumed = await reloaded.resume_worker(registered["token"], {"name": "worker-a"})
+    assert resumed["name"] == "worker-a"
+
+
+@pytest.mark.asyncio
+async def test_remote_registry_rejects_stale_backup_after_partial_save(tmp_path, monkeypatch):
+    _configure_stateless(tmp_path, monkeypatch)
+    store = get_state_store()
+    manager = remote_module.RemoteManager()
+    invite = await manager.create_invite(name="worker-a", workdir="/srv/work")
+    registered = await manager.register_worker(
+        {
+            "invite": invite["code"],
+            "name": "worker-a",
+            "workdir": "/srv/work",
+        }
+    )
+    original_write = store.write_bytes
+
+    def fail_backup(key: str, value: bytes) -> None:
+        if key == remote_module.REMOTE_WORKER_REGISTRY_BACKUP_FILE_NAME:
+            raise OSError("backup unavailable")
+        original_write(key, value)
+
+    monkeypatch.setattr(store, "write_bytes", fail_backup)
+    manager.revoke("worker-a")
+    monkeypatch.setattr(store, "write_bytes", original_write)
+    original_write(remote_module.REMOTE_WORKER_REGISTRY_FILE_NAME, b"{corrupt")
+
+    reloaded = remote_module.RemoteManager()
+    with pytest.raises(RuntimeError, match="no valid backup"):
+        await reloaded.resume_worker(registered["token"], {"name": "worker-a"})
+
+
+@pytest.mark.asyncio
+async def test_remote_registry_restores_generation_after_primary_write_failure(
+    tmp_path, monkeypatch
+):
+    _configure_stateless(tmp_path, monkeypatch)
+    store = get_state_store()
+    manager = remote_module.RemoteManager()
+    invite = await manager.create_invite(name="worker-a", workdir="/srv/work")
+    previous_generation = store.read_bytes(
+        remote_module.REMOTE_WORKER_REGISTRY_GENERATION_FILE_NAME
+    )
+    previous_backup = store.read_bytes(remote_module.REMOTE_WORKER_REGISTRY_BACKUP_FILE_NAME)
+    assert previous_generation is not None
+    assert previous_backup is not None
+    original_write = store.write_bytes
+
+    def fail_primary(key: str, value: bytes) -> None:
+        if key == remote_module.REMOTE_WORKER_REGISTRY_FILE_NAME:
+            raise OSError("primary unavailable")
+        original_write(key, value)
+
+    monkeypatch.setattr(store, "write_bytes", fail_primary)
+    with pytest.raises(OSError, match="primary unavailable"):
+        await manager.create_invite(name="worker-b", workdir="/srv/work")
+
+    assert (
+        store.read_bytes(remote_module.REMOTE_WORKER_REGISTRY_GENERATION_FILE_NAME)
+        == previous_generation
+    )
+    monkeypatch.setattr(store, "write_bytes", original_write)
+    original_write(remote_module.REMOTE_WORKER_REGISTRY_FILE_NAME, b"{corrupt")
+
+    reloaded = remote_module.RemoteManager()
+    registered = await reloaded.register_worker(
+        {
+            "invite": invite["code"],
+            "name": "worker-a",
+            "workdir": "/srv/work",
+        }
+    )
+    assert registered["token"].startswith("lsmcp_wk_")
+
+
+@pytest.mark.asyncio
+async def test_remote_registry_malformed_invite_uses_valid_backup(tmp_path, monkeypatch):
+    _configure_stateless(tmp_path, monkeypatch)
+    store = get_state_store()
+    manager = remote_module.RemoteManager()
+    invite = await manager.create_invite(name="worker-a", workdir="/srv/work")
+    raw = store.read_bytes(remote_module.REMOTE_WORKER_REGISTRY_FILE_NAME)
+    assert raw is not None
+    registry = json.loads(raw)
+    registry["invites"][0]["expires_at"] = "not-a-number"
+    store.write_bytes(
+        remote_module.REMOTE_WORKER_REGISTRY_FILE_NAME,
+        json.dumps(registry).encode("utf-8"),
+    )
+
+    reloaded = remote_module.RemoteManager()
+    registered = await reloaded.register_worker(
+        {
+            "invite": invite["code"],
+            "name": "worker-a",
+            "workdir": "/srv/work",
+        }
+    )
+    assert registered["token"].startswith("lsmcp_wk_")
 
 
 @pytest.mark.asyncio
@@ -870,3 +1105,52 @@ async def test_object_store_transfer_uses_presigned_urls_and_deletes_object(tmp_
         "download",
         "delete",
     ]
+
+
+@pytest.mark.asyncio
+async def test_object_store_cleanup_failure_retries_and_is_reported(tmp_path, monkeypatch):
+    _configure_workspace(
+        tmp_path,
+        monkeypatch,
+        remote_transfer_strategy="object_store",
+        remote_transfer_s3_bucket="transfer-bucket",
+    )
+    content = b"object-store-transfer"
+    digest = hashlib.sha256(content).hexdigest()
+
+    class FakeS3:
+        def __init__(self) -> None:
+            self.delete_attempts = 0
+
+        def generate_presigned_url(self, operation, *, Params, ExpiresIn, HttpMethod):
+            del ExpiresIn, HttpMethod
+            return f"https://storage.test/{Params['Bucket']}/{Params['Key']}?op={operation}"
+
+        def delete_object(self, *, Bucket, Key):
+            del Bucket, Key
+            self.delete_attempts += 1
+            raise OSError("cleanup failed")
+
+    fake_s3 = FakeS3()
+    monkeypatch.setattr(tools, "_s3_transfer_client", lambda: fake_s3)
+
+    async def transfer(machine: str, tool: str, args: dict[str, Any], timeout_s=None):
+        del machine, timeout_s
+        if tool == "transfer_stat":
+            return {"type": "file", "path": "source.bin", "size": len(content), "sha256": digest}
+        if tool == "transfer_put_url":
+            return {"bytes": len(content), "sha256": digest}
+        if tool == "transfer_get_url":
+            return {"path": args["path"], "bytes": len(content), "sha256": digest}
+        raise AssertionError(f"unexpected tool: {tool}")
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", transfer)
+    result = await tools._copy_remote_file_to_remote(
+        "source-worker", "source.bin", "destination-worker", "destination.bin", True
+    )
+
+    assert result["transport"] == "s3-presigned"
+    assert result["cleanup_error"] == "OSError: cleanup failed"
+    assert fake_s3.delete_attempts == 3
+    rows = audit_module.query_audit(search="remote_transfer_object_cleanup_failed")
+    assert rows["count"] >= 1

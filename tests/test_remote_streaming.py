@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 
 import pytest
 from starlette.applications import Starlette
@@ -214,6 +215,68 @@ def test_stream_download_is_exact_and_one_time(tmp_path, monkeypatch):
     assert response.headers["content-length"] == str(len(data))
     assert response.headers["x-content-sha256"] == digest
     assert client.get(ticket["url"]).status_code == 404
+
+
+def test_stale_orphan_download_snapshot_is_scavenged(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    data = b"orphaned"
+    source = tmp_path / "source.bin"
+    source.write_bytes(data)
+    ticket = create_download_ticket("source.bin", len(data), hashlib.sha256(data).hexdigest())
+    snapshot = Path(remote_transfer._TICKETS[ticket["token"]].cleanup_path or "")
+    assert snapshot.is_file()
+
+    with remote_transfer._TICKET_LOCK:
+        remote_transfer._TICKETS.clear()
+        remote_transfer._LAST_ORPHAN_PRUNE_AT = 0.0
+        remote_transfer._maybe_prune_orphan_download_snapshots_locked(
+            snapshot.stat().st_mtime + remote_transfer._ticket_ttl_s() + 1
+        )
+
+    assert not snapshot.exists()
+
+
+def test_active_download_snapshot_temporary_is_not_scavenged(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    transfer_dir = tmp_path / ".state" / "remote-transfers"
+    transfer_dir.mkdir(parents=True, exist_ok=True)
+    temporary = transfer_dir / "active.bin.deadbeef.tmp"
+    temporary.write_bytes(b"in progress")
+    stale_now = temporary.stat().st_mtime + remote_transfer._ticket_ttl_s() + 1
+
+    with remote_transfer._TICKET_LOCK:
+        remote_transfer._ACTIVE_SNAPSHOT_TEMPORARIES.add(str(temporary))
+        try:
+            remote_transfer._prune_orphan_download_snapshots_locked(stale_now)
+        finally:
+            remote_transfer._ACTIVE_SNAPSHOT_TEMPORARIES.discard(str(temporary))
+
+    assert temporary.exists()
+    with remote_transfer._TICKET_LOCK:
+        remote_transfer._prune_orphan_download_snapshots_locked(stale_now)
+    assert not temporary.exists()
+
+
+def test_ticket_claims_do_not_rescan_orphan_directory(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    data = b"payload"
+    source = tmp_path / "source.bin"
+    source.write_bytes(data)
+    ticket_info = create_download_ticket("source.bin", len(data), hashlib.sha256(data).hexdigest())
+    scans = 0
+
+    def count_scan(now):
+        nonlocal scans
+        del now
+        scans += 1
+
+    monkeypatch.setattr(remote_transfer, "_prune_orphan_download_snapshots_locked", count_scan)
+    for _ in range(3):
+        remote_transfer._claim_ticket(ticket_info["token"], "download")
+        remote_transfer._release_ticket(ticket_info["token"])
+
+    assert scans == 0
+    revoke_transfer_ticket(ticket_info["token"])
 
 
 def _worker_identity(tmp_path):

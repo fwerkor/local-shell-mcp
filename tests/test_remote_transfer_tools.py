@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import threading
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -231,6 +232,66 @@ async def test_streaming_transfer_preserves_chunk_size_validation(tmp_path, monk
 
     with pytest.raises(ValueError, match="chunk_size must be greater than zero"):
         await tools._copy_local_file_to_remote("payload.bin", "dst", "copied.bin", True, 0)
+
+
+@pytest.mark.asyncio
+async def test_local_to_remote_snapshot_runs_off_event_loop(tmp_path, monkeypatch):
+    root = _workspace(tmp_path, monkeypatch)
+    (root / "payload.bin").write_bytes(b"content")
+    event_loop_thread = threading.get_ident()
+    snapshot_threads: list[int] = []
+
+    def create_ticket(source_path, expected_bytes, expected_sha256):
+        del source_path, expected_bytes, expected_sha256
+        snapshot_threads.append(threading.get_ident())
+        return {"token": "ticket", "url": "http://testserver/remote/transfer/download/ticket"}
+
+    async def transfer(machine, tool, args, timeout_s=None):
+        del machine, tool, timeout_s
+        return {"path": args["path"], "bytes": len(b"content"), "sha256": hashlib.sha256(b"content").hexdigest()}
+
+    monkeypatch.setattr(tools, "create_download_ticket", create_ticket)
+    monkeypatch.setattr(tools, "revoke_transfer_ticket", lambda token: {"revoked": token == "ticket"})
+    monkeypatch.setattr(tools, "_remote_transfer_data", transfer)
+
+    result = await tools._copy_local_file_to_remote("payload.bin", "dst", "copied.bin")
+
+    assert result["transport"] == "http-stream"
+    assert snapshot_threads and snapshot_threads[0] != event_loop_thread
+
+
+@pytest.mark.asyncio
+async def test_cancelled_local_to_remote_snapshot_is_revoked(tmp_path, monkeypatch):
+    root = _workspace(tmp_path, monkeypatch)
+    (root / "payload.bin").write_bytes(b"content")
+    started = threading.Event()
+    release = threading.Event()
+    revoked = threading.Event()
+
+    def create_ticket(source_path, expected_bytes, expected_sha256):
+        del source_path, expected_bytes, expected_sha256
+        started.set()
+        assert release.wait(timeout=5)
+        return {"token": "ticket", "url": "http://testserver/remote/transfer/download/ticket"}
+
+    def revoke_ticket(token):
+        assert token == "ticket"
+        revoked.set()
+        return {"revoked": True}
+
+    monkeypatch.setattr(tools, "create_download_ticket", create_ticket)
+    monkeypatch.setattr(tools, "revoke_transfer_ticket", revoke_ticket)
+
+    transfer = asyncio.create_task(
+        tools._copy_local_file_to_remote("payload.bin", "dst", "copied.bin")
+    )
+    assert await asyncio.to_thread(started.wait, 2)
+    transfer.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await transfer
+    release.set()
+
+    assert await asyncio.to_thread(revoked.wait, 2)
 
 
 @pytest.mark.asyncio
