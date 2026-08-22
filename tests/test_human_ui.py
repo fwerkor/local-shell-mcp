@@ -445,10 +445,10 @@ def test_human_file_mutations_are_not_audited(tmp_path, monkeypatch):
 def test_suppress_audit_context_excludes_manual_activity(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
 
-    audit("mcp_tool_call_start", tool="list_files", machine="worker-a")
+    audit("mcp_tool_call_start", tool="file_list", machine="worker-a")
     with suppress_audit():
         audit("shell_send", session="manual")
-    audit("mcp_tool_call_end", tool="list_files", ok=True, machine="worker-a")
+    audit("mcp_tool_call_end", tool="file_list", ok=True, machine="worker-a")
 
     records = [
         json.loads(line)
@@ -466,7 +466,7 @@ def test_audit_storage_remains_valid_under_concurrent_trim_and_append(tmp_path, 
     get_settings.cache_clear()
 
     def write(index: int) -> None:
-        audit("mcp_tool_call_end", tool="read_file", index=index, detail="x" * 80)
+        audit("mcp_tool_call_end", tool="file_read", index=index, detail="x" * 80)
 
     with ThreadPoolExecutor(max_workers=12) as executor:
         list(executor.map(write, range(240)))
@@ -491,13 +491,13 @@ def test_audit_large_payloads_are_previewed_and_loaded_on_demand(tmp_path, monke
     audit(
         "mcp_tool_call_start",
         call_id="large-call",
-        tool="write_file",
+        tool="file_write",
         arguments={"keyword_args": {"content": large_input}},
     )
     audit(
         "mcp_tool_call_end",
         call_id="large-call",
-        tool="write_file",
+        tool="file_write",
         ok=True,
         result={"stdout": large_output},
     )
@@ -553,7 +553,7 @@ def test_query_audit_pairs_calls_filters_compact_operations_and_hides_auth(tmp_p
                     "ts": 10,
                     "event": "mcp_tool_call_start",
                     "call_id": "files-call",
-                    "tool": "read_file",
+                    "tool": "file_read",
                     "machine": "worker-a",
                     "arguments": {"keyword_args": {"path": "a.txt"}},
                 },
@@ -561,7 +561,7 @@ def test_query_audit_pairs_calls_filters_compact_operations_and_hides_auth(tmp_p
                     "ts": 20,
                     "event": "mcp_tool_call_start",
                     "call_id": "shell-call",
-                    "tool": "run_shell_tool",
+                    "tool": "run_shell",
                     "machine": "worker-b",
                     "arguments": {"keyword_args": {"command": "true"}},
                 },
@@ -569,7 +569,7 @@ def test_query_audit_pairs_calls_filters_compact_operations_and_hides_auth(tmp_p
                     "ts": 30,
                     "event": "mcp_tool_call_end",
                     "call_id": "shell-call",
-                    "tool": "run_shell_tool",
+                    "tool": "run_shell",
                     "machine": "worker-b",
                     "ok": True,
                     "duration_ms": 12,

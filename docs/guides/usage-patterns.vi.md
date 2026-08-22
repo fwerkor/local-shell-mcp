@@ -19,7 +19,7 @@ Runtime xác định tiến trình server chạy như thế nào và điều khi
 2. Khởi động Runtime và kiểm tra `/healthz` khi dùng chế độ HTTP.
 3. Sau đó chọn trang kết nối Client.
 4. Đăng ký MCP endpoint hoặc lệnh stdio trong Client.
-5. Gọi `environment_info` để kiểm tra workspace và cấu hình thực tế.
+5. Gọi `environment_get` để kiểm tra workspace và cấu hình thực tế.
 
 ```text
 Runtime: Docker / VS Code extension / binary / Python / stdio
@@ -29,9 +29,9 @@ Endpoint: https://your-host.example.com/mcp
 
 ## Xác minh
 
-- `environment_info` xác nhận cấu hình Runtime và workspace.
-- `tree_view` xác nhận các tệp nhìn thấy được.
-- `run_shell_tool` xác nhận môi trường lệnh.
+- `environment_get` xác nhận cấu hình Runtime và workspace.
+- `file_tree` xác nhận các tệp nhìn thấy được.
+- `run_shell` xác nhận môi trường lệnh.
 
 ## Ghi chú
 

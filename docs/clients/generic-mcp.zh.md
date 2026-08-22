@@ -61,7 +61,7 @@ LOCAL_SHELL_MCP_WORKSPACE_ROOT=/path/to/workspace local-shell-mcp --mode stdio
 新客户端连接后，先执行：
 
 ```text
-调用 environment_info，然后对工作区根目录调用 tree_view。暂时不要修改文件。
+调用 environment_get，然后对工作区根目录调用 file_tree。暂时不要修改文件。
 ```
 
 之后再运行带有明确编辑、测试和 Git 规则的有边界任务。

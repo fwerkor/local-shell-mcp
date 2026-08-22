@@ -21,23 +21,23 @@ With the default workspace and state directory, the first two paths are:
 
 Each immediate child directory is one Skill. Its directory name is the Skill name and it must provide `SKILL.md`. Skill directories, `SKILL.md`, related files, and related directories may be symlinks.
 
-When the same Skill name appears in multiple sources, the project source wins over the LSM-managed source, which wins over the global source. `skills_list` reports each accepted Skill's `source` and `source_path`, plus the complete ordered `skills_dirs` list.
+When the same Skill name appears in multiple sources, the project source wins over the LSM-managed source, which wins over the global source. `skill_list` reports each accepted Skill's `source` and `source_path`, plus the complete ordered `skills_dirs` list.
 
 ## Fixed tools
 
 | Tool | Purpose |
 |---|---|
-| `skills_list` | Rescan all sources and list Skill names, descriptions, sources, entry paths, related files, and non-fatal warnings without loading full instructions. |
-| `skill_load` | Load the complete `SKILL.md` instructions for one exact name returned by `skills_list`. |
-| `skill_read_file` | Read one bounded related text file using the Skill-relative path returned by `skill_load`. |
+| `skill_list` | Rescan all sources and list Skill names, descriptions, sources, entry paths, related files, and non-fatal warnings without loading full instructions. |
+| `skill_load` | Load the complete `SKILL.md` instructions for one exact name returned by `skill_list`. |
+| `skill_read` | Read one bounded related text file using the Skill-relative path returned by `skill_load`. |
 
 Recommended flow:
 
 ```text
-skills_list
+skill_list
   -> choose the relevant Skill
   -> skill_load(name)
-  -> skill_read_file(name, path) only when a related file is needed
+  -> skill_read(name, path) only when a related file is needed
   -> follow the Skill with the existing shell, Git, browser, and remote tools
 ```
 
@@ -87,7 +87,7 @@ The registry skips malformed Skill names and directories without a readable `SKI
 The optional REST surface exposes the same merged registry:
 
 ```text
-GET  /tools/skills_list
+GET  /tools/skill_list
 POST /tools/skill_load       {"name": "debugging"}
-POST /tools/skill_read_file  {"name": "debugging", "path": "checklist.md"}
+POST /tools/skill_read  {"name": "debugging", "path": "checklist.md"}
 ```

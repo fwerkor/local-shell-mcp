@@ -48,7 +48,7 @@ def test_audit_call_helpers_cover_legacy_unpaired_and_optional_fields():
     assert audit_module._operation_type({"event": "browser_capture"}) == "browser"
     assert audit_module._operation_type({"event": "download_created"}) == "files"
     assert audit_module._operation_type({"event": "transfer_completed"}) == "remote"
-    assert audit_module._operation_type({"tool": "transfer_path"}) == "remote"
+    assert audit_module._operation_type({"tool": "remote_transfer"}) == "remote"
     assert audit_module._call_input({"arguments": "invalid"}) is None
     assert audit_module._call_input({"arguments": {"positional_count": 2}}) == {
         "positional_count": 2
@@ -57,7 +57,7 @@ def test_audit_call_helpers_cover_legacy_unpaired_and_optional_fields():
     legacy_start = {
         "ts": 1,
         "event": "mcp_tool_call_start",
-        "tool": "read_file",
+        "tool": "file_read",
         "machine": "worker-a",
         "session": "term-a",
         "arguments": {"path": "legacy.txt"},
@@ -121,7 +121,7 @@ def test_audit_call_helpers_cover_legacy_unpaired_and_optional_fields():
         [
             {"ts": 0, "event": "auth_ok"},
             legacy_start,
-            {"ts": 1.5, "event": "tool_call_purpose", "tool": "read_file"},
+            {"ts": 1.5, "event": "tool_call_purpose", "tool": "file_read"},
             {"ts": 1.6, "event": "run_shell_start", "command": "true"},
             {
                 "ts": 1.7,
@@ -131,7 +131,7 @@ def test_audit_call_helpers_cover_legacy_unpaired_and_optional_fields():
             {
                 "ts": 3,
                 "event": "mcp_tool_call_end",
-                "tool": "read_file",
+                "tool": "file_read",
                 "machine": "worker-a",
                 "session": "term-a",
                 "ok": True,
@@ -154,7 +154,7 @@ def test_audit_call_helpers_cover_legacy_unpaired_and_optional_fields():
 
 def test_coalescing_keeps_semantic_child_details_without_duplicate_rows():
     records = [
-        {"ts": 1, "event": "mcp_tool_call_start", "call_id": "call-1", "tool": "revoke_file_link"},
+        {"ts": 1, "event": "mcp_tool_call_start", "call_id": "call-1", "tool": "link_revoke"},
         {
             "ts": 2,
             "event": "download_link_revoked",
@@ -168,7 +168,7 @@ def test_coalescing_keeps_semantic_child_details_without_duplicate_rows():
             "parent_call_id": "call-1",
             "ok": False,
         },
-        {"ts": 4, "event": "mcp_tool_call_end", "call_id": "call-1", "tool": "revoke_file_link", "ok": True},
+        {"ts": 4, "event": "mcp_tool_call_end", "call_id": "call-1", "tool": "link_revoke", "ok": True},
     ]
 
     rows = audit_module._coalesce_audit_records(records)
@@ -334,13 +334,13 @@ def test_get_audit_entry_loads_only_the_selected_payloads(tmp_path, monkeypatch)
         audit_module.audit(
             "mcp_tool_call_start",
             call_id=call_id,
-            tool="write_file",
+            tool="file_write",
             arguments={"keyword_args": {"content": fill * 30_000}},
         )
         audit_module.audit(
             "mcp_tool_call_end",
             call_id=call_id,
-            tool="write_file",
+            tool="file_write",
             ok=True,
             result={"stdout": fill * 30_000},
         )
@@ -487,13 +487,13 @@ def test_audit_retention_keeps_latest_call_pair_together(tmp_path, monkeypatch):
     audit_module.audit(
         "mcp_tool_call_start",
         call_id="latest-call",
-        tool="write_file",
+        tool="file_write",
         arguments={"keyword_args": {"content": latest_input}},
     )
     audit_module.audit(
         "mcp_tool_call_end",
         call_id="latest-call",
-        tool="write_file",
+        tool="file_write",
         ok=True,
         result={"stdout": latest_output},
     )

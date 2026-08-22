@@ -18,16 +18,16 @@ async def test_mcp_tool_calls_are_audited(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
     get_settings.cache_clear()
 
-    await build_mcp().call_tool("list_files", {"path": "."})
+    await build_mcp().call_tool("file_list", {"path": "."})
 
     records = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines()]
     starts = [record for record in records if record["event"] == "mcp_tool_call_start"]
     ends = [record for record in records if record["event"] == "mcp_tool_call_end"]
 
-    assert starts[-1]["tool"] == "list_files"
+    assert starts[-1]["tool"] == "file_list"
     assert starts[-1]["arguments"]["keyword_args"]["path"] == "."
     assert starts[-1]["call_id"] == ends[-1]["call_id"]
-    assert ends[-1]["tool"] == "list_files"
+    assert ends[-1]["tool"] == "file_list"
     assert ends[-1]["ok"] is True
     assert ends[-1]["duration_ms"] >= 0
     assert ends[-1]["result"]["ok"] is True
@@ -59,11 +59,11 @@ async def test_failed_shell_command_is_audited_as_failed(tmp_path, monkeypatch):
         f"{quote_shell_argument('import sys; sys.exit(7)')}"
     )
 
-    await build_mcp().call_tool("run_shell_tool", {"command": command})
+    await build_mcp().call_tool("run_shell", {"command": command})
 
     records = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines()]
     end = [record for record in records if record["event"] == "mcp_tool_call_end"][-1]
-    assert end["tool"] == "run_shell_tool"
+    assert end["tool"] == "run_shell"
     assert end["ok"] is False
     assert end["result"]["data"]["ok"] is False
     nested = [record for record in records if record["event"] == "run_shell_end"][-1]
@@ -72,19 +72,19 @@ async def test_failed_shell_command_is_audited_as_failed(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_connector_error_is_collapsed_into_failed_parent_call(tmp_path, monkeypatch):
+async def test_file_read_error_is_collapsed_into_failed_parent_call(tmp_path, monkeypatch):
     audit_path = tmp_path / "audit.jsonl"
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUDIT_LOG_PATH", str(audit_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
     get_settings.cache_clear()
 
-    await build_mcp().call_tool("fetch", {"id": "missing.txt"})
+    await build_mcp().call_tool("file_read", {"path": "missing.txt"})
 
     records = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines()]
     end = [record for record in records if record["event"] == "mcp_tool_call_end"][-1]
     nested = [record for record in records if record["event"] == "tool_error"][-1]
-    assert end["tool"] == "fetch"
+    assert end["tool"] == "file_read"
     assert end["ok"] is False
     assert end["error"] == nested["error"]
     assert nested["parent_call_id"] == end["call_id"]

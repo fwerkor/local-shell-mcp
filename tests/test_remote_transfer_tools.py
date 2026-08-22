@@ -128,7 +128,7 @@ class FakeRemoteManager:
                     args.get("overwrite", True),
                     args.get("cleanup_archive", True),
                 )
-            elif tool == "delete_file_or_dir":
+            elif tool == "file_delete":
                 data = delete_path(args["path"], args.get("recursive", False))
             else:
                 raise ValueError(f"unsupported fake remote tool: {tool}")

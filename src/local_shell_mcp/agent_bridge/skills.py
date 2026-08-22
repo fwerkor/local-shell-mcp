@@ -245,7 +245,7 @@ def _resolve_skill_root(skills_dir: Path, name: str) -> Path:
         resolved = candidate.resolve(strict=True)
     except FileNotFoundError as exc:
         raise ValueError(
-            f"Unknown skill: {validated_name}. Call skills_list to see installed skills."
+            f"Unknown skill: {validated_name}. Call skill_list to see installed skills."
         ) from exc
     except OSError as exc:
         raise ValueError(f"Could not inspect skill {validated_name}: {exc}") from exc

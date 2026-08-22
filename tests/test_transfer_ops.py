@@ -113,7 +113,7 @@ def test_mcp_exposes_unified_transfer_tool(tmp_path, monkeypatch):
     _workspace(tmp_path, monkeypatch)
     mcp = build_mcp()
     names = set(mcp._tool_manager._tools)  # noqa: SLF001
-    assert "transfer_path" in names
+    assert "remote_transfer" in names
     assert {
         "remote_copy_file",
         "remote_copy_dir",

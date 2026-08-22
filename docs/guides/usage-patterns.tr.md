@@ -19,7 +19,7 @@ Runtime, sunucu sürecinin nasıl çalıştığını ve hangi workspace’i kont
 2. Runtime’ı başlatın ve HTTP modu kullanılıyorsa `/healthz` değerini doğrulayın.
 3. Sonra Client bağlantı sayfasını seçin.
 4. Client içinde MCP endpoint veya stdio komutunu kaydedin.
-5. Etkin workspace ve ayarları doğrulamak için `environment_info` çağırın.
+5. Etkin workspace ve ayarları doğrulamak için `environment_get` çağırın.
 
 ```text
 Runtime: Docker / VS Code extension / binary / Python / stdio
@@ -29,9 +29,9 @@ Endpoint: https://your-host.example.com/mcp
 
 ## Doğrulama
 
-- `environment_info` Runtime ayarlarını ve workspace’i doğrular.
-- `tree_view` görünen dosyaları doğrular.
-- `run_shell_tool` komut ortamını doğrular.
+- `environment_get` Runtime ayarlarını ve workspace’i doğrular.
+- `file_tree` görünen dosyaları doğrular.
+- `run_shell` komut ortamını doğrular.
 
 ## Notlar
 

@@ -93,25 +93,22 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
     assert "local-shell-mcp.example.com" in mcp.settings.transport_security.allowed_hosts
 
     tools = {tool.name: tool for tool in await mcp.list_tools()}
-    assert tools["search"].meta["securitySchemes"][0]["type"] == "noauth"
-    assert tools["environment_info"].meta["securitySchemes"][0]["type"] == "oauth2"
+    assert tools["environment_get"].meta["securitySchemes"][0]["type"] == "oauth2"
 
     def scopes(tool_name: str, scheme_index: int = 0) -> list[str]:
         return tools[tool_name].meta["securitySchemes"][scheme_index]["scopes"]
 
     full_scopes = list(ALL_OAUTH_SCOPES)
-    assert scopes("search", scheme_index=1) == full_scopes
     assert scopes("audit_tail") == full_scopes
-    assert scopes("apply_patch") == full_scopes
+    assert scopes("file_patch") == full_scopes
     assert scopes("browser_get_text_tool") == full_scopes
     assert scopes("browser_capture_tool") == full_scopes
-    assert scopes("transfer_path") == full_scopes
+    assert scopes("remote_transfer") == full_scopes
     assert all(tool.outputSchema is not None for tool in tools.values())
-    assert tools["run_shell_tool"].outputSchema["title"] == "ToolResult"
-    assert set(tools["run_shell_tool"].outputSchema["properties"]) == {"ok", "message", "data"}
-    assert tools["search"].outputSchema["properties"]["result"]["type"] == "string"
+    assert tools["run_shell"].outputSchema["title"] == "ToolResult"
+    assert set(tools["run_shell"].outputSchema["properties"]) == {"ok", "message", "data"}
 
-    content, structured = await mcp.call_tool("environment_info", {})
+    content, structured = await mcp.call_tool("environment_get", {})
     assert content
     assert structured["ok"] is True
     assert structured["data"]["settings"]["default_timeout_s"] == 10
@@ -131,7 +128,7 @@ async def test_mcp_tool_execution_uses_one_full_scope_bundle(tmp_path, monkeypat
     )
     try:
         with pytest.raises(Exception, match="shell:write"):
-            await mcp.call_tool("read_file", {"path": "readable.txt"})
+            await mcp.call_tool("file_read", {"path": "readable.txt"})
     finally:
         _CURRENT_PRINCIPAL.reset(partial_token)
 
@@ -143,11 +140,11 @@ async def test_mcp_tool_execution_uses_one_full_scope_bundle(tmp_path, monkeypat
         )
     )
     try:
-        content, structured = await mcp.call_tool("read_file", {"path": "readable.txt"})
+        content, structured = await mcp.call_tool("file_read", {"path": "readable.txt"})
         assert content
         assert structured["ok"] is True
         _, written = await mcp.call_tool(
-            "write_file", {"path": "written.txt", "content": "yes"}
+            "file_write", {"path": "written.txt", "content": "yes"}
         )
         assert written["ok"] is True
     finally:
@@ -168,7 +165,7 @@ async def test_machine_argument_requires_remote_scope(tmp_path, monkeypatch):
     )
     try:
         with pytest.raises(Exception, match="remote:use"):
-            await mcp.call_tool("environment_info", {"machine": "worker"})
+            await mcp.call_tool("environment_get", {"machine": "worker"})
     finally:
         _CURRENT_PRINCIPAL.reset(principal_token)
 
@@ -182,32 +179,32 @@ async def test_tool_annotations_are_conservative_and_mode_independent(
 
     tools = {tool.name: tool for tool in await build_mcp().list_tools()}
 
-    command = tools["run_shell_tool"].annotations
+    command = tools["run_shell"].annotations
     assert command.readOnlyHint is False
     assert command.destructiveHint is True
     assert command.idempotentHint is False
     assert command.openWorldHint is True
 
-    assert tools["delete_file_or_dir"].annotations.destructiveHint is True
-    assert tools["transfer_path"].annotations.destructiveHint is True
-    assert tools["transfer_path"].annotations.openWorldHint is True
-    assert tools["write_file"].annotations.openWorldHint is True
-    assert tools["create_file_link"].annotations.destructiveHint is False
-    assert tools["create_file_link"].annotations.openWorldHint is True
+    assert tools["file_delete"].annotations.destructiveHint is True
+    assert tools["remote_transfer"].annotations.destructiveHint is True
+    assert tools["remote_transfer"].annotations.openWorldHint is True
+    assert tools["remote_manage"].annotations.destructiveHint is True
+    assert tools["remote_manage"].annotations.openWorldHint is True
+    assert tools["file_write"].annotations.openWorldHint is True
+    assert tools["link_create"].annotations.destructiveHint is False
+    assert tools["link_create"].annotations.openWorldHint is True
     assert tools["browser_get_text_tool"].annotations.readOnlyHint is True
     assert tools["browser_get_text_tool"].annotations.openWorldHint is True
-    assert tools["read_file"].annotations.readOnlyHint is True
-    assert tools["read_file"].annotations.openWorldHint is True
-    assert tools["view_image"].annotations.readOnlyHint is True
-    assert tools["view_image"].annotations.openWorldHint is True
-    assert tools["search"].annotations.readOnlyHint is True
-    assert tools["search"].annotations.openWorldHint is False
+    assert tools["file_read"].annotations.readOnlyHint is True
+    assert tools["file_read"].annotations.openWorldHint is True
+    assert tools["image_view"].annotations.readOnlyHint is True
+    assert tools["image_view"].annotations.openWorldHint is True
     assert all(tool.annotations is not None for tool in tools.values())
 
     monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "false")
     get_settings.cache_clear()
     restricted = {tool.name: tool for tool in await build_mcp().list_tools()}
-    assert restricted["run_shell_tool"].annotations == command
+    assert restricted["run_shell"].annotations == command
 
 
 def test_oauth_access_tokens_do_not_expire_by_default(tmp_path, monkeypatch):
@@ -339,23 +336,22 @@ async def test_read_only_tools_have_read_only_hint(tmp_path, monkeypatch):
 
     tools = {tool.name: tool for tool in await build_mcp().list_tools()}
     names = {
-        "environment_info",
+        "environment_get",
         "shell_read",
         "shell_list",
         "job_list",
         "job_tail",
-        "list_files",
-        "tree_view",
-        "glob_search",
-        "grep_search",
-        "read_file",
-        "view_image",
-        "list_file_links",
+        "file_list",
+        "file_tree",
+        "file_glob",
+        "file_grep",
+        "file_read",
+        "image_view",
+        "link_list",
         "secret_scan",
         "todo_read_tool",
         "audit_tail",
         "browser_get_text_tool",
-        "remote_list_machines",
     }
 
     for name in names:

@@ -314,7 +314,7 @@ async def test_mcp_mutation_does_not_return_before_thread_finishes(tmp_path, mon
 
     monkeypatch.setattr(tools_module, "write_text", delayed_write)
     response = await build_mcp().call_tool(
-        "write_file", {"path": "target.txt", "content": "done"}
+        "file_write", {"path": "target.txt", "content": "done"}
     )
     payload = json.loads(response[0][0].text)
     assert payload["data"]["path"] == "target.txt"
@@ -421,24 +421,6 @@ def test_secret_scan_fallback_respects_gitignore(tmp_path, monkeypatch):
 
     findings = tools_module._secret_scan_sync(".", None, 20)["findings"]
     assert {item["path"] for item in findings} == {"visible.txt"}
-
-
-@pytest.mark.asyncio
-async def test_fetch_reports_truncation_and_encoded_actual_file_uri(tmp_path, monkeypatch):
-    _configure_workspace(tmp_path, monkeypatch)
-    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_FILE_READ_BYTES", "5")
-    get_settings.cache_clear()
-    path = tmp_path / "a b#c.txt"
-    path.write_text("0123456789", encoding="utf-8")
-
-    response = await build_mcp().call_tool("fetch", {"id": "a b#c.txt"})
-    payload = json.loads(response[0][0].text)
-    assert payload["text"] == "01234"
-    assert payload["metadata"]["truncated"] is True
-    assert payload["metadata"]["truncated_bytes"] == 5
-    assert "%20" in payload["url"]
-    assert "%23" in payload["url"]
-    assert payload["url"] == path.resolve().as_uri()
 
 
 @pytest.mark.asyncio

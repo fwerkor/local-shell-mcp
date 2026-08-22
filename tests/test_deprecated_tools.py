@@ -33,7 +33,7 @@ async def test_deprecated_tools_are_tombstones_not_listed_tools() -> None:
         assert result["data"] == {
             "status": "stale_tool_snapshot",
             "deprecated_tool": "version_info",
-            "replacement": "environment_info",
+            "replacement": "environment_get",
             "removed_in": "3.0.0",
             "help_url": DEPRECATED_TOOL_HELP_URL,
             "assistant_instruction": (
@@ -41,7 +41,7 @@ async def test_deprecated_tools_are_tombstones_not_listed_tools() -> None:
                 "a stale local-shell-mcp tool snapshot and ask them to refresh the LSM App's "
                 "tools, or remove and re-add the App if refresh is unavailable. Refer them to "
                 f"{DEPRECATED_TOOL_HELP_URL}. After the cache is updated, use the replacement "
-                "tool 'environment_info'."
+                "tool 'environment_get'."
             ),
         }
 
@@ -56,5 +56,5 @@ async def test_remote_tombstone_points_to_unified_machine_tool() -> None:
     result = await mcp.call_tool("remote_run_shell_tool", {"machine": "worker"})
 
     assert result["data"]["status"] == "stale_tool_snapshot"
-    assert result["data"]["replacement"] == "run_shell_tool"
+    assert result["data"]["replacement"] == "run_shell"
     assert "refresh the LSM App's tools" in result["data"]["assistant_instruction"]

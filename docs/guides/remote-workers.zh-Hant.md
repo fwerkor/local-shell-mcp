@@ -8,12 +8,12 @@ MCP 客戶端 -> 控制服務 -> 出站輪詢 worker -> 遠端機器
 
 ## 基本流程
 
-1. 使用 `remote_invite` 建立一次性邀請。
+1. 使用 `remote_manage(action="invite", ...)` 建立一次性邀請。
 2. 在遠端機器上執行生成的命令。
-3. 使用 `remote_list_machines` 確認註冊成功。
-4. 在一般工具中指定 `machine="<worker-name>"`，例如 `environment_info`、`run_shell_tool`、`read_file` 或 `browser_capture_tool`。
-5. 使用 `transfer_path` 處理控制端到 worker、worker 到控制端以及 worker 到 worker 的檔案或目錄傳輸。
-6. 使用 `remote_rename_machine` 重新命名，或用 `remote_revoke_machine` 撤銷 worker。
+3. 使用 `remote_manage(action="list")` 確認註冊成功。
+4. 在一般工具中指定 `machine="<worker-name>"`，例如 `environment_get`、`run_shell`、`file_read` 或 `browser_capture_tool`。
+5. 使用 `remote_transfer` 處理控制端到 worker、worker 到控制端以及 worker 到 worker 的檔案或目錄傳輸。
+6. 使用 `remote_manage(action="rename", ...)` 重新命名，或用 `remote_manage(action="revoke", ...)` 撤銷 worker。
 
 只有 worker 管理繼續使用 `remote_*` 名稱。執行、shell、job、檔案、patch 和瀏覽器操作在本地與遠端使用同一 Schema。指定 `machine` 時會額外要求 `remote:use` OAuth scope。
 
@@ -40,7 +40,7 @@ worker 日誌位於 worker 狀態目錄中的 `worker.log`。
 
 ## 能力與安全
 
-worker 支援 shell、持久終端、tracked job、檔案操作、傳輸、Python、patch，以及已安裝相依套件時的 Playwright。Git 透過 `run_shell_tool(machine=...)` 執行標準 CLI。
+worker 支援 shell、持久終端、tracked job、檔案操作、傳輸、Python、patch，以及已安裝相依套件時的 Playwright。Git 透過 `run_shell(machine=...)` 執行標準 CLI。
 
 加入 worker 相當於允許 MCP 客戶端控制其配置環境。應使用較短邀請 TTL、專用工作目錄或帳戶，保留稽核日誌，並在任務結束後撤銷 worker。生成的邀請會安裝與控制服務匹配的 worker 版本。
 

@@ -8,9 +8,9 @@ ChatGPT -> local-shell-mcp -> outbound polling worker -> remote machine
 
 Basic flow:
 
-1. Create an invite with `remote_invite`.
+1. Create an invite with `remote_manage(action="invite", ...)`.
 2. Run the generated command on the remote machine.
-3. Check `remote_list_machines`.
+3. Check `remote_manage(action="list")`.
 4. Use remote shell, file, transfer, Git, and browser tools.
 5. Revoke the worker when done.
 

@@ -160,9 +160,9 @@ def test_mcp_instructions_describe_the_fixed_skill_flow(tmp_path, monkeypatch):
 
     instructions = build_mcp().instructions
 
-    assert "skills_list first" in instructions
+    assert "skill_list first" in instructions
     assert "skill_load with that exact name" in instructions
-    assert "skill_read_file only when" in instructions
+    assert "skill_read only when" in instructions
     assert "do not expect per-Skill MCP tools" in instructions
     assert "activate_skill__" not in instructions
 
@@ -173,11 +173,11 @@ async def test_skill_changes_are_visible_without_mcp_tool_list_changes(tmp_path,
     mcp = build_mcp()
     initial_tool_names = {tool.name for tool in await mcp.list_tools()}
 
-    _, initial = await mcp.call_tool("skills_list", {})
+    _, initial = await mcp.call_tool("skill_list", {})
     assert initial["data"]["skills"] == []
 
     _install_skill(tmp_path, "paper-writer")
-    _, updated = await mcp.call_tool("skills_list", {})
+    _, updated = await mcp.call_tool("skill_list", {})
     updated_tool_names = {tool.name for tool in await mcp.list_tools()}
 
     assert [skill["name"] for skill in updated["data"]["skills"]] == ["paper-writer"]
@@ -192,13 +192,13 @@ async def test_skill_tools_are_read_only_and_callable(tmp_path, monkeypatch):
     mcp = build_mcp()
     tools = {tool.name: tool for tool in await mcp.list_tools()}
 
-    assert tools["skills_list"].annotations.readOnlyHint is True
+    assert tools["skill_list"].annotations.readOnlyHint is True
     assert tools["skill_load"].annotations.readOnlyHint is True
-    assert tools["skill_read_file"].annotations.readOnlyHint is True
+    assert tools["skill_read"].annotations.readOnlyHint is True
 
     _, loaded = await mcp.call_tool("skill_load", {"name": "debugging"})
     _, related = await mcp.call_tool(
-        "skill_read_file", {"name": "debugging", "path": "checklist.md"}
+        "skill_read", {"name": "debugging", "path": "checklist.md"}
     )
     assert loaded["ok"] is True
     assert loaded["data"]["name"] == "debugging"
@@ -226,7 +226,7 @@ def test_skill_rest_endpoints_use_the_same_fixed_registry(tmp_path, monkeypatch)
 def test_skill_load_rejects_unknown_names(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
 
-    with pytest.raises(ValueError, match="Call skills_list"):
+    with pytest.raises(ValueError, match="Call skill_list"):
         load_installed_skill("missing")
 
 

@@ -96,7 +96,7 @@ def test_dashboard_helpers_build_alerts_and_activity(tmp_path, monkeypatch):
 
     activity = ui._dashboard_activity(
         [
-            {"ts": 3, "node": "a", "tool": "read_file", "ok": True},
+            {"ts": 3, "node": "a", "tool": "file_read", "ok": True},
             {"ts": 2, "node": "b", "tool": "run_shell", "ok": False},
             {"ts": 1, "node": "c", "tool": "job_start", "paired": False},
         ]
@@ -174,7 +174,7 @@ def test_dashboard_api_returns_macro_snapshot(tmp_path, monkeypatch):
         "query_audit",
         lambda **kwargs: {
             "entries": [
-                {"ts": 950, "node": "local", "tool": "read_file", "ok": True, "operation": "files"},
+                {"ts": 950, "node": "local", "tool": "file_read", "ok": True, "operation": "files"},
                 {"ts": 940, "node": "local", "tool": "run_shell", "ok": False, "operation": "shell"},
             ],
             "count": 2,

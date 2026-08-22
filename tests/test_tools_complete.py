@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import subprocess
 
 import pytest
@@ -144,92 +143,100 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
 
     mcp = tools.build_mcp()
     local_cases = {
-        "search": {"query": "needle"},
-        "fetch": {"id": "found.txt"},
-        "environment_info": {},
-        "skills_list": {},
+        "environment_get": {},
+        "skill_list": {},
         "skill_load": {"name": "skill"},
-        "skill_read_file": {"name": "skill", "path": "guide.md"},
-        "run_shell_tool": {"command": "true", "purpose": "test", "explanation": "coverage"},
-        "run_python_tool": {"code": "print(1)", "purpose": "test"},
+        "skill_read": {"name": "skill", "path": "guide.md"},
+        "run_shell": {"command": "true", "purpose": "test", "explanation": "coverage"},
+        "run_python": {"code": "print(1)", "purpose": "test"},
         "shell_start": {"purpose": "test"},
         "shell_send": {"session_id": "s", "input_text": "x"},
         "shell_read": {"session_id": "s"},
-        "shell_kill": {"session_id": "s"},
+        "shell_stop": {"session_id": "s"},
         "shell_list": {},
         "job_start": {"command": "true", "purpose": "test"},
         "job_list": {},
         "job_tail": {"job_id": "j"},
         "job_stop": {"job_id": "j"},
         "job_retry": {"job_id": "j", "purpose": "test"},
-        "list_files": {},
-        "tree_view": {},
-        "glob_search": {"pattern": "*.py"},
-        "grep_search": {"query": "x"},
-        "read_file": {"path": "x"},
-        "view_image": {"path": "found.png"},
-        "create_file_link": {"path": "found.txt"},
-        "list_file_links": {},
-        "revoke_file_link": {"token": "t"},
-        "write_file": {"path": "x", "content": "y", "purpose": "test"},
-        "edit_file": {"path": "x", "edits": [], "purpose": "test"},
-        "delete_file_or_dir": {"path": "x", "purpose": "test"},
-        "apply_patch": {"patch": "diff", "purpose": "test"},
-        "transfer_path": {"source_path": "a", "destination_path": "b", "destination_machine": "node", "purpose": "test"},
+        "file_list": {},
+        "file_tree": {},
+        "file_glob": {"pattern": "*.py"},
+        "file_grep": {"query": "x"},
+        "file_read": {"path": "x"},
+        "image_view": {"path": "found.png"},
+        "link_create": {"path": "found.txt"},
+        "link_list": {},
+        "link_revoke": {"token": "t"},
+        "file_write": {"path": "x", "content": "y", "purpose": "test"},
+        "file_edit": {"path": "x", "edits": [], "purpose": "test"},
+        "file_delete": {"path": "x", "purpose": "test"},
+        "file_patch": {"patch": "diff", "purpose": "test"},
+        "remote_transfer": {"source_path": "a", "destination_path": "b", "destination_machine": "node", "purpose": "test"},
         "secret_scan": {},
         "todo_read_tool": {},
         "todo_write_tool": {"todos": []},
         "browser_capture_tool": {"url": "https://example.test"},
         "browser_get_text_tool": {"url": "https://example.test"},
-        "playwright_run_script_tool": {"script": "print(1)"},
+        "browser_run_script": {"script": "print(1)"},
         "audit_tail": {},
-        "remote_invite": {"name": "node"},
-        "remote_list_machines": {},
-        "remote_revoke_machine": {"machine": "node"},
-        "remote_rename_machine": {"machine": "node", "new_name": "renamed"},
+        "remote_manage": {"action": "list"},
     }
     assert set(local_cases) == set(mcp._tool_manager._tools)
     for name, kwargs in local_cases.items():
         result = await _raw_tool(mcp, name)(**kwargs)
         assert result is not None, name
 
-    search_payload = json.loads(await _raw_tool(mcp, "search")(query="needle"))
-    assert len(search_payload["results"]) == 1
-    assert search_payload["results"][0]["title"] == "found.txt:1"
+    invite = await _raw_tool(mcp, "remote_manage")(
+        action="invite", name="node", workdir="/workspace", ttl_s=120
+    )
+    assert invite["ok"] is True
+    assert invite["data"] == {"name": "node", "workdir": "/workspace", "ttl_s": 120}
+    renamed = await _raw_tool(mcp, "remote_manage")(
+        action="rename", machine="node", new_name="renamed"
+    )
+    assert renamed["ok"] is True
+    assert renamed["data"] == {"old_name": "node", "new_name": "renamed"}
+    revoked = await _raw_tool(mcp, "remote_manage")(action="revoke", machine="node")
+    assert revoked["ok"] is True
+    assert revoked["data"] == {"machine": "node", "revoked": True}
+    invalid = await _raw_tool(mcp, "remote_manage")(action="rename", machine="node")
+    assert invalid.isError is True
+    assert _handled_error_data(invalid)["message"] == "new_name is required for action=rename"
 
     remote_cases = {
-        "environment_info": {},
-        "run_shell_tool": {"command": "true"},
-        "run_python_tool": {"code": "print(1)"},
+        "environment_get": {},
+        "run_shell": {"command": "true"},
+        "run_python": {"code": "print(1)"},
         "shell_start": {},
         "shell_send": {"session_id": "s", "input_text": "x"},
         "shell_read": {"session_id": "s"},
-        "shell_kill": {"session_id": "s"},
+        "shell_stop": {"session_id": "s"},
         "shell_list": {},
         "job_start": {"command": "true"},
         "job_list": {},
         "job_tail": {"job_id": "j"},
         "job_stop": {"job_id": "j"},
         "job_retry": {"job_id": "j"},
-        "list_files": {},
-        "tree_view": {},
-        "glob_search": {"pattern": "*"},
-        "grep_search": {"query": "x"},
-        "read_file": {"path": "x"},
-        "view_image": {"path": "x"},
-        "write_file": {"path": "x", "content": "y"},
-        "edit_file": {"path": "x", "edits": []},
-        "delete_file_or_dir": {"path": "x"},
-        "apply_patch": {"patch": "diff"},
+        "file_list": {},
+        "file_tree": {},
+        "file_glob": {"pattern": "*"},
+        "file_grep": {"query": "x"},
+        "file_read": {"path": "x"},
+        "image_view": {"path": "x"},
+        "file_write": {"path": "x", "content": "y"},
+        "file_edit": {"path": "x", "edits": []},
+        "file_delete": {"path": "x"},
+        "file_patch": {"patch": "diff"},
         "browser_capture_tool": {"url": "https://x"},
         "browser_get_text_tool": {"url": "https://x"},
-        "playwright_run_script_tool": {"script": "x"},
+        "browser_run_script": {"script": "x"},
     }
     for name, kwargs in remote_cases.items():
         result = await _raw_tool(mcp, name)(**kwargs, machine="node")
         assert result["ok"] is True, name
     assert len(fake_remote.calls) == len(remote_cases) - 1
-    assert all(tool != "view_image" for _, tool, _, _ in fake_remote.calls)
+    assert all(tool != "image_view" for _, tool, _, _ in fake_remote.calls)
 
 
 @pytest.mark.asyncio
@@ -279,54 +286,46 @@ async def test_tool_wrapper_error_paths_and_remote_disabled(tmp_path, monkeypatc
 
     mcp = tools.build_mcp()
     checks = [
-        ("search", {"query": "x"}),
-        ("fetch", {"id": "missing"}),
-        ("environment_info", {}),
-        ("skills_list", {}),
-        ("run_shell_tool", {"command": "x"}),
-        ("run_python_tool", {"code": "x"}),
+        ("environment_get", {}),
+        ("skill_list", {}),
+        ("run_shell", {"command": "x"}),
+        ("run_python", {"code": "x"}),
         ("shell_start", {}),
         ("shell_send", {"session_id": "s", "input_text": "x"}),
         ("shell_read", {"session_id": "s"}),
-        ("shell_kill", {"session_id": "s"}),
+        ("shell_stop", {"session_id": "s"}),
         ("shell_list", {}),
         ("job_start", {"command": "x"}),
         ("job_list", {}),
         ("job_tail", {"job_id": "j"}),
         ("job_stop", {"job_id": "j"}),
         ("job_retry", {"job_id": "j"}),
-        ("list_files", {}),
-        ("tree_view", {}),
-        ("glob_search", {"pattern": "*"}),
-        ("grep_search", {"query": "x"}),
-        ("read_file", {"path": "x"}),
-        ("write_file", {"path": "x", "content": "y"}),
-        ("edit_file", {"path": "x", "edits": []}),
-        ("delete_file_or_dir", {"path": "x"}),
-        ("apply_patch", {"patch": "x"}),
-        ("transfer_path", {"source_path": "a", "destination_path": "b"}),
+        ("file_list", {}),
+        ("file_tree", {}),
+        ("file_glob", {"pattern": "*"}),
+        ("file_grep", {"query": "x"}),
+        ("file_read", {"path": "x"}),
+        ("file_write", {"path": "x", "content": "y"}),
+        ("file_edit", {"path": "x", "edits": []}),
+        ("file_delete", {"path": "x"}),
+        ("file_patch", {"patch": "x"}),
+        ("remote_transfer", {"source_path": "a", "destination_path": "b"}),
         ("secret_scan", {}),
         ("todo_read_tool", {}),
         ("todo_write_tool", {"todos": []}),
         ("browser_capture_tool", {"url": "x"}),
         ("browser_get_text_tool", {"url": "x"}),
-        ("playwright_run_script_tool", {"script": "x"}),
+        ("browser_run_script", {"script": "x"}),
         ("audit_tail", {}),
     ]
     for name, kwargs in checks:
         result = await _raw_tool(mcp, name)(**kwargs)
-        if name in {"search", "fetch"}:
-            assert isinstance(result, str)
-        else:
-            assert isinstance(result, CallToolResult), name
-            assert _handled_error_data(result)["status"] == "error", name
+        assert isinstance(result, CallToolResult), name
+        assert _handled_error_data(result)["status"] == "error", name
 
     _configure(tmp_path, monkeypatch, remote_enabled=False)
     disabled = tools.build_mcp()
-    assert not any(
-        name.startswith("remote_") or name == "transfer_path"
-        for name in disabled._tool_manager._tools
-    )
+    assert not any(name.startswith("remote_") for name in disabled._tool_manager._tools)
 
 
 def test_tool_helpers_audit_serialization_timeout_and_tail(tmp_path, monkeypatch):
@@ -358,10 +357,6 @@ def test_tool_helpers_audit_serialization_timeout_and_tail(tmp_path, monkeypatch
     with pytest.raises(ValueError, match="explanation"):
         tools._audit_tool_purpose("x", explanation="x" * 2001)
 
-    search = json.loads(tools._timeout_payload_for_tool("search", TimeoutError("x")))
-    assert search == {"results": []}
-    fetch = json.loads(tools._timeout_payload_for_tool("fetch", TimeoutError("x")))
-    assert fetch["metadata"]["error"] == "TimeoutError"
     generic = tools._timeout_payload_for_tool("other", TimeoutError("x"))
     assert isinstance(generic, CallToolResult)
     assert _handled_error_data(generic)["status"] == "error"
@@ -524,7 +519,7 @@ async def test_remote_shell_failure_returns_mcp_error(tmp_path, monkeypatch):
     monkeypatch.setattr(tools, "remote_manager", lambda: FailedRemoteManager())
 
     result = await tools.build_mcp().call_tool(
-        "run_shell_tool",
+        "run_shell",
         {"command": "echo ok", "machine": "node"},
     )
 

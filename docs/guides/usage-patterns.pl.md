@@ -19,7 +19,7 @@ Runtime określa, jak działa proces serwera i którym workspace steruje. Client
 2. Uruchom Runtime i sprawdź `/healthz`, gdy używany jest tryb HTTP.
 3. Następnie wybierz stronę połączenia Client.
 4. Zarejestruj MCP endpoint albo polecenie stdio w Client.
-5. Wywołaj `environment_info`, aby sprawdzić rzeczywisty workspace i ustawienia.
+5. Wywołaj `environment_get`, aby sprawdzić rzeczywisty workspace i ustawienia.
 
 ```text
 Runtime: Docker / VS Code extension / binary / Python / stdio
@@ -29,9 +29,9 @@ Endpoint: https://your-host.example.com/mcp
 
 ## Weryfikacja
 
-- `environment_info` potwierdza ustawienia Runtime i workspace.
-- `tree_view` potwierdza widoczne pliki.
-- `run_shell_tool` potwierdza środowisko poleceń.
+- `environment_get` potwierdza ustawienia Runtime i workspace.
+- `file_tree` potwierdza widoczne pliki.
+- `run_shell` potwierdza środowisko poleceń.
 
 ## Uwagi
 

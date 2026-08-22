@@ -6,28 +6,28 @@
 
 大多数编程任务可以使用这个循环：
 
-1. 检查：`environment_info`、`tree_view`、`run_shell_tool`、`grep_search`、`read_file`。
+1. 检查：`environment_get`、`file_tree`、`run_shell`、`file_grep`、`file_read`。
 2. 计划：让模型识别最小相关文件和测试。
-3. 编辑：使用 `edit_file`、`apply_patch` 或 shell 命令。
-4. 验证：用 `run_shell_tool` 或持久 shell 运行定向测试或构建。
-5. 复查：需要时使用 `run_shell_tool`、`secret_scan`、`audit_tail`。
-6. 提交或导出：通过 `run_shell_tool` 执行明确的 Git CLI 命令，或使用 `create_file_link`。
+3. 编辑：使用 `file_edit`、`file_patch` 或 shell 命令。
+4. 验证：用 `run_shell` 或持久 shell 运行定向测试或构建。
+5. 复查：需要时使用 `run_shell`、`secret_scan`、`audit_tail`。
+6. 提交或导出：通过 `run_shell` 执行明确的 Git CLI 命令，或使用 `link_create`。
 
 ## 工具选择
 
 | 任务 | 优先使用 | 避免 |
 |---|---|---|
-| 快速一次性命令 | `run_shell_tool` | 每个命令都启动持久 shell |
-| 长时间开发服务器、REPL、watch 任务 | `shell_start` + `shell_read` + `shell_send` | 用阻塞式 `run_shell_tool` 等到超时 |
-| 结构化分析或生成文件 | `run_python_tool` | 用脆弱的 shell 管道处理复杂 JSON / 文本 |
-| 小范围精确编辑 | `edit_file` | 无必要地重写整个文件 |
-| 同一文件多处替换 | `edit_file` | 不重新读取文件就反复做陈旧编辑 |
-| 多文件补丁 | `apply_patch` | 临时拼接 shell 编辑命令 |
-| 查找文件 | `tree_view`、`glob_search` | 对大型仓库做完整递归列表 |
-| 查找代码 | `grep_search` | 盲目读取大量文件 |
+| 快速一次性命令 | `run_shell` | 每个命令都启动持久 shell |
+| 长时间开发服务器、REPL、watch 任务 | `shell_start` + `shell_read` + `shell_send` | 用阻塞式 `run_shell` 等到超时 |
+| 结构化分析或生成文件 | `run_python` | 用脆弱的 shell 管道处理复杂 JSON / 文本 |
+| 小范围精确编辑 | `file_edit` | 无必要地重写整个文件 |
+| 同一文件多处替换 | `file_edit` | 不重新读取文件就反复做陈旧编辑 |
+| 多文件补丁 | `file_patch` | 临时拼接 shell 编辑命令 |
+| 查找文件 | `file_tree`、`file_glob` | 对大型仓库做完整递归列表 |
+| 查找代码 | `file_grep` | 盲目读取大量文件 |
 | 浏览器证据 | `browser_capture_tool`、`browser_get_text_tool` | 只根据页面名或路由猜测 |
-| 可下载产物 | `create_file_link` | 在聊天中粘贴大型二进制内容 |
-| 远程机器任务 | 普通工具加 `machine`，以及 `transfer_path` | 在出站 worker 模式足够时开放入站 SSH |
+| 可下载产物 | `link_create` | 在聊天中粘贴大型二进制内容 |
+| 远程机器任务 | 普通工具加 `machine`，以及 `remote_transfer` | 在出站 worker 模式足够时开放入站 SSH |
 
 ## 提示词模板
 
@@ -58,16 +58,16 @@
 ### 远程 worker 任务
 
 ```text
-使用名为 <machine> 的已连接远程 worker。先调用 environment_info(machine=<machine>) 和 list_files(machine=<machine>)。只在配置的远程工作目录内操作。短命令用 run_shell_tool，长时间任务用 shell_start 或 job_start。
+使用名为 <machine> 的已连接远程 worker。先调用 environment_get(machine=<machine>) 和 file_list(machine=<machine>)。只在配置的远程工作目录内操作。短命令用 run_shell，长时间任务用 shell_start 或 job_start。
 ```
 
 ## 处理仓库
 
 开源改动建议流程：
 
-1. 用 `run_shell_tool` 检查是否有未提交改动。
-2. 如果任务依赖上游状态，使用 `run_shell_tool` 并检查分支。
-3. 编辑前用 `grep_search` 和 `read_file` 定位相关代码。
+1. 用 `run_shell` 检查是否有未提交改动。
+2. 如果任务依赖上游状态，使用 `run_shell` 并检查分支。
+3. 编辑前用 `file_grep` 和 `file_read` 定位相关代码。
 4. 做最小补丁。
 5. 先跑定向测试；可行时再跑更广的测试。
 6. 提交或推送前运行 `secret_scan`。
@@ -81,7 +81,7 @@
 
 1. 在工作区内生成文件。
 2. 验证文件存在且大小符合预期。
-3. 使用 `create_file_link`，设置较短 TTL 和可选 `max_downloads`。
+3. 使用 `link_create`，设置较短 TTL 和可选 `max_downloads`。
 4. 不再需要时撤销链接。
 
 不要为私钥、凭据目录或无关个人数据创建公开链接。
@@ -92,10 +92,10 @@
 
 推荐做法：
 
-- 用 `remote_invite` 或 `remote_rename_machine` 给机器取清晰名称。
-- 操作前检查 `environment_info`。
-- 用 `transfer_path` 处理控制端与 worker、或 worker 之间的文件和目录传输。
-- 任务结束后用 `remote_revoke_machine` 撤销 worker。
+- 用 `remote_manage(action="invite", ...)` 或 `remote_manage(action="rename", ...)` 给机器取清晰名称。
+- 操作前检查 `environment_get`。
+- 用 `remote_transfer` 处理控制端与 worker、或 worker 之间的文件和目录传输。
+- 任务结束后用 `remote_manage(action="revoke", ...)` 撤销 worker。
 
 ## 反模式
 

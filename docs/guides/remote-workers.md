@@ -8,12 +8,12 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 ## Basic workflow
 
-1. Create a one-time invite with `remote_invite`.
+1. Create a one-time invite with `remote_manage(action="invite", ...)`.
 2. Run the generated command on the remote machine.
-3. Confirm registration with `remote_list_machines`.
-4. Call normal tools with `machine="<worker-name>"`, for example `environment_info`, `run_shell_tool`, `read_file`, or `browser_capture_tool`.
-5. Use `transfer_path` to start a tracked controller-to-worker, worker-to-controller, or worker-to-worker file or directory transfer. Follow it with `job_list` or `job_tail`; stop or retry it with `job_stop` or `job_retry`.
-6. Rename or revoke workers with `remote_rename_machine` and `remote_revoke_machine`.
+3. Confirm registration with `remote_manage(action="list")`.
+4. Call normal tools with `machine="<worker-name>"`, for example `environment_get`, `run_shell`, `file_read`, or `browser_capture_tool`.
+5. Use `remote_transfer` to start a tracked controller-to-worker, worker-to-controller, or worker-to-worker file or directory transfer. Follow it with `job_list` or `job_tail`; stop or retry it with `job_stop` or `job_retry`.
+6. Rename or revoke workers with `remote_manage(action="rename", ...)` and `remote_manage(action="revoke", ...)`.
 
 Only worker administration uses `remote_*` names. Execution, shell, job, filesystem, patch, and browser operations share the same schema locally and remotely. Supplying a machine additionally requires the `remote:use` OAuth scope.
 
@@ -40,7 +40,7 @@ The worker log is stored under the worker state directory as `worker.log`.
 
 ## Capabilities
 
-Workers support shell and persistent shell sessions, tracked jobs, filesystem operations, transfer internals, Python execution, patches, and Playwright where dependencies are installed. Git uses standard commands through `run_shell_tool(machine=...)`.
+Workers support shell and persistent shell sessions, tracked jobs, filesystem operations, transfer internals, Python execution, patches, and Playwright where dependencies are installed. Git uses standard commands through `run_shell(machine=...)`.
 
 ## Security and versioning
 

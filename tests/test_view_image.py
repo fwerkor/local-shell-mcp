@@ -108,7 +108,7 @@ async def test_view_image_returns_native_mcp_image_content(tmp_path, monkeypatch
     _configure(tmp_path, monkeypatch)
     (tmp_path / "pixel.png").write_bytes(PNG)
 
-    result = await tools.build_mcp().call_tool("view_image", {"path": "pixel.png"})
+    result = await tools.build_mcp().call_tool("image_view", {"path": "pixel.png"})
 
     assert isinstance(result, CallToolResult)
     assert result.isError is False
@@ -167,7 +167,7 @@ async def test_view_image_reuses_remote_transfer_protocol(tmp_path, monkeypatch)
     )
 
     result = await tools.build_mcp().call_tool(
-        "view_image",
+        "image_view",
         {"path": "images/remote.png", "machine": "node"},
     )
 
@@ -184,7 +184,7 @@ async def test_view_image_returns_structured_errors(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     (tmp_path / "plain.txt").write_text("not an image", encoding="utf-8")
 
-    invalid = await tools.build_mcp().call_tool("view_image", {"path": "plain.txt"})
+    invalid = await tools.build_mcp().call_tool("image_view", {"path": "plain.txt"})
     assert isinstance(invalid, CallToolResult)
     assert invalid.isError is True
     assert invalid.structuredContent["ok"] is False
@@ -192,7 +192,7 @@ async def test_view_image_returns_structured_errors(tmp_path, monkeypatch):
 
     _configure(tmp_path, monkeypatch, remote_enabled=False)
     disabled = await tools.build_mcp().call_tool(
-        "view_image",
+        "image_view",
         {"path": "remote.png", "machine": "node"},
     )
     assert isinstance(disabled, CallToolResult)

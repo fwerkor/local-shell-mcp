@@ -114,8 +114,8 @@ async def test_file_link_tools_are_registered(tmp_path, monkeypatch):
     _reset(tmp_path, monkeypatch)
     tools = {tool.name: tool for tool in await build_mcp().list_tools()}
 
-    assert {"create_file_link", "list_file_links", "revoke_file_link"} <= tools.keys()
-    assert tools["create_file_link"].inputSchema["properties"]["inline"]["default"] is False
+    assert {"link_create", "link_list", "link_revoke"} <= tools.keys()
+    assert tools["link_create"].inputSchema["properties"]["inline"]["default"] is False
 
 
 def test_share_link_cannot_be_retargeted_outside_workspace(tmp_path, monkeypatch):

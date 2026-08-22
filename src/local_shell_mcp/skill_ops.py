@@ -160,7 +160,7 @@ def _load_skill_from_sources(
 
     if errors:
         raise ValueError(f"Could not load skill {validated_name}: " + "; ".join(errors))
-    raise ValueError(f"Unknown skill: {validated_name}. Call skills_list to see installed skills.")
+    raise ValueError(f"Unknown skill: {validated_name}. Call skill_list to see installed skills.")
 
 
 def load_installed_skill(name: str, settings: Settings | None = None) -> dict[str, Any]:

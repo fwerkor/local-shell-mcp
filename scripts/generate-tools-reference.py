@@ -15,14 +15,13 @@ REPO = Path(__file__).resolve().parents[1]
 OUTPUT = REPO / "docs" / "reference" / "tools.md"
 
 GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Connector and discovery", ("search", "fetch")),
     (
         "Environment, skills, and task state",
         (
-            "environment_info",
-            "skills_list",
+            "environment_get",
+            "skill_list",
             "skill_load",
-            "skill_read_file",
+            "skill_read",
             "secret_scan",
             "todo_read_tool",
             "todo_write_tool",
@@ -32,12 +31,12 @@ GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "Shells and jobs",
         (
-            "run_shell_tool",
-            "run_python_tool",
+            "run_shell",
+            "run_python",
             "shell_start",
             "shell_send",
             "shell_read",
-            "shell_kill",
+            "shell_stop",
             "shell_list",
             "job_start",
             "job_list",
@@ -49,20 +48,20 @@ GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "Files and transfer",
         (
-            "list_files",
-            "tree_view",
-            "glob_search",
-            "grep_search",
-            "read_file",
-            "view_image",
-            "write_file",
-            "edit_file",
-            "delete_file_or_dir",
-            "apply_patch",
-            "transfer_path",
-            "create_file_link",
-            "list_file_links",
-            "revoke_file_link",
+            "file_list",
+            "file_tree",
+            "file_glob",
+            "file_grep",
+            "file_read",
+            "image_view",
+            "file_write",
+            "file_edit",
+            "file_delete",
+            "file_patch",
+            "remote_transfer",
+            "link_create",
+            "link_list",
+            "link_revoke",
         ),
     ),
     (
@@ -70,16 +69,13 @@ GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "browser_capture_tool",
             "browser_get_text_tool",
-            "playwright_run_script_tool",
+            "browser_run_script",
         ),
     ),
     (
         "Remote worker administration",
         (
-            "remote_invite",
-            "remote_list_machines",
-            "remote_revoke_machine",
-            "remote_rename_machine",
+            "remote_manage",
         ),
     ),
 )
@@ -128,17 +124,17 @@ async def generate() -> str:
         "",
         "This page is generated from the actual MCP tool schemas. Run `python scripts/generate-tools-reference.py` after changing the public tool surface.",
         "",
-        "All tools except connector-style `search` and `fetch` return a structured `ToolResult` containing `ok`, `message`, and `data`. Most execution and file tools accept an optional `machine`; omit it for the controller workspace and provide it for a connected worker. Git operations intentionally use `run_shell_tool` or another shell tool rather than dedicated Git wrappers.",
+        "All tools return a structured `ToolResult` containing `ok`, `message`, and `data`. Most execution and file tools accept an optional `machine`; omit it for the controller workspace and provide it for a connected worker. Git operations intentionally use `run_shell` or another shell tool rather than dedicated Git wrappers.",
         "",
         "## Selection guide",
         "",
         "| Need | Preferred tools |",
         "|---|---|",
-        "| Inspect an environment | `environment_info`, `tree_view`, `read_file` |",
-        "| Run a short command or Git operation | `run_shell_tool` |",
+        "| Inspect an environment | `environment_get`, `file_tree`, `file_read` |",
+        "| Run a short command or Git operation | `run_shell` |",
         "| Run an interactive or long task | `shell_start` or `job_start` |",
-        "| Make exact file changes | `edit_file` or `apply_patch` |",
-        "| Transfer a file or directory | `transfer_path` |",
+        "| Make exact file changes | `file_edit` or `file_patch` |",
+        "| Transfer a file or directory | `remote_transfer` |",
         "| Capture a page | `browser_get_text_tool` or `browser_capture_tool` |",
         "| Work on a remote machine | use the same tool with `machine`; use `remote_*` only for worker administration |",
         "",
@@ -183,7 +179,7 @@ async def generate() -> str:
                         "",
                     ]
                 )
-            if name == "transfer_path":
+            if name == "remote_transfer":
                 lines.extend(
                     [
                         "At least one of `source_machine` and `destination_machine` must be supplied. Omitted endpoints refer to the controller workspace; the source may be either a file or a directory.",

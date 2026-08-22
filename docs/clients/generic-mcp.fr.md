@@ -19,7 +19,7 @@ Runtime définit la manière dont le processus serveur s’exécute et l’espac
 2. Démarrez le Runtime et vérifiez `/healthz` lorsque le mode HTTP est utilisé.
 3. Choisissez ensuite la page de connexion Client.
 4. Enregistrez le MCP endpoint ou la commande stdio dans le Client.
-5. Appelez `environment_info` pour vérifier l’espace de travail et les paramètres effectifs.
+5. Appelez `environment_get` pour vérifier l’espace de travail et les paramètres effectifs.
 
 ```text
 Runtime: Docker / VS Code extension / binary / Python / stdio
@@ -29,9 +29,9 @@ Endpoint: https://your-host.example.com/mcp
 
 ## Vérification
 
-- `environment_info` confirme les paramètres du Runtime et l’espace de travail.
-- `tree_view` confirme les fichiers visibles.
-- `run_shell_tool` confirme l’environnement de commande.
+- `environment_get` confirme les paramètres du Runtime et l’espace de travail.
+- `file_tree` confirme les fichiers visibles.
+- `run_shell` confirme l’environnement de commande.
 
 ## Notes
 

@@ -21,23 +21,23 @@ LSM 按以下優先級掃描目錄：
 
 每個直接子目錄代表一個 Skill。目錄名就是 Skill 名稱，目錄中必須提供 `SKILL.md`。Skill 目錄、`SKILL.md`、關聯檔案和關聯目錄均可使用符號連結。
 
-同名 Skill 出現在多個來源時，專案級來源優先於 LSM 管理目錄，LSM 管理目錄優先於全域目錄。`skills_list` 會返回每個有效 Skill 的 `source` 和 `source_path`，並透過 `skills_dirs` 給出完整的有序來源列表。
+同名 Skill 出現在多個來源時，專案級來源優先於 LSM 管理目錄，LSM 管理目錄優先於全域目錄。`skill_list` 會返回每個有效 Skill 的 `source` 和 `source_path`，並透過 `skills_dirs` 給出完整的有序來源列表。
 
 ## 固定工具
 
 | 工具 | 用途 |
 |---|---|
-| `skills_list` | 重新掃描所有來源，列出 Skill 名稱、描述、來源、入口路徑、關聯檔案和非致命警告，不載入完整指令。 |
-| `skill_load` | 按 `skills_list` 返回的精確名稱載入完整 `SKILL.md`。 |
-| `skill_read_file` | 使用 `skill_load` 返回的 Skill 內相對路徑讀取受大小限制的關聯文字檔案。 |
+| `skill_list` | 重新掃描所有來源，列出 Skill 名稱、描述、來源、入口路徑、關聯檔案和非致命警告，不載入完整指令。 |
+| `skill_load` | 按 `skill_list` 返回的精確名稱載入完整 `SKILL.md`。 |
+| `skill_read` | 使用 `skill_load` 返回的 Skill 內相對路徑讀取受大小限制的關聯文字檔案。 |
 
 推薦流程：
 
 ```text
-skills_list
+skill_list
   -> 選擇相關 Skill
   -> skill_load(name)
-  -> 僅在需要關聯檔案時調用 skill_read_file(name, path)
+  -> 僅在需要關聯檔案時調用 skill_read(name, path)
   -> 按 Skill 指令調用現有 shell、Git、瀏覽器和遠端工具
 ```
 
@@ -87,7 +87,7 @@ Registry 會跳過非法 Skill 名稱和缺少可讀 `SKILL.md` 的目錄。入�
 可選 REST 介面使用同一份合併後的 Registry：
 
 ```text
-GET  /tools/skills_list
+GET  /tools/skill_list
 POST /tools/skill_load       {"name": "debugging"}
-POST /tools/skill_read_file  {"name": "debugging", "path": "checklist.md"}
+POST /tools/skill_read  {"name": "debugging", "path": "checklist.md"}
 ```

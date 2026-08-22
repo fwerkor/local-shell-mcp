@@ -65,12 +65,12 @@ Docker、VS Code 擴展、二進制、Python 和 stdio 是運行時；ChatGPT �
 
 | 工具族 | 示例 | 用途 |
 |---|---|---|
-| Shell 和 Python | `run_shell_tool`, `run_python_tool`, `shell_start` | 構建、測試、腳本、長時間進程 |
-| 文件和搜索 | `tree_view`, `grep_search`, `read_file`, `apply_patch` | 倉庫檢查和精確修改 |
-| Git | `run_shell_tool`, `run_shell_tool`, `run_shell_tool`, `run_shell_tool` | 可審查的源碼管理流程 |
-| 瀏覽器 | `browser_capture_tool`, `browser_get_text_tool`, `playwright_run_script_tool` | UI 檢查、截圖、渲染文檔、頁面文本 |
-| 文件鏈接 | `create_file_link`, `revoke_file_link` | 從聊天中下載生成產物 |
-| 遠程節點 | `remote_invite`, `run_shell_tool`, `transfer_path` | NAT、防火牆或集羣登錄流程後的機器 |
+| Shell 和 Python | `run_shell`, `run_python`, `shell_start` | 構建、測試、腳本、長時間進程 |
+| 文件和搜索 | `file_tree`, `file_grep`, `file_read`, `file_patch` | 倉庫檢查和精確修改 |
+| Git | `run_shell`, `run_shell`, `run_shell`, `run_shell` | 可審查的源碼管理流程 |
+| 瀏覽器 | `browser_capture_tool`, `browser_get_text_tool`, `browser_run_script` | UI 檢查、截圖、渲染文檔、頁面文本 |
+| 文件鏈接 | `link_create`, `link_revoke` | 從聊天中下載生成產物 |
+| 遠程節點 | `remote_manage(action="invite", ...)`, `run_shell`, `remote_transfer` | NAT、防火牆或集羣登錄流程後的機器 |
 
 ## 典型工作流
 
@@ -87,7 +87,7 @@ Docker、VS Code 擴展、二進制、Python 和 stdio 是運行時；ChatGPT �
 
 1. 創建一次性遠程節點邀請。
 2. 在遠程主機上粘貼生成的命令。
-3. 通過普通工具的 `machine` 參數操作遠程節點；Git 使用 `run_shell_tool`，路徑傳輸使用 `transfer_path`。
+3. 通過普通工具的 `machine` 參數操作遠程節點；Git 使用 `run_shell`，路徑傳輸使用 `remote_transfer`。
 4. 任務結束後撤銷該節點。
 
 ### 產物生成

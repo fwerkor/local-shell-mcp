@@ -99,7 +99,7 @@ def test_audit_detail_requires_scopes_before_materializing_payloads(tmp_path, mo
     calls: list[bool] = []
     preview = {
         "id": "call:write",
-        "tool": "write_file",
+        "tool": "file_write",
         "operation": "files",
         "node": "local",
     }
@@ -150,7 +150,7 @@ def test_audit_detail_renders_view_image_without_returning_raw_data(tmp_path, mo
     )
     preview = {
         "id": "call:image",
-        "tool": "view_image",
+        "tool": "image_view",
         "operation": "files",
         "node": "local",
     }
@@ -199,19 +199,19 @@ def test_audit_detail_renders_view_image_without_returning_raw_data(tmp_path, mo
 
 
 def test_audit_view_image_detail_keeps_non_images_and_sanitizes_invalid_data():
-    ordinary = {"tool": "read_file", "output": {"content": []}}
+    ordinary = {"tool": "file_read", "output": {"content": []}}
     assert ui._audit_view_image_detail(ordinary, columns=20, rows=10, cell_aspect=2) is ordinary
 
     for incomplete in (
-        {"tool": "view_image"},
-        {"tool": "view_image", "output": "invalid"},
-        {"tool": "view_image", "output": {"content": "invalid"}},
-        {"tool": "view_image", "output": {"content": [{"type": "text", "text": "none"}]}},
+        {"tool": "image_view"},
+        {"tool": "image_view", "output": "invalid"},
+        {"tool": "image_view", "output": {"content": "invalid"}},
+        {"tool": "image_view", "output": {"content": [{"type": "text", "text": "none"}]}},
     ):
         assert ui._audit_view_image_detail(incomplete, columns=20, rows=10, cell_aspect=2) is incomplete
 
     invalid = {
-        "tool": "view_image",
+        "tool": "image_view",
         "output": {
             "content": [{"type": "image", "data": "not-base64", "mimeType": "image/png"}],
             "structured_content": {"path": "broken.png"},

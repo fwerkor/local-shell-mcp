@@ -10,31 +10,31 @@
 
 ### Environment / audit / task state
 
-`environment_info`, `audit_tail`, `todo_read_tool`, `todo_write_tool`, `secret_scan`
+`environment_get`, `audit_tail`, `todo_read_tool`, `todo_write_tool`, `secret_scan`
 
 ### Skills
 
-`skills_list`, `skill_load`, `skill_read_file`
+`skill_list`, `skill_load`, `skill_read`
 
 ### Filesystem
 
-`list_files`, `read_file`, `write_file`, `edit_file`, `delete_file_or_dir`, `transfer_path`, `tree_view`, `glob_search`, `grep_search`
+`file_list`, `file_read`, `file_write`, `file_edit`, `file_delete`, `remote_transfer`, `file_tree`, `file_glob`, `file_grep`
 
 ### Shell and jobs
 
-`run_shell_tool`, `run_python_tool`, `shell_start`, `shell_read`, `shell_send`, `shell_kill`, `shell_list`, `job_start`, `job_list`, `job_tail`, `job_stop`, `job_retry`
+`run_shell`, `run_python`, `shell_start`, `shell_read`, `shell_send`, `shell_stop`, `shell_list`, `job_start`, `job_list`, `job_tail`, `job_stop`, `job_retry`
 
 ### Browser automation
 
-`browser_get_text_tool`, `browser_capture_tool`, `playwright_run_script_tool`
+`browser_get_text_tool`, `browser_capture_tool`, `browser_run_script`
 
 ### File links
 
-`create_file_link`, `list_file_links`, `revoke_file_link`
+`link_create`, `link_list`, `link_revoke`
 
 ### Remote workers
 
-`remote_invite`, `remote_list_machines`, `remote_rename_machine`, `remote_revoke_machine`; normal tools use optional `machine`, and `transfer_path` handles transfers
+`remote_manage` (`invite`, `list`, `rename`, `revoke`); normal tools use optional `machine`, and `remote_transfer` handles transfers
 
 ## 利用上の指針
 

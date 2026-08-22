@@ -19,7 +19,7 @@
 2. شغّل Runtime وتحقق من `/healthz` عند استخدام وضع HTTP.
 3. اختر بعد ذلك صفحة اتصال Client.
 4. سجّل MCP endpoint أو أمر stdio في Client.
-5. استدعِ `environment_info` للتحقق من مساحة العمل والإعدادات الفعلية.
+5. استدعِ `environment_get` للتحقق من مساحة العمل والإعدادات الفعلية.
 
 ```text
 Runtime: Docker / VS Code extension / binary / Python / stdio
@@ -29,9 +29,9 @@ Endpoint: https://your-host.example.com/mcp
 
 ## التحقق
 
-- `environment_info` يؤكد إعدادات Runtime ومساحة العمل.
-- `tree_view` يؤكد الملفات المرئية.
-- `run_shell_tool` يؤكد بيئة الأوامر.
+- `environment_get` يؤكد إعدادات Runtime ومساحة العمل.
+- `file_tree` يؤكد الملفات المرئية.
+- `run_shell` يؤكد بيئة الأوامر.
 
 ## ملاحظات
 

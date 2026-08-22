@@ -150,7 +150,7 @@ See the [remote workers guide](https://fwerkor.github.io/local-shell-mcp/guides/
 
 Skills are discovered from three ordered sources: project-level `/workspace/.agents/skills`, the LSM-managed `/workspace/.local-shell-mcp/agent_config/skills`, and global `~/.config/agents/skills`. Higher-priority sources override lower-priority Skills with the same name, and symlinked Skill directories and files are supported.
 
-This makes the universal Skills CLI layout work directly, for example `npx skills add owner/repo --agent universal -y`. Use `skills_list` to discover installed Skills, `skill_load` to load one instruction set, and `skill_read_file` to read a related file by the returned Skill-relative path. Changes are detected on the next call; no per-Skill MCP tools are registered and no client reconnect is required.
+This makes the universal Skills CLI layout work directly, for example `npx skills add owner/repo --agent universal -y`. Use `skill_list` to discover installed Skills, `skill_load` to load one instruction set, and `skill_read` to read a related file by the returned Skill-relative path. Changes are detected on the next call; no per-Skill MCP tools are registered and no client reconnect is required.
 
 See the [Agent Skills guide](https://fwerkor.github.io/local-shell-mcp/guides/skills/).
 
@@ -158,14 +158,14 @@ See the [Agent Skills guide](https://fwerkor.github.io/local-shell-mcp/guides/sk
 
 The public MCP surface includes:
 
-- Shell and jobs: `run_shell_tool`, `run_python_tool`, persistent `shell_*`, and tracked `job_*` tools. Use `run_shell_tool` for Git CLI operations.
-- Filesystem: `list_files`, `tree_view`, `glob_search`, `grep_search`, unified `read_file`, native-vision `view_image`, `write_file`, unified `edit_file`, `delete_file_or_dir`, and `apply_patch`.
-- Transfer: `transfer_path` for files or directories across controller and worker endpoints.
-- Browser: `browser_get_text_tool`, unified `browser_capture_tool`, and `playwright_run_script_tool`.
-- File links: `create_file_link`, `list_file_links`, `revoke_file_link`.
-- Remote workers: `remote_invite`, `remote_list_machines`, `remote_rename_machine`, and `remote_revoke_machine`; normal execution tools accept optional `machine`.
-- Agent Skills: `skills_list`, `skill_load`, `skill_read_file`.
-- Diagnostics: `environment_info` (including version information), `secret_scan`, `audit_tail`, `todo_read_tool`, and `todo_write_tool`.
+- Shell and jobs: `run_shell`, `run_python`, persistent `shell_*`, and tracked `job_*` tools. Use `run_shell` for Git CLI operations.
+- Filesystem: `file_list`, `file_tree`, `file_glob`, `file_grep`, unified `file_read`, native-vision `image_view`, `file_write`, unified `file_edit`, `file_delete`, and `file_patch`.
+- Transfer: `remote_transfer` for files or directories across controller and worker endpoints.
+- Browser: `browser_get_text_tool`, unified `browser_capture_tool`, and `browser_run_script`.
+- File links: `link_create`, `link_list`, `link_revoke`.
+- Remote workers: `remote_manage` with `invite`, `list`, `rename`, and `revoke` actions; normal execution tools accept optional `machine`.
+- Agent Skills: `skill_list`, `skill_load`, `skill_read`.
+- Diagnostics: `environment_get` (including version information), `secret_scan`, `audit_tail`, `todo_read_tool`, and `todo_write_tool`.
 
 The detailed tool reference, including purpose, inputs, returns, combinations, and notes for every tool, is available in the [docs](https://fwerkor.github.io/local-shell-mcp/reference/tools/).
 

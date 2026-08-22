@@ -1,6 +1,5 @@
 
 import hashlib
-import json
 import os
 import re
 import threading
@@ -217,20 +216,6 @@ def test_edits_refuse_binary_files(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_fetch_omits_binary_content_from_text_field(tmp_path, monkeypatch):
-    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
-    get_settings.cache_clear()
-    (tmp_path / "blob.bin").write_bytes(b"abc\x00world")
-
-    response = await build_mcp().call_tool("fetch", {"id": "blob.bin"})
-    payload = json.loads(response[0][0].text)
-
-    assert payload["text"] == "Refusing to read binary file as text"
-    assert payload["metadata"]["binary"] is True
-    assert payload["metadata"]["bytes"] == 9
-
-
-@pytest.mark.asyncio
 async def test_read_file_rejects_too_many_files(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_READ_MANY_FILES", "1")
@@ -238,7 +223,7 @@ async def test_read_file_rejects_too_many_files(tmp_path, monkeypatch):
     (tmp_path / "a.txt").write_text("a", encoding="utf-8")
     (tmp_path / "b.txt").write_text("b", encoding="utf-8")
 
-    response = await build_mcp().call_tool("read_file", {"path": ["a.txt", "b.txt"]})
+    response = await build_mcp().call_tool("file_read", {"path": ["a.txt", "b.txt"]})
 
     assert isinstance(response, CallToolResult)
     assert response.isError is True

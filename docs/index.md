@@ -65,12 +65,12 @@ The intended isolation boundary is the container or VM running the service.
 
 | Family | Examples | Use for |
 |---|---|---|
-| Shell and Python | `run_shell_tool`, `run_python_tool`, `shell_start` | Builds, tests, scripts, long-running processes |
-| Files and search | `tree_view`, `grep_search`, `read_file`, `apply_patch` | Repository inspection and precise edits |
-| Git | `run_shell_tool`, `run_shell_tool`, `run_shell_tool`, `run_shell_tool` | Reviewable source-control workflows |
-| Browser | `browser_capture_tool`, `browser_get_text_tool`, `playwright_run_script_tool` | UI checks, screenshots, rendered docs, page text |
-| File links | `create_file_link`, `revoke_file_link` | Downloading generated artifacts from chat |
-| Remote workers | `remote_invite`, `run_shell_tool`, `transfer_path` | Machines behind NAT, firewalls, or cluster login flows |
+| Shell and Python | `run_shell`, `run_python`, `shell_start` | Builds, tests, scripts, long-running processes |
+| Files and search | `file_tree`, `file_grep`, `file_read`, `file_patch` | Repository inspection and precise edits |
+| Git | `run_shell`, `run_shell`, `run_shell`, `run_shell` | Reviewable source-control workflows |
+| Browser | `browser_capture_tool`, `browser_get_text_tool`, `browser_run_script` | UI checks, screenshots, rendered docs, page text |
+| File links | `link_create`, `link_revoke` | Downloading generated artifacts from chat |
+| Remote workers | `remote_manage(action="invite", ...)`, `run_shell`, `remote_transfer` | Machines behind NAT, firewalls, or cluster login flows |
 
 ## Typical workflows
 
@@ -87,7 +87,7 @@ The intended isolation boundary is the container or VM running the service.
 
 1. Create a one-time remote worker invite.
 2. Paste the generated command on the remote host.
-3. Use normal tools with `machine`; run Git through `run_shell_tool` and transfer paths with `transfer_path`.
+3. Use normal tools with `machine`; run Git through `run_shell` and transfer paths with `remote_transfer`.
 4. Revoke the worker after the task.
 
 ### Artifact generation

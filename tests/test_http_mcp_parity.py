@@ -25,7 +25,7 @@ async def test_http_list_files_matches_mcp_payload(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
 
     http_payload = client.post("/tools/list_files", json={"path": "."}).json()
-    mcp_payload = _mcp_data(await build_mcp().call_tool("list_files", {"path": "."}))
+    mcp_payload = _mcp_data(await build_mcp().call_tool("file_list", {"path": "."}))
 
     def comparable_listing(rows):
         return sorted((item["path"], item["type"], item["size"]) for item in rows)
@@ -40,7 +40,7 @@ async def test_http_read_file_matches_mcp_payload(tmp_path, monkeypatch):
     args = {"path": "alpha.txt", "start_line": 2}
 
     http_payload = client.post("/tools/read_file", json=args).json()
-    mcp_payload = _mcp_data(await build_mcp().call_tool("read_file", args))
+    mcp_payload = _mcp_data(await build_mcp().call_tool("file_read", args))
 
     assert http_payload == mcp_payload
 
@@ -51,7 +51,7 @@ async def test_http_run_shell_matches_mcp_command_payload(tmp_path, monkeypatch)
     args = {"command": python_shell_command("print('parity', end='')"), "cwd": ".", "timeout_s": 5}
 
     http_payload = client.post("/tools/run_shell", json=args).json()
-    mcp_payload = _mcp_data(await build_mcp().call_tool("run_shell_tool", args))
+    mcp_payload = _mcp_data(await build_mcp().call_tool("run_shell", args))
 
     assert http_payload["ok"] is True
     assert http_payload["stdout"] == mcp_payload["stdout"] == "parity"

@@ -19,7 +19,7 @@ Runtime menentukan bagaimana proses server berjalan dan workspace mana yang dike
 2. Mulai Runtime dan periksa `/healthz` saat menggunakan mode HTTP.
 3. Pilih halaman koneksi Client berikutnya.
 4. Daftarkan MCP endpoint atau perintah stdio di Client.
-5. Panggil `environment_info` untuk memeriksa workspace dan pengaturan efektif.
+5. Panggil `environment_get` untuk memeriksa workspace dan pengaturan efektif.
 
 ```text
 Runtime: Docker / VS Code extension / binary / Python / stdio
@@ -29,9 +29,9 @@ Endpoint: https://your-host.example.com/mcp
 
 ## Verifikasi
 
-- `environment_info` mengonfirmasi pengaturan Runtime dan workspace.
-- `tree_view` mengonfirmasi file yang terlihat.
-- `run_shell_tool` mengonfirmasi lingkungan perintah.
+- `environment_get` mengonfirmasi pengaturan Runtime dan workspace.
+- `file_tree` mengonfirmasi file yang terlihat.
+- `run_shell` mengonfirmasi lingkungan perintah.
 
 ## Catatan
 

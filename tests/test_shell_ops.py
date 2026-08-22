@@ -47,7 +47,7 @@ async def test_run_shell_tool_returns_output_after_command_timeout(tmp_path, mon
     get_settings.cache_clear()
 
     response = await build_mcp().call_tool(
-        "run_shell_tool",
+        "run_shell",
         {
             "command": python_shell_command(
                 'import sys, time; print("partial-out", flush=True); '
@@ -70,7 +70,7 @@ async def test_run_shell_tool_rejects_timeout_above_public_cap(tmp_path, monkeyp
     get_settings.cache_clear()
 
     response = await build_mcp().call_tool(
-        "run_shell_tool", {"command": "echo ok", "timeout_s": 3600}
+        "run_shell", {"command": "echo ok", "timeout_s": 3600}
     )
     assert isinstance(response, CallToolResult)
     payload = _mcp_error_text(response)
@@ -89,11 +89,11 @@ async def test_mcp_tool_watchdog_returns_handled_timeout(tmp_path, monkeypatch):
 
     monkeypatch.setattr(tools_module, "tree", hanging_tree)
 
-    response = await build_mcp().call_tool("tree_view", {"cwd": "."})
+    response = await build_mcp().call_tool("file_tree", {"cwd": "."})
     assert isinstance(response, CallToolResult)
     payload = _mcp_error_text(response)
 
-    assert "tree_view exceeded 0.01 second public tool timeout" in payload
+    assert "file_tree exceeded 0.01 second public tool timeout" in payload
 
 
 def test_rest_tool_watchdog_returns_timeout(tmp_path, monkeypatch):
@@ -143,11 +143,11 @@ async def test_mcp_tool_watchdog_times_out_sync_tool(tmp_path, monkeypatch):
 
     monkeypatch.setattr(tools_module, "list_dir", blocking_list_dir)
 
-    response = await build_mcp().call_tool("list_files", {"path": "."})
+    response = await build_mcp().call_tool("file_list", {"path": "."})
     assert isinstance(response, CallToolResult)
     payload = _mcp_error_text(response)
 
-    assert "list_files exceeded 0.01 second public tool timeout" in payload
+    assert "file_list exceeded 0.01 second public tool timeout" in payload
 
 
 def test_public_run_shell_timeout_uses_ten_second_default(tmp_path, monkeypatch):
@@ -227,7 +227,7 @@ async def test_run_shell_tool_reports_missing_shell_executable(tmp_path, monkeyp
     monkeypatch.setenv("LOCAL_SHELL_MCP_SHELL_EXECUTABLE", executable)
     get_settings.cache_clear()
 
-    result = await build_mcp().call_tool("run_shell_tool", {"command": "echo ok"})
+    result = await build_mcp().call_tool("run_shell", {"command": "echo ok"})
 
     assert isinstance(result, CallToolResult)
     assert result.isError is True

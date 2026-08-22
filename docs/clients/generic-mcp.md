@@ -61,7 +61,7 @@ Use `/mcp` for the full shell, filesystem, Git, browser, file-link, and remote-w
 For a newly connected client, start with:
 
 ```text
-Call environment_info, then tree_view on the workspace root. Do not modify files yet.
+Call environment_get, then file_tree on the workspace root. Do not modify files yet.
 ```
 
 Then run a bounded task with explicit edit, test, and Git rules.
