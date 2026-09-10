@@ -83,3 +83,101 @@ describe("Native WebUI file actions", () => {
     ])
   })
 })
+
+
+describe("Native WebUI file performance", () => {
+  test("reuses the derived directory entries until payload or filters change", () => {
+    const controller: any = new FilesController({} as any)
+    controller.payload = {
+      machine: "local",
+      path: ".",
+      parent: ".",
+      entries: [
+        { path: "b", name: "b", type: "file", size: 2, modified: 2 },
+        { path: "a", name: "a", type: "file", size: 1, modified: 1 },
+      ],
+      parent_entries: [],
+    }
+
+    const first = controller.entries()
+    const second = controller.entries()
+    expect(second).toBe(first)
+
+    controller.query = "a"
+    const filtered = controller.entries()
+    expect(filtered).not.toBe(first)
+    expect(filtered.map((entry: { path: string }) => entry.path)).toEqual(["a"])
+  })
+
+  test("does not refetch an unchanged selected preview", async () => {
+    let requests = 0
+    const controller: any = new FilesController({
+      api: {
+        get: async () => { requests += 1; return { kind: "text", content: "hello" } },
+      },
+    } as any)
+    controller.machine = "local"
+    controller.payload = {
+      machine: "local",
+      path: ".",
+      parent: ".",
+      entries: [{ path: "a.txt", name: "a.txt", type: "file", size: 5, modified: 1 }],
+      parent_entries: [],
+    }
+    controller.selectedPath = "a.txt"
+    controller.root = { querySelector: () => null }
+    controller.renderPreview = () => undefined
+
+    await controller.loadPreview()
+    await controller.loadPreview()
+
+    expect(requests).toBe(1)
+  })
+
+  test("coalesces a forced preview refresh with the same request already in flight", async () => {
+    let requests = 0
+    let resolvePreview!: (value: unknown) => void
+    const controller: any = new FilesController({
+      api: {
+        get: async () => {
+          requests += 1
+          return new Promise((resolve) => { resolvePreview = resolve })
+        },
+      },
+    } as any)
+    controller.machine = "local"
+    controller.payload = {
+      machine: "local", path: ".", parent: ".",
+      entries: [{ path: "a.txt", name: "a.txt", type: "file", size: 5, modified: 1 }],
+      parent_entries: [],
+    }
+    controller.selectedPath = "a.txt"
+    controller.root = { querySelector: () => null }
+    controller.renderPreview = () => undefined
+
+    const first = controller.loadPreview()
+    const forced = controller.loadPreview(true)
+    expect(requests).toBe(1)
+    resolvePreview({ kind: "text", content: "hello" })
+    await Promise.all([first, forced])
+    expect(requests).toBe(1)
+  })
+
+  test("changes file selection without rebuilding the directory table", () => {
+    const controller: any = new FilesController({} as any)
+    controller.selectedPath = "a"
+    controller.preview = { kind: "text", content: "old" }
+    let selectionUpdates = 0
+    let directoryRenders = 0
+    controller.updateDirectorySelection = () => { selectionUpdates += 1 }
+    controller.renderDirectory = () => { directoryRenders += 1 }
+    controller.focusEntry = () => undefined
+    controller.loadPreview = async () => undefined
+
+    controller.select("b")
+
+    expect(controller.selectedPath).toBe("b")
+    expect(selectionUpdates).toBe(1)
+    expect(directoryRenders).toBe(0)
+  })
+})

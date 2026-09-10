@@ -176,3 +176,29 @@ describe("Native WebUI terminal session filtering", () => {
     expect(selected).toBe("build-a")
   })
 })
+
+
+describe("Native WebUI terminal rendering", () => {
+  test("switches terminal selection without rebuilding the session sidebar", () => {
+    const controller: any = {
+      selectedSessionId: "a",
+      terminal: { focus: () => undefined },
+      updateSessionSelection: () => { controller.selectionUpdates += 1 },
+      updateTerminalHeader: () => { controller.headerUpdates += 1 },
+      renderSessions: () => { controller.sidebarRenders += 1 },
+      connect: () => { controller.connections += 1 },
+      selectionUpdates: 0,
+      headerUpdates: 0,
+      sidebarRenders: 0,
+      connections: 0,
+    }
+
+    ;(TerminalsController.prototype as any).selectSession.call(controller, "b")
+
+    expect(controller.selectedSessionId).toBe("b")
+    expect(controller.selectionUpdates).toBe(1)
+    expect(controller.headerUpdates).toBe(1)
+    expect(controller.sidebarRenders).toBe(0)
+    expect(controller.connections).toBe(1)
+  })
+})

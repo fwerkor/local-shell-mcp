@@ -26,10 +26,14 @@ describe("Native WebUI actions", () => {
 
     for (const source of [files, sessions, remotes]) {
       expect(source).toContain('this.listen(root, "keydown"')
-      expect(source).toContain('tabindex="${selected ? "0" : "-1"}"')
       expect(source).toContain('event.key === "ArrowDown"')
       expect(source).toContain('event.key === "Enter"')
     }
+    for (const source of [files, sessions]) {
+      expect(source).toContain("tabIndex = -1")
+      expect(source).toContain("tabIndex = 0")
+    }
+    expect(remotes).toContain('tabindex="${selected ? "0" : "-1"}"')
     expect(sessions).toContain("data-session-id")
     expect(remotes).toContain("data-remote-name")
     expect(remotes).toContain("focusedName")
@@ -61,6 +65,17 @@ describe("Native WebUI actions", () => {
     for (const label of ["Copy", "Paste", "Find", "Clear", "Fullscreen"]) {
       expect(terminals).toContain(`button("${label}"`)
     }
+  })
+
+  test("uses one visibility-aware scheduler for native WebUI refreshes", async () => {
+    const nativeSources = await Promise.all(
+      nativePages.map((page) => Bun.file(new URL(`./web-native/${page}.ts`, import.meta.url)).text()),
+    )
+    const web = await Bun.file(new URL("./web.ts", import.meta.url)).text()
+
+    for (const source of nativeSources) expect(source).not.toContain("this.every(")
+    expect(web).toContain('document.visibilityState !== "hidden"')
+    expect(web).toContain('document.addEventListener("visibilitychange"')
   })
 
   test("uses the shared WebUI refresh control instead of duplicating it inside native pages", async () => {
