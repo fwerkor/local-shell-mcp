@@ -12,18 +12,28 @@ import {
   type NativePageContext,
 } from "./common"
 
+function remoteDetailRevision(machine: Machine): string {
+  return JSON.stringify([
+    machine.name,
+    machine.status,
+    machine.workdir,
+    machine.capabilities,
+    machine.info,
+  ])
+}
+
 export class RemotesController extends BaseController {
   private machines: Machine[] = []
   private selected = 0
   private enabled = true
   private loading = false
+  private renderedDetailRevision = ""
 
   mount(root: HTMLElement): void {
     this.root = root
     this.root.innerHTML = `<section class="native-page remotes-page"><div class="remote-summary" data-role="remote-summary"></div><div class="native-toolbar"><div><strong>Remote workers</strong><span class="toolbar-detail">Persistent worker identities and one-time invitations</span></div><div class="toolbar-actions">${button("New invite", "invite", { icon: "+", primary: true })}${button("Rename", "rename", { disabled: true })}${button("Revoke", "revoke", { danger: true, disabled: true })}</div></div><div class="remotes-layout"><section class="native-panel remote-list-panel"><header><div><h3>Remote nodes</h3><p data-role="remote-count">Loading…</p></div></header><div data-role="remote-list"><div class="native-loading">Loading remote nodes…</div></div></section><section class="native-panel remote-detail-panel"><header><div><h3>Node details</h3><p>Version, workdir, capabilities, and system information</p></div></header><div class="remote-detail" data-role="remote-detail"><div class="native-empty">No node selected</div></div></section></div></section>`
     this.listen(root, "click", (event) => this.onClick(event))
     this.listen(root, "keydown", (event) => this.onListKeyDown(event as KeyboardEvent))
-    this.every(() => void this.refresh(), 4_000)
     void this.refresh()
   }
 
@@ -75,7 +85,15 @@ export class RemotesController extends BaseController {
     }
     const current = this.current()
     const detail = this.root.querySelector<HTMLElement>("[data-role=remote-detail]")
-    if (detail) detail.innerHTML = current ? `<div class="remote-title"><span class="status-dot ${current.status === "online" ? "online" : "offline"}"></span><div><h2>${escapeHtml(current.name)}</h2><p>${escapeHtml(current.status)}</p></div></div><dl class="detail-grid"><div><dt>LSM version</dt><dd>${escapeHtml(String(current.info?.version || current.info?.lsm_version || "unknown"))}</dd></div><div><dt>Last seen</dt><dd>${formatAge(current.last_seen, current.last_seen_age_s)}</dd></div><div><dt>Workdir</dt><dd><code>${escapeHtml(current.workdir || "—")}</code></dd></div><div><dt>Capabilities</dt><dd>${(current.capabilities || []).map((item) => `<span class="tag">${escapeHtml(item)}</span>`).join("") || "—"}</dd></div></dl><section class="detail-json"><h4>System information</h4><pre>${highlightedHtml(JSON.stringify(current.info || {}, null, 2), "info.json")}</pre></section>` : '<div class="native-empty">No node selected</div>'
+    if (detail) {
+      const revision = current ? remoteDetailRevision(current) : "empty"
+      if (revision !== this.renderedDetailRevision) {
+        this.renderedDetailRevision = revision
+        detail.innerHTML = current ? `<div class="remote-title"><span class="status-dot ${current.status === "online" ? "online" : "offline"}"></span><div><h2>${escapeHtml(current.name)}</h2><p>${escapeHtml(current.status)}</p></div></div><dl class="detail-grid"><div><dt>LSM version</dt><dd>${escapeHtml(String(current.info?.version || current.info?.lsm_version || "unknown"))}</dd></div><div><dt>Last seen</dt><dd data-role="remote-last-seen"></dd></div><div><dt>Workdir</dt><dd><code>${escapeHtml(current.workdir || "—")}</code></dd></div><div><dt>Capabilities</dt><dd>${(current.capabilities || []).map((item) => `<span class="tag">${escapeHtml(item)}</span>`).join("") || "—"}</dd></div></dl><section class="detail-json"><h4>System information</h4><pre>${highlightedHtml(JSON.stringify(current.info || {}, null, 2), "info.json")}</pre></section>` : '<div class="native-empty">No node selected</div>'
+      }
+      const lastSeen = detail.querySelector<HTMLElement>("[data-role=remote-last-seen]")
+      if (lastSeen && current) lastSeen.textContent = formatAge(current.last_seen, current.last_seen_age_s)
+    }
     const rename = this.root.querySelector<HTMLButtonElement>("[data-action=rename]")
     const revoke = this.root.querySelector<HTMLButtonElement>("[data-action=revoke]")
     const invite = this.root.querySelector<HTMLButtonElement>("[data-action=invite]")

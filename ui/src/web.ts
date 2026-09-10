@@ -769,7 +769,9 @@ async function refreshAll(manual = false): Promise<void> {
 
 function startRefreshTimer(): void {
   stopRefreshTimer()
-  refreshTimer = window.setInterval(() => void refreshAll(false), 5_000)
+  refreshTimer = window.setInterval(() => {
+    if (document.visibilityState !== "hidden") void refreshAll(false)
+  }, 5_000)
 }
 
 function stopRefreshTimer(): void {
@@ -1188,6 +1190,9 @@ loginButton.addEventListener("click", () => void startOAuth("console"))
 loginWebButton.addEventListener("click", () => void startOAuth("overview"))
 refreshButton.addEventListener("click", () => void refreshAll(true))
 openConsoleButton.addEventListener("click", () => showView("console"))
+document.addEventListener("visibilitychange", () => {
+  if (authenticated && document.visibilityState === "visible") void refreshAll(false)
+})
 window.addEventListener("popstate", () => {
   showView(viewFromHash(location.hash) || "overview", { syncHash: false })
 })

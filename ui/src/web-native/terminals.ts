@@ -15,6 +15,15 @@ import {
   type NativePageContext,
 } from "./common"
 
+function terminalSessionRevision(session: TerminalSession): string {
+  return [
+    session.session_id,
+    session.backend || "",
+    session.attached ?? "",
+    session.created ?? "",
+  ].join("\u0000")
+}
+
 export class TerminalsController extends BaseController {
   private machine = "local"
   private sessions: TerminalSession[] = []
@@ -45,6 +54,7 @@ export class TerminalsController extends BaseController {
   private sessionQuery = ""
   private sidebarVisible = true
   private fontSize = 14
+  private renderedSessionsRevision = ""
 
   mount(root: HTMLElement): void {
     this.root = root
@@ -67,7 +77,6 @@ export class TerminalsController extends BaseController {
     this.listen(root, "input", (event) => this.onInput(event))
     this.listen(root, "submit", (event) => this.onSubmit(event))
     this.listen(root, "keydown", (event) => this.onRootKeyDown(event as KeyboardEvent))
-    this.every(() => void this.refresh(), 4_000)
     void this.refresh()
   }
 
@@ -186,6 +195,7 @@ export class TerminalsController extends BaseController {
     const title = this.root.querySelector<HTMLElement>("[data-role=terminal-title]")
     const subtitle = this.root.querySelector<HTMLElement>("[data-role=terminal-subtitle]")
     if (list) list.innerHTML = '<div class="native-loading">Loading terminals…</div>'
+    this.renderedSessionsRevision = ""
     if (summary) summary.textContent = "Loading…"
     if (title) title.textContent = "Persistent terminal"
     if (subtitle) subtitle.textContent = "Loading terminals…"
@@ -222,18 +232,35 @@ export class TerminalsController extends BaseController {
       if (control) control.disabled = !hasSession
     }
     if (!list) return
-    if (!visibleSessions.length) {
-      if (this.sessions.length) {
-        list.innerHTML = '<div class="native-empty"><strong>No matches</strong><span>Try a different session filter.</span></div>'
-        this.updateTerminalHeader()
-        return
+
+    const revision = [
+      this.sessionQuery,
+      this.sessions.length,
+      ...visibleSessions.map(terminalSessionRevision),
+    ].join("\u0001")
+    if (revision !== this.renderedSessionsRevision) {
+      this.renderedSessionsRevision = revision
+      if (!visibleSessions.length) {
+        list.innerHTML = this.sessions.length
+          ? '<div class="native-empty"><strong>No matches</strong><span>Try a different session filter.</span></div>'
+          : '<div class="native-empty"><strong>No sessions</strong><span>Create one to start working.</span></div>'
+      } else {
+        list.innerHTML = visibleSessions.map((session) => `<button type="button" class="session-row" data-session="${escapeHtml(session.session_id)}"><span class="session-state"></span><span><strong>${escapeHtml(session.session_id)}</strong><small>${escapeHtml(session.backend || "persistent shell")} · attached ${escapeHtml(String(session.attached ?? "—"))}</small></span></button>`).join("")
       }
-      list.innerHTML = '<div class="native-empty"><strong>No sessions</strong><span>Create one to start working.</span></div>'
-      this.updateTerminalHeader()
-      return
     }
-    list.innerHTML = visibleSessions.map((session) => `<button type="button" class="session-row ${session.session_id === this.selectedSessionId ? "active" : ""}" data-session="${escapeHtml(session.session_id)}"><span class="session-state"></span><span><strong>${escapeHtml(session.session_id)}</strong><small>${escapeHtml(session.backend || "persistent shell")} · attached ${escapeHtml(String(session.attached ?? "—"))}</small></span></button>`).join("")
+    this.updateSessionSelection()
     this.updateTerminalHeader()
+  }
+
+  private updateSessionSelection(): void {
+    const list = this.root.querySelector<HTMLElement>("[data-role=sessions]")
+    if (!list) return
+    const active = list.querySelector<HTMLElement>(".session-row.active")
+    const selected = this.selectedSessionId
+      ? list.querySelector<HTMLElement>(`.session-row[data-session="${CSS.escape(this.selectedSessionId)}"]`)
+      : null
+    if (active && active !== selected) active.classList.remove("active")
+    if (selected) selected.classList.add("active")
   }
 
   private updateTerminalHeader(): void {
@@ -611,7 +638,8 @@ export class TerminalsController extends BaseController {
       return
     }
     this.selectedSessionId = sessionId
-    this.renderSessions()
+    this.updateSessionSelection()
+    this.updateTerminalHeader()
     this.connect()
   }
 

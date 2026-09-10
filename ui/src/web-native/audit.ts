@@ -97,14 +97,6 @@ export class AuditController extends BaseController {
         this.moveSelection(key.key === "ArrowDown" ? 1 : -1)
       }
     })
-    this.every(() => {
-      if (!this.paused && document.visibilityState !== "hidden") void this.refresh()
-    }, 5_000)
-    const refreshWhenVisible = () => {
-      if (!this.paused && document.visibilityState === "visible") void this.refresh(true)
-    }
-    document.addEventListener("visibilitychange", refreshWhenVisible)
-    this.listeners.push(() => document.removeEventListener("visibilitychange", refreshWhenVisible))
     void this.refresh()
   }
 
@@ -118,6 +110,7 @@ export class AuditController extends BaseController {
   }
 
   async refresh(preserveSelection = false): Promise<void> {
+    if (this.paused && !preserveSelection) return
     if (this.loading) {
       this.refreshQueued = true
       this.preserveSelectionOnQueuedRefresh ||= preserveSelection
