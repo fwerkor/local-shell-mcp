@@ -31,6 +31,28 @@ function stringList(title: string, values: string[]): string {
   return `<section class="session-detail-block"><h4>${escapeHtml(title)}</h4>${values.length ? `<ul>${values.map((value) => `<li>${escapeHtml(value)}</li>`).join("")}</ul>` : '<p><span class="session-muted">None</span></p>'}</section>`
 }
 
+function sessionRowRevision(session: LogicalSession): string {
+  return [
+    session.session_id,
+    session.status,
+    session.label || "",
+    session.objective || "",
+    formatAge(session.updated_at),
+  ].join("\u0000")
+}
+
+function sessionDetailRevision(session: LogicalSession): string {
+  return JSON.stringify([
+    session.session_id,
+    session.status,
+    session.label,
+    session.objective,
+    session.updated_at,
+    session.progress,
+    session.plan,
+  ])
+}
+
 export class SessionsController extends BaseController {
   private sessions: LogicalSession[] = []
   private counts: LogicalSessionsPayload["counts"] = { active: 0, completed: 0, cancelled: 0, total: 0 }
@@ -39,6 +61,10 @@ export class SessionsController extends BaseController {
   private filter: SessionFilter = "all"
   private loading = false
   private detailRequest = 0
+  private detailLoadedRevision = ""
+  private detailLoadingRevision = ""
+  private readonly rowRevisions = new Map<string, string>()
+  private renderedSummaryRevision = ""
 
   mount(root: HTMLElement): void {
     this.root = root
@@ -65,7 +91,6 @@ export class SessionsController extends BaseController {
     this.listen(root, "click", (event) => this.onClick(event))
     this.listen(root, "change", (event) => this.onChange(event))
     this.listen(root, "keydown", (event) => this.onKeyDown(event as KeyboardEvent))
-    this.every(() => void this.refresh(), 5_000)
     void this.refresh()
   }
 
@@ -81,6 +106,8 @@ export class SessionsController extends BaseController {
       if (!this.selectedId || !visible.some((session) => session.session_id === this.selectedId)) {
         this.selectedId = visible[0]?.session_id || null
         this.detail = null
+        this.detailLoadedRevision = ""
+        this.detailLoadingRevision = ""
       }
       this.renderSummary()
       this.renderList()
@@ -102,6 +129,9 @@ export class SessionsController extends BaseController {
   private renderSummary(): void {
     const summary = this.root.querySelector<HTMLElement>("[data-role=sessions-summary]")
     if (!summary) return
+    const revision = `${this.counts.active}|${this.counts.completed}|${this.counts.cancelled}|${this.counts.total}`
+    if (revision === this.renderedSummaryRevision) return
+    this.renderedSummaryRevision = revision
     summary.innerHTML = [
       ["Active", this.counts.active, "accent"],
       ["Completed", this.counts.completed, "success"],
@@ -117,38 +147,108 @@ export class SessionsController extends BaseController {
     const list = this.root.querySelector<HTMLElement>("[data-role=sessions-list]")
     if (!list) return
     if (!visible.length) {
-      list.innerHTML = '<div class="native-empty"><strong>No logical sessions</strong><span>Change the status filter or create a session through session_manage.</span></div>'
+      if (!list.querySelector(".native-empty")) {
+        list.innerHTML = '<div class="native-empty"><strong>No logical sessions</strong><span>Change the status filter or create a session through session_manage.</span></div>'
+      }
+      this.rowRevisions.clear()
       this.detail = null
+      this.detailLoadedRevision = ""
+      this.detailLoadingRevision = ""
       this.renderDetail()
       return
     }
-    list.innerHTML = `<table class="native-table sessions-table" role="grid" aria-label="Logical Sessions"><thead><tr><th>Status</th><th>Label</th><th>Objective</th><th>Updated</th></tr></thead><tbody>${visible.map((session) => {
-      const selected = session.session_id === this.selectedId
-      return `<tr class="${selected ? "selected" : ""}" data-session-id="${escapeHtml(session.session_id)}" tabindex="${selected ? "0" : "-1"}" aria-selected="${selected}"><td><span class="status-chip ${sessionTone(session.status)}">${escapeHtml(session.status)}</span></td><td><strong>${escapeHtml(session.label || "Untitled session")}</strong><small>${escapeHtml(session.session_id)}</small></td><td>${escapeHtml(session.objective || "—")}</td><td>${formatAge(session.updated_at)}</td></tr>`
-    }).join("")}</tbody></table>`
+
+    let table = list.querySelector<HTMLTableElement>("table.sessions-table")
+    if (!table) {
+      list.innerHTML = '<table class="native-table sessions-table" role="grid" aria-label="Logical Sessions"><thead><tr><th>Status</th><th>Label</th><th>Objective</th><th>Updated</th></tr></thead><tbody></tbody></table>'
+      table = list.querySelector<HTMLTableElement>("table.sessions-table")
+      this.rowRevisions.clear()
+    }
+    const body = table?.tBodies[0]
+    if (body) this.reconcileSessionRows(body, visible)
+    this.updateSelectionState()
+  }
+
+  private reconcileSessionRows(body: HTMLTableSectionElement, sessions: LogicalSession[]): void {
+    const desiredIds = new Set(sessions.map((session) => session.session_id))
+    const existingRows = new Map<string, HTMLTableRowElement>()
+    Array.from(body.rows).forEach((row) => {
+      const sessionId = row.dataset.sessionId
+      if (!sessionId || !desiredIds.has(sessionId) || existingRows.has(sessionId)) {
+        if (sessionId) this.rowRevisions.delete(sessionId)
+        row.remove()
+      } else existingRows.set(sessionId, row)
+    })
+
+    sessions.forEach((session, index) => {
+      const revision = sessionRowRevision(session)
+      let row = existingRows.get(session.session_id)
+      if (!row) {
+        row = document.createElement("tr")
+        row.dataset.sessionId = session.session_id
+      }
+      if (this.rowRevisions.get(session.session_id) !== revision) {
+        row.innerHTML = `<td><span class="status-chip ${sessionTone(session.status)}">${escapeHtml(session.status)}</span></td><td><strong>${escapeHtml(session.label || "Untitled session")}</strong><small>${escapeHtml(session.session_id)}</small></td><td>${escapeHtml(session.objective || "—")}</td><td>${formatAge(session.updated_at)}</td>`
+        this.rowRevisions.set(session.session_id, revision)
+      }
+      const current = body.rows[index]
+      if (current !== row) body.insertBefore(row, current || null)
+    })
+  }
+
+  private updateSelectionState(): void {
+    const list = this.root.querySelector<HTMLElement>("[data-role=sessions-list]")
+    if (!list) return
+    const active = list.querySelector<HTMLTableRowElement>("tr.selected")
+    const selected = this.selectedId
+      ? list.querySelector<HTMLTableRowElement>(`tr[data-session-id="${CSS.escape(this.selectedId)}"]`)
+      : null
+    if (active && active !== selected) {
+      active.classList.remove("selected")
+      active.tabIndex = -1
+      active.setAttribute("aria-selected", "false")
+    }
+    if (selected) {
+      selected.classList.add("selected")
+      selected.tabIndex = 0
+      selected.setAttribute("aria-selected", "true")
+    }
   }
 
   private async loadDetail(): Promise<void> {
     const sessionId = this.selectedId
-    const request = ++this.detailRequest
     if (!sessionId) {
+      this.detailRequest += 1
       this.detail = null
+      this.detailLoadedRevision = ""
+      this.detailLoadingRevision = ""
       this.renderDetail()
       return
     }
+    const summary = this.sessions.find((session) => session.session_id === sessionId)
+    const revision = summary ? sessionDetailRevision(summary) : sessionId
+    if (this.detail?.session_id === sessionId && this.detailLoadedRevision === revision) return
+    if (this.detailLoadingRevision === revision) return
+
+    const request = ++this.detailRequest
     if (this.detail?.session_id !== sessionId) {
       this.detail = null
+      this.detailLoadedRevision = ""
       this.renderDetail(true)
     }
+    this.detailLoadingRevision = revision
     try {
       const detail = await this.context.api.get<LogicalSession>(`/logical-sessions/detail${queryString({ session_id: sessionId })}`)
       if (this.destroyed || request !== this.detailRequest) return
       this.detail = detail
+      this.detailLoadedRevision = revision
       this.renderDetail()
       this.renderActions()
     } catch (error) {
       if (this.destroyed || request !== this.detailRequest) return
       this.context.notify(`Session detail: ${error instanceof Error ? error.message : String(error)}`, "error")
+    } finally {
+      if (request === this.detailRequest) this.detailLoadingRevision = ""
     }
   }
 
@@ -272,10 +372,17 @@ export class SessionsController extends BaseController {
   }
 
   private selectSession(sessionId: string, focus = false): void {
-    if (sessionId === this.selectedId && this.detail?.session_id === sessionId) return
+    if (sessionId === this.selectedId) {
+      void this.loadDetail()
+      if (focus) this.root.querySelector<HTMLElement>(`[data-session-id="${CSS.escape(sessionId)}"]`)?.focus()
+      return
+    }
     this.selectedId = sessionId
     this.detail = null
-    this.renderList()
+    this.detailLoadedRevision = ""
+    this.detailLoadingRevision = ""
+    this.updateSelectionState()
+    this.renderActions()
     void this.loadDetail()
     if (focus) this.root.querySelector<HTMLElement>(`[data-session-id="${CSS.escape(sessionId)}"]`)?.focus()
   }
@@ -299,6 +406,8 @@ export class SessionsController extends BaseController {
     if (!this.selectedId || !visible.some((session) => session.session_id === this.selectedId)) {
       this.selectedId = visible[0]?.session_id || null
       this.detail = null
+      this.detailLoadedRevision = ""
+      this.detailLoadingRevision = ""
     }
     this.renderList()
     void this.loadDetail()
