@@ -25,6 +25,8 @@ export class AuditController extends BaseController {
   private selected = 0
   private detail: AuditEntry | null = null
   private loading = false
+  private paused = false
+  private renderedDetailId: string | undefined
   private refreshQueued = false
   private preserveSelectionOnQueuedRefresh = false
   private totalMatched = 0
@@ -34,12 +36,20 @@ export class AuditController extends BaseController {
 
   mount(root: HTMLElement): void {
     this.root = root
-    this.root.innerHTML = `<section class="native-page audit-page"><div class="audit-filter-strip"><label><span>Node</span><select data-filter="node"></select></label><label><span>Operation</span><select data-filter="operation"></select></label><label><span>Time</span><select data-filter="time"></select></label><label><span>Sort</span><select data-filter="sort"><option value="desc">DESC</option><option value="asc">ASC</option></select></label><div class="audit-filter-actions">${button("Advanced", "toggle-advanced")}</div></div><div class="audit-advanced" data-role="advanced" hidden><label>Search<input data-filter="search" placeholder="Command, path, tool, error…"/></label><label>Event<input data-filter="event" placeholder="tool_call_completed"/></label><label>Session<input data-filter="session" placeholder="session id"/></label><button class="native-button" type="button" data-action="clear-filters">Clear filters</button></div><div class="audit-layout"><section class="native-panel audit-list-panel"><header><div><h3>Audit records</h3><p data-role="audit-summary">Loading…</p></div><div class="panel-tools"><button class="native-button" type="button" data-action="previous-record" disabled>Previous</button><button class="native-button" type="button" data-action="next-record" disabled>Next</button></div></header><div class="audit-list" data-role="audit-list"><div class="native-loading">Loading audit records…</div></div></section><section class="native-panel audit-detail-panel"><header><div><h3 data-role="audit-title">Call details</h3><p data-role="audit-meta">Select a record</p></div><span class="status-chip neutral" data-role="audit-status">EVENT</span></header><div class="audit-details" data-role="audit-detail"><div class="native-empty">No record selected</div></div></section></div></section>`
+    this.root.innerHTML = `<section class="native-page audit-page"><div class="audit-searchbar"><label>Search audit<input type="search" data-filter="search" placeholder="Command, path, tool, error…" autocomplete="off"/></label><div class="toolbar-actions"><button class="native-button" type="button" data-action="toggle-live" aria-pressed="false">Pause updates</button></div></div><div class="audit-filter-strip"><label><span>Node</span><select data-filter="node"></select></label><label><span>Operation</span><select data-filter="operation"></select></label><label><span>Time</span><select data-filter="time"></select></label><label><span>Sort</span><select data-filter="sort"><option value="desc">Newest first</option><option value="asc">Oldest first</option></select></label><div class="audit-filter-actions">${button("Advanced", "toggle-advanced")}</div></div><div class="audit-advanced" data-role="advanced" hidden><label>Event<input data-filter="event" placeholder="tool_call_completed"/></label><label>Session<input data-filter="session" placeholder="session id"/></label><button class="native-button" type="button" data-action="clear-filters">Clear filters</button></div><div class="audit-layout"><section class="native-panel audit-list-panel"><header><div><h3>Audit records</h3><p data-role="audit-summary">Loading…</p></div><div class="panel-tools"><button class="native-button" type="button" data-action="previous-record" disabled>Previous</button><button class="native-button" type="button" data-action="next-record" disabled>Next</button></div></header><div class="audit-list" data-role="audit-list" tabindex="0" aria-label="Audit records. Use up and down arrows to select a record."><div class="native-loading">Loading audit records…</div></div></section><section class="native-panel audit-detail-panel"><header><div><h3 data-role="audit-title">Call details</h3><p data-role="audit-meta">Select a record</p></div><div class="status-chip neutral" data-role="audit-status">EVENT</div></header><div class="audit-details" data-role="audit-detail"><div class="native-empty">No record selected</div></div></section></div></section>`
     this.populateFilters()
     this.listen(root, "click", (event) => this.onClick(event))
     this.listen(root, "change", (event) => this.onFilterChange(event))
     this.listen(root, "input", (event) => this.onFilterInput(event))
-    this.every(() => void this.refresh(), 5_000)
+    this.listen(root, "keydown", (event) => {
+      const key = event as KeyboardEvent
+      if (!(key.target instanceof HTMLElement) || !key.target.closest("[data-role=audit-list]")) return
+      if (key.key === "ArrowDown" || key.key === "ArrowUp") {
+        key.preventDefault()
+        this.moveSelection(key.key === "ArrowDown" ? 1 : -1)
+      }
+    })
+    this.every(() => { if (!this.paused) void this.refresh() }, 5_000)
     void this.refresh()
   }
 
@@ -82,6 +92,10 @@ export class AuditController extends BaseController {
     } catch (error) {
       if (this.destroyed || filtersChanged()) return
       this.context.notify(`Audit: ${error instanceof Error ? error.message : String(error)}`, "error")
+      if (!this.entries.length) {
+        const list = this.root.querySelector<HTMLElement>("[data-role=audit-list]")
+        if (list) list.innerHTML = '<div class="native-error">Unable to load audit records. Use Refresh to retry.</div>'
+      }
     } finally {
       this.loading = false
       if (this.refreshQueued && !this.destroyed) {
@@ -95,7 +109,7 @@ export class AuditController extends BaseController {
 
   private renderList(): void {
     const summary = this.root.querySelector<HTMLElement>("[data-role=audit-summary]")
-    if (summary) summary.textContent = `${this.totalMatched} matching calls and events · ${this.loading ? "syncing" : "ready"}`
+    if (summary) summary.textContent = `${this.entries.length} shown / ${this.totalMatched} matching · ${this.paused ? "updates paused" : "live"}`
     const list = this.root.querySelector<HTMLElement>("[data-role=audit-list]")
     const previous = this.root.querySelector<HTMLButtonElement>("[data-action=previous-record]")
     const next = this.root.querySelector<HTMLButtonElement>("[data-action=next-record]")
@@ -110,7 +124,7 @@ export class AuditController extends BaseController {
     }
     list.innerHTML = `<table class="native-table audit-table"><thead><tr><th>Time</th><th>Node</th><th>Operation</th><th>Event / Tool</th><th>Status</th></tr></thead><tbody>${this.entries.map((entry, index) => {
       const status = entry.paired === false ? entry.status === "running" ? "RUNNING" : "UNPAIRED" : entry.ok === false || entry.error || entry.status === "failed" ? "FAILED" : entry.ok === true || entry.status === "success" ? "SUCCESS" : String(entry.status || "EVENT").toUpperCase()
-      return `<tr class="${index === this.selected ? "selected" : ""}" data-audit-index="${index}"><td>${new Date(entry.ts * 1000).toLocaleTimeString()}</td><td>${escapeHtml(entry.node)}</td><td><span class="operation-label">${escapeHtml(entry.operation)}</span></td><td><strong>${escapeHtml(entry.tool || entry.event)}</strong><small>${entry.command ? escapeHtml(entry.command.slice(0, 90)) : escapeHtml(entry.session || "")}</small></td><td><span class="status-chip ${statusClass(status)}">${escapeHtml(status)}</span></td></tr>`
+      return `<tr class="${index === this.selected ? "selected" : ""}" data-audit-index="${index}" aria-selected="${index === this.selected}"><td title="${escapeHtml(new Date(entry.ts * 1000).toLocaleString())}">${new Date(entry.ts * 1000).toLocaleTimeString()}</td><td>${escapeHtml(entry.node)}</td><td><span class="operation-label">${escapeHtml(entry.operation)}</span></td><td><strong>${escapeHtml(entry.tool || entry.event)}</strong><small>${entry.command ? escapeHtml(entry.command.slice(0, 90)) : escapeHtml(entry.session || "")}</small></td><td><span class="status-chip ${statusClass(status)}">${escapeHtml(status)}</span></td></tr>`
     }).join("")}</tbody></table>`
   }
 
@@ -151,6 +165,8 @@ export class AuditController extends BaseController {
     if (!entry) {
       if (title) title.textContent = "Call details"
       if (meta) meta.textContent = "Select a record"
+      this.renderedDetailId = undefined
+      if (statusElement) { statusElement.textContent = "EVENT"; statusElement.className = "status-chip neutral" }
       target.innerHTML = '<div class="native-empty">No record selected</div>'
       return
     }
@@ -163,7 +179,15 @@ export class AuditController extends BaseController {
     }
     const output = formatAuditValue(auditOutput(entry), "No return value recorded")
     const input = formatAuditValue(auditInput(entry), "No input recorded")
+    const scrollPositions = this.renderedDetailId === entry.id
+      ? Array.from(target.querySelectorAll<HTMLElement>(".audit-value")).map((element) => [element.scrollTop, element.scrollLeft])
+      : []
+    this.renderedDetailId = entry.id
     target.innerHTML = `<section class="audit-detail-card result"><header><h4>Call result</h4><button type="button" data-copy-detail="output">Copy</button></header><div class="audit-value" data-role="audit-output">${entry.image_preview?.kind === "image" ? '<div class="audit-image-stage" data-role="audit-image"></div>' : `<pre><code>${highlightedHtml(output, "result.json")}</code></pre>`}</div></section><section class="audit-detail-card input"><header><h4>Call input</h4><button type="button" data-copy-detail="input">Copy</button></header><div class="audit-value"><pre><code>${highlightedHtml(input, "input.json")}</code></pre></div></section>`
+    target.querySelectorAll<HTMLElement>(".audit-value").forEach((element, index) => {
+      element.scrollTop = scrollPositions[index]?.[0] || 0
+      element.scrollLeft = scrollPositions[index]?.[1] || 0
+    })
     if (entry.image_preview?.kind === "image") {
       const stage = target.querySelector<HTMLElement>("[data-role=audit-image]")
       const canvas = rgbaCanvas(entry.image_preview)
@@ -190,6 +214,7 @@ export class AuditController extends BaseController {
     if (next === this.selected) return
     this.selected = next
     this.renderList()
+    this.root.querySelector<HTMLElement>(`[data-audit-index="${next}"]`)?.scrollIntoView({ block: "nearest" })
     void this.loadDetail()
   }
 
@@ -211,11 +236,20 @@ export class AuditController extends BaseController {
       return
     }
     const action = target.closest<HTMLElement>("[data-action]")?.dataset.action
-    if (action === "previous-record") this.moveSelection(-1)
+    if (action === "toggle-live") {
+      this.paused = !this.paused
+      const control = target.closest<HTMLButtonElement>("[data-action=toggle-live]")
+      if (control) { control.textContent = this.paused ? "Resume updates" : "Pause updates"; control.setAttribute("aria-pressed", String(this.paused)) }
+      this.renderList()
+      if (!this.paused) void this.refresh(true)
+    } else if (action === "previous-record") this.moveSelection(-1)
     else if (action === "next-record") this.moveSelection(1)
     else if (action === "toggle-advanced") {
       const advanced = this.root.querySelector<HTMLElement>("[data-role=advanced]")
-      if (advanced) advanced.hidden = !advanced.hidden
+      if (advanced) {
+        advanced.hidden = !advanced.hidden
+        target.closest("button")?.setAttribute("aria-expanded", String(!advanced.hidden))
+      }
     } else if (action === "clear-filters") {
       this.filters = { node: "", operation: "", time: "24h", sort: "desc", search: "", event: "", session: "" }
       this.root.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-filter]").forEach((control) => { control.value = this.filters[control.dataset.filter as keyof typeof this.filters] })

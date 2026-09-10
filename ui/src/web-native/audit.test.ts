@@ -4,6 +4,32 @@ import type { NativePageContext } from "./common"
 import { AuditController } from "./audit"
 
 describe("Native WebUI audit refresh", () => {
+  test("preserves detail scroll on refresh and resets it for another record", () => {
+    const values = [{ scrollTop: 120, scrollLeft: 24 }, { scrollTop: 40, scrollLeft: 0 }]
+    const target = {
+      querySelectorAll: () => values,
+      set innerHTML(_html: string) {
+        values.forEach((value) => { value.scrollTop = 0; value.scrollLeft = 0 })
+      },
+    }
+    const controller = new AuditController({} as NativePageContext) as unknown as {
+      entries: AuditEntry[]
+      selected: number
+      root: unknown
+      renderedDetailId: string
+      renderDetail: () => void
+    }
+    controller.entries = [{ id: "a", ts: 1, node: "local", operation: "tool", event: "a" }]
+    controller.selected = 0
+    controller.renderedDetailId = "a"
+    controller.root = { querySelector: (selector: string) => selector === "[data-role=audit-detail]" ? target : null }
+    controller.renderDetail()
+    expect(values).toEqual([{ scrollTop: 120, scrollLeft: 24 }, { scrollTop: 40, scrollLeft: 0 }])
+    controller.entries = [{ id: "b", ts: 2, node: "local", operation: "tool", event: "b" }]
+    controller.renderDetail()
+    expect(values).toEqual([{ scrollTop: 0, scrollLeft: 0 }, { scrollTop: 0, scrollLeft: 0 }])
+  })
+
   test("keeps following the first row when new audit entries arrive", async () => {
     let resolvePayload!: (payload: AuditPayload) => void
     const context: NativePageContext = {
