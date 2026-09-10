@@ -478,6 +478,8 @@ export class FilesController extends BaseController {
   }
 
   private async upload(files: FileList): Promise<void> {
+    const machine = this.machine
+    const path = this.path
     for (const file of Array.from(files)) {
       try {
         const bytes = new Uint8Array(await file.arrayBuffer())
@@ -486,8 +488,8 @@ export class FilesController extends BaseController {
           binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))
         }
         await this.context.api.send("/files/write", "POST", {
-          machine: this.machine,
-          path: joinPath(this.path, file.name),
+          machine,
+          path: joinPath(path, file.name),
           content: btoa(binary),
           encoding: "base64",
           overwrite: false,
@@ -544,7 +546,7 @@ export class FilesController extends BaseController {
     else if (action === "new-dir") void this.create("dir")
     else if (action === "upload") this.root.querySelector<HTMLInputElement>("[data-role=file-upload]")?.click()
     else if (action === "refresh") void this.refresh()
-    else if (action === "home-location") this.navigate(this.machines().find((item) => item.name === this.machine)?.workdir || ".")
+    else if (action === "home-location") this.navigate(".")
     else if (action === "sort-direction") {
       this.sortDirection = this.sortDirection === "asc" ? "desc" : "asc"
       this.renderDirectory()
