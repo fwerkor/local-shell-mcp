@@ -198,6 +198,162 @@ describe("Native WebUI audit refresh", () => {
     expect(renders).toBe(2)
   })
 
+  test("skips row reconciliation when periodic refresh returns the same rendered rows", async () => {
+    const current: AuditEntry = { id: "same", ts: 1, node: "local", operation: "tool", event: "same", status: "success", ok: true }
+    const context: NativePageContext = {
+      api: {
+        get: async () => ({ count: 1, total_matched: 1, entries: [{ ...current }] }) as never,
+        send: async () => undefined as never,
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller = new AuditController(context) as unknown as {
+      entries: AuditEntry[]
+      selected: number
+      renderList: (rowsChanged?: boolean) => void
+      loadDetail: () => Promise<void>
+      refresh: () => Promise<void>
+    }
+    controller.entries = [current]
+    controller.selected = 0
+    const reconciliations: boolean[] = []
+    controller.renderList = (rowsChanged = true) => { reconciliations.push(rowsChanged) }
+    controller.loadDetail = async () => undefined
+
+    await controller.refresh()
+
+    expect(reconciliations).toEqual([false])
+  })
+
+  test("does not refetch unchanged selected detail", async () => {
+    let requests = 0
+    const current: AuditEntry = { id: "same", ts: 1, node: "local", operation: "tool", event: "same", status: "success", ok: true, output: { value: 1 } }
+    const context: NativePageContext = {
+      api: {
+        get: async () => { requests += 1; return { ...current } as never },
+        send: async () => undefined as never,
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller = new AuditController(context) as unknown as {
+      entries: AuditEntry[]
+      selected: number
+      renderDetail: () => void
+      loadDetail: () => Promise<void>
+    }
+    controller.entries = [current]
+    controller.selected = 0
+    controller.renderDetail = () => undefined
+
+    await controller.loadDetail()
+    await controller.loadDetail()
+
+    expect(requests).toBe(1)
+  })
+
+  test("coalesces duplicate detail loads while the same revision is in flight", async () => {
+    let requests = 0
+    let resolveDetail!: (entry: AuditEntry) => void
+    const current: AuditEntry = { id: "same", ts: 1, node: "local", operation: "tool", event: "same", status: "running" }
+    const context: NativePageContext = {
+      api: {
+        get: async () => {
+          requests += 1
+          return new Promise<AuditEntry>((resolve) => { resolveDetail = resolve }) as never
+        },
+        send: async () => undefined as never,
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller = new AuditController(context) as unknown as {
+      entries: AuditEntry[]
+      selected: number
+      renderDetail: () => void
+      loadDetail: () => Promise<void>
+    }
+    controller.entries = [current]
+    controller.selected = 0
+    controller.renderDetail = () => undefined
+
+    const first = controller.loadDetail()
+    const duplicate = controller.loadDetail()
+    expect(requests).toBe(1)
+    resolveDetail({ ...current })
+    await Promise.all([first, duplicate])
+    expect(requests).toBe(1)
+  })
+
+  test("refreshes detail when the selected preview revision changes", async () => {
+    let requests = 0
+    const context: NativePageContext = {
+      api: {
+        get: async () => { requests += 1; return { id: "same", ts: 1, node: "local", operation: "tool", event: "same", output: { request: requests } } as never },
+        send: async () => undefined as never,
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller = new AuditController(context) as unknown as {
+      entries: AuditEntry[]
+      selected: number
+      renderDetail: () => void
+      loadDetail: () => Promise<void>
+    }
+    controller.entries = [{ id: "same", ts: 1, node: "local", operation: "tool", event: "same", status: "running" }]
+    controller.selected = 0
+    controller.renderDetail = () => undefined
+
+    await controller.loadDetail()
+    controller.entries = [{ id: "same", ts: 1, node: "local", operation: "tool", event: "same", status: "success", ok: true, output: { value: 2 } }]
+    await controller.loadDetail()
+
+    expect(requests).toBe(2)
+  })
+
+  test("moves selection without rebuilding the audit table", () => {
+    const controller = new AuditController({} as NativePageContext) as unknown as {
+      entries: AuditEntry[]
+      selected: number
+      root: { querySelector: () => null }
+      renderList: () => void
+      updateSelectionState: () => void
+      loadDetail: () => Promise<void>
+      moveSelection: (delta: number) => void
+    }
+    controller.entries = [
+      { id: "a", ts: 2, node: "local", operation: "tool", event: "a" },
+      { id: "b", ts: 1, node: "local", operation: "tool", event: "b" },
+    ]
+    controller.selected = 0
+    controller.root = { querySelector: () => null }
+    let tableRebuilds = 0
+    let selectionUpdates = 0
+    controller.renderList = () => { tableRebuilds += 1 }
+    controller.updateSelectionState = () => { selectionUpdates += 1 }
+    controller.loadDetail = async () => undefined
+
+    controller.moveSelection(1)
+
+    expect(controller.selected).toBe(1)
+    expect(selectionUpdates).toBe(1)
+    expect(tableRebuilds).toBe(0)
+  })
+
   test("retains full detail while refreshing the same selected record", async () => {
     let resolveDetail!: (entry: AuditEntry) => void
     const context: NativePageContext = {
