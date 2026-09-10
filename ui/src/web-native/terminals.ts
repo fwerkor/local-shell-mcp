@@ -211,17 +211,17 @@ export class TerminalsController extends BaseController {
     const kill = this.root.querySelector<HTMLButtonElement>("[data-action=kill-session]")
     const previous = this.root.querySelector<HTMLButtonElement>("[data-action=previous-session]")
     const next = this.root.querySelector<HTMLButtonElement>("[data-action=next-session]")
+    const visibleSessions = this.visibleSessions()
     const hasSession = Boolean(this.selectedSessionId)
     if (summary) summary.textContent = `${this.sessions.length} persistent session${this.sessions.length === 1 ? "" : "s"}`
     if (kill) kill.disabled = !hasSession
-    if (previous) previous.disabled = this.sessions.length < 2
-    if (next) next.disabled = this.sessions.length < 2
+    if (previous) previous.disabled = visibleSessions.length < 2
+    if (next) next.disabled = visibleSessions.length < 2
     for (const action of ["reconnect", "copy", "paste", "search", "clear"]) {
       const control = this.root.querySelector<HTMLButtonElement>(`[data-action=${action}]`)
       if (control) control.disabled = !hasSession
     }
     if (!list) return
-    const visibleSessions = this.sessions.filter((session) => session.session_id.toLocaleLowerCase().includes(this.sessionQuery.toLocaleLowerCase()))
     if (!visibleSessions.length) {
       if (this.sessions.length) {
         list.innerHTML = '<div class="native-empty"><strong>No matches</strong><span>Try a different session filter.</span></div>'
@@ -615,10 +615,16 @@ export class TerminalsController extends BaseController {
     this.connect()
   }
 
+  private visibleSessions(): TerminalSession[] {
+    const needle = this.sessionQuery.toLocaleLowerCase()
+    return this.sessions.filter((session) => session.session_id.toLocaleLowerCase().includes(needle))
+  }
+
   private switchSession(delta: number): void {
-    if (!this.sessions.length) return
-    const index = Math.max(0, this.sessions.findIndex((session) => session.session_id === this.selectedSessionId))
-    const next = this.sessions[(index + delta + this.sessions.length) % this.sessions.length]
+    const sessions = this.visibleSessions()
+    if (!sessions.length) return
+    const index = sessions.findIndex((session) => session.session_id === this.selectedSessionId)
+    const next = index < 0 ? sessions[0] : sessions[(index + delta + sessions.length) % sessions.length]
     if (next) this.selectSession(next.session_id)
   }
 
