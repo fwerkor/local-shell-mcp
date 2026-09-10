@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from collections import namedtuple
 from types import SimpleNamespace
 
@@ -251,3 +252,23 @@ def test_dashboard_api_prioritizes_critical_alerts_before_truncation(tmp_path, m
     assert len(payload["alerts"]) == 12
     assert payload["alerts"][0]["severity"] == "critical"
     assert payload["alerts"][0]["title"] == "Workspace disk is 96% full"
+
+
+def test_native_file_write_accepts_base64_uploads(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    client = TestClient(Starlette(routes=ui.ui_routes()))
+    payload = b"\x00native-webui\xff"
+
+    response = client.post(
+        "/api/ui/files/write",
+        json={
+            "machine": "local",
+            "path": "upload.bin",
+            "content": base64.b64encode(payload).decode("ascii"),
+            "encoding": "base64",
+            "overwrite": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert (tmp_path / "upload.bin").read_bytes() == payload

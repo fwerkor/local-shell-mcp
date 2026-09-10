@@ -136,3 +136,43 @@ describe("Native WebUI terminal scrolling", () => {
     expect(scheduled).toBe(0)
   })
 })
+
+describe("Native WebUI terminal session filtering", () => {
+  test("switches only among sessions visible under the active filter", () => {
+    let selected = ""
+    const controller: any = {
+      sessions: [
+        { session_id: "build-a" },
+        { session_id: "hidden" },
+        { session_id: "build-b" },
+      ],
+      sessionQuery: "BUILD",
+      selectedSessionId: "build-a",
+      selectSession: (sessionId: string) => { selected = sessionId },
+    }
+    controller.visibleSessions = () => (TerminalsController.prototype as any).visibleSessions.call(controller)
+
+    ;(TerminalsController.prototype as any).switchSession.call(controller, 1)
+
+    expect(selected).toBe("build-b")
+  })
+
+  test("uses the first visible session when the active session is filtered out", () => {
+    let selected = ""
+    const controller: any = {
+      sessions: [
+        { session_id: "hidden" },
+        { session_id: "build-a" },
+        { session_id: "build-b" },
+      ],
+      sessionQuery: "build",
+      selectedSessionId: "hidden",
+      selectSession: (sessionId: string) => { selected = sessionId },
+    }
+    controller.visibleSessions = () => (TerminalsController.prototype as any).visibleSessions.call(controller)
+
+    ;(TerminalsController.prototype as any).switchSession.call(controller, -1)
+
+    expect(selected).toBe("build-a")
+  })
+})

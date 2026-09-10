@@ -33,6 +33,28 @@ export function fileBreadcrumbRows(path: string): Array<{ label: string; path: s
   return rows
 }
 
+export type FileSort = "name" | "size" | "modified"
+
+export function filterAndSortFileEntries(
+  entries: FileEntry[],
+  query: string,
+  sort: FileSort,
+  direction: "asc" | "desc",
+): FileEntry[] {
+  const needle = query.trim().toLocaleLowerCase()
+  const visible = needle ? entries.filter((entry) => entry.name.toLocaleLowerCase().includes(needle)) : [...entries]
+  const sign = direction === "asc" ? 1 : -1
+  return visible.sort((left, right) => {
+    if (left.type === "dir" && right.type !== "dir") return -1
+    if (left.type !== "dir" && right.type === "dir") return 1
+    let result = 0
+    if (sort === "size") result = Number(left.size || 0) - Number(right.size || 0)
+    else if (sort === "modified") result = Number(left.modified || 0) - Number(right.modified || 0)
+    else result = left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" })
+    return result === 0 ? left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }) : result * sign
+  })
+}
+
 export class FilesController extends BaseController {
   private machine = "local"
   private path = "."
@@ -40,6 +62,10 @@ export class FilesController extends BaseController {
   private preview: FilePreview | null = null
   private selectedPath: string | null = null
   private showHidden = false
+  private query = ""
+  private sort: FileSort = "name"
+  private sortDirection: "asc" | "desc" = "asc"
+  private previewVisible = true
   private busy = false
   private refreshQueued = false
   private clipboard: { mode: "copy" | "move"; machine: string; path: string } | null = null
@@ -53,6 +79,7 @@ export class FilesController extends BaseController {
     this.listen(root, "click", (event) => this.onClick(event))
     this.listen(root, "dblclick", (event) => this.onDoubleClick(event))
     this.listen(root, "change", (event) => this.onChange(event))
+    this.listen(root, "input", (event) => this.onInput(event))
     this.listen(root, "keydown", (event) => this.onListKeyDown(event as KeyboardEvent))
     void this.refresh()
   }
@@ -62,7 +89,8 @@ export class FilesController extends BaseController {
   }
 
   private entries(): FileEntry[] {
-    return (this.payload?.entries || []).filter((entry) => this.showHidden || !entry.hidden)
+    const entries = (this.payload?.entries || []).filter((entry) => this.showHidden || !entry.hidden)
+    return filterAndSortFileEntries(entries, this.query, this.sort, this.sortDirection)
   }
 
   private current(): FileEntry | undefined {
@@ -73,15 +101,23 @@ export class FilesController extends BaseController {
     this.root.innerHTML = `<section class="native-page files-page">
       <div class="native-toolbar files-toolbar">
         <div class="toolbar-group compact-only"><label>Machine<select data-role="machine"></select></label></div>
-        <div class="path-bar"><button class="native-button" type="button" data-action="parent" title="Parent directory"><span aria-hidden="true">↑</span>Up</button><div class="breadcrumbs" data-role="breadcrumbs"></div><input data-role="path" aria-label="Path" value="${escapeHtml(this.path)}"/></div>
+        <div class="path-bar"><button class="native-button icon-only" type="button" data-action="parent" title="Parent directory (Alt+Up)" aria-label="Parent directory">↑</button><div class="breadcrumbs" data-role="breadcrumbs"></div><input data-role="path" aria-label="Path" value="${escapeHtml(this.path)}" title="Focus path with Ctrl+L"/></div>
         <div class="toolbar-actions" data-role="actions"></div>
       </div>
-      <div class="files-layout">
-        <aside class="native-panel machine-rail"><header><h3>Machines</h3><span data-role="machine-count">${this.machines().length}</span></header><div class="machine-list" data-role="machines"></div></aside>
-        <section class="native-panel file-parent-panel"><header><div><h3>Parent</h3><p data-role="parent-summary">Loading…</p></div></header><div class="file-parent-list" data-role="parent-list"><div class="native-loading">Loading parent directory…</div></div></section>
-        <section class="native-panel file-list-panel"><header><div><h3>Directory</h3><p data-role="directory-summary">Loading…</p></div><div class="panel-tools"><label class="native-toggle"><input data-role="hidden" type="checkbox"/>Hidden</label></div></header><div class="file-table-wrap" data-role="file-list"><div class="native-loading">Loading directory…</div></div></section>
+      <div class="files-controlbar">
+        <label class="file-search"><span aria-hidden="true">⌕</span><input data-role="file-search" type="search" placeholder="Filter this folder" autocomplete="off"/><kbd>Ctrl F</kbd></label>
+        <label>Sort<select data-role="file-sort"><option value="name">Name</option><option value="modified">Modified</option><option value="size">Size</option></select></label>
+        <button class="native-button icon-only" type="button" data-action="sort-direction" title="Reverse sort" aria-label="Reverse sort">↕</button>
+        <label class="native-toggle"><input data-role="hidden" type="checkbox"/>Hidden</label>
+        <span class="file-clipboard" data-role="clipboard-state">Clipboard empty</span>
+      </div>
+      <div class="files-layout preview-open">
+        <aside class="native-panel machine-rail"><header><div><h3>Locations</h3><p>Connected workspaces</p></div><span data-role="machine-count">${this.machines().length}</span></header><div class="machine-list" data-role="machines"></div><div class="file-shortcuts"><button type="button" data-action="home-location">⌂ <span>Workspace</span></button><button type="button" data-action="parent">↑ <span>Parent folder</span></button></div></aside>
+        <section class="native-panel file-parent-panel" hidden><header><div><h3>Parent</h3><p data-role="parent-summary">Loading…</p></div></header><div class="file-parent-list" data-role="parent-list"><div class="native-loading">Loading parent directory…</div></div></section>
+        <section class="native-panel file-list-panel"><header><div><h3>Files</h3><p data-role="directory-summary">Loading…</p></div><div class="panel-tools"><button class="native-button" type="button" data-action="refresh">Refresh</button></div></header><div class="file-table-wrap" data-role="file-list"><div class="native-loading">Loading directory…</div></div><footer class="file-statusbar"><span data-role="selection-summary">No selection</span><span>Enter open · F2 rename · Del delete</span></footer></section>
         <section class="native-panel file-preview-panel"><header><div><h3>Preview</h3><p data-role="preview-summary">Choose an entry</p></div></header><div class="file-preview" data-role="preview"><div class="native-empty">No selection</div></div></section>
       </div>
+      <input data-role="file-upload" type="file" multiple hidden/>
     </section>`
     this.renderMachines()
     this.renderBreadcrumbs()
@@ -117,13 +153,20 @@ export class FilesController extends BaseController {
     target.innerHTML = [
       button("New file", "new-file", { icon: "+", disabled: !ready }),
       button("New folder", "new-dir", { icon: "▰", disabled: !ready }),
+      button("Upload", "upload", { disabled: !ready }),
       button(current?.type === "dir" ? "Open folder" : "Edit file", "open", { disabled: !current }),
       button("Rename", "rename", { disabled: !current }),
       button("Copy", "copy", { disabled: !current }),
       button("Move", "cut", { disabled: !current }),
       button(this.clipboard ? `Paste ${this.clipboard.mode === "copy" ? "copy" : "move"}` : "Paste", "paste", { disabled: !ready || !this.clipboard }),
+      button(this.previewVisible ? "Hide preview" : "Show preview", "toggle-preview", { disabled: !ready }),
       button("Delete", "delete", { danger: true, disabled: !current }),
     ].join("")
+    const state = this.root.querySelector<HTMLElement>("[data-role=clipboard-state]")
+    if (state) {
+      state.textContent = this.clipboard ? `${this.clipboard.mode === "copy" ? "Copy" : "Move"}: ${basename(this.clipboard.path)}` : "Clipboard empty"
+      state.classList.toggle("active", Boolean(this.clipboard))
+    }
   }
 
   private navigate(path: string, pendingSelectionPath: string | null = null): void {
@@ -228,6 +271,9 @@ export class FilesController extends BaseController {
     }
     const entries = this.entries()
     if (summary) summary.textContent = `${this.machine}:${this.path} · ${entries.length} visible entries`
+    const selectionSummary = this.root.querySelector<HTMLElement>("[data-role=selection-summary]")
+    const selected = this.current()
+    if (selectionSummary) selectionSummary.textContent = selected ? `${selected.name} · ${selected.type === "dir" ? "folder" : formatBytes(selected.size)}` : "No selection"
     if (!list) return
     if (!entries.length) {
       list.innerHTML = '<div class="native-empty">This directory is empty.</div>'
@@ -431,6 +477,37 @@ export class FilesController extends BaseController {
     this.navigate(".")
   }
 
+  private async upload(files: FileList): Promise<void> {
+    const machine = this.machine
+    const path = this.path
+    for (const file of Array.from(files)) {
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer())
+        let binary = ""
+        for (let index = 0; index < bytes.length; index += 0x8000) {
+          binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))
+        }
+        await this.context.api.send("/files/write", "POST", {
+          machine,
+          path: joinPath(path, file.name),
+          content: btoa(binary),
+          encoding: "base64",
+          overwrite: false,
+        })
+        this.context.notify(`Uploaded ${file.name}`, "success")
+      } catch (error) {
+        this.context.notify(`Upload ${file.name}: ${error instanceof Error ? error.message : String(error)}`, "error")
+      }
+    }
+    await this.refresh()
+  }
+
+  private togglePreview(): void {
+    this.previewVisible = !this.previewVisible
+    this.root.querySelector(".files-layout")?.classList.toggle("preview-open", this.previewVisible)
+    this.renderActions()
+  }
+
   private onClick(event: MouseEvent): void {
     const target = event.target as HTMLElement
     const machine = target.closest<HTMLElement>("[data-machine]")?.dataset.machine
@@ -467,6 +544,14 @@ export class FilesController extends BaseController {
     if (action === "parent") this.parent()
     else if (action === "new-file") void this.create("file")
     else if (action === "new-dir") void this.create("dir")
+    else if (action === "upload") this.root.querySelector<HTMLInputElement>("[data-role=file-upload]")?.click()
+    else if (action === "refresh") void this.refresh()
+    else if (action === "home-location") this.navigate(".")
+    else if (action === "sort-direction") {
+      this.sortDirection = this.sortDirection === "asc" ? "desc" : "asc"
+      this.renderDirectory()
+    }
+    else if (action === "toggle-preview") this.togglePreview()
     else if (action === "open") this.activate(this.current())
     else if (action === "rename") void this.renameCurrent()
     else if (action === "copy") {
@@ -499,13 +584,53 @@ export class FilesController extends BaseController {
       this.renderDirectory()
       void this.loadPreview()
     }
+    if (target instanceof HTMLSelectElement && target.dataset.role === "file-sort") {
+      this.sort = target.value as FileSort
+      this.renderDirectory()
+    }
+    if (target instanceof HTMLInputElement && target.dataset.role === "file-upload" && target.files?.length) {
+      void this.upload(target.files)
+      target.value = ""
+    }
     if (target instanceof HTMLInputElement && target.dataset.role === "path") {
       this.navigate(target.value.trim() || ".")
     }
   }
 
+  private onInput(event: Event): void {
+    const target = event.target
+    if (!(target instanceof HTMLInputElement) || target.dataset.role !== "file-search") return
+    this.query = target.value
+    const entries = this.entries()
+    if (!entries.some((entry) => entry.path === this.selectedPath)) this.selectedPath = entries[0]?.path || null
+    this.renderDirectory()
+    void this.loadPreview()
+  }
+
   private onListKeyDown(event: KeyboardEvent): void {
-    const row = (event.target as HTMLElement).closest<HTMLElement>("[data-entry]")
+    const target = event.target as HTMLElement
+    const editing = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement
+    const mod = event.ctrlKey || event.metaKey
+    if (mod && event.key.toLowerCase() === "f") {
+      event.preventDefault()
+      this.root.querySelector<HTMLInputElement>("[data-role=file-search]")?.focus()
+      return
+    }
+    if (mod && event.key.toLowerCase() === "l") {
+      event.preventDefault()
+      const input = this.root.querySelector<HTMLInputElement>("[data-role=path]")
+      input?.focus()
+      input?.select()
+      return
+    }
+    if (!editing && event.altKey && event.key === "ArrowUp") { event.preventDefault(); this.parent(); return }
+    if (!editing && mod && event.key.toLowerCase() === "r") { event.preventDefault(); void this.refresh(); return }
+    if (!editing && mod && event.key.toLowerCase() === "c") { const current = this.current(); if (current) this.clipboard = { mode: "copy", machine: this.machine, path: current.path }; this.renderActions(); return }
+    if (!editing && mod && event.key.toLowerCase() === "x") { const current = this.current(); if (current) this.clipboard = { mode: "move", machine: this.machine, path: current.path }; this.renderActions(); return }
+    if (!editing && mod && event.key.toLowerCase() === "v") { event.preventDefault(); void this.paste(); return }
+    if (!editing && event.key === "F2") { event.preventDefault(); void this.renameCurrent(); return }
+    if (!editing && event.key === "Delete") { event.preventDefault(); void this.deleteCurrent(); return }
+    const row = target.closest<HTMLElement>("[data-entry]")
     const path = row?.dataset.entry
     if (!path) return
     const entries = this.entries()
