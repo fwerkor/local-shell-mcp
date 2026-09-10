@@ -1,6 +1,6 @@
 {
   "name": "local-shell-mcp-dsh",
-  "version": "4.3.0",
+  "version": "4.3.1",
   "description": "DeepSeek Harness bridge for the full local-shell-mcp tool surface and per-session Live Workspace.",
   "private": true,
   "type": "module",
