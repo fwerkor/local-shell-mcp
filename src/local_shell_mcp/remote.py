@@ -572,7 +572,7 @@ class RemoteManager:
             "ttl_s": ttl,
             "join_url": join_url,
             "command": command,
-            "persistent_command": command + " --persist",
+            "persistent_command": command + ' --persist && export PATH="${LOCAL_SHELL_MCP_WORKER_BIN_DIR:-$HOME/.local/bin}:$PATH"',
             "powershell_join_url": powershell_join_url,
             "powershell_command": powershell_command,
             "powershell_persistent_command": powershell_command + " -Persist",
