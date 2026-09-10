@@ -55,6 +55,21 @@ export function filterAndSortFileEntries(
   })
 }
 
+function fileEntryRevision(entry: FileEntry): string {
+  return [
+    entry.path,
+    entry.name,
+    entry.type,
+    entry.size ?? "",
+    entry.modified ?? "",
+    entry.hidden ? 1 : 0,
+  ].join("\u0000")
+}
+
+function filePreviewRevision(machine: string, entry: FileEntry): string {
+  return [machine, fileEntryRevision(entry)].join("\u0000")
+}
+
 export class FilesController extends BaseController {
   private machine = "local"
   private path = "."
@@ -71,6 +86,20 @@ export class FilesController extends BaseController {
   private clipboard: { mode: "copy" | "move"; machine: string; path: string } | null = null
   private pendingSelectionPath: string | null = null
   private previewRequest = 0
+  private previewLoadedRevision = ""
+  private previewLoadingRevision = ""
+  private refreshPreviewQueued = false
+  private filterTimer: number | null = null
+  private readonly rowRevisions = new Map<string, string>()
+  private renderedParentRevision = ""
+  private entriesCache: {
+    payload: FilesPayload | null
+    showHidden: boolean
+    query: string
+    sort: FileSort
+    sortDirection: "asc" | "desc"
+    entries: FileEntry[]
+  } | null = null
 
   mount(root: HTMLElement): void {
     this.root = root
@@ -89,12 +118,36 @@ export class FilesController extends BaseController {
   }
 
   private entries(): FileEntry[] {
-    const entries = (this.payload?.entries || []).filter((entry) => this.showHidden || !entry.hidden)
-    return filterAndSortFileEntries(entries, this.query, this.sort, this.sortDirection)
+    const cached = this.entriesCache
+    if (
+      cached &&
+      cached.payload === this.payload &&
+      cached.showHidden === this.showHidden &&
+      cached.query === this.query &&
+      cached.sort === this.sort &&
+      cached.sortDirection === this.sortDirection
+    ) return cached.entries
+
+    const entries = filterAndSortFileEntries(
+      (this.payload?.entries || []).filter((entry) => this.showHidden || !entry.hidden),
+      this.query,
+      this.sort,
+      this.sortDirection,
+    )
+    this.entriesCache = {
+      payload: this.payload,
+      showHidden: this.showHidden,
+      query: this.query,
+      sort: this.sort,
+      sortDirection: this.sortDirection,
+      entries,
+    }
+    return entries
   }
 
   private current(): FileEntry | undefined {
-    return this.entries().find((entry) => entry.path === this.selectedPath) || this.entries()[0]
+    const entries = this.entries()
+    return entries.find((entry) => entry.path === this.selectedPath) || entries[0]
   }
 
   private renderShell(): void {
@@ -173,9 +226,13 @@ export class FilesController extends BaseController {
     this.path = path
     this.payload = null
     this.preview = null
+    this.previewLoadedRevision = ""
+    this.previewLoadingRevision = ""
     this.selectedPath = null
     this.pendingSelectionPath = pendingSelectionPath
     this.previewRequest += 1
+    this.rowRevisions.clear()
+    this.renderedParentRevision = ""
     this.renderBreadcrumbs()
     this.renderParent()
     this.renderDirectory()
@@ -183,9 +240,10 @@ export class FilesController extends BaseController {
     void this.refresh()
   }
 
-  async refresh(): Promise<void> {
+  async refresh(forcePreview = false): Promise<void> {
     if (this.busy) {
       this.refreshQueued = true
+      this.refreshPreviewQueued ||= forcePreview
       return
     }
     this.busy = true
@@ -210,6 +268,7 @@ export class FilesController extends BaseController {
         requestedMachine !== this.machine ||
         requestedPath !== this.path
       ) return
+      const previousSelection = this.selectedPath
       this.payload = payload
       const entries = this.entries()
       if (this.pendingSelectionPath && entries.some((entry) => entry.path === this.pendingSelectionPath)) {
@@ -218,10 +277,15 @@ export class FilesController extends BaseController {
       } else if (!this.selectedPath || !entries.some((entry) => entry.path === this.selectedPath)) {
         this.selectedPath = entries[0]?.path || null
       }
+      if (this.selectedPath !== previousSelection) {
+        this.preview = null
+        this.previewLoadedRevision = ""
+        this.previewLoadingRevision = ""
+      }
       this.renderParent()
       this.renderDirectory()
       this.renderBreadcrumbs()
-      void this.loadPreview()
+      void this.loadPreview(forcePreview)
     } catch (error) {
       if (requestedMachine !== this.machine || requestedPath !== this.path) return
       this.context.notify(`Files: ${error instanceof Error ? error.message : String(error)}`, "error")
@@ -233,7 +297,9 @@ export class FilesController extends BaseController {
       this.renderActions()
       if (this.refreshQueued && !this.destroyed) {
         this.refreshQueued = false
-        void this.refresh()
+        const forceQueuedPreview = this.refreshPreviewQueued
+        this.refreshPreviewQueued = false
+        void this.refresh(forceQueuedPreview)
       }
     }
   }
@@ -246,12 +312,16 @@ export class FilesController extends BaseController {
       layout?.classList.remove("no-parent")
       if (summary) summary.textContent = "Loading…"
       if (list) list.innerHTML = '<div class="native-loading">Loading parent directory…</div>'
+      this.renderedParentRevision = ""
       return
     }
     const entries = this.payload.parent_entries.filter((entry) => this.showHidden || !entry.hidden)
     layout?.classList.toggle("no-parent", this.payload.parent === this.path)
-    if (summary) summary.textContent = this.payload?.parent === this.path ? "Root" : this.payload?.parent || "."
+    if (summary) summary.textContent = this.payload.parent === this.path ? "Root" : this.payload.parent || "."
     if (!list) return
+    const revision = [this.payload.parent, this.path, this.showHidden ? 1 : 0, ...entries.map(fileEntryRevision)].join("\u0001")
+    if (revision === this.renderedParentRevision) return
+    this.renderedParentRevision = revision
     if (!entries.length) {
       list.innerHTML = '<div class="native-empty">No parent entries</div>'
       return
@@ -265,49 +335,121 @@ export class FilesController extends BaseController {
     if (!this.payload) {
       if (summary) summary.textContent = `${this.machine}:${this.path} · loading`
       if (list) list.innerHTML = '<div class="native-loading">Loading directory…</div>'
+      this.rowRevisions.clear()
       this.preview = null
+      this.previewLoadedRevision = ""
+      this.previewLoadingRevision = ""
       this.renderPreview()
       return
     }
     const entries = this.entries()
     if (summary) summary.textContent = `${this.machine}:${this.path} · ${entries.length} visible entries`
-    const selectionSummary = this.root.querySelector<HTMLElement>("[data-role=selection-summary]")
-    const selected = this.current()
-    if (selectionSummary) selectionSummary.textContent = selected ? `${selected.name} · ${selected.type === "dir" ? "folder" : formatBytes(selected.size)}` : "No selection"
     if (!list) return
     if (!entries.length) {
-      list.innerHTML = '<div class="native-empty">This directory is empty.</div>'
+      if (!list.querySelector(".native-empty")) list.innerHTML = '<div class="native-empty">This directory is empty.</div>'
+      this.rowRevisions.clear()
       this.selectedPath = null
       this.preview = null
+      this.previewLoadedRevision = ""
+      this.previewLoadingRevision = ""
       this.renderPreview()
+      this.updateDirectorySelection()
       return
     }
-    list.innerHTML = `<table class="native-table file-table" role="grid" aria-label="Directory entries"><thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead><tbody>${entries.map((entry) => {
-      const selected = entry.path === this.selectedPath
-      return `<tr class="${selected ? "selected" : ""}" data-entry="${escapeHtml(entry.path)}" tabindex="${selected ? "0" : "-1"}" aria-selected="${selected}" aria-label="${escapeHtml(`${entry.type === "dir" ? "Folder" : "File"} ${entry.name}`)}"><td><span class="file-kind ${entry.type === "dir" ? "directory" : ""}">${fileIcon(entry)}</span><span class="file-name ${entry.hidden ? "hidden" : ""}">${escapeHtml(entry.name)}</span></td><td>${entry.type === "dir" ? "dir" : formatBytes(entry.size)}</td><td>${formatDate(entry.modified)}</td></tr>`
-    }).join("")}</tbody></table>`
+
+    let table = list.querySelector<HTMLTableElement>("table.file-table")
+    if (!table) {
+      list.innerHTML = '<table class="native-table file-table" role="grid" aria-label="Directory entries"><thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead><tbody></tbody></table>'
+      table = list.querySelector<HTMLTableElement>("table.file-table")
+      this.rowRevisions.clear()
+    }
+    const body = table?.tBodies[0]
+    if (body) this.reconcileDirectoryRows(body, entries)
+    this.updateDirectorySelection()
+  }
+
+  private reconcileDirectoryRows(body: HTMLTableSectionElement, entries: FileEntry[]): void {
+    const desiredPaths = new Set(entries.map((entry) => entry.path))
+    const existingRows = new Map<string, HTMLTableRowElement>()
+    Array.from(body.rows).forEach((row) => {
+      const path = row.dataset.entry
+      if (!path || !desiredPaths.has(path) || existingRows.has(path)) {
+        if (path) this.rowRevisions.delete(path)
+        row.remove()
+      } else existingRows.set(path, row)
+    })
+
+    entries.forEach((entry, index) => {
+      const revision = fileEntryRevision(entry)
+      let row = existingRows.get(entry.path)
+      if (!row) {
+        row = document.createElement("tr")
+        row.dataset.entry = entry.path
+      }
+      if (this.rowRevisions.get(entry.path) !== revision) {
+        row.setAttribute("aria-label", `${entry.type === "dir" ? "Folder" : "File"} ${entry.name}`)
+        row.innerHTML = `<td><span class="file-kind ${entry.type === "dir" ? "directory" : ""}">${fileIcon(entry)}</span><span class="file-name ${entry.hidden ? "hidden" : ""}">${escapeHtml(entry.name)}</span></td><td>${entry.type === "dir" ? "dir" : formatBytes(entry.size)}</td><td>${formatDate(entry.modified)}</td>`
+        this.rowRevisions.set(entry.path, revision)
+      }
+      const current = body.rows[index]
+      if (current !== row) body.insertBefore(row, current || null)
+    })
+  }
+
+  private updateDirectorySelection(): void {
+    const list = this.root.querySelector<HTMLElement>("[data-role=file-list]")
+    if (list) {
+      const active = list.querySelector<HTMLTableRowElement>("tr.selected")
+      const selected = this.selectedPath
+        ? list.querySelector<HTMLTableRowElement>(`tr[data-entry="${CSS.escape(this.selectedPath)}"]`)
+        : null
+      if (active && active !== selected) {
+        active.classList.remove("selected")
+        active.tabIndex = -1
+        active.setAttribute("aria-selected", "false")
+      }
+      if (selected) {
+        selected.classList.add("selected")
+        selected.tabIndex = 0
+        selected.setAttribute("aria-selected", "true")
+      }
+    }
+    const selectionSummary = this.root.querySelector<HTMLElement>("[data-role=selection-summary]")
+    const selectedEntry = this.current()
+    if (selectionSummary) selectionSummary.textContent = selectedEntry ? `${selectedEntry.name} · ${selectedEntry.type === "dir" ? "folder" : formatBytes(selectedEntry.size)}` : "No selection"
     this.renderActions()
   }
 
-  private async loadPreview(): Promise<void> {
+  private async loadPreview(force = false): Promise<void> {
     const entry = this.current()
     if (!entry) {
       this.preview = null
+      this.previewLoadedRevision = ""
+      this.previewLoadingRevision = ""
       this.renderPreview()
       return
     }
+    const revision = filePreviewRevision(this.machine, entry)
+    if (!force && this.preview && this.previewLoadedRevision === revision) return
+    if (this.previewLoadingRevision === revision) return
+
     const request = ++this.previewRequest
+    this.previewLoadingRevision = revision
     const target = this.root.querySelector<HTMLElement>("[data-role=preview]")
-    if (target) target.innerHTML = '<div class="native-loading">Loading preview…</div>'
+    if (!this.preview && target) target.innerHTML = '<div class="native-loading">Loading preview…</div>'
     try {
       const preview = await this.context.api.get<FilePreview>(`/files/preview${queryString({ machine: this.machine, path: entry.path, columns: 120, rows: 50, cell_aspect: 2 })}`)
       if (request !== this.previewRequest || this.destroyed || this.current()?.path !== entry.path) return
       this.preview = preview
+      this.previewLoadedRevision = revision
       this.renderPreview()
     } catch (error) {
       if (request !== this.previewRequest) return
       this.preview = null
+      this.previewLoadedRevision = ""
       if (target) target.innerHTML = `<div class="native-error">${escapeHtml(error instanceof Error ? error.message : String(error))}</div>`
+    } finally {
+      if (request === this.previewRequest) this.previewLoadingRevision = ""
     }
   }
 
@@ -345,9 +487,7 @@ export class FilesController extends BaseController {
   }
 
   private focusEntry(path: string): void {
-    const row = Array.from(this.root.querySelectorAll<HTMLElement>("[data-entry]"))
-      .find((element) => element.dataset.entry === path)
-    row?.focus()
+    this.root.querySelector<HTMLElement>(`[data-entry="${CSS.escape(path)}"]`)?.focus()
   }
 
   private select(path: string, focus = false): void {
@@ -357,7 +497,9 @@ export class FilesController extends BaseController {
     }
     this.selectedPath = path
     this.preview = null
-    this.renderDirectory()
+    this.previewLoadedRevision = ""
+    this.previewLoadingRevision = ""
+    this.updateDirectorySelection()
     if (focus) this.focusEntry(path)
     void this.loadPreview()
   }
@@ -545,7 +687,7 @@ export class FilesController extends BaseController {
     else if (action === "new-file") void this.create("file")
     else if (action === "new-dir") void this.create("dir")
     else if (action === "upload") this.root.querySelector<HTMLInputElement>("[data-role=file-upload]")?.click()
-    else if (action === "refresh") void this.refresh()
+    else if (action === "refresh") void this.refresh(true)
     else if (action === "home-location") this.navigate(".")
     else if (action === "sort-direction") {
       this.sortDirection = this.sortDirection === "asc" ? "desc" : "asc"
@@ -578,8 +720,14 @@ export class FilesController extends BaseController {
     if (target instanceof HTMLSelectElement && target.dataset.role === "machine") this.switchMachine(target.value)
     if (target instanceof HTMLInputElement && target.dataset.role === "hidden") {
       this.showHidden = target.checked
+      const previousSelection = this.selectedPath
       const entries = this.entries()
       if (!entries.some((entry) => entry.path === this.selectedPath)) this.selectedPath = entries[0]?.path || null
+      if (this.selectedPath !== previousSelection) {
+        this.preview = null
+        this.previewLoadedRevision = ""
+        this.previewLoadingRevision = ""
+      }
       this.renderParent()
       this.renderDirectory()
       void this.loadPreview()
@@ -601,10 +749,20 @@ export class FilesController extends BaseController {
     const target = event.target
     if (!(target instanceof HTMLInputElement) || target.dataset.role !== "file-search") return
     this.query = target.value
-    const entries = this.entries()
-    if (!entries.some((entry) => entry.path === this.selectedPath)) this.selectedPath = entries[0]?.path || null
-    this.renderDirectory()
-    void this.loadPreview()
+    if (this.filterTimer !== null) window.clearTimeout(this.filterTimer)
+    this.filterTimer = window.setTimeout(() => {
+      this.filterTimer = null
+      const previousSelection = this.selectedPath
+      const entries = this.entries()
+      if (!entries.some((entry) => entry.path === this.selectedPath)) this.selectedPath = entries[0]?.path || null
+      if (this.selectedPath !== previousSelection) {
+        this.preview = null
+        this.previewLoadedRevision = ""
+        this.previewLoadingRevision = ""
+      }
+      this.renderDirectory()
+      void this.loadPreview()
+    }, 120)
   }
 
   private onListKeyDown(event: KeyboardEvent): void {
@@ -654,6 +812,12 @@ export class FilesController extends BaseController {
     event.preventDefault()
     const next = entries[nextIndex]
     if (next) this.select(next.path, true)
+  }
+
+  destroy(): void {
+    if (this.filterTimer !== null) window.clearTimeout(this.filterTimer)
+    this.filterTimer = null
+    super.destroy()
   }
 
 }
