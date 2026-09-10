@@ -89,4 +89,14 @@ describe("Native WebUI actions", () => {
     expect(compactStyles).toContain(".files-layout, .files-layout.no-parent { grid-template-columns: minmax(0,1fr); }")
     expect(compactStyles).toContain(".files-layout.preview-open, .files-layout.no-parent.preview-open { grid-template-columns: minmax(360px,1fr) minmax(280px,.65fr); }")
   })
+
+  test("keeps the mobile terminal height override after desktop refinements", async () => {
+    const styles = await Bun.file(new URL("./web-native.css", import.meta.url)).text()
+    const desktopRule = styles.lastIndexOf(".terminal-layout { grid-template-columns: 240px minmax(0,1fr)")
+    const mobileRule = styles.lastIndexOf("@media (max-width: 720px)")
+    const mobileStyles = styles.slice(mobileRule)
+
+    expect(mobileRule).toBeGreaterThan(desktopRule)
+    expect(mobileStyles).toContain(".terminal-layout { height: calc(100dvh - 319px); min-height: 420px; }")
+  })
 })

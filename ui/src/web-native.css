@@ -547,6 +547,10 @@ button.summary-card { cursor: pointer; }
   .terminal-layout.sidebar-hidden .terminal-sessions { display: none; }
 }
 
+@media (max-width: 720px) {
+  .terminal-layout { height: calc(100dvh - 319px); min-height: 420px; }
+}
+
 @media (prefers-color-scheme: dark) {
   .files-controlbar, .file-statusbar { color: #929eb1; background: #111927; border-color: #293449; }
   .file-search, .files-controlbar select, .files-toolbar .path-bar > input { color: #dce5f2; background: #0f1724; border-color: #344158; }
