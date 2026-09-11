@@ -170,6 +170,10 @@ class RemoteJobCancelled(RuntimeError):
     pass
 
 
+class RemoteControllerShuttingDown(RuntimeError):
+    pass
+
+
 class WorkerHttpError(RuntimeError):
     def __init__(self, url: str, status_code: int, detail: str):
         self.url = url
@@ -245,6 +249,55 @@ def _error(message: str, error: str = "remote_error", status_code: int = 400):  
     from starlette.responses import JSONResponse
 
     return JSONResponse({"ok": False, "error": error, "message": message}, status_code=status_code)
+
+
+_REMOTE_POLL_SHUTDOWN_WAITERS: set[asyncio.Future[None]] = set()
+_REMOTE_POLL_SHUTTING_DOWN = False
+
+
+def _prepare_remote_polls_for_server_start() -> None:
+    global _REMOTE_POLL_SHUTTING_DOWN
+    _REMOTE_POLL_SHUTTING_DOWN = False
+
+
+def _interrupt_remote_polls_for_shutdown() -> int:
+    global _REMOTE_POLL_SHUTTING_DOWN
+    _REMOTE_POLL_SHUTTING_DOWN = True
+    waiters = tuple(_REMOTE_POLL_SHUTDOWN_WAITERS)
+    for waiter in waiters:
+        if not waiter.done():
+            waiter.set_result(None)
+    return len(waiters)
+
+
+async def _wait_for_remote_poll_item(
+    queue: asyncio.Queue[dict[str, Any]], timeout_s: float
+) -> dict[str, Any]:
+    if _REMOTE_POLL_SHUTTING_DOWN:
+        raise RemoteControllerShuttingDown("controller is shutting down")
+    loop = asyncio.get_running_loop()
+    shutdown_waiter: asyncio.Future[None] = loop.create_future()
+    queue_get = asyncio.create_task(queue.get())
+    _REMOTE_POLL_SHUTDOWN_WAITERS.add(shutdown_waiter)
+    try:
+        done, _ = await asyncio.wait(
+            {queue_get, shutdown_waiter},
+            timeout=timeout_s,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if shutdown_waiter in done:
+            raise RemoteControllerShuttingDown("controller is shutting down")
+        if queue_get in done:
+            return queue_get.result()
+        raise TimeoutError
+    finally:
+        _REMOTE_POLL_SHUTDOWN_WAITERS.discard(shutdown_waiter)
+        if not shutdown_waiter.done():
+            shutdown_waiter.cancel()
+        if not queue_get.done():
+            queue_get.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await queue_get
 
 
 @dataclass
@@ -760,7 +813,7 @@ class RemoteManager:
                     "poll_timeout_s": configured_poll_timeout_s,
                 }
             try:
-                job = await asyncio.wait_for(queue.get(), timeout=remaining)
+                job = await _wait_for_remote_poll_item(queue, remaining)
             except TimeoutError:
                 return {
                     "job": None,
@@ -1134,6 +1187,8 @@ async def poll_endpoint(request: Any):  # noqa: ANN201
         return JSONResponse(
             _ok(await remote_manager().poll(_bearer_token(request), await request.json()))
         )
+    except RemoteControllerShuttingDown as exc:
+        return _error(str(exc), type(exc).__name__, 503)
     except Exception as exc:
         return _error(str(exc), type(exc).__name__, 401)
 

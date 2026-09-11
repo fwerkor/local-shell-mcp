@@ -129,17 +129,48 @@ async def test_poll_clamps_to_worker_timeout_and_returns_current_controller_valu
     manager.tokens[worker.token] = worker.name
     captured = []
 
-    async def fake_wait_for(awaitable, timeout):  # noqa: ANN001
-        captured.append(timeout)
-        awaitable.close()
+    async def fake_poll_wait(queue, timeout_s):  # noqa: ANN001
+        assert queue is worker.queue
+        captured.append(timeout_s)
         raise TimeoutError
 
-    monkeypatch.setattr(remote.asyncio, "wait_for", fake_wait_for)
+    monkeypatch.setattr(remote, "_wait_for_remote_poll_item", fake_poll_wait)
 
     result = await manager.poll(worker.token, {"poll_timeout_s": 10})
 
     assert captured == [pytest.approx(10)]
     assert result["poll_timeout_s"] == 50.0
+
+
+@pytest.mark.asyncio
+async def test_shutdown_interrupt_wakes_waiting_remote_poll(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_POLL_TIMEOUT_S", "50")
+    get_settings.cache_clear()
+    manager = remote.RemoteManager()
+    worker = remote.RemoteWorker(name="worker-a", token="token-a")
+    manager.workers[worker.name] = worker
+    manager.tokens[worker.token] = worker.name
+
+    remote._prepare_remote_polls_for_server_start()  # noqa: SLF001
+    try:
+        poll = asyncio.create_task(manager.poll(worker.token))
+        for _ in range(10):
+            if remote._REMOTE_POLL_SHUTDOWN_WAITERS:  # noqa: SLF001
+                break
+            await asyncio.sleep(0)
+
+        assert len(remote._REMOTE_POLL_SHUTDOWN_WAITERS) == 1  # noqa: SLF001
+        assert remote._interrupt_remote_polls_for_shutdown() == 1  # noqa: SLF001
+        with pytest.raises(remote.RemoteControllerShuttingDown, match="shutting down"):
+            await poll
+        assert not remote._REMOTE_POLL_SHUTDOWN_WAITERS  # noqa: SLF001
+
+        with pytest.raises(remote.RemoteControllerShuttingDown, match="shutting down"):
+            await manager.poll(worker.token)
+    finally:
+        remote._prepare_remote_polls_for_server_start()  # noqa: SLF001
 
 
 @pytest.mark.asyncio
