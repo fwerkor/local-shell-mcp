@@ -194,6 +194,9 @@ def test_coalescing_keeps_semantic_child_details_without_duplicate_rows():
         {"event": "download_link_revoked", "path": "/tmp/report.txt", "token": "token-1"}
     ]
     assert rows[0][audit_module._AUDIT_SOURCE_INDEXES] == [0, 1, 2, 3]
+    summary = audit_module._audit_summary_entry(rows[0])
+    assert summary["detail_revision"] == 4
+    assert "related_events" not in summary
     units = audit_module._retention_units([(b"line\n", record, set()) for record in records])
     assert len(units) == 1
     assert [item[0] for item in units[0]] == [0, 1, 2, 3]

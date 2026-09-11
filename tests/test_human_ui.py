@@ -730,6 +730,7 @@ def test_audit_large_payloads_are_previewed_and_loaded_on_demand(tmp_path, monke
     assert listing["id"] == "call:large-call"
     assert listing["tool"] == "write_file"
     assert listing["status"] == "success"
+    assert listing["detail_revision"] == 2
     assert "input" not in listing
     assert "output" not in listing
 

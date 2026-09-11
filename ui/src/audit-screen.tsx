@@ -216,6 +216,7 @@ export function AuditScreen({
     current?.id,
     current?.paired,
     current?.status,
+    current?.detail_revision,
     previewBounds.columns,
     previewBounds.rows,
     setStatus,

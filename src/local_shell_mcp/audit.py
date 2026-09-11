@@ -1561,7 +1561,11 @@ _AUDIT_SUMMARY_FIELDS = frozenset(
 
 
 def _audit_summary_entry(row: dict[str, Any]) -> dict[str, Any]:
-    return {name: value for name, value in row.items() if name in _AUDIT_SUMMARY_FIELDS}
+    summary = {name: value for name, value in row.items() if name in _AUDIT_SUMMARY_FIELDS}
+    source_indexes = row.get(_AUDIT_SOURCE_INDEXES)
+    if isinstance(source_indexes, list):
+        summary["detail_revision"] = len(source_indexes)
+    return summary
 
 
 def _read_audit_records() -> list[dict[str, Any]]:

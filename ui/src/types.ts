@@ -81,6 +81,7 @@ export interface AuditEntry {
   paired?: boolean
   status?: "success" | "failed" | "running" | "unpaired" | "completed" | string
   duration_ms?: number
+  detail_revision?: number
   input?: unknown
   output?: unknown
   result?: unknown

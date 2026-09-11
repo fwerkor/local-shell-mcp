@@ -55,6 +55,7 @@ function auditDetailRevision(entry: AuditEntry): string {
     entry.duration_ms,
     entry.error,
     entry.error_type,
+    entry.detail_revision,
     entry.input,
     entry.arguments,
     entry.output,
