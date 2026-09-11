@@ -76,7 +76,7 @@ WARNING: This link could potentially be dangerous`)){let c=window.open();if(c){t
       <button class="row-action" type="button" data-view="workloads">Open</button>
     </div>`}).join("")}function ro(s,d=4){let v=s.slice(0,d);if(!v.length)return'<div class="empty-state">No recent MCP activity.</div>';return v.map((w)=>{let g=is(w.kind,"success"),i=g==="running",t=g==="failed";return`<div class="activity-item">
       <div class="activity-state ${t?"failed":i?"running":"success"}">${i?"<span></span>":t?os.warning:os.check}</div>
-      <div><strong>${G(w.title||"MCP activity")}</strong><p>${t?"Failed":i?"Running":"Completed"} on <b>${G(w.node||"local")}</b></p><small>${an(w.timestamp)}</small></div>
+      <div class="activity-copy"><strong>${G(w.title||"MCP activity")}</strong><p>${t?"Failed":i?"Running":"Completed"} on <b>${G(w.node||"local")}</b></p><small>${an(w.timestamp)}</small></div>
       <span class="duration ${i?"live":""}">${i?"LIVE":t?"FAILED":"OK"}</span>
     </div>`}).join("")}function tr(s,d=2){let v=s.slice(0,d);if(!v.length)return'<div class="empty-state">Nothing needs attention.</div>';return v.map((w)=>{let g=is(w.severity,"info");return`<div class="attention-item ${g==="warning"||g==="critical"?"warning-item":"info-item"}">
       <div class="attention-icon">${g==="warning"||g==="critical"?os.warning:os.info}</div>
