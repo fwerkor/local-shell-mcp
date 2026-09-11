@@ -1,11 +1,38 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 
 # Long-lived MCP connections must not prevent process supervisors from observing exit.
 _GRACEFUL_SHUTDOWN_TIMEOUT_S = 10
+_LOG_LEVEL_ENV = "LOCAL_SHELL_MCP_LOG_LEVEL"
+_DEFAULT_LOG_LEVEL = "WARNING"
+_LOG_LEVELS = {
+    "CRITICAL": logging.CRITICAL,
+    "ERROR": logging.ERROR,
+    "WARNING": logging.WARNING,
+    "INFO": logging.INFO,
+    "DEBUG": logging.DEBUG,
+}
+
+
+def _log_level_name(value: str | None = None) -> str:
+    raw = os.getenv(_LOG_LEVEL_ENV, _DEFAULT_LOG_LEVEL) if value is None else value
+    name = str(raw).strip().upper()
+    if name not in _LOG_LEVELS:
+        choices = ", ".join(_LOG_LEVELS)
+        raise ValueError(f"{_LOG_LEVEL_ENV} must be one of: {choices}")
+    return name
+
+
+def _configure_logging() -> str:
+    name = _log_level_name()
+    level = _LOG_LEVELS[name]
+    logging.basicConfig(level=level)
+    logging.getLogger().setLevel(level)
+    return name
 
 
 def _with_oauth_routes(inner_app):  # noqa: ANN001
@@ -115,6 +142,7 @@ def run_mcp() -> None:
             port=settings.port,
             forwarded_allow_ips=settings.forwarded_allow_ips,
             timeout_graceful_shutdown=_GRACEFUL_SHUTDOWN_TIMEOUT_S,
+            log_level=_log_level_name().lower(),
         )
         return
     if hasattr(mcp, "sse_app"):
@@ -130,6 +158,7 @@ def run_mcp() -> None:
             port=settings.port,
             forwarded_allow_ips=settings.forwarded_allow_ips,
             timeout_graceful_shutdown=_GRACEFUL_SHUTDOWN_TIMEOUT_S,
+            log_level=_log_level_name().lower(),
         )
         return
 
@@ -154,10 +183,12 @@ def run_http() -> None:
         port=settings.port,
         forwarded_allow_ips=settings.forwarded_allow_ips,
         timeout_graceful_shutdown=_GRACEFUL_SHUTDOWN_TIMEOUT_S,
+        log_level=_log_level_name().lower(),
     )
 
 
 def main(argv: list[str] | None = None) -> None:
+    _configure_logging()
     argv = sys.argv[1:] if argv is None else list(argv)
     if argv and argv[0] == "job-runner":
         from .jobs import run_job_runner_cli
