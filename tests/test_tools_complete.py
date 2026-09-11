@@ -209,6 +209,7 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
         monkeypatch.setattr(tools, name, sync_value)
 
     monkeypatch.setattr(tools, "_view_image_result", image_value)
+    monkeypatch.setattr(tools, "manage_chat_dispatch", sync_value)
     monkeypatch.setattr(downloads, "create_share_link", sync_value)
     monkeypatch.setattr(downloads, "list_share_links", sync_value)
     monkeypatch.setattr(downloads, "revoke_share_link", sync_value)
@@ -264,6 +265,7 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
         "browser_snapshot": {"session_id": "missing"},
         "browser_act": {"session_id": "missing", "actions": [{"action": "wait"}]},
         "browser_run_script": {"script": "print(1)"},
+        "chat_dispatch": {"action": "status"},
         "audit_tail": {},
         "remote_manage": {"action": "list"},
     }

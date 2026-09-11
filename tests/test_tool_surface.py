@@ -45,6 +45,7 @@ CORE_TOOL_NAMES = {
     "browser_snapshot",
     "browser_act",
     "browser_run_script",
+    "chat_dispatch",
     "audit_tail",
 }
 

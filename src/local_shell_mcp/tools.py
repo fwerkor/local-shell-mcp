@@ -22,6 +22,7 @@ from . import __version__
 from .audit import audit, audit_call_context, audit_result_ok
 from .auth import current_principal, principal_scopes, require_current_scopes
 from .browser_sessions import get_browser_session_manager
+from .chat_dispatch_bridge import manage_chat_dispatch
 from .deprecated_tools import DeprecatedToolFastMCP as FastMCP
 from .downloads import create_share_link, list_share_links, revoke_share_link
 from .dynamic_mcp import DynamicMCPManager
@@ -342,6 +343,7 @@ NON_CANCELLABLE_TOOL_NAMES = frozenset(
         "file_patch",
         "remote_transfer",
         "mcp_tool_call",
+        "chat_dispatch",
     }
 )
 
@@ -487,6 +489,12 @@ def _safe_audit_call_arguments(tool_name: str, arguments: dict[str, Any]) -> dic
                 safe[field_name] = {str(key): "<redacted>" for key in value}
         if str(safe.get("action") or "").lower() in {"env_set", "header_set"}:
             safe["value"] = "<redacted>"
+        return safe
+    if tool_name == "chat_dispatch":
+        safe = dict(arguments)
+        prompt = safe.get("prompt")
+        if isinstance(prompt, str):
+            safe["prompt"] = f"<redacted:{len(prompt.encode('utf-8'))} bytes>"
         return safe
     if tool_name == "browser_act":
         safe = dict(arguments)
@@ -1220,6 +1228,7 @@ LOCAL_ONLY_TOOL_NAMES = {
     "link_list",
     "link_revoke",
     "secret_scan",
+    "chat_dispatch",
 }
 
 
@@ -1255,6 +1264,7 @@ OPEN_WORLD_TOOL_NAMES = {
     "remote_transfer",
     "mcp_manage",
     "mcp_tool_call",
+    "chat_dispatch",
 }
 
 READ_ONLY_OPEN_WORLD_TOOL_NAMES = {
@@ -3197,6 +3207,58 @@ def _register_dynamic_mcp_tools(
         return _ok(result)
 
 
+def _register_chat_dispatch_tools(mcp: FastMCP, settings: Any) -> None:
+    chat_dispatch_meta = _oauth_meta(["browser:use", "shell:execute"])
+
+    @mcp.tool(structured_output=True, meta=chat_dispatch_meta)
+    async def chat_dispatch(
+        action: str = "enqueue",
+        prompt: str | None = None,
+        conversation_key: str | None = None,
+        conversation_url: str | None = None,
+        project_url: str | None = None,
+        dispatch_id: str | None = None,
+        idempotency_key: str | None = None,
+        max_windows: int | None = None,
+        idle_close_s: int | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Queue and supervise prompts to new or existing ChatGPT child conversations.
+
+        Use action="enqueue" (default) to durably queue a prompt. For an existing child,
+        provide conversation_url or a previously resolved conversation_key. For a new child,
+        provide project_url plus a stable conversation_key; once the first prompt creates a
+        /c/ conversation, later enqueue calls may use only that key. Every enqueue must include
+        an idempotency_key so a repeated call returns the original dispatch instead of sending
+        twice after an interrupted tool call.
+
+        The dispatcher borrows already-open user Chrome windows without closing them. If it
+        must open its own page, it keeps that exact HWND/PID until the queue for the child is
+        drained, waits idle_close_s, then closes only that owned page. Ambiguous Send outcomes
+        are fenced as RECONCILE_REQUIRED and are never replayed automatically.
+
+        Use action="status" with optional dispatch_id to inspect durable jobs/pages and the
+        resident watchdog; use action="cancel" only for a pre-send dispatch; use action="ensure"
+        to restart a short-lived dispatcher for pending durable work. watchdog_start,
+        watchdog_status, and watchdog_stop manage the hidden detached recovery loop.
+        """
+
+        return await asyncio.to_thread(
+            manage_chat_dispatch,
+            settings,
+            action=action,
+            prompt=prompt,
+            conversation_key=conversation_key,
+            conversation_url=conversation_url,
+            project_url=project_url,
+            dispatch_id=dispatch_id,
+            idempotency_key=idempotency_key,
+            max_windows=max_windows,
+            idle_close_s=idle_close_s,
+            limit=limit,
+        )
+
+
 def _register_browser_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnotations) -> None:
     browser_meta = _oauth_meta(["browser:use"])
     browser_execute_meta = _oauth_meta(["browser:use", "shell:execute"])
@@ -3561,6 +3623,7 @@ def build_mcp() -> FastMCP:
     _register_workspace_write_tools(mcp, settings)
     _register_maintenance_tools(mcp, read_only_tool)
     _register_dynamic_mcp_tools(mcp, settings, read_only_tool)
+    _register_chat_dispatch_tools(mcp, settings)
     _register_browser_tools(mcp, settings, read_only_tool)
     _register_remote_admin_tools(mcp)
 

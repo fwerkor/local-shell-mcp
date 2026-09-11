@@ -81,6 +81,9 @@ _POSITIVE_INTEGER_SETTINGS = (
     "mcp_session_idle_timeout_s",
     "mcp_max_sessions",
     "oauth_code_ttl_s",
+    "chat_dispatch_max_windows",
+    "chat_dispatch_idle_close_s",
+    "chat_dispatch_watchdog_interval_s",
 )
 
 _NONNEGATIVE_INTEGER_SETTINGS = (
@@ -380,6 +383,15 @@ if _PYDANTIC_AVAILABLE:
         # Durable Logical Sessions and optional Goal plans exposed through MCP.
         logical_sessions_enabled: bool = True
 
+        # Optional model-facing ChatGPT child-conversation queue. The browser mutation
+        # implementation lives in localshell-web-supervisor; this server only exposes the
+        # durable enqueue/status/cancel/ensure abstraction.
+        chat_dispatch_lws_repo: str | None = None
+        chat_dispatch_max_windows: int = 4
+        chat_dispatch_idle_close_s: int = 90
+        chat_dispatch_watchdog_enabled: bool = True
+        chat_dispatch_watchdog_interval_s: int = 15
+
         # Human-facing OpenTUI/WebUI. The browser interface is mounted on the same
         # ASGI service and launches the exact same TUI executable as the local CLI.
         ui_enabled: bool = True
@@ -615,6 +627,11 @@ else:
         max_tmux_sessions: int = 16
 
         logical_sessions_enabled: bool = True
+        chat_dispatch_lws_repo: str | None = None
+        chat_dispatch_max_windows: int = 4
+        chat_dispatch_idle_close_s: int = 90
+        chat_dispatch_watchdog_enabled: bool = True
+        chat_dispatch_watchdog_interval_s: int = 15
 
         ui_enabled: bool = True
         live_workspace_enabled: bool = True
