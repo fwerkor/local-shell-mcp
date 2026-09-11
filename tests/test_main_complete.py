@@ -83,6 +83,7 @@ def test_run_mcp_streamable_and_sse(monkeypatch):
             "port": 9876,
             "forwarded_allow_ips": "10.0.0.2",
             "timeout_graceful_shutdown": 10,
+            "log_level": "warning",
         },
     )
 
@@ -105,6 +106,7 @@ def test_run_mcp_streamable_and_sse(monkeypatch):
             "port": 9876,
             "forwarded_allow_ips": "10.0.0.2",
             "timeout_graceful_shutdown": 10,
+            "log_level": "warning",
         }
         assert len(app.middleware) == expected_middleware_count
 
@@ -165,6 +167,7 @@ def test_run_http(monkeypatch):
                 "port": 9876,
                 "forwarded_allow_ips": "10.0.0.2",
                 "timeout_graceful_shutdown": 10,
+                "log_level": "warning",
             },
         ),
     ]

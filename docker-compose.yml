@@ -12,6 +12,7 @@ services:
       # The published port is loopback-only; trust proxy headers from the optional
       # cloudflared sidecar so request.client contains the public caller address.
       LOCAL_SHELL_MCP_FORWARDED_ALLOW_IPS: "${LOCAL_SHELL_MCP_FORWARDED_ALLOW_IPS:-*}"
+      LOCAL_SHELL_MCP_LOG_LEVEL: "${LOCAL_SHELL_MCP_LOG_LEVEL:-WARNING}"
       LOCAL_SHELL_MCP_WORKSPACE_ROOT: "/workspace"
       LOCAL_SHELL_MCP_AUTH_MODE: "${LOCAL_SHELL_MCP_AUTH_MODE:-oauth}"
       LOCAL_SHELL_MCP_MCP_SESSION_IDLE_TIMEOUT_S: "${LOCAL_SHELL_MCP_MCP_SESSION_IDLE_TIMEOUT_S:-180}"
