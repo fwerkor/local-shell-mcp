@@ -1537,6 +1537,33 @@ def _public_audit_entry(row: dict[str, Any]) -> dict[str, Any]:
     return {name: value for name, value in row.items() if name != _AUDIT_SOURCE_INDEXES}
 
 
+_AUDIT_SUMMARY_FIELDS = frozenset(
+    {
+        "id",
+        "call_id",
+        "ts",
+        "event",
+        "node",
+        "machine",
+        "operation",
+        "tool",
+        "session",
+        "command",
+        "purpose",
+        "ok",
+        "paired",
+        "status",
+        "duration_ms",
+        "error",
+        "error_type",
+    }
+)
+
+
+def _audit_summary_entry(row: dict[str, Any]) -> dict[str, Any]:
+    return {name: value for name, value in row.items() if name in _AUDIT_SUMMARY_FIELDS}
+
+
 def _read_audit_records() -> list[dict[str, Any]]:
     settings = get_settings()
     max_bytes = max(1, settings.max_audit_log_bytes)
@@ -1620,6 +1647,7 @@ def query_audit(
     start_ts: float | None = None,
     end_ts: float | None = None,
     sort: str = "desc",
+    summary_only: bool = False,
 ) -> dict[str, Any]:
     """Read, pair, filter, and sort the bounded live audit log."""
 
@@ -1639,8 +1667,12 @@ def query_audit(
     reverse = sort.lower() != "asc"
     matched.sort(key=lambda item: float(item.get("ts") or 0), reverse=reverse)
     total = len(matched)
+    visible = matched[:bounded_limit]
     return {
-        "entries": [_public_audit_entry(row) for row in matched[:bounded_limit]],
+        "entries": [
+            _audit_summary_entry(row) if summary_only else _public_audit_entry(row)
+            for row in visible
+        ],
         "count": min(total, bounded_limit),
         "total_matched": total,
     }

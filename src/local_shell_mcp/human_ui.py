@@ -1343,6 +1343,7 @@ async def api_audit(request: Request) -> Response:
             start_ts=float(params["start_ts"]) if "start_ts" in params else None,
             end_ts=float(params["end_ts"]) if "end_ts" in params else None,
             sort=params.get("sort", "desc"),
+            summary_only=True,
         )
         return _json_ok(result)
     except Exception as exc:

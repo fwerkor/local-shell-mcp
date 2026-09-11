@@ -728,8 +728,10 @@ def test_audit_large_payloads_are_previewed_and_loaded_on_demand(tmp_path, monke
     client = TestClient(build_http_app())
     listing = client.get("/api/ui/audit").json()["data"]["entries"][0]
     assert listing["id"] == "call:large-call"
-    assert listing["input"]["content"].endswith("…<preview>")
-    assert listing["output"]["stdout"].endswith("…<preview>")
+    assert listing["tool"] == "write_file"
+    assert listing["status"] == "success"
+    assert "input" not in listing
+    assert "output" not in listing
 
     detail = client.get(
         "/api/ui/audit/detail", params={"id": listing["id"]}
