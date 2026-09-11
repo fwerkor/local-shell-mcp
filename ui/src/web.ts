@@ -507,7 +507,7 @@ function activityRows(entries: Activity[], limit = 4): string {
     const failed = kind === "failed"
     return `<div class="activity-item">
       <div class="activity-state ${failed ? "failed" : running ? "running" : "success"}">${running ? "<span></span>" : failed ? ICONS.warning : ICONS.check}</div>
-      <div><strong>${escapeHtml(entry.title || "MCP activity")}</strong><p>${failed ? "Failed" : running ? "Running" : "Completed"} on <b>${escapeHtml(entry.node || "local")}</b></p><small>${relativeTime(entry.timestamp)}</small></div>
+      <div class="activity-copy"><strong>${escapeHtml(entry.title || "MCP activity")}</strong><p>${failed ? "Failed" : running ? "Running" : "Completed"} on <b>${escapeHtml(entry.node || "local")}</b></p><small>${relativeTime(entry.timestamp)}</small></div>
       <span class="duration ${running ? "live" : ""}">${running ? "LIVE" : failed ? "FAILED" : "OK"}</span>
     </div>`
   }).join("")
