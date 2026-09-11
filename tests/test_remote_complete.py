@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 import io
+import json
 import subprocess
 import tarfile
 from pathlib import Path
@@ -238,6 +239,32 @@ def test_remote_http_routes_success_and_errors(tmp_path, monkeypatch):
     assert "--invite is required" in join.text
     bundle = client.get(remote.REMOTE_WORKER_BUNDLE_PATH)
     assert bundle.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_poll_endpoint_returns_retryable_shutdown_response(monkeypatch):
+    class ShuttingDownManager:
+        async def poll(self, token, payload):  # noqa: ANN001
+            assert token == "token"
+            assert payload == {}
+            raise remote.RemoteControllerShuttingDown("controller is shutting down")
+
+    class Request:
+        headers = {"authorization": "Bearer token"}
+
+        async def json(self):
+            return {}
+
+    monkeypatch.setattr(remote, "remote_manager", lambda: ShuttingDownManager())
+
+    response = await remote.poll_endpoint(Request())
+
+    assert response.status_code == 503
+    assert json.loads(response.body) == {
+        "ok": False,
+        "error": "RemoteControllerShuttingDown",
+        "message": "controller is shutting down",
+    }
 
 
 @pytest.mark.asyncio

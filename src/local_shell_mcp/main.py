@@ -35,6 +35,38 @@ def _configure_logging() -> str:
     return name
 
 
+def _run_uvicorn(app, settings) -> None:  # noqa: ANN001
+    from contextlib import suppress
+
+    import uvicorn
+    from uvicorn.main import STARTUP_FAILURE
+
+    from .remote import (
+        _interrupt_remote_polls_for_shutdown,
+        _prepare_remote_polls_for_server_start,
+    )
+
+    class ShutdownAwareServer(uvicorn.Server):
+        async def shutdown(self, sockets=None) -> None:  # noqa: ANN001
+            _interrupt_remote_polls_for_shutdown()
+            await super().shutdown(sockets=sockets)
+
+    config = uvicorn.Config(
+        app,
+        host=settings.host,
+        port=settings.port,
+        forwarded_allow_ips=settings.forwarded_allow_ips,
+        timeout_graceful_shutdown=_GRACEFUL_SHUTDOWN_TIMEOUT_S,
+        log_level=_log_level_name().lower(),
+    )
+    server = ShutdownAwareServer(config=config)
+    _prepare_remote_polls_for_server_start()
+    with suppress(KeyboardInterrupt):  # pragma: full coverage
+        server.run()
+    if not server.started:
+        raise SystemExit(STARTUP_FAILURE)
+
+
 def _with_oauth_routes(inner_app):  # noqa: ANN001
     from contextlib import asynccontextmanager
 
@@ -118,8 +150,6 @@ def _build_mcp_http_app(mcp):  # noqa: ANN001
 
 
 def run_mcp() -> None:
-    import uvicorn
-
     from .deprecated_tools import install_deprecated_tool_tombstones
 
     install_deprecated_tool_tombstones()
@@ -136,14 +166,7 @@ def run_mcp() -> None:
         return
 
     if hasattr(mcp, "streamable_http_app"):
-        uvicorn.run(
-            _build_mcp_http_app(mcp),
-            host=settings.host,
-            port=settings.port,
-            forwarded_allow_ips=settings.forwarded_allow_ips,
-            timeout_graceful_shutdown=_GRACEFUL_SHUTDOWN_TIMEOUT_S,
-            log_level=_log_level_name().lower(),
-        )
+        _run_uvicorn(_build_mcp_http_app(mcp), settings)
         return
     if hasattr(mcp, "sse_app"):
         from .auth import AuthMiddleware, RequestBodyLimitMiddleware
@@ -152,14 +175,7 @@ def run_mcp() -> None:
         if settings.auth_mode != "none":
             app.add_middleware(AuthMiddleware)
         app.add_middleware(RequestBodyLimitMiddleware)
-        uvicorn.run(
-            app,
-            host=settings.host,
-            port=settings.port,
-            forwarded_allow_ips=settings.forwarded_allow_ips,
-            timeout_graceful_shutdown=_GRACEFUL_SHUTDOWN_TIMEOUT_S,
-            log_level=_log_level_name().lower(),
-        )
+        _run_uvicorn(app, settings)
         return
 
     try:
@@ -169,22 +185,13 @@ def run_mcp() -> None:
 
 
 def run_http() -> None:
-    import uvicorn
-
     from .http_app import build_http_app
     from .settings import get_settings, validate_public_oauth_configuration
 
     settings = get_settings()
     validate_public_oauth_configuration(settings)
     app = build_http_app()
-    uvicorn.run(
-        app,
-        host=settings.host,
-        port=settings.port,
-        forwarded_allow_ips=settings.forwarded_allow_ips,
-        timeout_graceful_shutdown=_GRACEFUL_SHUTDOWN_TIMEOUT_S,
-        log_level=_log_level_name().lower(),
-    )
+    _run_uvicorn(app, settings)
 
 
 def main(argv: list[str] | None = None) -> None:

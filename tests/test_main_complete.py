@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -8,6 +9,7 @@ import local_shell_mcp
 import local_shell_mcp.human_ui as human_ui
 import local_shell_mcp.jobs as jobs
 import local_shell_mcp.main as main_module
+import local_shell_mcp.remote as remote
 import local_shell_mcp.remote_worker_cli as remote_worker_cli
 import local_shell_mcp.settings as settings_module
 import local_shell_mcp.tools as tools
@@ -65,10 +67,23 @@ def test_run_mcp_stdio_and_legacy_fallback(monkeypatch):
 
 
 def test_run_mcp_streamable_and_sse(monkeypatch):
-    import uvicorn
-
     runs = []
-    monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: runs.append((app, kwargs)))
+
+    def fake_run(app, settings):  # noqa: ANN001
+        runs.append(
+            (
+                app,
+                {
+                    "host": settings.host,
+                    "port": settings.port,
+                    "forwarded_allow_ips": settings.forwarded_allow_ips,
+                    "timeout_graceful_shutdown": main_module._GRACEFUL_SHUTDOWN_TIMEOUT_S,
+                    "log_level": main_module._log_level_name().lower(),
+                },
+            )
+        )
+
+    monkeypatch.setattr(main_module, "_run_uvicorn", fake_run)
     monkeypatch.setattr(settings_module, "validate_public_oauth_configuration", lambda value: None)
     monkeypatch.setattr(main_module, "_build_mcp_http_app", lambda mcp: ("wrapped", mcp))
 
@@ -145,8 +160,6 @@ def test_build_mcp_http_app_applies_timeout_and_middleware(monkeypatch):
 
 
 def test_run_http(monkeypatch):
-    import uvicorn
-
     import local_shell_mcp.http_app as http_app
 
     settings = _settings(mode="http")
@@ -154,7 +167,22 @@ def test_run_http(monkeypatch):
     monkeypatch.setattr(settings_module, "get_settings", lambda: settings)
     monkeypatch.setattr(settings_module, "validate_public_oauth_configuration", lambda value: calls.append(("validate", value)))
     monkeypatch.setattr(http_app, "build_http_app", lambda: "http-app")
-    monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: calls.append((app, kwargs)))
+
+    def fake_run(app, run_settings):  # noqa: ANN001
+        calls.append(
+            (
+                app,
+                {
+                    "host": run_settings.host,
+                    "port": run_settings.port,
+                    "forwarded_allow_ips": run_settings.forwarded_allow_ips,
+                    "timeout_graceful_shutdown": main_module._GRACEFUL_SHUTDOWN_TIMEOUT_S,
+                    "log_level": main_module._log_level_name().lower(),
+                },
+            )
+        )
+
+    monkeypatch.setattr(main_module, "_run_uvicorn", fake_run)
 
     main_module.run_http()
 
@@ -171,6 +199,56 @@ def test_run_http(monkeypatch):
             },
         ),
     ]
+
+
+def test_run_uvicorn_interrupts_remote_polls_before_base_shutdown(monkeypatch):
+    import uvicorn
+
+    calls = []
+    configs = []
+
+    class FakeConfig:
+        def __init__(self, app, **kwargs):  # noqa: ANN001
+            self.app = app
+            self.kwargs = kwargs
+            configs.append(self)
+
+    class FakeServer:
+        def __init__(self, config):  # noqa: ANN001
+            self.config = config
+            self.started = True
+
+        def run(self):
+            asyncio.run(self.shutdown(sockets=["socket"]))
+
+        async def shutdown(self, sockets=None):  # noqa: ANN001
+            calls.append(("base", sockets))
+
+    monkeypatch.setattr(uvicorn, "Config", FakeConfig)
+    monkeypatch.setattr(uvicorn, "Server", FakeServer)
+    monkeypatch.setattr(
+        remote,
+        "_prepare_remote_polls_for_server_start",
+        lambda: calls.append(("prepare", None)),
+    )
+    monkeypatch.setattr(
+        remote,
+        "_interrupt_remote_polls_for_shutdown",
+        lambda: calls.append(("interrupt", None)) or 0,
+    )
+
+    settings = _settings()
+    main_module._run_uvicorn("app", settings)
+
+    assert configs[0].app == "app"
+    assert configs[0].kwargs == {
+        "host": "127.0.0.1",
+        "port": 9876,
+        "forwarded_allow_ips": "10.0.0.2",
+        "timeout_graceful_shutdown": 10,
+        "log_level": "warning",
+    }
+    assert calls == [("prepare", None), ("interrupt", None), ("base", ["socket"])]
 
 
 def test_main_subcommands_and_version(monkeypatch, capsys):
