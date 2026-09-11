@@ -295,7 +295,7 @@ describe("Native WebUI audit refresh", () => {
     expect(requests).toBe(1)
   })
 
-  test("refreshes detail when the selected preview revision changes", async () => {
+  test("refreshes detail when the lightweight detail revision changes", async () => {
     let requests = 0
     const context: NativePageContext = {
       api: {
@@ -314,12 +314,12 @@ describe("Native WebUI audit refresh", () => {
       renderDetail: () => void
       loadDetail: () => Promise<void>
     }
-    controller.entries = [{ id: "same", ts: 1, node: "local", operation: "tool", event: "same", status: "running" }]
+    controller.entries = [{ id: "same", ts: 1, node: "local", operation: "tool", event: "same", status: "running", detail_revision: 1 }]
     controller.selected = 0
     controller.renderDetail = () => undefined
 
     await controller.loadDetail()
-    controller.entries = [{ id: "same", ts: 1, node: "local", operation: "tool", event: "same", status: "success", ok: true, output: { value: 2 } }]
+    controller.entries = [{ id: "same", ts: 1, node: "local", operation: "tool", event: "same", status: "running", detail_revision: 2 }]
     await controller.loadDetail()
 
     expect(requests).toBe(2)
