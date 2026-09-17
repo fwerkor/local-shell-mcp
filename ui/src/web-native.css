@@ -65,7 +65,8 @@
 .audit-page .audit-table th:nth-child(3) { width: 14%; }
 .audit-page .audit-table th:nth-child(4) { width: 34%; }
 .audit-page .audit-table th:last-child { width: 20%; }
-.audit-page .audit-table td { padding: 9px 8px; }
+.audit-page .audit-table td { height: 37px; padding: 3px 8px; }
+.audit-page .audit-table td small { margin-top: 1px; line-height: 1.15; }
 .audit-page .audit-table .status-chip { min-width: 0; max-width: 100%; font-size: 10px; padding: 4px; letter-spacing: 0; }
 .audit-page .audit-details { grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(140px,.4fr) minmax(0,1fr); }
 .audit-page .audit-detail-card.input { grid-row: 1; }
