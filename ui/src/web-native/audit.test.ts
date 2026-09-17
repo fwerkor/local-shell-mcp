@@ -4,6 +4,35 @@ import type { NativePageContext } from "./common"
 import { AuditController } from "./audit"
 
 describe("Native WebUI audit refresh", () => {
+  test("requests at most 200 audit records", async () => {
+    let requestedUrl = ""
+    const context: NativePageContext = {
+      api: {
+        get: async (url: string) => {
+          requestedUrl = url
+          return { count: 0, total_matched: 0, entries: [] } as never
+        },
+        send: async () => undefined as never,
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller = new AuditController(context) as unknown as {
+      renderList: () => void
+      loadDetail: () => Promise<void>
+      refresh: () => Promise<void>
+    }
+    controller.renderList = () => undefined
+    controller.loadDetail = async () => undefined
+
+    await controller.refresh()
+
+    expect(requestedUrl).toContain("limit=200")
+  })
+
   test("preserves detail scroll on refresh and resets it for another record", () => {
     const values = [{ scrollTop: 120, scrollLeft: 24 }, { scrollTop: 40, scrollLeft: 0 }]
     const target = {
