@@ -97,4 +97,25 @@ describe("Native WebUI logical session performance", () => {
     expect(selectionUpdates).toBe(1)
     expect(listRenders).toBe(0)
   })
+
+  test("batch lifecycle actions only target eligible selected sessions", () => {
+    const active = summary(1)
+    const activeWithPlan = {
+      ...summary(2),
+      session_id: "s2",
+      plan: { status: "active", steps: [], objective: "Plan" },
+    }
+    const completed = { ...summary(3), session_id: "s3", status: "completed" }
+    const cancelled = { ...summary(4), session_id: "s4", status: "cancelled" }
+    const controller: any = new SessionsController({} as any)
+    controller.sessions = [active, activeWithPlan, completed, cancelled]
+    controller.selectedIds.add("s1")
+    controller.selectedIds.add("s2")
+    controller.selectedIds.add("s3")
+    controller.selectedIds.add("s4")
+
+    expect(controller.bulkTargets("finish")).toEqual({ targets: [active], skipped: 3 })
+    expect(controller.bulkTargets("cancel")).toEqual({ targets: [active, activeWithPlan], skipped: 2 })
+    expect(controller.bulkTargets("delete")).toEqual({ targets: [completed, cancelled], skipped: 2 })
+  })
 })

@@ -250,13 +250,18 @@ button.summary-card { cursor: pointer; }
 .sessions-filter { display: flex; align-items: center; gap: 7px; color: #7f8898; font-size: 12px; font-weight: 650; }
 .sessions-filter select { height: 32px; min-width: 140px; padding: 0 9px; color: #394255; background: #fff; border: 1px solid #dfe3eb; border-radius: 8px; outline: none; font-size: 12px; }
 .sessions-filter select:focus { border-color: #8f84ed; box-shadow: 0 0 0 3px rgba(103,89,231,.1); }
+.session-bulk-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; flex-wrap: wrap; }
+.session-bulk-actions > span { margin-right: 2px; color: #929aaa; font-size: 11px; font-weight: 650; white-space: nowrap; }
+.session-bulk-actions .native-button { height: 28px; padding: 0 8px; }
 .sessions-layout { display: grid; grid-template-columns: minmax(520px,.95fr) minmax(470px,1.05fr); gap: 10px; min-height: 590px; height: calc(100vh - 260px); }
 .sessions-list-panel, .sessions-detail-panel { display: grid; grid-template-rows: auto minmax(0,1fr); }
 .sessions-list, .session-detail { min-height: 0; overflow: auto; }
-.sessions-table th:nth-child(1) { width: 15%; }
-.sessions-table th:nth-child(2) { width: 27%; }
-.sessions-table th:nth-child(3) { width: 40%; }
-.sessions-table th:nth-child(4) { width: 18%; }
+.sessions-table .session-select-column { width: 38px; padding-left: 11px; padding-right: 5px; text-align: center; }
+.sessions-table .session-select-column input { width: 15px; height: 15px; margin: 0; accent-color: #6759e7; cursor: pointer; }
+.sessions-table th:nth-child(2) { width: 15%; }
+.sessions-table th:nth-child(3) { width: 27%; }
+.sessions-table th:nth-child(4) { width: 40%; }
+.sessions-table th:nth-child(5) { width: 18%; }
 .session-detail { display: grid; align-content: start; gap: 10px; padding: 11px; background: #f8f9fb; }
 .session-identity, .session-section, .session-detail-block { min-width: 0; background: #fff; border: 1px solid #e7e9ef; border-radius: 9px; }
 .session-identity { padding: 10px 12px; }
@@ -387,6 +392,8 @@ button.summary-card { cursor: pointer; }
   .native-page { gap: 8px; }
   .native-toolbar { border-radius: 9px; }
   .native-button { height: 31px; padding: 0 8px; }
+  .sessions-list-panel > header { align-items: flex-start; flex-direction: column; }
+  .session-bulk-actions { width: 100%; justify-content: flex-start; }
   .remote-summary, .sessions-summary { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .summary-card { min-height: 50px; }
   .files-layout { min-height: 0; }
@@ -410,10 +417,10 @@ button.summary-card { cursor: pointer; }
   .remote-table th:nth-child(1) { width: 24%; }
   .remote-table th:nth-child(2) { width: 42%; }
   .remote-table th:nth-child(5) { width: 34%; }
-  .sessions-table th:nth-child(3), .sessions-table td:nth-child(3) { display: none; }
-  .sessions-table th:nth-child(1) { width: 25%; }
-  .sessions-table th:nth-child(2) { width: 50%; }
-  .sessions-table th:nth-child(4) { width: 25%; }
+  .sessions-table th:nth-child(4), .sessions-table td:nth-child(4) { display: none; }
+  .sessions-table th:nth-child(2) { width: 25%; }
+  .sessions-table th:nth-child(3) { width: 50%; }
+  .sessions-table th:nth-child(5) { width: 25%; }
   .session-progress-grid { grid-template-columns: 1fr; }
   .session-activity-row > div { align-items: flex-start; flex-direction: column; }
   .audit-list-panel { height: 390px; }

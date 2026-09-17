@@ -16,6 +16,14 @@ import {
 const SESSION_STATUSES = ["all", "active", "completed", "cancelled"] as const
 
 type SessionFilter = (typeof SESSION_STATUSES)[number]
+type SessionLifecycleAction = "finish" | "cancel" | "delete"
+
+function canApplyLifecycle(action: SessionLifecycleAction, session: LogicalSession): boolean {
+  if (action === "delete") return session.status !== "active"
+  if (session.status !== "active") return false
+  if (action === "cancel") return true
+  return !(session.plan && ["active", "blocked"].includes(session.plan.status))
+}
 
 function sessionTone(status: string): string {
   if (status === "completed") return "success"
@@ -59,6 +67,8 @@ export class SessionsController extends BaseController {
   private selectedId: string | null = null
   private detail: LogicalSession | null = null
   private filter: SessionFilter = "all"
+  private readonly selectedIds = new Set<string>()
+  private bulkBusy = false
   private loading = false
   private detailRequest = 0
   private detailLoadedRevision = ""
@@ -79,7 +89,7 @@ export class SessionsController extends BaseController {
       </div>
       <div class="sessions-layout">
         <section class="native-panel sessions-list-panel">
-          <header><div><h3>Sessions</h3><p data-role="sessions-count">Loading…</p></div></header>
+          <header><div><h3>Sessions</h3><p data-role="sessions-count">Loading…</p></div><div class="session-bulk-actions"><span data-role="session-selection-count">0 selected</span>${button("Finish", "bulk-finish", { disabled: true })}${button("Cancel", "bulk-cancel", { danger: true, disabled: true })}${button("Delete", "bulk-delete", { danger: true, disabled: true })}${button("Clear", "clear-selection", { disabled: true })}</div></header>
           <div class="sessions-list" data-role="sessions-list"><div class="native-loading">Loading logical sessions…</div></div>
         </section>
         <section class="native-panel sessions-detail-panel">
@@ -102,6 +112,10 @@ export class SessionsController extends BaseController {
       if (this.destroyed) return
       this.sessions = payload.sessions
       this.counts = payload.counts
+      const knownIds = new Set(this.sessions.map((session) => session.session_id))
+      for (const sessionId of this.selectedIds) {
+        if (!knownIds.has(sessionId)) this.selectedIds.delete(sessionId)
+      }
       const visible = this.filteredSessions()
       if (!this.selectedId || !visible.some((session) => session.session_id === this.selectedId)) {
         this.selectedId = visible[0]?.session_id || null
@@ -112,6 +126,7 @@ export class SessionsController extends BaseController {
       this.renderSummary()
       this.renderList()
       this.renderActions()
+      this.renderBulkActions()
       void this.loadDetail()
     } catch (error) {
       if (!this.destroyed) this.context.notify(`Logical Sessions: ${error instanceof Error ? error.message : String(error)}`, "error")
@@ -160,13 +175,14 @@ export class SessionsController extends BaseController {
 
     let table = list.querySelector<HTMLTableElement>("table.sessions-table")
     if (!table) {
-      list.innerHTML = '<table class="native-table sessions-table" role="grid" aria-label="Logical Sessions"><thead><tr><th>Status</th><th>Label</th><th>Objective</th><th>Updated</th></tr></thead><tbody></tbody></table>'
+      list.innerHTML = '<table class="native-table sessions-table" role="grid" aria-label="Logical Sessions"><thead><tr><th class="session-select-column"><input type="checkbox" data-select-visible aria-label="Select all visible sessions"/></th><th>Status</th><th>Label</th><th>Objective</th><th>Updated</th></tr></thead><tbody></tbody></table>'
       table = list.querySelector<HTMLTableElement>("table.sessions-table")
       this.rowRevisions.clear()
     }
     const body = table?.tBodies[0]
     if (body) this.reconcileSessionRows(body, visible)
     this.updateSelectionState()
+    this.updateBatchSelectionState()
   }
 
   private reconcileSessionRows(body: HTMLTableSectionElement, sessions: LogicalSession[]): void {
@@ -188,7 +204,7 @@ export class SessionsController extends BaseController {
         row.dataset.sessionId = session.session_id
       }
       if (this.rowRevisions.get(session.session_id) !== revision) {
-        row.innerHTML = `<td><span class="status-chip ${sessionTone(session.status)}">${escapeHtml(session.status)}</span></td><td><strong>${escapeHtml(session.label || "Untitled session")}</strong><small>${escapeHtml(session.session_id)}</small></td><td>${escapeHtml(session.objective || "—")}</td><td>${formatAge(session.updated_at)}</td>`
+        row.innerHTML = `<td class="session-select-column"><input type="checkbox" data-session-select="${escapeHtml(session.session_id)}" aria-label="Select ${escapeHtml(session.label || session.session_id)}"/></td><td><span class="status-chip ${sessionTone(session.status)}">${escapeHtml(session.status)}</span></td><td><strong>${escapeHtml(session.label || "Untitled session")}</strong><small>${escapeHtml(session.session_id)}</small></td><td>${escapeHtml(session.objective || "—")}</td><td>${formatAge(session.updated_at)}</td>`
         this.rowRevisions.set(session.session_id, revision)
       }
       const current = body.rows[index]
@@ -213,6 +229,20 @@ export class SessionsController extends BaseController {
       selected.tabIndex = 0
       selected.setAttribute("aria-selected", "true")
     }
+  }
+
+  private updateBatchSelectionState(): void {
+    const visibleIds = this.filteredSessions().map((session) => session.session_id)
+    const selectedVisible = visibleIds.filter((sessionId) => this.selectedIds.has(sessionId)).length
+    const selectAll = this.root.querySelector<HTMLInputElement>("[data-select-visible]")
+    if (selectAll) {
+      selectAll.checked = visibleIds.length > 0 && selectedVisible === visibleIds.length
+      selectAll.indeterminate = selectedVisible > 0 && selectedVisible < visibleIds.length
+    }
+    this.root.querySelectorAll<HTMLInputElement>("[data-session-select]").forEach((control) => {
+      control.checked = this.selectedIds.has(control.dataset.sessionSelect || "")
+    })
+    this.renderBulkActions()
   }
 
   private async loadDetail(): Promise<void> {
@@ -306,6 +336,23 @@ export class SessionsController extends BaseController {
     }
   }
 
+  private bulkTargets(action: SessionLifecycleAction): { targets: LogicalSession[]; skipped: number } {
+    const selected = this.sessions.filter((session) => this.selectedIds.has(session.session_id))
+    const targets = selected.filter((session) => canApplyLifecycle(action, session))
+    return { targets, skipped: selected.length - targets.length }
+  }
+
+  private renderBulkActions(): void {
+    const count = this.root.querySelector<HTMLElement>("[data-role=session-selection-count]")
+    if (count) count.textContent = `${this.selectedIds.size} selected`
+    for (const action of ["finish", "cancel", "delete"] as const) {
+      const control = this.root.querySelector<HTMLButtonElement>(`[data-action="bulk-${action}"]`)
+      if (control) control.disabled = this.bulkBusy || this.bulkTargets(action).targets.length === 0
+    }
+    const clear = this.root.querySelector<HTMLButtonElement>('[data-action="clear-selection"]')
+    if (clear) clear.disabled = this.bulkBusy || this.selectedIds.size === 0
+  }
+
   private async createSession(): Promise<void> {
     const values = await openFormDialog({
       title: "New logical session",
@@ -371,6 +418,50 @@ export class SessionsController extends BaseController {
     }
   }
 
+  private async bulkLifecycle(action: SessionLifecycleAction): Promise<void> {
+    if (this.bulkBusy) return
+    const { targets, skipped } = this.bulkTargets(action)
+    if (!targets.length) {
+      this.context.notify(`No selected sessions can be ${action === "finish" ? "finished" : action === "cancel" ? "cancelled" : "deleted"}.`, "warning")
+      return
+    }
+    const verb = action === "finish" ? "Finish" : action === "cancel" ? "Cancel" : "Delete"
+    const past = action === "finish" ? "Finished" : action === "cancel" ? "Cancelled" : "Deleted"
+    const skippedNote = skipped ? ` ${skipped} selected session${skipped === 1 ? " is" : "s are"} not eligible and will be skipped.` : ""
+    const confirmed = await confirmDialog(
+      `${verb} ${targets.length} logical session${targets.length === 1 ? "" : "s"}`,
+      action === "delete"
+        ? `Permanently delete ${targets.length} selected session${targets.length === 1 ? "" : "s"} and their durable history?${skippedNote}`
+        : `${verb} ${targets.length} selected session${targets.length === 1 ? "" : "s"}?${skippedNote}`,
+      targets.length === 1 ? verb : `${verb} ${targets.length}`,
+    )
+    if (!confirmed) return
+
+    this.bulkBusy = true
+    this.renderBulkActions()
+    try {
+      const results = await Promise.allSettled(targets.map(async (session) => {
+        await this.context.api.send(`/logical-sessions/${action}`, "POST", { session_id: session.session_id })
+        return session.session_id
+      }))
+      const succeeded = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : [])
+      const failed = results.length - succeeded.length
+      succeeded.forEach((sessionId) => this.selectedIds.delete(sessionId))
+      if (action === "delete" && this.selectedId && succeeded.includes(this.selectedId)) {
+        this.selectedId = null
+        this.detail = null
+      }
+      await this.refresh()
+      const parts = [`${past} ${succeeded.length}/${targets.length}`]
+      if (failed) parts.push(`${failed} failed`)
+      if (skipped) parts.push(`${skipped} skipped`)
+      this.context.notify(parts.join(" · "), failed ? "warning" : "success")
+    } finally {
+      this.bulkBusy = false
+      this.renderBulkActions()
+    }
+  }
+
   private selectSession(sessionId: string, focus = false): void {
     if (sessionId === this.selectedId) {
       void this.loadDetail()
@@ -392,13 +483,35 @@ export class SessionsController extends BaseController {
     if (action === "new-session") void this.createSession()
     else if (action === "copy-id") void this.copySessionId()
     else if (action === "finish" || action === "cancel" || action === "delete") void this.lifecycle(action)
+    else if (action === "bulk-finish") void this.bulkLifecycle("finish")
+    else if (action === "bulk-cancel") void this.bulkLifecycle("cancel")
+    else if (action === "bulk-delete") void this.bulkLifecycle("delete")
+    else if (action === "clear-selection") {
+      this.selectedIds.clear()
+      this.updateBatchSelectionState()
+    }
     if (action) return
+    if ((event.target as HTMLElement).closest("[data-session-select], [data-select-visible]")) return
     const sessionId = (event.target as HTMLElement).closest<HTMLElement>("[data-session-id]")?.dataset.sessionId
     if (sessionId) this.selectSession(sessionId)
   }
 
   private onChange(event: Event): void {
     const target = event.target
+    if (target instanceof HTMLInputElement && target.matches("[data-select-visible]")) {
+      for (const session of this.filteredSessions()) {
+        if (target.checked) this.selectedIds.add(session.session_id)
+        else this.selectedIds.delete(session.session_id)
+      }
+      this.updateBatchSelectionState()
+      return
+    }
+    if (target instanceof HTMLInputElement && target.dataset.sessionSelect) {
+      if (target.checked) this.selectedIds.add(target.dataset.sessionSelect)
+      else this.selectedIds.delete(target.dataset.sessionSelect)
+      this.updateBatchSelectionState()
+      return
+    }
     if (!(target instanceof HTMLSelectElement) || target.dataset.filter !== "status") return
     if (!SESSION_STATUSES.includes(target.value as SessionFilter)) return
     this.filter = target.value as SessionFilter
@@ -410,10 +523,12 @@ export class SessionsController extends BaseController {
       this.detailLoadingRevision = ""
     }
     this.renderList()
+    this.renderBulkActions()
     void this.loadDetail()
   }
 
   private onKeyDown(event: KeyboardEvent): void {
+    if ((event.target as HTMLElement).closest("input, select, button, textarea")) return
     const row = (event.target as HTMLElement).closest<HTMLElement>("[data-session-id]")
     if (!row) return
     const visible = this.filteredSessions()
