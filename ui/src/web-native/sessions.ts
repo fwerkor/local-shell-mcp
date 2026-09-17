@@ -45,7 +45,7 @@ function sessionRowRevision(session: LogicalSession): string {
     session.status,
     session.label || "",
     session.objective || "",
-    formatAge(session.updated_at),
+    session.updated_at,
   ].join("\u0000")
 }
 
@@ -69,7 +69,7 @@ export class SessionsController extends BaseController {
   private filter: SessionFilter = "all"
   private readonly selectedIds = new Set<string>()
   private bulkBusy = false
-  private loading = false
+  private refreshInFlight: Promise<void> | null = null
   private detailRequest = 0
   private detailLoadedRevision = ""
   private detailLoadingRevision = ""
@@ -104,9 +104,25 @@ export class SessionsController extends BaseController {
     void this.refresh()
   }
 
-  async refresh(): Promise<void> {
-    if (this.loading) return
-    this.loading = true
+  async refresh(force = false): Promise<void> {
+    const current = this.refreshInFlight
+    if (current) {
+      if (!force) return current
+      await current
+      if (this.destroyed) return
+      if (this.refreshInFlight === current) this.refreshInFlight = null
+    }
+
+    const request = this.performRefresh()
+    this.refreshInFlight = request
+    try {
+      await request
+    } finally {
+      if (this.refreshInFlight === request) this.refreshInFlight = null
+    }
+  }
+
+  private async performRefresh(): Promise<void> {
     try {
       const payload = await this.context.api.get<LogicalSessionsPayload>("/logical-sessions")
       if (this.destroyed) return
@@ -130,8 +146,6 @@ export class SessionsController extends BaseController {
       void this.loadDetail()
     } catch (error) {
       if (!this.destroyed) this.context.notify(`Logical Sessions: ${error instanceof Error ? error.message : String(error)}`, "error")
-    } finally {
-      this.loading = false
     }
   }
 
@@ -202,11 +216,20 @@ export class SessionsController extends BaseController {
       if (!row) {
         row = document.createElement("tr")
         row.dataset.sessionId = session.session_id
+        row.innerHTML = '<td class="session-select-column"><input type="checkbox" data-session-select aria-label="Select session"/></td><td></td><td></td><td></td><td></td>'
       }
       if (this.rowRevisions.get(session.session_id) !== revision) {
-        row.innerHTML = `<td class="session-select-column"><input type="checkbox" data-session-select="${escapeHtml(session.session_id)}" aria-label="Select ${escapeHtml(session.label || session.session_id)}"/></td><td><span class="status-chip ${sessionTone(session.status)}">${escapeHtml(session.status)}</span></td><td><strong>${escapeHtml(session.label || "Untitled session")}</strong><small>${escapeHtml(session.session_id)}</small></td><td>${escapeHtml(session.objective || "—")}</td><td>${formatAge(session.updated_at)}</td>`
+        const checkbox = row.cells[0]?.querySelector<HTMLInputElement>("[data-session-select]")
+        if (checkbox) {
+          checkbox.dataset.sessionSelect = session.session_id
+          checkbox.setAttribute("aria-label", `Select ${session.label || session.session_id}`)
+        }
+        if (row.cells[1]) row.cells[1].innerHTML = `<span class="status-chip ${sessionTone(session.status)}">${escapeHtml(session.status)}</span>`
+        if (row.cells[2]) row.cells[2].innerHTML = `<strong>${escapeHtml(session.label || "Untitled session")}</strong><small>${escapeHtml(session.session_id)}</small>`
+        if (row.cells[3]) row.cells[3].textContent = session.objective || "—"
         this.rowRevisions.set(session.session_id, revision)
       }
+      if (row.cells[4]) row.cells[4].textContent = formatAge(session.updated_at)
       const current = body.rows[index]
       if (current !== row) body.insertBefore(row, current || null)
     })
@@ -375,7 +398,7 @@ export class SessionsController extends BaseController {
       if (filter) filter.value = "all"
       this.selectedId = created.session_id
       this.detail = created
-      await this.refresh()
+      await this.refresh(true)
       this.context.notify(`Created ${created.session_id}`, "success")
     } catch (error) {
       this.context.notify(`Create session: ${error instanceof Error ? error.message : String(error)}`, "error")
@@ -411,7 +434,7 @@ export class SessionsController extends BaseController {
         this.selectedId = null
         this.detail = null
       }
-      await this.refresh()
+      await this.refresh(true)
       this.context.notify(`${action === "finish" ? "Finished" : action === "cancel" ? "Cancelled" : "Deleted"} ${session.session_id}`, "success")
     } catch (error) {
       this.context.notify(`${action}: ${error instanceof Error ? error.message : String(error)}`, "error")
@@ -451,7 +474,7 @@ export class SessionsController extends BaseController {
         this.selectedId = null
         this.detail = null
       }
-      await this.refresh()
+      await this.refresh(true)
       const parts = [`${past} ${succeeded.length}/${targets.length}`]
       if (failed) parts.push(`${failed} failed`)
       if (skipped) parts.push(`${skipped} skipped`)

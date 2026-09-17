@@ -16,6 +16,49 @@ function summary(updatedAt = 1) {
 }
 
 describe("Native WebUI logical session performance", () => {
+  test("forced refresh waits for an in-flight refresh and then fetches fresh state", async () => {
+    let requests = 0
+    let resolveFirst!: (value: unknown) => void
+    const active = summary(1)
+    const completed = { ...summary(2), status: "completed" }
+    const payload = (session: any) => ({
+      sessions: [session],
+      counts: {
+        active: session.status === "active" ? 1 : 0,
+        completed: session.status === "completed" ? 1 : 0,
+        cancelled: 0,
+        total: 1,
+      },
+    })
+    const controller: any = new SessionsController({
+      api: {
+        get: async () => {
+          requests += 1
+          if (requests === 1) return new Promise((resolve) => { resolveFirst = resolve })
+          return payload(completed)
+        },
+      },
+      notify: () => undefined,
+    } as any)
+    controller.root = { querySelector: () => null }
+    controller.renderSummary = () => undefined
+    controller.renderList = () => undefined
+    controller.renderActions = () => undefined
+    controller.renderBulkActions = () => undefined
+    controller.loadDetail = async () => undefined
+
+    const first = controller.refresh()
+    const forced = controller.refresh(true)
+    expect(requests).toBe(1)
+
+    resolveFirst(payload(active))
+    await first
+    await forced
+
+    expect(requests).toBe(2)
+    expect(controller.sessions[0].status).toBe("completed")
+  })
+
   test("does not refetch unchanged selected detail", async () => {
     let requests = 0
     const controller: any = new SessionsController({
@@ -96,6 +139,47 @@ describe("Native WebUI logical session performance", () => {
     expect(controller.selectedId).toBe("s2")
     expect(selectionUpdates).toBe(1)
     expect(listRenders).toBe(0)
+  })
+
+  test("updates session row content without replacing its checkbox", () => {
+    const checkbox: any = {
+      dataset: { sessionSelect: "s1" },
+      ariaLabel: "Select Task",
+      setAttribute(name: string, value: string) {
+        if (name === "aria-label") this.ariaLabel = value
+      },
+    }
+    const checkboxCell: any = {
+      querySelector: () => checkbox,
+      set innerHTML(_: string) {
+        throw new Error("checkbox cell must not be rebuilt")
+      },
+    }
+    const cells: any[] = [
+      checkboxCell,
+      { innerHTML: "" },
+      { innerHTML: "" },
+      { textContent: "" },
+      { textContent: "" },
+    ]
+    const row: any = {
+      dataset: { sessionId: "s1" },
+      cells,
+      remove: () => undefined,
+    }
+    const body: any = {
+      rows: [row],
+      insertBefore: () => undefined,
+    }
+    const controller: any = new SessionsController({} as any)
+    controller.rowRevisions.set("s1", "stale")
+
+    controller.reconcileSessionRows(body, [{ ...summary(2), label: "Renamed" }])
+
+    expect(cells[0].querySelector()).toBe(checkbox)
+    expect(checkbox.dataset.sessionSelect).toBe("s1")
+    expect(checkbox.ariaLabel).toBe("Select Renamed")
+    expect(cells[2].innerHTML).toContain("Renamed")
   })
 
   test("batch lifecycle actions only target eligible selected sessions", () => {
