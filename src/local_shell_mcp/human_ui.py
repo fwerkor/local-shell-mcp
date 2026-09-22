@@ -42,13 +42,19 @@ from .image_ops import ImageFile, assert_view_image_size, detect_image_type, mak
 from .jobs import list_jobs
 from .live_channel import get_live_channel_manager, live_id_from_claims
 from .oauth import ALL_OAUTH_SCOPES
-from .remote import remote_manager
+from .remote import (
+    REMOTE_QUEUE_TIMEOUT_S,
+    REMOTE_RESULT_GRACE_S,
+    remote_execution_rpc_timeout_s,
+    remote_manager,
+)
 from .session_runtime import get_session_runtime_manager
 from .settings import get_settings
 from .shell_environment import subprocess_env
 from .shell_ops import (
     kill_shell,
     list_shells,
+    public_run_shell_timeout,
     read_shell,
     resize_shell,
     send_shell,
@@ -661,11 +667,23 @@ def _machine_rows() -> dict[str, Any]:
 
 
 async def _remote_call(machine: str, tool: str, args: dict[str, Any]) -> Any:
+    worker_args = {**args, "_human": True}
+    execution_timeout_s = None
+    if tool == "run_shell_tool":
+        execution_timeout_s = public_run_shell_timeout(args.get("timeout_s"))
+        worker_args["timeout_s"] = execution_timeout_s
+        rpc_timeout_s = remote_execution_rpc_timeout_s(execution_timeout_s)
+    elif tool == "run_python_tool":
+        execution_timeout_s = public_run_shell_timeout(args.get("timeout_s", 60))
+        worker_args["timeout_s"] = execution_timeout_s
+        rpc_timeout_s = remote_execution_rpc_timeout_s(execution_timeout_s)
+    elif tool in {"shell_start", "shell_send", "shell_kill", "job_start", "job_stop", "job_retry"}:
+        rpc_timeout_s = max(180.0, REMOTE_QUEUE_TIMEOUT_S + REMOTE_RESULT_GRACE_S)
+    else:
+        rpc_timeout_s = max(1, get_settings().ui_remote_request_timeout_s)
     result = await remote_manager().call(
-        machine,
-        tool,
-        {**args, "_human": True},
-        timeout_s=max(1, get_settings().ui_remote_request_timeout_s),
+        machine, tool, worker_args, execution_timeout_s=execution_timeout_s,
+        rpc_timeout_s=rpc_timeout_s,
     )
     if not result.get("ok", False):
         raise RuntimeError(result.get("message") or f"Remote operation failed: {tool}")
@@ -1163,10 +1181,11 @@ async def api_terminal_action(request: Request) -> Response:
                 "cwd": str(body.get("cwd") or "."),
                 "name": body.get("name"),
                 "command": body.get("command"),
+                "idempotency_key": body.get("idempotency_key"),
             }
             result = await _machine_dispatch(
                 machine,
-                lambda: start_shell(args["cwd"], args["name"], args["command"]),
+                lambda: start_shell(args["cwd"], args["name"], args["command"], args["idempotency_key"]),
                 "shell_start",
                 args,
             )
@@ -1175,12 +1194,15 @@ async def api_terminal_action(request: Request) -> Response:
                 "session_id": str(body.get("session_id") or ""),
                 "input_text": str(body.get("input_text") or ""),
                 "enter": bool(body.get("enter", True)),
+                "idempotency_key": body.get("idempotency_key"),
             }
             if not args["session_id"]:
                 raise ValueError("session_id is required")
             result = await _machine_dispatch(
                 machine,
-                lambda: send_shell(args["session_id"], args["input_text"], args["enter"]),
+                lambda: send_shell(
+                    args["session_id"], args["input_text"], args["enter"], args["idempotency_key"]
+                ),
                 "shell_send",
                 args,
             )
@@ -1219,9 +1241,9 @@ async def api_terminal_action(request: Request) -> Response:
                 raise ValueError("session_id is required")
             result = await _machine_dispatch(
                 machine,
-                lambda: kill_shell(session_id),
+                lambda: kill_shell(session_id, body.get("idempotency_key")),
                 "shell_kill",
-                {"session_id": session_id},
+                {"session_id": session_id, "idempotency_key": body.get("idempotency_key")},
             )
         else:
             raise ValueError(f"Unsupported terminal action: {action}")

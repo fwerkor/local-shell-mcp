@@ -125,8 +125,11 @@ class FakeRemoteManager:
     def __init__(self):
         self.calls = []
 
-    async def call(self, machine, tool, args, timeout_s=None):
-        self.calls.append((machine, tool, args, timeout_s))
+    async def call(
+        self, machine, tool, args, timeout_s=None, *, lane=None, execution_timeout_s=None,
+        queue_timeout_s=None, rpc_timeout_s=None,
+    ):
+        self.calls.append((machine, tool, args, timeout_s if timeout_s is not None else rpc_timeout_s))
         return {"ok": True, "message": "", "data": {"tool": tool}}
 
     async def create_invite(self, name=None, workdir=None, ttl_s=None):
@@ -619,7 +622,10 @@ async def test_remote_shell_failure_returns_mcp_error(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
 
     class FailedRemoteManager:
-        async def call(self, machine, tool, args, timeout_s=None):  # noqa: ARG002
+        async def call(
+            self, machine, tool, args, timeout_s=None, *, lane=None, execution_timeout_s=None,
+            queue_timeout_s=None, rpc_timeout_s=None,
+        ):  # noqa: ARG002
             return {
                 "ok": False,
                 "message": "Shell executable not found: missing-shell",

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import os
 import re
 import shlex
@@ -12,6 +14,7 @@ import threading
 import time
 import uuid
 import weakref
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,6 +35,7 @@ from .shell_environment import (
 from .shell_environment import (
     shell_program_name as _shell_program_name,
 )
+from .state_store import get_state_store, state_lock
 from .tmux_helper import resolve_tmux, tmux_socket_name
 
 PUBLIC_RUN_SHELL_DEFAULT_TIMEOUT_S = 10
@@ -52,6 +56,11 @@ PERSISTENT_SHELL_MIN_COLUMNS = 20
 PERSISTENT_SHELL_MAX_COLUMNS = 1_600
 PERSISTENT_SHELL_MIN_ROWS = 3
 PERSISTENT_SHELL_MAX_ROWS = 500
+SHELL_IDEMPOTENCY_TTL_S = 7 * 24 * 60 * 60
+_SHELL_IDEMPOTENCY_GUARD = threading.Lock()
+_SHELL_IDEMPOTENCY_LOCKS: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, dict[str, asyncio.Lock]
+] = weakref.WeakKeyDictionary()
 
 
 @dataclass
@@ -162,6 +171,101 @@ def _command_semaphore() -> asyncio.Semaphore:
         _COMMAND_SEMAPHORE = asyncio.Semaphore(size)
         _COMMAND_SEMAPHORE_SIZE = size
     return _COMMAND_SEMAPHORE
+
+
+def _shell_idempotency_lock(key: str) -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    with _SHELL_IDEMPOTENCY_GUARD:
+        locks = _SHELL_IDEMPOTENCY_LOCKS.get(loop)
+        if locks is None:
+            locks = {}
+            _SHELL_IDEMPOTENCY_LOCKS[loop] = locks
+        lock = locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            locks[key] = lock
+        return lock
+
+
+async def _run_shell_mutation_once(
+    operation: str,
+    idempotency_key: str | None,
+    request_payload: dict[str, object],
+    callback: Callable[[], Awaitable[dict]],
+) -> dict:
+    key = str(idempotency_key or "").strip()
+    if not key:
+        return await callback()
+    if len(key) > 256:
+        raise ValueError("idempotency_key must be 256 characters or fewer")
+    fingerprint = hashlib.sha256(f"{operation}:{key}".encode()).hexdigest()
+    state_key = f"shell-idempotency/{fingerprint}.json"
+    request_fingerprint = hashlib.sha256(
+        json.dumps(
+            request_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+    ).hexdigest()
+    store = get_state_store()
+    async with _shell_idempotency_lock(state_key):
+        with state_lock(state_key):
+            raw = store.read_bytes(state_key)
+            entry = json.loads(raw.decode("utf-8")) if raw else None
+            now = time.time()
+            if isinstance(entry, dict):
+                if entry.get("state") == "completed" and float(entry.get("expires_at") or 0) <= now:
+                    store.delete(state_key)
+                    entry = None
+                elif entry.get("fingerprint") != request_fingerprint:
+                    raise ValueError("idempotency_key was already used for a different shell request")
+                elif entry.get("state") == "completed":
+                    result = entry.get("result")
+                    if not isinstance(result, dict):
+                        raise RuntimeError("cached shell mutation result is invalid")
+                    return result
+                else:
+                    raise RuntimeError(
+                        "this idempotency_key was already used for a shell mutation whose "
+                        "outcome is still being reconciled; inspect the shell before retrying"
+                    )
+            store.write_bytes(
+                state_key,
+                json.dumps(
+                    {
+                        "state": "pending",
+                        "created_at": now,
+                        "fingerprint": request_fingerprint,
+                    }
+                ).encode("utf-8"),
+            )
+        try:
+            result = await callback()
+        except BaseException:
+            with suppress(Exception), state_lock(state_key):
+                store.write_bytes(
+                    state_key,
+                    json.dumps(
+                        {
+                            "state": "uncertain",
+                            "updated_at": time.time(),
+                            "fingerprint": request_fingerprint,
+                        }
+                    ).encode("utf-8"),
+                )
+            raise
+        with state_lock(state_key):
+            store.write_bytes(
+                state_key,
+                json.dumps(
+                    {
+                        "state": "completed",
+                        "result": result,
+                        "fingerprint": request_fingerprint,
+                        "expires_at": time.time() + SHELL_IDEMPOTENCY_TTL_S,
+                    },
+                    ensure_ascii=False,
+                ).encode("utf-8"),
+            )
+        return result
 
 
 def _shell_start_lock() -> asyncio.Lock:
@@ -882,9 +986,16 @@ async def _start_shell_unlocked(
     }
 
 
-async def start_shell(cwd: str = ".", name: str | None = None, command: str | None = None) -> dict:
-    async with _shell_start_lock():
-        return await _start_shell_unlocked(cwd, name, command)
+async def start_shell(
+    cwd: str = ".", name: str | None = None, command: str | None = None,
+    idempotency_key: str | None = None,
+) -> dict:
+    async def start() -> dict:
+        async with _shell_start_lock():
+            return await _start_shell_unlocked(cwd, name, command)
+    return await _run_shell_mutation_once(
+        "start", idempotency_key, {"cwd": cwd, "name": name, "command": command}, start
+    )
 
 
 def _validate_persistent_shell_size(cols: int, rows: int) -> tuple[int, int]:
@@ -945,29 +1056,42 @@ async def resize_shell(session_id: str, cols: int, rows: int) -> dict:
     }
 
 
-async def send_shell(session_id: str, input_text: str, enter: bool = True) -> dict:
-    if _use_windows_persistent_shell_backend():
-        if conpty_ops.has_session(session_id):
-            return await conpty_ops.send_shell(session_id, input_text, enter)
-        return await _native_send_shell(session_id, input_text, enter)
-    if session_id in _NATIVE_SHELL_SESSIONS or resolve_tmux().path is None:
-        return await _native_send_shell(session_id, input_text, enter)
+async def send_shell(
+    session_id: str,
+    input_text: str,
+    enter: bool = True,
+    idempotency_key: str | None = None,
+) -> dict:
+    async def send() -> dict:
+        if _use_windows_persistent_shell_backend():
+            if conpty_ops.has_session(session_id):
+                return await conpty_ops.send_shell(session_id, input_text, enter)
+            return await _native_send_shell(session_id, input_text, enter)
+        if session_id in _NATIVE_SHELL_SESSIONS or resolve_tmux().path is None:
+            return await _native_send_shell(session_id, input_text, enter)
 
-    result = await tmux(["send-keys", "-t", session_id, "-l", input_text])
-    if not result.ok:
-        raise RuntimeError(result.stderr or result.stdout)
-    if enter:
-        result = await tmux(["send-keys", "-t", session_id, "Enter"])
+        result = await tmux(["send-keys", "-t", session_id, "-l", input_text])
         if not result.ok:
             raise RuntimeError(result.stderr or result.stdout)
-    audit(
-        "shell_send",
-        session=session_id,
-        bytes=len(input_text.encode()),
-        enter=enter,
-        backend="tmux",
+        if enter:
+            result = await tmux(["send-keys", "-t", session_id, "Enter"])
+            if not result.ok:
+                raise RuntimeError(result.stderr or result.stdout)
+        audit(
+            "shell_send",
+            session=session_id,
+            bytes=len(input_text.encode()),
+            enter=enter,
+            backend="tmux",
+        )
+        return {"session_id": session_id, "sent_bytes": len(input_text.encode()), "enter": enter}
+
+    return await _run_shell_mutation_once(
+        "send",
+        idempotency_key,
+        {"session_id": session_id, "input_text": input_text, "enter": enter},
+        send,
     )
-    return {"session_id": session_id, "sent_bytes": len(input_text.encode()), "enter": enter}
 
 
 async def read_shell(session_id: str, lines: int = 200) -> dict:
@@ -985,17 +1109,20 @@ async def read_shell(session_id: str, lines: int = 200) -> dict:
     return {"session_id": session_id, "output": result.stdout}
 
 
-async def kill_shell(session_id: str) -> dict:
-    if _use_windows_persistent_shell_backend():
-        if conpty_ops.has_session(session_id):
-            return await conpty_ops.kill_shell(session_id)
-        return await _native_kill_shell(session_id)
-    if session_id in _NATIVE_SHELL_SESSIONS or resolve_tmux().path is None:
-        return await _native_kill_shell(session_id)
+async def kill_shell(session_id: str, idempotency_key: str | None = None) -> dict:
+    async def kill() -> dict:
+        if _use_windows_persistent_shell_backend():
+            if conpty_ops.has_session(session_id):
+                return await conpty_ops.kill_shell(session_id)
+            return await _native_kill_shell(session_id)
+        if session_id in _NATIVE_SHELL_SESSIONS or resolve_tmux().path is None:
+            return await _native_kill_shell(session_id)
 
-    result = await tmux(["kill-session", "-t", session_id])
-    audit("shell_kill", session=session_id, ok=result.ok, backend="tmux")
-    return {"session_id": session_id, "killed": result.ok, "stderr": result.stderr}
+        result = await tmux(["kill-session", "-t", session_id])
+        audit("shell_kill", session=session_id, ok=result.ok, backend="tmux")
+        return {"session_id": session_id, "killed": result.ok, "stderr": result.stderr}
+
+    return await _run_shell_mutation_once("kill", idempotency_key, {"session_id": session_id}, kill)
 
 
 async def _tmux_list_shells() -> list[dict]:

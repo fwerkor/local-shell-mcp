@@ -1,6 +1,7 @@
 
 
 import asyncio
+import json
 import subprocess
 import sys
 import threading
@@ -73,6 +74,121 @@ async def test_timed_out_remote_job_is_skipped_on_next_poll(tmp_path, monkeypatc
     assert result["job"]["id"] == "job-valid"
     assert cancelled_job["id"] not in manager.cancelled_jobs
     assert cancelled_job["id"] not in manager.pending
+
+
+@pytest.mark.asyncio
+async def test_cancelled_unclaimed_tombstone_does_not_use_live_queue_capacity(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_MAX_PENDING_JOBS", "1")
+    get_settings.cache_clear()
+    manager = remote.RemoteManager()
+    worker = remote.RemoteWorker(name="worker-a", token="token-a")
+    manager.workers[worker.name] = worker
+    manager.tokens[worker.token] = worker.name
+
+    with pytest.raises(TimeoutError, match="remote job timed out"):
+        await manager.call("worker-a", "list_files", {"path": "."}, timeout_s=0.01)
+
+    assert manager.pending_machines == {}
+    assert manager.pending == {}
+    assert worker.queue.qsize() == 1
+
+    admitted = asyncio.create_task(
+        manager.call("worker-a", "list_files", {"path": "admitted"}, timeout_s=10)
+    )
+    await asyncio.sleep(0)
+    assert len(manager.pending_machines) == 1
+    assert worker.queue.qsize() == 2
+
+    with pytest.raises(RuntimeError, match="queue is full"):
+        await manager.call("worker-a", "list_files", {"path": "again"}, timeout_s=1)
+
+    admitted.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await admitted
+
+
+@pytest.mark.asyncio
+async def test_execution_rpc_budget_includes_queue_and_result_grace(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    monkeypatch.setattr(remote, "_utc", lambda: 100.0)
+    manager = remote.RemoteManager()
+    worker = remote.RemoteWorker(name="worker-a", token="token-a")
+    manager.workers[worker.name] = worker
+    manager.tokens[worker.token] = worker.name
+
+    call = asyncio.create_task(
+        manager.call(
+            "worker-a",
+            "run_shell_tool",
+            {"command": "echo ok", "timeout_s": 23},
+            execution_timeout_s=23,
+            queue_timeout_s=17,
+        )
+    )
+    await asyncio.sleep(0)
+    queued_job = worker.queue._queue[0]
+
+    assert queued_job["expires_at"] == pytest.approx(
+        100.0 + 17.0 + 23.0 + remote.REMOTE_RESULT_GRACE_S
+    )
+
+    call.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await call
+
+
+@pytest.mark.asyncio
+async def test_worker_job_outbox_sender_drains_and_accepts_persisted_result(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(remote, "_worker_state_dir", lambda: tmp_path / "worker-state")
+
+    async def execute(_tool, _args):
+        return {"exit_code": 0, "stdout": "finished\n"}
+
+    monkeypatch.setattr(remote, "execute_worker_tool", execute)
+    job = {"id": "job-outbox", "tool": "run_shell_tool", "args": {}}
+
+    await remote._run_worker_job(job, "https://controller.test", {}, 1.0)
+
+    outbox_dir = remote._worker_result_outbox_dir()
+    outbox_files = list(outbox_dir.glob("*.json"))
+    assert len(outbox_files) == 1
+    persisted = json.loads(outbox_files[0].read_text(encoding="utf-8"))
+    assert persisted["job_id"] == "job-outbox"
+    assert persisted["data"] == {"exit_code": 0, "stdout": "finished\n"}
+
+    accepted = asyncio.Event()
+    submitted = []
+
+    async def submit(result, _server, _headers, _heartbeat_interval_s):
+        submitted.append(result)
+        accepted.set()
+        return {"ok": True, "data": {"accepted": True}}
+
+    monkeypatch.setattr(remote, "_submit_worker_result_with_heartbeat", submit)
+    sender = asyncio.create_task(
+        remote._worker_result_outbox_sender("https://controller.test", {}, 1.0, set())
+    )
+    try:
+        await asyncio.wait_for(accepted.wait(), timeout=1.0)
+        assert submitted[0]["job_id"] == "job-outbox"
+        async def wait_until_drained():
+            while outbox_files[0].exists():
+                await asyncio.sleep(0.01)
+
+        await asyncio.wait_for(wait_until_drained(), timeout=1.0)
+        assert not outbox_files[0].exists()
+    finally:
+        sender.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await sender
 
 
 @pytest.mark.asyncio
@@ -183,9 +299,10 @@ async def test_remote_queue_is_bounded_per_worker(tmp_path, monkeypatch):
     worker = remote.RemoteWorker(name="worker-a", token="token-a")
     manager.workers[worker.name] = worker
     manager.tokens[worker.token] = worker.name
-    worker.queue.put_nowait({"id": "already-queued"})
+    for index in range(4):
+        worker.queue.put_nowait({"id": f"already-queued-{index}"})
 
-    with pytest.raises(RuntimeError, match="queue is full"):
+    with pytest.raises(RuntimeError, match="physical queue backlog is full"):
         await manager.call("worker-a", "list_files", {"path": "."}, timeout_s=1)
 
 
