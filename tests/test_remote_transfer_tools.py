@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import threading
+import time
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -95,6 +97,17 @@ class FakeRemoteManager:
                 if response.status_code >= 400 or not payload.get("ok"):
                     raise RuntimeError(payload)
                 data = payload["data"]
+            elif tool == "transfer_put_url":
+                source = resolve_path(args["path"], must_exist=True)
+                response = await asyncio.to_thread(
+                    self.client.put,
+                    urlsplit(args["url"]).path,
+                    content=source.read_bytes(),
+                )
+                payload = response.json()
+                if response.status_code >= 400 or not payload.get("ok"):
+                    raise RuntimeError(payload)
+                data = payload["data"]
             elif tool == "transfer_download_url":
                 response = await asyncio.to_thread(self.client.get, urlsplit(args["url"]).path)
                 if response.status_code >= 400:
@@ -170,18 +183,14 @@ async def test_remote_copy_file_streams_between_workers(tmp_path, monkeypatch):
         "src", "src-machine/payload.bin", "dst", "dst-machine/payload.bin", True, 1024
     )
 
-    assert result["chunks"] == 6
-    assert result["chunk_size"] == 1024
-    assert result["transport"] == "controller-memory-relay"
+    assert result["chunks"] == 1
+    assert result["chunk_size"] == len(data)
+    assert result["transport"] == "controller-http-relay"
     assert result["bytes"] == len(data)
-    assert calls[0] == "transfer_stat"
-    assert calls[1] == "transfer_begin_write"
-    assert calls[2:14:2] == ["transfer_read_chunk"] * 6
-    assert calls[3:14:2] == ["transfer_write_chunk"] * 6
-    assert calls[14] == "transfer_finish_write"
-    assert "transfer_alloc_temp_path" not in calls
+    assert calls == ["transfer_stat", "transfer_put_url", "transfer_download_url"]
+    assert "transfer_read_chunk" not in calls
+    assert "transfer_write_chunk" not in calls
     assert "transfer_upload_url" not in calls
-    assert "transfer_download_url" not in calls
     assert (root / "dst-machine" / "payload.bin").read_bytes() == data
 
 
@@ -248,6 +257,142 @@ async def test_cancelled_remote_unpack_cleans_destination_archive(monkeypatch):
     assert cleaned == [("worker-a", "remote-transfer.tar.gz")]
 
 
+def test_controller_relay_staging_prunes_interrupted_transaction_files(tmp_path, monkeypatch):
+    root = _workspace(tmp_path, monkeypatch)
+    relay_dir = root / ".local-shell-mcp" / "transfer-relay"
+    relay_dir.mkdir(parents=True)
+    stale_files = [
+        relay_dir / "relay-dead.bin",
+        relay_dir / ".relay-dead.bin.local-shell-mcp-transfer-txn.tmp",
+        relay_dir / ".relay-dead.bin.local-shell-mcp-transfer-txn.tmp.json",
+    ]
+    cutoff = time.time() - 100_000
+    for path in stale_files:
+        path.write_bytes(b"stale")
+        os.utime(path, (cutoff, cutoff))
+    fresh = relay_dir / ".relay-live.bin.local-shell-mcp-transfer-txn.tmp"
+    fresh.write_bytes(b"active")
+
+    tools._controller_relay_staging_path()
+
+    assert all(not path.exists() for path in stale_files)
+    assert fresh.exists()
+
+
+def test_controller_relay_staging_rejects_symlink(tmp_path, monkeypatch):
+    root = _workspace(tmp_path, monkeypatch)
+    state_dir = root / ".local-shell-mcp"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    external = tmp_path.parent / f"{tmp_path.name}-external-relay"
+    external.mkdir()
+    victim = external / "relay-victim.bin"
+    victim.write_bytes(b"keep")
+    relay_dir = state_dir / "transfer-relay"
+    try:
+        relay_dir.symlink_to(external, target_is_directory=True)
+    except (NotImplementedError, OSError):
+        pytest.skip("directory symlinks are unavailable")
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        tools._controller_relay_staging_path()
+
+    assert victim.read_bytes() == b"keep"
+
+
+@pytest.mark.asyncio
+async def test_local_stream_download_refreshes_temp_archive_lease(tmp_path, monkeypatch):
+    root = _workspace(tmp_path, monkeypatch)
+    source_dir = root / "archive-source"
+    source_dir.mkdir()
+    (source_dir / "payload.bin").write_bytes(b"payload")
+    pack = transfer_pack_dir("archive-source")
+    archive = resolve_path(pack["archive_path"], must_exist=True)
+    refreshed = threading.Event()
+    original_refresh = tools.refresh_temp_file_lease
+
+    def record_refresh(path, *, create=True):
+        if path == archive:
+            refreshed.set()
+        return original_refresh(path, create=create)
+
+    async def queued_download(machine, tool, args, timeout_s=None):
+        del machine, args, timeout_s
+        assert tool == "transfer_download_url"
+        assert await asyncio.to_thread(refreshed.wait, 2)
+        return {"path": "destination/archive.tar.gz"}
+
+    monkeypatch.setattr(tools, "refresh_temp_file_lease", record_refresh)
+    monkeypatch.setattr(tools, "_remote_transfer_data", queued_download)
+
+    result = await tools._copy_local_file_to_remote(
+        pack["archive_path"],
+        "worker-a",
+        "destination/archive.tar.gz",
+    )
+
+    assert result["transport"] == "http-stream"
+    assert refreshed.is_set()
+    delete_path(pack["archive_path"], False)
+
+
+@pytest.mark.asyncio
+async def test_remote_stream_upload_preserves_failure_when_ticket_is_removed(monkeypatch):
+    calls = 0
+
+    async def fail_upload(*args, **kwargs):
+        nonlocal calls
+        del args, kwargs
+        calls += 1
+        raise RuntimeError("stream upload failed with HTTP 400")
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", fail_upload)
+    monkeypatch.setattr(
+        tools,
+        "get_upload_ticket_status",
+        lambda token: (_ for _ in ()).throw(FileNotFoundError(token)),
+    )
+
+    with pytest.raises(RuntimeError, match="stream upload failed with HTTP 400"):
+        await tools._stream_remote_file_to_upload_ticket(
+            "source-worker",
+            "source.bin",
+            7,
+            hashlib.sha256(b"payload").hexdigest(),
+            {"token": "removed", "url": "http://testserver/upload/removed"},
+            None,
+        )
+
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_remote_stream_upload_preserves_worker_failure_when_poll_loses_ticket(monkeypatch):
+    release_upload = asyncio.Event()
+
+    async def fail_after_poll(*args, **kwargs):
+        del args, kwargs
+        await release_upload.wait()
+        raise RuntimeError("receiver rejected streamed checksum")
+
+    def missing_status(token):
+        del token
+        release_upload.set()
+        raise FileNotFoundError("ticket removed")
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", fail_after_poll)
+    monkeypatch.setattr(tools, "get_upload_ticket_status", missing_status)
+
+    with pytest.raises(RuntimeError, match="receiver rejected streamed checksum"):
+        await tools._stream_remote_file_to_upload_ticket(
+            "source-worker",
+            "source.bin",
+            7,
+            hashlib.sha256(b"payload").hexdigest(),
+            {"token": "removed", "url": "http://testserver/upload/removed"},
+            None,
+        )
+
+
 @pytest.mark.asyncio
 async def test_remote_upload_recovers_lost_chunk_acknowledgement(tmp_path, monkeypatch):
     root = _workspace(tmp_path, monkeypatch)
@@ -263,7 +408,7 @@ async def test_remote_upload_recovers_lost_chunk_acknowledgement(tmp_path, monke
 
         async def call(self, machine, tool, args, timeout_s=None, *, lane=None):
             result = await super().call(machine, tool, args, timeout_s, lane=lane)
-            if tool == "transfer_upload_url":
+            if tool == "transfer_put_url":
                 self.upload_calls += 1
                 if self.drop_next_ack:
                     self.drop_next_ack = False
@@ -285,9 +430,9 @@ async def test_remote_upload_recovers_lost_chunk_acknowledgement(tmp_path, monke
         1024,
     )
 
-    assert result["transport"] == "http-chunks"
-    assert result["chunks"] == 3
-    assert manager.upload_calls == 3
+    assert result["transport"] == "http-stream"
+    assert result["chunks"] == 1
+    assert manager.upload_calls == 1
     assert (root / "copied.bin").read_bytes() == payload
 
 
@@ -301,63 +446,87 @@ async def test_streaming_transfer_preserves_chunk_size_validation(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_local_to_remote_snapshot_runs_off_event_loop(tmp_path, monkeypatch):
+async def test_local_to_remote_streams_source_without_snapshot(tmp_path, monkeypatch):
     root = _workspace(tmp_path, monkeypatch)
-    (root / "payload.bin").write_bytes(b"content")
-    event_loop_thread = threading.get_ident()
-    snapshot_threads: list[int] = []
+    data = b"content"
+    (root / "payload.bin").write_bytes(data)
+    created: list[str] = []
+    revoked: list[str] = []
+    digest = hashlib.sha256(data).hexdigest()
 
-    def create_ticket(source_path, expected_bytes, expected_sha256):
-        del source_path, expected_bytes, expected_sha256
-        snapshot_threads.append(threading.get_ident())
-        return {"token": "ticket", "url": "http://testserver/remote/transfer/download/ticket"}
+    def create_ticket(source_path):
+        created.append(source_path)
+        return {
+            "token": "ticket",
+            "url": "http://testserver/remote/transfer/download/ticket",
+            "path": source_path,
+            "bytes": len(data),
+            "sha256": digest,
+        }
 
     async def transfer(machine, tool, args, timeout_s=None):
-        del machine, tool, timeout_s
-        return {"path": args["path"], "bytes": len(b"content"), "sha256": hashlib.sha256(b"content").hexdigest()}
+        del machine, timeout_s
+        assert tool == "transfer_download_url"
+        return {
+            "path": args["path"],
+            "bytes": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }
 
-    monkeypatch.setattr(tools, "create_download_ticket", create_ticket)
-    monkeypatch.setattr(tools, "revoke_transfer_ticket", lambda token: {"revoked": token == "ticket"})
+    monkeypatch.setattr(tools, "create_stream_download_ticket", create_ticket)
+    monkeypatch.setattr(
+        tools,
+        "revoke_transfer_ticket",
+        lambda token: revoked.append(token) or {"revoked": True},
+    )
     monkeypatch.setattr(tools, "_remote_transfer_data", transfer)
 
     result = await tools._copy_local_file_to_remote("payload.bin", "dst", "copied.bin")
 
     assert result["transport"] == "http-stream"
-    assert snapshot_threads and snapshot_threads[0] != event_loop_thread
+    assert created == ["payload.bin"]
+    assert result["sha256"] == digest
+    assert revoked == ["ticket"]
 
 
 @pytest.mark.asyncio
-async def test_cancelled_local_to_remote_snapshot_is_revoked(tmp_path, monkeypatch):
+async def test_cancelled_local_to_remote_stream_revokes_ticket(tmp_path, monkeypatch):
     root = _workspace(tmp_path, monkeypatch)
     (root / "payload.bin").write_bytes(b"content")
-    started = threading.Event()
-    release = threading.Event()
-    revoked = threading.Event()
+    started = asyncio.Event()
+    revoked: list[str] = []
 
-    def create_ticket(source_path, expected_bytes, expected_sha256):
-        del source_path, expected_bytes, expected_sha256
+    def create_ticket(source_path):
+        return {
+            "token": "ticket",
+            "url": "http://testserver/remote/transfer/download/ticket",
+            "path": source_path,
+            "bytes": len(b"content"),
+            "sha256": hashlib.sha256(b"content").hexdigest(),
+        }
+
+    async def transfer(machine, tool, args, timeout_s=None):
+        del machine, tool, args, timeout_s
         started.set()
-        assert release.wait(timeout=5)
-        return {"token": "ticket", "url": "http://testserver/remote/transfer/download/ticket"}
+        await asyncio.Event().wait()
 
-    def revoke_ticket(token):
-        assert token == "ticket"
-        revoked.set()
-        return {"revoked": True}
+    monkeypatch.setattr(tools, "create_stream_download_ticket", create_ticket)
+    monkeypatch.setattr(
+        tools,
+        "revoke_transfer_ticket",
+        lambda token: revoked.append(token) or {"revoked": True},
+    )
+    monkeypatch.setattr(tools, "_remote_transfer_data", transfer)
 
-    monkeypatch.setattr(tools, "create_download_ticket", create_ticket)
-    monkeypatch.setattr(tools, "revoke_transfer_ticket", revoke_ticket)
-
-    transfer = asyncio.create_task(
+    task = asyncio.create_task(
         tools._copy_local_file_to_remote("payload.bin", "dst", "copied.bin")
     )
-    assert await asyncio.to_thread(started.wait, 2)
-    transfer.cancel()
+    await asyncio.wait_for(started.wait(), timeout=2)
+    task.cancel()
     with pytest.raises(asyncio.CancelledError):
-        await transfer
-    release.set()
+        await task
 
-    assert await asyncio.to_thread(revoked.wait, 2)
+    assert revoked == ["ticket"]
 
 
 @pytest.mark.asyncio
@@ -388,7 +557,7 @@ async def test_transfer_path_starts_tracked_managed_job(tmp_path, monkeypatch):
 
     assert current["status"] == "succeeded"
     assert current["progress"]["phase"] == "completed"
-    assert current["result"]["transport"] == "http-chunks"
+    assert current["result"]["transport"] == "http-stream"
     assert (root / "copied.bin").read_bytes() == payload
     tail = await jobs_module.tail_job(job["job_id"])
     assert "transfer started" in tail["output"]

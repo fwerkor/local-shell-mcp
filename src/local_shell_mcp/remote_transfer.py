@@ -6,6 +6,7 @@ import hashlib
 import os
 import re
 import secrets
+import stat
 import threading
 import time
 from collections.abc import Iterator
@@ -19,13 +20,16 @@ from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
 from .audit import audit
-from .fs_ops import relative_display, resolve_path
+from .fs_ops import refresh_temp_file_lease, relative_display, resolve_path
 from .settings import get_settings
 from .transfer_ops import (
     MAX_TRANSFER_CHUNK_BYTES,
     transfer_abort_write,
     transfer_begin_write,
+    transfer_finish_verified_write,
     transfer_finish_write,
+    transfer_prepare_stream_write,
+    transfer_refresh_stream_write,
     transfer_write_bytes,
 )
 
@@ -33,6 +37,7 @@ REMOTE_TRANSFER_PREFIX = "/remote/transfer"
 REMOTE_TRANSFER_UPLOAD_PREFIX = f"{REMOTE_TRANSFER_PREFIX}/upload/"
 REMOTE_TRANSFER_DOWNLOAD_PREFIX = f"{REMOTE_TRANSFER_PREFIX}/download/"
 _TRANSFER_CHUNK_BYTES = 1024 * 1024
+_STREAM_LEASE_REFRESH_INTERVAL_S = 60.0
 _CONTENT_RANGE_RE = re.compile(r"^bytes (\d+)-(\d+)/(\d+)$")
 _TICKET_LOCK = threading.RLock()
 _ACTIVE_SNAPSHOT_PATHS: set[str] = set()
@@ -56,6 +61,10 @@ class _TransferTicket:
     transfer_id: str | None = None
     received_bytes: int = 0
     completed_data: dict[str, Any] | None = None
+    transport: str = "http-chunks"
+    source_handle: Any | None = None
+    source_identity: tuple[int, int, int, int, int] | None = None
+    source_chunk_hashes: tuple[bytes, ...] | None = None
 
 
 _TICKETS: dict[str, _TransferTicket] = {}
@@ -95,15 +104,31 @@ def _validate_expected(expected_bytes: int, expected_sha256: str) -> tuple[int, 
     return size, digest
 
 
+def _file_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
 def _cleanup_ticket_file(ticket: _TransferTicket) -> None:
     if ticket.direction == "upload" and ticket.transfer_id:
         with contextlib.suppress(Exception):
             transfer_abort_write(ticket.path, ticket.transfer_id)
         ticket.transfer_id = None
+    if ticket.source_handle is not None:
+        with contextlib.suppress(Exception):
+            ticket.source_handle.close()
+        ticket.source_handle = None
     if not ticket.cleanup_path:
         return
+    cleanup = Path(ticket.cleanup_path)
+    if ticket.source_identity is not None:
+        try:
+            current = cleanup.stat()
+        except OSError:
+            return
+        if (current.st_dev, current.st_ino) != ticket.source_identity[:2]:
+            return
     with contextlib.suppress(OSError):
-        Path(ticket.cleanup_path).unlink(missing_ok=True)
+        cleanup.unlink(missing_ok=True)
 
 
 def _prune_orphan_download_snapshots_locked(now: float) -> None:
@@ -158,6 +183,9 @@ def _create_ticket(
     display_path: Path | None = None,
     cleanup_path: Path | None = None,
     transfer_id: str | None = None,
+    source_handle: Any | None = None,
+    source_identity: tuple[int, int, int, int, int] | None = None,
+    source_chunk_hashes: tuple[bytes, ...] | None = None,
 ) -> dict[str, Any]:
     size, digest = _validate_expected(expected_bytes, expected_sha256)
     token = token or secrets.token_urlsafe(32)
@@ -174,6 +202,9 @@ def _create_ticket(
         display_path=str(display_path or path),
         cleanup_path=str(cleanup_path) if cleanup_path is not None else None,
         transfer_id=transfer_id,
+        source_handle=source_handle,
+        source_identity=source_identity,
+        source_chunk_hashes=source_chunk_hashes,
     )
     with _TICKET_LOCK:
         _prune_locked(now)
@@ -309,6 +340,60 @@ def create_download_ticket(
             _ACTIVE_SNAPSHOT_PATHS.discard(str(snapshot))
 
 
+def create_stream_download_ticket(
+    source_path: str,
+    expected_bytes: int | None = None,
+    expected_sha256: str | None = None,
+    *,
+    cleanup_source: bool = False,
+) -> dict[str, Any]:
+    """Create a one-shot ticket bound to one validated open source file."""
+
+    if (expected_bytes is None) != (expected_sha256 is None):
+        raise ValueError("expected_bytes and expected_sha256 must be provided together")
+    expected: tuple[int, str] | None = None
+    if expected_bytes is not None and expected_sha256 is not None:
+        expected = _validate_expected(expected_bytes, expected_sha256)
+
+    source = resolve_path(source_path, must_exist=True)
+    handle = source.open("rb")
+    try:
+        before = os.fstat(handle.fileno())
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"source is not a file: {source_path}")
+        if expected is not None and before.st_size != expected[0]:
+            raise ValueError(f"size mismatch: expected {expected[0]}, got {before.st_size}")
+
+        digest_state = hashlib.sha256()
+        chunk_hashes: list[bytes] = []
+        while chunk := handle.read(_TRANSFER_CHUNK_BYTES):
+            refresh_temp_file_lease(source, create=False)
+            digest_state.update(chunk)
+            chunk_hashes.append(hashlib.sha256(chunk).digest())
+        after = os.fstat(handle.fileno())
+        if _file_identity(before) != _file_identity(after):
+            raise RuntimeError("source changed while validating stream download")
+        digest = digest_state.hexdigest()
+        if expected is not None and digest != expected[1]:
+            raise ValueError("file sha256 mismatch")
+        handle.seek(0)
+        return _create_ticket(
+            "download",
+            source,
+            after.st_size,
+            digest,
+            False,
+            display_path=source,
+            cleanup_path=source if cleanup_source else None,
+            source_handle=handle,
+            source_identity=_file_identity(after),
+            source_chunk_hashes=tuple(chunk_hashes),
+        )
+    except Exception:
+        handle.close()
+        raise
+
+
 def revoke_transfer_ticket(token: str) -> dict[str, Any]:
     with _TICKET_LOCK:
         removed = _TICKETS.pop(token, None)
@@ -353,7 +438,7 @@ def _upload_ticket_data(ticket: _TransferTicket) -> dict[str, Any]:
         "sha256": ticket.expected_sha256,
         "received_bytes": ticket.received_bytes,
         "completed": False,
-        "transport": "http-chunks",
+        "transport": ticket.transport,
     }
 
 
@@ -370,20 +455,26 @@ def get_upload_ticket_status(token: str) -> dict[str, Any]:
 
 
 def _complete_upload_ticket(
-    token: str, ticket: _TransferTicket, finish: dict[str, Any]
+    token: str,
+    ticket: _TransferTicket,
+    finish: dict[str, Any],
+    *,
+    transport: str | None = None,
 ) -> dict[str, Any]:
+    completed_transport = transport or ticket.transport
     data = {
         "path": finish["path"],
         "bytes": finish["bytes"],
         "sha256": finish["sha256"],
         "received_bytes": finish["bytes"],
         "completed": True,
-        "transport": "http-chunks",
+        "transport": completed_transport,
     }
     with _TICKET_LOCK:
         ticket.transfer_id = None
         ticket.received_bytes = finish["bytes"]
         ticket.completed_data = data
+        ticket.transport = completed_transport
         ticket.claimed = False
         ticket.expires_at = _now() + _ticket_ttl_s()
     audit(
@@ -420,6 +511,81 @@ def _finish_upload_transaction(token: str, ticket: _TransferTicket) -> dict[str,
         ticket.expected_sha256,
     )
     return _complete_upload_ticket(token, ticket, finish)
+
+
+async def _refresh_stream_write_leases(path: str, transfer_id: str) -> None:
+    while True:
+        await asyncio.sleep(_STREAM_LEASE_REFRESH_INTERVAL_S)
+        await asyncio.to_thread(transfer_refresh_stream_write, path, transfer_id)
+
+
+async def _stream_full_upload(
+    request: Request,
+    token: str,
+    ticket: _TransferTicket,
+) -> dict[str, Any]:
+    if ticket.transfer_id is None:
+        raise RuntimeError("upload transaction is unavailable")
+    prepared = await asyncio.to_thread(
+        transfer_prepare_stream_write,
+        ticket.path,
+        ticket.transfer_id,
+    )
+    temporary = Path(str(prepared["temp_path"]))
+    digest = hashlib.sha256()
+    received = 0
+    pending = bytearray()
+    with _TICKET_LOCK:
+        ticket.received_bytes = 0
+        ticket.transport = "http-stream"
+        ticket.expires_at = _now() + _ticket_ttl_s()
+    handle = await asyncio.to_thread(temporary.open, "r+b")
+    lease_task = asyncio.create_task(_refresh_stream_write_leases(ticket.path, ticket.transfer_id))
+    try:
+        async for chunk in request.stream():
+            if not chunk:
+                continue
+            received += len(chunk)
+            if received > ticket.expected_bytes:
+                raise ValueError("upload exceeds declared size")
+            digest.update(chunk)
+            if len(chunk) >= _TRANSFER_CHUNK_BYTES:
+                if pending:
+                    block = bytes(pending)
+                    pending.clear()
+                    await asyncio.to_thread(handle.write, block)
+                await asyncio.to_thread(handle.write, chunk)
+            else:
+                pending.extend(chunk)
+                if len(pending) >= _TRANSFER_CHUNK_BYTES:
+                    block = bytes(pending)
+                    pending.clear()
+                    await asyncio.to_thread(handle.write, block)
+            with _TICKET_LOCK:
+                ticket.received_bytes = received
+                ticket.expires_at = _now() + _ticket_ttl_s()
+        if pending:
+            await asyncio.to_thread(handle.write, bytes(pending))
+        await asyncio.to_thread(handle.flush)
+    finally:
+        lease_task.cancel()
+        try:
+            with contextlib.suppress(asyncio.CancelledError):
+                await lease_task
+        finally:
+            await asyncio.to_thread(handle.close)
+
+    if received != ticket.expected_bytes:
+        raise ValueError(f"size mismatch: expected {ticket.expected_bytes}, got {received}")
+    finish = await asyncio.to_thread(
+        transfer_finish_verified_write,
+        ticket.path,
+        ticket.transfer_id,
+        ticket.expected_bytes,
+        ticket.expected_sha256,
+        digest.hexdigest(),
+    )
+    return _complete_upload_ticket(token, ticket, finish, transport="http-stream")
 
 
 def _complete_ticket(token: str) -> None:
@@ -495,13 +661,11 @@ async def upload_endpoint(request: Request) -> JSONResponse:
     try:
         start, end, legacy_full_upload = _upload_range(request, ticket)
         expected_chunk_bytes = end - start
-        if expected_chunk_bytes > MAX_TRANSFER_CHUNK_BYTES:
-            detail = (
-                "legacy full-file upload exceeds the supported request size; update the remote worker"
-                if legacy_full_upload
-                else "upload chunk exceeds the supported request size"
+        if not legacy_full_upload and expected_chunk_bytes > MAX_TRANSFER_CHUNK_BYTES:
+            raise ValueError(
+                "upload chunk exceeds the supported request size: "
+                f"maximum is {MAX_TRANSFER_CHUNK_BYTES} bytes"
             )
-            raise ValueError(f"{detail}: maximum is {MAX_TRANSFER_CHUNK_BYTES} bytes")
         raw_length = request.headers.get("content-length")
         if raw_length:
             try:
@@ -512,7 +676,7 @@ async def upload_endpoint(request: Request) -> JSONResponse:
                 raise ValueError(
                     f"Expected {expected_chunk_bytes} bytes, got Content-Length {content_length}"
                 )
-        if start != ticket.received_bytes:
+        if not legacy_full_upload and start != ticket.received_bytes:
             data = _upload_ticket_data(ticket)
             _release_ticket(token)
             return JSONResponse(
@@ -524,6 +688,10 @@ async def upload_endpoint(request: Request) -> JSONResponse:
                 },
                 status_code=409,
             )
+
+        if legacy_full_upload:
+            data = await _stream_full_upload(request, token, ticket)
+            return JSONResponse({"ok": True, "data": data})
 
         payload = bytearray()
         async for chunk in request.stream():
@@ -578,24 +746,56 @@ async def upload_endpoint(request: Request) -> JSONResponse:
         return _error_response(400, type(exc).__name__, str(exc))
 
 
+def _validate_bound_download_handle(ticket: _TransferTicket, handle: Any) -> None:
+    if ticket.source_identity is None:
+        return
+    current = os.fstat(handle.fileno())
+    if (current.st_dev, current.st_ino, current.st_size) != ticket.source_identity[:3]:
+        raise RuntimeError("stream download source changed after validation")
+
+
 def _open_download(ticket: _TransferTicket):  # noqa: ANN202
-    path = resolve_path(ticket.path, must_exist=True)
-    handle = path.open("rb")
-    stat = os.fstat(handle.fileno())
-    if stat.st_size != ticket.expected_bytes:
+    if ticket.source_handle is not None:
+        ticket.source_handle.seek(0)
+        handle = os.fdopen(os.dup(ticket.source_handle.fileno()), "rb")
+        path = Path(ticket.display_path or ticket.path)
+    else:
+        path = resolve_path(ticket.path, must_exist=True)
+        handle = path.open("rb")
+    try:
+        current = os.fstat(handle.fileno())
+        if current.st_size != ticket.expected_bytes:
+            raise ValueError(
+                f"size mismatch: expected {ticket.expected_bytes}, got {current.st_size}"
+            )
+        _validate_bound_download_handle(ticket, handle)
+        return path, handle
+    except Exception:
         handle.close()
-        raise ValueError(f"size mismatch: expected {ticket.expected_bytes}, got {stat.st_size}")
-    return path, handle
+        raise
 
 
 def _download_iterator(token: str, ticket: _TransferTicket, handle) -> Iterator[bytes]:  # noqa: ANN001
     completed = False
+    chunk_index = 0
     try:
         while True:
+            _validate_bound_download_handle(ticket, handle)
             chunk = handle.read(_TRANSFER_CHUNK_BYTES)
+            _validate_bound_download_handle(ticket, handle)
             if not chunk:
+                if ticket.source_chunk_hashes is not None and chunk_index != len(
+                    ticket.source_chunk_hashes
+                ):
+                    raise RuntimeError("stream download source length changed after validation")
                 completed = True
                 break
+            if ticket.source_chunk_hashes is not None and (
+                chunk_index >= len(ticket.source_chunk_hashes)
+                or hashlib.sha256(chunk).digest() != ticket.source_chunk_hashes[chunk_index]
+            ):
+                raise RuntimeError("stream download source content changed after validation")
+            chunk_index += 1
             yield chunk
     finally:
         handle.close()

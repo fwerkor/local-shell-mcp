@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import threading
 from pathlib import Path
 
 import pytest
@@ -39,7 +41,7 @@ def test_stream_upload_bypasses_json_body_limit_and_retains_status(tmp_path, mon
     response = client.put(ticket["url"], content=data)
 
     assert response.status_code == 200
-    assert response.json()["data"]["transport"] == "http-chunks"
+    assert response.json()["data"]["transport"] == "http-stream"
     assert (tmp_path / "artifact.bin").read_bytes() == data
     repeated = client.put(ticket["url"], content=data)
     assert repeated.status_code == 200
@@ -134,11 +136,16 @@ def test_chunk_upload_rejects_bad_hash_and_oversized_legacy_request(tmp_path, mo
     assert response.status_code == 400
     revoke_transfer_ticket(ticket["token"])
 
-    oversized = remote_transfer.MAX_TRANSFER_CHUNK_BYTES + 1
-    ticket = create_upload_ticket("oversized.bin", oversized, "0" * 64)
-    response = client.put(ticket["url"], content=b"")
-    assert response.status_code == 400
-    assert "update the remote worker" in response.json()["message"]
+    oversized_data = b"x" * (remote_transfer.MAX_TRANSFER_CHUNK_BYTES + 1)
+    ticket = create_upload_ticket(
+        "oversized.bin",
+        len(oversized_data),
+        hashlib.sha256(oversized_data).hexdigest(),
+    )
+    response = client.put(ticket["url"], content=oversized_data)
+    assert response.status_code == 200
+    assert response.json()["data"]["transport"] == "http-stream"
+    assert (tmp_path / "oversized.bin").read_bytes() == oversized_data
     revoke_transfer_ticket(ticket["token"])
 
 
@@ -215,6 +222,88 @@ def test_stream_download_is_exact_and_one_time(tmp_path, monkeypatch):
     assert response.headers["content-length"] == str(len(data))
     assert response.headers["x-content-sha256"] == digest
     assert client.get(ticket["url"]).status_code == 404
+
+
+def test_stream_download_ticket_validates_expected_metadata(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    data = b"validated-stream"
+    source = tmp_path / "source.bin"
+    source.write_bytes(data)
+    digest = hashlib.sha256(data).hexdigest()
+
+    with pytest.raises(ValueError, match="must be provided together"):
+        remote_transfer.create_stream_download_ticket("source.bin", expected_bytes=len(data))
+    with pytest.raises(ValueError, match="size mismatch"):
+        remote_transfer.create_stream_download_ticket("source.bin", len(data) + 1, digest)
+    with pytest.raises(ValueError, match="sha256 mismatch"):
+        remote_transfer.create_stream_download_ticket(
+            "source.bin",
+            len(data),
+            hashlib.sha256(b"different").hexdigest(),
+        )
+
+
+def test_stream_download_cleanup_preserves_atomic_replacement(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    original = b"original-cleanup"
+    replacement_data = b"replacement-data"
+    assert len(original) == len(replacement_data)
+    source = tmp_path / "source.bin"
+    source.write_bytes(original)
+    ticket = remote_transfer.create_stream_download_ticket("source.bin", cleanup_source=True)
+    replacement = tmp_path / "replacement.bin"
+    replacement.write_bytes(replacement_data)
+    try:
+        replacement.replace(source)
+    except OSError:
+        revoke_transfer_ticket(ticket["token"])
+        pytest.skip("platform does not permit atomic replacement of an open file")
+
+    revoke_transfer_ticket(ticket["token"])
+
+    assert source.read_bytes() == replacement_data
+
+
+def test_stream_download_ticket_stays_bound_after_atomic_replace(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    original = b"original-stream" * 131072
+    replacement_data = b"replaced-stream" * 131072
+    assert len(original) == len(replacement_data)
+    source = tmp_path / "source.bin"
+    source.write_bytes(original)
+    ticket = remote_transfer.create_stream_download_ticket("source.bin")
+    replacement = tmp_path / "replacement.bin"
+    replacement.write_bytes(replacement_data)
+    try:
+        replacement.replace(source)
+    except OSError:
+        revoke_transfer_ticket(ticket["token"])
+        pytest.skip("platform does not permit atomic replacement of an open file")
+
+    response = client.get(ticket["url"])
+
+    assert response.status_code == 200
+    assert response.content == original
+    assert source.read_bytes() == replacement_data
+
+
+def test_stream_download_rejects_in_place_mutation_before_yield(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    original = b"a" * (remote_transfer._TRANSFER_CHUNK_BYTES + 17)
+    mutated = b"b" * len(original)
+    source = tmp_path / "source.bin"
+    source.write_bytes(original)
+    ticket_info = remote_transfer.create_stream_download_ticket("source.bin")
+    ticket = remote_transfer._claim_ticket(ticket_info["token"], "download")
+    _, handle = remote_transfer._open_download(ticket)
+    source.write_bytes(mutated)
+    monkeypatch.setattr(remote_transfer, "_validate_bound_download_handle", lambda *args: None)
+    iterator = remote_transfer._download_iterator(ticket_info["token"], ticket, handle)
+
+    with pytest.raises(RuntimeError, match="content changed"):
+        next(iterator)
+
+    revoke_transfer_ticket(ticket_info["token"])
 
 
 def test_stale_orphan_download_snapshot_is_scavenged(tmp_path, monkeypatch):
@@ -348,6 +437,97 @@ def test_worker_upload_uses_raw_chunk_endpoint(tmp_path, monkeypatch):
 
     assert result["transport"] == "http-chunks"
     assert (tmp_path / "destination.bin").read_bytes() == data
+
+
+@pytest.mark.asyncio
+async def test_worker_stream_put_cancellation_kills_curl(tmp_path, monkeypatch):
+    import local_shell_mcp.remote as remote
+
+    _client(tmp_path, monkeypatch)
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    digest = hashlib.sha256(b"payload").hexdigest()
+    monkeypatch.setattr(remote, "_worker_identity_path", lambda: _worker_identity(tmp_path))
+    monkeypatch.setattr(remote.shutil, "which", lambda name: "/usr/bin/curl")
+    started = threading.Event()
+    killed = threading.Event()
+
+    class FakeProcess:
+        def __init__(self, command, **kwargs):
+            del command, kwargs
+            self.returncode = None
+            started.set()
+
+        def communicate(self):
+            assert killed.wait(2)
+            self.returncode = -9
+            return b"", b"cancelled"
+
+        def kill(self):
+            self.returncode = -9
+            killed.set()
+
+    monkeypatch.setattr(remote.subprocess, "Popen", FakeProcess)
+
+    task = asyncio.create_task(
+        remote._worker_put_url_cancellable(
+            "source.bin",
+            "http://testserver/upload",
+            len(b"payload"),
+            digest,
+            60,
+        )
+    )
+    assert await asyncio.to_thread(started.wait, 2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert killed.is_set()
+    assert "transfer_put_url" not in remote.REMOTE_NON_CANCELLABLE_WORKER_TOOLS
+
+
+def test_stream_upload_rejects_staged_file_changed_after_hash(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    data = b"verified-stream"
+    digest = hashlib.sha256(data).hexdigest()
+    ticket = create_upload_ticket("artifact.bin", len(data), digest)
+    original_finish = remote_transfer.transfer_finish_verified_write
+
+    def mutate_before_commit(path, transfer_id, *args):
+        temporary = next(tmp_path.glob(".artifact.bin.local-shell-mcp-transfer-*.tmp"))
+        temporary.write_bytes(b"x" * len(data))
+        return original_finish(path, transfer_id, *args)
+
+    monkeypatch.setattr(remote_transfer, "transfer_finish_verified_write", mutate_before_commit)
+
+    response = client.put(ticket["url"], content=data)
+
+    assert response.status_code == 400
+    assert "file sha256 mismatch" in response.json()["message"]
+    assert not (tmp_path / "artifact.bin").exists()
+
+
+@pytest.mark.asyncio
+async def test_stream_write_lease_refresher_renews_until_cancel(monkeypatch):
+    calls: list[tuple[str, str]] = []
+    refreshed = threading.Event()
+
+    def refresh(path, transfer_id):
+        calls.append((path, transfer_id))
+        refreshed.set()
+
+    monkeypatch.setattr(remote_transfer, "_STREAM_LEASE_REFRESH_INTERVAL_S", 0)
+    monkeypatch.setattr(remote_transfer, "transfer_refresh_stream_write", refresh)
+
+    task = asyncio.create_task(remote_transfer._refresh_stream_write_leases("artifact.bin", "txn"))
+    assert await asyncio.to_thread(refreshed.wait, 2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert calls
+    assert all(call == ("artifact.bin", "txn") for call in calls)
 
 
 def test_worker_download_is_transactional_and_verified(tmp_path, monkeypatch):

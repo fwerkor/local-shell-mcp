@@ -39,6 +39,7 @@ from .fs_ops import (
     prune_temp_dir,
     read_text,
     read_texts,
+    refresh_temp_file_lease,
     relative_display,
     resolve_path,
     temp_dir,
@@ -73,7 +74,7 @@ from .playwright_ops import playwright_run_script
 from .process_utils import managed_process_kwargs
 from .remote import REMOTE_WORKER_TRANSFER_LANE, remote_manager
 from .remote_transfer import (
-    create_download_ticket,
+    create_stream_download_ticket,
     create_upload_ticket,
     get_upload_ticket_status,
     revoke_transfer_ticket,
@@ -108,7 +109,6 @@ from .skill_ops import (
 from .state_store import get_state_store
 from .tmux_helper import persistent_shell_backend_info
 from .transfer_ops import (
-    DEFAULT_TRANSFER_CHUNK_BYTES,
     normalize_chunk_size,
     transfer_alloc_temp_path,
     transfer_pack_dir_async,
@@ -1440,15 +1440,128 @@ async def _remote_transfer_data(
     return _unwrap_remote_transfer_result(result, machine=machine, tool=tool)
 
 
-def _revoke_cancelled_snapshot_ticket(task: asyncio.Task[dict[str, Any]]) -> None:
-    if task.cancelled():
-        return
+def _controller_relay_staging_path() -> str:
+    settings = get_settings()
+    root = settings.workspace_root.resolve()
+    parent = (root / ".local-shell-mcp").resolve(strict=False)
     try:
-        ticket = task.result()
-    except Exception:
-        return
-    with suppress(Exception):
-        revoke_transfer_ticket(ticket["token"])
+        parent.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("relay staging parent escapes workspace") from exc
+
+    directory = parent / "transfer-relay"
+    if directory.is_symlink():
+        raise ValueError("relay staging directory must not be a symlink")
+    directory.mkdir(parents=True, exist_ok=True)
+    resolved_directory = directory.resolve(strict=True)
+    try:
+        resolved_directory.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("relay staging directory escapes workspace") from exc
+    if resolved_directory != directory:
+        raise ValueError("relay staging directory must not resolve through a symlink")
+    directory = resolved_directory
+
+    with suppress(OSError):
+        directory.chmod(0o700)
+    cutoff = time.time() - max(120, 2 * int(settings.remote_job_timeout_s))
+    with suppress(OSError):
+        for candidate in directory.iterdir():
+            if (
+                candidate.is_file()
+                and candidate.name.lstrip(".").startswith("relay-")
+                and candidate.stat().st_mtime < cutoff
+            ):
+                candidate.unlink(missing_ok=True)
+    return relative_display(directory / f"relay-{uuid.uuid4().hex}.bin")
+
+
+async def _stream_remote_file_to_upload_ticket(
+    src_machine: str,
+    src_path: str,
+    total_bytes: int,
+    expected_sha256: str,
+    ticket: dict[str, Any],
+    progress: TransferProgress | None = None,
+) -> dict[str, Any]:
+    timeout_s = get_settings().remote_job_timeout_s
+    last_error: Exception | None = None
+    last_reported = -1
+    for attempt in range(3):
+        task = asyncio.create_task(
+            _remote_transfer_data(
+                src_machine,
+                "transfer_put_url",
+                {
+                    "path": src_path,
+                    "url": ticket["url"],
+                    "expected_bytes": total_bytes,
+                    "expected_sha256": expected_sha256,
+                    "timeout_s": timeout_s,
+                },
+                timeout_s,
+            )
+        )
+        try:
+            while not task.done():
+                done, _ = await asyncio.wait({task}, timeout=1.0)
+                if task in done:
+                    break
+                try:
+                    status = get_upload_ticket_status(ticket["token"])
+                except FileNotFoundError as status_error:
+                    try:
+                        await task
+                    except Exception:
+                        raise
+                    raise status_error
+                received = int(status.get("received_bytes") or 0)
+                if received != last_reported:
+                    await _report_transfer_progress(
+                        progress,
+                        phase="transferring",
+                        bytes_transferred=received,
+                        total_bytes=total_bytes,
+                        chunks=0,
+                        chunk_size=total_bytes,
+                    )
+                    last_reported = received
+        except BaseException:
+            task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await task
+            raise
+        try:
+            await task
+        except Exception as exc:
+            last_error = exc
+            try:
+                status = get_upload_ticket_status(ticket["token"])
+            except FileNotFoundError:
+                raise exc from None
+            if status.get("completed"):
+                return status
+            if attempt == 2:
+                raise
+            await asyncio.sleep(0.25 * (2**attempt))
+            continue
+
+        status = get_upload_ticket_status(ticket["token"])
+        if status.get("completed"):
+            return status
+        last_error = RemoteTransferError(f"upload did not complete: {status}")
+        if attempt < 2:
+            await asyncio.sleep(0.25 * (2**attempt))
+
+    assert last_error is not None
+    raise last_error
+
+
+async def _refresh_controller_temp_lease(path: str) -> None:
+    source = resolve_path(path, must_exist=True)
+    while True:
+        await asyncio.to_thread(refresh_temp_file_lease, source, create=False)
+        await asyncio.sleep(60.0)
 
 
 async def _copy_local_file_to_remote(
@@ -1459,23 +1572,12 @@ async def _copy_local_file_to_remote(
     chunk_size: int | None = None,
     progress: TransferProgress | None = None,
 ) -> dict:
-    stat = await asyncio.to_thread(transfer_stat, source_path, True)
-    if stat.get("type") != "file":
-        raise ValueError(f"source is not a file: {source_path}")
-    effective_chunk_size = stat["size"] if chunk_size is None else normalize_chunk_size(chunk_size)
-    ticket_task = asyncio.create_task(
-        asyncio.to_thread(
-            create_download_ticket,
-            source_path,
-            stat["size"],
-            stat["sha256"],
-        )
-    )
-    try:
-        ticket = await asyncio.shield(ticket_task)
-    except asyncio.CancelledError:
-        ticket_task.add_done_callback(_revoke_cancelled_snapshot_ticket)
-        raise
+    if chunk_size is not None:
+        normalize_chunk_size(chunk_size)
+    ticket = await asyncio.to_thread(create_stream_download_ticket, source_path)
+    total_bytes = int(ticket["bytes"])
+    digest = str(ticket["sha256"])
+    lease_task = asyncio.create_task(_refresh_controller_temp_lease(source_path))
     try:
         finish = await _remote_transfer_data(
             dst_machine,
@@ -1484,29 +1586,32 @@ async def _copy_local_file_to_remote(
                 "url": ticket["url"],
                 "path": dst_path,
                 "overwrite": overwrite,
-                "expected_bytes": stat["size"],
-                "expected_sha256": stat["sha256"],
+                "expected_bytes": total_bytes,
+                "expected_sha256": digest,
                 "timeout_s": get_settings().remote_job_timeout_s,
             },
             get_settings().remote_job_timeout_s,
         )
     finally:
+        lease_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await lease_task
         revoke_transfer_ticket(ticket["token"])
     await _report_transfer_progress(
         progress,
         phase="transferring",
-        bytes_transferred=stat["size"],
-        total_bytes=stat["size"],
+        bytes_transferred=total_bytes,
+        total_bytes=total_bytes,
         chunks=1,
-        chunk_size=effective_chunk_size,
+        chunk_size=total_bytes,
     )
     return {
-        "source": {"machine": "controller", "path": stat["path"]},
+        "source": {"machine": "controller", "path": ticket["path"]},
         "destination": {"machine": dst_machine, "path": finish["path"]},
-        "bytes": stat["size"],
-        "sha256": stat.get("sha256"),
+        "bytes": total_bytes,
+        "sha256": digest,
         "chunks": 1,
-        "chunk_size": effective_chunk_size,
+        "chunk_size": total_bytes,
         "transport": "http-stream",
     }
 
@@ -1525,92 +1630,39 @@ async def _copy_remote_file_to_local(
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {src_path}")
     total_bytes = int(stat["size"])
-    effective_chunk_size = normalize_chunk_size(
-        DEFAULT_TRANSFER_CHUNK_BYTES if chunk_size is None else chunk_size
-    )
-    chunk_timeout_s = min(int(get_settings().remote_job_timeout_s), 300)
+    if chunk_size is not None:
+        normalize_chunk_size(chunk_size)
     ticket = create_upload_ticket(
         destination_path,
         total_bytes,
         stat["sha256"],
         overwrite,
     )
-    chunks = 0
-    finish: dict[str, Any] | None = None
     try:
-        status = get_upload_ticket_status(ticket["token"])
-        offset = int(status["received_bytes"])
         await _report_transfer_progress(
             progress,
             phase="transferring",
-            bytes_transferred=offset,
+            bytes_transferred=0,
             total_bytes=total_bytes,
-            chunks=chunks,
-            chunk_size=effective_chunk_size,
+            chunks=0,
+            chunk_size=total_bytes,
         )
-        while offset < total_bytes or (total_bytes == 0 and chunks == 0):
-            expected_end = min(total_bytes, offset + effective_chunk_size)
-            last_error: Exception | None = None
-            for attempt in range(3):
-                try:
-                    response = await _remote_transfer_data(
-                        src_machine,
-                        "transfer_upload_url",
-                        {
-                            "path": src_path,
-                            "url": ticket["url"],
-                            "expected_bytes": total_bytes,
-                            "expected_sha256": stat["sha256"],
-                            "timeout_s": chunk_timeout_s,
-                            "offset": offset,
-                            "chunk_size": effective_chunk_size,
-                        },
-                        chunk_timeout_s,
-                    )
-                except Exception as exc:
-                    last_error = exc
-                    status = get_upload_ticket_status(ticket["token"])
-                    acknowledged = int(status["received_bytes"])
-                    if acknowledged == expected_end or (
-                        total_bytes == 0 and status.get("completed")
-                    ):
-                        response = status
-                    elif acknowledged != offset or attempt == 2:
-                        raise
-                    else:
-                        await asyncio.sleep(1)
-                        continue
-
-                acknowledged = int(response.get("received_bytes", -1))
-                if total_bytes == 0:
-                    if not response.get("completed"):
-                        raise RemoteTransferError("empty upload was not completed")
-                elif acknowledged != expected_end:
-                    raise RemoteTransferError(
-                        f"upload acknowledged offset {acknowledged}, expected {expected_end}"
-                    )
-                offset = acknowledged
-                chunks += 1
-                finish = response
-                await _report_transfer_progress(
-                    progress,
-                    phase="transferring",
-                    bytes_transferred=offset,
-                    total_bytes=total_bytes,
-                    chunks=chunks,
-                    chunk_size=effective_chunk_size,
-                )
-                break
-            else:
-                assert last_error is not None
-                raise last_error
-            if finish.get("completed"):
-                break
-
-        if finish is None or not finish.get("completed"):
-            finish = get_upload_ticket_status(ticket["token"])
-        if not finish.get("completed"):
-            raise RemoteTransferError(f"upload did not complete: {finish}")
+        finish = await _stream_remote_file_to_upload_ticket(
+            src_machine,
+            src_path,
+            total_bytes,
+            stat["sha256"],
+            ticket,
+            progress,
+        )
+        await _report_transfer_progress(
+            progress,
+            phase="transferring",
+            bytes_transferred=total_bytes,
+            total_bytes=total_bytes,
+            chunks=1,
+            chunk_size=total_bytes,
+        )
     finally:
         revoke_transfer_ticket(ticket["token"])
     return {
@@ -1618,9 +1670,9 @@ async def _copy_remote_file_to_local(
         "destination": {"machine": "controller", "path": finish["path"]},
         "bytes": total_bytes,
         "sha256": stat.get("sha256"),
-        "chunks": chunks,
-        "chunk_size": effective_chunk_size,
-        "transport": "http-chunks",
+        "chunks": 1,
+        "chunk_size": total_bytes,
+        "transport": "http-stream",
     }
 
 
@@ -1639,101 +1691,78 @@ async def _copy_remote_file_via_controller_relay(
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {src_path}")
     total_bytes = int(stat["size"])
-    effective_chunk_size = normalize_chunk_size(
-        DEFAULT_TRANSFER_CHUNK_BYTES if chunk_size is None else chunk_size
-    )
-    begin = await _remote_transfer_data(
-        dst_machine,
-        "transfer_begin_write",
-        {
-            "path": dst_path,
-            "overwrite": overwrite,
-            "expected_bytes": total_bytes,
-        },
-    )
-    transfer_id = str(begin["transfer_id"])
-    offset = 0
-    chunks = 0
+    if chunk_size is not None:
+        normalize_chunk_size(chunk_size)
+    staging_path = _controller_relay_staging_path()
+    upload_ticket: dict[str, Any] | None = None
+    staged_ticket: dict[str, Any] | None = None
     try:
+        upload_ticket = create_upload_ticket(
+            staging_path,
+            total_bytes,
+            stat["sha256"],
+            True,
+        )
         await _report_transfer_progress(
             progress,
             phase="transferring",
             bytes_transferred=0,
             total_bytes=total_bytes,
             chunks=0,
-            chunk_size=effective_chunk_size,
+            chunk_size=total_bytes,
         )
-        while offset < total_bytes:
-            chunk = await _remote_transfer_data(
-                src_machine,
-                "transfer_read_chunk",
-                {
-                    "path": src_path,
-                    "offset": offset,
-                    "chunk_size": effective_chunk_size,
-                },
-            )
-            chunk_bytes = int(chunk.get("bytes", 0))
-            if chunk_bytes <= 0:
-                raise RemoteTransferError(
-                    f"source returned an empty chunk at offset {offset} before EOF"
-                )
-            if int(chunk.get("offset", -1)) != offset:
-                raise RemoteTransferError(
-                    f"source returned offset {chunk.get('offset')}, expected {offset}"
-                )
-            written = await _remote_transfer_data(
-                dst_machine,
-                "transfer_write_chunk",
-                {
-                    "path": dst_path,
-                    "transfer_id": transfer_id,
-                    "offset": offset,
-                    "data_b64": chunk["data_b64"],
-                    "expected_sha256": chunk["sha256"],
-                },
-            )
-            if int(written.get("bytes", -1)) != chunk_bytes:
-                raise RemoteTransferError(
-                    f"destination wrote {written.get('bytes')} bytes, expected {chunk_bytes}"
-                )
-            offset += chunk_bytes
-            chunks += 1
-            await _report_transfer_progress(
-                progress,
-                phase="transferring",
-                bytes_transferred=offset,
-                total_bytes=total_bytes,
-                chunks=chunks,
-                chunk_size=effective_chunk_size,
-            )
-
+        await _stream_remote_file_to_upload_ticket(
+            src_machine,
+            src_path,
+            total_bytes,
+            stat["sha256"],
+            upload_ticket,
+            progress,
+        )
+        revoke_transfer_ticket(upload_ticket["token"])
+        staged_ticket = create_stream_download_ticket(
+            staging_path,
+            total_bytes,
+            stat["sha256"],
+            cleanup_source=True,
+        )
         finish = await _remote_transfer_data(
             dst_machine,
-            "transfer_finish_write",
+            "transfer_download_url",
             {
                 "path": dst_path,
-                "transfer_id": transfer_id,
+                "url": staged_ticket["url"],
+                "overwrite": overwrite,
                 "expected_bytes": total_bytes,
                 "expected_sha256": stat["sha256"],
+                "timeout_s": get_settings().remote_job_timeout_s,
             },
+            get_settings().remote_job_timeout_s,
         )
-    except Exception:
-        with suppress(Exception):
-            await _remote_transfer_data(
-                dst_machine,
-                "transfer_abort_write",
-                {"path": dst_path, "transfer_id": transfer_id},
-            )
-        raise
+        await _report_transfer_progress(
+            progress,
+            phase="transferring",
+            bytes_transferred=total_bytes,
+            total_bytes=total_bytes,
+            chunks=1,
+            chunk_size=total_bytes,
+        )
+    finally:
+        if upload_ticket is not None:
+            revoke_transfer_ticket(upload_ticket["token"])
+        if staged_ticket is not None:
+            revoke_transfer_ticket(staged_ticket["token"])
+        else:
+            with suppress(Exception):
+                await asyncio.to_thread(delete_path, staging_path, False)
     return {
         "source": {"machine": src_machine, "path": stat["path"]},
         "destination": {"machine": dst_machine, "path": finish["path"]},
         "bytes": total_bytes,
         "sha256": stat.get("sha256"),
-        "chunks": chunks,
-        "chunk_size": effective_chunk_size,
-        "transport": "controller-memory-relay",
+        "chunks": 1,
+        "chunk_size": total_bytes,
+        "transport": "controller-http-relay",
     }
 
 

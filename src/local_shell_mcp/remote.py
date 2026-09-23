@@ -125,7 +125,6 @@ REMOTE_NON_CANCELLABLE_WORKER_TOOLS = frozenset(
         "transfer_upload_url",
         "transfer_download_url",
         "transfer_open_receiver",
-        "transfer_put_url",
         "transfer_get_url",
         "transfer_close_receiver",
     }
@@ -1550,44 +1549,58 @@ def _worker_put_url(
 ) -> dict[str, Any]:
     _worker_validate_external_transfer_url(url)
     source = resolve_path(path, must_exist=True)
-    stat = transfer_stat(str(source), True)
+    stat = transfer_stat(str(source), False)
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {path}")
     total = int(expected_bytes)
     if int(stat["size"]) != total:
         raise ValueError(f"size mismatch: expected {total}, got {stat['size']}")
-    if str(stat.get("sha256") or "").lower() != str(expected_sha256).lower():
-        raise ValueError("file sha256 mismatch before upload")
 
     curl = shutil.which("curl")
     if not curl:
         raise FileNotFoundError("curl is required for remote file streaming")
     marker = "\n__LSM_HTTP_STATUS__:"
-    completed = subprocess.run(  # noqa: S603
-        [
-            curl,
-            "-sS",
-            "--http1.1",
-            "--connect-timeout",
-            "15",
-            "--max-time",
-            str(_worker_curl_timeout(timeout_s)),
-            "-X",
-            "PUT",
-            "-H",
-            "Expect:",
-            "-H",
-            "Content-Type: application/octet-stream",
-            "--upload-file",
-            str(source),
-            "--write-out",
-            marker + "%{http_code}",
-            url,
-        ],
-        capture_output=True,
-        check=False,
-        creationflags=_worker_subprocess_creationflags(),
-    )
+    command = [
+        curl,
+        "-sS",
+        "--http1.1",
+        "--connect-timeout",
+        "15",
+        "--max-time",
+        str(_worker_curl_timeout(timeout_s)),
+        "-X",
+        "PUT",
+        "-H",
+        "Expect:",
+        "-H",
+        "Content-Type: application/octet-stream",
+        "--upload-file",
+        str(source),
+        "--write-out",
+        marker + "%{http_code}",
+        url,
+    ]
+    cancellation = getattr(_worker_request_context, "cancellation", None)
+    if cancellation is None:
+        completed = subprocess.run(  # noqa: S603
+            command,
+            capture_output=True,
+            check=False,
+            creationflags=_worker_subprocess_creationflags(),
+        )
+    else:
+        process = subprocess.Popen(  # noqa: S603
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            creationflags=_worker_subprocess_creationflags(),
+        )
+        cancellation.attach(process)
+        try:
+            stdout, stderr = process.communicate()
+        finally:
+            cancellation.detach(process)
+        completed = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
     raw_stdout = completed.stdout or b""
     raw_stderr = completed.stderr or b""
     stdout = raw_stdout.encode() if isinstance(raw_stdout, str) else raw_stdout
@@ -1608,7 +1621,7 @@ def _worker_put_url(
     return {
         "path": stat["path"],
         "bytes": total,
-        "sha256": stat["sha256"],
+        "sha256": str(expected_sha256).lower(),
         "http_status": status_code,
         "transport": "http-put",
     }
@@ -1935,8 +1948,7 @@ async def _execute_transfer_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         return await asyncio.to_thread(close_peer_receiver, args["receiver_id"])
 
     if tool == "transfer_put_url":
-        return await asyncio.to_thread(
-            _worker_put_url,
+        return await _worker_put_url_cancellable(
             args["path"],
             args["url"],
             args["expected_bytes"],
@@ -2159,6 +2171,54 @@ class _WorkerRequestCancellation:
 
 
 _worker_request_context = threading.local()
+
+
+def _worker_put_url_in_cancellable_thread(
+    path: str,
+    url: str,
+    expected_bytes: int,
+    expected_sha256: str,
+    timeout_s: int | None,
+    cancellation: _WorkerRequestCancellation,
+) -> dict[str, Any]:
+    previous = getattr(_worker_request_context, "cancellation", None)
+    _worker_request_context.cancellation = cancellation
+    try:
+        return _worker_put_url(path, url, expected_bytes, expected_sha256, timeout_s)
+    finally:
+        if previous is None:
+            with contextlib.suppress(AttributeError):
+                del _worker_request_context.cancellation
+        else:
+            _worker_request_context.cancellation = previous
+
+
+async def _worker_put_url_cancellable(
+    path: str,
+    url: str,
+    expected_bytes: int,
+    expected_sha256: str,
+    timeout_s: int | None = None,
+) -> dict[str, Any]:
+    cancellation = _WorkerRequestCancellation()
+    request = asyncio.create_task(
+        asyncio.to_thread(
+            _worker_put_url_in_cancellable_thread,
+            path,
+            url,
+            expected_bytes,
+            expected_sha256,
+            timeout_s,
+            cancellation,
+        )
+    )
+    try:
+        return await asyncio.shield(request)
+    except asyncio.CancelledError:
+        cancellation.cancel()
+        with contextlib.suppress(Exception):
+            await asyncio.shield(request)
+        raise
 
 
 def _worker_post_json_with_curl(
