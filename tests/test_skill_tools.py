@@ -160,10 +160,9 @@ def test_mcp_instructions_describe_the_fixed_skill_flow(tmp_path, monkeypatch):
 
     instructions = build_mcp().instructions
 
-    assert "skill_list first" in instructions
-    assert "skill_load with that exact name" in instructions
-    assert "skill_read only when" in instructions
-    assert "do not expect per-Skill MCP tools" in instructions
+    assert "use skill_list first" in instructions
+    assert "skill_load with its exact name" in instructions
+    assert "use skill_read only for related files" in instructions
     assert "activate_skill__" not in instructions
 
 
