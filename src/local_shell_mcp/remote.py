@@ -112,6 +112,32 @@ MAX_REMOTE_INVITES = 1_024
 MAX_REMOTE_MACHINE_NAME_LENGTH = 128
 REMOTE_WORKER_INTERACTIVE_LANE = "interactive"
 REMOTE_WORKER_TRANSFER_LANE = "transfer"
+REMOTE_WORKER_INTERACTIVE_CONCURRENCY = 4
+REMOTE_QUEUE_TIMEOUT_S = 30.0
+REMOTE_RESULT_GRACE_S = 120.0
+REMOTE_WORKER_RESULT_OUTBOX_MAX_ITEMS = 1_024
+REMOTE_WORKER_RESULT_OUTBOX_MAX_BYTES = 256 * 1024 * 1024
+
+
+def remote_execution_rpc_timeout_s(
+    execution_timeout_s: float, queue_timeout_s: float | None = None
+) -> float:
+    queue_budget = REMOTE_QUEUE_TIMEOUT_S if queue_timeout_s is None else max(0.1, queue_timeout_s)
+    return queue_budget + max(0.1, float(execution_timeout_s)) + REMOTE_RESULT_GRACE_S
+
+
+async def _wait_remote_future(future: asyncio.Future[Any], timeout_s: float) -> Any:
+    """Wait without cancelling the underlying future if this task is cancelled."""
+    done, _ = await asyncio.wait(
+        {future},
+        timeout=max(0.0, float(timeout_s)),
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    if future not in done:
+        raise TimeoutError
+    return future.result()
+
+
 REMOTE_NON_CANCELLABLE_WORKER_TOOLS = frozenset(
     {
         "write_file",
@@ -128,6 +154,12 @@ REMOTE_NON_CANCELLABLE_WORKER_TOOLS = frozenset(
         "transfer_put_url",
         "transfer_get_url",
         "transfer_close_receiver",
+        "shell_start",
+        "shell_send",
+        "shell_kill",
+        "job_start",
+        "job_stop",
+        "job_retry",
     }
 )
 
@@ -330,6 +362,8 @@ class RemoteManager:
         self.tokens: dict[str, str] = {}
         self.pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self.pending_machines: dict[str, str] = {}
+        self.claimed_waiters: dict[str, asyncio.Future[float]] = {}
+        self.job_lifecycle: dict[str, dict[str, Any]] = {}
         self.cancelled_jobs: dict[str, float] = {}
         self.claimed_jobs: set[str] = set()
         self._lock = asyncio.Lock()
@@ -737,8 +771,12 @@ class RemoteManager:
 
     def _cancel_job_locked(self, job_id: str) -> None:
         future = self.pending.pop(job_id, None)
+        claimed = self.claimed_waiters.pop(job_id, None)
         self.pending_machines.pop(job_id, None)
+        self.job_lifecycle.pop(job_id, None)
         self.claimed_jobs.discard(job_id)
+        if claimed is not None and not claimed.done():
+            claimed.cancel()
         now = _utc()
         self.cancelled_jobs[job_id] = now
         self._prune_cancelled_jobs_locked(now)
@@ -828,6 +866,24 @@ class RemoteManager:
                     self.cancelled_jobs.pop(job_id, None)
                     continue
                 self.claimed_jobs.add(job_id)
+                claimed_waiter = self.claimed_waiters.get(job_id)
+                claimed_at = _utc()
+                lifecycle = self.job_lifecycle.get(job_id)
+                if lifecycle is not None:
+                    lifecycle["claimed_at"] = claimed_at
+                if claimed_waiter is not None and not claimed_waiter.done():
+                    claimed_waiter.set_result(claimed_at)
+            if lifecycle is not None:
+                audit(
+                    "remote_job_claimed",
+                    job_id=job_id,
+                    machine=worker.name,
+                    tool=lifecycle.get("tool"),
+                    lane=lifecycle.get("lane"),
+                    enqueued_at=lifecycle.get("enqueued_at"),
+                    claimed_at=claimed_at,
+                    queue_wait_s=max(0.0, claimed_at - float(lifecycle.get("enqueued_at") or claimed_at)),
+                )
             return {
                 "job": job,
                 "upgrade": upgrade,
@@ -851,9 +907,11 @@ class RemoteManager:
     async def submit_result(self, token: str, payload: dict[str, Any]) -> dict[str, Any]:
         worker = self._worker_by_token(token)
         job_id = str(payload.get("job_id") or "")
+        accepted_at = _utc()
+        lifecycle: dict[str, Any] | None = None
         with self._state_lock:
             worker.status = "online"
-            worker.last_seen = _utc()
+            worker.last_seen = accepted_at
             self._prune_cancelled_jobs_locked()
             assigned_machine = self.pending_machines.get(job_id)
             if assigned_machine is not None and assigned_machine != worker.name:
@@ -869,14 +927,47 @@ class RemoteManager:
             if assigned_machine is None:
                 self.cancelled_jobs.pop(job_id, None)
                 self.claimed_jobs.discard(job_id)
+                self.job_lifecycle.pop(job_id, None)
                 return {"accepted": False}
             self.pending_machines.pop(job_id, None)
             self.cancelled_jobs.pop(job_id, None)
             self.claimed_jobs.discard(job_id)
+            self.claimed_waiters.pop(job_id, None)
+            lifecycle = self.job_lifecycle.pop(job_id, None)
             future = self.pending.pop(job_id, None)
             if future and not future.done():
                 future.set_result(payload)
-        return {"accepted": bool(future)}
+        accepted = bool(future)
+        if lifecycle is not None:
+            worker_timing = payload.get("lifecycle")
+            worker_timing = worker_timing if isinstance(worker_timing, dict) else {}
+            enqueued_at = float(lifecycle.get("enqueued_at") or accepted_at)
+            claimed_at = float(lifecycle.get("claimed_at") or accepted_at)
+            submitted_at = worker_timing.get("result_submit_started_at")
+            audit(
+                "remote_job_result_accepted",
+                job_id=job_id,
+                machine=worker.name,
+                tool=lifecycle.get("tool"),
+                lane=lifecycle.get("lane"),
+                enqueued_at=enqueued_at,
+                claimed_at=claimed_at,
+                execution_started_at=worker_timing.get("execution_started_at"),
+                execution_finished_at=worker_timing.get("execution_finished_at"),
+                result_spooled_at=worker_timing.get("result_spooled_at"),
+                result_submit_started_at=submitted_at,
+                result_accepted_at=accepted_at,
+                queue_wait_s=max(0.0, claimed_at - enqueued_at),
+                execution_s=worker_timing.get("execution_s"),
+                result_submit_wait_s=(
+                    max(0.0, accepted_at - float(submitted_at))
+                    if submitted_at is not None
+                    else None
+                ),
+                end_to_end_s=max(0.0, accepted_at - enqueued_at),
+                accepted=accepted,
+            )
+        return {"accepted": accepted}
 
     async def call(
         self,
@@ -886,12 +977,41 @@ class RemoteManager:
         timeout_s: int | None = None,
         *,
         lane: str | None = None,
+        execution_timeout_s: float | None = None,
+        queue_timeout_s: float | None = None,
+        rpc_timeout_s: float | None = None,
     ) -> dict[str, Any]:
         settings = get_settings()
-        effective_timeout = timeout_s or settings.remote_job_timeout_s
+        queue_budget = max(
+            0.1,
+            float(REMOTE_QUEUE_TIMEOUT_S if queue_timeout_s is None else queue_timeout_s),
+        )
+        if rpc_timeout_s is not None:
+            total_budget = max(0.1, float(rpc_timeout_s))
+        elif timeout_s is not None:
+            # Preserve the legacy call contract: timeout_s is the full RPC deadline.
+            total_budget = max(0.1, float(timeout_s))
+        elif execution_timeout_s is not None:
+            total_budget = (
+                queue_budget
+                + max(0.1, float(execution_timeout_s))
+                + REMOTE_RESULT_GRACE_S
+            )
+        else:
+            total_budget = max(0.1, float(settings.remote_job_timeout_s))
+        queue_budget = min(queue_budget, total_budget)
+
         job_id = "job_" + uuid.uuid4().hex
         loop = asyncio.get_running_loop()
         future: asyncio.Future[dict[str, Any]] = loop.create_future()
+        claimed_waiter: asyncio.Future[float] = loop.create_future()
+        enqueued_at = _utc()
+        lifecycle = {
+            "machine": machine,
+            "tool": tool,
+            "lane": lane,
+            "enqueued_at": enqueued_at,
+        }
         with self._state_lock:
             self._load_registry_unlocked()
             worker = self.workers.get(machine)
@@ -902,13 +1022,25 @@ class RemoteManager:
                 raise RuntimeError(f"remote machine is offline: {machine}")
             max_pending = max(1, settings.remote_max_pending_jobs)
             machine_pending = sum(1 for value in self.pending_machines.values() if value == machine)
-            queued = worker.queue.qsize() + worker.transfer_queue.qsize()
-            if queued >= max_pending or machine_pending >= max_pending:
+            if machine_pending >= max_pending:
                 raise RuntimeError(f"remote machine queue is full: {machine}")
+
+            # Cancelled entries remain in asyncio.Queue until a worker drains them.
+            # Keep a separate physical safety ceiling; never charge those tombstones
+            # against the logical limit for live work.
+            physical_queue_depth = worker.queue.qsize() + worker.transfer_queue.qsize()
+            physical_queue_cap = max_pending * 4
+            if physical_queue_depth >= physical_queue_cap:
+                raise RuntimeError(
+                    f"remote machine physical queue backlog is full: {machine}"
+                )
             self.pending[job_id] = future
+            self.claimed_waiters[job_id] = claimed_waiter
             self.pending_machines[job_id] = machine
+            self.job_lifecycle[job_id] = lifecycle
             protocol_version = _worker_poll_protocol_version(worker.info)
             job_lane = _worker_job_lane(tool, lane)
+            lifecycle["lane"] = job_lane
             queue = (
                 worker.transfer_queue
                 if protocol_version >= REMOTE_WORKER_LANE_PROTOCOL_VERSION
@@ -921,37 +1053,67 @@ class RemoteManager:
                     "tool": tool,
                     "args": args,
                     "lane": job_lane,
-                    "expires_at": _utc() + effective_timeout,
+                    "expires_at": enqueued_at + total_budget,
                 }
             )
+        audit(
+            "remote_job_enqueued",
+            job_id=job_id,
+            machine=machine,
+            tool=tool,
+            lane=job_lane,
+            enqueued_at=enqueued_at,
+            queue_timeout_s=queue_budget,
+            execution_timeout_s=execution_timeout_s,
+            rpc_timeout_s=total_budget,
+        )
+
         preserve_pending = False
+        deadline = loop.time() + total_budget
+
+        def preserve_claimed_mutation() -> None:
+            nonlocal preserve_pending
+            preserve_pending = True
+
+            def cleanup(_future: asyncio.Future[dict[str, Any]]) -> None:
+                with self._state_lock:
+                    self.pending.pop(job_id, None)
+                    self.pending_machines.pop(job_id, None)
+                    self.claimed_waiters.pop(job_id, None)
+                    self.job_lifecycle.pop(job_id, None)
+                    self.claimed_jobs.discard(job_id)
+
+            future.add_done_callback(cleanup)
+
         try:
-            result = await asyncio.wait_for(asyncio.shield(future), timeout=effective_timeout)
+            try:
+                await _wait_remote_future(
+                    claimed_waiter,
+                    min(queue_budget, max(0.001, deadline - loop.time())),
+                )
+            except TimeoutError:
+                # Claim and queue timeout can race. If the worker claimed the job,
+                # continue against the remaining execution/result budget.
+                if self._cancel_job_if_unclaimed(job_id):
+                    raise
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError
+            result = await _wait_remote_future(future, remaining)
         except TimeoutError as exc:
-            if tool in REMOTE_NON_CANCELLABLE_WORKER_TOOLS:
-                cancelled = self._cancel_job_if_unclaimed(job_id)
-                if not cancelled:
-                    result = await future
-                else:
-                    raise TimeoutError(f"remote job timed out: {tool} on {machine}") from exc
+            with self._state_lock:
+                claimed = job_id in self.claimed_jobs
+            if tool in REMOTE_NON_CANCELLABLE_WORKER_TOOLS and claimed:
+                preserve_claimed_mutation()
             else:
                 self._cancel_job(job_id)
-                raise TimeoutError(f"remote job timed out: {tool} on {machine}") from exc
+            raise TimeoutError(f"remote job timed out: {tool} on {machine}") from exc
         except asyncio.CancelledError:
-            claimed_mutation = False
-            if tool in REMOTE_NON_CANCELLABLE_WORKER_TOOLS:
-                claimed_mutation = not self._cancel_job_if_unclaimed(job_id)
-            if claimed_mutation:
-                preserve_pending = True
-
-                def cleanup(_future: asyncio.Future[dict[str, Any]]) -> None:
-                    with self._state_lock:
-                        self.pending.pop(job_id, None)
-                        self.pending_machines.pop(job_id, None)
-                        self.claimed_jobs.discard(job_id)
-
-                future.add_done_callback(cleanup)
-            elif tool not in REMOTE_NON_CANCELLABLE_WORKER_TOOLS:
+            with self._state_lock:
+                claimed = job_id in self.claimed_jobs
+            if tool in REMOTE_NON_CANCELLABLE_WORKER_TOOLS and claimed:
+                preserve_claimed_mutation()
+            else:
                 self._cancel_job(job_id)
             raise
         finally:
@@ -959,6 +1121,8 @@ class RemoteManager:
                 with self._state_lock:
                     self.pending.pop(job_id, None)
                     self.pending_machines.pop(job_id, None)
+                    self.claimed_waiters.pop(job_id, None)
+                    self.job_lifecycle.pop(job_id, None)
                     self.claimed_jobs.discard(job_id)
         if not result.get("ok", False):
             data = result.get("data")
@@ -1727,10 +1891,14 @@ async def _execute_command_worker_tool(tool: str, args: dict[str, Any]) -> Any:
 
 async def _execute_shell_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "shell_start":
-        return await start_shell(args.get("cwd", "."), args.get("name"), args.get("command"))
+        return await start_shell(
+            args.get("cwd", "."), args.get("name"), args.get("command"), args.get("idempotency_key")
+        )
 
     if tool == "shell_send":
-        return await send_shell(args["session_id"], args["input_text"], args.get("enter", True))
+        return await send_shell(
+            args["session_id"], args["input_text"], args.get("enter", True), args.get("idempotency_key")
+        )
 
     if tool == "shell_read":
         return await read_shell(args["session_id"], args.get("lines", 200))
@@ -1739,7 +1907,7 @@ async def _execute_shell_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         return await resize_shell(args["session_id"], args["cols"], args["rows"])
 
     if tool == "shell_kill":
-        return await kill_shell(args["session_id"])
+        return await kill_shell(args["session_id"], args.get("idempotency_key"))
 
     if tool == "shell_list":
         return await list_shells()
@@ -1748,7 +1916,9 @@ async def _execute_shell_worker_tool(tool: str, args: dict[str, Any]) -> Any:
 
 async def _execute_job_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "job_start":
-        return await start_job(args["command"], args.get("cwd", "."), args.get("name"))
+        return await start_job(
+            args["command"], args.get("cwd", "."), args.get("name"), args.get("idempotency_key")
+        )
 
     if tool == "job_list":
         return await list_jobs(
@@ -1763,7 +1933,7 @@ async def _execute_job_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         return await stop_job(args["job_id"])
 
     if tool == "job_retry":
-        return await retry_job(args["job_id"])
+        return await retry_job(args["job_id"], args.get("idempotency_key"))
     raise ValueError(f"unsupported remote worker tool: {tool}")
 
 
@@ -2395,6 +2565,44 @@ def _worker_state_dir() -> Path:
     return Path.home() / ".local" / "state" / "local-shell-mcp-worker"
 
 
+def _worker_result_outbox_dir() -> Path:
+    configured = os.getenv("LOCAL_SHELL_MCP_WORKER_RESULT_OUTBOX_DIR")
+    if configured:
+        return Path(configured).expanduser()
+    return _worker_state_dir() / "result-outbox"
+
+
+def _worker_store_result_outbox(result: dict[str, Any]) -> Path:
+    job_id = str(result.get("job_id") or "")
+    if not job_id:
+        raise ValueError("remote result requires a job id")
+    directory = _worker_result_outbox_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(OSError):
+        directory.chmod(0o700)
+    filename = hashlib.sha256(job_id.encode("utf-8")).hexdigest() + ".json"
+    target = directory / filename
+    temporary = directory / (filename + ".tmp." + uuid.uuid4().hex)
+    encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    existing = list(directory.glob("*.json"))
+    existing_bytes = sum(path.stat().st_size for path in existing if path.is_file())
+    if target not in existing and len(existing) >= REMOTE_WORKER_RESULT_OUTBOX_MAX_ITEMS:
+        raise RuntimeError("worker result outbox is full")
+    if target not in existing and existing_bytes + len(encoded) > REMOTE_WORKER_RESULT_OUTBOX_MAX_BYTES:
+        raise RuntimeError("worker result outbox byte limit reached")
+    try:
+        with temporary.open("wb") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        with contextlib.suppress(OSError):
+            temporary.chmod(0o600)
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return target
+
+
 def _worker_identity_path() -> Path:
     return _worker_state_dir() / REMOTE_WORKER_IDENTITY_FILE_NAME
 
@@ -2574,6 +2782,8 @@ async def _run_worker_job(
     heartbeat_interval_s: float,
 ) -> None:
     expires_at = float(job.get("expires_at") or 0)
+    execution_started_at: float | None = None
+    execution_finished_at = _utc()
     if expires_at and expires_at < _utc():
         out = {
             "job_id": job.get("id"),
@@ -2583,13 +2793,90 @@ async def _run_worker_job(
         }
     else:
         try:
+            execution_started_at = _utc()
+            execution_started_monotonic = time.monotonic()
             result = await _execute_worker_job_with_heartbeat(
                 job, server, headers, heartbeat_interval_s
             )
+            execution_s = max(0.0, time.monotonic() - execution_started_monotonic)
             out = {"job_id": job["id"], "ok": True, "data": result}
         except Exception as exc:  # noqa: BLE001
+            execution_s = (
+                max(0.0, time.monotonic() - execution_started_monotonic)
+                if execution_started_at is not None
+                else 0.0
+            )
             out = {"job_id": job.get("id"), **_handled_remote_exception(exc)}
-    await _submit_worker_result_with_heartbeat(out, server, headers, heartbeat_interval_s)
+        execution_finished_at = _utc()
+    if "execution_s" not in locals():
+        execution_s = 0.0
+    result_spooled_at = _utc()
+    out["lifecycle"] = {
+        "execution_started_at": execution_started_at,
+        "execution_finished_at": execution_finished_at,
+        "result_spooled_at": result_spooled_at,
+        "execution_s": execution_s,
+    }
+    try:
+        # Persist before releasing the execution lane. A transient /result outage
+        # is handled by independent senders and survives a worker restart.
+        await asyncio.to_thread(_worker_store_result_outbox, out)
+    except Exception as exc:  # noqa: BLE001
+        _worker_log_retry("persist result outbox", exc, 1.0)
+        # If local spool storage is unavailable, keep the previous synchronous
+        # delivery behavior rather than silently losing a completed result.
+        out["lifecycle"]["result_submit_started_at"] = _utc()
+        await _submit_worker_result_with_heartbeat(out, server, headers, heartbeat_interval_s)
+
+
+async def _worker_result_outbox_sender(
+    server: str,
+    headers: dict[str, str],
+    heartbeat_interval_s: float,
+    in_progress: set[str],
+) -> None:
+    directory = _worker_result_outbox_dir()
+    while True:
+        directory.mkdir(parents=True, exist_ok=True)
+        candidates = [path for path in sorted(directory.glob("*.json")) if path.name not in in_progress]
+        if not candidates:
+            await asyncio.sleep(0.25)
+            continue
+        path = candidates[0]
+        in_progress.add(path.name)
+        try:
+            try:
+                result = json.loads(await asyncio.to_thread(path.read_text, encoding="utf-8"))
+                if not isinstance(result, dict):
+                    raise ValueError("spooled result is not a JSON object")
+            except Exception as exc:  # noqa: BLE001
+                _worker_log_retry("read result outbox", exc, 1.0)
+                await asyncio.sleep(1.0)
+                continue
+            lifecycle = result.get("lifecycle")
+            if isinstance(lifecycle, dict):
+                lifecycle["result_submit_started_at"] = _utc()
+                try:
+                    await asyncio.to_thread(_worker_store_result_outbox, result)
+                except Exception as exc:  # noqa: BLE001
+                    _worker_log_retry("update result outbox timing", exc, 1.0)
+            response = await _submit_worker_result_with_heartbeat(
+                result, server, headers, heartbeat_interval_s
+            )
+            data = response.get("data") if isinstance(response, dict) else None
+            # accepted=false means the controller already timed out/cancelled it,
+            # or this is a harmless retry after an ACK was lost.
+            if isinstance(data, dict) and data.get("accepted") is False:
+                audit("remote_result_outbox_discarded", job_id=result.get("job_id"))
+            await asyncio.to_thread(path.unlink, True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            delay_s = _worker_retry_delay(1)
+            _worker_log_retry("result outbox submit", exc, delay_s)
+            await asyncio.sleep(delay_s)
+        finally:
+            in_progress.discard(path.name)
 
 
 @dataclass
@@ -2770,9 +3057,22 @@ async def _run_worker_locked(
     upgrade_lock = asyncio.Lock()
     lanes: tuple[str | None, ...]
     if controller_poll_protocol_version >= REMOTE_WORKER_LANE_PROTOCOL_VERSION:
-        lanes = (REMOTE_WORKER_INTERACTIVE_LANE, REMOTE_WORKER_TRANSFER_LANE)
+        lanes = (
+            *(REMOTE_WORKER_INTERACTIVE_LANE for _ in range(REMOTE_WORKER_INTERACTIVE_CONCURRENCY)),
+            REMOTE_WORKER_TRANSFER_LANE,
+        )
     else:
         lanes = (None,)
+    outbox_in_progress: set[str] = set()
+    sender_tasks = [
+        asyncio.create_task(
+            _worker_result_outbox_sender(
+                server, headers, heartbeat_interval_s, outbox_in_progress
+            ),
+            name=f"remote-worker-result-sender-{index}",
+        )
+        for index in range(2)
+    ]
     lane_tasks = [
         asyncio.create_task(
             _worker_poll_lane(
@@ -2785,16 +3085,16 @@ async def _run_worker_locked(
                 lane_state_changed,
                 upgrade_lock,
             ),
-            name=f"remote-worker-{lane or 'legacy'}-lane",
+            name=f"remote-worker-{lane or 'legacy'}-lane-{index}",
         )
-        for lane in lanes
+        for index, lane in enumerate(lanes)
     ]
     try:
         await asyncio.gather(*lane_tasks)
     finally:
-        for task in lane_tasks:
+        for task in [*lane_tasks, *sender_tasks]:
             task.cancel()
-        await asyncio.gather(*lane_tasks, return_exceptions=True)
+        await asyncio.gather(*lane_tasks, *sender_tasks, return_exceptions=True)
 
 
 def run_worker_cli(argv: list[str] | None = None) -> None:

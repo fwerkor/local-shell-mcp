@@ -71,7 +71,13 @@ from .oauth import ALL_OAUTH_SCOPES
 from .patch_ops import git_apply_command, git_apply_prefix, normalize_patch_text
 from .playwright_ops import playwright_run_script
 from .process_utils import managed_process_kwargs
-from .remote import REMOTE_WORKER_TRANSFER_LANE, remote_manager
+from .remote import (
+    REMOTE_QUEUE_TIMEOUT_S,
+    REMOTE_RESULT_GRACE_S,
+    REMOTE_WORKER_TRANSFER_LANE,
+    remote_execution_rpc_timeout_s,
+    remote_manager,
+)
 from .remote_transfer import (
     create_download_ticket,
     create_upload_ticket,
@@ -329,10 +335,92 @@ NON_CANCELLABLE_TOOL_NAMES = frozenset(
         "file_patch",
         "remote_transfer",
         "mcp_tool_call",
+        "shell_start",
+        "shell_send",
+        "shell_stop",
+        "job_start",
+        "job_stop",
+        "job_retry",
     }
 )
 
+PUBLIC_TOOL_TIMEOUT_OVERRIDES_S: dict[str, float] = {
+    "workspace_open": 90.0,
+    "open_live_workspace": 90.0,
+    "live_workspace_reconnect": 90.0,
+    "environment_get": 90.0,
+    "skill_list": 30.0,
+    "skill_load": 45.0,
+    "skill_read": 45.0,
+    "shell_read": 60.0,
+    "shell_list": 30.0,
+    "job_list": 60.0,
+    "job_tail": 60.0,
+    "file_list": 60.0,
+    "file_tree": 90.0,
+    "file_glob": 90.0,
+    "file_grep": 120.0,
+    "file_read": 120.0,
+    "image_view": 90.0,
+    "link_list": 60.0,
+    "secret_scan": 300.0,
+    "session_manage": 60.0,
+    "plan_manage": 60.0,
+    "mcp_manage": 60.0,
+    "mcp_tool_search": 60.0,
+    "mcp_tool_inspect": 60.0,
+    "audit_tail": 60.0,
+    "remote_manage": 90.0,
+}
+
+
 REMOTE_MACHINE_ARGUMENTS = frozenset({"machine", "source_machine", "destination_machine"})
+
+
+def _public_tool_timeout_s(tool_name: str, arguments: dict[str, Any]) -> float | None:
+    """Return a watchdog budget derived from the public tool and its execution limit."""
+    if tool_name in NON_CANCELLABLE_TOOL_NAMES:
+        return None
+    if tool_name in {"run_shell", "run_python"}:
+        try:
+            execution_s = public_run_shell_timeout(arguments.get("timeout_s"))
+        except ValueError:
+            return float(PUBLIC_RUN_SHELL_TIMEOUT_CAP_S + 15)
+        return (
+            remote_execution_rpc_timeout_s(execution_s)
+            if arguments.get("machine")
+            else execution_s + 15.0
+        )
+    if tool_name == "browser_run_script":
+        execution_s = public_run_shell_timeout(arguments.get("timeout_s") or 60)
+        return (
+            remote_execution_rpc_timeout_s(execution_s)
+            if arguments.get("machine")
+            else execution_s + 15.0
+        )
+    if tool_name.startswith("browser_"):
+        return 300.0
+    if arguments.get("machine"):
+        return 120.0
+    return float(PUBLIC_TOOL_TIMEOUT_OVERRIDES_S.get(tool_name, PUBLIC_TOOL_TIMEOUT_S))
+
+
+async def _await_tool_watchdog(awaitable: Awaitable[Any], tool_name: str, timeout_s: float) -> Any:
+    task = asyncio.create_task(awaitable)
+    try:
+        done, _ = await asyncio.wait({task}, timeout=max(0.1, timeout_s))
+        if task in done:
+            return task.result()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        raise PublicToolTimeoutError(
+            f"{tool_name} exceeded {timeout_s:g} second public tool timeout"
+        )
+    except BaseException:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        raise
 
 
 def _security_meta(schemes: list[dict[str, Any]]) -> dict[str, Any]:
@@ -839,6 +927,7 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
             ) or None
 
             local_access_error = _disabled_local_access_error(__tool_name, call_arguments)
+            tool_timeout_s = _public_tool_timeout_s(__tool_name, call_arguments)
             if any(call_arguments.get(name) for name in REMOTE_MACHINE_ARGUMENTS):
                 require_current_scopes(("remote:use",))
             safe_call_arguments = _safe_audit_call_arguments(__tool_name, call_arguments)
@@ -986,8 +1075,9 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                             __original(*args, **invoke_kwargs)
                         )
                     else:
-                        result = await asyncio.wait_for(
-                            __original(*args, **invoke_kwargs), timeout=PUBLIC_TOOL_TIMEOUT_S
+                        result = await _await_tool_watchdog(
+                            __original(*args, **invoke_kwargs), __tool_name,
+                            tool_timeout_s or PUBLIC_TOOL_TIMEOUT_S,
                         )
                 serialized_result = _safe_audit_result(__tool_name, result)
                 call_ok = audit_result_ok(result) and not bool(call_state["failed"])
@@ -1031,17 +1121,14 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                 )
                 logical_activity_finished = True
                 return result
-            except TimeoutError:
-                exc = PublicToolTimeoutError(
-                    f"{__tool_name} exceeded {PUBLIC_TOOL_TIMEOUT_S} second public tool timeout"
-                )
+            except PublicToolTimeoutError as exc:
                 result = _timeout_payload_for_tool(__tool_name, exc)
                 audit(
                     "tool_timeout",
                     call_id=call_id,
                     parent_call_id=call_id,
                     tool=__tool_name,
-                    timeout_s=PUBLIC_TOOL_TIMEOUT_S,
+                    timeout_s=tool_timeout_s or PUBLIC_TOOL_TIMEOUT_S,
                 )
                 audit(
                     "mcp_tool_call_end",
@@ -2444,11 +2531,34 @@ async def _remote_call(
     tool: str,
     args: dict,
     timeout_s: int | None = None,
+    *,
+    execution_timeout_s: float | None = None,
 ) -> ToolResult:
     try:
         if not settings.remote_enabled:
             raise RuntimeError("Remote workers are disabled")
-        result = await remote_manager().call(machine, tool, args, timeout_s)
+        rpc_timeout_s: float | None = None
+        if timeout_s is not None:
+            rpc_timeout_s = float(timeout_s)
+        elif execution_timeout_s is None:
+            if tool.startswith("transfer_"):
+                rpc_timeout_s = float(settings.remote_peer_transfer_timeout_s)
+            elif tool in {"job_start", "job_stop", "job_retry", "shell_start", "shell_send", "shell_kill"}:
+                rpc_timeout_s = max(180.0, REMOTE_QUEUE_TIMEOUT_S + REMOTE_RESULT_GRACE_S)
+            elif tool.startswith("browser_"):
+                rpc_timeout_s = 300.0
+            else:
+                rpc_timeout_s = min(
+                    max(120.0, REMOTE_QUEUE_TIMEOUT_S + REMOTE_RESULT_GRACE_S),
+                    float(settings.remote_job_timeout_s),
+                )
+        result = await remote_manager().call(
+            machine,
+            tool,
+            args,
+            execution_timeout_s=execution_timeout_s,
+            rpc_timeout_s=rpc_timeout_s,
+        )
         data = result.get("data") if isinstance(result, dict) else None
         failed_status = (
             isinstance(data, dict)
@@ -2545,7 +2655,7 @@ def _register_command_tools(mcp: FastMCP, settings: Any) -> None:
                     "timeout_s": timeout_s,
                     "max_output_bytes": max_output_bytes,
                 },
-                timeout_s,
+                execution_timeout_s=public_run_shell_timeout(timeout_s),
             )
         try:
             return _ok(
@@ -2570,8 +2680,8 @@ def _register_command_tools(mcp: FastMCP, settings: Any) -> None:
                 settings,
                 machine,
                 "run_python_tool",
-                {"code": code, "cwd": cwd, "timeout_s": timeout_s},
-                timeout_s,
+                {"code": code, "cwd": cwd, "timeout_s": public_run_shell_timeout(timeout_s)},
+                execution_timeout_s=public_run_shell_timeout(timeout_s),
             )
         return await _tool_call(_run_python, code, cwd, timeout_s)
 
@@ -2588,17 +2698,18 @@ def _register_shell_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnot
         purpose: str | None = None,
         explanation: str | None = None,
         machine: str | None = None,
+        idempotency_key: str | None = None,
     ) -> ToolResult:
-        """Start a persistent interactive shell locally or on a remote machine."""
+        """Start a persistent interactive shell locally or on a remote machine. Reuse idempotency_key when retrying an ambiguous request."""
         _audit_tool_purpose("shell_start", purpose, explanation)
         if machine:
             return await _remote_call(
                 settings,
                 machine,
                 "shell_start",
-                {"cwd": cwd, "name": name, "command": command},
+                {"cwd": cwd, "name": name, "command": command, "idempotency_key": idempotency_key},
             )
-        return await _tool_call(start_shell, cwd, name, command)
+        return await _tool_call(start_shell, cwd, name, command, idempotency_key)
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def shell_send(
@@ -2606,16 +2717,17 @@ def _register_shell_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnot
         input_text: str,
         enter: bool = True,
         machine: str | None = None,
+        idempotency_key: str | None = None,
     ) -> ToolResult:
-        """Send input to a persistent local or remote shell session."""
+        """Send input to a persistent local or remote shell session. Reuse idempotency_key when retrying an ambiguous request."""
         if machine:
             return await _remote_call(
                 settings,
                 machine,
                 "shell_send",
-                {"session_id": session_id, "input_text": input_text, "enter": enter},
+                {"session_id": session_id, "input_text": input_text, "enter": enter, "idempotency_key": idempotency_key},
             )
-        return await _tool_call(send_shell, session_id, input_text, enter)
+        return await _tool_call(send_shell, session_id, input_text, enter, idempotency_key)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def shell_read(
@@ -2637,11 +2749,15 @@ def _register_shell_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnot
     async def shell_stop(
         session_id: str,
         machine: str | None = None,
+        idempotency_key: str | None = None,
     ) -> ToolResult:
         """Terminate a persistent local or remote shell session."""
         if machine:
-            return await _remote_call(settings, machine, "shell_kill", {"session_id": session_id})
-        return await _tool_call(kill_shell, session_id)
+            return await _remote_call(
+                settings, machine, "shell_kill",
+                {"session_id": session_id, "idempotency_key": idempotency_key},
+            )
+        return await _tool_call(kill_shell, session_id, idempotency_key)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def shell_list(machine: str | None = None) -> ToolResult:
@@ -2663,17 +2779,18 @@ def _register_job_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnotat
         purpose: str | None = None,
         explanation: str | None = None,
         machine: str | None = None,
+        idempotency_key: str | None = None,
     ) -> ToolResult:
-        """Start a tracked long-running job locally or on a remote machine."""
+        """Start a tracked job. Reuse idempotency_key when retrying an ambiguous request."""
         _audit_tool_purpose("job_start", purpose, explanation)
         if machine:
             return await _remote_call(
                 settings,
                 machine,
                 "job_start",
-                {"command": command, "cwd": cwd, "name": name},
+                {"command": command, "cwd": cwd, "name": name, "idempotency_key": idempotency_key},
             )
-        return await _tool_call(start_job, command, cwd, name)
+        return await _tool_call(start_job, command, cwd, name, idempotency_key)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def job_list(
@@ -2723,12 +2840,16 @@ def _register_job_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnotat
         purpose: str | None = None,
         explanation: str | None = None,
         machine: str | None = None,
+        idempotency_key: str | None = None,
     ) -> ToolResult:
-        """Restart a stopped or exited tracked local or remote job."""
+        """Retry a tracked job. Reuse idempotency_key when retrying an ambiguous request."""
         _audit_tool_purpose("job_retry", purpose, explanation)
         if machine:
-            return await _remote_call(settings, machine, "job_retry", {"job_id": job_id})
-        return await _tool_call(retry_job, job_id)
+            return await _remote_call(
+                settings, machine, "job_retry",
+                {"job_id": job_id, "idempotency_key": idempotency_key},
+            )
+        return await _tool_call(retry_job, job_id, idempotency_key)
 
 
 def _register_workspace_read_tools(
@@ -3279,8 +3400,8 @@ def _register_browser_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnn
                 settings,
                 machine,
                 "browser_run_script",
-                {"script": script, "cwd": cwd, "timeout_s": timeout_s},
-                timeout_s,
+                {"script": script, "cwd": cwd, "timeout_s": public_run_shell_timeout(timeout_s)},
+                execution_timeout_s=public_run_shell_timeout(timeout_s),
             )
         return await _tool_call(playwright_run_script, script, cwd, timeout_s)
 

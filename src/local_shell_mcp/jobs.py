@@ -5,6 +5,7 @@ import asyncio
 import base64
 import contextlib
 import errno
+import hashlib
 import itertools
 import json
 import os
@@ -53,6 +54,7 @@ ManagedJobHandler = Callable[
 ]
 _MANAGED_JOB_HANDLERS: dict[str, ManagedJobHandler] = {}
 _MANAGED_JOB_TASKS: dict[str, asyncio.Task[None]] = {}
+_IDEMPOTENCY_KEY_MAX_LENGTH = 256
 
 
 def _utc() -> float:
@@ -671,6 +673,183 @@ def _clear_job_operation(job: dict[str, Any]) -> None:
         job.pop(key, None)
 
 
+def _normalize_idempotency_key(key: str | None) -> str | None:
+    if key is None:
+        return None
+    normalized = key.strip()
+    if not normalized:
+        raise ValueError("idempotency_key must not be empty")
+    if len(normalized) > _IDEMPOTENCY_KEY_MAX_LENGTH:
+        raise ValueError(
+            f"idempotency_key must be <= {_IDEMPOTENCY_KEY_MAX_LENGTH} characters"
+        )
+    return normalized
+
+
+def _idempotency_fingerprint(action: str, payload: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        {"action": action, "payload": payload},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _idempotency_key_hash(key: str) -> str:
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def _find_idempotent_job(
+    store: dict[str, Any],
+    *,
+    action: str,
+    key: str | None,
+    fingerprint: str,
+) -> dict[str, Any] | None:
+    if key is None:
+        return None
+    key_hash = _idempotency_key_hash(key)
+    for job in store.get("jobs", []):
+        records = job.get("idempotency_requests")
+        if not isinstance(records, list):
+            continue
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            if record.get("action") != action or record.get("key_hash") != key_hash:
+                continue
+            if record.get("fingerprint") != fingerprint:
+                raise ValueError(
+                    "idempotency_key was already used for a different request"
+                )
+            return job
+    return None
+
+
+def _record_idempotency_request(
+    job: dict[str, Any], *, action: str, key: str | None, fingerprint: str
+) -> None:
+    if key is None:
+        return
+    records = job.setdefault("idempotency_requests", [])
+    records.append(
+        {
+            "action": action,
+            "key_hash": _idempotency_key_hash(key),
+            "fingerprint": fingerprint,
+        }
+    )
+
+
+async def _settle_task_after_cancellation(task: asyncio.Task[Any]) -> Any:
+    """Wait for an already-started side effect to settle despite caller cancellation."""
+
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            continue
+        except Exception:
+            break
+    if task.cancelled():
+        return None
+    try:
+        return task.result()
+    except Exception:
+        return None
+
+
+async def _reconcile_cancelled_shell_start(
+    job_id: str,
+    operation_id: str,
+    session_id: str,
+    *,
+    action: str,
+    shell: dict[str, Any] | None = None,
+    paths: dict[str, Path] | None = None,
+) -> None:
+    """Stop a shell created by a cancelled start/retry and commit its final state."""
+
+    with contextlib.suppress(Exception):
+        await kill_shell(session_id)
+    try:
+        active = session_id in _active_session_ids(await list_shells())
+        inspect_error = None
+    except Exception as exc:
+        # Keep a possibly live shell visible as running when its state cannot be read.
+        active = True
+        inspect_error = f"; session check failed: {type(exc).__name__}: {exc}"
+
+    now = _utc()
+    with _store_transaction() as store:
+        job = _find_job(store, job_id)
+        if _job_operation_matches(job, operation_id):
+            if action == "retry":
+                _adopt_pending_retry(job)
+                _clear_pending_retry(job)
+            _clear_job_operation(job)
+            if active:
+                job.update(
+                    {
+                        "status": "running",
+                        "session_id": session_id,
+                        "backend": (shell or {}).get("backend") or job.get("backend"),
+                        "updated_at": now,
+                        "completed_at": None,
+                        "error": (
+                            f"{action} was cancelled; shell may still be running"
+                            f"{inspect_error or ''}"
+                        ),
+                    }
+                )
+            else:
+                job.update(
+                    {
+                        "status": "failed",
+                        "updated_at": now,
+                        "completed_at": now,
+                        "exit_code": None,
+                        "error": f"{action} was cancelled before the shell was committed",
+                    }
+                )
+
+    if not active:
+        if action == "start":
+            _remove_attempt_files(job_id)
+        else:
+            _remove_attempt_paths(paths)
+
+
+async def _reconcile_cancelled_shell_stop(
+    job_id: str, operation_id: str, session_id: str
+) -> None:
+    try:
+        active = session_id in _active_session_ids(await list_shells())
+        inspect_error = None
+    except Exception as exc:
+        active = True
+        inspect_error = f"stop outcome is uncertain: {type(exc).__name__}: {exc}"
+    now = _utc()
+    with _store_transaction() as store:
+        job = _find_job(store, job_id)
+        if (
+            job.get("status") == "stopping"
+            and str(job.get("session_id") or "") == session_id
+            and _job_operation_matches(job, operation_id)
+        ):
+            job.update(
+                {
+                    "status": "running" if active else "stopped",
+                    "updated_at": now,
+                    "completed_at": None if active else now,
+                    "exit_code": None,
+                    "error": inspect_error,
+                }
+            )
+            _clear_job_operation(job)
+
+
 def _refresh_job_status(
     job: dict[str, Any], active_sessions: set[str], now: float | None = None
 ) -> dict[str, Any]:
@@ -1102,7 +1281,27 @@ async def start_managed_job(
     return _public_job(job)
 
 
-async def start_job(command: str, cwd: str = ".", name: str | None = None) -> dict[str, Any]:
+async def start_job(
+    command: str,
+    cwd: str = ".",
+    name: str | None = None,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
+    idempotency_key = _normalize_idempotency_key(idempotency_key)
+    request_fingerprint = _idempotency_fingerprint(
+        "start", {"command": command, "cwd": cwd, "name": name}
+    )
+    if idempotency_key is not None:
+        with _store_transaction() as store:
+            existing = _find_idempotent_job(
+                store,
+                action="start",
+                key=idempotency_key,
+                fingerprint=request_fingerprint,
+            )
+            if existing is not None:
+                return _public_job(existing)
+
     job_id = _new_job_id()
     display_name = name or job_id
     paths, runner_command = _prepare_attempt(job_id, 1, command, cwd)
@@ -1127,17 +1326,49 @@ async def start_job(command: str, cwd: str = ".", name: str | None = None) -> di
         "attempts": 1,
     }
     operation_id = _begin_job_operation(job, "start")
+    existing_job = None
     try:
         with _store_transaction() as store:
-            store["jobs"].append(job)
+            existing_job = _find_idempotent_job(
+                store,
+                action="start",
+                key=idempotency_key,
+                fingerprint=request_fingerprint,
+            )
+            if existing_job is None:
+                _record_idempotency_request(
+                    job,
+                    action="start",
+                    key=idempotency_key,
+                    fingerprint=request_fingerprint,
+                )
+                store["jobs"].append(job)
     except BaseException:
         _ACTIVE_JOB_OPERATIONS.discard(operation_id)
         _remove_attempt_files(job_id)
         raise
+    if existing_job is not None:
+        _ACTIVE_JOB_OPERATIONS.discard(operation_id)
+        _remove_attempt_files(job_id)
+        return _public_job(existing_job)
 
     try:
         try:
-            shell = await start_shell(cwd, shell_name, runner_command)
+            start_task = asyncio.create_task(start_shell(cwd, shell_name, runner_command))
+            shell = await asyncio.shield(start_task)
+        except asyncio.CancelledError:
+            shell = await _settle_task_after_cancellation(start_task)
+            cleanup = asyncio.create_task(
+                _reconcile_cancelled_shell_start(
+                    job_id,
+                    operation_id,
+                    str((shell or {}).get("session_id") or shell_name),
+                    action="start",
+                    shell=shell if isinstance(shell, dict) else None,
+                )
+            )
+            await _settle_task_after_cancellation(cleanup)
+            raise
         except Exception as exc:
             _remove_attempt_files(job_id)
             with _store_transaction() as store:
@@ -1323,8 +1554,24 @@ async def _stop_managed_job(job_id: str) -> dict[str, Any]:
     return {"job": public_job, "killed": killed, "stderr": ""}
 
 
-async def _retry_managed_job(job_id: str) -> dict[str, Any]:
+async def _retry_managed_job(
+    job_id: str,
+    *,
+    idempotency_key: str | None = None,
+    request_fingerprint: str | None = None,
+) -> dict[str, Any]:
+    request_fingerprint = request_fingerprint or _idempotency_fingerprint(
+        "retry", {"job_id": job_id}
+    )
     with _store_transaction() as store:
+        existing = _find_idempotent_job(
+            store,
+            action="retry",
+            key=idempotency_key,
+            fingerprint=request_fingerprint,
+        )
+        if existing is not None:
+            return _public_job(existing)
         job = _refresh_job_status(_find_job(store, job_id), set())
         if job.get("status") in {"starting", "running", "stopping", "retrying"}:
             raise RuntimeError(f"job is still active: {job_id}")
@@ -1341,6 +1588,12 @@ async def _retry_managed_job(job_id: str) -> dict[str, Any]:
             _private_write_text(paths["log"], "")
             log_path = str(paths["log"])
         started_at = _utc()
+        _record_idempotency_request(
+            job,
+            action="retry",
+            key=idempotency_key,
+            fingerprint=request_fingerprint,
+        )
         job.update(
             {
                 "status": "running",
@@ -1406,7 +1659,15 @@ async def stop_job(job_id: str) -> dict[str, Any]:
 
     try:
         try:
-            result = await kill_shell(session_id)
+            stop_task = asyncio.create_task(kill_shell(session_id))
+            result = await asyncio.shield(stop_task)
+        except asyncio.CancelledError:
+            await _settle_task_after_cancellation(stop_task)
+            cleanup = asyncio.create_task(
+                _reconcile_cancelled_shell_stop(job_id, operation_id, session_id)
+            )
+            await _settle_task_after_cancellation(cleanup)
+            raise
         except Exception as exc:
             still_active = True
             with contextlib.suppress(Exception):
@@ -1447,38 +1708,70 @@ async def stop_job(job_id: str) -> dict[str, Any]:
         _ACTIVE_JOB_OPERATIONS.discard(operation_id)
 
 
-async def retry_job(job_id: str) -> dict[str, Any]:
+async def retry_job(
+    job_id: str, idempotency_key: str | None = None
+) -> dict[str, Any]:
+    idempotency_key = _normalize_idempotency_key(idempotency_key)
+    request_fingerprint = _idempotency_fingerprint("retry", {"job_id": job_id})
     with _store_transaction() as store:
         job = _find_job(store, job_id)
+        existing = _find_idempotent_job(
+            store,
+            action="retry",
+            key=idempotency_key,
+            fingerprint=request_fingerprint,
+        )
+        if existing is not None:
+            return _public_job(existing)
         managed = job.get("kind") == "managed"
         if get_settings().disable_local and not managed:
             raise ValueError("local shell jobs are unavailable when local access is disabled")
     if managed:
-        return await _retry_managed_job(job_id)
+        return await _retry_managed_job(
+            job_id,
+            idempotency_key=idempotency_key,
+            request_fingerprint=request_fingerprint,
+        )
     active = _active_session_ids(await list_shells())
     operation_id = ""
+    existing_job = None
     try:
         with _store_transaction() as store:
-            job = _refresh_job_status(_find_job(store, job_id), active)
-            if job.get("status") in {"starting", "running", "stopping", "retrying"}:
-                raise RuntimeError(f"job is still active: {job_id}")
-            attempts = int(job.get("attempts") or 1) + 1
-            command = str(job["command"])
-            cwd = str(job.get("cwd") or ".")
-            display_name = str(job.get("name") or job_id)
-            shell_name = _shell_safe_name(f"{display_name}-{job_id}-{attempts}")
-            job.update(
-                {
-                    "status": "retrying",
-                    "updated_at": _utc(),
-                    "pending_attempt": attempts,
-                    "pending_session_name": shell_name,
-                }
+            existing_job = _find_idempotent_job(
+                store,
+                action="retry",
+                key=idempotency_key,
+                fingerprint=request_fingerprint,
             )
-            operation_id = _begin_job_operation(job, "retry")
+            if existing_job is None:
+                job = _refresh_job_status(_find_job(store, job_id), active)
+                if job.get("status") in {"starting", "running", "stopping", "retrying"}:
+                    raise RuntimeError(f"job is still active: {job_id}")
+                attempts = int(job.get("attempts") or 1) + 1
+                command = str(job["command"])
+                cwd = str(job.get("cwd") or ".")
+                display_name = str(job.get("name") or job_id)
+                shell_name = _shell_safe_name(f"{display_name}-{job_id}-{attempts}")
+                _record_idempotency_request(
+                    job,
+                    action="retry",
+                    key=idempotency_key,
+                    fingerprint=request_fingerprint,
+                )
+                job.update(
+                    {
+                        "status": "retrying",
+                        "updated_at": _utc(),
+                        "pending_attempt": attempts,
+                        "pending_session_name": shell_name,
+                    }
+                )
+                operation_id = _begin_job_operation(job, "retry")
     except BaseException:
         _ACTIVE_JOB_OPERATIONS.discard(operation_id)
         raise
+    if existing_job is not None:
+        return _public_job(existing_job)
 
     paths: dict[str, Path] | None = None
     try:
@@ -1498,7 +1791,22 @@ async def retry_job(job_id: str) -> dict[str, Any]:
                         "pending_status_path": str(paths["status"]),
                     }
                 )
-            shell = await start_shell(cwd, shell_name, runner_command)
+            start_task = asyncio.create_task(start_shell(cwd, shell_name, runner_command))
+            shell = await asyncio.shield(start_task)
+        except asyncio.CancelledError:
+            shell = await _settle_task_after_cancellation(start_task)
+            cleanup = asyncio.create_task(
+                _reconcile_cancelled_shell_start(
+                    job_id,
+                    operation_id,
+                    str((shell or {}).get("session_id") or shell_name),
+                    action="retry",
+                    shell=shell if isinstance(shell, dict) else None,
+                    paths=paths,
+                )
+            )
+            await _settle_task_after_cancellation(cleanup)
+            raise
         except Exception as exc:
             _remove_attempt_paths(paths)
             with _store_transaction() as store:

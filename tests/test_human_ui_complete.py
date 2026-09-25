@@ -69,7 +69,8 @@ def _request(path: str = "/", *, query: bytes = b"", method: str = "GET") -> Req
 
 class FakeRemoteManager:
     def __init__(self):
-        self.calls: list[tuple[str, str, dict, int | None]] = []
+        self.calls: list[tuple[str, str, dict, float | int | None]] = []
+        self.call_options: list[dict[str, object]] = []
         self.response: dict = {"ok": True, "data": {}}
         self.machines = {
             "machines": [
@@ -82,8 +83,29 @@ class FakeRemoteManager:
             "counts": {"online": 1, "offline": 0, "total": 1},
         }
 
-    async def call(self, machine, tool, args, timeout_s=None):
-        self.calls.append((machine, tool, args, timeout_s))
+    async def call(
+        self,
+        machine,
+        tool,
+        args,
+        timeout_s=None,
+        *,
+        lane=None,
+        execution_timeout_s=None,
+        queue_timeout_s=None,
+        rpc_timeout_s=None,
+    ):
+        self.calls.append(
+            (machine, tool, args, timeout_s if timeout_s is not None else rpc_timeout_s)
+        )
+        self.call_options.append(
+            {
+                "lane": lane,
+                "execution_timeout_s": execution_timeout_s,
+                "queue_timeout_s": queue_timeout_s,
+                "rpc_timeout_s": rpc_timeout_s,
+            }
+        )
         return self.response
 
     def list_machines(self):
@@ -480,6 +502,14 @@ def test_remote_dispatch_machine_rows_and_errors(tmp_path, monkeypatch):
     manager.response = {"ok": True, "data": {"value": 1}}
     assert asyncio.run(ui._remote_call("win-node", "tool", {"a": 1})) == {"value": 1}
     assert manager.calls[-1][2]["_human"] is True
+    assert manager.call_options[-1]["rpc_timeout_s"] == get_settings().ui_remote_request_timeout_s
+    assert asyncio.run(
+        ui._remote_call(
+            "win-node", "run_shell_tool", {"command": "echo ok", "timeout_s": 10}
+        )
+    ) == {"value": 1}
+    assert manager.call_options[-1]["execution_timeout_s"] == 10
+    assert manager.call_options[-1]["rpc_timeout_s"] == ui.remote_execution_rpc_timeout_s(10)
     manager.response = {"ok": False, "message": "failed"}
     with pytest.raises(RuntimeError, match="failed"):
         asyncio.run(ui._remote_call("win-node", "tool", {}))
