@@ -202,6 +202,16 @@ def _install_tool_timeout_middleware(app: FastAPI) -> None:
         try:
             return await asyncio.wait_for(call_next(request), timeout=timeout_s)
         except TimeoutError:
+            # Authentication and authorization failures should keep their original
+            # status even when an aggressively short watchdog fires first.
+            try:
+                principal_dep(request)
+            except HTTPException as exc:
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content={"ok": False, "error": "http_error", "message": exc.detail},
+                    headers=exc.headers,
+                )
             return JSONResponse(
                 status_code=504,
                 content={

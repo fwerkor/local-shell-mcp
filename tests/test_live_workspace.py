@@ -1495,7 +1495,7 @@ def test_live_git_routes_remote_inspection_to_selected_machine(tmp_path, monkeyp
         def __init__(self):
             self.calls = []
 
-        async def call(self, machine, tool, args, timeout_s=None):
+        async def call(self, machine, tool, args, timeout_s=None, **_kwargs):
             self.calls.append((machine, tool, args, timeout_s))
             command = args["command"]
             stdout = (

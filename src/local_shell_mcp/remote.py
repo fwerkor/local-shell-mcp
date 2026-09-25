@@ -126,6 +126,18 @@ def remote_execution_rpc_timeout_s(
     return queue_budget + max(0.1, float(execution_timeout_s)) + REMOTE_RESULT_GRACE_S
 
 
+async def _wait_remote_future(future: asyncio.Future[Any], timeout_s: float) -> Any:
+    """Wait without cancelling the underlying future if this task is cancelled."""
+    done, _ = await asyncio.wait(
+        {future},
+        timeout=max(0.0, float(timeout_s)),
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    if future not in done:
+        raise TimeoutError
+    return future.result()
+
+
 REMOTE_NON_CANCELLABLE_WORKER_TOOLS = frozenset(
     {
         "write_file",
@@ -1075,9 +1087,9 @@ class RemoteManager:
 
         try:
             try:
-                await asyncio.wait_for(
-                    asyncio.shield(claimed_waiter),
-                    timeout=min(queue_budget, max(0.001, deadline - loop.time())),
+                await _wait_remote_future(
+                    claimed_waiter,
+                    min(queue_budget, max(0.001, deadline - loop.time())),
                 )
             except TimeoutError:
                 # Claim and queue timeout can race. If the worker claimed the job,
@@ -1087,7 +1099,7 @@ class RemoteManager:
             remaining = deadline - loop.time()
             if remaining <= 0:
                 raise TimeoutError
-            result = await asyncio.wait_for(asyncio.shield(future), timeout=remaining)
+            result = await _wait_remote_future(future, remaining)
         except TimeoutError as exc:
             with self._state_lock:
                 claimed = job_id in self.claimed_jobs
