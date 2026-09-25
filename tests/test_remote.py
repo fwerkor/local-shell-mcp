@@ -96,12 +96,31 @@ async def test_poll_requires_upgrade_before_dequeuing_jobs(tmp_path, monkeypatch
 
     assert mismatch == {
         "job": None,
-        "upgrade": {"required": True, "version": remote.__version__},
+        "upgrade": {
+            "required": True,
+            "version": remote.__version__,
+            "protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+        },
         "poll_timeout_s": 25.0,
     }
     assert worker.queue.qsize() == 1
     assert worker.info["lsm_version"] == "0.0.0"
     assert worker.info["poll_protocol_version"] == 1
+
+    stale_protocol = await manager.poll(
+        worker.token,
+        {
+            "protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION - 1,
+            "worker_version": remote.__version__,
+        },
+    )
+    assert stale_protocol["job"] is None
+    assert stale_protocol["upgrade"] == {
+        "required": True,
+        "version": remote.__version__,
+        "protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+    }
+    assert worker.queue.qsize() == 1
 
     matched = await manager.poll(
         worker.token,
@@ -111,7 +130,11 @@ async def test_poll_requires_upgrade_before_dequeuing_jobs(tmp_path, monkeypatch
         },
     )
     assert matched["job"]["id"] == "job-valid"
-    assert matched["upgrade"] == {"required": False, "version": remote.__version__}
+    assert matched["upgrade"] == {
+        "required": False,
+        "version": remote.__version__,
+        "protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+    }
     assert matched["poll_timeout_s"] == 25.0
 
 
@@ -263,9 +286,20 @@ async def test_invalid_worker_poll_protocol_uses_legacy_queue(tmp_path, monkeypa
 
     assert worker.queue.qsize() == 1
     assert worker.transfer_queue.qsize() == 0
-    polled = await manager.poll(
+    stale = await manager.poll(
         worker.token,
         {"protocol_version": 1, "worker_version": remote.__version__},
+    )
+    assert stale["job"] is None
+    assert stale["upgrade"]["required"] is True
+
+    polled = await manager.poll(
+        worker.token,
+        {
+            "protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+            "worker_version": remote.__version__,
+            "lane": remote.REMOTE_WORKER_TRANSFER_LANE,
+        },
     )
     await manager.submit_result(
         worker.token,

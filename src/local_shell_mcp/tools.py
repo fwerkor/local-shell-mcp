@@ -72,10 +72,12 @@ from .oauth import ALL_OAUTH_SCOPES
 from .patch_ops import git_apply_command, git_apply_prefix, normalize_patch_text
 from .playwright_ops import playwright_run_script
 from .process_utils import managed_process_kwargs
-from .remote import REMOTE_WORKER_TRANSFER_LANE, remote_manager
+from .remote import REMOTE_WORKER_INTERACTIVE_LANE, REMOTE_WORKER_TRANSFER_LANE, remote_manager
 from .remote_transfer import (
     create_stream_download_ticket,
     create_upload_ticket,
+    finalize_upload_ticket,
+    get_download_ticket_status,
     get_upload_ticket_status,
     revoke_transfer_ticket,
 )
@@ -1427,6 +1429,26 @@ async def _remote_transfer_data(
     return _unwrap_remote_transfer_result(result, machine=machine, tool=tool)
 
 
+_REMOTE_STAGED_LEASE_REFRESH_INTERVAL_S = 60.0
+
+
+async def _refresh_remote_staged_write_lease(
+    machine: str, path: str, transfer_id: str
+) -> None:
+    while True:
+        await asyncio.sleep(_REMOTE_STAGED_LEASE_REFRESH_INTERVAL_S)
+        result = await remote_manager().call(
+            machine,
+            "transfer_refresh_stream_write",
+            {"path": path, "transfer_id": transfer_id},
+            30,
+            lane=REMOTE_WORKER_INTERACTIVE_LANE,
+        )
+        _unwrap_remote_transfer_result(
+            result, machine=machine, tool="transfer_refresh_stream_write"
+        )
+
+
 def _controller_relay_staging_path() -> str:
     settings = get_settings()
     root = settings.workspace_root.resolve()
@@ -1467,13 +1489,37 @@ async def _stream_remote_file_to_upload_ticket(
     src_machine: str,
     src_path: str,
     total_bytes: int,
-    expected_sha256: str,
+    expected_sha256: str | None,
     ticket: dict[str, Any],
     progress: TransferProgress | None = None,
 ) -> dict[str, Any]:
     timeout_s = get_settings().remote_job_timeout_s
     last_error: Exception | None = None
     last_reported = -1
+
+    async def finalize_staged(
+        status: dict[str, Any], source_digest: str | None
+    ) -> dict[str, Any] | None:
+        if expected_sha256 is not None or not status.get("staged"):
+            return None
+        receiver_digest = str(status.get("sha256") or "")
+        if int(status.get("received_bytes") or 0) != total_bytes or not receiver_digest:
+            return None
+        digest = str(source_digest or "").lower()
+        if not digest:
+            source_stat = await _remote_transfer_data(
+                src_machine,
+                "transfer_stat",
+                {"path": src_path, "sha256": True},
+                timeout_s,
+            )
+            if int(source_stat.get("size") or -1) != total_bytes:
+                raise RemoteTransferError("source changed after an ambiguous upload")
+            digest = str(source_stat.get("sha256") or "").lower()
+        if digest != receiver_digest:
+            raise RemoteTransferError("source and receiver streamed checksums differ")
+        return finalize_upload_ticket(ticket["token"], digest)
+
     for attempt in range(3):
         task = asyncio.create_task(
             _remote_transfer_data(
@@ -1518,8 +1564,9 @@ async def _stream_remote_file_to_upload_ticket(
             with suppress(asyncio.CancelledError, Exception):
                 await task
             raise
+
         try:
-            await task
+            worker_result = await task
         except Exception as exc:
             last_error = exc
             try:
@@ -1528,6 +1575,9 @@ async def _stream_remote_file_to_upload_ticket(
                 raise exc from None
             if status.get("completed"):
                 return status
+            finalized = await finalize_staged(status, None)
+            if finalized is not None:
+                return finalized
             if attempt == 2:
                 raise
             await asyncio.sleep(0.25 * (2**attempt))
@@ -1536,6 +1586,12 @@ async def _stream_remote_file_to_upload_ticket(
         status = get_upload_ticket_status(ticket["token"])
         if status.get("completed"):
             return status
+        finalized = await finalize_staged(
+            status,
+            str(worker_result.get("sha256") or "") if isinstance(worker_result, dict) else None,
+        )
+        if finalized is not None:
+            return finalized
         last_error = RemoteTransferError(f"upload did not complete: {status}")
         if attempt < 2:
             await asyncio.sleep(0.25 * (2**attempt))
@@ -1551,6 +1607,17 @@ async def _refresh_controller_temp_lease(path: str) -> None:
         await asyncio.sleep(60.0)
 
 
+async def _wait_for_download_ticket_completion(token: str) -> dict[str, Any]:
+    deadline = asyncio.get_running_loop().time() + 5.0
+    while True:
+        status = get_download_ticket_status(token)
+        if status.get("completed"):
+            return status
+        if asyncio.get_running_loop().time() >= deadline:
+            raise RemoteTransferError("source stream ended before its digest was finalized")
+        await asyncio.sleep(0.01)
+
+
 async def _copy_local_file_to_remote(
     source_path: str,
     dst_machine: str,
@@ -1561,12 +1628,15 @@ async def _copy_local_file_to_remote(
 ) -> dict:
     if chunk_size is not None:
         normalize_chunk_size(chunk_size)
-    ticket = await asyncio.to_thread(create_stream_download_ticket, source_path)
+    ticket = create_stream_download_ticket(source_path)
     total_bytes = int(ticket["bytes"])
-    digest = str(ticket["sha256"])
+    staged_transfer_id: str | None = None
+    staged_lease_task: asyncio.Task[None] | None = None
+    digest: str | None = None
+    finish: dict[str, Any] | None = None
     lease_task = asyncio.create_task(_refresh_controller_temp_lease(source_path))
     try:
-        finish = await _remote_transfer_data(
+        staged = await _remote_transfer_data(
             dst_machine,
             "transfer_download_url",
             {
@@ -1574,18 +1644,51 @@ async def _copy_local_file_to_remote(
                 "path": dst_path,
                 "overwrite": overwrite,
                 "expected_bytes": total_bytes,
-                "expected_sha256": digest,
                 "timeout_s": get_settings().remote_job_timeout_s,
+                "defer_commit": True,
             },
             get_settings().remote_job_timeout_s,
         )
+        staged_transfer_id = str(staged["transfer_id"])
+        staged_lease_task = asyncio.create_task(
+            _refresh_remote_staged_write_lease(dst_machine, dst_path, staged_transfer_id)
+        )
+        status = await _wait_for_download_ticket_completion(ticket["token"])
+        if not status.get("sha256"):
+            raise RemoteTransferError("source stream completed without a verified digest")
+        digest = str(status["sha256"])
+        finish = await _remote_transfer_data(
+            dst_machine,
+            "transfer_finish_write",
+            {
+                "path": dst_path,
+                "transfer_id": staged_transfer_id,
+                "expected_bytes": total_bytes,
+                "expected_sha256": digest,
+            },
+            get_settings().remote_job_timeout_s,
+        )
+        staged_transfer_id = None
     finally:
+        if staged_lease_task is not None:
+            staged_lease_task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await staged_lease_task
+        if staged_transfer_id is not None:
+            with suppress(asyncio.CancelledError, Exception):
+                await _remote_transfer_data(
+                    dst_machine,
+                    "transfer_abort_write",
+                    {"path": dst_path, "transfer_id": staged_transfer_id},
+                    30,
+                )
         lease_task.cancel()
         try:
             with suppress(asyncio.CancelledError, FileNotFoundError):
                 await lease_task
         finally:
             revoke_transfer_ticket(ticket["token"])
+    assert finish is not None and digest is not None
     await _report_transfer_progress(
         progress,
         phase="transferring",
@@ -1614,7 +1717,7 @@ async def _copy_remote_file_to_local(
     progress: TransferProgress | None = None,
 ) -> dict:
     stat = await _remote_transfer_data(
-        src_machine, "transfer_stat", {"path": src_path, "sha256": True}
+        src_machine, "transfer_stat", {"path": src_path, "sha256": False}
     )
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {src_path}")
@@ -1624,7 +1727,7 @@ async def _copy_remote_file_to_local(
     ticket = create_upload_ticket(
         destination_path,
         total_bytes,
-        stat["sha256"],
+        None,
         overwrite,
     )
     try:
@@ -1640,7 +1743,7 @@ async def _copy_remote_file_to_local(
             src_machine,
             src_path,
             total_bytes,
-            stat["sha256"],
+            None,
             ticket,
             progress,
         )
@@ -1658,7 +1761,7 @@ async def _copy_remote_file_to_local(
         "source": {"machine": src_machine, "path": stat["path"]},
         "destination": {"machine": "controller", "path": finish["path"]},
         "bytes": total_bytes,
-        "sha256": stat.get("sha256"),
+        "sha256": finish.get("sha256"),
         "chunks": 1,
         "chunk_size": total_bytes,
         "transport": "http-stream",
@@ -1675,7 +1778,7 @@ async def _copy_remote_file_via_controller_relay(
     progress: TransferProgress | None = None,
 ) -> dict:
     stat = await _remote_transfer_data(
-        src_machine, "transfer_stat", {"path": src_path, "sha256": True}
+        src_machine, "transfer_stat", {"path": src_path, "sha256": False}
     )
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {src_path}")
@@ -1689,7 +1792,7 @@ async def _copy_remote_file_via_controller_relay(
         upload_ticket = create_upload_ticket(
             staging_path,
             total_bytes,
-            stat["sha256"],
+            None,
             True,
         )
         await _report_transfer_progress(
@@ -1700,19 +1803,20 @@ async def _copy_remote_file_via_controller_relay(
             chunks=0,
             chunk_size=total_bytes,
         )
-        await _stream_remote_file_to_upload_ticket(
+        upload_finish = await _stream_remote_file_to_upload_ticket(
             src_machine,
             src_path,
             total_bytes,
-            stat["sha256"],
+            None,
             upload_ticket,
             progress,
         )
+        digest = str(upload_finish["sha256"])
         revoke_transfer_ticket(upload_ticket["token"])
         staged_ticket = create_stream_download_ticket(
             staging_path,
             total_bytes,
-            stat["sha256"],
+            digest,
             cleanup_source=True,
         )
         finish = await _remote_transfer_data(
@@ -1723,7 +1827,7 @@ async def _copy_remote_file_via_controller_relay(
                 "url": staged_ticket["url"],
                 "overwrite": overwrite,
                 "expected_bytes": total_bytes,
-                "expected_sha256": stat["sha256"],
+                "expected_sha256": digest,
                 "timeout_s": get_settings().remote_job_timeout_s,
             },
             get_settings().remote_job_timeout_s,
@@ -1748,7 +1852,7 @@ async def _copy_remote_file_via_controller_relay(
         "source": {"machine": src_machine, "path": stat["path"]},
         "destination": {"machine": dst_machine, "path": finish["path"]},
         "bytes": total_bytes,
-        "sha256": stat.get("sha256"),
+        "sha256": digest,
         "chunks": 1,
         "chunk_size": total_bytes,
         "transport": "controller-http-relay",

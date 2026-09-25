@@ -24,6 +24,7 @@ from local_shell_mcp.transfer_ops import (
     transfer_finish_write,
     transfer_pack_dir,
     transfer_read_chunk,
+    transfer_refresh_stream_write,
     transfer_stat,
     transfer_unpack_archive,
     transfer_write_bytes,
@@ -45,7 +46,8 @@ class FakeRemoteManager:
         lane: str | None = None,
     ) -> dict[str, Any]:
         del machine, timeout_s
-        assert lane == "transfer"
+        expected_lane = "interactive" if tool == "transfer_refresh_stream_write" else "transfer"
+        assert lane == expected_lane
         try:
             if tool == "transfer_stat":
                 data = transfer_stat(args["path"], args.get("sha256", True))
@@ -76,6 +78,9 @@ class FakeRemoteManager:
                 )
             elif tool == "transfer_abort_write":
                 data = transfer_abort_write(args["path"], args["transfer_id"])
+            elif tool == "transfer_refresh_stream_write":
+                transfer_refresh_stream_write(args["path"], args["transfer_id"])
+                data = {"refreshed": True}
             elif tool == "transfer_upload_url":
                 source = resolve_path(args["path"], must_exist=True)
                 offset = int(args.get("offset", 0))
@@ -124,16 +129,26 @@ class FakeRemoteManager:
                         0,
                         response.content,
                     )
-                    finish = transfer_finish_write(
-                        args["path"],
-                        begin["transfer_id"],
-                        args["expected_bytes"],
-                        args["expected_sha256"],
-                    )
+                    if args.get("defer_commit", False):
+                        data = {
+                            "path": begin["path"],
+                            "temp_path": begin["temp_path"],
+                            "transfer_id": begin["transfer_id"],
+                            "bytes": len(response.content),
+                            "sha256": None,
+                            "transport": "http-staged",
+                        }
+                    else:
+                        finish = transfer_finish_write(
+                            args["path"],
+                            begin["transfer_id"],
+                            args["expected_bytes"],
+                            args["expected_sha256"],
+                        )
+                        data = {**finish, "transport": "http-stream"}
                 except Exception:
                     transfer_abort_write(args["path"], begin["transfer_id"])
                     raise
-                data = {**finish, "transport": "http-stream"}
             elif tool == "transfer_alloc_temp_path":
                 data = transfer_alloc_temp_path(args.get("suffix", ".bin"))
             elif tool == "transfer_pack_dir":
@@ -299,6 +314,35 @@ def test_controller_relay_staging_rejects_symlink(tmp_path, monkeypatch):
     assert victim.read_bytes() == b"keep"
 
 
+
+
+
+@pytest.mark.asyncio
+async def test_staged_write_lease_refresh_uses_interactive_lane(monkeypatch):
+    seen = asyncio.Event()
+
+    class Manager:
+        async def call(self, machine, tool, args, timeout_s=None, *, lane=None):
+            assert machine == "worker-a"
+            assert tool == "transfer_refresh_stream_write"
+            assert args == {"path": "staged.bin", "transfer_id": "txn"}
+            assert timeout_s == 30
+            assert lane == "interactive"
+            seen.set()
+            return {"ok": True, "message": "", "data": {"refreshed": True}}
+
+    monkeypatch.setattr(tools, "remote_manager", lambda: Manager())
+    monkeypatch.setattr(tools, "_REMOTE_STAGED_LEASE_REFRESH_INTERVAL_S", 0.001)
+
+    task = asyncio.create_task(
+        tools._refresh_remote_staged_write_lease("worker-a", "staged.bin", "txn")
+    )
+    await asyncio.wait_for(seen.wait(), timeout=2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
 @pytest.mark.asyncio
 async def test_local_stream_download_refreshes_temp_archive_lease(tmp_path, monkeypatch):
     root = _workspace(tmp_path, monkeypatch)
@@ -315,14 +359,28 @@ async def test_local_stream_download_refreshes_temp_archive_lease(tmp_path, monk
             refreshed.set()
         return original_refresh(path, create=create)
 
+    digest = pack["sha256"]
+
     async def queued_download(machine, tool, args, timeout_s=None):
-        del machine, args, timeout_s
-        assert tool == "transfer_download_url"
-        assert await asyncio.to_thread(refreshed.wait, 2)
-        return {"path": "destination/archive.tar.gz"}
+        del machine, timeout_s
+        if tool == "transfer_download_url":
+            assert await asyncio.to_thread(refreshed.wait, 2)
+            return {
+                "path": args["path"],
+                "transfer_id": "staged",
+                "bytes": pack["bytes"],
+                "transport": "http-staged",
+            }
+        assert tool == "transfer_finish_write"
+        return {"path": args["path"], "bytes": pack["bytes"], "sha256": digest}
 
     monkeypatch.setattr(tools, "refresh_temp_file_lease", record_refresh)
     monkeypatch.setattr(tools, "_remote_transfer_data", queued_download)
+    monkeypatch.setattr(
+        tools,
+        "get_download_ticket_status",
+        lambda token: {"completed": True, "sha256": digest},
+    )
 
     result = await tools._copy_local_file_to_remote(
         pack["archive_path"],
@@ -461,19 +519,30 @@ async def test_local_to_remote_streams_source_without_snapshot(tmp_path, monkeyp
             "url": "http://testserver/remote/transfer/download/ticket",
             "path": source_path,
             "bytes": len(data),
-            "sha256": digest,
+            "sha256": None,
         }
 
     async def transfer(machine, tool, args, timeout_s=None):
         del machine, timeout_s
-        assert tool == "transfer_download_url"
-        return {
-            "path": args["path"],
-            "bytes": len(data),
-            "sha256": hashlib.sha256(data).hexdigest(),
-        }
+        if tool == "transfer_download_url":
+            assert args.get("defer_commit") is True
+            assert "expected_sha256" not in args
+            return {
+                "path": args["path"],
+                "transfer_id": "staged",
+                "bytes": len(data),
+                "transport": "http-staged",
+            }
+        assert tool == "transfer_finish_write"
+        assert args["expected_sha256"] == digest
+        return {"path": args["path"], "bytes": len(data), "sha256": digest}
 
     monkeypatch.setattr(tools, "create_stream_download_ticket", create_ticket)
+    monkeypatch.setattr(
+        tools,
+        "get_download_ticket_status",
+        lambda token: {"completed": True, "sha256": digest},
+    )
     monkeypatch.setattr(
         tools,
         "revoke_transfer_ticket",
@@ -506,7 +575,7 @@ async def test_local_to_remote_revokes_ticket_when_lease_refresh_loses_source(
             "url": "http://testserver/remote/transfer/download/ticket",
             "path": source_path,
             "bytes": len(data),
-            "sha256": digest,
+            "sha256": None,
         }
 
     async def refresh_lease(source_path):
@@ -516,17 +585,25 @@ async def test_local_to_remote_revokes_ticket_when_lease_refresh_loses_source(
 
     async def transfer(machine, tool, args, timeout_s=None):
         del machine, timeout_s
-        assert tool == "transfer_download_url"
-        await asyncio.wait_for(lease_failed.wait(), timeout=2)
-        await asyncio.sleep(0)
-        return {
-            "path": args["path"],
-            "bytes": len(data),
-            "sha256": digest,
-        }
+        if tool == "transfer_download_url":
+            await asyncio.wait_for(lease_failed.wait(), timeout=2)
+            await asyncio.sleep(0)
+            return {
+                "path": args["path"],
+                "transfer_id": "staged",
+                "bytes": len(data),
+                "transport": "http-staged",
+            }
+        assert tool == "transfer_finish_write"
+        return {"path": args["path"], "bytes": len(data), "sha256": digest}
 
     monkeypatch.setattr(tools, "create_stream_download_ticket", create_ticket)
     monkeypatch.setattr(tools, "_refresh_controller_temp_lease", refresh_lease)
+    monkeypatch.setattr(
+        tools,
+        "get_download_ticket_status",
+        lambda token: {"completed": True, "sha256": digest},
+    )
     monkeypatch.setattr(
         tools,
         "revoke_transfer_ticket",
