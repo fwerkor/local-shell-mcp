@@ -296,14 +296,14 @@ def _oauth_security_scheme(scopes: list[str] | tuple[str, ...]) -> dict[str, Any
 NOAUTH_SECURITY_SCHEMES = [{"type": "noauth"}]
 PUBLIC_TOOL_TIMEOUT_S = PUBLIC_TOOL_WATCHDOG_TIMEOUT_S
 MCP_BASE_INSTRUCTIONS = (
-    "Skills: use skill_list first, then skill_load with its exact name; use skill_read only "
-    "for related files. External MCP: mcp_tool_search -> mcp_tool_inspect -> mcp_tool_call."
+    "Skills: skill_list -> skill_load -> skill_read as needed. External MCP: "
+    "mcp_tool_search -> mcp_tool_inspect -> mcp_tool_call."
 )
 LOGICAL_SESSION_MCP_INSTRUCTIONS = (
     "For substantive tool work, use one durable Logical Session. Start with "
-    "session_manage(action='start'); resume only a session_id already in this conversation or supplied by the user; "
-    "never infer one elsewhere. Pass it as logical_session_id to all tools, report progress, and state the active "
-    "session_id before ending. "
+    "session_manage(action='start'); resume only an id from this conversation or user; never infer elsewhere. "
+    "Ordinary tools use logical_session_id; explicit-session tools use session_id. State the id after start/resume, "
+    "at checkpoints, and before ending. Persist progress via session_manage(action='report'). "
 )
 MCP_INSTRUCTIONS = LOGICAL_SESSION_MCP_INSTRUCTIONS + MCP_BASE_INSTRUCTIONS
 
