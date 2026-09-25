@@ -527,6 +527,127 @@ def test_unknown_digest_upload_stages_until_explicit_finalize(tmp_path, monkeypa
     revoke_transfer_ticket(ticket["token"])
 
 
+def test_unknown_digest_ticket_status_and_finalize_errors(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    data = b"state-machine-payload"
+    digest = hashlib.sha256(data).hexdigest()
+
+    (tmp_path / "source.bin").write_bytes(data)
+    download = remote_transfer.create_stream_download_ticket("source.bin")
+    pending = remote_transfer.get_download_ticket_status(download["token"])
+    assert pending["completed"] is False
+    assert pending["received_bytes"] == 0
+    assert pending["sha256"] is None
+
+    upload = create_upload_ticket("destination.bin", len(data), None)
+    with pytest.raises(PermissionError, match="direction mismatch"):
+        remote_transfer.get_download_ticket_status(upload["token"])
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        remote_transfer.get_download_ticket_status("missing")
+    with pytest.raises(ValueError, match="incomplete"):
+        remote_transfer.finalize_upload_ticket(upload["token"], digest)
+
+    response = client.put(upload["url"], content=data)
+    assert response.status_code == 200
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        remote_transfer.finalize_upload_ticket(
+            upload["token"], hashlib.sha256(b"different").hexdigest()
+        )
+
+    finish = remote_transfer.finalize_upload_ticket(upload["token"], digest)
+    assert remote_transfer.finalize_upload_ticket(upload["token"], digest) == finish
+
+    revoke_transfer_ticket(download["token"])
+    revoke_transfer_ticket(upload["token"])
+
+
+@pytest.mark.asyncio
+async def test_upload_transaction_guards_and_stream_size_validation(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    data = b"guarded"
+    digest = hashlib.sha256(data).hexdigest()
+    ticket_info = create_upload_ticket("destination.bin", len(data), None)
+    ticket = remote_transfer._TICKETS[ticket_info["token"]]
+    transfer_id = ticket.transfer_id
+
+    ticket.transfer_id = None
+    with pytest.raises(RuntimeError, match="transaction is unavailable"):
+        remote_transfer._write_upload_chunk(ticket, 0, len(data), data)
+    with pytest.raises(RuntimeError, match="transaction is unavailable"):
+        remote_transfer._finish_upload_transaction(ticket_info["token"], ticket)
+    with pytest.raises(RuntimeError, match="transaction is unavailable"):
+        await remote_transfer._stream_full_upload(None, ticket_info["token"], ticket)
+    with pytest.raises(RuntimeError, match="transaction is unavailable"):
+        remote_transfer.finalize_upload_ticket(ticket_info["token"], digest)
+
+    ticket.transfer_id = transfer_id
+    with pytest.raises(RuntimeError, match="no verified digest"):
+        remote_transfer._finish_upload_transaction(ticket_info["token"], ticket)
+
+    class ShortRequest:
+        async def stream(self):
+            yield data[:-1]
+
+    with pytest.raises(ValueError, match="size mismatch"):
+        await remote_transfer._stream_full_upload(
+            ShortRequest(), ticket_info["token"], ticket
+        )
+
+    revoke_transfer_ticket(ticket_info["token"])
+
+
+@pytest.mark.asyncio
+async def test_stream_upload_rejects_more_than_declared_size(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    ticket_info = create_upload_ticket("destination.bin", 3, None)
+    ticket = remote_transfer._TICKETS[ticket_info["token"]]
+
+    class OversizedRequest:
+        async def stream(self):
+            yield b"four"
+
+    with pytest.raises(ValueError, match="exceeds declared size"):
+        await remote_transfer._stream_full_upload(
+            OversizedRequest(), ticket_info["token"], ticket
+        )
+
+    assert not (tmp_path / "destination.bin").exists()
+    revoke_transfer_ticket(ticket_info["token"])
+
+
+def test_stream_download_rejects_size_change_before_open(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"original")
+    ticket_info = remote_transfer.create_stream_download_ticket("source.bin")
+    ticket = remote_transfer._claim_ticket(ticket_info["token"], "download")
+    source.write_bytes(b"x")
+
+    with pytest.raises(ValueError, match="size mismatch"):
+        remote_transfer._open_download(ticket)
+
+    revoke_transfer_ticket(ticket_info["token"])
+
+
+def test_stream_download_rejects_known_digest_mismatch(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    data = b"actual-stream"
+    source = tmp_path / "source.bin"
+    source.write_bytes(data)
+    ticket_info = remote_transfer.create_stream_download_ticket(
+        "source.bin",
+        len(data),
+        hashlib.sha256(b"different-data").hexdigest(),
+    )
+    ticket = remote_transfer._claim_ticket(ticket_info["token"], "download")
+    _, handle = remote_transfer._open_download(ticket)
+
+    with pytest.raises(RuntimeError, match="checksum changed"):
+        list(remote_transfer._download_iterator(ticket_info["token"], ticket, handle))
+
+    revoke_transfer_ticket(ticket_info["token"])
+
+
 def test_worker_unknown_digest_put_streams_pinned_source_once(tmp_path, monkeypatch):
     import local_shell_mcp.remote as remote
 
@@ -547,7 +668,10 @@ def test_worker_unknown_digest_put_streams_pinned_source_once(tmp_path, monkeypa
             sent.extend(chunk)
             if not self.replaced:
                 self.replaced = True
-                replacement.replace(source)
+                try:
+                    replacement.replace(source)
+                except OSError:
+                    pytest.skip("platform does not permit replacing an open source file")
             return len(chunk)
 
         def flush(self):
@@ -641,6 +765,91 @@ def test_worker_unknown_digest_put_rejects_in_place_mutation(tmp_path, monkeypat
         )
 
     assert killed is True
+
+
+@pytest.mark.parametrize(
+    ("mode", "message"),
+    [
+        ("no_stdin", "stdin is unavailable"),
+        ("short_write", "accepted"),
+        ("broken_pipe", "HTTP 400"),
+        ("bad_status", "invalid HTTP status"),
+        ("no_marker", "invalid response"),
+        ("curl_error", "curl exit 7"),
+    ],
+)
+def test_worker_unknown_digest_put_reports_stream_failures(
+    tmp_path, monkeypatch, mode, message
+):
+    import local_shell_mcp.remote as remote
+
+    _client(tmp_path, monkeypatch)
+    data = b"stream-failure"
+    (tmp_path / "source.bin").write_bytes(data)
+
+    class FakeStdin:
+        def write(self, chunk):
+            if mode == "short_write":
+                return len(chunk) - 1
+            if mode == "broken_pipe":
+                raise BrokenPipeError
+            return len(chunk)
+
+        def flush(self):
+            return None
+
+        def close(self):
+            return None
+
+    class FakeProcess:
+        def __init__(self, command, **kwargs):
+            del command, kwargs
+            self.stdin = None if mode == "no_stdin" else FakeStdin()
+            self.returncode = 7 if mode == "curl_error" else 0
+
+        def communicate(self):
+            if mode == "bad_status":
+                return b"\n__LSM_HTTP_STATUS__:bad", b""
+            if mode == "no_marker":
+                return b"invalid", b""
+            if mode == "broken_pipe":
+                return b"\n__LSM_HTTP_STATUS__:400", b""
+            if mode == "curl_error":
+                return b"", b"network"
+            return b"\n__LSM_HTTP_STATUS__:200", b""
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(remote.shutil, "which", lambda name: "/usr/bin/curl")
+    monkeypatch.setattr(remote.subprocess, "Popen", FakeProcess)
+
+    with pytest.raises(RuntimeError, match=message):
+        remote._worker_put_url(
+            "source.bin",
+            "http://testserver/upload",
+            len(data),
+            None,
+            60,
+        )
+
+
+def test_worker_unknown_digest_put_requires_curl(tmp_path, monkeypatch):
+    import local_shell_mcp.remote as remote
+
+    _client(tmp_path, monkeypatch)
+    data = b"payload"
+    (tmp_path / "source.bin").write_bytes(data)
+    monkeypatch.setattr(remote.shutil, "which", lambda name: None)
+
+    with pytest.raises(FileNotFoundError, match="curl is required"):
+        remote._worker_put_url(
+            "source.bin",
+            "http://testserver/upload",
+            len(data),
+            None,
+            60,
+        )
 
 
 @pytest.mark.asyncio
