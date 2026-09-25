@@ -103,10 +103,13 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
     )
     assert initialization.icons[0].mimeType == "image/svg+xml"
     instructions = mcp.instructions or ""
-    assert "Never discover, infer, or auto-select a Session from other conversations" in instructions
-    assert "clearly tell the user the active session_id" in instructions
-    assert "before ending the turn" in instructions
-    assert "workspace_open take the same session_id explicitly" in instructions
+    assert len(instructions) <= 512
+    assert instructions.startswith("For substantive tool work, use one durable Logical Session")
+    assert "resume only an id from this conversation or user" in instructions
+    assert "never infer elsewhere" in instructions
+    assert "Ordinary tools use logical_session_id; explicit-session tools use session_id" in instructions
+    assert "State the id after start/resume, at checkpoints, and before ending" in instructions
+    assert "Persist progress via session_manage(action='report')" in instructions
 
     tools = {tool.name: tool for tool in await mcp.list_tools()}
     assert tools["environment_get"].meta["securitySchemes"][0]["type"] == "oauth2"

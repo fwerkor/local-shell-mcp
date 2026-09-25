@@ -296,29 +296,16 @@ def _oauth_security_scheme(scopes: list[str] | tuple[str, ...]) -> dict[str, Any
 NOAUTH_SECURITY_SCHEMES = [{"type": "noauth"}]
 PUBLIC_TOOL_TIMEOUT_S = PUBLIC_TOOL_WATCHDOG_TIMEOUT_S
 MCP_BASE_INSTRUCTIONS = (
-    "When a task may benefit from an installed Agent Skill, call skill_list first "
-    "to discover the exact Skill name and description. Before following a Skill's "
-    "workflow, call skill_load with that exact name. Call skill_read only when "
-    "a related file returned by skill_load is needed. Skills use this fixed tool "
-    "surface; do not expect per-Skill MCP tools. When a registered external MCP may "
-    "provide a capability, use mcp_tool_search, then mcp_tool_inspect, then mcp_tool_call; "
-    "dynamic MCP tools never appear directly in tools/list."
+    "Skills: skill_list -> skill_load -> skill_read as needed. External MCP: "
+    "mcp_tool_search -> mcp_tool_inspect -> mcp_tool_call."
 )
 LOGICAL_SESSION_MCP_INSTRUCTIONS = (
-    " For substantive tool-driven work, use exactly one durable Logical Session. "
-    "Start a new task with session_manage(action='start', ...). "
-    "Only continue an existing Session when its session_id is already present in this conversation or the "
-    "user explicitly provides that session_id; then call session_manage(action='resume', session_id=...). "
-    "Never discover, infer, or auto-select a Session from other conversations. After start or resume, clearly "
-    "tell the user the active session_id. Include it again at meaningful progress checkpoints and before ending "
-    "the turn so the user can hand it to another conversation. Ordinary tools expose a required nullable "
-    "logical_session_id; while working in a Session, pass the exact session_id returned by session_manage. "
-    "Use null only when no Logical Session is active. Keep progress current with session_manage(action='report', "
-    "session_id=...) at meaningful checkpoints. Logical Sessions are independent of MCP transports, machines, "
-    "and working directories. plan_manage and workspace_open take the same session_id explicitly and never infer it "
-    "from the transport. plan_manage is optional Goal mode owned by the Logical Session."
+    "For substantive tool work, use one durable Logical Session. Start with "
+    "session_manage(action='start'); resume only an id from this conversation or user; never infer elsewhere. "
+    "Ordinary tools use logical_session_id; explicit-session tools use session_id. State the id after start/resume, "
+    "at checkpoints, and before ending. Persist progress via session_manage(action='report'). "
 )
-MCP_INSTRUCTIONS = MCP_BASE_INSTRUCTIONS + LOGICAL_SESSION_MCP_INSTRUCTIONS
+MCP_INSTRUCTIONS = LOGICAL_SESSION_MCP_INSTRUCTIONS + MCP_BASE_INSTRUCTIONS
 
 LOGICAL_SESSION_ARGUMENT_DESCRIPTION = (
     "Logical Session for this tool call. Pass the session_id returned by session_manage while working in that "
