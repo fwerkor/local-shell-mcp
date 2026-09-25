@@ -1581,9 +1581,11 @@ async def _copy_local_file_to_remote(
         )
     finally:
         lease_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await lease_task
-        revoke_transfer_ticket(ticket["token"])
+        try:
+            with suppress(asyncio.CancelledError, FileNotFoundError):
+                await lease_task
+        finally:
+            revoke_transfer_ticket(ticket["token"])
     await _report_transfer_progress(
         progress,
         phase="transferring",

@@ -490,6 +490,57 @@ async def test_local_to_remote_streams_source_without_snapshot(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_local_to_remote_revokes_ticket_when_lease_refresh_loses_source(
+    tmp_path, monkeypatch
+):
+    root = _workspace(tmp_path, monkeypatch)
+    data = b"content"
+    (root / "payload.bin").write_bytes(data)
+    lease_failed = asyncio.Event()
+    revoked: list[str] = []
+    digest = hashlib.sha256(data).hexdigest()
+
+    def create_ticket(source_path):
+        return {
+            "token": "ticket",
+            "url": "http://testserver/remote/transfer/download/ticket",
+            "path": source_path,
+            "bytes": len(data),
+            "sha256": digest,
+        }
+
+    async def refresh_lease(source_path):
+        assert source_path == "payload.bin"
+        lease_failed.set()
+        raise FileNotFoundError(source_path)
+
+    async def transfer(machine, tool, args, timeout_s=None):
+        del machine, timeout_s
+        assert tool == "transfer_download_url"
+        await asyncio.wait_for(lease_failed.wait(), timeout=2)
+        await asyncio.sleep(0)
+        return {
+            "path": args["path"],
+            "bytes": len(data),
+            "sha256": digest,
+        }
+
+    monkeypatch.setattr(tools, "create_stream_download_ticket", create_ticket)
+    monkeypatch.setattr(tools, "_refresh_controller_temp_lease", refresh_lease)
+    monkeypatch.setattr(
+        tools,
+        "revoke_transfer_ticket",
+        lambda token: revoked.append(token) or {"revoked": True},
+    )
+    monkeypatch.setattr(tools, "_remote_transfer_data", transfer)
+
+    result = await tools._copy_local_file_to_remote("payload.bin", "dst", "copied.bin")
+
+    assert result["transport"] == "http-stream"
+    assert revoked == ["ticket"]
+
+
+@pytest.mark.asyncio
 async def test_cancelled_local_to_remote_stream_revokes_ticket(tmp_path, monkeypatch):
     root = _workspace(tmp_path, monkeypatch)
     (root / "payload.bin").write_bytes(b"content")
