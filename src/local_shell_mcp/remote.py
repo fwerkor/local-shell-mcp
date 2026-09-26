@@ -130,6 +130,9 @@ REMOTE_NON_CANCELLABLE_WORKER_TOOLS = frozenset(
         "transfer_upload_url",
         "transfer_open_receiver",
         "transfer_close_receiver",
+        "transfer_gui_temp_stat",
+        "transfer_gui_temp_put_url",
+        "transfer_gui_temp_delete",
     }
 )
 
@@ -1422,6 +1425,73 @@ REMOTE_WORKER_TOOL_NAMES = frozenset().union(
 )
 
 
+_GUI_TEMP_NAME_RE = re.compile(r"^gui(?:-frame)?-[0-9a-f]{32}\.png$")
+
+
+def _worker_gui_temp_path(path: str, *, must_exist: bool = True) -> Path:
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = get_settings().workspace_root / candidate
+    root = temp_dir().resolve(strict=False)
+    parent = candidate.parent.resolve(strict=False)
+    if parent != root:
+        raise ValueError("GUI temp path is outside the internal temp directory")
+    if not _GUI_TEMP_NAME_RE.fullmatch(candidate.name):
+        raise ValueError("GUI temp path has an invalid filename")
+    resolved = candidate.resolve(strict=must_exist)
+    if resolved.parent != root:
+        raise ValueError("GUI temp path escapes the internal temp directory")
+    return resolved
+
+
+def _worker_gui_temp_stat(path: str, sha256: bool = False) -> dict[str, Any]:
+    source = _worker_gui_temp_path(path, must_exist=True)
+    if not source.is_file():
+        raise IsADirectoryError(str(source))
+    stat = source.stat()
+    result: dict[str, Any] = {
+        "path": relative_display(source),
+        "type": "file",
+        "size": stat.st_size,
+        "mtime": stat.st_mtime,
+    }
+    if sha256:
+        digest = hashlib.sha256()
+        with source.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        result["sha256"] = digest.hexdigest()
+    return result
+
+
+def _worker_gui_temp_delete(path: str) -> dict[str, Any]:
+    source = _worker_gui_temp_path(path, must_exist=False)
+    source.unlink(missing_ok=True)
+    return {"path": relative_display(source), "deleted": True}
+
+
+def _worker_gui_temp_put_url(
+    path: str,
+    url: str,
+    expected_bytes: int,
+    timeout_s: int | None = None,
+) -> dict[str, Any]:
+    _worker_validate_external_transfer_url(url)
+    source = _worker_gui_temp_path(path, must_exist=True)
+    if not source.is_file():
+        raise IsADirectoryError(str(source))
+    total = int(expected_bytes)
+    if source.stat().st_size != total:
+        raise ValueError(f"size mismatch: expected {total}, got {source.stat().st_size}")
+    return _worker_put_stream_url(
+        source,
+        relative_display(source),
+        url,
+        total,
+        timeout_s,
+    )
+
+
 def _worker_validate_transfer_url(url: str) -> None:
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -2143,6 +2213,25 @@ async def _execute_transfer_worker_tool(tool: str, args: dict[str, Any]) -> Any:
 
     if tool == "transfer_close_receiver":
         return await asyncio.to_thread(close_peer_receiver, args["receiver_id"])
+
+    if tool == "transfer_gui_temp_stat":
+        return await asyncio.to_thread(
+            _worker_gui_temp_stat,
+            args["path"],
+            args.get("sha256", False),
+        )
+
+    if tool == "transfer_gui_temp_delete":
+        return await asyncio.to_thread(_worker_gui_temp_delete, args["path"])
+
+    if tool == "transfer_gui_temp_put_url":
+        return await asyncio.to_thread(
+            _worker_gui_temp_put_url,
+            args["path"],
+            args["url"],
+            args["expected_bytes"],
+            args.get("timeout_s"),
+        )
 
     if tool == "transfer_put_url":
         return await _worker_put_url_cancellable(

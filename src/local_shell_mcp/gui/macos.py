@@ -255,10 +255,11 @@ class MacOSGuiBackend:
                     }
                 )
                 locators[element_id] = element
-                if depth >= max_depth:
+                remaining = max_elements - len(elements) - len(queue)
+                if depth >= max_depth or remaining <= 0:
                     continue
                 children = _ax_copy(AX, element, AX.kAXChildrenAttribute, []) or []
-                queue.extend((child, depth + 1) for child in children)
+                queue.extend((child, depth + 1) for child in children[:remaining])
 
         return record, trusted, elements, locators
 

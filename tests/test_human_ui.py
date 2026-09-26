@@ -1129,6 +1129,24 @@ def test_windows_worker_paths_use_windows_semantics():
     assert normalized[1]["hidden"] is True
 
 
+def test_webui_remote_gui_windows_uses_bootstrap_safe_timeout(tmp_path, monkeypatch):
+    import local_shell_mcp.human_ui as human_ui
+
+    _configure(tmp_path, monkeypatch)
+    calls = []
+
+    async def dispatch(machine, local_call, remote_tool, remote_args, remote_timeout_s=None):
+        del local_call
+        calls.append((machine, remote_tool, remote_args, remote_timeout_s))
+        return {"backend": "remote", "windows": [], "capabilities": {}}
+
+    monkeypatch.setattr(human_ui, "_machine_dispatch", dispatch)
+    client = TestClient(build_http_app())
+    response = client.get("/api/ui/gui/windows", params={"machine": "node"})
+    assert response.status_code == 200
+    assert calls == [("node", "gui_list", {}, 210)]
+
+
 def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     calls = []
@@ -1365,8 +1383,8 @@ def test_webui_gui_remote_human_action_dispatch(tmp_path, monkeypatch):
     get_settings.cache_clear()
     calls = []
 
-    async def remote_call(machine, tool, args):
-        calls.append((machine, tool, args))
+    async def remote_call(machine, tool, args, timeout_s=None):
+        calls.append((machine, tool, args, timeout_s))
         return {
             "backend": "remote-gui",
             "window_id": args["window_id"],
@@ -1399,5 +1417,6 @@ def test_webui_gui_remote_human_action_dispatch(tmp_path, monkeypatch):
                 "bounds": bounds,
                 "actions": [{"type": "click", "x": 10, "y": 11}],
             },
+            210,
         )
     ]

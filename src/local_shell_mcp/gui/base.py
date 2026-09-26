@@ -355,11 +355,19 @@ class GuiManager:
                 raise
             if snapshot.screenshot_path is None or not screenshot_path.is_file():
                 raise GuiUnavailableError("GUI backend did not produce the requested screenshot")
-            await asyncio.to_thread(
-                _normalize_screenshot_coordinates,
-                screenshot_path,
-                snapshot.window,
+            normalize = asyncio.create_task(
+                asyncio.to_thread(
+                    _normalize_screenshot_coordinates,
+                    screenshot_path,
+                    snapshot.window,
+                )
             )
+            try:
+                await asyncio.shield(normalize)
+            except BaseException:
+                with contextlib.suppress(BaseException):
+                    await asyncio.shield(normalize)
+                raise
             keep_file = True
             return {
                 "backend": self._backend.name,
@@ -379,39 +387,41 @@ class GuiManager:
     ) -> dict[str, Any]:
         self._validate_action_batch(actions)
 
-        async with self._lock:
-            self._prune_locked(time.monotonic())
-            record = self._states.pop(state_id, None)
-        if record is None:
-            raise GuiStaleStateError(
-                "GUI state is stale, unknown, or already consumed; call gui_state again"
-            )
-        if str(record.window.get("id")) != str(window_id):
-            raise GuiStaleStateError("GUI state belongs to a different window; call gui_state again")
-
-        normalized: list[tuple[dict[str, Any], Any | None]] = []
-        for index, raw_action in enumerate(actions):
-            action = dict(raw_action)
-            kind = str(action.get("type") or "").strip().lower()
-            if not kind:
-                raise ValueError(f"actions[{index}].type is required")
-            action["type"] = kind
-            target = action.get("element_id")
-            locator = None
-            if target is not None:
-                locator = record.locators.get(str(target))
-                if locator is None:
-                    raise ValueError(f"Unknown element_id {target!r} for state {state_id}")
-            if kind in _COORDINATE_ACTIONS:
-                _validate_coordinate_action(
-                    record.window,
-                    action,
-                    has_locator=locator is not None,
-                )
-            normalized.append((action, locator))
-
         results: list[dict[str, Any]] = []
         async with self._execution_lock:
+            async with self._lock:
+                self._prune_locked(time.monotonic())
+                record = self._states.pop(state_id, None)
+            if record is None:
+                raise GuiStaleStateError(
+                    "GUI state is stale, unknown, or already consumed; call gui_state again"
+                )
+            if str(record.window.get("id")) != str(window_id):
+                raise GuiStaleStateError(
+                    "GUI state belongs to a different window; call gui_state again"
+                )
+
+            normalized: list[tuple[dict[str, Any], Any | None]] = []
+            for index, raw_action in enumerate(actions):
+                action = dict(raw_action)
+                kind = str(action.get("type") or "").strip().lower()
+                if not kind:
+                    raise ValueError(f"actions[{index}].type is required")
+                action["type"] = kind
+                target = action.get("element_id")
+                locator = None
+                if target is not None:
+                    locator = record.locators.get(str(target))
+                    if locator is None:
+                        raise ValueError(f"Unknown element_id {target!r} for state {state_id}")
+                if kind in _COORDINATE_ACTIONS:
+                    _validate_coordinate_action(
+                        record.window,
+                        action,
+                        has_locator=locator is not None,
+                    )
+                normalized.append((action, locator))
+
             for index, (action, locator) in enumerate(normalized):
                 if action["type"] in _COORDINATE_ACTIONS:
                     await self._assert_window_geometry_unchanged(record.window)

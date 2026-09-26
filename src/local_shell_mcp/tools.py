@@ -1634,6 +1634,9 @@ async def _stream_remote_file_to_upload_ticket(
     expected_sha256: str | None,
     ticket: dict[str, Any],
     progress: TransferProgress | None = None,
+    *,
+    put_tool: str = "transfer_put_url",
+    stat_tool: str = "transfer_stat",
 ) -> dict[str, Any]:
     timeout_s = get_settings().remote_job_timeout_s
     last_error: Exception | None = None
@@ -1651,7 +1654,7 @@ async def _stream_remote_file_to_upload_ticket(
         if not digest:
             source_stat = await _remote_transfer_data(
                 src_machine,
-                "transfer_stat",
+                stat_tool,
                 {"path": src_path, "sha256": True},
                 timeout_s,
             )
@@ -1666,7 +1669,7 @@ async def _stream_remote_file_to_upload_ticket(
         task = asyncio.create_task(
             _remote_transfer_data(
                 src_machine,
-                "transfer_put_url",
+                put_tool,
                 {
                     "path": src_path,
                     "url": ticket["url"],
@@ -1846,6 +1849,46 @@ async def _copy_local_file_to_remote(
         "sha256": digest,
         "chunks": 1,
         "chunk_size": total_bytes,
+        "transport": "http-stream",
+    }
+
+
+async def _copy_remote_gui_temp_to_local(
+    src_machine: str,
+    src_path: str,
+    destination_path: str,
+) -> dict[str, Any]:
+    stat = await _remote_transfer_data(
+        src_machine,
+        "transfer_gui_temp_stat",
+        {"path": src_path, "sha256": False},
+    )
+    if not isinstance(stat, dict) or stat.get("type") != "file":
+        raise RuntimeError(f"Remote GUI temp source is not a file: {src_path}")
+    total_bytes = int(stat["size"])
+    ticket = create_upload_ticket(
+        destination_path,
+        total_bytes,
+        None,
+        True,
+    )
+    try:
+        finish = await _stream_remote_file_to_upload_ticket(
+            src_machine,
+            src_path,
+            total_bytes,
+            None,
+            ticket,
+            put_tool="transfer_gui_temp_put_url",
+            stat_tool="transfer_gui_temp_stat",
+        )
+    finally:
+        revoke_transfer_ticket(ticket["token"])
+    return {
+        "source": {"machine": src_machine, "path": stat["path"]},
+        "destination": {"machine": "controller", "path": finish["path"]},
+        "bytes": total_bytes,
+        "sha256": finish.get("sha256"),
         "transport": "http-stream",
     }
 
@@ -2869,7 +2912,7 @@ async def _gui_frame_data(
             machine,
             "gui_frame",
             {"window_id": window_id},
-            120,
+            210,
         )
         if not isinstance(data, dict):
             raise RuntimeError("Remote gui_frame returned invalid data")
@@ -2879,18 +2922,11 @@ async def _gui_frame_data(
         if not screenshot_path:
             raise RuntimeError("Remote gui_frame returned no screenshot")
         try:
-            stat = await _remote_transfer_data(
-                machine,
-                "transfer_stat",
-                {"path": screenshot_path, "sha256": False},
-            )
-            if not isinstance(stat, dict) or stat.get("type") != "file":
-                raise RuntimeError("Remote GUI frame is not a file")
             temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".png")
             local_path = temporary["path"]
             try:
-                await _copy_remote_file_to_local(
-                    machine, screenshot_path, local_path, True
+                await _copy_remote_gui_temp_to_local(
+                    machine, screenshot_path, local_path
                 )
                 image = await asyncio.to_thread(_read_gui_temp_image, local_path)
             finally:
@@ -2901,10 +2937,10 @@ async def _gui_frame_data(
             return data, image
         finally:
             with suppress(Exception):
-                await _remote_worker_data(
+                await _remote_transfer_data(
                     machine,
-                    "delete_file_or_dir",
-                    {"path": screenshot_path, "recursive": False},
+                    "transfer_gui_temp_delete",
+                    {"path": screenshot_path},
                     30,
                 )
 
@@ -2980,7 +3016,7 @@ async def _gui_state_result(
         if machine:
             if not get_settings().remote_enabled:
                 raise RuntimeError("Remote workers are disabled")
-            data = await _remote_worker_data(machine, "gui_state", args, 120)
+            data = await _remote_worker_data(machine, "gui_state", args, 210)
             if not isinstance(data, dict):
                 raise RuntimeError("Remote gui_state returned invalid data")
             state_id = str(data.get("state_id") or "")
@@ -3002,28 +3038,21 @@ async def _gui_state_result(
                     _refresh_remote_gui_state_lease(machine, window_id, state_id)
                 )
                 try:
-                    stat = await _remote_transfer_data(
-                        machine,
-                        "transfer_stat",
-                        {"path": screenshot_path, "sha256": False},
-                    )
-                    if not isinstance(stat, dict) or stat.get("type") != "file":
-                        raise RuntimeError("Remote GUI screenshot is not a file")
                     temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".png")
                     local_path = temporary["path"]
                     try:
-                        await _copy_remote_file_to_local(
-                            machine, screenshot_path, local_path, True
+                        await _copy_remote_gui_temp_to_local(
+                            machine, screenshot_path, local_path
                         )
                         image = await asyncio.to_thread(_read_gui_temp_image, local_path)
                     finally:
                         with suppress(Exception):
                             await asyncio.to_thread(_delete_gui_temp_file, local_path)
                     with suppress(Exception):
-                        await _remote_worker_data(
+                        await _remote_transfer_data(
                             machine,
-                            "delete_file_or_dir",
-                            {"path": screenshot_path, "recursive": False},
+                            "transfer_gui_temp_delete",
+                            {"path": screenshot_path},
                             30,
                         )
                     screenshot_path = None
@@ -3058,10 +3087,10 @@ async def _gui_state_result(
     finally:
         if machine and screenshot_path:
             with suppress(Exception):
-                await _remote_worker_data(
+                await _remote_transfer_data(
                     machine,
-                    "delete_file_or_dir",
-                    {"path": screenshot_path, "recursive": False},
+                    "transfer_gui_temp_delete",
+                    {"path": screenshot_path},
                     30,
                 )
 
@@ -3559,7 +3588,7 @@ def _register_gui_tools(
     async def gui_list(machine: str | None = None) -> ToolResult:
         """List visible desktop application windows and GUI backend capabilities locally or remotely."""
         if machine:
-            return await _remote_call(settings, machine, "gui_list", {})
+            return await _remote_call(settings, machine, "gui_list", {}, 210)
         return await _tool_call(get_gui_manager().list_windows)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
@@ -3595,7 +3624,7 @@ def _register_gui_tools(
         payload = [action.model_dump(exclude_none=True) for action in actions]
         args = {"window_id": window_id, "state_id": state_id, "actions": payload}
         if machine:
-            return await _remote_call(settings, machine, "gui_action", args, 120)
+            return await _remote_call(settings, machine, "gui_action", args, 210)
         return await _tool_call(get_gui_manager().act, window_id, state_id, payload)
 
 

@@ -129,18 +129,21 @@ def _windows() -> list[tuple[Any, Any, int]]:
 
 def _window_signature(window: Any) -> str:
     try:
+        accessible_id = str(window.get_accessible_id() or "")
+    except Exception:
+        accessible_id = ""
+    try:
         role = str(window.get_role_name() or "")
     except Exception:
         role = ""
-    try:
-        title = str(window.get_name() or "")
-    except Exception:
-        title = ""
-    bounds = _bounds(window)
-    fingerprint = (
-        f"{role}\0{title}\0{bounds['x']}\0{bounds['y']}\0"
-        f"{bounds['width']}\0{bounds['height']}"
-    )
+    if accessible_id:
+        fingerprint = f"id\0{role}\0{accessible_id}"
+    else:
+        bounds = _bounds(window)
+        fingerprint = (
+            f"fallback\0{role}\0{bounds['x']}\0{bounds['y']}\0"
+            f"{bounds['width']}\0{bounds['height']}"
+        )
     return hashlib.sha256(fingerprint.encode()).hexdigest()[:12]
 
 

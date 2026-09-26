@@ -660,12 +660,22 @@ def _machine_rows() -> dict[str, Any]:
     return {"machines": rows, "counts": counts}
 
 
-async def _remote_call(machine: str, tool: str, args: dict[str, Any]) -> Any:
+async def _remote_call(
+    machine: str,
+    tool: str,
+    args: dict[str, Any],
+    timeout_s: int | None = None,
+) -> Any:
+    effective_timeout = (
+        max(1, int(timeout_s))
+        if timeout_s is not None
+        else max(1, get_settings().ui_remote_request_timeout_s)
+    )
     result = await remote_manager().call(
         machine,
         tool,
         {**args, "_human": True},
-        timeout_s=max(1, get_settings().ui_remote_request_timeout_s),
+        timeout_s=effective_timeout,
     )
     if not result.get("ok", False):
         raise RuntimeError(result.get("message") or f"Remote operation failed: {tool}")
@@ -680,6 +690,7 @@ async def _machine_dispatch(
     local_call: Callable[[], Any | Awaitable[Any]],
     remote_tool: str,
     remote_args: dict[str, Any],
+    remote_timeout_s: int | None = None,
 ) -> Any:
     if machine == "local":
         if get_settings().disable_local:
@@ -689,7 +700,7 @@ async def _machine_dispatch(
             if asyncio.iscoroutine(result):
                 return await result
             return result
-    return await _remote_call(machine, remote_tool, remote_args)
+    return await _remote_call(machine, remote_tool, remote_args, remote_timeout_s)
 
 
 def _machine_uses_windows_paths(machine: str) -> bool:
@@ -1127,6 +1138,7 @@ async def api_gui_windows(request: Request) -> Response:
             get_gui_manager().list_windows,
             "gui_list",
             {},
+            210,
         )
         if not isinstance(payload, dict):
             raise TypeError("GUI window listing returned an invalid payload")
@@ -1214,6 +1226,7 @@ async def api_gui_action(request: Request) -> Response:
                     "bounds": observed_bounds,
                     "actions": actions,
                 },
+                210,
             )
         _record_live_human_action(
             live_id,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
@@ -675,16 +676,20 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
             return {"state_id": "s", "state_ttl_s": 30}
         return {"deleted": True}
 
-    async def remote_transfer(machine, tool, args, timeout_s=None):
-        assert tool == "transfer_stat"
-        return {"type": "file", "size": 7, "path": args["path"]}
+    transfer_calls = []
 
-    async def copy_remote(machine, source, destination, overwrite):
+    async def remote_transfer(machine, tool, args, timeout_s=None):
+        transfer_calls.append((machine, tool, args, timeout_s))
+        return {"deleted": True}
+
+    async def copy_remote_gui_temp(machine, source, destination):
+        del machine, source
         Image.new("RGB", (4, 4)).save(destination, format="PNG")
+        return {"bytes": 7}
 
     monkeypatch.setattr(tools, "_remote_worker_data", remote_worker)
     monkeypatch.setattr(tools, "_remote_transfer_data", remote_transfer)
-    monkeypatch.setattr(tools, "_copy_remote_file_to_local", copy_remote)
+    monkeypatch.setattr(tools, "_copy_remote_gui_temp_to_local", copy_remote_gui_temp)
     monkeypatch.setattr(
         tools,
         "transfer_alloc_temp_path",
@@ -707,19 +712,20 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
     assert [call[1] for call in calls] == [
         "gui_state",
         "gui_state_refresh",
-        "delete_file_or_dir",
         "gui_state_refresh",
     ]
+    assert [call[1] for call in transfer_calls] == ["transfer_gui_temp_delete"]
 
     calls.clear()
     monkeypatch.setattr(tools, "_REMOTE_GUI_STATE_REFRESH_INTERVAL_S", 0.001)
 
-    async def slow_copy(machine, source, destination, overwrite):
-        del machine, source, overwrite
+    async def slow_copy(machine, source, destination):
+        del machine, source
         await asyncio.sleep(0.01)
         Image.new("RGB", (4, 4)).save(destination, format="PNG")
+        return {"bytes": 7}
 
-    monkeypatch.setattr(tools, "_copy_remote_file_to_local", slow_copy)
+    monkeypatch.setattr(tools, "_copy_remote_gui_temp_to_local", slow_copy)
     kept_alive = await tools._gui_state_result(
         "w",
         screenshot=True,
@@ -756,6 +762,62 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
     )
     assert failed.isError is True
     assert "invalid data" in failed.structuredContent["message"]
+
+@pytest.mark.asyncio
+async def test_copy_remote_gui_temp_to_local_uses_internal_transfer_tools(tmp_path, monkeypatch):
+    import local_shell_mcp.tools as tools
+
+    calls = []
+    ticket = {"token": "t", "url": "https://controller/remote/transfer/t"}
+
+    async def remote_transfer(machine, tool, args, timeout_s=None):
+        calls.append((machine, tool, args, timeout_s))
+        assert tool == "transfer_gui_temp_stat"
+        return {"type": "file", "size": 7, "path": args["path"]}
+
+    async def stream(
+        src_machine,
+        src_path,
+        total_bytes,
+        expected_sha256,
+        actual_ticket,
+        progress=None,
+        *,
+        put_tool="transfer_put_url",
+        stat_tool="transfer_stat",
+    ):
+        del progress
+        calls.append(
+            (
+                "stream",
+                src_machine,
+                src_path,
+                total_bytes,
+                expected_sha256,
+                actual_ticket,
+                put_tool,
+                stat_tool,
+            )
+        )
+        return {"path": str(tmp_path / "out.png"), "sha256": "digest"}
+
+    revoked = []
+    monkeypatch.setattr(tools, "_remote_transfer_data", remote_transfer)
+    monkeypatch.setattr(tools, "create_upload_ticket", lambda *_args, **_kwargs: ticket)
+    monkeypatch.setattr(tools, "_stream_remote_file_to_upload_ticket", stream)
+    monkeypatch.setattr(tools, "revoke_transfer_ticket", revoked.append)
+
+    result = await tools._copy_remote_gui_temp_to_local(
+        "node",
+        "/outside/workspace/gui-" + "a" * 32 + ".png",
+        str(tmp_path / "out.png"),
+    )
+    assert result["bytes"] == 7
+    assert result["transport"] == "http-stream"
+    assert calls[0][1] == "transfer_gui_temp_stat"
+    assert calls[1][-2:] == ("transfer_gui_temp_put_url", "transfer_gui_temp_stat")
+    assert revoked == ["t"]
+
 
 @pytest.mark.asyncio
 async def test_gui_frame_data_local_and_remote_paths(tmp_path, monkeypatch):
@@ -796,21 +858,23 @@ async def test_gui_frame_data_local_and_remote_paths(tmp_path, monkeypatch):
                 "capabilities": {},
                 "screenshot_path": ".local-shell-mcp/tmp/frame.png",
             }
-        assert tool == "delete_file_or_dir"
-        return {"deleted": True}
+        raise AssertionError(f"unexpected worker tool: {tool}")
+
+    transfer_calls = []
 
     async def remote_transfer(machine, tool, args, timeout_s=None):
-        assert machine == "node"
-        assert tool == "transfer_stat"
-        return {"type": "file", "path": args["path"], "size": 5}
+        transfer_calls.append((machine, tool, args, timeout_s))
+        return {"deleted": True}
 
-    async def copy_remote(machine, source, destination, overwrite):
-        assert (machine, overwrite) == ("node", True)
+    async def copy_remote_gui_temp(machine, source, destination):
+        assert machine == "node"
+        del source
         Image.new("RGB", (4, 4)).save(destination, format="PNG")
+        return {"bytes": 5}
 
     monkeypatch.setattr(tools, "_remote_worker_data", remote_worker)
     monkeypatch.setattr(tools, "_remote_transfer_data", remote_transfer)
-    monkeypatch.setattr(tools, "_copy_remote_file_to_local", copy_remote)
+    monkeypatch.setattr(tools, "_copy_remote_gui_temp_to_local", copy_remote_gui_temp)
     monkeypatch.setattr(
         tools,
         "transfer_alloc_temp_path",
@@ -821,7 +885,8 @@ async def test_gui_frame_data_local_and_remote_paths(tmp_path, monkeypatch):
     assert remote_data["backend"] == "remote"
     assert "screenshot_path" not in remote_data
     assert remote_image.format == "png"
-    assert [call[1] for call in calls] == ["gui_frame", "delete_file_or_dir"]
+    assert [call[1] for call in calls] == ["gui_frame"]
+    assert [call[1] for call in transfer_calls] == ["transfer_gui_temp_delete"]
     assert not (tools.temp_dir() / "relay.png").exists()
 
 
@@ -864,26 +929,30 @@ async def test_gui_frame_data_rejects_invalid_sources(tmp_path, monkeypatch):
     async def remote_frame(*_args, **_kwargs):
         return {"window": {"id": "w"}, "screenshot_path": "remote.png"}
 
-    async def bad_stat(*_args, **_kwargs):
-        return {"type": "directory"}
-
     cleanup_calls = []
 
     async def remote_frame_with_cleanup(machine, tool, args, timeout_s=None):
         if tool == "gui_frame":
             return {"window": {"id": "w"}, "screenshot_path": "remote.png"}
+        raise AssertionError(f"unexpected worker tool: {tool}")
+
+    async def remote_transfer(machine, tool, args, timeout_s=None):
         cleanup_calls.append((machine, tool, args, timeout_s))
         return {"deleted": True}
 
+    async def bad_copy(*_args, **_kwargs):
+        raise RuntimeError("Remote GUI temp source is not a file")
+
     monkeypatch.setattr(tools, "_remote_worker_data", remote_frame_with_cleanup)
-    monkeypatch.setattr(tools, "_remote_transfer_data", bad_stat)
+    monkeypatch.setattr(tools, "_remote_transfer_data", remote_transfer)
+    monkeypatch.setattr(tools, "_copy_remote_gui_temp_to_local", bad_copy)
     with pytest.raises(RuntimeError, match="not a file"):
         await tools._gui_frame_data("w", "node")
     assert cleanup_calls == [
         (
             "node",
-            "delete_file_or_dir",
-            {"path": "remote.png", "recursive": False},
+            "transfer_gui_temp_delete",
+            {"path": "remote.png"},
             30,
         )
     ]
@@ -1110,14 +1179,18 @@ def test_atspi_window_identity_survives_child_reordering(monkeypatch):
     from local_shell_mcp.gui import linux_atspi_helper as helper
 
     class Window:
-        def __init__(self, title):
+        def __init__(self, title, stable_id):
             self.title = title
+            self.stable_id = stable_id
 
         def get_name(self):
             return self.title
 
         def get_role_name(self):
             return "frame"
+
+        def get_accessible_id(self):
+            return self.stable_id
 
     class App:
         def __init__(self, children):
@@ -1132,8 +1205,8 @@ def test_atspi_window_identity_survives_child_reordering(monkeypatch):
         def get_child_at_index(self, index):
             return self.children[index]
 
-    target = Window("Target")
-    other = Window("Other")
+    target = Window("Target", "target-window")
+    other = Window("Other", "other-window")
     monkeypatch.setattr(
         helper,
         "_bounds",
@@ -1145,6 +1218,8 @@ def test_atspi_window_identity_survives_child_reordering(monkeypatch):
         },
     )
     signature = helper._window_signature(target)
+    target.title = "Target — changed"
+    assert helper._window_signature(target) == signature
     app = App([other, target])
     monkeypatch.setattr(helper, "_apps", lambda: [app])
 
@@ -1158,12 +1233,12 @@ def test_atspi_window_identity_survives_child_reordering(monkeypatch):
         lambda _window: {"x": 0, "y": 0, "width": 300, "height": 200},
     )
     replacement_signature = helper._window_signature(target)
-    replacement = Window("Replacement")
+    replacement = Window("Replacement", "replacement-window")
     app.children = [replacement]
     with pytest.raises(LookupError, match="no longer available"):
         helper._resolve_window(f"atspi:42:0:{replacement_signature}")
 
-    duplicate = Window("Target")
+    duplicate = Window("Target copy", "target-window")
     app.children = [target, duplicate]
     ambiguous_signature = helper._window_signature(target)
     with pytest.raises(LookupError, match="ambiguous"):
@@ -1288,6 +1363,59 @@ async def test_gui_state_cancellation_cleans_late_capture(tmp_path, monkeypatch)
 
     assert list(tmp_path.glob("gui-*.png")) == []
     assert manager._states == {}
+
+
+@pytest.mark.asyncio
+async def test_gui_frame_cancellation_waits_for_normalization_before_cleanup(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.base as base
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(base, "temp_dir", lambda: tmp_path)
+    backend = FakeBackend()
+    manager = GuiManager(backend)
+    started = threading.Event()
+    release = threading.Event()
+    original = base._normalize_screenshot_coordinates
+
+    def slow_normalize(path, window):
+        started.set()
+        release.wait(timeout=2)
+        original(path, window)
+
+    monkeypatch.setattr(base, "_normalize_screenshot_coordinates", slow_normalize)
+    task = asyncio.create_task(manager.frame("window:1"))
+    assert await asyncio.to_thread(started.wait, 1)
+    task.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert list(tmp_path.glob("gui-frame-*.png")) == []
+
+
+@pytest.mark.asyncio
+async def test_gui_action_rechecks_state_ttl_after_execution_queue(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.base as base
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(base, "GUI_STATE_TTL_S", 0.02)
+    backend = FakeBackend()
+    manager = GuiManager(backend)
+    state = await manager.snapshot("window:1", screenshot=False)
+
+    await manager._execution_lock.acquire()
+    task = asyncio.create_task(
+        manager.act(
+            "window:1",
+            state["state_id"],
+            [{"type": "click", "x": 1, "y": 1}],
+        )
+    )
+    await asyncio.sleep(0.04)
+    manager._execution_lock.release()
+
+    with pytest.raises(GuiStaleStateError, match="stale"):
+        await task
+    assert backend.actions == []
 
 
 @pytest.mark.asyncio
@@ -1905,6 +2033,38 @@ async def test_portal_connect_failure_does_not_poison_cached_connection(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_portal_closed_signal_clears_cached_session(monkeypatch):
+    portal = PortalDesktop({})
+    portal._session = "/session/1"
+    portal._streams = [{"node_id": 1, "properties": {}}]
+    callbacks = []
+
+    class SessionIface:
+        def on_closed(self, callback):
+            callbacks.append(callback)
+
+    class Obj:
+        def get_interface(self, name):
+            assert name == "org.freedesktop.portal.Session"
+            return SessionIface()
+
+    class Bus:
+        async def introspect(self, *_args):
+            return object()
+        def get_proxy_object(self, *_args):
+            return Obj()
+
+    portal._bus = Bus()
+    await portal._observe_session_closed("/session/1")
+    assert len(callbacks) == 1
+    assert portal._session_iface is not None
+    callbacks[0]()
+    assert portal._session is None
+    assert portal._session_iface is None
+    assert portal._streams == []
+
+
+@pytest.mark.asyncio
 async def test_portal_click_releases_pressed_button_after_release_failure(monkeypatch):
     portal = PortalDesktop({})
     calls = []
@@ -2310,6 +2470,55 @@ def test_atspi_listing_skips_defunct_children(monkeypatch):
     windows = helper._windows()
     assert len(windows) == 1
     assert windows[0][1] is good
+
+
+def test_macos_accessibility_traversal_does_not_fetch_children_after_budget(monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    child_queries = []
+
+    class AX:
+        kAXRoleAttribute = "role"
+        kAXTitleAttribute = "title"
+        kAXDescriptionAttribute = "description"
+        kAXValueAttribute = "value"
+        kAXEnabledAttribute = "enabled"
+        kAXChildrenAttribute = "children"
+
+        @staticmethod
+        def AXIsProcessTrusted():
+            return True
+
+    root = object()
+    backend = MacOSGuiBackend()
+    monkeypatch.setattr(macos, "_native", lambda: (AX, object()))
+    monkeypatch.setattr(
+        backend,
+        "_find_record",
+        lambda _window_id: {
+            "id": "cg:1",
+            "pid": 1,
+            "title": "Window",
+            "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+        },
+    )
+    monkeypatch.setattr(backend, "_find_ax_window", lambda _record: root)
+    monkeypatch.setattr(macos, "_ax_bounds", lambda _ax, _element: {})
+    def ax_copy(_ax, _element, attr, default=None):
+        if attr == AX.kAXChildrenAttribute:
+            child_queries.append(True)
+            return [object() for _ in range(10000)]
+        return default
+    monkeypatch.setattr(macos, "_ax_copy", ax_copy)
+
+    _record, _trusted, elements, _locators = backend._snapshot_accessibility_sync(
+        "cg:1",
+        include_elements=True,
+        max_elements=1,
+        max_depth=12,
+    )
+    assert len(elements) == 1
+    assert child_queries == []
 
 
 def test_macos_ax_window_matching_rejects_ambiguous_weaker_matches(monkeypatch):

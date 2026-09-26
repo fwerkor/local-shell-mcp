@@ -196,6 +196,110 @@ async def test_remote_gui_worker_dependency_failure_is_scoped_to_gui(monkeypatch
 
 
 
+def test_gui_temp_worker_path_allows_external_state_dir_only(tmp_path, monkeypatch):
+    import local_shell_mcp.remote as remote
+
+    workspace = tmp_path / "workspace"
+    temp = tmp_path / "state" / "tmp"
+    workspace.mkdir()
+    temp.mkdir(parents=True)
+    monkeypatch.setattr(
+        remote,
+        "get_settings",
+        lambda: type("Settings", (), {"workspace_root": workspace})(),
+    )
+    monkeypatch.setattr(remote, "temp_dir", lambda: temp)
+
+    shot = temp / ("gui-frame-" + "a" * 32 + ".png")
+    shot.write_bytes(b"png")
+    stat = remote._worker_gui_temp_stat(str(shot), sha256=True)
+    assert stat["type"] == "file"
+    assert stat["size"] == 3
+    assert stat["sha256"]
+
+    uploads = []
+    monkeypatch.setattr(remote, "_worker_validate_external_transfer_url", lambda _url: None)
+    monkeypatch.setattr(
+        remote,
+        "_worker_put_stream_url",
+        lambda source, display_path, url, total, timeout_s: uploads.append(
+            (source, display_path, url, total, timeout_s)
+        )
+        or {"bytes": total, "sha256": "digest"},
+    )
+    uploaded = remote._worker_gui_temp_put_url(
+        str(shot),
+        "https://controller.invalid/remote/transfer/token",
+        3,
+        12,
+    )
+    assert uploaded["bytes"] == 3
+    assert uploads[0][0] == shot
+    assert uploads[0][3:] == (3, 12)
+
+    deleted = remote._worker_gui_temp_delete(str(shot))
+    assert deleted["deleted"] is True
+    assert not shot.exists()
+
+    outside = workspace / ("gui-frame-" + "b" * 32 + ".png")
+    outside.write_bytes(b"png")
+    with pytest.raises(ValueError, match="outside"):
+        remote._worker_gui_temp_stat(str(outside))
+
+    with pytest.raises(ValueError, match="invalid filename"):
+        remote._worker_gui_temp_stat(str(temp / "arbitrary.png"))
+
+
+@pytest.mark.asyncio
+async def test_gui_temp_transfer_worker_dispatch(tmp_path, monkeypatch):
+    import local_shell_mcp.remote as remote
+
+    calls = []
+    monkeypatch.setattr(
+        remote,
+        "_worker_gui_temp_stat",
+        lambda path, sha256=False: calls.append(("stat", path, sha256))
+        or {"type": "file", "size": 1},
+    )
+    monkeypatch.setattr(
+        remote,
+        "_worker_gui_temp_delete",
+        lambda path: calls.append(("delete", path)) or {"deleted": True},
+    )
+    monkeypatch.setattr(
+        remote,
+        "_worker_gui_temp_put_url",
+        lambda path, url, expected_bytes, timeout_s=None: calls.append(
+            ("put", path, url, expected_bytes, timeout_s)
+        )
+        or {"bytes": expected_bytes},
+    )
+
+    assert (
+        await remote._execute_transfer_worker_tool(
+            "transfer_gui_temp_stat",
+            {"path": "p", "sha256": True},
+        )
+    )["size"] == 1
+    assert (
+        await remote._execute_transfer_worker_tool(
+            "transfer_gui_temp_delete",
+            {"path": "p"},
+        )
+    )["deleted"] is True
+    assert (
+        await remote._execute_transfer_worker_tool(
+            "transfer_gui_temp_put_url",
+            {"path": "p", "url": "u", "expected_bytes": 4, "timeout_s": 9},
+        )
+    )["bytes"] == 4
+    assert calls == [
+        ("stat", "p", True),
+        ("delete", "p"),
+        ("put", "p", "u", 4, 9),
+    ]
+
+
 def test_linux_gui_preflight_caches_positive_session(monkeypatch):
     import local_shell_mcp.gui.linux as linux
     import local_shell_mcp.remote as remote

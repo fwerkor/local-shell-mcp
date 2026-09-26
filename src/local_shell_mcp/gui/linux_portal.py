@@ -154,6 +154,7 @@ class PortalDesktop:
         self._remote = None
         self._screen = None
         self._session = None
+        self._session_iface = None
         self._streams: list[dict[str, Any]] = []
         self._lock = asyncio.Lock()
 
@@ -203,6 +204,30 @@ class PortalDesktop:
             handle_token=handle_token,
             timeout_s=timeout_s,
         )
+
+    def _on_session_closed(self, *_args: Any) -> None:
+        self._session = None
+        self._session_iface = None
+        self._streams = []
+
+    async def _observe_session_closed(self, session: str) -> None:
+        if self._bus is None:
+            return
+        intro = await self._bus.introspect(
+            "org.freedesktop.portal.Desktop",
+            session,
+        )
+        obj = self._bus.get_proxy_object(
+            "org.freedesktop.portal.Desktop",
+            session,
+            intro,
+        )
+        iface = obj.get_interface("org.freedesktop.portal.Session")
+        on_closed = getattr(iface, "on_closed", None)
+        if callable(on_closed):
+            on_closed(self._on_session_closed)
+        if self._session == session:
+            self._session_iface = iface
 
     async def _close_session(self, session: str) -> None:
         if self._bus is None:
@@ -277,9 +302,11 @@ class PortalDesktop:
                 with contextlib.suppress(BaseException):
                     await asyncio.shield(self._close_session(session))
                 self._session = None
+                self._session_iface = None
                 self._streams = []
                 raise
             self._session = session
+            self._session_iface = None
             self._streams = []
             for stream in started.get("streams", []):
                 if not isinstance(stream, list) or not stream:
@@ -287,6 +314,10 @@ class PortalDesktop:
                 node_id = int(stream[0])
                 props = stream[1] if len(stream) > 1 and isinstance(stream[1], dict) else {}
                 self._streams.append({"node_id": node_id, "properties": props})
+            try:
+                await self._observe_session_closed(session)
+            except Exception:
+                self._session_iface = None
 
     def _stream_point(self, x: int, y: int) -> tuple[int, float, float]:
         if not self._streams:
