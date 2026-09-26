@@ -51,6 +51,8 @@ type PointerStart = {
   pointerId: number
 }
 
+export const SINGLE_CLICK_DELAY_MS = 500
+
 const SPECIAL_KEYS: Record<string, string> = {
   Enter: "ENTER",
   Tab: "TAB",
@@ -106,6 +108,8 @@ export class DesktopController extends BaseController {
   private backend = ""
   private loadingWindows = false
   private framePromise: Promise<void> | null = null
+  private frameRequestKey = ""
+  private frameAbort: AbortController | null = null
   private frameUrl = ""
   private frameBounds: GuiBounds | null = null
   private frameEpoch = 0
@@ -196,6 +200,8 @@ export class DesktopController extends BaseController {
 
   override destroy(): void {
     this.frameEpoch += 1
+    this.frameAbort?.abort()
+    this.frameAbort = null
     if (this.clickTimer !== null) window.clearTimeout(this.clickTimer)
     if (this.wheelTimer !== null) window.clearTimeout(this.wheelTimer)
     this.revokeFrame()
@@ -304,15 +310,25 @@ export class DesktopController extends BaseController {
   }
 
   private refreshFrame(): Promise<void> {
-    if (this.framePromise) return this.framePromise
-    const promise = this.loadFrame().finally(() => {
-      if (this.framePromise === promise) this.framePromise = null
+    const key = `${this.machine}\0${this.selectedWindowId}`
+    if (this.framePromise && this.frameRequestKey === key) return this.framePromise
+    if (this.framePromise && this.frameRequestKey !== key) this.frameAbort?.abort()
+
+    const controller = new AbortController()
+    this.frameAbort = controller
+    this.frameRequestKey = key
+    const promise = this.loadFrame(key, controller).finally(() => {
+      if (this.framePromise === promise) {
+        this.framePromise = null
+        this.frameAbort = null
+        this.frameRequestKey = ""
+      }
     })
     this.framePromise = promise
     return promise
   }
 
-  private async loadFrame(): Promise<void> {
+  private async loadFrame(requestKey: string, controller: AbortController): Promise<void> {
     const windowId = this.selectedWindowId
     if (!windowId) {
       this.clearFrame()
@@ -329,6 +345,7 @@ export class DesktopController extends BaseController {
         headers,
         cache: "no-store",
         credentials: "omit",
+        signal: controller.signal,
       })
       if (!response.ok) {
         let message = `GUI frame returned HTTP ${response.status}`
@@ -348,7 +365,14 @@ export class DesktopController extends BaseController {
       }
       if (!bounds.width || !bounds.height) throw new Error("GUI frame returned invalid window bounds")
       const blob = await response.blob()
-      if (this.destroyed || epoch !== this.frameEpoch || requestedMachine !== this.machine || windowId !== this.selectedWindowId) return
+      if (
+        this.destroyed
+        || controller.signal.aborted
+        || requestKey !== this.frameRequestKey
+        || epoch !== this.frameEpoch
+        || requestedMachine !== this.machine
+        || windowId !== this.selectedWindowId
+      ) return
       const nextUrl = URL.createObjectURL(blob)
       const previousUrl = this.frameUrl
       this.frameUrl = nextUrl
@@ -363,13 +387,24 @@ export class DesktopController extends BaseController {
       if (previousUrl) URL.revokeObjectURL(previousUrl)
       this.renderStatus()
     } catch (error) {
-      if (epoch !== this.frameEpoch || requestedMachine !== this.machine || windowId !== this.selectedWindowId) return
-      this.renderStatus(error instanceof Error ? error.message : String(error), true)
+      if (
+        controller.signal.aborted
+        || requestKey !== this.frameRequestKey
+        || epoch !== this.frameEpoch
+        || requestedMachine !== this.machine
+        || windowId !== this.selectedWindowId
+      ) return
+      const message = error instanceof Error ? error.message : String(error)
+      this.clearFrame()
+      this.renderStatus(message, true)
     }
   }
 
   private clearFrame(): void {
     this.frameEpoch += 1
+    this.frameAbort?.abort()
+    this.frameAbort = null
+    this.frameRequestKey = ""
     this.frameBounds = null
     this.revokeFrame()
     const image = this.root?.querySelector<HTMLImageElement>("[data-role=desktop-frame]")
@@ -488,7 +523,7 @@ export class DesktopController extends BaseController {
     this.clickTimer = window.setTimeout(() => {
       this.clickTimer = null
       this.queueAction({ type: "click", ...point }, observedBounds)
-    }, 190)
+    }, SINGLE_CLICK_DELAY_MS)
   }
 
   private onPointerDown(event: PointerEvent): void {

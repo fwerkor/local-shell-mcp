@@ -94,6 +94,27 @@ _MAC_KEY_CODES = {
 }
 
 
+def _utf16_units(text: str) -> int:
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _unicode_chunks(text: str, max_units: int = 20) -> list[str]:
+    chunks: list[str] = []
+    current = ""
+    units = 0
+    for char in text:
+        char_units = _utf16_units(char)
+        if current and units + char_units > max_units:
+            chunks.append(current)
+            current = ""
+            units = 0
+        current += char
+        units += char_units
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def _key_parts(keys: Any) -> list[str]:
     if isinstance(keys, str):
         parts = [part.strip() for part in keys.replace("+", " ").split() if part.strip()]
@@ -336,11 +357,16 @@ class MacOSGuiBackend:
             text = str(action.get("text", ""))
             if locator is not None:
                 AX.AXUIElementSetAttributeValue(locator, AX.kAXFocusedAttribute, True)
-            event = Quartz.CGEventCreateKeyboardEvent(None, 0, True)
-            Quartz.CGEventKeyboardSetUnicodeString(event, len(text), text)
-            Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
-            up = Quartz.CGEventCreateKeyboardEvent(None, 0, False)
-            Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)
+            for chunk in _unicode_chunks(text):
+                event = Quartz.CGEventCreateKeyboardEvent(None, 0, True)
+                Quartz.CGEventKeyboardSetUnicodeString(
+                    event,
+                    _utf16_units(chunk),
+                    chunk,
+                )
+                Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+                up = Quartz.CGEventCreateKeyboardEvent(None, 0, False)
+                Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)
             return {"characters": len(text)}
 
         if kind == "key":
@@ -355,12 +381,16 @@ class MacOSGuiBackend:
                 self._mouse(Quartz, Quartz.kCGEventMouseMoved, x, y, Quartz.kCGMouseButtonLeft)
             elif kind == "scroll":
                 self._mouse(Quartz, Quartz.kCGEventMouseMoved, x, y, Quartz.kCGMouseButtonLeft)
-                amount = quantize_scroll_amount(
-                    action.get("delta_y", action.get("amount", -3))
-                )
-                if amount:
+                default_y = action.get("amount", -3) if "delta_x" not in action else 0
+                amount_y = quantize_scroll_amount(action.get("delta_y", default_y))
+                amount_x = quantize_scroll_amount(action.get("delta_x", 0))
+                if amount_x or amount_y:
                     event = Quartz.CGEventCreateScrollWheelEvent(
-                        None, Quartz.kCGScrollEventUnitLine, 1, amount
+                        None,
+                        Quartz.kCGScrollEventUnitLine,
+                        2,
+                        amount_y,
+                        amount_x,
                     )
                     Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
             else:

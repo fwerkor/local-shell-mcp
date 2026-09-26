@@ -471,8 +471,16 @@ class LinuxGuiBackend:
         paths = data.get("locators", {})
         for element in data.get("elements", []):
             element_id = str(element["id"])
+            raw_locator = paths.get(element_id, {})
+            if isinstance(raw_locator, dict):
+                semantic_locator = {
+                    "path": list(raw_locator.get("path", [])),
+                    "fingerprint": str(raw_locator.get("fingerprint") or ""),
+                }
+            else:
+                semantic_locator = {"path": list(raw_locator), "fingerprint": ""}
             locators[element_id] = {
-                "path": paths.get(element_id, []),
+                "semantic": semantic_locator,
                 "bounds": element.get("bounds", {}),
             }
 
@@ -548,7 +556,7 @@ class LinuxGuiBackend:
                 {
                     "command": "semantic_action",
                     "window_id": window["id"],
-                    "locator": locator["path"],
+                    "locator": locator["semantic"],
                     "action": action,
                 },
             )
@@ -560,23 +568,26 @@ class LinuxGuiBackend:
                     {
                         "command": "semantic_action",
                         "window_id": window["id"],
-                        "locator": locator["path"],
+                        "locator": locator["semantic"],
                         "action": action,
                     },
                 )
             except GuiUnavailableError:
                 pass
 
-        if kind in {"type", "key"} and locator is not None:
-            await asyncio.to_thread(
-                self._helper,
-                {
-                    "command": "semantic_action",
-                    "window_id": window["id"],
-                    "locator": locator["path"],
-                    "action": {"type": "focus"},
-                },
-            )
+        if kind in {"type", "key"}:
+            if locator is not None:
+                await asyncio.to_thread(
+                    self._helper,
+                    {
+                        "command": "semantic_action",
+                        "window_id": window["id"],
+                        "locator": locator["semantic"],
+                        "action": {"type": "focus"},
+                    },
+                )
+            else:
+                await self.focus_window(window)
 
         session_type = _session_type(self._env)
         if session_type == "wayland":
@@ -629,11 +640,16 @@ class LinuxGuiBackend:
                     {"command": "raw", "kind": "mouse", "x": x, "y": y, "event": event},
                 )
             elif kind == "scroll":
-                amount = quantize_scroll_amount(
-                    action.get("delta_y", action.get("amount", -3))
-                )
-                if amount:
-                    button = 5 if amount < 0 else 4
+                default_y = action.get("amount", -3) if "delta_x" not in action else 0
+                amount_y = quantize_scroll_amount(action.get("delta_y", default_y))
+                amount_x = quantize_scroll_amount(action.get("delta_x", 0))
+                for amount, negative_button, positive_button in (
+                    (amount_y, 5, 4),
+                    (amount_x, 7, 6),
+                ):
+                    if not amount:
+                        continue
+                    button = negative_button if amount < 0 else positive_button
                     for _ in range(abs(amount)):
                         await asyncio.to_thread(
                             self._helper,
@@ -704,16 +720,11 @@ class LinuxGuiBackend:
             if kind == "move":
                 await portal.move(x, y)
             elif kind == "scroll":
-                amount = quantize_scroll_amount(
-                    action.get("delta_y", action.get("amount", -3))
-                )
-                if amount:
-                    await portal.scroll(
-                        x,
-                        y,
-                        float(action.get("delta_x", 0)),
-                        float(amount),
-                    )
+                default_y = action.get("amount", -3) if "delta_x" not in action else 0
+                amount_y = quantize_scroll_amount(action.get("delta_y", default_y))
+                amount_x = quantize_scroll_amount(action.get("delta_x", 0))
+                if amount_x or amount_y:
+                    await portal.scroll(x, y, float(amount_x), float(amount_y))
             else:
                 await portal.click(
                     x,

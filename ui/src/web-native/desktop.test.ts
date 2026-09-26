@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { framePoint, wheelScrollAmount } from "./desktop"
+import { SINGLE_CLICK_DELAY_MS, framePoint, wheelScrollAmount } from "./desktop"
 
 describe("Native WebUI desktop coordinate mapping", () => {
   test("maps rendered image coordinates back to logical window pixels", () => {
@@ -18,6 +18,12 @@ describe("Native WebUI desktop coordinate mapping", () => {
     expect(framePoint(9, 20, rect, bounds)).toBeNull()
     expect(framePoint(110, 20, rect, bounds)).toBeNull()
     expect(framePoint(20, 60, rect, bounds)).toBeNull()
+  })
+})
+
+describe("Native WebUI desktop click handling", () => {
+  test("waits for the browser double-click window before dispatching a single click", () => {
+    expect(SINGLE_CLICK_DELAY_MS).toBeGreaterThanOrEqual(500)
   })
 })
 

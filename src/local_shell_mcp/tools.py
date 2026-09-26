@@ -2663,6 +2663,67 @@ def _gui_state_error_result(machine: str | None, exc: Exception) -> CallToolResu
     )
 
 
+async def _gui_frame_data(
+    window_id: str,
+    machine: str | None,
+) -> tuple[dict[str, Any], ImageFile]:
+    screenshot_path: str | None = None
+    if machine:
+        if not get_settings().remote_enabled:
+            raise RuntimeError("Remote workers are disabled")
+        data = await _remote_worker_data(
+            machine,
+            "gui_frame",
+            {"window_id": window_id},
+            120,
+        )
+        if not isinstance(data, dict):
+            raise RuntimeError("Remote gui_frame returned invalid data")
+        screenshot_path = (
+            str(data.get("screenshot_path")) if data.get("screenshot_path") else None
+        )
+        if not screenshot_path:
+            raise RuntimeError("Remote gui_frame returned no screenshot")
+        stat = await _remote_transfer_data(
+            machine,
+            "transfer_stat",
+            {"path": screenshot_path, "sha256": False},
+        )
+        if not isinstance(stat, dict) or stat.get("type") != "file":
+            raise RuntimeError("Remote GUI frame is not a file")
+        temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".png")
+        local_path = temporary["path"]
+        try:
+            await _copy_remote_file_to_local(machine, screenshot_path, local_path, True)
+            image = await asyncio.to_thread(read_image, local_path)
+        finally:
+            with suppress(Exception):
+                await asyncio.to_thread(delete_path, local_path, False)
+        with suppress(Exception):
+            await _remote_worker_data(
+                machine,
+                "delete_file_or_dir",
+                {"path": screenshot_path, "recursive": False},
+                30,
+            )
+        data = dict(data)
+        data.pop("screenshot_path", None)
+        return data, image
+
+    data = await get_gui_manager().frame(window_id)
+    screenshot_path = str(data.get("screenshot_path") or "")
+    if not screenshot_path:
+        raise RuntimeError("Local gui_frame returned no screenshot")
+    try:
+        image = await asyncio.to_thread(read_image, screenshot_path)
+    finally:
+        with suppress(Exception):
+            await asyncio.to_thread(delete_path, screenshot_path, False)
+    data = dict(data)
+    data.pop("screenshot_path", None)
+    return data, image
+
+
 async def _gui_state_result(
     window_id: str,
     *,

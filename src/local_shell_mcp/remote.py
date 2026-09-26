@@ -121,6 +121,7 @@ REMOTE_NON_CANCELLABLE_WORKER_TOOLS = frozenset(
         "edit_file",
         "delete_file_or_dir",
         "gui_action",
+        "gui_human_action",
         "human_file_action",
         "transfer_begin_write",
         "transfer_write_chunk",
@@ -1404,6 +1405,7 @@ WORKER_GUI_TOOLS = frozenset(
         "gui_list",
         "gui_state",
         "gui_state_refresh",
+        "gui_frame",
         "gui_human_action",
         "gui_action",
     }
@@ -2233,6 +2235,8 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         )
     if tool == "gui_state_refresh":
         return await manager.refresh_state(args["window_id"], args["state_id"])
+    if tool == "gui_frame":
+        return await manager.frame(args["window_id"])
     if tool == "gui_human_action":
         return await manager.human_act(
             args["window_id"],

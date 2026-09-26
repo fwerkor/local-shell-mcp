@@ -1130,8 +1130,6 @@ def test_windows_worker_paths_use_windows_semantics():
 
 
 def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
-    from mcp.types import CallToolResult, ImageContent, TextContent
-
     _configure(tmp_path, monkeypatch)
     calls = []
 
@@ -1163,37 +1161,24 @@ def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
     manager = FakeGuiManager()
     monkeypatch.setattr("local_shell_mcp.gui.get_gui_manager", lambda: manager)
 
-    async def gui_state_result(window_id, **kwargs):
+    async def gui_frame_data(window_id, machine):
         assert window_id == "window:1"
-        assert kwargs["screenshot"] is True
-        assert kwargs["include_elements"] is False
-        assert kwargs["machine"] is None
-        return CallToolResult(
-            content=[
-                ImageContent(
-                    type="image",
-                    data=base64.b64encode(b"fake-png").decode(),
-                    mimeType="image/png",
-                ),
-                TextContent(type="text", text="frame"),
-            ],
-            structuredContent={
-                "ok": True,
+        assert machine is None
+        image = type("Image", (), {"data": b"fake-png", "mime_type": "image/png"})()
+        return (
+            {
                 "backend": "fake-native",
-                "state_id": "unused-human-state",
-                "state_ttl_s": 30,
                 "window": {
                     "id": "window:1",
                     "title": "Demo",
                     "bounds": {"x": 20, "y": 30, "width": 320, "height": 180},
                 },
-                "elements": [],
                 "capabilities": {},
-                "screenshot": True,
             },
+            image,
         )
 
-    monkeypatch.setattr("local_shell_mcp.tools._gui_state_result", gui_state_result)
+    monkeypatch.setattr("local_shell_mcp.tools._gui_frame_data", gui_frame_data)
     client = TestClient(build_http_app())
 
     windows = client.get("/api/ui/gui/windows", params={"machine": "local"})
@@ -1263,8 +1248,6 @@ def test_webui_gui_action_validates_human_payload(tmp_path, monkeypatch):
 
 
 def test_webui_gui_api_error_paths(tmp_path, monkeypatch):
-    from mcp.types import CallToolResult, TextContent
-
     _configure(tmp_path, monkeypatch)
 
     class InvalidGuiManager:
@@ -1285,14 +1268,10 @@ def test_webui_gui_api_error_paths(tmp_path, monkeypatch):
     assert missing_window.status_code == 400
     assert "window_id is required" in missing_window.json()["message"]
 
-    async def failed_state(*_args, **_kwargs):
-        return CallToolResult(
-            isError=True,
-            content=[TextContent(type="text", text="capture failed")],
-            structuredContent={"ok": False, "message": "capture failed"},
-        )
+    async def failed_frame(*_args, **_kwargs):
+        raise RuntimeError("capture failed")
 
-    monkeypatch.setattr("local_shell_mcp.tools._gui_state_result", failed_state)
+    monkeypatch.setattr("local_shell_mcp.tools._gui_frame_data", failed_frame)
     failed_frame = client.get(
         "/api/ui/gui/frame",
         params={"machine": "local", "window_id": "window:1"},
@@ -1301,18 +1280,9 @@ def test_webui_gui_api_error_paths(tmp_path, monkeypatch):
     assert "capture failed" in failed_frame.json()["message"]
 
     async def missing_image(*_args, **_kwargs):
-        return CallToolResult(
-            content=[TextContent(type="text", text="no image")],
-            structuredContent={
-                "ok": True,
-                "window": {
-                    "id": "window:1",
-                    "bounds": {"x": 0, "y": 0, "width": 10, "height": 10},
-                },
-            },
-        )
+        raise RuntimeError("GUI backend returned no screenshot")
 
-    monkeypatch.setattr("local_shell_mcp.tools._gui_state_result", missing_image)
+    monkeypatch.setattr("local_shell_mcp.tools._gui_frame_data", missing_image)
     no_image = client.get(
         "/api/ui/gui/frame",
         params={"machine": "local", "window_id": "window:1"},

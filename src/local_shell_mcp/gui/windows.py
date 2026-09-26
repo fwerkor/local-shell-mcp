@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,21 @@ def _rect_dict(rect: Any) -> dict[str, int]:
         "width": max(0, right - left),
         "height": max(0, bottom - top),
     }
+
+
+def _horizontal_wheel(amount: int) -> None:
+    if not amount:
+        return
+    user32 = ctypes.windll.user32
+    mouseeventf_hwheel = 0x1000
+    wheel_delta = 120
+    user32.mouse_event(
+        mouseeventf_hwheel,
+        0,
+        0,
+        ctypes.c_int(int(amount) * wheel_delta),
+        0,
+    )
 
 
 def _safe_property(control: Any, name: str, default: Any = None) -> Any:
@@ -232,8 +248,7 @@ class WindowsGuiBackend:
     async def focus_window(self, window: dict[str, Any]) -> None:
         def focus() -> None:
             target = self._find_window(str(window["id"]))
-            if not target.SetFocus():
-                raise RuntimeError("UI Automation could not focus the target window")
+            target.SetFocus()
 
         await asyncio.to_thread(focus)
 
@@ -253,8 +268,7 @@ class WindowsGuiBackend:
 
         if kind == "focus":
             target = locator or self._find_window(str(window["id"]))
-            if not target.SetFocus():
-                raise RuntimeError("UI Automation could not focus the target")
+            target.SetFocus()
             return {"semantic": True}
 
         if kind == "set_value":
@@ -294,7 +308,7 @@ class WindowsGuiBackend:
             if locator is not None:
                 locator.SetFocus()
             sequence = _key_sequence(action.get("keys"))
-            auto.SendKeys(sequence, interval=0.0, waitTime=0, charMode=True)
+            auto.SendKeys(sequence, interval=0.0, waitTime=0, charMode=False)
             return {"keys": action.get("keys")}
 
         if kind in {"click", "double_click", "right_click", "move", "scroll"}:
@@ -310,13 +324,15 @@ class WindowsGuiBackend:
                 auto.MoveTo(x, y, moveSpeed=0, waitTime=0)
             else:
                 auto.MoveTo(x, y, moveSpeed=0, waitTime=0)
-                amount = quantize_scroll_amount(
-                    action.get("delta_y", action.get("amount", -3))
-                )
-                if amount < 0:
-                    auto.WheelDown(abs(amount), interval=0.0, waitTime=0)
-                elif amount > 0:
-                    auto.WheelUp(amount, interval=0.0, waitTime=0)
+                default_y = action.get("amount", -3) if "delta_x" not in action else 0
+                amount_y = quantize_scroll_amount(action.get("delta_y", default_y))
+                amount_x = quantize_scroll_amount(action.get("delta_x", 0))
+                if amount_y < 0:
+                    auto.WheelDown(abs(amount_y), interval=0.0, waitTime=0)
+                elif amount_y > 0:
+                    auto.WheelUp(amount_y, interval=0.0, waitTime=0)
+                if amount_x:
+                    _horizontal_wheel(amount_x)
             return {"screen_x": x, "screen_y": y}
 
         if kind == "drag":

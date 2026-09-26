@@ -89,6 +89,62 @@ def _key_parts(keys: Any) -> list[str]:
     return parts
 
 
+def _portal_request_path(bus: Any, handle_token: str) -> str:
+    unique_name = str(getattr(bus, "unique_name", "") or "")
+    sender = unique_name.lstrip(":").replace(".", "_")
+    if not sender:
+        raise GuiUnavailableError("D-Bus connection has no unique name")
+    return f"/org/freedesktop/portal/desktop/request/{sender}/{handle_token}"
+
+
+async def _portal_request(
+    bus: Any,
+    awaitable: Any,
+    *,
+    handle_token: str,
+    timeout_s: float = 120.0,
+) -> dict[str, Any]:
+    from dbus_next import MessageType
+
+    expected_path = _portal_request_path(bus, handle_token)
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[tuple[int, dict[str, Any]]] = loop.create_future()
+
+    def handler(message: Any) -> bool:
+        if (
+            message.message_type == MessageType.SIGNAL
+            and message.path == expected_path
+            and message.interface == "org.freedesktop.portal.Request"
+            and message.member == "Response"
+        ):
+            body = list(message.body or [])
+            if len(body) >= 2 and not future.done():
+                future.set_result((int(body[0]), _unwrap(body[1])))
+        return False
+
+    match_rule = (
+        "type='signal',sender=org.freedesktop.portal.Desktop,"
+        f"interface=org.freedesktop.portal.Request,path={expected_path}"
+    )
+    bus._add_match_rule(match_rule)
+    bus.add_message_handler(handler)
+    try:
+        path = str(await awaitable)
+        if path != expected_path:
+            raise GuiUnavailableError(
+                f"Desktop portal returned unexpected request path: {path}"
+            )
+        code, results = await asyncio.wait_for(future, timeout=timeout_s)
+    finally:
+        with contextlib.suppress(Exception):
+            bus.remove_message_handler(handler)
+        with contextlib.suppress(Exception):
+            bus._remove_match_rule(match_rule)
+    if code != 0:
+        raise GuiUnavailableError(f"Desktop portal request was denied or cancelled ({code})")
+    return results
+
+
 class PortalDesktop:
     """XDG Desktop Portal RemoteDesktop/ScreenCast session for Wayland input."""
 
@@ -120,28 +176,20 @@ class PortalDesktop:
         self._remote = obj.get_interface("org.freedesktop.portal.RemoteDesktop")
         self._screen = obj.get_interface("org.freedesktop.portal.ScreenCast")
 
-    async def _request(self, awaitable: Any, *, timeout_s: float = 120.0) -> dict[str, Any]:
+    async def _request(
+        self,
+        awaitable: Any,
+        *,
+        handle_token: str,
+        timeout_s: float = 120.0,
+    ) -> dict[str, Any]:
         assert self._bus is not None
-        path = await awaitable
-        intro = await self._bus.introspect("org.freedesktop.portal.Desktop", path)
-        obj = self._bus.get_proxy_object("org.freedesktop.portal.Desktop", path, intro)
-        interface = obj.get_interface("org.freedesktop.portal.Request")
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[tuple[int, dict[str, Any]]] = loop.create_future()
-
-        def response(code: int, results: dict[str, Any]) -> None:
-            if not future.done():
-                future.set_result((int(code), _unwrap(results)))
-
-        interface.on_response(response)
-        try:
-            code, results = await asyncio.wait_for(future, timeout=timeout_s)
-        finally:
-            with contextlib.suppress(Exception):
-                interface.off_response(response)
-        if code != 0:
-            raise GuiUnavailableError(f"Desktop portal request was denied or cancelled ({code})")
-        return results
+        return await _portal_request(
+            self._bus,
+            awaitable,
+            handle_token=handle_token,
+            timeout_s=timeout_s,
+        )
 
     async def ensure_session(self) -> None:
         async with self._lock:
@@ -150,34 +198,53 @@ class PortalDesktop:
             await self._connect()
             assert self._remote is not None and self._screen is not None
             _MessageBus, Variant = _portal_modules()
-            token = uuid.uuid4().hex
+            token = f"lsm_req_{uuid.uuid4().hex}"
             created = await self._request(
                 self._remote.call_create_session(
                     {
-                        "handle_token": Variant("s", f"lsm_req_{token}"),
-                        "session_handle_token": Variant("s", f"lsm_session_{token}"),
+                        "handle_token": Variant("s", token),
+                        "session_handle_token": Variant(
+                            "s", f"lsm_session_{uuid.uuid4().hex}"
+                        ),
                     }
-                )
+                ),
+                handle_token=token,
             )
             session = str(created["session_handle"])
             try:
+                source_token = f"lsm_req_{uuid.uuid4().hex}"
                 await self._request(
                     self._screen.call_select_sources(
                         session,
                         {
+                            "handle_token": Variant("s", source_token),
                             "types": Variant("u", 1),
                             "multiple": Variant("b", True),
                             "cursor_mode": Variant("u", 1),
                         },
-                    )
+                    ),
+                    handle_token=source_token,
                 )
+                device_token = f"lsm_req_{uuid.uuid4().hex}"
                 await self._request(
                     self._remote.call_select_devices(
                         session,
-                        {"types": Variant("u", 3)},
-                    )
+                        {
+                            "handle_token": Variant("s", device_token),
+                            "types": Variant("u", 3),
+                        },
+                    ),
+                    handle_token=device_token,
                 )
-                started = await self._request(self._remote.call_start(session, "", {}))
+                start_token = f"lsm_req_{uuid.uuid4().hex}"
+                started = await self._request(
+                    self._remote.call_start(
+                        session,
+                        "",
+                        {"handle_token": Variant("s", start_token)},
+                    ),
+                    handle_token=start_token,
+                )
             except Exception:
                 self._session = None
                 raise
@@ -209,7 +276,9 @@ class PortalDesktop:
                 width, height = int(size[0]), int(size[1])
                 if px <= x < px + width and py <= y < py + height:
                     return stream["node_id"], float(x - px), float(y - py)
-        return self._streams[0]["node_id"], float(x), float(y)
+        raise GuiUnavailableError(
+            "Target point is outside the ScreenCast streams granted by the desktop portal"
+        )
 
     async def move(self, x: int, y: int) -> None:
         await self.ensure_session()
@@ -226,7 +295,11 @@ class PortalDesktop:
     async def button(self, button: int, pressed: bool) -> None:
         await self.ensure_session()
         assert self._remote is not None and self._session is not None
-        code = 0x110 + max(0, int(button) - 1)
+        codes = {1: 0x110, 2: 0x112, 3: 0x111}
+        try:
+            code = codes[int(button)]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"Unsupported pointer button: {button}") from exc
         await self._remote.call_notify_pointer_button(
             self._session,
             {},
@@ -312,31 +385,18 @@ async def portal_screenshot(destination: Path, env: dict[str, str]) -> None:
             intro,
         )
         screenshot = obj.get_interface("org.freedesktop.portal.Screenshot")
-        path = await screenshot.call_screenshot(
-            "",
-            {
-                "handle_token": Variant("s", f"lsm_shot_{uuid.uuid4().hex}"),
-                "interactive": Variant("b", False),
-            },
+        token = f"lsm_shot_{uuid.uuid4().hex}"
+        results = await _portal_request(
+            bus,
+            screenshot.call_screenshot(
+                "",
+                {
+                    "handle_token": Variant("s", token),
+                    "interactive": Variant("b", False),
+                },
+            ),
+            handle_token=token,
         )
-        request_intro = await bus.introspect("org.freedesktop.portal.Desktop", path)
-        request_obj = bus.get_proxy_object(
-            "org.freedesktop.portal.Desktop",
-            path,
-            request_intro,
-        )
-        request = request_obj.get_interface("org.freedesktop.portal.Request")
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[tuple[int, dict[str, Any]]] = loop.create_future()
-
-        def response(code: int, results: dict[str, Any]) -> None:
-            if not future.done():
-                future.set_result((int(code), _unwrap(results)))
-
-        request.on_response(response)
-        code, results = await asyncio.wait_for(future, timeout=120)
-        if code != 0:
-            raise GuiUnavailableError(f"Screenshot portal request was denied or cancelled ({code})")
         uri = str(results.get("uri") or "")
         parsed = urlparse(uri)
         if parsed.scheme != "file":

@@ -118,12 +118,33 @@ def _window_signature(window: Any) -> str:
         role = str(window.get_role_name() or "")
     except Exception:
         role = ""
+    try:
+        title = str(window.get_name() or "")
+    except Exception:
+        title = ""
     bounds = _bounds(window)
     fingerprint = (
-        f"{role}\0{bounds['x']}\0{bounds['y']}\0"
+        f"{role}\0{title}\0{bounds['x']}\0{bounds['y']}\0"
         f"{bounds['width']}\0{bounds['height']}"
     )
     return hashlib.sha256(fingerprint.encode()).hexdigest()[:12]
+
+
+def _element_signature(obj: Any) -> str:
+    try:
+        role = str(obj.get_role_name() or "")
+    except Exception:
+        role = ""
+    try:
+        name = str(obj.get_name() or "")
+    except Exception:
+        name = ""
+    bounds = _bounds(obj)
+    fingerprint = (
+        f"{role}\0{name}\0{bounds['x']}\0{bounds['y']}\0"
+        f"{bounds['width']}\0{bounds['height']}"
+    )
+    return hashlib.sha256(fingerprint.encode()).hexdigest()[:16]
 
 
 def _record(app: Any, window: Any, index: int) -> dict[str, Any]:
@@ -226,7 +247,10 @@ def _snapshot(payload: dict[str, Any]) -> dict[str, Any]:
                     "depth": depth,
                 }
             )
-            locators[element_id] = path
+            locators[element_id] = {
+                "path": path,
+                "fingerprint": _element_signature(obj),
+            }
             if depth >= max_depth:
                 continue
             try:
@@ -249,8 +273,16 @@ def _snapshot(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _semantic_action(payload: dict[str, Any]) -> dict[str, Any]:
     _app, window, _window_index = _resolve_window(str(payload["window_id"]))
-    locator = [int(value) for value in payload.get("locator", [])]
+    raw_locator = payload.get("locator", {})
+    if isinstance(raw_locator, dict):
+        locator = [int(value) for value in raw_locator.get("path", [])]
+        expected_fingerprint = str(raw_locator.get("fingerprint") or "")
+    else:
+        locator = [int(value) for value in raw_locator]
+        expected_fingerprint = ""
     obj = _resolve_path(window, locator)
+    if expected_fingerprint and _element_signature(obj) != expected_fingerprint:
+        raise LookupError("AT-SPI target element changed since observation")
     action = payload["action"]
     kind = str(action["type"])
 

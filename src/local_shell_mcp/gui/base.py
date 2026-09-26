@@ -17,6 +17,8 @@ GUI_STATE_TTL_S = 30.0
 GUI_STATE_CACHE_LIMIT = 32
 GUI_MAX_ELEMENTS = 1000
 GUI_MAX_DEPTH = 20
+GUI_MAX_ACTIONS = 32
+GUI_MAX_TOTAL_WAIT_S = 30.0
 
 _COORDINATE_ACTIONS = {
     "click",
@@ -223,6 +225,7 @@ class GuiManager:
         self._backend = backend or _backend_for_platform()
         self._states: dict[str, _StateRecord] = {}
         self._lock = asyncio.Lock()
+        self._execution_lock = asyncio.Lock()
 
     @property
     def backend_name(self) -> str:
@@ -300,14 +303,48 @@ class GuiManager:
             "screenshot_path": snapshot.screenshot_path,
         }
 
+    async def frame(self, window_id: str) -> dict[str, Any]:
+        screenshot_path = temp_dir() / f"gui-frame-{uuid.uuid4().hex}.png"
+        screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            snapshot = await self._backend.snapshot(
+                str(window_id),
+                screenshot_path=screenshot_path,
+                include_elements=False,
+                max_elements=1,
+                max_depth=1,
+            )
+            if snapshot.screenshot_path is None:
+                screenshot_path.unlink(missing_ok=True)
+                raise GuiUnavailableError("GUI backend did not produce the requested screenshot")
+            if not screenshot_path.is_file():
+                raise GuiUnavailableError("GUI backend did not produce the requested screenshot")
+            try:
+                await asyncio.to_thread(
+                    _normalize_screenshot_coordinates,
+                    screenshot_path,
+                    snapshot.window,
+                )
+            except Exception:
+                screenshot_path.unlink(missing_ok=True)
+                raise
+            return {
+                "backend": self._backend.name,
+                "window": snapshot.window,
+                "capabilities": snapshot.capabilities,
+                "screenshot_path": snapshot.screenshot_path,
+            }
+        except Exception:
+            screenshot_path.unlink(missing_ok=True)
+            raise
+
     async def act(
         self,
         window_id: str,
         state_id: str,
         actions: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        if not actions:
-            raise ValueError("actions must contain at least one GUI action")
+        self._validate_action_batch(actions)
 
         async with self._lock:
             self._prune_locked(time.monotonic())
@@ -341,11 +378,12 @@ class GuiManager:
             normalized.append((action, locator))
 
         results: list[dict[str, Any]] = []
-        for index, (action, locator) in enumerate(normalized):
-            if action["type"] in _COORDINATE_ACTIONS:
-                await self._assert_window_geometry_unchanged(record.window)
-            result = await self._backend.perform_action(record.window, locator, action)
-            results.append({"index": index, "type": action["type"], **(result or {})})
+        async with self._execution_lock:
+            for index, (action, locator) in enumerate(normalized):
+                if action["type"] in _COORDINATE_ACTIONS:
+                    await self._assert_window_geometry_unchanged(record.window)
+                result = await self._backend.perform_action(record.window, locator, action)
+                results.append({"index": index, "type": action["type"], **(result or {})})
 
         return {
             "backend": self._backend.name,
@@ -364,8 +402,7 @@ class GuiManager:
         expected_bounds = _bounds_tuple(observed_bounds)
         if expected_bounds is None:
             raise ValueError("Observed window bounds are invalid")
-        if not actions:
-            raise ValueError("At least one GUI action is required")
+        self._validate_action_batch(actions)
 
         normalized: list[dict[str, Any]] = []
         for index, raw_action in enumerate(actions):
@@ -381,21 +418,22 @@ class GuiManager:
             normalized.append(action)
 
         results: list[dict[str, Any]] = []
-        for index, action in enumerate(normalized):
-            current = await self._current_window(
-                window_id,
-                "refresh the displayed frame and try again",
-            )
-            if _bounds_tuple(current.get("bounds")) != expected_bounds:
-                raise GuiStaleStateError(
-                    "Target window moved or resized since the displayed frame; refresh it and try again"
+        async with self._execution_lock:
+            for index, action in enumerate(normalized):
+                current = await self._current_window(
+                    window_id,
+                    "refresh the displayed frame and try again",
                 )
-            if action["type"] in _COORDINATE_ACTIONS:
-                _validate_coordinate_action(current, action, has_locator=False)
-            if action["type"] in {"type", "key"}:
-                await self._backend.focus_window(current)
-            result = await self._backend.perform_action(current, None, action)
-            results.append({"index": index, "type": action["type"], **(result or {})})
+                if _bounds_tuple(current.get("bounds")) != expected_bounds:
+                    raise GuiStaleStateError(
+                        "Target window moved or resized since the displayed frame; refresh it and try again"
+                    )
+                if action["type"] in _COORDINATE_ACTIONS:
+                    _validate_coordinate_action(current, action, has_locator=False)
+                if action["type"] in {"type", "key"}:
+                    await self._backend.focus_window(current)
+                result = await self._backend.perform_action(current, None, action)
+                results.append({"index": index, "type": action["type"], **(result or {})})
 
         return {
             "backend": self._backend.name,
@@ -403,6 +441,26 @@ class GuiManager:
             "human_control": True,
             "actions": results,
         }
+
+    @staticmethod
+    def _validate_action_batch(actions: list[dict[str, Any]]) -> None:
+        if not actions:
+            raise ValueError("actions must contain at least one GUI action")
+        if len(actions) > GUI_MAX_ACTIONS:
+            raise ValueError(f"actions may contain at most {GUI_MAX_ACTIONS} GUI actions")
+        total_wait = 0.0
+        for index, raw_action in enumerate(actions):
+            if str(raw_action.get("type") or "").strip().lower() != "wait":
+                continue
+            try:
+                seconds = float(raw_action.get("seconds", 1.0))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"actions[{index}].seconds must be numeric") from exc
+            total_wait += max(0.0, min(seconds, 30.0))
+        if total_wait > GUI_MAX_TOTAL_WAIT_S:
+            raise ValueError(
+                f"Total GUI wait time may not exceed {GUI_MAX_TOTAL_WAIT_S:g} seconds"
+            )
 
     async def _current_window(
         self,

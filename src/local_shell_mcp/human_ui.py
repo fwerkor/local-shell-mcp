@@ -1143,33 +1143,16 @@ async def api_gui_frame(request: Request) -> Response:
         if not window_id:
             raise ValueError("window_id is required")
 
-        from .tools import _gui_state_result
+        from .tools import _gui_frame_data
 
-        result = await _gui_state_result(
+        data, image = await _gui_frame_data(
             window_id,
-            screenshot=True,
-            include_elements=False,
-            max_elements=1,
-            max_depth=1,
-            machine=None if machine == "local" else machine,
+            None if machine == "local" else machine,
         )
-        data = result.structuredContent if isinstance(result.structuredContent, dict) else {}
-        if result.isError:
-            raise RuntimeError(str(data.get("message") or "Unable to capture GUI window"))
-
-        image = next(
-            (item for item in result.content if getattr(item, "type", None) == "image"),
-            None,
-        )
-        if image is None:
-            raise RuntimeError("GUI backend returned no screenshot")
-
         window = data.get("window") if isinstance(data.get("window"), dict) else {}
         bounds = window.get("bounds") if isinstance(window.get("bounds"), dict) else {}
         headers = {
             "Cache-Control": "no-store",
-            "X-LSM-GUI-State-ID": str(data.get("state_id") or ""),
-            "X-LSM-GUI-State-TTL": str(data.get("state_ttl_s") or ""),
             "X-LSM-GUI-Window-X": str(bounds.get("x") or 0),
             "X-LSM-GUI-Window-Y": str(bounds.get("y") or 0),
             "X-LSM-GUI-Window-Width": str(bounds.get("width") or 0),
@@ -1177,8 +1160,8 @@ async def api_gui_frame(request: Request) -> Response:
             "X-LSM-GUI-Backend": str(data.get("backend") or ""),
         }
         return Response(
-            base64.b64decode(image.data),
-            media_type=str(image.mimeType or "image/png"),
+            image.data,
+            media_type=str(image.mime_type or "image/png"),
             headers=headers,
         )
     except Exception as exc:
