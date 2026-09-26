@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import shutil
@@ -395,8 +396,9 @@ def _x11_key_chord(keys: Any, env: dict[str, str]) -> None:
 
     parts = _key_parts(keys)
     connection = display.Display(env.get("DISPLAY"))
-    pressed = []
+    pressed: list[int] = []
     try:
+        keycodes: list[int] = []
         for part in parts:
             name = _X11_KEY_NAMES.get(part.upper(), part)
             if len(name) == 1 and name.isalpha():
@@ -407,11 +409,17 @@ def _x11_key_chord(keys: Any, env: dict[str, str]) -> None:
             keycode = connection.keysym_to_keycode(keysym)
             if not keycode:
                 raise ValueError(f"No X11 keycode for: {part}")
-            xtest.fake_input(connection, X.KeyPress, keycode)
-            pressed.append(keycode)
-        for keycode in reversed(pressed):
-            xtest.fake_input(connection, X.KeyRelease, keycode)
-        connection.sync()
+            keycodes.append(keycode)
+
+        try:
+            for keycode in keycodes:
+                xtest.fake_input(connection, X.KeyPress, keycode)
+                pressed.append(keycode)
+        finally:
+            for keycode in reversed(pressed):
+                with contextlib.suppress(Exception):
+                    xtest.fake_input(connection, X.KeyRelease, keycode)
+            connection.sync()
     finally:
         connection.close()
 
@@ -548,9 +556,23 @@ class LinuxGuiBackend:
             await asyncio.sleep(seconds)
             return {"waited_s": seconds}
 
-        if kind in {"focus", "set_value"}:
+        if kind == "focus":
             if locator is None:
-                raise ValueError(f"{kind} requires element_id")
+                await self.focus_window(window)
+                return {"semantic": True, "method": "window"}
+            return await asyncio.to_thread(
+                self._helper,
+                {
+                    "command": "semantic_action",
+                    "window_id": window["id"],
+                    "locator": locator["semantic"],
+                    "action": action,
+                },
+            )
+
+        if kind == "set_value":
+            if locator is None:
+                raise ValueError("set_value requires element_id")
             return await asyncio.to_thread(
                 self._helper,
                 {
@@ -604,10 +626,20 @@ class LinuxGuiBackend:
     ) -> tuple[int, int]:
         if locator is not None and action.get("x") is None and action.get("y") is None:
             bounds = locator["bounds"]
-            return (
-                int(bounds["x"]) + int(bounds["width"]) // 2,
-                int(bounds["y"]) + int(bounds["height"]) // 2,
-            )
+            width = int(bounds.get("width", 0))
+            height = int(bounds.get("height", 0))
+            if width <= 0 or height <= 0:
+                raise ValueError("Target element has no usable screen bounds")
+            x = int(bounds.get("x", 0)) + width // 2
+            y = int(bounds.get("y", 0)) + height // 2
+            window_bounds = window["bounds"]
+            left = int(window_bounds["x"])
+            top = int(window_bounds["y"])
+            right = left + int(window_bounds["width"])
+            bottom = top + int(window_bounds["height"])
+            if not (left <= x < right and top <= y < bottom):
+                raise ValueError("Target element center is outside the selected window")
+            return x, y
         if action.get("x") is None or action.get("y") is None:
             raise ValueError("Coordinate action requires x and y, or an element_id")
         bounds = window["bounds"]

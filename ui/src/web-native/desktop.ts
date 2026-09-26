@@ -202,8 +202,7 @@ export class DesktopController extends BaseController {
     this.frameEpoch += 1
     this.frameAbort?.abort()
     this.frameAbort = null
-    if (this.clickTimer !== null) window.clearTimeout(this.clickTimer)
-    if (this.wheelTimer !== null) window.clearTimeout(this.wheelTimer)
+    this.cancelPendingPointerInput()
     this.revokeFrame()
     super.destroy()
   }
@@ -402,6 +401,7 @@ export class DesktopController extends BaseController {
 
   private clearFrame(): void {
     this.frameEpoch += 1
+    this.cancelPendingPointerInput()
     this.frameAbort?.abort()
     this.frameAbort = null
     this.frameRequestKey = ""
@@ -464,6 +464,17 @@ export class DesktopController extends BaseController {
       }
     }
     this.actionQueue = this.actionQueue.then(run, run)
+  }
+
+  private cancelPendingPointerInput(): void {
+    if (this.clickTimer !== null) window.clearTimeout(this.clickTimer)
+    if (this.wheelTimer !== null) window.clearTimeout(this.wheelTimer)
+    this.clickTimer = null
+    this.wheelTimer = null
+    this.wheelDelta = 0
+    this.wheelPoint = null
+    this.wheelBounds = null
+    this.pointerStart = null
   }
 
   private renderInputPulse(): void {

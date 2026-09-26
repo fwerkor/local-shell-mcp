@@ -1237,12 +1237,89 @@ async def test_linux_raw_keyboard_focuses_selected_window(monkeypatch):
     monkeypatch.setattr(backend, "focus_window", focus)
     monkeypatch.setattr(backend, "_perform_x11", raw)
 
+    window = {"id": "window:1", "bounds": {"x": 0, "y": 0, "width": 10, "height": 10}}
     await backend.perform_action(
-        {"id": "window:1", "bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
+        window,
         None,
         {"type": "key", "keys": "CTRL+A"},
     )
     assert calls == [("focus", "window:1"), ("raw", "key")]
+
+    calls.clear()
+    result = await backend.perform_action(window, None, {"type": "focus"})
+    assert result == {"semantic": True, "method": "window"}
+    assert calls == [("focus", "window:1")]
+
+
+def test_linux_locator_center_must_be_usable_and_inside_window(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    monkeypatch.setattr(linux, "_desktop_environment", lambda: {"XDG_SESSION_TYPE": "x11"})
+    backend = linux.LinuxGuiBackend()
+    window = {"id": "w", "bounds": {"x": 100, "y": 100, "width": 200, "height": 100}}
+
+    assert backend._screen_point(
+        window,
+        {"type": "right_click"},
+        {"bounds": {"x": 120, "y": 130, "width": 20, "height": 10}},
+    ) == (130, 135)
+
+    with pytest.raises(ValueError, match="no usable"):
+        backend._screen_point(
+            window,
+            {"type": "scroll"},
+            {"bounds": {"x": 0, "y": 0, "width": 0, "height": 0}},
+        )
+
+    with pytest.raises(ValueError, match="outside"):
+        backend._screen_point(
+            window,
+            {"type": "drag"},
+            {"bounds": {"x": 400, "y": 130, "width": 20, "height": 10}},
+        )
+
+
+def test_x11_key_chord_validates_before_pressing(monkeypatch):
+    import sys
+    from types import ModuleType
+
+    import local_shell_mcp.gui.linux as linux
+
+    events = []
+    closed = []
+
+    class Connection:
+        def keysym_to_keycode(self, keysym):
+            return 10 if keysym == 1 else 0
+
+        def sync(self):
+            events.append(("sync",))
+
+        def close(self):
+            closed.append(True)
+
+    connection = Connection()
+    xlib = ModuleType("Xlib")
+    xlib.XK = SimpleNamespace(
+        string_to_keysym=lambda name: 1 if name == "Control_L" else 0
+    )
+    xlib.X = SimpleNamespace(KeyPress=2, KeyRelease=3)
+    xlib.display = SimpleNamespace(Display=lambda _name: connection)
+    ext = ModuleType("Xlib.ext")
+    ext.xtest = SimpleNamespace(
+        fake_input=lambda _connection, event_type, keycode: events.append(
+            (event_type, keycode)
+        )
+    )
+    xlib.ext = ext
+    monkeypatch.setitem(sys.modules, "Xlib", xlib)
+    monkeypatch.setitem(sys.modules, "Xlib.ext", ext)
+
+    with pytest.raises(ValueError, match="Unsupported X11 key name"):
+        linux._x11_key_chord("CTRL+NOT_A_KEY", {"DISPLAY": ":0"})
+
+    assert events == []
+    assert closed == [True]
 
 
 def test_atspi_element_locator_rejects_reordered_replacement(monkeypatch):
