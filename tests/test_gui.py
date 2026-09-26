@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -31,6 +32,70 @@ from local_shell_mcp.gui.macos import (
 )
 from local_shell_mcp.gui.macos import _key_parts as mac_key_parts
 from local_shell_mcp.gui.windows import WindowsGuiBackend, _key_sequence, _rect_dict
+
+
+def test_native_gui_adapters_are_optional_dependencies():
+    project = tomllib.loads(
+        (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]
+    mandatory = "\n".join(project["dependencies"]).lower()
+    for package in (
+        "uiautomation",
+        "pyobjc-framework-applicationservices",
+        "pyobjc-framework-quartz",
+        "dbus-next",
+        "python-xlib",
+    ):
+        assert package not in mandatory
+
+    optional = "\n".join(project["optional-dependencies"]["gui"]).lower()
+    for package in (
+        "uiautomation",
+        "pyobjc-framework-applicationservices",
+        "pyobjc-framework-quartz",
+        "dbus-next",
+        "python-xlib",
+    ):
+        assert package in optional
+
+
+def test_core_imports_without_optional_gui_adapters():
+    import os
+    import subprocess
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(root / "src")
+    code = r"""
+import builtins
+blocked = {
+    "uiautomation",
+    "ApplicationServices",
+    "Quartz",
+    "dbus_next",
+    "Xlib",
+}
+original = builtins.__import__
+def guarded(name, *args, **kwargs):
+    if name.split(".", 1)[0] in blocked:
+        raise ModuleNotFoundError(name)
+    return original(name, *args, **kwargs)
+builtins.__import__ = guarded
+import local_shell_mcp.remote
+import local_shell_mcp.tools
+print("ok")
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "ok"
 
 
 class FakeBackend:
@@ -1069,7 +1134,49 @@ async def test_macos_native_traversal_is_offloaded(monkeypatch):
         max_elements=1,
         max_depth=1,
     )
-    assert calls == ["<lambda>", "<lambda>"]
+    monkeypatch.setattr(
+        backend,
+        "_perform_action_sync",
+        lambda *_args, **_kwargs: {"performed": True},
+    )
+    result = await backend.perform_action(
+        {"id": "cg:1", "bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
+        None,
+        {"type": "click", "x": 1, "y": 1},
+    )
+    assert result == {"performed": True}
+    assert calls == ["<lambda>", "<lambda>", "<lambda>"]
+
+
+@pytest.mark.asyncio
+async def test_gui_frame_cancellation_cleans_late_capture(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.base as base
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(base, "temp_dir", lambda: tmp_path)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class SlowBackend(FakeBackend):
+        async def snapshot(self, window_id, **kwargs):
+            path = kwargs["screenshot_path"]
+            started.set()
+            await release.wait()
+            Image.new("RGB", (300, 200)).save(path)
+            return GuiSnapshot(
+                window={"id": window_id, "bounds": dict(self.bounds)},
+                elements=[],
+                screenshot_path=str(path),
+            )
+
+    manager = GuiManager(SlowBackend())
+    task = asyncio.create_task(manager.frame("window:1"))
+    await started.wait()
+    task.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert list(tmp_path.glob("gui-frame-*.png")) == []
 
 
 @pytest.mark.asyncio
@@ -1349,6 +1456,41 @@ def test_x11_key_chord_validates_before_pressing(monkeypatch):
     assert closed == [True]
 
 
+def test_wayland_full_desktop_crop_requires_monitor_geometry():
+    with pytest.raises(GuiUnavailableError, match="Monitor geometry is unavailable"):
+        _desktop_crop_box(
+            {"x": -100, "y": 0, "width": 200, "height": 100},
+            [],
+            (1920, 1080),
+        )
+
+
+@pytest.mark.asyncio
+async def test_x11_drag_releases_button_after_motion_failure(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    monkeypatch.setattr(linux, "_desktop_environment", lambda: {"XDG_SESSION_TYPE": "x11"})
+    backend = linux.LinuxGuiBackend()
+    events = []
+
+    def helper(payload):
+        event = payload.get("event")
+        events.append(event)
+        if event == "abs":
+            raise RuntimeError("motion failed")
+        return {"generated": True}
+
+    monkeypatch.setattr(backend, "_helper", helper)
+    window = {"id": "w", "bounds": {"x": 0, "y": 0, "width": 100, "height": 100}}
+    with pytest.raises(RuntimeError, match="motion failed"):
+        await backend._perform_x11(
+            window,
+            None,
+            {"type": "drag", "x": 1, "y": 1, "to_x": 10, "to_y": 10},
+        )
+    assert events == ["b1p", "abs", "b1r"]
+
+
 def test_atspi_element_locator_rejects_reordered_replacement(monkeypatch):
     from local_shell_mcp.gui import linux_atspi_helper as helper
 
@@ -1418,6 +1560,68 @@ async def test_portal_request_subscribes_before_immediate_response(monkeypatch):
     assert await _portal_request(bus, immediate(), handle_token=token) == {"answer": "ok"}
     assert bus.handler is None
     assert bus.match_rules == []
+
+
+@pytest.mark.asyncio
+async def test_portal_key_chord_releases_every_successfully_pressed_key(monkeypatch):
+    portal = PortalDesktop({})
+    events = []
+    fail_once = {"value": True}
+
+    async def key_event(symbol, pressed):
+        events.append((symbol, pressed))
+        if symbol == 0x41 and pressed and fail_once["value"]:
+            fail_once["value"] = False
+            raise RuntimeError("key down failed")
+
+    monkeypatch.setattr(portal, "_key_event", key_event)
+    with pytest.raises(RuntimeError, match="key down failed"):
+        await portal.key_chord("CTRL+SHIFT+A")
+
+    assert (0xFFE3, False) in events
+    assert (0xFFE1, False) in events
+
+
+@pytest.mark.asyncio
+async def test_portal_setup_failure_closes_created_session(monkeypatch):
+    portal = PortalDesktop({})
+    portal._bus = object()
+    portal._remote = SimpleNamespace()
+    portal._screen = SimpleNamespace()
+    closed = []
+
+    async def connect():
+        return None
+
+    class Variant:
+        def __init__(self, _signature, value):
+            self.value = value
+
+    async def request(awaitable, *, handle_token, timeout_s=120.0):
+        del awaitable, handle_token, timeout_s
+        if not hasattr(request, "created"):
+            request.created = True
+            return {"session_handle": "/session/1"}
+        raise RuntimeError("selection failed")
+
+    async def close(session):
+        closed.append(session)
+
+    portal._remote.call_create_session = lambda _opts: object()
+    portal._screen.call_select_sources = lambda *_args: object()
+    monkeypatch.setattr(portal, "_connect", connect)
+    monkeypatch.setattr(portal, "_request", request)
+    monkeypatch.setattr(portal, "_close_session", close)
+
+    import local_shell_mcp.gui.linux_portal as linux_portal
+
+    monkeypatch.setattr(linux_portal, "_portal_modules", lambda: (object, Variant))
+
+    with pytest.raises(RuntimeError, match="selection failed"):
+        await portal.ensure_session()
+    assert closed == ["/session/1"]
+    assert portal._session is None
+    assert portal._streams == []
 
 
 @pytest.mark.asyncio
@@ -1679,11 +1883,101 @@ def test_atspi_listing_skips_defunct_children(monkeypatch):
     assert windows[0][1] is good
 
 
+def test_macos_ax_window_matching_rejects_ambiguous_weaker_matches(monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    first = object()
+    second = object()
+
+    class AX:
+        kAXWindowsAttribute = "windows"
+        kAXTitleAttribute = "title"
+
+        @staticmethod
+        def AXIsProcessTrusted():
+            return True
+
+        @staticmethod
+        def AXUIElementCreateApplication(_pid):
+            return "app"
+
+    monkeypatch.setattr(macos, "_native", lambda: (AX, object()))
+    monkeypatch.setattr(
+        macos,
+        "_ax_copy",
+        lambda _ax, obj, attr, default=None: (
+            [first, second]
+            if attr == AX.kAXWindowsAttribute
+            else ("Shared" if obj in {first, second} else default)
+        ),
+    )
+    monkeypatch.setattr(
+        macos,
+        "_ax_bounds",
+        lambda _ax, _window: {"x": 0, "y": 0, "width": 100, "height": 100},
+    )
+
+    backend = MacOSGuiBackend()
+    assert (
+        backend._find_ax_window(
+            {
+                "pid": 1,
+                "title": "Shared",
+                "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+            }
+        )
+        is None
+    )
+
+
 def test_macos_utf16_text_units_and_chunks():
     assert _utf16_units("A") == 1
     assert _utf16_units("😀") == 2
     assert _utf16_units("A😀") == 3
     assert _unicode_chunks("A😀B", max_units=2) == ["A", "😀", "B"]
+
+
+def test_windows_window_id_rejects_reused_hwnd(monkeypatch):
+    import local_shell_mcp.gui.windows as windows
+
+    class Rect:
+        left = 0
+        top = 0
+        right = 100
+        bottom = 100
+
+    class Control:
+        NativeWindowHandle = 7
+        ProcessId = 101
+        ClassName = "Editor"
+        AutomationId = "main"
+        Name = "Document A"
+        BoundingRectangle = Rect()
+
+        def GetRuntimeId(self):
+            return [1, 2, 3]
+
+    original = Control()
+    record = windows._window_record(original)
+    assert record is not None
+
+    replacement = Control()
+    replacement.ProcessId = 202
+    replacement.Name = "Document B"
+    replacement.GetRuntimeId = lambda: [9, 9, 9]
+
+    class Root:
+        def GetChildren(self):
+            return [replacement]
+
+    class Auto:
+        def GetRootControl(self):
+            return Root()
+
+    monkeypatch.setattr(windows, "_automation", lambda: Auto())
+    backend = WindowsGuiBackend()
+    with pytest.raises(LookupError, match="identity changed"):
+        backend._find_window(record["id"])
 
 
 @pytest.mark.asyncio

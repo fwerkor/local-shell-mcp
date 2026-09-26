@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import math
 import platform
 import time
@@ -309,37 +310,45 @@ class GuiManager:
     async def frame(self, window_id: str) -> dict[str, Any]:
         screenshot_path = temp_dir() / f"gui-frame-{uuid.uuid4().hex}.png"
         screenshot_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            snapshot = await self._backend.snapshot(
+        keep_file = False
+        capture = asyncio.create_task(
+            self._backend.snapshot(
                 str(window_id),
                 screenshot_path=screenshot_path,
                 include_elements=False,
                 max_elements=1,
                 max_depth=1,
             )
-            if snapshot.screenshot_path is None:
-                screenshot_path.unlink(missing_ok=True)
-                raise GuiUnavailableError("GUI backend did not produce the requested screenshot")
-            if not screenshot_path.is_file():
-                raise GuiUnavailableError("GUI backend did not produce the requested screenshot")
+        )
+
+        try:
             try:
-                await asyncio.to_thread(
-                    _normalize_screenshot_coordinates,
-                    screenshot_path,
-                    snapshot.window,
-                )
-            except Exception:
-                screenshot_path.unlink(missing_ok=True)
+                snapshot = await asyncio.shield(capture)
+            except BaseException:
+                if not capture.done():
+                    capture.add_done_callback(
+                        lambda _task: screenshot_path.unlink(missing_ok=True)
+                    )
+                with contextlib.suppress(BaseException):
+                    await asyncio.shield(capture)
                 raise
+            if snapshot.screenshot_path is None or not screenshot_path.is_file():
+                raise GuiUnavailableError("GUI backend did not produce the requested screenshot")
+            await asyncio.to_thread(
+                _normalize_screenshot_coordinates,
+                screenshot_path,
+                snapshot.window,
+            )
+            keep_file = True
             return {
                 "backend": self._backend.name,
                 "window": snapshot.window,
                 "capabilities": snapshot.capabilities,
                 "screenshot_path": snapshot.screenshot_path,
             }
-        except Exception:
-            screenshot_path.unlink(missing_ok=True)
-            raise
+        finally:
+            if not keep_file:
+                screenshot_path.unlink(missing_ok=True)
 
     async def act(
         self,

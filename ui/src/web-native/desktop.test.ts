@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { SINGLE_CLICK_DELAY_MS, framePoint, wheelScrollAmount } from "./desktop"
+import { DesktopController, SINGLE_CLICK_DELAY_MS, framePoint, wheelScrollAmount } from "./desktop"
+import type { NativePageContext } from "./common"
 
 describe("Native WebUI desktop coordinate mapping", () => {
   test("maps rendered image coordinates back to logical window pixels", () => {
@@ -24,6 +25,48 @@ describe("Native WebUI desktop coordinate mapping", () => {
 describe("Native WebUI desktop click handling", () => {
   test("waits for the browser double-click window before dispatching a single click", () => {
     expect(SINGLE_CLICK_DELAY_MS).toBeGreaterThanOrEqual(500)
+  })
+})
+
+describe("Native WebUI desktop window refresh", () => {
+  test("immediately refreshes the new machine after an older request finishes", async () => {
+    const calls: string[] = []
+    const resolvers: Array<(value: unknown) => void> = []
+    const context: NativePageContext = {
+      api: {
+        get: async (url: string) => {
+          calls.push(url)
+          return await new Promise<unknown>((resolve) => { resolvers.push(resolve) }) as never
+        },
+        send: async () => undefined as never,
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller: any = new DesktopController(context)
+    controller.renderSelectors = () => undefined
+    controller.clearFrame = () => undefined
+    controller.refreshFrame = async () => undefined
+    controller.machine = "old"
+
+    const first = controller.refreshWindows(false)
+    expect(calls[0]).toContain("machine=old")
+
+    controller.machine = "new"
+    await controller.refreshWindows(true)
+    expect(calls).toHaveLength(1)
+
+    resolvers[0]?.({ windows: [], backend: "" })
+    await first
+    await Promise.resolve()
+
+    expect(calls).toHaveLength(2)
+    expect(calls[1]).toContain("machine=new")
+    resolvers[1]?.({ windows: [], backend: "" })
+    await Promise.resolve()
   })
 })
 

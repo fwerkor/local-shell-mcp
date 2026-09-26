@@ -2210,17 +2210,30 @@ async def _execute_browser_worker_tool(tool: str, args: dict[str, Any]) -> Any:
 
 
 async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
+    from .gui import GuiUnavailableError, get_gui_manager
     from .remote_worker_installer import ensure_gui_dependencies
 
-    dependency_status = await asyncio.to_thread(ensure_gui_dependencies)
+    session_type: str | None = None
+    if sys.platform == "linux":
+        from .gui.linux import _desktop_environment, _session_type
+
+        session_type = _session_type(_desktop_environment())
+        if session_type == "unknown":
+            raise GuiUnavailableError(
+                "No graphical Linux session was found; GUI dependencies were not installed"
+            )
+
+    dependency_status = await asyncio.to_thread(
+        ensure_gui_dependencies,
+        session_type,
+    )
     if not dependency_status.get("available"):
         missing = ", ".join(dependency_status.get("missing") or []) or "GUI dependencies"
-        raise RuntimeError(
+        raise GuiUnavailableError(
             f"{missing} unavailable for native GUI automation: "
             f"{dependency_status.get('error') or 'installation failed'}"
         )
 
-    from .gui import get_gui_manager
 
     manager = get_gui_manager()
     if tool == "gui_list":

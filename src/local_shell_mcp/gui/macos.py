@@ -165,15 +165,35 @@ class MacOSGuiBackend:
         app = AX.AXUIElementCreateApplication(int(record["pid"]))
         windows = _ax_copy(AX, app, AX.kAXWindowsAttribute, []) or []
         title = str(record.get("title") or "")
-        best = None
+
+        exact: list[Any] = []
+        geometry_matches: list[Any] = []
+        title_matches: list[Any] = []
         for window in windows:
             candidate_title = str(_ax_copy(AX, window, AX.kAXTitleAttribute, "") or "")
             bounds = _ax_bounds(AX, window)
-            if title and candidate_title == title and _same_bounds(bounds, record["bounds"]):
-                return window
-            if best is None and _same_bounds(bounds, record["bounds"]) or best is None and title and candidate_title == title:
-                best = window
-        return best or (windows[0] if len(windows) == 1 else None)
+            geometry_match = _same_bounds(bounds, record["bounds"])
+            title_match = bool(title and candidate_title == title)
+            if geometry_match:
+                geometry_matches.append(window)
+            if title_match:
+                title_matches.append(window)
+            if geometry_match and title_match:
+                exact.append(window)
+
+        if len(exact) == 1:
+            return exact[0]
+        if len(exact) > 1:
+            return None
+        if len(geometry_matches) == 1 and (
+            not title_matches or title_matches[0] is geometry_matches[0]
+        ):
+            return geometry_matches[0]
+        if len(title_matches) == 1 and (
+            not geometry_matches or geometry_matches[0] is title_matches[0]
+        ):
+            return title_matches[0]
+        return windows[0] if len(windows) == 1 else None
 
     def _list_windows_sync(self) -> dict[str, Any]:
         AX, _Quartz = _native()
@@ -313,16 +333,24 @@ class MacOSGuiBackend:
         locator: Any | None,
         action: dict[str, Any],
     ) -> dict[str, Any]:
-        AX, Quartz = _native()
-        if not bool(AX.AXIsProcessTrusted()):
-            raise GuiUnavailableError("Grant Accessibility permission to local-shell-mcp on macOS")
-
         kind = action["type"]
         if kind == "wait":
             seconds = max(0.0, min(float(action.get("seconds", 1.0)), 30.0))
             await asyncio.sleep(seconds)
             return {"waited_s": seconds}
+        return await asyncio.to_thread(self._perform_action_sync, window, locator, action)
 
+    def _perform_action_sync(
+        self,
+        window: dict[str, Any],
+        locator: Any | None,
+        action: dict[str, Any],
+    ) -> dict[str, Any]:
+        AX, Quartz = _native()
+        if not bool(AX.AXIsProcessTrusted()):
+            raise GuiUnavailableError("Grant Accessibility permission to local-shell-mcp on macOS")
+
+        kind = action["type"]
         if kind == "focus":
             target = locator or self._find_ax_window(window)
             if target is None:

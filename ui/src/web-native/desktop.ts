@@ -107,6 +107,8 @@ export class DesktopController extends BaseController {
   private selectedWindowId = ""
   private backend = ""
   private loadingWindows = false
+  private pendingWindowsRefresh = false
+  private pendingWindowsForceFrame = false
   private framePromise: Promise<void> | null = null
   private frameRequestKey = ""
   private frameAbort: AbortController | null = null
@@ -279,7 +281,11 @@ export class DesktopController extends BaseController {
   }
 
   private async refreshWindows(forceFrame: boolean): Promise<void> {
-    if (this.loadingWindows) return
+    if (this.loadingWindows) {
+      this.pendingWindowsRefresh = true
+      this.pendingWindowsForceFrame ||= forceFrame
+      return
+    }
     this.loadingWindows = true
     const requestedMachine = this.machine
     try {
@@ -305,6 +311,16 @@ export class DesktopController extends BaseController {
       this.renderStatus(error instanceof Error ? error.message : String(error), true)
     } finally {
       this.loadingWindows = false
+      const targetChanged = requestedMachine !== this.machine
+      if (!this.destroyed && (this.pendingWindowsRefresh || targetChanged)) {
+        const nextForceFrame = this.pendingWindowsForceFrame || targetChanged
+        this.pendingWindowsRefresh = false
+        this.pendingWindowsForceFrame = false
+        void this.refreshWindows(nextForceFrame)
+      } else {
+        this.pendingWindowsRefresh = false
+        this.pendingWindowsForceFrame = false
+      }
     }
   }
 

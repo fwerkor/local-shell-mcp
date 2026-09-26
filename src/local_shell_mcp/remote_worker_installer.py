@@ -27,21 +27,24 @@ _WORKER_MANIFEST_PATH = "/remote/worker-bundle.tgz?manifest=1"
 _WINDOWS_PTY_REQUIREMENT = "pywinpty>=2.0.13"
 _GUI_DEPENDENCY_LOCK = threading.Lock()
 _GUI_REQUIREMENTS: dict[str, tuple[tuple[str, str], ...]] = {
-    "win32": (
-        ("PIL", "pillow>=10.3.0"),
-        ("uiautomation", "uiautomation>=2.0.29,<3"),
-    ),
-    "linux": (
-        ("PIL", "pillow>=10.3.0"),
-        ("dbus_next", "dbus-next>=0.2.3,<1"),
-        ("Xlib", "python-xlib>=0.33,<1"),
-    ),
+    "win32": (("uiautomation", "uiautomation>=2.0.29,<3"),),
     "darwin": (
-        ("PIL", "pillow>=10.3.0"),
         ("ApplicationServices", "pyobjc-framework-ApplicationServices>=11.1,<13"),
         ("Quartz", "pyobjc-framework-Quartz>=11.1,<13"),
     ),
+    "linux-x11": (("Xlib", "python-xlib>=0.33,<1"),),
+    "linux-wayland": (("dbus_next", "dbus-next>=0.2.3,<1"),),
 }
+
+
+def _gui_requirement_key(session_type: str | None) -> str | None:
+    if sys.platform == "linux":
+        normalized = str(session_type or "").strip().lower()
+        if normalized in {"x11", "wayland"}:
+            return f"linux-{normalized}"
+        return None
+    return sys.platform
+
 
 
 def worker_dependency_dir() -> Path:
@@ -121,10 +124,13 @@ def ensure_platform_dependencies() -> dict[str, Any]:
     return result
 
 
-def _ensure_gui_dependencies_unlocked() -> dict[str, Any]:
+def _ensure_gui_dependencies_unlocked(
+    session_type: str | None = None,
+) -> dict[str, Any]:
     path = worker_dependency_dir()
     _activate_worker_dependency_dir(path)
-    required = _GUI_REQUIREMENTS.get(sys.platform, ())
+    key = _gui_requirement_key(session_type)
+    required = _GUI_REQUIREMENTS.get(key or "", ())
     if not required:
         return {
             "available": True,
@@ -203,9 +209,11 @@ def _ensure_gui_dependencies_unlocked() -> dict[str, Any]:
     return result
 
 
-def ensure_gui_dependencies() -> dict[str, Any]:
+def ensure_gui_dependencies(
+    session_type: str | None = None,
+) -> dict[str, Any]:
     with _GUI_DEPENDENCY_LOCK:
-        return _ensure_gui_dependencies_unlocked()
+        return _ensure_gui_dependencies_unlocked(session_type)
 
 
 def _fetch_bytes(url: str, timeout: float = 60) -> bytes:

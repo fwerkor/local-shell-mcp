@@ -110,17 +110,21 @@ async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
 
     monkeypatch.setattr(gui, "get_gui_manager", lambda: manager)
     monkeypatch.setattr(remote.sys, "platform", "linux")
+    import local_shell_mcp.gui.linux as linux
+
+    monkeypatch.setattr(linux, "_desktop_environment", lambda: {"DISPLAY": ":0"})
+    monkeypatch.setattr(linux, "_session_type", lambda _env: "x11")
     dependency_calls = []
 
-    def dependencies():
-        dependency_calls.append(True)
+    def dependencies(session_type=None):
+        dependency_calls.append(session_type)
         return {"available": True, "missing": []}
 
     monkeypatch.setattr(installer, "ensure_gui_dependencies", dependencies)
 
     listed = await remote._execute_gui_worker_tool("gui_list", {})
     assert listed["windows"][0]["id"] == "w"
-    assert len(dependency_calls) == 1
+    assert dependency_calls == ["x11"]
 
     state = await remote._execute_gui_worker_tool(
         "gui_state",
@@ -133,21 +137,21 @@ async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
         },
     )
     assert state["state_id"] == "s"
-    assert len(dependency_calls) == 2
+    assert dependency_calls == ["x11", "x11"]
 
     refreshed = await remote._execute_gui_worker_tool(
         "gui_state_refresh",
         {"window_id": "w", "state_id": "s"},
     )
     assert refreshed["state_ttl_s"] == 30
-    assert len(dependency_calls) == 3
+    assert dependency_calls == ["x11", "x11", "x11"]
 
     frame = await remote._execute_gui_worker_tool(
         "gui_frame",
         {"window_id": "w"},
     )
     assert frame["screenshot_path"] == "/tmp/frame.png"
-    assert len(dependency_calls) == 4
+    assert dependency_calls == ["x11", "x11", "x11", "x11"]
 
     human = await remote._execute_gui_worker_tool(
         "gui_human_action",
@@ -158,14 +162,14 @@ async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
         },
     )
     assert human["human_control"] is True
-    assert len(dependency_calls) == 5
+    assert dependency_calls == ["x11", "x11", "x11", "x11", "x11"]
 
     acted = await remote._execute_gui_worker_tool(
         "gui_action",
         {"window_id": "w", "state_id": "s", "actions": [{"type": "wait"}]},
     )
     assert acted["state_consumed"] is True
-    assert len(dependency_calls) == 6
+    assert dependency_calls == ["x11", "x11", "x11", "x11", "x11", "x11"]
     assert calls[-1][0] == "act"
 
     with pytest.raises(ValueError, match="unsupported remote GUI worker tool"):
@@ -181,7 +185,7 @@ async def test_remote_gui_worker_dependency_failure_is_scoped_to_gui(monkeypatch
     monkeypatch.setattr(
         installer,
         "ensure_gui_dependencies",
-        lambda: {
+        lambda _session_type=None: {
             "available": False,
             "missing": ["uiautomation"],
             "error": "offline",
@@ -189,6 +193,29 @@ async def test_remote_gui_worker_dependency_failure_is_scoped_to_gui(monkeypatch
     )
     with pytest.raises(RuntimeError, match="uiautomation unavailable"):
         await remote._execute_gui_worker_tool("gui_list", {})
+
+
+
+@pytest.mark.asyncio
+async def test_remote_gui_worker_headless_linux_never_bootstraps_gui_dependencies(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+    import local_shell_mcp.remote as remote
+    import local_shell_mcp.remote_worker_installer as installer
+
+    monkeypatch.setattr(remote.sys, "platform", "linux")
+    monkeypatch.setattr(linux, "_desktop_environment", lambda: {})
+    monkeypatch.setattr(linux, "_session_type", lambda _env: "unknown")
+    monkeypatch.setattr(
+        installer,
+        "ensure_gui_dependencies",
+        lambda *_args, **_kwargs: pytest.fail(
+            "headless GUI dispatch must not invoke dependency installation"
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="No graphical Linux session"):
+        await remote._execute_gui_worker_tool("gui_list", {})
+
 
 
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: b98a6f03c96ab99dc4f9605caa7688dfef95651433e0d2c9377caafd62a2c98d -->
+<!-- i18n-source-sha256: 696652d73445aaa9f3fc920f090fdaad3b7dd627a2bba4f5c8530f054a937506 -->
 # أتمتة واجهة سطح المكتب
 
 `local-shell-mcp` can observe and control native desktop applications on Linux, Windows, and macOS. The public surface stays intentionally small:
@@ -50,7 +50,7 @@ Semantic actions are attempted first where possible. A button with a native invo
 
 ### Windows
 
-Run LSM in the same interactive desktop session as the applications it should control. A normal `pipx install local-shell-mcp` or Python package installation installs the Windows UI Automation dependency automatically.
+Run LSM in the same interactive desktop session as the applications it should control. The base `local-shell-mcp` install stays headless-safe and does not require the Windows UI Automation adapter; install the optional `local-shell-mcp[gui]` extra when local Windows GUI control is needed.
 
 ### macOS
 
@@ -59,7 +59,7 @@ Grant the LSM host process:
 - **Accessibility** permission for semantic control and input.
 - **Screen Recording** permission for screenshots.
 
-The Python package installs the required PyObjC frameworks automatically on macOS.
+The base package does not require PyObjC. Install the optional `local-shell-mcp[gui]` extra when local macOS GUI control is needed; machines that never use GUI tools do not need these frameworks.
 
 ### Linux
 
@@ -69,12 +69,12 @@ The desktop session must expose AT-SPI. Debian/Ubuntu systems normally provide t
 sudo apt install python3-gi gir1.2-atspi-2.0
 ```
 
-The Python package installs the pure-Python X11 and D-Bus client dependencies. On Wayland, raw pointer/keyboard fallback uses the XDG Desktop Portal RemoteDesktop API, so the desktop may show a one-time permission/session picker. KDE and GNOME portal implementations are supported. Window screenshots use the available native desktop capture path and fall back to the Screenshot portal when needed.
+The base package does not require the Python X11 or D-Bus adapters. The optional `local-shell-mcp[gui]` extra installs them for local GUI use. Remote workers detect the active Linux session before any GUI dependency bootstrap: X11 only needs the X11 adapter, Wayland only needs the D-Bus adapter, and headless workers install neither. On Wayland, raw pointer/keyboard fallback uses the XDG Desktop Portal RemoteDesktop API, so the desktop may show a one-time permission/session picker. KDE and GNOME portal implementations are supported. Window screenshots use the available native desktop capture path and fall back to the Screenshot portal when needed.
 
 LSM workers commonly start outside the graphical login environment. The Linux backend recovers `DISPLAY`, `WAYLAND_DISPLAY`, `XDG_SESSION_TYPE`, and related variables from the user systemd environment when they are not inherited directly.
 
 ## أسطح المكتب البعيدة
 
-GUI tools run on the selected machine, not on the controller. The remote worker must belong to the user/session that owns the target desktop and must have the platform-native GUI dependencies available. A headless worker can still use shell/files/browser tools, but `gui_list` will report that no usable graphical session is available.
+GUI tools run on the selected machine, not on the controller. The remote worker must belong to the user/session that owns the target desktop. GUI adapters are lazy and scoped to GUI calls: normal worker startup and shell/files/browser use do not install or import them. On Linux, a headless worker returns GUI unavailable before any GUI pip bootstrap; a graphical worker only checks or installs the adapter required by its active X11 or Wayland session.
 
 Screenshots returned by a remote `gui_state` are transferred through LSM's file-transfer path and exposed to the model as native MCP image content; they are not embedded in the worker JSON response.

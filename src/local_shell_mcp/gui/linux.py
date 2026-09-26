@@ -221,7 +221,9 @@ def _desktop_crop_box(
     width = max(1, int(bounds["width"]))
     height = max(1, int(bounds["height"]))
     if not monitors:
-        return x, y, x + width, y + height
+        raise GuiUnavailableError(
+            "Monitor geometry is unavailable; cannot crop a full-desktop capture safely"
+        )
 
     origin_x = min(int(item["x"]) for item in monitors)
     origin_y = min(int(item["y"]) for item in monitors)
@@ -457,8 +459,12 @@ class LinuxGuiBackend:
         return self._helper({"command": "list"})
 
     async def list_windows(self) -> dict[str, Any]:
-        data = await asyncio.to_thread(self._list_data)
         session_type = _session_type(self._env)
+        if session_type == "unknown":
+            raise GuiUnavailableError(
+                "No graphical Linux session was found; DISPLAY/WAYLAND_DISPLAY are unavailable"
+            )
+        data = await asyncio.to_thread(self._list_data)
         return {
             "backend": self.name,
             "platform": "linux",
@@ -735,15 +741,44 @@ class LinuxGuiBackend:
             to_x, to_y = self._screen_point(
                 window, {"x": action.get("to_x"), "y": action.get("to_y")}, None
             )
-            for px, py, event in [
-                (x, y, "b1p"),
-                (to_x, to_y, "abs"),
-                (to_x, to_y, "b1r"),
-            ]:
+            pressed = False
+            pending_error: BaseException | None = None
+            try:
                 await asyncio.to_thread(
                     self._helper,
-                    {"command": "raw", "kind": "mouse", "x": px, "y": py, "event": event},
+                    {"command": "raw", "kind": "mouse", "x": x, "y": y, "event": "b1p"},
                 )
+                pressed = True
+                await asyncio.to_thread(
+                    self._helper,
+                    {
+                        "command": "raw",
+                        "kind": "mouse",
+                        "x": to_x,
+                        "y": to_y,
+                        "event": "abs",
+                    },
+                )
+            except BaseException as exc:
+                pending_error = exc
+            finally:
+                if pressed:
+                    try:
+                        await asyncio.to_thread(
+                            self._helper,
+                            {
+                                "command": "raw",
+                                "kind": "mouse",
+                                "x": to_x,
+                                "y": to_y,
+                                "event": "b1r",
+                            },
+                        )
+                    except Exception:
+                        if pending_error is None:
+                            raise
+            if pending_error is not None:
+                raise pending_error
             return {"from": {"x": x, "y": y}, "to": {"x": to_x, "y": to_y}}
 
         raise ValueError(f"Unsupported GUI action type on X11: {kind}")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -58,13 +59,35 @@ def _safe_property(control: Any, name: str, default: Any = None) -> Any:
         return default
 
 
+def _control_runtime_id(control: Any) -> str:
+    try:
+        value = control.GetRuntimeId()
+    except Exception:  # noqa: BLE001 - third-party UIA providers can reject runtime IDs.
+        value = None
+    if isinstance(value, (list, tuple)):
+        return ",".join(str(int(part)) for part in value)
+    return str(value or "")
+
+
+def _window_fingerprint(control: Any) -> str:
+    fields = [
+        str(int(_safe_property(control, "NativeWindowHandle", 0) or 0)),
+        str(int(_safe_property(control, "ProcessId", 0) or 0)),
+        str(_safe_property(control, "ClassName", "") or ""),
+        str(_safe_property(control, "AutomationId", "") or ""),
+        str(_safe_property(control, "Name", "") or ""),
+        _control_runtime_id(control),
+    ]
+    return hashlib.sha256("\0".join(fields).encode("utf-8")).hexdigest()[:16]
+
+
 def _window_record(control: Any) -> dict[str, Any] | None:
     handle = int(_safe_property(control, "NativeWindowHandle", 0) or 0)
     bounds = _rect_dict(_safe_property(control, "BoundingRectangle"))
     if not handle or bounds["width"] <= 0 or bounds["height"] <= 0:
         return None
     return {
-        "id": f"hwnd:{handle}",
+        "id": f"hwnd:{handle}:{_window_fingerprint(control)}",
         "title": str(_safe_property(control, "Name", "") or ""),
         "app": str(_safe_property(control, "ClassName", "") or ""),
         "pid": int(_safe_property(control, "ProcessId", 0) or 0),
@@ -128,13 +151,18 @@ class WindowsGuiBackend:
     name = "windows-uia"
 
     def _find_window(self, window_id: str) -> Any:
-        if not window_id.startswith("hwnd:"):
+        parts = window_id.split(":")
+        if len(parts) != 3 or parts[0] != "hwnd" or not parts[2]:
             raise ValueError(f"Invalid Windows window id: {window_id}")
-        wanted = int(window_id.split(":", 1)[1])
+        wanted = int(parts[1])
+        expected_fingerprint = parts[2]
         root = _automation().GetRootControl()
         for control in root.GetChildren():
-            if int(_safe_property(control, "NativeWindowHandle", 0) or 0) == wanted:
-                return control
+            if int(_safe_property(control, "NativeWindowHandle", 0) or 0) != wanted:
+                continue
+            if _window_fingerprint(control) != expected_fingerprint:
+                raise LookupError(f"Window identity changed since observation: {window_id}")
+            return control
         raise LookupError(f"Window is no longer available: {window_id}")
 
     def _list_windows_sync(self) -> dict[str, Any]:

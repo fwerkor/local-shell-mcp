@@ -191,6 +191,21 @@ class PortalDesktop:
             timeout_s=timeout_s,
         )
 
+    async def _close_session(self, session: str) -> None:
+        if self._bus is None:
+            return
+        intro = await self._bus.introspect(
+            "org.freedesktop.portal.Desktop",
+            session,
+        )
+        obj = self._bus.get_proxy_object(
+            "org.freedesktop.portal.Desktop",
+            session,
+            intro,
+        )
+        iface = obj.get_interface("org.freedesktop.portal.Session")
+        await iface.call_close()
+
     async def ensure_session(self) -> None:
         async with self._lock:
             if self._session is not None:
@@ -245,8 +260,11 @@ class PortalDesktop:
                     ),
                     handle_token=start_token,
                 )
-            except Exception:
+            except BaseException:
+                with contextlib.suppress(BaseException):
+                    await asyncio.shield(self._close_session(session))
                 self._session = None
+                self._streams = []
                 raise
             self._session = session
             self._streams = []
@@ -344,8 +362,16 @@ class PortalDesktop:
     async def type_text(self, text: str) -> None:
         for char in text:
             symbol = _keysym("ENTER" if char == "\n" else char)
-            await self._key_event(symbol, True)
-            await self._key_event(symbol, False)
+            pressed = False
+            try:
+                await self._key_event(symbol, True)
+                pressed = True
+                await self._key_event(symbol, False)
+                pressed = False
+            finally:
+                if pressed:
+                    with contextlib.suppress(Exception):
+                        await self._key_event(symbol, False)
 
     async def key_chord(self, keys: Any) -> None:
         parts = _key_parts(keys)
@@ -359,14 +385,21 @@ class PortalDesktop:
                 ordinary.append(_keysym(part))
         if len(ordinary) != 1:
             raise ValueError("key action requires exactly one non-modifier key")
-        for symbol in modifiers:
-            await self._key_event(symbol, True)
+
+        pressed: list[int] = []
         try:
-            await self._key_event(ordinary[0], True)
-            await self._key_event(ordinary[0], False)
+            for symbol in modifiers:
+                await self._key_event(symbol, True)
+                pressed.append(symbol)
+            ordinary_symbol = ordinary[0]
+            await self._key_event(ordinary_symbol, True)
+            pressed.append(ordinary_symbol)
+            await self._key_event(ordinary_symbol, False)
+            pressed.pop()
         finally:
-            for symbol in reversed(modifiers):
-                await self._key_event(symbol, False)
+            for symbol in reversed(pressed):
+                with contextlib.suppress(Exception):
+                    await self._key_event(symbol, False)
 
 
 async def portal_screenshot(destination: Path, env: dict[str, str]) -> None:

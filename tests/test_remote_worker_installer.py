@@ -296,12 +296,18 @@ def test_gui_dependency_bootstrap_reuses_available_modules(tmp_path, monkeypatch
         lambda *args, **kwargs: pytest.fail("pip should not run when GUI deps are available"),
     )
 
-    result = installer.ensure_gui_dependencies()
+    result = installer.ensure_gui_dependencies("x11")
 
     assert result["available"] is True
     assert result["installed"] is False
     assert result["missing"] == []
-    assert imported == ["PIL", "dbus_next", "Xlib"]
+    assert imported == ["Xlib"]
+
+    imported.clear()
+    result = installer.ensure_gui_dependencies("wayland")
+    assert result["available"] is True
+    assert result["missing"] == []
+    assert imported == ["dbus_next"]
 
 
 def test_gui_dependency_bootstrap_installs_missing_modules(tmp_path, monkeypatch):
@@ -359,7 +365,7 @@ def test_gui_dependency_bootstrap_failure_is_nonfatal_status(tmp_path, monkeypat
 
     assert result["available"] is False
     assert result["installed"] is False
-    assert result["missing"] == ["PIL", "ApplicationServices", "Quartz"]
+    assert result["missing"] == ["ApplicationServices", "Quartz"]
     assert "timed out" in result["error"]
 
 
@@ -408,6 +414,26 @@ def test_gui_dependency_bootstrap_serializes_inflight_install(tmp_path, monkeypa
     assert first_result["available"] is True
     assert second_result["available"] is True
     assert len(run_calls) == 1
+
+
+def test_gui_dependency_bootstrap_unknown_linux_session_is_noop(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(installer.sys, "platform", "linux")
+    monkeypatch.setattr(installer.sys, "path", list(installer.sys.path))
+    monkeypatch.setenv("PYTHONPATH", "")
+    monkeypatch.setattr(
+        installer.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail(
+            "unknown/headless Linux session must not install GUI packages"
+        ),
+    )
+
+    result = installer.ensure_gui_dependencies("unknown")
+
+    assert result["available"] is True
+    assert result["installed"] is False
+    assert result["missing"] == []
 
 
 def test_gui_dependency_bootstrap_unknown_platform_is_noop(tmp_path, monkeypatch):

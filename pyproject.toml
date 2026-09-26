@@ -36,11 +36,6 @@ dependencies = [
   "pillow>=10.3.0",
   "playwright>=1.44.0",
   "pywinpty>=2.0.13; platform_system == \"Windows\"",
-  "uiautomation>=2.0.29,<3; platform_system == \"Windows\"",
-  "pyobjc-framework-ApplicationServices>=11.1,<13; platform_system == \"Darwin\"",
-  "pyobjc-framework-Quartz>=11.1,<13; platform_system == \"Darwin\"",
-  "dbus-next>=0.2.3,<1; platform_system == \"Linux\"",
-  "python-xlib>=0.33,<1; platform_system == \"Linux\"",
 ]
 
 [project.optional-dependencies]
@@ -49,6 +44,13 @@ dev = [
   "pytest>=8.2.0",
   "pytest-asyncio>=0.23.0",
   "ruff>=0.5.0",
+]
+gui = [
+  "uiautomation>=2.0.29,<3; platform_system == \"Windows\"",
+  "pyobjc-framework-ApplicationServices>=11.1,<13; platform_system == \"Darwin\"",
+  "pyobjc-framework-Quartz>=11.1,<13; platform_system == \"Darwin\"",
+  "dbus-next>=0.2.3,<1; platform_system == \"Linux\"",
+  "python-xlib>=0.33,<1; platform_system == \"Linux\"",
 ]
 redis = [
   "redis>=5.0.0,<7",
