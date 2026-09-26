@@ -257,32 +257,52 @@ class GuiManager:
             screenshot_path = temp_dir() / f"gui-{uuid.uuid4().hex}.png"
             screenshot_path.parent.mkdir(parents=True, exist_ok=True)
 
-        try:
-            snapshot = await self._backend.snapshot(
+        capture = asyncio.create_task(
+            self._backend.snapshot(
                 str(window_id),
                 screenshot_path=screenshot_path,
                 include_elements=include_elements,
                 max_elements=max_elements,
                 max_depth=max_depth,
             )
-        except Exception:
+        )
+        try:
+            try:
+                snapshot = await asyncio.shield(capture)
+            except BaseException:
+                if screenshot_path is not None and not capture.done():
+                    capture.add_done_callback(
+                        lambda _task: screenshot_path.unlink(missing_ok=True)
+                    )
+                with contextlib.suppress(BaseException):
+                    await asyncio.shield(capture)
+                raise
+
+            if screenshot_path is not None:
+                if snapshot.screenshot_path is None:
+                    screenshot_path.unlink(missing_ok=True)
+                elif not screenshot_path.is_file():
+                    raise GuiUnavailableError(
+                        "GUI backend did not produce the requested screenshot"
+                    )
+                else:
+                    normalize = asyncio.create_task(
+                        asyncio.to_thread(
+                            _normalize_screenshot_coordinates,
+                            screenshot_path,
+                            snapshot.window,
+                        )
+                    )
+                    try:
+                        await asyncio.shield(normalize)
+                    except BaseException:
+                        with contextlib.suppress(BaseException):
+                            await asyncio.shield(normalize)
+                        raise
+        except BaseException:
             if screenshot_path is not None:
                 screenshot_path.unlink(missing_ok=True)
             raise
-
-        if screenshot_path is not None:
-            if snapshot.screenshot_path is None:
-                screenshot_path.unlink(missing_ok=True)
-            elif not screenshot_path.is_file():
-                raise GuiUnavailableError("GUI backend did not produce the requested screenshot")
-            else:
-                try:
-                    await asyncio.to_thread(
-                        _normalize_screenshot_coordinates, screenshot_path, snapshot.window
-                    )
-                except Exception:
-                    screenshot_path.unlink(missing_ok=True)
-                    raise
 
         state_id = uuid.uuid4().hex
         now = time.monotonic()

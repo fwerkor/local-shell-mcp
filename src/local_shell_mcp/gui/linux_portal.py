@@ -354,11 +354,17 @@ class PortalDesktop:
 
     async def drag(self, x: int, y: int, to_x: int, to_y: int) -> None:
         await self.move(x, y)
-        await self.button(1, True)
+        pressed = False
         try:
+            await self.button(1, True)
+            pressed = True
             await self.move(to_x, to_y)
-        finally:
             await self.button(1, False)
+            pressed = False
+        finally:
+            if pressed:
+                with contextlib.suppress(BaseException):
+                    await asyncio.shield(self.button(1, False))
 
     async def scroll(self, x: int, y: int, delta_x: float, delta_y: float) -> None:
         await self.move(x, y)

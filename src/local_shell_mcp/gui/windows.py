@@ -75,7 +75,6 @@ def _window_fingerprint(control: Any) -> str:
         str(int(_safe_property(control, "ProcessId", 0) or 0)),
         str(_safe_property(control, "ClassName", "") or ""),
         str(_safe_property(control, "AutomationId", "") or ""),
-        str(_safe_property(control, "Name", "") or ""),
         _control_runtime_id(control),
     ]
     return hashlib.sha256("\0".join(fields).encode("utf-8")).hexdigest()[:16]

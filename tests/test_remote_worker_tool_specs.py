@@ -196,6 +196,27 @@ async def test_remote_gui_worker_dependency_failure_is_scoped_to_gui(monkeypatch
 
 
 
+def test_linux_gui_preflight_caches_positive_session(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+    import local_shell_mcp.remote as remote
+
+    calls = []
+
+    def discover():
+        calls.append("discover")
+        return {"DISPLAY": ":0"}
+
+    monkeypatch.setattr(linux, "_desktop_environment", discover)
+    monkeypatch.setattr(linux, "_session_type", lambda _env: "x11")
+    monkeypatch.setattr(remote, "_GUI_LINUX_PREFLIGHT_SESSION_TYPE", None)
+    monkeypatch.setattr(remote, "_GUI_LINUX_PREFLIGHT_ENV_SIGNATURE", None)
+    monkeypatch.setattr(remote, "_GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN", None)
+
+    assert remote._linux_gui_preflight_session_type() == "x11"
+    assert remote._linux_gui_preflight_session_type() == "x11"
+    assert calls == ["discover"]
+
+
 @pytest.mark.asyncio
 async def test_remote_gui_worker_headless_linux_never_bootstraps_gui_dependencies(monkeypatch):
     import local_shell_mcp.gui.linux as linux

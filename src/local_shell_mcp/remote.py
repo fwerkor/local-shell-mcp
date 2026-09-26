@@ -2209,16 +2209,49 @@ async def _execute_browser_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     raise ValueError(f"unsupported remote worker tool: {tool}")
 
 
+_GUI_LINUX_PREFLIGHT_LOCK = threading.Lock()
+_GUI_LINUX_PREFLIGHT_SESSION_TYPE: str | None = None
+_GUI_LINUX_PREFLIGHT_ENV_SIGNATURE: tuple[str, str, str, str] | None = None
+_GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN: tuple[int, int] | None = None
+
+
+def _linux_gui_preflight_session_type() -> str:
+    from .gui.linux import _desktop_environment, _session_type
+
+    global _GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN
+    global _GUI_LINUX_PREFLIGHT_ENV_SIGNATURE
+    global _GUI_LINUX_PREFLIGHT_SESSION_TYPE
+
+    discovery_token = (id(_desktop_environment), id(_session_type))
+    signature = (
+        os.environ.get("DISPLAY", ""),
+        os.environ.get("WAYLAND_DISPLAY", ""),
+        os.environ.get("XDG_SESSION_TYPE", ""),
+        os.environ.get("DBUS_SESSION_BUS_ADDRESS", ""),
+    )
+    with _GUI_LINUX_PREFLIGHT_LOCK:
+        if (
+            _GUI_LINUX_PREFLIGHT_SESSION_TYPE is not None
+            and signature == _GUI_LINUX_PREFLIGHT_ENV_SIGNATURE
+            and discovery_token == _GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN
+        ):
+            return _GUI_LINUX_PREFLIGHT_SESSION_TYPE
+        desktop_env = _desktop_environment()
+        session_type = _session_type(desktop_env)
+        if session_type != "unknown":
+            _GUI_LINUX_PREFLIGHT_ENV_SIGNATURE = signature
+            _GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN = discovery_token
+            _GUI_LINUX_PREFLIGHT_SESSION_TYPE = session_type
+        return session_type
+
+
 async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     from .gui import GuiUnavailableError, get_gui_manager
     from .remote_worker_installer import ensure_gui_dependencies
 
     session_type: str | None = None
     if sys.platform == "linux":
-        from .gui.linux import _desktop_environment, _session_type
-
-        desktop_env = await asyncio.to_thread(_desktop_environment)
-        session_type = _session_type(desktop_env)
+        session_type = await asyncio.to_thread(_linux_gui_preflight_session_type)
         if session_type == "unknown":
             raise GuiUnavailableError(
                 "No graphical Linux session was found; GUI dependencies were not installed"

@@ -116,6 +116,7 @@ export class DesktopController extends BaseController {
   private frameUrl = ""
   private frameBounds: GuiBounds | null = null
   private frameEpoch = 0
+  private actionTargetEpoch = 0
   private actionQueue: Promise<void> = Promise.resolve()
   private pendingActions = 0
   private pointerStart: PointerStart | null = null
@@ -128,6 +129,10 @@ export class DesktopController extends BaseController {
 
   constructor(context: NativePageContext) {
     super(context)
+  }
+
+  private invalidateActionTarget(): void {
+    this.actionTargetEpoch += 1
   }
 
   mount(root: HTMLElement): void {
@@ -202,6 +207,7 @@ export class DesktopController extends BaseController {
   }
 
   override destroy(): void {
+    this.invalidateActionTarget()
     this.frameEpoch += 1
     this.frameAbort?.abort()
     this.frameAbort = null
@@ -226,6 +232,7 @@ export class DesktopController extends BaseController {
         : machines[0]?.name || "local"
       this.selectedWindowId = ""
       this.windows = []
+      this.invalidateActionTarget()
       this.clearFrame()
     }
 
@@ -299,6 +306,7 @@ export class DesktopController extends BaseController {
       this.backend = payload.backend || ""
       if (!this.windows.some((window) => window.id === previous)) {
         this.selectedWindowId = this.windows[0]?.id || ""
+        this.invalidateActionTarget()
         this.clearFrame()
       }
       this.renderSelectors()
@@ -307,6 +315,7 @@ export class DesktopController extends BaseController {
       if (requestedMachine !== this.machine) return
       this.windows = []
       this.selectedWindowId = ""
+      this.invalidateActionTarget()
       this.clearFrame()
       this.renderSelectors()
       this.renderStatus(error instanceof Error ? error.message : String(error), true)
@@ -449,6 +458,7 @@ export class DesktopController extends BaseController {
   private queueAction(action: GuiAction, observedBounds?: GuiBounds): void {
     const windowId = this.selectedWindowId
     const machine = this.machine
+    const targetEpoch = this.actionTargetEpoch
     const bounds = observedBounds ? { ...observedBounds } : this.frameBounds ? { ...this.frameBounds } : null
     if (!windowId || !bounds) return
 
@@ -456,6 +466,12 @@ export class DesktopController extends BaseController {
     this.renderInputPulse()
     const run = async () => {
       try {
+        if (
+          this.destroyed
+          || targetEpoch !== this.actionTargetEpoch
+          || machine !== this.machine
+          || windowId !== this.selectedWindowId
+        ) return
         await this.context.api.send("/gui/action", "POST", {
           machine,
           window_id: windowId,
@@ -508,6 +524,7 @@ export class DesktopController extends BaseController {
       this.windows = []
       this.selectedWindowId = ""
       this.backend = ""
+      this.invalidateActionTarget()
       this.clearFrame()
       this.renderSelectors()
       void this.refreshWindows(true)
@@ -516,6 +533,7 @@ export class DesktopController extends BaseController {
     if (target.dataset.role === "desktop-window") {
       if (target.value === this.selectedWindowId) return
       this.selectedWindowId = target.value
+      this.invalidateActionTarget()
       this.clearFrame()
       this.renderSelectors()
       void this.refreshFrame()

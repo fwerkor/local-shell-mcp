@@ -70,6 +70,55 @@ describe("Native WebUI desktop window refresh", () => {
   })
 })
 
+describe("Native WebUI desktop queued input", () => {
+  test("drops queued actions after the target changes", async () => {
+    const sends: unknown[] = []
+    let releaseFirst!: () => void
+    const first = new Promise<void>((resolve) => { releaseFirst = resolve })
+
+    const context: NativePageContext = {
+      api: {
+        get: async () => undefined as never,
+        send: async (_url: string, _method: string, body?: unknown) => {
+          sends.push(body)
+          if (sends.length === 1) await first
+          return {} as never
+        },
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller: any = new DesktopController(context)
+    controller.root = { querySelector: () => null }
+    controller.machine = "old"
+    controller.selectedWindowId = "window:1"
+    controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
+    controller.refreshFrame = async () => undefined
+
+    controller.queueAction({ type: "click", x: 1, y: 1 })
+    await Promise.resolve()
+    controller.queueAction({ type: "click", x: 2, y: 2 })
+
+    controller.machine = "new"
+    controller.selectedWindowId = "window:2"
+    controller.invalidateActionTarget()
+
+    releaseFirst()
+    await controller.actionQueue
+
+    expect(sends).toHaveLength(1)
+    expect(sends[0]).toEqual({
+      machine: "old",
+      window_id: "window:1",
+      bounds: { x: 0, y: 0, width: 100, height: 100 },
+      actions: [{ type: "click", x: 1, y: 1 }],
+    })
+  })
+})
+
 describe("Native WebUI desktop shortcut encoding", () => {
   test("preserves Ctrl+Plus and Ctrl+Space as unambiguous key arrays", () => {
     const context: NativePageContext = {

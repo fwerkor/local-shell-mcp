@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
@@ -490,6 +491,54 @@ def test_gui_tool_result_rendering_and_errors():
     assert error.structuredContent["error_type"] == "RuntimeError"
     metadata = tools.GuiStateResult(ok=False, message="bad")
     assert tools._format_gui_state_text(metadata) == "Unable to observe GUI state: bad"
+
+
+def test_gui_state_result_bounds_accessibility_metadata():
+    import local_shell_mcp.tools as tools
+
+    elements = [
+        {
+            "id": f"e{index}",
+            "role": "R" * 5000,
+            "name": "N" * 5000,
+            "automation_id": "A" * 5000,
+            "value": "V" * 10000,
+            "bounds": {"x": 1, "y": 2, "width": 3, "height": 4, "extra": "ignored"},
+            "enabled": True,
+            "actions": ["X" * 1000] * 100,
+            "depth": 1,
+            "unknown": "Z" * 100000,
+        }
+        for index in range(100)
+    ]
+    result = tools._gui_state_call_result(
+        {
+            "backend": "fake",
+            "state_id": "s",
+            "state_ttl_s": 30,
+            "window": {"id": "w", "bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
+            "elements": elements,
+            "capabilities": {},
+        },
+        None,
+        None,
+    )
+
+    bounded = result.structuredContent["elements"]
+    assert bounded
+    first = bounded[0]
+    assert len(first["role"].encode("utf-8")) <= tools.GUI_ELEMENT_TEXT_FIELD_MAX_BYTES
+    assert len(first["name"].encode("utf-8")) <= tools.GUI_ELEMENT_TEXT_FIELD_MAX_BYTES
+    assert len(first["automation_id"].encode("utf-8")) <= tools.GUI_ELEMENT_TEXT_FIELD_MAX_BYTES
+    assert len(first["value"].encode("utf-8")) <= tools.GUI_ELEMENT_VALUE_FIELD_MAX_BYTES
+    assert len(first["actions"]) == tools.GUI_ELEMENT_ACTION_MAX_ITEMS
+    assert all(
+        len(action.encode("utf-8")) <= tools.GUI_ELEMENT_ACTION_MAX_BYTES
+        for action in first["actions"]
+    )
+    assert "unknown" not in first
+    encoded = json.dumps(bounded, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    assert len(encoded) <= tools.GUI_ELEMENTS_TOTAL_BYTES
 
 
 @pytest.mark.asyncio
@@ -1209,6 +1258,39 @@ async def test_macos_native_traversal_is_offloaded(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_gui_state_cancellation_cleans_late_capture(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.base as base
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(base, "temp_dir", lambda: tmp_path)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class SlowBackend(FakeBackend):
+        async def snapshot(self, window_id, **kwargs):
+            path = kwargs["screenshot_path"]
+            started.set()
+            await release.wait()
+            Image.new("RGB", (300, 200)).save(path)
+            return GuiSnapshot(
+                window={"id": window_id, "bounds": dict(self.bounds)},
+                elements=[],
+                screenshot_path=str(path),
+            )
+
+    manager = GuiManager(SlowBackend())
+    task = asyncio.create_task(manager.snapshot("window:1", screenshot=True))
+    await started.wait()
+    task.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert list(tmp_path.glob("gui-*.png")) == []
+    assert manager._states == {}
+
+
+@pytest.mark.asyncio
 async def test_gui_frame_cancellation_cleans_late_capture(tmp_path, monkeypatch):
     import local_shell_mcp.gui.base as base
 
@@ -1845,6 +1927,32 @@ async def test_portal_click_releases_pressed_button_after_release_failure(monkey
 
 
 @pytest.mark.asyncio
+async def test_portal_drag_retries_release_after_release_failure(monkeypatch):
+    portal = PortalDesktop({})
+    button_calls = []
+    moves = []
+    release_failures = {"remaining": 1}
+
+    async def move(x, y):
+        moves.append((x, y))
+
+    async def button(_button, pressed):
+        button_calls.append(pressed)
+        if not pressed and release_failures["remaining"]:
+            release_failures["remaining"] -= 1
+            raise RuntimeError("release failed")
+
+    monkeypatch.setattr(portal, "move", move)
+    monkeypatch.setattr(portal, "button", button)
+
+    with pytest.raises(RuntimeError, match="release failed"):
+        await portal.drag(1, 2, 10, 20)
+
+    assert moves == [(1, 2), (10, 20)]
+    assert button_calls == [True, False, False]
+
+
+@pytest.mark.asyncio
 async def test_portal_key_chord_releases_every_successfully_pressed_key(monkeypatch):
     portal = PortalDesktop({})
     events = []
@@ -2303,6 +2411,49 @@ def test_macos_utf16_text_units_and_chunks():
     assert _utf16_units("😀") == 2
     assert _utf16_units("A😀") == 3
     assert _unicode_chunks("A😀B", max_units=2) == ["A", "😀", "B"]
+
+
+def test_windows_window_id_ignores_mutable_title(monkeypatch):
+    import local_shell_mcp.gui.windows as windows
+
+    class Rect:
+        left = 0
+        top = 0
+        right = 100
+        bottom = 100
+
+    class Control:
+        NativeWindowHandle = 7
+        ProcessId = 101
+        ClassName = "Editor"
+        AutomationId = "main"
+        BoundingRectangle = Rect()
+
+        def __init__(self, name):
+            self.Name = name
+
+        def GetRuntimeId(self):
+            return [1, 2, 3]
+
+    first = Control("Document A")
+    second = Control("Document A *")
+    first_record = windows._window_record(first)
+    second_record = windows._window_record(second)
+    assert first_record is not None
+    assert second_record is not None
+    assert first_record["id"] == second_record["id"]
+
+    class Root:
+        def GetChildren(self):
+            return [second]
+
+    class Auto:
+        def GetRootControl(self):
+            return Root()
+
+    monkeypatch.setattr(windows, "_automation", lambda: Auto())
+    backend = WindowsGuiBackend()
+    assert backend._find_window(first_record["id"]) is second
 
 
 def test_windows_window_id_rejects_reused_hwnd(monkeypatch):
