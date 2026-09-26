@@ -27,6 +27,7 @@ nav:
       - File links: guides/file-links.md
       - Git access: guides/git-access.md
       - Browser automation: guides/browser-automation.md
+      - Desktop GUI automation: guides/gui-automation.md
       - Audit log: guides/audit-log.md
       - Skills: guides/skills.md
   - Reference:

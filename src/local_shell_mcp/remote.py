@@ -51,6 +51,7 @@ from .fs_ops import (
     write_content,
     write_text,
 )
+from .gui import get_gui_manager
 from .jobs import JOB_LIST_DEFAULT_LIMIT, list_jobs, retry_job, start_job, stop_job, tail_job
 from .models import ok_result as _ok
 from .patch_ops import git_apply_command, git_apply_prefix, normalize_patch_text
@@ -120,6 +121,7 @@ REMOTE_NON_CANCELLABLE_WORKER_TOOLS = frozenset(
         "write_file",
         "edit_file",
         "delete_file_or_dir",
+        "gui_action",
         "human_file_action",
         "transfer_begin_write",
         "transfer_write_chunk",
@@ -1398,6 +1400,13 @@ WORKER_BROWSER_TOOLS = frozenset(
         "browser_run_script",
     }
 )
+WORKER_GUI_TOOLS = frozenset(
+    {
+        "gui_list",
+        "gui_state",
+        "gui_action",
+    }
+)
 REMOTE_WORKER_TOOL_NAMES = frozenset().union(
     WORKER_ENVIRONMENT_TOOLS,
     WORKER_COMMAND_TOOLS,
@@ -1406,6 +1415,7 @@ REMOTE_WORKER_TOOL_NAMES = frozenset().union(
     WORKER_FILE_TOOLS,
     WORKER_TRANSFER_TOOLS,
     WORKER_BROWSER_TOOLS,
+    WORKER_GUI_TOOLS,
 )
 
 
@@ -2196,6 +2206,38 @@ async def _execute_browser_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     raise ValueError(f"unsupported remote worker tool: {tool}")
 
 
+async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
+    if sys.platform != "linux" or tool == "gui_action":
+        from .remote_worker_installer import ensure_gui_dependencies
+
+        dependency_status = await asyncio.to_thread(ensure_gui_dependencies)
+        if not dependency_status.get("available"):
+            missing = ", ".join(dependency_status.get("missing") or []) or "GUI dependencies"
+            raise RuntimeError(
+                f"{missing} unavailable for native GUI automation: "
+                f"{dependency_status.get('error') or 'installation failed'}"
+            )
+
+    manager = get_gui_manager()
+    if tool == "gui_list":
+        return await manager.list_windows()
+    if tool == "gui_state":
+        return await manager.snapshot(
+            args["window_id"],
+            screenshot=args.get("screenshot", True),
+            include_elements=args.get("include_elements", True),
+            max_elements=args.get("max_elements", 300),
+            max_depth=args.get("max_depth", 12),
+        )
+    if tool == "gui_action":
+        return await manager.act(
+            args["window_id"],
+            args["state_id"],
+            args["actions"],
+        )
+    raise ValueError(f"unsupported remote GUI worker tool: {tool}")
+
+
 async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
     if tool in WORKER_ENVIRONMENT_TOOLS:
         return await _execute_environment_worker_tool(tool, args)
@@ -2211,6 +2253,8 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
         return await _execute_transfer_worker_tool(tool, args)
     if tool in WORKER_BROWSER_TOOLS:
         return await _execute_browser_worker_tool(tool, args)
+    if tool in WORKER_GUI_TOOLS:
+        return await _execute_gui_worker_tool(tool, args)
     raise ValueError(f"unsupported remote worker tool: {tool}")
 
 
@@ -2225,6 +2269,7 @@ def worker_capabilities() -> list[str]:
         "python",
         "playwright",
         "browser_sessions",
+        "gui",
     ]
 
 

@@ -208,7 +208,16 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
     ):
         monkeypatch.setattr(tools, name, sync_value)
 
+    class FakeGuiManager:
+        async def list_windows(self):
+            return {"windows": []}
+
+        async def act(self, window_id, state_id, actions):
+            return {"window_id": window_id, "state_id": state_id, "actions": actions}
+
     monkeypatch.setattr(tools, "_view_image_result", image_value)
+    monkeypatch.setattr(tools, "_gui_state_result", image_value)
+    monkeypatch.setattr(tools, "get_gui_manager", lambda: FakeGuiManager())
     monkeypatch.setattr(downloads, "create_share_link", sync_value)
     monkeypatch.setattr(downloads, "list_share_links", sync_value)
     monkeypatch.setattr(downloads, "revoke_share_link", sync_value)
@@ -240,6 +249,13 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
         "file_grep": {"query": "x"},
         "file_read": {"path": "x"},
         "image_view": {"path": "found.png"},
+        "gui_list": {},
+        "gui_state": {"window_id": "w"},
+        "gui_action": {
+            "window_id": "w",
+            "state_id": "s",
+            "actions": [tools.GuiAction(type="wait")],
+        },
         "link_create": {"path": "found.txt"},
         "link_list": {},
         "link_revoke": {"token": "t"},
@@ -309,6 +325,13 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
         "file_grep": {"query": "x"},
         "file_read": {"path": "x"},
         "image_view": {"path": "x"},
+        "gui_list": {},
+        "gui_state": {"window_id": "w"},
+        "gui_action": {
+            "window_id": "w",
+            "state_id": "s",
+            "actions": [tools.GuiAction(type="wait")],
+        },
         "file_write": {"path": "x", "content": "y"},
         "file_edit": {"path": "x", "edits": []},
         "file_delete": {"path": "x"},
@@ -321,8 +344,8 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
     for name, kwargs in remote_cases.items():
         result = await _raw_tool(mcp, name)(**kwargs, machine="node")
         assert result["ok"] is True, name
-    assert len(fake_remote.calls) == len(remote_cases) - 1
-    assert all(tool != "view_image" for _, tool, _, _ in fake_remote.calls)
+    assert len(fake_remote.calls) == len(remote_cases) - 2
+    assert all(tool not in {"view_image", "gui_state"} for _, tool, _, _ in fake_remote.calls)
     job_list_call = next(call for call in fake_remote.calls if call[1] == "job_list")
     assert job_list_call[2] == {"include_finished": False, "limit": 7}
 

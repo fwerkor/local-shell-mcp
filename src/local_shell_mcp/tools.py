@@ -46,6 +46,7 @@ from .fs_ops import (
     write_content,
     write_text,
 )
+from .gui import get_gui_manager
 from .image_ops import ImageFile, assert_view_image_size, read_image
 from .jobs import (
     JOB_LIST_DEFAULT_LIMIT,
@@ -138,6 +139,57 @@ class ViewImageResult(BaseModel):
     ok: bool
     path: str
     machine: str | None = None
+    mime_type: str | None = None
+    bytes: int | None = None
+    message: str = ""
+    error_type: str | None = None
+
+
+class GuiAction(BaseModel):
+    """One action against a fresh gui_state observation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal[
+        "click",
+        "double_click",
+        "right_click",
+        "move",
+        "scroll",
+        "drag",
+        "type",
+        "key",
+        "set_value",
+        "focus",
+        "wait",
+    ]
+    element_id: str | None = None
+    x: int | None = None
+    y: int | None = None
+    to_x: int | None = None
+    to_y: int | None = None
+    delta_x: float | None = None
+    delta_y: float | None = None
+    amount: int | None = None
+    text: str | None = None
+    keys: str | list[str] | None = None
+    seconds: float | None = None
+
+
+class GuiStateResult(BaseModel):
+    """Structured GUI observation accompanying optional native image content."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ok: bool
+    machine: str | None = None
+    backend: str | None = None
+    state_id: str | None = None
+    state_ttl_s: float | None = None
+    window: dict[str, Any] | None = None
+    elements: list[dict[str, Any]] = Field(default_factory=list)
+    capabilities: dict[str, Any] = Field(default_factory=dict)
+    screenshot: bool = False
     mime_type: str | None = None
     bytes: int | None = None
     message: str = ""
@@ -325,6 +377,7 @@ NON_CANCELLABLE_TOOL_NAMES = frozenset(
         "link_create",
         "link_revoke",
         "image_view",
+        "gui_action",
         "file_write",
         "file_edit",
         "file_delete",
@@ -1191,6 +1244,9 @@ MACHINE_CAPABLE_TOOL_NAMES = {
     "file_grep",
     "file_read",
     "image_view",
+    "gui_list",
+    "gui_state",
+    "gui_action",
     "file_write",
     "file_edit",
     "file_delete",
@@ -1425,6 +1481,15 @@ async def _remote_transfer_data(
 ) -> Any:
     result = await remote_manager().call(
         machine, tool, args, timeout_s, lane=REMOTE_WORKER_TRANSFER_LANE
+    )
+    return _unwrap_remote_transfer_result(result, machine=machine, tool=tool)
+
+
+async def _remote_worker_data(
+    machine: str, tool: str, args: dict, timeout_s: int | None = None
+) -> Any:
+    result = await remote_manager().call(
+        machine, tool, args, timeout_s, lane=REMOTE_WORKER_INTERACTIVE_LANE
     )
     return _unwrap_remote_transfer_result(result, machine=machine, tool=tool)
 
@@ -2513,6 +2578,162 @@ async def _view_image_result(path: str, machine: str | None = None) -> CallToolR
         return _view_image_error_result(path, machine, exc)
 
 
+def _format_gui_state_text(metadata: GuiStateResult) -> str:
+    if not metadata.ok:
+        return f"Unable to observe GUI state: {metadata.message}"
+    window = metadata.window or {}
+    bounds = window.get("bounds") or {}
+    lines = [
+        (
+            f"GUI state {metadata.state_id} on {metadata.backend}: "
+            f"{window.get('app', '')} — {window.get('title', '')}"
+        ),
+        (
+            "window bounds: "
+            f"x={bounds.get('x')} y={bounds.get('y')} "
+            f"width={bounds.get('width')} height={bounds.get('height')}"
+        ),
+        "Coordinates for gui_action are window-relative. Prefer element_id when available.",
+    ]
+    if metadata.elements:
+        lines.append("Accessibility elements:")
+        for element in metadata.elements:
+            eb = element.get("bounds") or {}
+            name = str(element.get("name") or "").replace("\n", " ")
+            if len(name) > 160:
+                name = name[:157] + "..."
+            lines.append(
+                f"[{element.get('id')}] {element.get('role', '')} {name!r} "
+                f"@({eb.get('x')},{eb.get('y')},{eb.get('width')},{eb.get('height')})"
+            )
+    return "\n".join(lines)
+
+
+def _gui_state_call_result(
+    data: dict[str, Any],
+    machine: str | None,
+    image: ImageFile | None,
+) -> CallToolResult:
+    metadata = GuiStateResult(
+        ok=True,
+        machine=machine,
+        backend=str(data.get("backend") or "") or None,
+        state_id=str(data.get("state_id") or "") or None,
+        state_ttl_s=float(data.get("state_ttl_s") or 0) or None,
+        window=data.get("window") if isinstance(data.get("window"), dict) else None,
+        elements=data.get("elements") if isinstance(data.get("elements"), list) else [],
+        capabilities=(
+            data.get("capabilities") if isinstance(data.get("capabilities"), dict) else {}
+        ),
+        screenshot=image is not None,
+        mime_type=image.mime_type if image is not None else None,
+        bytes=image.size if image is not None else None,
+    )
+    content: list[ImageContent | TextContent] = [
+        TextContent(type="text", text=_format_gui_state_text(metadata))
+    ]
+    if image is not None:
+        content.insert(
+            0,
+            ImageContent(
+                type="image",
+                data=base64.b64encode(image.data).decode("ascii"),
+                mimeType=image.mime_type,
+            ),
+        )
+    return CallToolResult(
+        content=content,
+        structuredContent=metadata.model_dump(mode="json"),
+    )
+
+
+def _gui_state_error_result(machine: str | None, exc: Exception) -> CallToolResult:
+    audit("tool_error", error=repr(exc))
+    message = f"{type(exc).__name__}: {exc}"
+    metadata = GuiStateResult(
+        ok=False,
+        machine=machine,
+        message=message,
+        error_type=type(exc).__name__,
+    )
+    return CallToolResult(
+        content=[TextContent(type="text", text=f"Unable to observe GUI state: {message}")],
+        structuredContent=metadata.model_dump(mode="json"),
+        isError=True,
+    )
+
+
+async def _gui_state_result(
+    window_id: str,
+    *,
+    screenshot: bool,
+    include_elements: bool,
+    max_elements: int,
+    max_depth: int,
+    machine: str | None,
+) -> CallToolResult:
+    image: ImageFile | None = None
+    screenshot_path: str | None = None
+    try:
+        args = {
+            "window_id": window_id,
+            "screenshot": screenshot,
+            "include_elements": include_elements,
+            "max_elements": max_elements,
+            "max_depth": max_depth,
+        }
+        if machine:
+            if not get_settings().remote_enabled:
+                raise RuntimeError("Remote workers are disabled")
+            data = await _remote_worker_data(machine, "gui_state", args, 120)
+            if not isinstance(data, dict):
+                raise RuntimeError("Remote gui_state returned invalid data")
+            screenshot_path = (
+                str(data.get("screenshot_path")) if data.get("screenshot_path") else None
+            )
+            if screenshot_path:
+                stat = await _remote_transfer_data(
+                    machine,
+                    "transfer_stat",
+                    {"path": screenshot_path, "sha256": False},
+                )
+                if not isinstance(stat, dict) or stat.get("type") != "file":
+                    raise RuntimeError("Remote GUI screenshot is not a file")
+                temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".png")
+                local_path = temporary["path"]
+                try:
+                    await _copy_remote_file_to_local(machine, screenshot_path, local_path, True)
+                    image = await asyncio.to_thread(read_image, local_path)
+                finally:
+                    with suppress(Exception):
+                        await asyncio.to_thread(delete_path, local_path, False)
+        else:
+            data = await get_gui_manager().snapshot(**args)
+            screenshot_path = (
+                str(data.get("screenshot_path")) if data.get("screenshot_path") else None
+            )
+            if screenshot_path:
+                try:
+                    image = await asyncio.to_thread(read_image, screenshot_path)
+                finally:
+                    with suppress(Exception):
+                        await asyncio.to_thread(delete_path, screenshot_path, False)
+        data = dict(data)
+        data.pop("screenshot_path", None)
+        return _gui_state_call_result(data, machine, image)
+    except Exception as exc:
+        return _gui_state_error_result(machine, exc)
+    finally:
+        if machine and screenshot_path:
+            with suppress(Exception):
+                await _remote_worker_data(
+                    machine,
+                    "delete_file_or_dir",
+                    {"path": screenshot_path, "recursive": False},
+                    30,
+                )
+
+
 def _read_audit_tail_entries(lines: int = 100) -> dict:
     settings = get_settings()
     line_limit = max(1, min(lines, 1000))
@@ -2992,6 +3213,58 @@ def _register_workspace_read_tools(
     ) -> ViewImageResult:
         """View a PNG, JPEG, GIF, or WebP file as native MCP image content locally or on a remote machine. Use this instead of file_read when visual inspection is needed. Remote images reuse the existing file-transfer protocol, so the worker does not need a new image-specific RPC."""
         return cast(ViewImageResult, await _view_image_result(path, machine))
+
+
+def _register_gui_tools(
+    mcp: FastMCP,
+    settings: Any,
+    read_only_tool: ToolAnnotations,
+) -> None:
+    shell_read_meta = _oauth_meta(["shell:read"])
+    shell_execute_meta = _oauth_meta(["shell:read", "shell:execute"])
+
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
+    async def gui_list(machine: str | None = None) -> ToolResult:
+        """List visible desktop application windows and GUI backend capabilities locally or remotely."""
+        if machine:
+            return await _remote_call(settings, machine, "gui_list", {})
+        return await _tool_call(get_gui_manager().list_windows)
+
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
+    async def gui_state(
+        window_id: str,
+        screenshot: bool = True,
+        include_elements: bool = True,
+        max_elements: int = 300,
+        max_depth: int = 12,
+        machine: str | None = None,
+    ) -> GuiStateResult:
+        """Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized."""
+        return cast(
+            GuiStateResult,
+            await _gui_state_result(
+                window_id,
+                screenshot=screenshot,
+                include_elements=include_elements,
+                max_elements=max_elements,
+                max_depth=max_depth,
+                machine=machine,
+            ),
+        )
+
+    @mcp.tool(structured_output=True, meta=shell_execute_meta)
+    async def gui_action(
+        window_id: str,
+        state_id: str,
+        actions: list[GuiAction],
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Execute GUI actions against a fresh gui_state observation locally or remotely. The state_id is single-use. Prefer semantic element_id targeting; raw x/y coordinates are window-relative. Supported actions are click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, and wait."""
+        payload = [action.model_dump(exclude_none=True) for action in actions]
+        args = {"window_id": window_id, "state_id": state_id, "actions": payload}
+        if machine:
+            return await _remote_call(settings, machine, "gui_action", args, 120)
+        return await _tool_call(get_gui_manager().act, window_id, state_id, payload)
 
 
 def _register_download_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -> None:
@@ -3679,6 +3952,7 @@ def build_mcp() -> FastMCP:
     _register_shell_tools(mcp, settings, read_only_tool)
     _register_job_tools(mcp, settings, read_only_tool)
     _register_workspace_read_tools(mcp, settings, read_only_tool)
+    _register_gui_tools(mcp, settings, read_only_tool)
     _register_download_tools(mcp, read_only_tool)
     _register_workspace_write_tools(mcp, settings)
     _register_maintenance_tools(mcp, read_only_tool)

@@ -191,7 +191,7 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ripgrep tmux
+          sudo apt-get install -y --no-install-recommends ripgrep tmux python3-gi gir1.2-atspi-2.0
           python -m pip install --upgrade pip
           python -m pip install -e '.[dev]'
           python -m playwright install --with-deps chromium
@@ -263,7 +263,7 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ripgrep tmux
+          sudo apt-get install -y --no-install-recommends ripgrep tmux python3-gi gir1.2-atspi-2.0
 
       - name: Remove unused Homebrew taps
         if: runner.os == 'macOS'

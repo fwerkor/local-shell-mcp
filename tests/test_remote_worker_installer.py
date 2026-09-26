@@ -276,3 +276,101 @@ def test_windows_worker_falls_back_when_pywinpty_install_fails(tmp_path, monkeyp
     assert result["available"] is False
     assert result["installed"] is False
     assert "timed out" in result["error"]
+
+
+def test_gui_dependency_bootstrap_reuses_available_modules(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(installer.sys, "platform", "linux")
+    monkeypatch.setattr(installer.sys, "path", list(installer.sys.path))
+    monkeypatch.setenv("PYTHONPATH", "")
+    imported = []
+
+    def import_module(name):
+        imported.append(name)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(installer.importlib, "import_module", import_module)
+    monkeypatch.setattr(
+        installer.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("pip should not run when GUI deps are available"),
+    )
+
+    result = installer.ensure_gui_dependencies()
+
+    assert result["available"] is True
+    assert result["installed"] is False
+    assert result["missing"] == []
+    assert imported == ["dbus_next", "Xlib"]
+
+
+def test_gui_dependency_bootstrap_installs_missing_modules(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(installer.sys, "platform", "win32")
+    monkeypatch.setattr(installer.sys, "path", list(installer.sys.path))
+    monkeypatch.setenv("PYTHONPATH", "")
+    attempts = 0
+    captured = {}
+
+    def import_module(name):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise ImportError(name)
+        return SimpleNamespace()
+
+    def run(argv, **kwargs):
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(argv, 0, stdout="installed", stderr="")
+
+    monkeypatch.setattr(installer.importlib, "import_module", import_module)
+    monkeypatch.setattr(installer.importlib, "invalidate_caches", lambda: None)
+    monkeypatch.setattr(installer.subprocess, "run", run)
+
+    result = installer.ensure_gui_dependencies()
+
+    assert result["available"] is True
+    assert result["installed"] is True
+    assert result["missing"] == []
+    assert "uiautomation>=2.0.29,<3" in captured["argv"]
+    assert captured["kwargs"]["timeout"] == 180
+
+
+def test_gui_dependency_bootstrap_failure_is_nonfatal_status(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(installer.sys, "platform", "darwin")
+    monkeypatch.setattr(installer.sys, "path", list(installer.sys.path))
+    monkeypatch.setenv("PYTHONPATH", "")
+
+    def missing(name):
+        raise ImportError(name)
+
+    monkeypatch.setattr(installer.importlib, "import_module", missing)
+    monkeypatch.setattr(
+        installer.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            subprocess.TimeoutExpired(args[0], 180)
+        ),
+    )
+
+    result = installer.ensure_gui_dependencies()
+
+    assert result["available"] is False
+    assert result["installed"] is False
+    assert result["missing"] == ["ApplicationServices", "Quartz"]
+    assert "timed out" in result["error"]
+
+
+def test_gui_dependency_bootstrap_unknown_platform_is_noop(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(installer.sys, "platform", "plan9")
+    monkeypatch.setattr(installer.sys, "path", list(installer.sys.path))
+    monkeypatch.setenv("PYTHONPATH", "")
+
+    result = installer.ensure_gui_dependencies()
+
+    assert result["available"] is True
+    assert result["installed"] is False
+    assert result["missing"] == []
