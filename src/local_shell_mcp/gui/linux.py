@@ -37,15 +37,18 @@ def _desktop_environment() -> dict[str, str]:
     env = dict(os.environ)
     missing = [key for key in _DESKTOP_ENV_KEYS if not env.get(key)]
     if missing and shutil.which("systemctl"):
-        result = subprocess.run(
-            ["systemctl", "--user", "show-environment"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-            env=env,
-        )
-        if result.returncode == 0:
+        try:
+            result = subprocess.run(
+                ["systemctl", "--user", "show-environment"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+                env=env,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            result = None
+        if result is not None and result.returncode == 0:
             for line in result.stdout.splitlines():
                 if "=" not in line:
                     continue
@@ -449,17 +452,29 @@ class LinuxGuiBackend:
     name = "linux-atspi"
 
     def __init__(self) -> None:
-        self._env = _desktop_environment()
+        self._env: dict[str, str] | None = None
         self._portal: PortalDesktop | None = None
+        self._env_lock = asyncio.Lock()
+
+    async def _ensure_env(self) -> dict[str, str]:
+        if self._env is not None:
+            return self._env
+        async with self._env_lock:
+            if self._env is None:
+                self._env = await asyncio.to_thread(_desktop_environment)
+            return self._env
 
     def _helper(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self._env is None:
+            raise GuiUnavailableError("Linux desktop environment has not been initialized")
         return _run_helper(payload, self._env)
 
     def _list_data(self) -> dict[str, Any]:
         return self._helper({"command": "list"})
 
     async def list_windows(self) -> dict[str, Any]:
-        session_type = _session_type(self._env)
+        env = await self._ensure_env()
+        session_type = _session_type(env)
         if session_type == "unknown":
             raise GuiUnavailableError(
                 "No graphical Linux session was found; DISPLAY/WAYLAND_DISPLAY are unavailable"
@@ -489,6 +504,7 @@ class LinuxGuiBackend:
         max_elements: int,
         max_depth: int,
     ) -> GuiSnapshot:
+        env = await self._ensure_env()
         data = await asyncio.to_thread(
             self._helper,
             {
@@ -519,7 +535,7 @@ class LinuxGuiBackend:
 
         screenshot_display = None
         capture_backend = None
-        session_type = _session_type(self._env)
+        session_type = _session_type(env)
         if screenshot_path is not None:
             list_data = await asyncio.to_thread(self._list_data)
             monitors = list_data.get("monitors", [])
@@ -528,13 +544,13 @@ class LinuxGuiBackend:
                     screenshot_path,
                     record["bounds"],
                     monitors,
-                    self._env,
+                    env,
                 )
             elif session_type == "x11":
                 capture_backend = await _capture_x11(
                     screenshot_path,
                     record["bounds"],
-                    self._env,
+                    env,
                 )
             else:
                 raise GuiUnavailableError(
@@ -559,6 +575,7 @@ class LinuxGuiBackend:
         )
 
     async def focus_window(self, window: dict[str, Any]) -> None:
+        await self._ensure_env()
         await asyncio.to_thread(
             self._helper,
             {
@@ -636,7 +653,11 @@ class LinuxGuiBackend:
             else:
                 await self.focus_window(window)
 
-        session_type = _session_type(self._env)
+        if kind in {"click", "double_click", "right_click", "move", "scroll", "drag"}:
+            await self.focus_window(window)
+
+        env = await self._ensure_env()
+        session_type = _session_type(env)
         if session_type == "wayland":
             return await self._perform_wayland(window, locator, action)
         if session_type == "x11":
@@ -685,7 +706,8 @@ class LinuxGuiBackend:
             )
             return {**result, "characters": len(text)}
         if kind == "key":
-            await asyncio.to_thread(_x11_key_chord, action.get("keys"), self._env)
+            env = await self._ensure_env()
+            await asyncio.to_thread(_x11_key_chord, action.get("keys"), env)
             return {"keys": action.get("keys")}
 
         if kind in {"click", "double_click", "right_click", "move", "scroll"}:
@@ -790,7 +812,7 @@ class LinuxGuiBackend:
         action: dict[str, Any],
     ) -> dict[str, Any]:
         if self._portal is None:
-            self._portal = PortalDesktop(self._env)
+            self._portal = PortalDesktop(await self._ensure_env())
         portal = self._portal
         kind = action["type"]
         if kind == "type":

@@ -2217,7 +2217,8 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if sys.platform == "linux":
         from .gui.linux import _desktop_environment, _session_type
 
-        session_type = _session_type(_desktop_environment())
+        desktop_env = await asyncio.to_thread(_desktop_environment)
+        session_type = _session_type(desktop_env)
         if session_type == "unknown":
             raise GuiUnavailableError(
                 "No graphical Linux session was found; GUI dependencies were not installed"

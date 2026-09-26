@@ -378,8 +378,15 @@ class MacOSGuiBackend:
                 return {"semantic": True, "method": "AXPress"}
 
         ax_window = self._find_ax_window(window)
-        if ax_window is not None:
-            AX.AXUIElementPerformAction(ax_window, AX.kAXRaiseAction)
+        if ax_window is None:
+            raise RuntimeError("Could not resolve the target AX window unambiguously")
+        window_error = AX.AXUIElementSetAttributeValue(
+            ax_window, AX.kAXFocusedAttribute, True
+        )
+        if int(window_error) != 0:
+            window_error = AX.AXUIElementPerformAction(ax_window, AX.kAXRaiseAction)
+        if int(window_error) != 0:
+            raise RuntimeError(f"AX target window focus/raise failed with error {window_error}")
 
         if kind == "type":
             text = str(action.get("text", ""))

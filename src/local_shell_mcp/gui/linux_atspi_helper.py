@@ -260,7 +260,8 @@ def _snapshot(payload: dict[str, Any]) -> dict[str, Any]:
                 child_count = obj.get_child_count()
             except Exception:
                 child_count = 0
-            for child_index in range(child_count):
+            remaining = max(0, max_elements - len(elements) - len(queue))
+            for child_index in range(min(child_count, remaining)):
                 try:
                     child = obj.get_child_at_index(child_index)
                 except Exception:

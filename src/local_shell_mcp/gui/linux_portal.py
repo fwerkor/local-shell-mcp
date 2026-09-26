@@ -158,23 +158,36 @@ class PortalDesktop:
         self._lock = asyncio.Lock()
 
     async def _connect(self) -> None:
-        if self._bus is not None:
+        if self._bus is not None and self._remote is not None and self._screen is not None:
             return
+        self._bus = None
+        self._remote = None
+        self._screen = None
         MessageBus, _Variant = _portal_modules()
         address = self._env.get("DBUS_SESSION_BUS_ADDRESS")
-        bus = MessageBus(bus_address=address) if address else MessageBus()
-        self._bus = await bus.connect()
-        intro = await self._bus.introspect(
-            "org.freedesktop.portal.Desktop",
-            "/org/freedesktop/portal/desktop",
-        )
-        obj = self._bus.get_proxy_object(
-            "org.freedesktop.portal.Desktop",
-            "/org/freedesktop/portal/desktop",
-            intro,
-        )
-        self._remote = obj.get_interface("org.freedesktop.portal.RemoteDesktop")
-        self._screen = obj.get_interface("org.freedesktop.portal.ScreenCast")
+        candidate = MessageBus(bus_address=address) if address else MessageBus()
+        connected = None
+        try:
+            connected = await candidate.connect()
+            intro = await connected.introspect(
+                "org.freedesktop.portal.Desktop",
+                "/org/freedesktop/portal/desktop",
+            )
+            obj = connected.get_proxy_object(
+                "org.freedesktop.portal.Desktop",
+                "/org/freedesktop/portal/desktop",
+                intro,
+            )
+            remote = obj.get_interface("org.freedesktop.portal.RemoteDesktop")
+            screen = obj.get_interface("org.freedesktop.portal.ScreenCast")
+        except BaseException:
+            if connected is not None:
+                with contextlib.suppress(Exception):
+                    connected.disconnect()
+            raise
+        self._bus = connected
+        self._remote = remote
+        self._screen = screen
 
     async def _request(
         self,
@@ -328,8 +341,16 @@ class PortalDesktop:
     async def click(self, x: int, y: int, button: int = 1, count: int = 1) -> None:
         await self.move(x, y)
         for _ in range(max(1, count)):
-            await self.button(button, True)
-            await self.button(button, False)
+            pressed = False
+            try:
+                await self.button(button, True)
+                pressed = True
+                await self.button(button, False)
+                pressed = False
+            finally:
+                if pressed:
+                    with contextlib.suppress(BaseException):
+                        await asyncio.shield(self.button(button, False))
 
     async def drag(self, x: int, y: int, to_x: int, to_y: int) -> None:
         await self.move(x, y)

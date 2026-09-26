@@ -32,6 +32,7 @@ from local_shell_mcp.gui.macos import (
 )
 from local_shell_mcp.gui.macos import _key_parts as mac_key_parts
 from local_shell_mcp.gui.windows import WindowsGuiBackend, _key_sequence, _rect_dict
+from local_shell_mcp.image_ops import ImageFile
 
 
 def test_native_gui_adapters_are_optional_dependencies():
@@ -439,7 +440,6 @@ def test_gui_manager_singleton_helpers(monkeypatch):
 
 def test_gui_tool_result_rendering_and_errors():
     import local_shell_mcp.tools as tools
-    from local_shell_mcp.image_ops import ImageFile
 
     data = {
         "backend": "fake",
@@ -501,7 +501,8 @@ async def test_gui_state_result_local_screenshot(tmp_path, monkeypatch):
     get_settings = tools.get_settings
     get_settings.cache_clear()
 
-    shot = tmp_path / "shot.png"
+    shot = tmp_path / ".state" / "tmp" / "shot.png"
+    shot.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (8, 6)).save(shot)
 
     class Manager:
@@ -550,10 +551,59 @@ async def test_gui_state_result_local_screenshot(tmp_path, monkeypatch):
     assert "no desktop" in failed.structuredContent["message"]
 
 
+def test_gui_temp_reader_accepts_workspace_relative_internal_path(tmp_path, monkeypatch):
+    import local_shell_mcp.tools as tools
+
+    workspace = tmp_path / "workspace"
+    state = workspace / ".state"
+    workspace.mkdir()
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(workspace))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state))
+    tools.get_settings.cache_clear()
+
+    shot = tools.temp_dir() / "relative.png"
+    Image.new("RGB", (4, 4)).save(shot, format="PNG")
+    display = str(shot.relative_to(workspace))
+
+    image = tools._read_gui_temp_image(display)
+    assert image.format == "png"
+    tools._delete_gui_temp_file(display)
+    assert not shot.exists()
+
+
+@pytest.mark.asyncio
+async def test_gui_screenshot_temp_can_live_outside_workspace(tmp_path, monkeypatch):
+    import local_shell_mcp.tools as tools
+
+    workspace = tmp_path / "workspace"
+    state = tmp_path / "state"
+    workspace.mkdir()
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(workspace))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state))
+    tools.get_settings.cache_clear()
+
+    shot = tools.temp_dir() / "outside-workspace.png"
+    Image.new("RGB", (4, 4)).save(shot, format="PNG")
+
+    class Manager:
+        async def frame(self, _window_id):
+            return {
+                "backend": "fake",
+                "window": {"id": "w", "bounds": {"x": 0, "y": 0, "width": 4, "height": 4}},
+                "capabilities": {},
+                "screenshot_path": str(shot),
+            }
+
+    monkeypatch.setattr(tools, "get_gui_manager", lambda: Manager())
+    data, image = await tools._gui_frame_data("w", None)
+    assert data["backend"] == "fake"
+    assert image.format == "png"
+    assert not shot.exists()
+
+
 @pytest.mark.asyncio
 async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypatch):
     import local_shell_mcp.tools as tools
-    from local_shell_mcp.image_ops import ImageFile
 
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "true")
@@ -581,7 +631,7 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
         return {"type": "file", "size": 7, "path": args["path"]}
 
     async def copy_remote(machine, source, destination, overwrite):
-        Path(destination).write_bytes(b"fakepng")
+        Image.new("RGB", (4, 4)).save(destination, format="PNG")
 
     monkeypatch.setattr(tools, "_remote_worker_data", remote_worker)
     monkeypatch.setattr(tools, "_remote_transfer_data", remote_transfer)
@@ -589,18 +639,9 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
     monkeypatch.setattr(
         tools,
         "transfer_alloc_temp_path",
-        lambda suffix: {"path": str(tmp_path / f"temporary{suffix}")},
-    )
-    monkeypatch.setattr(
-        tools,
-        "read_image",
-        lambda path: ImageFile(
-            path=str(path),
-            data=b"image",
-            format="png",
-            mime_type="image/png",
-            size=5,
-        ),
+        lambda suffix: {
+            "path": str(tools.temp_dir() / f"temporary{suffix}")
+        },
     )
 
     result = await tools._gui_state_result(
@@ -638,14 +679,12 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
 @pytest.mark.asyncio
 async def test_gui_frame_data_local_and_remote_paths(tmp_path, monkeypatch):
     import local_shell_mcp.tools as tools
-    from local_shell_mcp.image_ops import ImageFile
-
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "true")
     tools.get_settings.cache_clear()
 
-    local_shot = tmp_path / "local-frame.png"
-    local_shot.write_bytes(b"local")
+    local_shot = tools.temp_dir() / "local-frame.png"
+    Image.new("RGB", (4, 4)).save(local_shot, format="PNG")
 
     class Manager:
         async def frame(self, window_id):
@@ -657,20 +696,12 @@ async def test_gui_frame_data_local_and_remote_paths(tmp_path, monkeypatch):
                 "screenshot_path": str(local_shot),
             }
 
-    image = ImageFile(
-        path="frame.png",
-        data=b"image",
-        format="png",
-        mime_type="image/png",
-        size=5,
-    )
     monkeypatch.setattr(tools, "get_gui_manager", lambda: Manager())
-    monkeypatch.setattr(tools, "read_image", lambda _path: image)
 
     local_data, local_image = await tools._gui_frame_data("w", None)
     assert local_data["backend"] == "local"
     assert "screenshot_path" not in local_data
-    assert local_image is image
+    assert local_image.format == "png"
     assert not local_shot.exists()
 
     calls = []
@@ -694,7 +725,7 @@ async def test_gui_frame_data_local_and_remote_paths(tmp_path, monkeypatch):
 
     async def copy_remote(machine, source, destination, overwrite):
         assert (machine, overwrite) == ("node", True)
-        Path(destination).write_bytes(b"remote")
+        Image.new("RGB", (4, 4)).save(destination, format="PNG")
 
     monkeypatch.setattr(tools, "_remote_worker_data", remote_worker)
     monkeypatch.setattr(tools, "_remote_transfer_data", remote_transfer)
@@ -702,15 +733,15 @@ async def test_gui_frame_data_local_and_remote_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(
         tools,
         "transfer_alloc_temp_path",
-        lambda suffix: {"path": str(tmp_path / f"relay{suffix}")},
+        lambda suffix: {"path": str(tools.temp_dir() / f"relay{suffix}")},
     )
 
     remote_data, remote_image = await tools._gui_frame_data("w", "node")
     assert remote_data["backend"] == "remote"
     assert "screenshot_path" not in remote_data
-    assert remote_image is image
+    assert remote_image.format == "png"
     assert [call[1] for call in calls] == ["gui_frame", "delete_file_or_dir"]
-    assert not (tmp_path / "relay.png").exists()
+    assert not (tools.temp_dir() / "relay.png").exists()
 
 
 @pytest.mark.asyncio
@@ -1463,6 +1494,76 @@ def test_wayland_full_desktop_crop_requires_monitor_geometry():
 
 
 @pytest.mark.asyncio
+async def test_linux_environment_discovery_is_lazy_and_off_event_loop(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    calls = []
+
+    def discover():
+        calls.append("discover")
+        return {"XDG_SESSION_TYPE": "x11", "DISPLAY": ":0"}
+
+    original_to_thread = asyncio.to_thread
+
+    async def tracked_to_thread(func, *args, **kwargs):
+        if func is discover:
+            calls.append("to_thread")
+        return await original_to_thread(func, *args, **kwargs)
+
+    monkeypatch.setattr(linux, "_desktop_environment", discover)
+    monkeypatch.setattr(asyncio, "to_thread", tracked_to_thread)
+    backend = linux.LinuxGuiBackend()
+    assert calls == []
+    env = await backend._ensure_env()
+    assert env["DISPLAY"] == ":0"
+    assert calls == ["to_thread", "discover"]
+
+
+def test_linux_environment_discovery_timeout_is_nonfatal(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    monkeypatch.setattr(linux.shutil, "which", lambda _name: "/usr/bin/systemctl")
+    monkeypatch.setattr(
+        linux.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            linux.subprocess.TimeoutExpired("systemctl", 5)
+        ),
+    )
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.delenv("XDG_SESSION_TYPE", raising=False)
+    env = linux._desktop_environment()
+    assert linux._session_type(env) == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_linux_raw_pointer_focuses_target_before_injection(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    backend = linux.LinuxGuiBackend()
+    backend._env = {"XDG_SESSION_TYPE": "x11", "DISPLAY": ":0"}
+    calls = []
+
+    async def focus(_window):
+        calls.append("focus")
+
+    async def raw(_window, _locator, _action):
+        calls.append("raw")
+        return {"performed": True}
+
+    monkeypatch.setattr(backend, "focus_window", focus)
+    monkeypatch.setattr(backend, "_perform_x11", raw)
+    result = await backend.perform_action(
+        {"id": "w", "bounds": {"x": 0, "y": 0, "width": 100, "height": 100}},
+        None,
+        {"type": "click", "x": 10, "y": 10},
+    )
+    assert result == {"performed": True}
+    assert calls == ["focus", "raw"]
+
+
+@pytest.mark.asyncio
 async def test_x11_drag_releases_button_after_motion_failure(monkeypatch):
     import local_shell_mcp.gui.linux as linux
 
@@ -1486,6 +1587,58 @@ async def test_x11_drag_releases_button_after_motion_failure(monkeypatch):
             {"type": "drag", "x": 1, "y": 1, "to_x": 10, "to_y": 10},
         )
     assert events == ["b1p", "abs", "b1r"]
+
+
+def test_atspi_snapshot_bounds_direct_child_provider_calls(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    child_calls = []
+
+    class Node:
+        def __init__(self, child_count=0):
+            self.child_count = child_count
+
+        def get_role_name(self):
+            return "node"
+
+        def get_name(self):
+            return "n"
+
+        def get_action_iface(self):
+            return None
+
+        def get_child_count(self):
+            return self.child_count
+
+        def get_child_at_index(self, index):
+            child_calls.append(index)
+            return Node()
+
+    root = Node(child_count=100000)
+    app = object()
+    monkeypatch.setattr(helper, "_resolve_window", lambda _id: (app, root, 0))
+    monkeypatch.setattr(helper, "_record", lambda *_args: {"id": "w"})
+    monkeypatch.setattr(helper, "_bounds", lambda _obj: {})
+    monkeypatch.setattr(helper, "_state", lambda *_args: False)
+    monkeypatch.setattr(helper, "_element_signature", lambda _obj: "sig")
+    monkeypatch.setattr(
+        helper,
+        "Atspi",
+        SimpleNamespace(
+            StateType=SimpleNamespace(ENABLED=1, FOCUSED=2, EDITABLE=3)
+        ),
+    )
+
+    result = helper._snapshot(
+        {
+            "window_id": "w",
+            "include_elements": True,
+            "max_elements": 3,
+            "max_depth": 5,
+        }
+    )
+    assert len(result["elements"]) == 3
+    assert child_calls == [0, 1]
 
 
 def test_atspi_element_locator_rejects_reordered_replacement(monkeypatch):
@@ -1557,6 +1710,78 @@ async def test_portal_request_subscribes_before_immediate_response(monkeypatch):
     assert await _portal_request(bus, immediate(), handle_token=token) == {"answer": "ok"}
     assert bus.handler is None
     assert bus.match_rules == []
+
+
+@pytest.mark.asyncio
+async def test_portal_connect_failure_does_not_poison_cached_connection(monkeypatch):
+    import local_shell_mcp.gui.linux_portal as linux_portal
+
+    attempts = []
+
+    class InterfaceObject:
+        def get_interface(self, name):
+            return name
+
+    class Connected:
+        def __init__(self, fail):
+            self.fail = fail
+            self.disconnected = False
+
+        async def introspect(self, *_args):
+            if self.fail:
+                raise RuntimeError("transient introspection failure")
+            return object()
+
+        def get_proxy_object(self, *_args):
+            return InterfaceObject()
+
+        def disconnect(self):
+            self.disconnected = True
+
+    class MessageBus:
+        def __init__(self, **_kwargs):
+            self.connected = Connected(fail=not attempts)
+            attempts.append(self.connected)
+
+        async def connect(self):
+            return self.connected
+
+    monkeypatch.setattr(linux_portal, "_portal_modules", lambda: (MessageBus, object))
+    portal = PortalDesktop({})
+
+    with pytest.raises(RuntimeError, match="transient"):
+        await portal._connect()
+    assert portal._bus is None
+    assert portal._remote is None
+    assert portal._screen is None
+    assert attempts[0].disconnected is True
+
+    await portal._connect()
+    assert portal._bus is attempts[1]
+    assert portal._remote == "org.freedesktop.portal.RemoteDesktop"
+    assert portal._screen == "org.freedesktop.portal.ScreenCast"
+
+
+@pytest.mark.asyncio
+async def test_portal_click_releases_pressed_button_after_release_failure(monkeypatch):
+    portal = PortalDesktop({})
+    calls = []
+    release_failures = {"remaining": 1}
+
+    async def move(_x, _y):
+        return None
+
+    async def button(_button, pressed):
+        calls.append(pressed)
+        if not pressed and release_failures["remaining"]:
+            release_failures["remaining"] -= 1
+            raise RuntimeError("release failed")
+
+    monkeypatch.setattr(portal, "move", move)
+    monkeypatch.setattr(portal, "button", button)
+    with pytest.raises(RuntimeError, match="release failed"):
+        await portal.click(1, 2)
+    assert calls == [True, False, False]
 
 
 @pytest.mark.asyncio
@@ -1925,6 +2150,53 @@ def test_macos_ax_window_matching_rejects_ambiguous_weaker_matches(monkeypatch):
         )
         is None
     )
+
+
+def test_macos_raw_input_requires_unambiguous_focusable_window(monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    posted = []
+
+    class AX:
+        kAXFocusedAttribute = "focused"
+        kAXRaiseAction = "raise"
+
+        @staticmethod
+        def AXIsProcessTrusted():
+            return True
+
+        @staticmethod
+        def AXUIElementSetAttributeValue(*_args):
+            return 0
+
+        @staticmethod
+        def AXUIElementPerformAction(*_args):
+            return 0
+
+    class Quartz:
+        kCGHIDEventTap = 1
+        kCGEventMouseMoved = 2
+        kCGMouseButtonLeft = 0
+
+        @staticmethod
+        def CGEventCreateMouseEvent(*_args):
+            return object()
+
+        @staticmethod
+        def CGEventPost(*args):
+            posted.append(args)
+
+    backend = MacOSGuiBackend()
+    monkeypatch.setattr(macos, "_native", lambda: (AX, Quartz))
+    monkeypatch.setattr(backend, "_find_ax_window", lambda _window: None)
+
+    with pytest.raises(RuntimeError, match="unambiguously"):
+        backend._perform_action_sync(
+            {"id": "cg:1", "pid": 1, "bounds": {"x": 0, "y": 0, "width": 20, "height": 20}},
+            None,
+            {"type": "move", "x": 1, "y": 1},
+        )
+    assert posted == []
 
 
 def test_macos_utf16_text_units_and_chunks():

@@ -48,7 +48,13 @@ from .fs_ops import (
 )
 from .gui import get_gui_manager
 from .gui.base import GUI_MAX_KEY_PARTS, GUI_MAX_KEYS_BYTES, GUI_MAX_TEXT_BYTES
-from .image_ops import ImageFile, assert_view_image_size, read_image
+from .image_ops import (
+    MAX_VIEW_IMAGE_BYTES,
+    ImageFile,
+    assert_view_image_size,
+    detect_image_type,
+    read_image,
+)
 from .jobs import (
     JOB_LIST_DEFAULT_LIMIT,
     ManagedJobContext,
@@ -2691,6 +2697,44 @@ def _gui_state_error_result(machine: str | None, exc: Exception) -> CallToolResu
     )
 
 
+def _gui_temp_path(path: str, *, must_exist: bool) -> Path:
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = get_settings().workspace_root / candidate
+    root = temp_dir().resolve(strict=False)
+    parent = candidate.parent.resolve(strict=False)
+    if parent != root:
+        raise ValueError("GUI screenshot path is outside the internal temp directory")
+    resolved = candidate.resolve(strict=must_exist)
+    if resolved.parent != root:
+        raise ValueError("GUI screenshot path escapes the internal temp directory")
+    return resolved
+
+
+def _read_gui_temp_image(path: str) -> ImageFile:
+    resolved = _gui_temp_path(path, must_exist=True)
+    if not resolved.is_file():
+        raise IsADirectoryError(str(resolved))
+    expected_size = resolved.stat().st_size
+    assert_view_image_size(expected_size)
+    with resolved.open("rb") as handle:
+        data = handle.read(MAX_VIEW_IMAGE_BYTES + 1)
+    assert_view_image_size(len(data))
+    image_format, mime_type = detect_image_type(data[:16])
+    return ImageFile(
+        path=relative_display(resolved),
+        data=data,
+        format=image_format,
+        mime_type=mime_type,
+        size=len(data),
+    )
+
+
+def _delete_gui_temp_file(path: str) -> None:
+    candidate = _gui_temp_path(path, must_exist=False)
+    candidate.unlink(missing_ok=True)
+
+
 async def _gui_frame_data(
     window_id: str,
     machine: str | None,
@@ -2726,10 +2770,10 @@ async def _gui_frame_data(
                 await _copy_remote_file_to_local(
                     machine, screenshot_path, local_path, True
                 )
-                image = await asyncio.to_thread(read_image, local_path)
+                image = await asyncio.to_thread(_read_gui_temp_image, local_path)
             finally:
                 with suppress(Exception):
-                    await asyncio.to_thread(delete_path, local_path, False)
+                    await asyncio.to_thread(_delete_gui_temp_file, local_path)
             data = dict(data)
             data.pop("screenshot_path", None)
             return data, image
@@ -2747,10 +2791,10 @@ async def _gui_frame_data(
     if not screenshot_path:
         raise RuntimeError("Local gui_frame returned no screenshot")
     try:
-        image = await asyncio.to_thread(read_image, screenshot_path)
+        image = await asyncio.to_thread(_read_gui_temp_image, screenshot_path)
     finally:
         with suppress(Exception):
-            await asyncio.to_thread(delete_path, screenshot_path, False)
+            await asyncio.to_thread(_delete_gui_temp_file, screenshot_path)
     data = dict(data)
     data.pop("screenshot_path", None)
     return data, image
@@ -2796,10 +2840,10 @@ async def _gui_state_result(
                 local_path = temporary["path"]
                 try:
                     await _copy_remote_file_to_local(machine, screenshot_path, local_path, True)
-                    image = await asyncio.to_thread(read_image, local_path)
+                    image = await asyncio.to_thread(_read_gui_temp_image, local_path)
                 finally:
                     with suppress(Exception):
-                        await asyncio.to_thread(delete_path, local_path, False)
+                        await asyncio.to_thread(_delete_gui_temp_file, local_path)
                 with suppress(Exception):
                     await _remote_worker_data(
                         machine,
@@ -2827,10 +2871,10 @@ async def _gui_state_result(
             )
             if screenshot_path:
                 try:
-                    image = await asyncio.to_thread(read_image, screenshot_path)
+                    image = await asyncio.to_thread(_read_gui_temp_image, screenshot_path)
                 finally:
                     with suppress(Exception):
-                        await asyncio.to_thread(delete_path, screenshot_path, False)
+                        await asyncio.to_thread(_delete_gui_temp_file, screenshot_path)
         data = dict(data)
         data.pop("screenshot_path", None)
         return _gui_state_call_result(data, machine, image)
