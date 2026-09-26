@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 63f9fb40c4fd1c085e87c30ed221598cccacef1a6fb4aeb2bb4f1db520590ada -->
+<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
 # Tool-Referenz
 
 Diese Seite wird aus den tatsächlichen MCP-Tool-Schemas aufgebaut. Führen Sie nach Änderungen an der öffentlichen Tool-Oberfläche `python scripts/generate-tools-reference.py` aus, um die English-Referenz zu aktualisieren.
@@ -18,6 +18,7 @@ Die meisten Tools liefern ein strukturiertes `ToolResult` mit `ok`, `message` un
 | Externe MCP-Capability entdecken | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Mit einer Seite interagieren | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Eigene Browser-Logik ausführen | `browser_run_script` |
+| Control a native desktop app | `gui_list`, `gui_state`, then `gui_action` |
 | Auf einer Remote-Maschine arbeiten | dasselbe Tool mit `machine` verwenden; `remote_*` nur zur Worker-Administration |
 
 ## Interaktiver Workspace
@@ -445,6 +446,7 @@ Schreibt eine UTF-8-Textdatei lokal oder auf einer Remote-Maschine.
 | `path` | `string` | required |  |
 | `content` | `string` | required |  |
 | `overwrite` | `boolean` | `true` |  |
+| `encoding` | `string` | `"utf-8"` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
@@ -703,6 +705,55 @@ Führt ein vollständiges Python-Playwright-Skript lokal oder auf einer Remote-M
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 Wenn `machine` angegeben ist, benötigt der Aufruf zusätzlich `remote:use` und läuft über das Remote-Worker-Protokoll.
+
+## Desktop-GUI-Automatisierung
+
+### `gui_list`
+
+List visible desktop application windows and GUI backend capabilities locally or remotely.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+
+### `gui_state`
+
+Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `window_id` | `string` | required |  |
+| `screenshot` | `boolean` | `true` |  |
+| `include_elements` | `boolean` | `true` |  |
+| `max_elements` | `integer` | `300` |  |
+| `max_depth` | `integer` | `12` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+
+### `gui_action`
+
+Execute GUI actions against a fresh gui_state observation locally or remotely. The state_id is single-use. Prefer semantic element_id targeting; raw x/y coordinates are window-relative. Supported actions are click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, and wait.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `window_id` | `string` | required |  |
+| `state_id` | `string` | required |  |
+| `actions` | `array[GuiAction]` | required |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
 
 ## Remote-Worker-Administration
 

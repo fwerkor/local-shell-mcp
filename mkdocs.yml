@@ -90,6 +90,7 @@ plugins:
             File links: 文件链接
             Git access: Git 访问
             Browser automation: 浏览器自动化
+            Desktop GUI automation: 桌面 GUI 自动化
             Audit log: 审计日志
             Skills: Agent Skills
             Reference: 参考
@@ -126,6 +127,7 @@ plugins:
             File links: 檔案連結
             Git access: Git 存取
             Browser automation: 瀏覽器自動化
+            Desktop GUI automation: 桌面 GUI 自動化
             Audit log: 稽核日誌
             Skills: Agent Skills
             Reference: 參考
@@ -162,6 +164,7 @@ plugins:
             File links: ファイルリンク
             Git access: Git アクセス
             Browser automation: ブラウザー自動化
+            Desktop GUI automation: デスクトップ GUI 自動化
             Audit log: 監査ログ
             Skills: Skills
             Reference: リファレンス
@@ -198,6 +201,7 @@ plugins:
             File links: 파일 링크
             Git access: Git 접근
             Browser automation: 브라우저 자동화
+            Desktop GUI automation: 데스크톱 GUI 자동화
             Audit log: 감사 로그
             Skills: Skills
             Reference: 참조
@@ -234,6 +238,7 @@ plugins:
             File links: Enlaces de archivos
             Git access: Acceso a Git
             Browser automation: Automatización del navegador
+            Desktop GUI automation: Automatización de GUI de escritorio
             Audit log: Registro de auditoría
             Skills: Skills
             Reference: Referencia
@@ -270,6 +275,7 @@ plugins:
             File links: Liens de fichiers
             Git access: Accès Git
             Browser automation: Automatisation du navigateur
+            Desktop GUI automation: Automatisation GUI du bureau
             Audit log: Journal d’audit
             Skills: Skills
             Reference: Référence
@@ -306,6 +312,7 @@ plugins:
             File links: Dateilinks
             Git access: Git-Zugriff
             Browser automation: Browser-Automatisierung
+            Desktop GUI automation: Desktop-GUI-Automatisierung
             Audit log: Audit-Log
             Skills: Skills
             Reference: Referenz
@@ -342,6 +349,7 @@ plugins:
             File links: Ссылки на файлы
             Git access: Доступ к Git
             Browser automation: Автоматизация браузера
+            Desktop GUI automation: Автоматизация GUI рабочего стола
             Audit log: Журнал аудита
             Skills: Skills
             Reference: Справочник
@@ -378,6 +386,7 @@ plugins:
             File links: Links de arquivos
             Git access: Acesso ao Git
             Browser automation: Automação do navegador
+            Desktop GUI automation: Automação de GUI de desktop
             Audit log: Log de auditoria
             Skills: Skills
             Reference: Referência
@@ -414,6 +423,7 @@ plugins:
             File links: Link ai file
             Git access: Accesso Git
             Browser automation: Automazione del browser
+            Desktop GUI automation: Automazione GUI desktop
             Audit log: Log di audit
             Skills: Skill
             Reference: Riferimento
@@ -450,6 +460,7 @@ plugins:
             File links: روابط الملفات
             Git access: الوصول إلى Git
             Browser automation: أتمتة المتصفح
+            Desktop GUI automation: أتمتة واجهة سطح المكتب
             Audit log: سجل التدقيق
             Skills: المهارات
             Reference: المرجع
@@ -486,6 +497,7 @@ plugins:
             File links: फ़ाइल लिंक
             Git access: Git पहुँच
             Browser automation: ब्राउज़र स्वचालन
+            Desktop GUI automation: डेस्कटॉप GUI ऑटोमेशन
             Audit log: ऑडिट लॉग
             Skills: Skills
             Reference: संदर्भ
@@ -522,6 +534,7 @@ plugins:
             File links: Tautan file
             Git access: Akses Git
             Browser automation: Otomasi browser
+            Desktop GUI automation: Otomasi GUI desktop
             Audit log: Log audit
             Skills: Skills
             Reference: Referensi
@@ -558,6 +571,7 @@ plugins:
             File links: Liên kết tệp
             Git access: Truy cập Git
             Browser automation: Tự động hóa trình duyệt
+            Desktop GUI automation: Tự động hóa GUI máy tính
             Audit log: Nhật ký audit
             Skills: Skills
             Reference: Tham chiếu
@@ -594,6 +608,7 @@ plugins:
             File links: Dosya bağlantıları
             Git access: Git erişimi
             Browser automation: Tarayıcı otomasyonu
+            Desktop GUI automation: Masaüstü GUI otomasyonu
             Audit log: Denetim günlüğü
             Skills: Skills
             Reference: Başvuru
@@ -630,6 +645,7 @@ plugins:
             File links: Linki do plików
             Git access: Dostęp Git
             Browser automation: Automatyzacja przeglądarki
+            Desktop GUI automation: Automatyzacja GUI pulpitu
             Audit log: Dziennik audytu
             Skills: Skills
             Reference: Dokumentacja referencyjna
