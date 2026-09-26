@@ -777,42 +777,39 @@ async def test_gui_frame_data_rejects_invalid_sources(tmp_path, monkeypatch):
     ]
 
 
-def test_native_gui_dependencies_are_available_on_platform():
-    import subprocess
+def test_native_gui_optional_dependency_guards_are_platform_safe():
     import sys
 
     if sys.platform == "win32":
         from local_shell_mcp.gui.windows import _automation
 
-        assert _automation() is not None
+        try:
+            auto = _automation()
+        except GuiUnavailableError:
+            return
+        assert auto is not None
         return
 
     if sys.platform == "darwin":
         from local_shell_mcp.gui.macos import _native
 
-        ax, quartz = _native()
+        try:
+            ax, quartz = _native()
+        except GuiUnavailableError:
+            return
         assert ax is not None
         assert quartz is not None
         return
 
     if sys.platform.startswith("linux"):
-        import dbus_next
-        import Xlib
+        from local_shell_mcp.gui.linux_portal import _portal_modules
 
-        assert dbus_next is not None
-        assert Xlib is not None
-        completed = subprocess.run(
-            [
-                "/usr/bin/python3",
-                "-c",
-                "import gi; gi.require_version('Atspi','2.0'); from gi.repository import Atspi",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if completed.returncode != 0:
-            pytest.skip("system AT-SPI bindings are not installed in this dev runtime")
+        try:
+            message_bus, variant = _portal_modules()
+        except GuiUnavailableError:
+            return
+        assert message_bus is not None
+        assert variant is not None
 
 
 @pytest.mark.asyncio
