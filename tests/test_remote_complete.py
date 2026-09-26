@@ -433,6 +433,21 @@ def test_worker_transfer_validation_and_curl_failures(tmp_path, monkeypatch):
         "run",
         lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 22, stdout="", stderr="network"),
     )
+
+    class FailedDownloadProcess:
+        def __init__(self, command, **kwargs):
+            del kwargs
+            self.command = command
+            self.returncode = 22
+
+        def communicate(self, timeout=None):
+            del timeout
+            return b"", b"network"
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(remote.subprocess, "Popen", FailedDownloadProcess)
     with pytest.raises(RuntimeError, match="curl exit 22"):
         remote._worker_upload_url("source.bin", valid, 7, digest)
     with pytest.raises(RuntimeError, match="curl exit 22"):

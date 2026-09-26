@@ -1147,41 +1147,29 @@ async def test_auto_remote_transfer_falls_back_to_memory_relay(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["empty", "offset", "write"])
-async def test_memory_relay_aborts_destination_on_invalid_chunk(tmp_path, monkeypatch, failure):
-    _configure_workspace(tmp_path, monkeypatch, remote_transfer_strategy="relay")
+async def test_streamed_relay_cleans_staging_on_source_failure(tmp_path, monkeypatch):
+    root = _configure_workspace(tmp_path, monkeypatch, remote_transfer_strategy="relay")
     calls: list[str] = []
 
     async def transfer(machine: str, tool: str, args: dict[str, Any], timeout_s=None):
-        del machine, timeout_s
+        del machine, args, timeout_s
         calls.append(tool)
         if tool == "transfer_stat":
             return {"type": "file", "path": "source.bin", "size": 4, "sha256": "a" * 64}
-        if tool == "transfer_begin_write":
-            return {"transfer_id": "tx"}
-        if tool == "transfer_read_chunk":
-            if failure == "empty":
-                return {"offset": 0, "bytes": 0, "data_b64": "", "sha256": "b" * 64}
-            return {
-                "offset": 1 if failure == "offset" else 0,
-                "bytes": 4,
-                "data_b64": "AAAAAA==",
-                "sha256": "b" * 64,
-            }
-        if tool == "transfer_write_chunk":
-            return {"bytes": 3 if failure == "write" else 4}
-        if tool == "transfer_abort_write":
-            return {"aborted": True, "path": args["path"]}
+        if tool == "transfer_put_url":
+            raise tools.RemoteTransferError("source upload failed")
         raise AssertionError(f"unexpected tool: {tool}")
 
     monkeypatch.setattr(tools, "_remote_transfer_data", transfer)
 
-    with pytest.raises(tools.RemoteTransferError):
+    with pytest.raises(tools.RemoteTransferError, match="source upload failed"):
         await tools._copy_remote_file_to_remote(
             "source-worker", "source.bin", "destination-worker", "destination.bin", True
         )
 
-    assert calls[-1] == "transfer_abort_write"
+    assert calls == ["transfer_stat", "transfer_put_url", "transfer_put_url", "transfer_put_url"]
+    relay_dir = root / ".local-shell-mcp" / "transfer-relay"
+    assert not relay_dir.exists() or not list(relay_dir.iterdir())
 
 
 @pytest.mark.asyncio
@@ -1294,8 +1282,6 @@ def test_worker_external_transfer_url_and_source_validation(tmp_path, monkeypatc
         remote_module._worker_validate_external_transfer_url("ftp://x.test/file")
     with pytest.raises(ValueError, match="size mismatch"):
         remote_module._worker_put_url("source.bin", "https://x.test/file", 99, digest)
-    with pytest.raises(ValueError, match="sha256 mismatch"):
-        remote_module._worker_put_url("source.bin", "https://x.test/file", 7, "0" * 64)
     with pytest.raises(ValueError, match="source is not a file"):
         remote_module._worker_put_url(".", "https://x.test/file", 0, digest)
 

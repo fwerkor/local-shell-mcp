@@ -474,6 +474,41 @@ def transfer_write_bytes(
     )
 
 
+def transfer_prepare_stream_write(path: str, transfer_id: str) -> dict[str, Any]:
+    """Reset a transactional temp file for one sequential raw-binary upload."""
+
+    dst = resolve_path(path, follow_final_symlink=False)
+    tmp = _transfer_temp_path(dst, transfer_id)
+    metadata_path = _transfer_metadata_path(tmp)
+    refresh_temp_file_lease(tmp, create=False)
+    refresh_temp_file_lease(metadata_path, create=False)
+    with _path_lock(tmp):
+        if not tmp.exists():
+            raise FileNotFoundError(str(tmp))
+        metadata = _read_transfer_metadata(tmp)
+        with tmp.open("wb"):
+            pass
+        metadata["received_ranges"] = []
+        _write_transfer_metadata(tmp, metadata)
+    return {
+        "path": relative_display(dst),
+        "temp_path": str(tmp),
+        "expected_bytes": metadata.get("expected_bytes"),
+    }
+
+
+def transfer_refresh_stream_write(path: str, transfer_id: str) -> None:
+    """Refresh temp-file leases for an active sequential raw-binary upload."""
+
+    dst = resolve_path(path, follow_final_symlink=False)
+    tmp = _transfer_temp_path(dst, transfer_id)
+    metadata_path = _transfer_metadata_path(tmp)
+    if not tmp.exists() or not metadata_path.exists():
+        raise FileNotFoundError(str(tmp if not tmp.exists() else metadata_path))
+    refresh_temp_file_lease(tmp, create=False)
+    refresh_temp_file_lease(metadata_path, create=False)
+
+
 def transfer_mark_complete_write(path: str, transfer_id: str) -> dict[str, Any]:
     """Record that an external sequential writer populated the whole transfer temp file."""
 
@@ -498,11 +533,12 @@ def transfer_mark_complete_write(path: str, transfer_id: str) -> dict[str, Any]:
     }
 
 
-def transfer_finish_write(
+def _finish_transfer_write(
     path: str,
     transfer_id: str,
     expected_bytes: int | None = None,
     expected_sha256: str | None = None,
+    mark_complete: bool = False,
 ) -> dict[str, Any]:
     dst = resolve_path(path, follow_final_symlink=False)
     tmp = _transfer_temp_path(dst, transfer_id)
@@ -521,6 +557,9 @@ def transfer_finish_write(
         size = tmp.stat().st_size
         if expected is not None and size != expected:
             raise ValueError(f"size mismatch: expected {expected}, got {size}")
+        if mark_complete:
+            metadata["received_ranges"] = [] if size == 0 else [[0, size]]
+            _write_transfer_metadata(tmp, metadata)
         received = _received_ranges(metadata)
         required_size = size if expected is None else expected
         complete = received == [] if required_size == 0 else received == [[0, required_size]]
@@ -547,6 +586,45 @@ def transfer_finish_write(
         "sha256": digest,
         "completed": True,
     }
+
+
+def transfer_finish_write(
+    path: str,
+    transfer_id: str,
+    expected_bytes: int | None = None,
+    expected_sha256: str | None = None,
+) -> dict[str, Any]:
+    return _finish_transfer_write(
+        path,
+        transfer_id,
+        expected_bytes,
+        expected_sha256,
+    )
+
+
+def transfer_finish_verified_write(
+    path: str,
+    transfer_id: str,
+    expected_bytes: int,
+    expected_sha256: str,
+    verified_sha256: str,
+) -> dict[str, Any]:
+    """Commit a sequential upload after checking its streaming and staged digests."""
+
+    streamed_digest = str(verified_sha256).lower()
+    if len(streamed_digest) != 64 or any(
+        character not in "0123456789abcdef" for character in streamed_digest
+    ):
+        raise ValueError("verified_sha256 must be a SHA-256 digest")
+    if streamed_digest != str(expected_sha256).lower():
+        raise ValueError("file sha256 mismatch")
+    return _finish_transfer_write(
+        path,
+        transfer_id,
+        expected_bytes,
+        expected_sha256,
+        mark_complete=True,
+    )
 
 
 def transfer_abort_write(path: str, transfer_id: str) -> dict[str, Any]:

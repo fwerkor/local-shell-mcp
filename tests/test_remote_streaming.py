@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import os
+import threading
 from pathlib import Path
 
 import pytest
@@ -17,6 +20,7 @@ from local_shell_mcp.remote_transfer import (
     revoke_transfer_ticket,
 )
 from local_shell_mcp.settings import get_settings
+from local_shell_mcp.transfer_ops import transfer_finish_write
 
 
 def _client(tmp_path, monkeypatch, *, request_limit: int = 1024) -> TestClient:
@@ -39,7 +43,7 @@ def test_stream_upload_bypasses_json_body_limit_and_retains_status(tmp_path, mon
     response = client.put(ticket["url"], content=data)
 
     assert response.status_code == 200
-    assert response.json()["data"]["transport"] == "http-chunks"
+    assert response.json()["data"]["transport"] == "http-stream"
     assert (tmp_path / "artifact.bin").read_bytes() == data
     repeated = client.put(ticket["url"], content=data)
     assert repeated.status_code == 200
@@ -134,11 +138,16 @@ def test_chunk_upload_rejects_bad_hash_and_oversized_legacy_request(tmp_path, mo
     assert response.status_code == 400
     revoke_transfer_ticket(ticket["token"])
 
-    oversized = remote_transfer.MAX_TRANSFER_CHUNK_BYTES + 1
-    ticket = create_upload_ticket("oversized.bin", oversized, "0" * 64)
-    response = client.put(ticket["url"], content=b"")
-    assert response.status_code == 400
-    assert "update the remote worker" in response.json()["message"]
+    oversized_data = b"x" * (remote_transfer.MAX_TRANSFER_CHUNK_BYTES + 1)
+    ticket = create_upload_ticket(
+        "oversized.bin",
+        len(oversized_data),
+        hashlib.sha256(oversized_data).hexdigest(),
+    )
+    response = client.put(ticket["url"], content=oversized_data)
+    assert response.status_code == 200
+    assert response.json()["data"]["transport"] == "http-stream"
+    assert (tmp_path / "oversized.bin").read_bytes() == oversized_data
     revoke_transfer_ticket(ticket["token"])
 
 
@@ -215,6 +224,147 @@ def test_stream_download_is_exact_and_one_time(tmp_path, monkeypatch):
     assert response.headers["content-length"] == str(len(data))
     assert response.headers["x-content-sha256"] == digest
     assert client.get(ticket["url"]).status_code == 404
+
+
+
+
+
+def test_stream_ticket_creation_does_not_read_source(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"x" * (remote_transfer._TRANSFER_CHUNK_BYTES + 17))
+    original_open = Path.open
+    reads = 0
+
+    class TrackedFile:
+        def __init__(self, handle):
+            self._handle = handle
+
+        def read(self, *args, **kwargs):
+            nonlocal reads
+            reads += 1
+            return self._handle.read(*args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._handle, name)
+
+    def tracked_open(path, *args, **kwargs):
+        handle = original_open(path, *args, **kwargs)
+        if path == source and args and args[0] == "rb":
+            return TrackedFile(handle)
+        return handle
+
+    monkeypatch.setattr(Path, "open", tracked_open)
+
+    ticket = remote_transfer.create_stream_download_ticket("source.bin")
+
+    assert ticket["sha256"] is None
+    assert reads == 0
+    revoke_transfer_ticket(ticket["token"])
+
+
+def test_stream_ticket_reports_digest_computed_by_actual_download(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    data = b"single-pass-download" * 65536
+    (tmp_path / "source.bin").write_bytes(data)
+    ticket = remote_transfer.create_stream_download_ticket("source.bin")
+
+    response = client.get(ticket["url"])
+    status = remote_transfer.get_download_ticket_status(ticket["token"])
+
+    assert response.status_code == 200
+    assert response.content == data
+    assert "x-content-sha256" not in response.headers
+    assert status["completed"] is True
+    assert status["sha256"] == hashlib.sha256(data).hexdigest()
+    assert client.get(ticket["url"]).status_code == 404
+    revoke_transfer_ticket(ticket["token"])
+
+
+def test_stream_download_ticket_validates_expected_metadata(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    data = b"validated-stream"
+    source = tmp_path / "source.bin"
+    source.write_bytes(data)
+    digest = hashlib.sha256(data).hexdigest()
+
+    with pytest.raises(ValueError, match="must be provided together"):
+        remote_transfer.create_stream_download_ticket("source.bin", expected_bytes=len(data))
+    with pytest.raises(ValueError, match="size mismatch"):
+        remote_transfer.create_stream_download_ticket("source.bin", len(data) + 1, digest)
+    ticket_info = remote_transfer.create_stream_download_ticket(
+        "source.bin",
+        len(data),
+        hashlib.sha256(b"different").hexdigest(),
+    )
+    ticket = remote_transfer._claim_ticket(ticket_info["token"], "download")
+    _, handle = remote_transfer._open_download(ticket)
+    iterator = remote_transfer._download_iterator(ticket_info["token"], ticket, handle)
+    with pytest.raises(RuntimeError, match="checksum changed"):
+        b"".join(iterator)
+    revoke_transfer_ticket(ticket_info["token"])
+
+
+def test_stream_download_cleanup_preserves_atomic_replacement(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    original = b"original-cleanup"
+    replacement_data = b"replacement-data"
+    assert len(original) == len(replacement_data)
+    source = tmp_path / "source.bin"
+    source.write_bytes(original)
+    ticket = remote_transfer.create_stream_download_ticket("source.bin", cleanup_source=True)
+    replacement = tmp_path / "replacement.bin"
+    replacement.write_bytes(replacement_data)
+    try:
+        replacement.replace(source)
+    except OSError:
+        revoke_transfer_ticket(ticket["token"])
+        pytest.skip("platform does not permit atomic replacement of an open file")
+
+    revoke_transfer_ticket(ticket["token"])
+
+    assert source.read_bytes() == replacement_data
+
+
+def test_stream_download_ticket_stays_bound_after_atomic_replace(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    original = b"original-stream" * 131072
+    replacement_data = b"replaced-stream" * 131072
+    assert len(original) == len(replacement_data)
+    source = tmp_path / "source.bin"
+    source.write_bytes(original)
+    ticket = remote_transfer.create_stream_download_ticket("source.bin")
+    replacement = tmp_path / "replacement.bin"
+    replacement.write_bytes(replacement_data)
+    try:
+        replacement.replace(source)
+    except OSError:
+        revoke_transfer_ticket(ticket["token"])
+        pytest.skip("platform does not permit atomic replacement of an open file")
+
+    response = client.get(ticket["url"])
+
+    assert response.status_code == 200
+    assert response.content == original
+    assert source.read_bytes() == replacement_data
+
+
+def test_stream_download_rejects_in_place_mutation_before_yield(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    original = b"a" * (remote_transfer._TRANSFER_CHUNK_BYTES + 17)
+    mutated = b"b" * len(original)
+    source = tmp_path / "source.bin"
+    source.write_bytes(original)
+    ticket_info = remote_transfer.create_stream_download_ticket("source.bin")
+    ticket = remote_transfer._claim_ticket(ticket_info["token"], "download")
+    _, handle = remote_transfer._open_download(ticket)
+    source.write_bytes(mutated)
+    iterator = remote_transfer._download_iterator(ticket_info["token"], ticket, handle)
+
+    with pytest.raises(RuntimeError, match="source changed"):
+        next(iterator)
+
+    revoke_transfer_ticket(ticket_info["token"])
 
 
 def test_stale_orphan_download_snapshot_is_scavenged(tmp_path, monkeypatch):
@@ -350,8 +500,513 @@ def test_worker_upload_uses_raw_chunk_endpoint(tmp_path, monkeypatch):
     assert (tmp_path / "destination.bin").read_bytes() == data
 
 
+
+
+
+def test_unknown_digest_upload_stages_until_explicit_finalize(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    data = b"single-pass-upload" * 65536
+    digest = hashlib.sha256(data).hexdigest()
+    (tmp_path / "destination.bin").write_bytes(b"old")
+    ticket = create_upload_ticket("destination.bin", len(data), None)
+
+    response = client.put(ticket["url"], content=data)
+    status = remote_transfer.get_upload_ticket_status(ticket["token"])
+
+    assert response.status_code == 200
+    assert status["staged"] is True
+    assert status["completed"] is False
+    assert status["sha256"] == digest
+    assert (tmp_path / "destination.bin").read_bytes() == b"old"
+
+    finish = remote_transfer.finalize_upload_ticket(ticket["token"], digest)
+
+    assert finish["completed"] is True
+    assert finish["sha256"] == digest
+    assert (tmp_path / "destination.bin").read_bytes() == data
+    revoke_transfer_ticket(ticket["token"])
+
+
+def test_unknown_digest_ticket_status_and_finalize_errors(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    data = b"state-machine-payload"
+    digest = hashlib.sha256(data).hexdigest()
+
+    (tmp_path / "source.bin").write_bytes(data)
+    download = remote_transfer.create_stream_download_ticket("source.bin")
+    pending = remote_transfer.get_download_ticket_status(download["token"])
+    assert pending["completed"] is False
+    assert pending["received_bytes"] == 0
+    assert pending["sha256"] is None
+
+    upload = create_upload_ticket("destination.bin", len(data), None)
+    with pytest.raises(PermissionError, match="direction mismatch"):
+        remote_transfer.get_download_ticket_status(upload["token"])
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        remote_transfer.get_download_ticket_status("missing")
+    with pytest.raises(ValueError, match="incomplete"):
+        remote_transfer.finalize_upload_ticket(upload["token"], digest)
+
+    response = client.put(upload["url"], content=data)
+    assert response.status_code == 200
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        remote_transfer.finalize_upload_ticket(
+            upload["token"], hashlib.sha256(b"different").hexdigest()
+        )
+
+    finish = remote_transfer.finalize_upload_ticket(upload["token"], digest)
+    assert remote_transfer.finalize_upload_ticket(upload["token"], digest) == finish
+
+    revoke_transfer_ticket(download["token"])
+    revoke_transfer_ticket(upload["token"])
+
+
+@pytest.mark.asyncio
+async def test_upload_transaction_guards_and_stream_size_validation(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    data = b"guarded"
+    digest = hashlib.sha256(data).hexdigest()
+    ticket_info = create_upload_ticket("destination.bin", len(data), None)
+    ticket = remote_transfer._TICKETS[ticket_info["token"]]
+    transfer_id = ticket.transfer_id
+
+    ticket.transfer_id = None
+    with pytest.raises(RuntimeError, match="transaction is unavailable"):
+        remote_transfer._write_upload_chunk(ticket, 0, len(data), data)
+    with pytest.raises(RuntimeError, match="transaction is unavailable"):
+        remote_transfer._finish_upload_transaction(ticket_info["token"], ticket)
+    with pytest.raises(RuntimeError, match="transaction is unavailable"):
+        await remote_transfer._stream_full_upload(None, ticket_info["token"], ticket)
+    with pytest.raises(RuntimeError, match="transaction is unavailable"):
+        remote_transfer.finalize_upload_ticket(ticket_info["token"], digest)
+
+    ticket.transfer_id = transfer_id
+    with pytest.raises(RuntimeError, match="no verified digest"):
+        remote_transfer._finish_upload_transaction(ticket_info["token"], ticket)
+
+    class ShortRequest:
+        async def stream(self):
+            yield data[:-1]
+
+    with pytest.raises(ValueError, match="size mismatch"):
+        await remote_transfer._stream_full_upload(
+            ShortRequest(), ticket_info["token"], ticket
+        )
+
+    revoke_transfer_ticket(ticket_info["token"])
+
+
+@pytest.mark.asyncio
+async def test_stream_upload_rejects_more_than_declared_size(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    ticket_info = create_upload_ticket("destination.bin", 3, None)
+    ticket = remote_transfer._TICKETS[ticket_info["token"]]
+
+    class OversizedRequest:
+        async def stream(self):
+            yield b"four"
+
+    with pytest.raises(ValueError, match="exceeds declared size"):
+        await remote_transfer._stream_full_upload(
+            OversizedRequest(), ticket_info["token"], ticket
+        )
+
+    assert not (tmp_path / "destination.bin").exists()
+    revoke_transfer_ticket(ticket_info["token"])
+
+
+def test_stream_download_rejects_size_change_before_open(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"original")
+    ticket_info = remote_transfer.create_stream_download_ticket("source.bin")
+    ticket = remote_transfer._claim_ticket(ticket_info["token"], "download")
+    source.write_bytes(b"x")
+
+    with pytest.raises(ValueError, match="size mismatch"):
+        remote_transfer._open_download(ticket)
+
+    revoke_transfer_ticket(ticket_info["token"])
+
+
+def test_stream_download_rejects_known_digest_mismatch(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch)
+    data = b"actual-stream"
+    source = tmp_path / "source.bin"
+    source.write_bytes(data)
+    ticket_info = remote_transfer.create_stream_download_ticket(
+        "source.bin",
+        len(data),
+        hashlib.sha256(b"different-data").hexdigest(),
+    )
+    ticket = remote_transfer._claim_ticket(ticket_info["token"], "download")
+    _, handle = remote_transfer._open_download(ticket)
+
+    with pytest.raises(RuntimeError, match="checksum changed"):
+        list(remote_transfer._download_iterator(ticket_info["token"], ticket, handle))
+
+    revoke_transfer_ticket(ticket_info["token"])
+
+
+def test_worker_unknown_digest_put_streams_pinned_source_once(tmp_path, monkeypatch):
+    import local_shell_mcp.remote as remote
+
+    _client(tmp_path, monkeypatch)
+    data = b"a" * (remote.DEFAULT_TRANSFER_CHUNK_BYTES + 17)
+    replacement_data = b"b" * len(data)
+    source = tmp_path / "source.bin"
+    source.write_bytes(data)
+    replacement = tmp_path / "replacement.bin"
+    replacement.write_bytes(replacement_data)
+    sent = bytearray()
+
+    class FakeStdin:
+        def __init__(self):
+            self.replaced = False
+
+        def write(self, chunk):
+            sent.extend(chunk)
+            if not self.replaced:
+                self.replaced = True
+                try:
+                    replacement.replace(source)
+                except OSError:
+                    pytest.skip("platform does not permit replacing an open source file")
+            return len(chunk)
+
+        def flush(self):
+            return None
+
+        def close(self):
+            return None
+
+    class FakeProcess:
+        def __init__(self, command, **kwargs):
+            del command, kwargs
+            self.stdin = FakeStdin()
+            self.returncode = 0
+
+        def communicate(self):
+            return b"\n__LSM_HTTP_STATUS__:200", b""
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(remote.shutil, "which", lambda name: "/usr/bin/curl")
+    monkeypatch.setattr(remote.subprocess, "Popen", FakeProcess)
+
+    result = remote._worker_put_url(
+        "source.bin",
+        "http://testserver/upload",
+        len(data),
+        None,
+        60,
+    )
+
+    assert bytes(sent) == data
+    assert result["sha256"] == hashlib.sha256(data).hexdigest()
+    assert source.read_bytes() == replacement_data
+
+
+def test_worker_unknown_digest_put_rejects_in_place_mutation(tmp_path, monkeypatch):
+    import local_shell_mcp.remote as remote
+
+    _client(tmp_path, monkeypatch)
+    data = b"a" * (remote.DEFAULT_TRANSFER_CHUNK_BYTES + 17)
+    source = tmp_path / "source.bin"
+    source.write_bytes(data)
+    original_mtime = source.stat().st_mtime_ns
+    killed = False
+
+    class FakeStdin:
+        def __init__(self):
+            self.mutated = False
+
+        def write(self, chunk):
+            if not self.mutated:
+                self.mutated = True
+                source.write_bytes(b"b" * len(data))
+                os.utime(
+                    source,
+                    ns=(source.stat().st_atime_ns, original_mtime + 1_000_000),
+                )
+            return len(chunk)
+
+        def flush(self):
+            return None
+
+        def close(self):
+            return None
+
+    class FakeProcess:
+        def __init__(self, command, **kwargs):
+            del command, kwargs
+            self.stdin = FakeStdin()
+            self.returncode = None
+
+        def communicate(self):
+            return b"", b""
+
+        def kill(self):
+            nonlocal killed
+            killed = True
+            self.returncode = -9
+
+    monkeypatch.setattr(remote.shutil, "which", lambda name: "/usr/bin/curl")
+    monkeypatch.setattr(remote.subprocess, "Popen", FakeProcess)
+
+    with pytest.raises(RuntimeError, match="source changed"):
+        remote._worker_put_url(
+            "source.bin",
+            "http://testserver/upload",
+            len(data),
+            None,
+            60,
+        )
+
+    assert killed is True
+
+
+@pytest.mark.parametrize(
+    ("mode", "message"),
+    [
+        ("no_stdin", "stdin is unavailable"),
+        ("short_write", "accepted"),
+        ("broken_pipe", "HTTP 400"),
+        ("bad_status", "invalid HTTP status"),
+        ("no_marker", "invalid response"),
+        ("curl_error", "curl exit 7"),
+    ],
+)
+def test_worker_unknown_digest_put_reports_stream_failures(
+    tmp_path, monkeypatch, mode, message
+):
+    import local_shell_mcp.remote as remote
+
+    _client(tmp_path, monkeypatch)
+    data = b"stream-failure"
+    (tmp_path / "source.bin").write_bytes(data)
+
+    class FakeStdin:
+        def write(self, chunk):
+            if mode == "short_write":
+                return len(chunk) - 1
+            if mode == "broken_pipe":
+                raise BrokenPipeError
+            return len(chunk)
+
+        def flush(self):
+            return None
+
+        def close(self):
+            return None
+
+    class FakeProcess:
+        def __init__(self, command, **kwargs):
+            del command, kwargs
+            self.stdin = None if mode == "no_stdin" else FakeStdin()
+            self.returncode = 7 if mode == "curl_error" else 0
+
+        def communicate(self):
+            if mode == "bad_status":
+                return b"\n__LSM_HTTP_STATUS__:bad", b""
+            if mode == "no_marker":
+                return b"invalid", b""
+            if mode == "broken_pipe":
+                return b"\n__LSM_HTTP_STATUS__:400", b""
+            if mode == "curl_error":
+                return b"", b"network"
+            return b"\n__LSM_HTTP_STATUS__:200", b""
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(remote.shutil, "which", lambda name: "/usr/bin/curl")
+    monkeypatch.setattr(remote.subprocess, "Popen", FakeProcess)
+
+    with pytest.raises(RuntimeError, match=message):
+        remote._worker_put_url(
+            "source.bin",
+            "http://testserver/upload",
+            len(data),
+            None,
+            60,
+        )
+
+
+def test_worker_unknown_digest_put_requires_curl(tmp_path, monkeypatch):
+    import local_shell_mcp.remote as remote
+
+    _client(tmp_path, monkeypatch)
+    data = b"payload"
+    (tmp_path / "source.bin").write_bytes(data)
+    monkeypatch.setattr(remote.shutil, "which", lambda name: None)
+
+    with pytest.raises(FileNotFoundError, match="curl is required"):
+        remote._worker_put_url(
+            "source.bin",
+            "http://testserver/upload",
+            len(data),
+            None,
+            60,
+        )
+
+
+@pytest.mark.asyncio
+async def test_worker_stream_put_cancellation_kills_curl(tmp_path, monkeypatch):
+    import local_shell_mcp.remote as remote
+
+    _client(tmp_path, monkeypatch)
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    digest = hashlib.sha256(b"payload").hexdigest()
+    monkeypatch.setattr(remote, "_worker_identity_path", lambda: _worker_identity(tmp_path))
+    monkeypatch.setattr(remote.shutil, "which", lambda name: "/usr/bin/curl")
+    started = threading.Event()
+    killed = threading.Event()
+
+    class FakeProcess:
+        def __init__(self, command, **kwargs):
+            del command, kwargs
+            self.returncode = None
+            started.set()
+
+        def communicate(self):
+            assert killed.wait(2)
+            self.returncode = -9
+            return b"", b"cancelled"
+
+        def kill(self):
+            self.returncode = -9
+            killed.set()
+
+    monkeypatch.setattr(remote.subprocess, "Popen", FakeProcess)
+
+    task = asyncio.create_task(
+        remote._worker_put_url_cancellable(
+            "source.bin",
+            "http://testserver/upload",
+            len(b"payload"),
+            digest,
+            60,
+        )
+    )
+    assert await asyncio.to_thread(started.wait, 2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert killed.is_set()
+    assert "transfer_put_url" not in remote.REMOTE_NON_CANCELLABLE_WORKER_TOOLS
+
+
+def test_stream_upload_rejects_staged_file_changed_after_hash(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    data = b"verified-stream"
+    digest = hashlib.sha256(data).hexdigest()
+    ticket = create_upload_ticket("artifact.bin", len(data), digest)
+    original_finish = remote_transfer.transfer_finish_verified_write
+
+    def mutate_before_commit(path, transfer_id, *args):
+        temporary = next(tmp_path.glob(".artifact.bin.local-shell-mcp-transfer-*.tmp"))
+        temporary.write_bytes(b"x" * len(data))
+        return original_finish(path, transfer_id, *args)
+
+    monkeypatch.setattr(remote_transfer, "transfer_finish_verified_write", mutate_before_commit)
+
+    response = client.put(ticket["url"], content=data)
+
+    assert response.status_code == 400
+    assert "file sha256 mismatch" in response.json()["message"]
+    assert not (tmp_path / "artifact.bin").exists()
+
+
+@pytest.mark.asyncio
+async def test_stream_write_lease_refresher_renews_until_cancel(monkeypatch):
+    calls: list[tuple[str, str]] = []
+    refreshed = threading.Event()
+
+    def refresh(path, transfer_id):
+        calls.append((path, transfer_id))
+        refreshed.set()
+
+    monkeypatch.setattr(remote_transfer, "_STREAM_LEASE_REFRESH_INTERVAL_S", 0)
+    monkeypatch.setattr(remote_transfer, "transfer_refresh_stream_write", refresh)
+
+    task = asyncio.create_task(remote_transfer._refresh_stream_write_leases("artifact.bin", "txn"))
+    assert await asyncio.to_thread(refreshed.wait, 2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert calls
+    assert all(call == ("artifact.bin", "txn") for call in calls)
+
+
+def test_worker_download_deferred_commit_keeps_old_destination_until_verified(
+    tmp_path, monkeypatch
+):
+    from pathlib import Path
+    from urllib.parse import urlsplit
+
+    import local_shell_mcp.remote as remote
+
+    client = _client(tmp_path, monkeypatch)
+    data = b"deferred-download" * 65536
+    digest = hashlib.sha256(data).hexdigest()
+    (tmp_path / "source.bin").write_bytes(data)
+    (tmp_path / "destination.bin").write_bytes(b"old")
+    ticket = remote_transfer.create_stream_download_ticket("source.bin")
+    monkeypatch.setattr(remote, "_worker_identity_path", lambda: _worker_identity(tmp_path))
+    monkeypatch.setattr(remote.shutil, "which", lambda name: "/usr/bin/curl")
+
+    class FakeProcess:
+        def __init__(self, command, **kwargs):
+            del kwargs
+            self.command = command
+            self.returncode = None
+
+        def communicate(self, timeout=None):
+            del timeout
+            output = Path(self.command[self.command.index("-o") + 1])
+            response = client.get(urlsplit(self.command[-1]).path)
+            output.write_bytes(response.content)
+            self.returncode = 0
+            return b"", b""
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(remote.subprocess, "Popen", FakeProcess)
+
+    staged = remote._worker_download_url(
+        ticket["url"],
+        "destination.bin",
+        True,
+        len(data),
+        None,
+        60,
+        defer_commit=True,
+    )
+
+    assert (tmp_path / "destination.bin").read_bytes() == b"old"
+    assert (tmp_path / staged["temp_path"]).is_file()
+    status = remote_transfer.get_download_ticket_status(ticket["token"])
+    assert status["sha256"] == digest
+
+    finish = transfer_finish_write(
+        "destination.bin",
+        staged["transfer_id"],
+        len(data),
+        status["sha256"],
+    )
+
+    assert finish["sha256"] == digest
+    assert (tmp_path / "destination.bin").read_bytes() == data
+    revoke_transfer_ticket(ticket["token"])
+
+
 def test_worker_download_is_transactional_and_verified(tmp_path, monkeypatch):
-    import subprocess
     from pathlib import Path
     from urllib.parse import urlsplit
 
@@ -366,19 +1021,24 @@ def test_worker_download_is_transactional_and_verified(tmp_path, monkeypatch):
     monkeypatch.setattr(remote, "_worker_identity_path", lambda: _worker_identity(tmp_path))
     monkeypatch.setattr(remote.shutil, "which", lambda name: "/usr/bin/curl")
 
-    def fake_run(command, **kwargs):
-        del kwargs
-        output = Path(command[command.index("-o") + 1])
-        response = client.get(urlsplit(command[-1]).path)
-        output.write_bytes(response.content)
-        return subprocess.CompletedProcess(
-            command,
-            0 if response.status_code < 400 else 22,
-            stdout="",
-            stderr="",
-        )
+    class FakeProcess:
+        def __init__(self, command, **kwargs):
+            del kwargs
+            self.command = command
+            self.returncode = None
 
-    monkeypatch.setattr(remote.subprocess, "run", fake_run)
+        def communicate(self, timeout=None):
+            del timeout
+            output = Path(self.command[self.command.index("-o") + 1])
+            response = client.get(urlsplit(self.command[-1]).path)
+            output.write_bytes(response.content)
+            self.returncode = 0 if response.status_code < 400 else 22
+            return b"", b""
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(remote.subprocess, "Popen", FakeProcess)
 
     result = remote._worker_download_url(
         ticket["url"], "destination.bin", True, len(data), digest, 60
@@ -386,6 +1046,107 @@ def test_worker_download_is_transactional_and_verified(tmp_path, monkeypatch):
 
     assert result["transport"] == "http-stream"
     assert (tmp_path / "destination.bin").read_bytes() == data
+    assert not list(tmp_path.glob(".destination.bin.local-shell-mcp-transfer-*.tmp"))
+
+
+def test_worker_download_refreshes_transaction_lease(tmp_path, monkeypatch):
+    import subprocess
+    from pathlib import Path
+    from urllib.parse import urlsplit
+
+    import local_shell_mcp.remote as remote
+
+    client = _client(tmp_path, monkeypatch)
+    data = b"lease-refresh-download"
+    digest = hashlib.sha256(data).hexdigest()
+    (tmp_path / "source.bin").write_bytes(data)
+    ticket = create_download_ticket("source.bin", len(data), digest)
+    monkeypatch.setattr(remote, "_worker_identity_path", lambda: _worker_identity(tmp_path))
+    monkeypatch.setattr(remote.shutil, "which", lambda name: "/usr/bin/curl")
+    refreshed: list[tuple[str, str]] = []
+
+    def record_refresh(path, transfer_id):
+        refreshed.append((path, transfer_id))
+
+    monkeypatch.setattr(remote, "transfer_refresh_stream_write", record_refresh)
+
+    class FakeProcess:
+        def __init__(self, command, **kwargs):
+            del kwargs
+            self.command = command
+            self.returncode = None
+            self.calls = 0
+
+        def communicate(self, timeout=None):
+            self.calls += 1
+            if self.calls == 1:
+                raise subprocess.TimeoutExpired(self.command, timeout)
+            output = Path(self.command[self.command.index("-o") + 1])
+            response = client.get(urlsplit(self.command[-1]).path)
+            output.write_bytes(response.content)
+            self.returncode = 0
+            return b"", b""
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(remote.subprocess, "Popen", FakeProcess)
+
+    result = remote._worker_download_url(
+        ticket["url"], "destination.bin", True, len(data), digest, 60
+    )
+
+    assert result["transport"] == "http-stream"
+    assert refreshed
+    assert refreshed[0][0] == "destination.bin"
+
+
+@pytest.mark.asyncio
+async def test_worker_stream_download_cancellation_kills_curl(tmp_path, monkeypatch):
+    import local_shell_mcp.remote as remote
+
+    _client(tmp_path, monkeypatch)
+    monkeypatch.setattr(remote, "_worker_identity_path", lambda: _worker_identity(tmp_path))
+    monkeypatch.setattr(remote.shutil, "which", lambda name: "/usr/bin/curl")
+    started = threading.Event()
+    killed = threading.Event()
+
+    class FakeProcess:
+        def __init__(self, command, **kwargs):
+            del command, kwargs
+            self.returncode = None
+            started.set()
+
+        def communicate(self, timeout=None):
+            del timeout
+            assert killed.wait(2)
+            self.returncode = -9
+            return b"", b"cancelled"
+
+        def kill(self):
+            self.returncode = -9
+            killed.set()
+
+    monkeypatch.setattr(remote.subprocess, "Popen", FakeProcess)
+
+    task = asyncio.create_task(
+        remote._worker_download_url_cancellable(
+            "http://testserver/remote/transfer/download/fake",
+            "destination.bin",
+            True,
+            len(b"payload"),
+            hashlib.sha256(b"payload").hexdigest(),
+            60,
+        )
+    )
+    assert await asyncio.to_thread(started.wait, 2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert killed.is_set()
+    assert "transfer_download_url" not in remote.REMOTE_NON_CANCELLABLE_WORKER_TOOLS
+    assert not (tmp_path / "destination.bin").exists()
     assert not list(tmp_path.glob(".destination.bin.local-shell-mcp-transfer-*.tmp"))
 
 
