@@ -11,12 +11,13 @@ from local_shell_mcp.gui.base import (
     GuiSnapshot,
     GuiStaleStateError,
     GuiUnavailableError,
+    quantize_scroll_amount,
 )
-from local_shell_mcp.gui.linux import _session_type
+from local_shell_mcp.gui.linux import _desktop_crop_box, _session_type
 from local_shell_mcp.gui.linux_portal import _keysym
-from local_shell_mcp.gui.macos import _cg_bounds
+from local_shell_mcp.gui.macos import _MAC_KEY_CODES, MacOSGuiBackend, _cg_bounds
 from local_shell_mcp.gui.macos import _key_parts as mac_key_parts
-from local_shell_mcp.gui.windows import _key_sequence, _rect_dict
+from local_shell_mcp.gui.windows import WindowsGuiBackend, _key_sequence, _rect_dict
 
 
 class FakeBackend:
@@ -99,6 +100,12 @@ async def test_gui_manager_state_is_single_use_and_resolves_element(tmp_path, mo
         [{"type": "click", "element_id": "e1"}],
     )
 
+    assert state["elements"][0]["bounds"] == {
+        "x": 10,
+        "y": 10,
+        "width": 80,
+        "height": 30,
+    }
     assert result["state_consumed"] is True
     assert backend.actions[0][1] == "native-element"
     with pytest.raises(GuiStaleStateError, match="stale"):
@@ -484,6 +491,8 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
                 "capabilities": {},
                 "screenshot_path": ".local-shell-mcp/tmp/remote.png",
             }
+        if tool == "gui_state_refresh":
+            return {"state_id": "s", "state_ttl_s": 30}
         return {"deleted": True}
 
     async def remote_transfer(machine, tool, args, timeout_s=None):
@@ -524,7 +533,11 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
     assert result.isError is False
     assert result.structuredContent["machine"] == "node"
     assert result.structuredContent["screenshot"] is True
-    assert [call[1] for call in calls] == ["gui_state", "delete_file_or_dir"]
+    assert [call[1] for call in calls] == [
+        "gui_state",
+        "delete_file_or_dir",
+        "gui_state_refresh",
+    ]
 
     async def invalid_remote(*args, **kwargs):
         return "bad"
@@ -639,3 +652,263 @@ async def test_gui_manager_cleans_missing_or_invalid_backend_screenshots(tmp_pat
     with pytest.raises(UnidentifiedImageError):
         await GuiManager(InvalidImageBackend()).snapshot("window:1", screenshot=True)
     assert not list((tmp_path / ".state").rglob("gui-*.png"))
+
+
+@pytest.mark.asyncio
+async def test_gui_manager_rechecks_geometry_before_each_coordinate_action(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+
+    class MovingBackend(FakeBackend):
+        async def perform_action(self, window, locator, action):
+            result = await super().perform_action(window, locator, action)
+            if action["type"] == "wait":
+                self.bounds["x"] += 5
+            return result
+
+    backend = MovingBackend()
+    manager = GuiManager(backend)
+    state = await manager.snapshot("window:1", screenshot=False)
+
+    with pytest.raises(GuiStaleStateError, match="moved or resized"):
+        await manager.act(
+            "window:1",
+            state["state_id"],
+            [
+                {"type": "wait", "seconds": 0},
+                {"type": "click", "x": 10, "y": 10},
+            ],
+        )
+    assert [action[2]["type"] for action in backend.actions] == ["wait"]
+
+
+@pytest.mark.asyncio
+async def test_gui_manager_checks_element_actions_that_can_fall_back_to_coordinates(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    backend = FakeBackend()
+    manager = GuiManager(backend)
+    state = await manager.snapshot("window:1", screenshot=False)
+    backend.bounds["y"] += 7
+
+    with pytest.raises(GuiStaleStateError, match="moved or resized"):
+        await manager.act(
+            "window:1",
+            state["state_id"],
+            [{"type": "click", "element_id": "e1"}],
+        )
+    assert backend.actions == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "action",
+    [
+        {"type": "click", "x": -1, "y": 0},
+        {"type": "move", "x": 300, "y": 0},
+        {"type": "scroll", "x": 0, "y": 200, "delta_y": -1},
+        {"type": "drag", "x": 1, "y": 1, "to_x": 300, "to_y": 10},
+    ],
+)
+async def test_gui_manager_rejects_points_outside_selected_window(
+    tmp_path, monkeypatch, action
+):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    backend = FakeBackend()
+    manager = GuiManager(backend)
+    state = await manager.snapshot("window:1", screenshot=False)
+
+    with pytest.raises(ValueError, match="outside the selected window"):
+        await manager.act("window:1", state["state_id"], [action])
+    assert backend.actions == []
+
+
+@pytest.mark.asyncio
+async def test_gui_manager_refreshes_remote_state_ttl(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.base as base
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    manager = GuiManager(FakeBackend())
+    state = await manager.snapshot("window:1", screenshot=False)
+    record = manager._states[state["state_id"]]
+    record.created_at -= base.GUI_STATE_TTL_S - 1
+
+    refreshed = await manager.refresh_state("window:1", state["state_id"])
+    assert refreshed["state_ttl_s"] == base.GUI_STATE_TTL_S
+    assert record.created_at > 0
+    result = await manager.act(
+        "window:1",
+        state["state_id"],
+        [{"type": "wait", "seconds": 0}],
+    )
+    assert result["state_consumed"] is True
+
+
+def test_scroll_quantization_and_platform_key_edge_cases():
+    assert quantize_scroll_amount(0) == 0
+    assert quantize_scroll_amount(-0.5) == -1
+    assert quantize_scroll_amount(0.5) == 1
+    assert quantize_scroll_amount(-101) == -100
+    assert _MAC_KEY_CODES["BACKSPACE"] == 51
+    assert _MAC_KEY_CODES["DELETE"] == 117
+    assert _rect_dict(None) == {"x": 0, "y": 0, "width": 0, "height": 0}
+
+
+def test_mixed_dpi_desktop_crop_uses_each_monitor_scale():
+    monitors = [
+        {"x": 0, "y": 0, "width": 1920, "height": 1080, "scale": 1},
+        {"x": 1920, "y": 0, "width": 1280, "height": 720, "scale": 2},
+    ]
+    bounds = {"x": 2020, "y": 100, "width": 200, "height": 100}
+
+    assert _desktop_crop_box(bounds, monitors, (4480, 1440)) == (
+        2120,
+        200,
+        2520,
+        400,
+    )
+    assert _desktop_crop_box(bounds, monitors, (3200, 1080)) == (
+        2020,
+        100,
+        2220,
+        200,
+    )
+
+
+def test_atspi_window_identity_survives_child_reordering(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    class Window:
+        def __init__(self, title):
+            self.title = title
+
+        def get_name(self):
+            return self.title
+
+        def get_role_name(self):
+            return "frame"
+
+    class App:
+        def __init__(self, children):
+            self.children = children
+
+        def get_process_id(self):
+            return 42
+
+        def get_child_count(self):
+            return len(self.children)
+
+        def get_child_at_index(self, index):
+            return self.children[index]
+
+    target = Window("Target")
+    other = Window("Other")
+    signature = helper._window_signature(target)
+    app = App([other, target])
+    monkeypatch.setattr(helper, "_apps", lambda: [app])
+
+    _app, resolved, index = helper._resolve_window(f"atspi:42:0:{signature}")
+    assert resolved is target
+    assert index == 1
+
+
+@pytest.mark.asyncio
+async def test_windows_native_traversal_is_offloaded(monkeypatch):
+    import local_shell_mcp.gui.windows as windows
+
+    backend = WindowsGuiBackend()
+    calls = []
+
+    async def fake_to_thread(func, *args, **kwargs):
+        calls.append(func.__name__)
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(windows.asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(backend, "_list_windows_sync", lambda: {"windows": []})
+    monkeypatch.setattr(
+        backend,
+        "_snapshot_sync",
+        lambda *args, **kwargs: GuiSnapshot(window={"id": "w", "bounds": {}}, elements=[]),
+    )
+
+    await backend.list_windows()
+    await backend.snapshot(
+        "w",
+        screenshot_path=None,
+        include_elements=False,
+        max_elements=1,
+        max_depth=1,
+    )
+    assert calls == ["<lambda>", "<lambda>"]
+
+
+@pytest.mark.asyncio
+async def test_macos_native_traversal_is_offloaded(monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    backend = MacOSGuiBackend()
+    calls = []
+
+    async def fake_to_thread(func, *args, **kwargs):
+        calls.append(func.__name__)
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(macos.asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(backend, "_list_windows_sync", lambda: {"windows": []})
+    monkeypatch.setattr(
+        backend,
+        "_snapshot_accessibility_sync",
+        lambda *args, **kwargs: (
+            {"id": "cg:1", "bounds": {}},
+            False,
+            [],
+            {},
+        ),
+    )
+
+    await backend.list_windows()
+    await backend.snapshot(
+        "cg:1",
+        screenshot_path=None,
+        include_elements=False,
+        max_elements=1,
+        max_depth=1,
+    )
+    assert calls == ["<lambda>", "<lambda>"]
+
+
+@pytest.mark.asyncio
+async def test_gui_manager_validation_and_refresh_error_paths(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.base as base
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    manager = GuiManager(FakeBackend())
+
+    for action, message in [
+        ({"type": "click", "x": 1}, "both x and y"),
+        ({"type": "click"}, "requires x and y"),
+        ({"type": "drag", "x": 1, "y": 1}, "requires to_x and to_y"),
+    ]:
+        state = await manager.snapshot("window:1", screenshot=False)
+        with pytest.raises(ValueError, match=message):
+            await manager.act("window:1", state["state_id"], [action])
+
+    with pytest.raises(GuiStaleStateError, match="stale"):
+        await manager.refresh_state("window:1", "missing")
+
+    state = await manager.snapshot("window:1", screenshot=False)
+    with pytest.raises(GuiStaleStateError, match="different window"):
+        await manager.refresh_state("window:2", state["state_id"])
+
+    with pytest.raises(ValueError, match="invalid bounds"):
+        base._validate_window_relative_point({}, 0, 0, label="point")
+    with pytest.raises(ValueError, match="integer x and y"):
+        base._validate_window_relative_point(
+            {"bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
+            "bad",
+            0,
+            label="point",
+        )
+
+    elements = [{"id": "e1", "bounds": {"x": 3, "y": 4, "width": 5, "height": 6}}]
+    assert base._window_relative_elements(elements, {}) == elements

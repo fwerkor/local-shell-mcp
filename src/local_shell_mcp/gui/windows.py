@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from .base import GuiSnapshot, GuiUnavailableError, display_screenshot_path
+from .base import GuiSnapshot, GuiUnavailableError, display_screenshot_path, quantize_scroll_amount
 
 
 def _automation():  # noqa: ANN202
@@ -18,10 +18,15 @@ def _automation():  # noqa: ANN202
 
 
 def _rect_dict(rect: Any) -> dict[str, int]:
-    left = int(rect.left)
-    top = int(rect.top)
-    right = int(rect.right)
-    bottom = int(rect.bottom)
+    if rect is None:
+        return {"x": 0, "y": 0, "width": 0, "height": 0}
+    try:
+        left = int(rect.left)
+        top = int(rect.top)
+        right = int(rect.right)
+        bottom = int(rect.bottom)
+    except (AttributeError, TypeError, ValueError):
+        return {"x": 0, "y": 0, "width": 0, "height": 0}
     return {
         "x": left,
         "y": top,
@@ -116,7 +121,7 @@ class WindowsGuiBackend:
                 return control
         raise LookupError(f"Window is no longer available: {window_id}")
 
-    async def list_windows(self) -> dict[str, Any]:
+    def _list_windows_sync(self) -> dict[str, Any]:
         auto = _automation()
         windows = []
         for control in auto.GetRootControl().GetChildren():
@@ -138,7 +143,10 @@ class WindowsGuiBackend:
             },
         }
 
-    async def snapshot(
+    async def list_windows(self) -> dict[str, Any]:
+        return await asyncio.to_thread(self._list_windows_sync)
+
+    def _snapshot_sync(
         self,
         window_id: str,
         *,
@@ -201,6 +209,24 @@ class WindowsGuiBackend:
                 "coordinate_input": True,
                 "semantic_actions": True,
             },
+        )
+
+    async def snapshot(
+        self,
+        window_id: str,
+        *,
+        screenshot_path: Path | None,
+        include_elements: bool,
+        max_elements: int,
+        max_depth: int,
+    ) -> GuiSnapshot:
+        return await asyncio.to_thread(
+            self._snapshot_sync,
+            window_id,
+            screenshot_path=screenshot_path,
+            include_elements=include_elements,
+            max_elements=max_elements,
+            max_depth=max_depth,
         )
 
     async def perform_action(
@@ -276,12 +302,13 @@ class WindowsGuiBackend:
                 auto.MoveTo(x, y, moveSpeed=0, waitTime=0)
             else:
                 auto.MoveTo(x, y, moveSpeed=0, waitTime=0)
-                amount = int(action.get("delta_y", action.get("amount", -3)))
-                times = max(1, min(abs(amount), 100))
+                amount = quantize_scroll_amount(
+                    action.get("delta_y", action.get("amount", -3))
+                )
                 if amount < 0:
-                    auto.WheelDown(times, interval=0.0, waitTime=0)
-                else:
-                    auto.WheelUp(times, interval=0.0, waitTime=0)
+                    auto.WheelDown(abs(amount), interval=0.0, waitTime=0)
+                elif amount > 0:
+                    auto.WheelUp(amount, interval=0.0, waitTime=0)
             return {"screen_x": x, "screen_y": y}
 
         if kind == "drag":

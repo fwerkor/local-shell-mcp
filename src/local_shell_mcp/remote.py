@@ -51,7 +51,6 @@ from .fs_ops import (
     write_content,
     write_text,
 )
-from .gui import get_gui_manager
 from .jobs import JOB_LIST_DEFAULT_LIMIT, list_jobs, retry_job, start_job, stop_job, tail_job
 from .models import ok_result as _ok
 from .patch_ops import git_apply_command, git_apply_prefix, normalize_patch_text
@@ -1404,6 +1403,7 @@ WORKER_GUI_TOOLS = frozenset(
     {
         "gui_list",
         "gui_state",
+        "gui_state_refresh",
         "gui_action",
     }
 )
@@ -2207,16 +2207,17 @@ async def _execute_browser_worker_tool(tool: str, args: dict[str, Any]) -> Any:
 
 
 async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
-    if sys.platform != "linux" or tool == "gui_action":
-        from .remote_worker_installer import ensure_gui_dependencies
+    from .remote_worker_installer import ensure_gui_dependencies
 
-        dependency_status = await asyncio.to_thread(ensure_gui_dependencies)
-        if not dependency_status.get("available"):
-            missing = ", ".join(dependency_status.get("missing") or []) or "GUI dependencies"
-            raise RuntimeError(
-                f"{missing} unavailable for native GUI automation: "
-                f"{dependency_status.get('error') or 'installation failed'}"
-            )
+    dependency_status = await asyncio.to_thread(ensure_gui_dependencies)
+    if not dependency_status.get("available"):
+        missing = ", ".join(dependency_status.get("missing") or []) or "GUI dependencies"
+        raise RuntimeError(
+            f"{missing} unavailable for native GUI automation: "
+            f"{dependency_status.get('error') or 'installation failed'}"
+        )
+
+    from .gui import get_gui_manager
 
     manager = get_gui_manager()
     if tool == "gui_list":
@@ -2229,6 +2230,8 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
             max_elements=args.get("max_elements", 300),
             max_depth=args.get("max_depth", 12),
         )
+    if tool == "gui_state_refresh":
+        return await manager.refresh_state(args["window_id"], args["state_id"])
     if tool == "gui_action":
         return await manager.act(
             args["window_id"],

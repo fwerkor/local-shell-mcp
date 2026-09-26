@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import sys
 from typing import Any
@@ -112,10 +113,27 @@ def _windows() -> list[tuple[Any, Any, int]]:
     return result
 
 
+def _window_signature(window: Any) -> str:
+    try:
+        title = str(window.get_name() or "")
+    except Exception:
+        title = ""
+    try:
+        role = str(window.get_role_name() or "")
+    except Exception:
+        role = ""
+    bounds = _bounds(window)
+    fingerprint = (
+        f"{role}\0{title}\0{bounds['x']}\0{bounds['y']}\0"
+        f"{bounds['width']}\0{bounds['height']}"
+    )
+    return hashlib.sha256(fingerprint.encode()).hexdigest()[:12]
+
+
 def _record(app: Any, window: Any, index: int) -> dict[str, Any]:
     pid = int(app.get_process_id())
     return {
-        "id": f"atspi:{pid}:{index}",
+        "id": f"atspi:{pid}:{index}:{_window_signature(window)}",
         "title": str(window.get_name() or ""),
         "app": str(app.get_name() or ""),
         "pid": pid,
@@ -123,22 +141,48 @@ def _record(app: Any, window: Any, index: int) -> dict[str, Any]:
     }
 
 
-def _resolve_window(window_id: str) -> tuple[Any, Any]:
+def _resolve_window(window_id: str) -> tuple[Any, Any, int]:
     parts = window_id.split(":")
-    if len(parts) != 3 or parts[0] != "atspi":
+    if len(parts) not in {3, 4} or parts[0] != "atspi":
         raise ValueError(f"Invalid AT-SPI window id: {window_id}")
     pid = int(parts[1])
-    index = int(parts[2])
+    preferred_index = int(parts[2])
+    signature = parts[3] if len(parts) == 4 else None
     for app in _apps():
         try:
             if int(app.get_process_id()) != pid:
                 continue
-            window = app.get_child_at_index(index)
-            if window is None:
-                break
-            return app, window
+            count = app.get_child_count()
         except Exception:
             continue
+
+        candidates = []
+        for index in range(count):
+            try:
+                window = app.get_child_at_index(index)
+            except Exception:
+                continue
+            if window is None:
+                continue
+            if signature is None:
+                if index == preferred_index:
+                    return app, window, index
+                continue
+            if _window_signature(window) == signature:
+                candidates.append((window, index))
+
+        if signature is not None:
+            preferred = next(
+                (item for item in candidates if item[1] == preferred_index),
+                None,
+            )
+            if preferred is not None:
+                return app, preferred[0], preferred[1]
+            if len(candidates) == 1:
+                window, index = candidates[0]
+                return app, window, index
+            if len(candidates) > 1:
+                raise LookupError(f"Window identity is ambiguous after reordering: {window_id}")
     raise LookupError(f"Window is no longer available: {window_id}")
 
 
@@ -152,7 +196,7 @@ def _resolve_path(window: Any, path: list[int]) -> Any:
 
 
 def _snapshot(payload: dict[str, Any]) -> dict[str, Any]:
-    app, window = _resolve_window(str(payload["window_id"]))
+    app, window, window_index = _resolve_window(str(payload["window_id"]))
     max_elements = max(1, int(payload.get("max_elements", 300)))
     max_depth = max(1, int(payload.get("max_depth", 12)))
     include_elements = bool(payload.get("include_elements", True))
@@ -207,14 +251,14 @@ def _snapshot(payload: dict[str, Any]) -> dict[str, Any]:
                 if child is not None:
                     queue.append((child, [*path, child_index], depth + 1))
     return {
-        "window": _record(app, window, int(str(payload["window_id"]).rsplit(":", 1)[1])),
+        "window": _record(app, window, window_index),
         "elements": elements,
         "locators": locators,
     }
 
 
 def _semantic_action(payload: dict[str, Any]) -> dict[str, Any]:
-    _app, window = _resolve_window(str(payload["window_id"]))
+    _app, window, _window_index = _resolve_window(str(payload["window_id"]))
     locator = [int(value) for value in payload.get("locator", [])]
     obj = _resolve_path(window, locator)
     action = payload["action"]

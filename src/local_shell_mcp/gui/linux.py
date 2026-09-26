@@ -11,7 +11,7 @@ from typing import Any
 
 from PIL import Image, ImageGrab
 
-from .base import GuiSnapshot, GuiUnavailableError, display_screenshot_path
+from .base import GuiSnapshot, GuiUnavailableError, display_screenshot_path, quantize_scroll_amount
 from .linux_portal import PortalDesktop, portal_screenshot
 
 _DESKTOP_ENV_KEYS = {
@@ -148,6 +148,111 @@ def _monitor_for_window(
     return None
 
 
+def _scaled_axis_offset(
+    coordinate: int,
+    origin: int,
+    *,
+    axis: str,
+    cross_coordinate: int,
+    monitors: list[dict[str, Any]],
+) -> int:
+    size_key = "width" if axis == "x" else "height"
+    cross_axis = "y" if axis == "x" else "x"
+    cross_size = "height" if axis == "x" else "width"
+    start, end = sorted((origin, coordinate))
+    boundaries = {start, end}
+    relevant = []
+    for monitor in monitors:
+        cross_start = int(monitor[cross_axis])
+        cross_end = cross_start + int(monitor[cross_size])
+        if not cross_start <= cross_coordinate < cross_end:
+            continue
+        axis_start = int(monitor[axis])
+        axis_end = axis_start + int(monitor[size_key])
+        if axis_end <= start or axis_start >= end:
+            continue
+        relevant.append(monitor)
+        boundaries.add(max(start, axis_start))
+        boundaries.add(min(end, axis_end))
+
+    total = 0.0
+    ordered = sorted(boundaries)
+    for left, right in zip(ordered, ordered[1:], strict=False):
+        midpoint = (left + right) / 2
+        scale = 1.0
+        for monitor in relevant:
+            monitor_start = int(monitor[axis])
+            monitor_end = monitor_start + int(monitor[size_key])
+            if monitor_start <= midpoint < monitor_end:
+                scale = float(monitor.get("scale", 1) or 1)
+                break
+        total += (right - left) * scale
+    offset = int(round(total))
+    return -offset if coordinate < origin else offset
+
+
+def _desktop_crop_box(
+    bounds: dict[str, Any],
+    monitors: list[dict[str, Any]],
+    image_size: tuple[int, int],
+) -> tuple[int, int, int, int]:
+    x = int(bounds["x"])
+    y = int(bounds["y"])
+    width = max(1, int(bounds["width"]))
+    height = max(1, int(bounds["height"]))
+    if not monitors:
+        return x, y, x + width, y + height
+
+    origin_x = min(int(item["x"]) for item in monitors)
+    origin_y = min(int(item["y"]) for item in monitors)
+    logical_right = max(int(item["x"]) + int(item["width"]) for item in monitors)
+    logical_bottom = max(int(item["y"]) + int(item["height"]) for item in monitors)
+    logical_size = (logical_right - origin_x, logical_bottom - origin_y)
+    if image_size == logical_size:
+        left = x - origin_x
+        top = y - origin_y
+        return left, top, left + width, top + height
+
+    if _monitor_for_window(bounds, monitors) is None:
+        raise GuiUnavailableError("Could not map the target window to a captured monitor")
+
+    center_x, center_y = _window_center(bounds)
+    left = _scaled_axis_offset(
+        x,
+        origin_x,
+        axis="x",
+        cross_coordinate=center_y,
+        monitors=monitors,
+    )
+    top = _scaled_axis_offset(
+        y,
+        origin_y,
+        axis="y",
+        cross_coordinate=center_x,
+        monitors=monitors,
+    )
+    right = _scaled_axis_offset(
+        x + width,
+        origin_x,
+        axis="x",
+        cross_coordinate=center_y,
+        monitors=monitors,
+    )
+    bottom = _scaled_axis_offset(
+        y + height,
+        origin_y,
+        axis="y",
+        cross_coordinate=center_x,
+        monitors=monitors,
+    )
+    if left < 0 or top < 0 or right > image_size[0] or bottom > image_size[1]:
+        raise GuiUnavailableError(
+            "Captured desktop geometry does not match the monitor layout; "
+            "cannot crop the target window safely"
+        )
+    return left, top, right, bottom
+
+
 def _crop_desktop_capture(
     path: Path,
     bounds: dict[str, Any],
@@ -155,27 +260,9 @@ def _crop_desktop_capture(
 ) -> None:
     with Image.open(path) as image:
         image.load()
-        if image.width == int(bounds["width"]) and image.height == int(bounds["height"]):
+        if image.size == (int(bounds["width"]), int(bounds["height"])):
             return
-
-        monitor = _monitor_for_window(bounds, monitors)
-        scale = float(monitor.get("scale", 1)) if monitor else 1.0
-        origin_x = min((int(item["x"]) for item in monitors), default=0)
-        origin_y = min((int(item["y"]) for item in monitors), default=0)
-
-        left = int(round((int(bounds["x"]) - origin_x) * scale))
-        top = int(round((int(bounds["y"]) - origin_y) * scale))
-        width = max(1, int(round(int(bounds["width"]) * scale)))
-        height = max(1, int(round(int(bounds["height"]) * scale)))
-        right = left + width
-        bottom = top + height
-
-        if left < 0 or top < 0 or right > image.width or bottom > image.height:
-            left = max(0, min(image.width - 1, int(bounds["x"]) - origin_x))
-            top = max(0, min(image.height - 1, int(bounds["y"]) - origin_y))
-            right = min(image.width, left + max(1, int(bounds["width"])))
-            bottom = min(image.height, top + max(1, int(bounds["height"])))
-        cropped = image.crop((left, top, right, bottom))
+        cropped = image.crop(_desktop_crop_box(bounds, monitors, image.size))
         cropped.save(path, format="PNG")
 
 
@@ -531,19 +618,22 @@ class LinuxGuiBackend:
                     {"command": "raw", "kind": "mouse", "x": x, "y": y, "event": event},
                 )
             elif kind == "scroll":
-                amount = int(action.get("delta_y", action.get("amount", -3)))
-                button = 5 if amount < 0 else 4
-                for _ in range(max(1, min(abs(amount), 100))):
-                    await asyncio.to_thread(
-                        self._helper,
-                        {
-                            "command": "raw",
-                            "kind": "mouse",
-                            "x": x,
-                            "y": y,
-                            "event": f"b{button}c",
-                        },
-                    )
+                amount = quantize_scroll_amount(
+                    action.get("delta_y", action.get("amount", -3))
+                )
+                if amount:
+                    button = 5 if amount < 0 else 4
+                    for _ in range(abs(amount)):
+                        await asyncio.to_thread(
+                            self._helper,
+                            {
+                                "command": "raw",
+                                "kind": "mouse",
+                                "x": x,
+                                "y": y,
+                                "event": f"b{button}c",
+                            },
+                        )
             else:
                 button = 3 if kind == "right_click" else 1
                 count = 2 if kind == "double_click" else 1
@@ -603,12 +693,16 @@ class LinuxGuiBackend:
             if kind == "move":
                 await portal.move(x, y)
             elif kind == "scroll":
-                await portal.scroll(
-                    x,
-                    y,
-                    float(action.get("delta_x", 0)),
-                    float(action.get("delta_y", action.get("amount", -3))),
+                amount = quantize_scroll_amount(
+                    action.get("delta_y", action.get("amount", -3))
                 )
+                if amount:
+                    await portal.scroll(
+                        x,
+                        y,
+                        float(action.get("delta_x", 0)),
+                        float(amount),
+                    )
             else:
                 await portal.click(
                     x,

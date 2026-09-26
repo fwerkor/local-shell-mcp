@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from local_shell_mcp.remote import (
@@ -27,6 +29,7 @@ def test_remote_worker_allowlist_covers_core_capabilities():
         "browser_run_script",
         "gui_list",
         "gui_state",
+        "gui_state_refresh",
         "gui_action",
     } <= REMOTE_WORKER_TOOL_NAMES
 
@@ -84,12 +87,18 @@ async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
             calls.append(("snapshot", window_id, kwargs))
             return {"window": {"id": window_id}, "state_id": "s"}
 
+        async def refresh_state(self, window_id, state_id):
+            calls.append(("refresh", window_id, state_id))
+            return {"state_id": state_id, "state_ttl_s": 30}
+
         async def act(self, window_id, state_id, actions):
             calls.append(("act", window_id, state_id, actions))
             return {"state_consumed": True}
 
     manager = FakeGuiManager()
-    monkeypatch.setattr(remote, "get_gui_manager", lambda: manager)
+    import local_shell_mcp.gui as gui
+
+    monkeypatch.setattr(gui, "get_gui_manager", lambda: manager)
     monkeypatch.setattr(remote.sys, "platform", "linux")
     dependency_calls = []
 
@@ -101,7 +110,7 @@ async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
 
     listed = await remote._execute_gui_worker_tool("gui_list", {})
     assert listed["windows"][0]["id"] == "w"
-    assert dependency_calls == []
+    assert len(dependency_calls) == 1
 
     state = await remote._execute_gui_worker_tool(
         "gui_state",
@@ -114,14 +123,21 @@ async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
         },
     )
     assert state["state_id"] == "s"
-    assert dependency_calls == []
+    assert len(dependency_calls) == 2
+
+    refreshed = await remote._execute_gui_worker_tool(
+        "gui_state_refresh",
+        {"window_id": "w", "state_id": "s"},
+    )
+    assert refreshed["state_ttl_s"] == 30
+    assert len(dependency_calls) == 3
 
     acted = await remote._execute_gui_worker_tool(
         "gui_action",
         {"window_id": "w", "state_id": "s", "actions": [{"type": "wait"}]},
     )
     assert acted["state_consumed"] is True
-    assert len(dependency_calls) == 1
+    assert len(dependency_calls) == 4
     assert calls[-1][0] == "act"
 
     with pytest.raises(ValueError, match="unsupported remote GUI worker tool"):
@@ -145,3 +161,28 @@ async def test_remote_gui_worker_dependency_failure_is_scoped_to_gui(monkeypatch
     )
     with pytest.raises(RuntimeError, match="uiautomation unavailable"):
         await remote._execute_gui_worker_tool("gui_list", {})
+
+
+
+def test_remote_module_does_not_import_gui_before_dispatch(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import local_shell_mcp.remote; "
+                "assert 'local_shell_mcp.gui' not in sys.modules"
+            ),
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr

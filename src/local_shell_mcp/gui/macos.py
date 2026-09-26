@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from .base import GuiSnapshot, GuiUnavailableError, display_screenshot_path
+from .base import GuiSnapshot, GuiUnavailableError, display_screenshot_path, quantize_scroll_amount
 
 
 def _native():  # noqa: ANN202
@@ -88,7 +88,7 @@ _MAC_KEY_CODES = {
     "O": 31, "U": 32, "[": 33, "I": 34, "P": 35, "ENTER": 36, "RETURN": 36,
     "L": 37, "J": 38, "'": 39, "K": 40, ";": 41, "\\": 42, ",": 43,
     "/": 44, "N": 45, "M": 46, ".": 47, "TAB": 48, "SPACE": 49,
-    "BACKSPACE": 51, "DELETE": 51, "ESC": 53, "ESCAPE": 53, "HOME": 115,
+    "BACKSPACE": 51, "DELETE": 117, "ESC": 53, "ESCAPE": 53, "HOME": 115,
     "PAGEUP": 116, "END": 119, "PAGEDOWN": 121, "LEFT": 123, "RIGHT": 124,
     "DOWN": 125, "UP": 126,
 }
@@ -154,7 +154,7 @@ class MacOSGuiBackend:
                 best = window
         return best or (windows[0] if len(windows) == 1 else None)
 
-    async def list_windows(self) -> dict[str, Any]:
+    def _list_windows_sync(self) -> dict[str, Any]:
         AX, _Quartz = _native()
         trusted = bool(AX.AXIsProcessTrusted())
         return {
@@ -171,15 +171,17 @@ class MacOSGuiBackend:
             },
         }
 
-    async def snapshot(
+    async def list_windows(self) -> dict[str, Any]:
+        return await asyncio.to_thread(self._list_windows_sync)
+
+    def _snapshot_accessibility_sync(
         self,
         window_id: str,
         *,
-        screenshot_path: Path | None,
         include_elements: bool,
         max_elements: int,
         max_depth: int,
-    ) -> GuiSnapshot:
+    ) -> tuple[dict[str, Any], bool, list[dict[str, Any]], dict[str, Any]]:
         AX, _Quartz = _native()
         record = self._find_record(window_id)
         trusted = bool(AX.AXIsProcessTrusted())
@@ -201,9 +203,13 @@ class MacOSGuiBackend:
                             or _ax_copy(AX, element, AX.kAXDescriptionAttribute, "")
                             or ""
                         ),
-                        "value": str(_ax_copy(AX, element, AX.kAXValueAttribute, "") or "")[:1000],
+                        "value": str(
+                            _ax_copy(AX, element, AX.kAXValueAttribute, "") or ""
+                        )[:1000],
                         "bounds": _ax_bounds(AX, element),
-                        "enabled": bool(_ax_copy(AX, element, AX.kAXEnabledAttribute, True)),
+                        "enabled": bool(
+                            _ax_copy(AX, element, AX.kAXEnabledAttribute, True)
+                        ),
                         "depth": depth,
                     }
                 )
@@ -212,6 +218,25 @@ class MacOSGuiBackend:
                     continue
                 children = _ax_copy(AX, element, AX.kAXChildrenAttribute, []) or []
                 queue.extend((child, depth + 1) for child in children)
+
+        return record, trusted, elements, locators
+
+    async def snapshot(
+        self,
+        window_id: str,
+        *,
+        screenshot_path: Path | None,
+        include_elements: bool,
+        max_elements: int,
+        max_depth: int,
+    ) -> GuiSnapshot:
+        record, trusted, elements, locators = await asyncio.to_thread(
+            self._snapshot_accessibility_sync,
+            window_id,
+            include_elements=include_elements,
+            max_elements=max_elements,
+            max_depth=max_depth,
+        )
 
         screenshot_display: str | None = None
         if screenshot_path is not None:
@@ -316,11 +341,14 @@ class MacOSGuiBackend:
                 self._mouse(Quartz, Quartz.kCGEventMouseMoved, x, y, Quartz.kCGMouseButtonLeft)
             elif kind == "scroll":
                 self._mouse(Quartz, Quartz.kCGEventMouseMoved, x, y, Quartz.kCGMouseButtonLeft)
-                amount = int(action.get("delta_y", action.get("amount", -3)))
-                event = Quartz.CGEventCreateScrollWheelEvent(
-                    None, Quartz.kCGScrollEventUnitLine, 1, amount
+                amount = quantize_scroll_amount(
+                    action.get("delta_y", action.get("amount", -3))
                 )
-                Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+                if amount:
+                    event = Quartz.CGEventCreateScrollWheelEvent(
+                        None, Quartz.kCGScrollEventUnitLine, 1, amount
+                    )
+                    Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
             else:
                 right = kind == "right_click"
                 button = Quartz.kCGMouseButtonRight if right else Quartz.kCGMouseButtonLeft

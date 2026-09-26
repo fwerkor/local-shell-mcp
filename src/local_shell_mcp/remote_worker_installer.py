@@ -25,12 +25,17 @@ from .remote_worker_state import (
 _WORKER_MANIFEST_PATH = "/remote/worker-bundle.tgz?manifest=1"
 _WINDOWS_PTY_REQUIREMENT = "pywinpty>=2.0.13"
 _GUI_REQUIREMENTS: dict[str, tuple[tuple[str, str], ...]] = {
-    "win32": (("uiautomation", "uiautomation>=2.0.29,<3"),),
+    "win32": (
+        ("PIL", "pillow>=10.3.0"),
+        ("uiautomation", "uiautomation>=2.0.29,<3"),
+    ),
     "linux": (
+        ("PIL", "pillow>=10.3.0"),
         ("dbus_next", "dbus-next>=0.2.3,<1"),
         ("Xlib", "python-xlib>=0.33,<1"),
     ),
     "darwin": (
+        ("PIL", "pillow>=10.3.0"),
         ("ApplicationServices", "pyobjc-framework-ApplicationServices>=11.1,<13"),
         ("Quartz", "pyobjc-framework-Quartz>=11.1,<13"),
     ),

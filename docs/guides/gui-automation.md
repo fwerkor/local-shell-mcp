@@ -21,7 +21,7 @@ gui_list
   -> gui_state(window_id)
 ```
 
-Use window-relative `x`/`y` coordinates only when the UI has no useful accessibility element, such as a canvas or custom-drawn control. Screenshots are normalized to the same logical pixel dimensions as the window coordinate space, including HiDPI/Retina desktops.
+Use window-relative `x`/`y` coordinates only when the UI has no useful accessibility element, such as a canvas or custom-drawn control. Returned element bounds and screenshots use the same window-relative logical pixel space, including HiDPI/Retina desktops. Raw coordinates outside the selected window are rejected.
 
 A `state_id` expires after 30 seconds and is single-use. Coordinate actions also verify that the target window has not moved or resized since observation. If either check fails, call `gui_state` again instead of reusing stale coordinates.
 

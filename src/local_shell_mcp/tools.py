@@ -2707,6 +2707,26 @@ async def _gui_state_result(
                 finally:
                     with suppress(Exception):
                         await asyncio.to_thread(delete_path, local_path, False)
+                with suppress(Exception):
+                    await _remote_worker_data(
+                        machine,
+                        "delete_file_or_dir",
+                        {"path": screenshot_path, "recursive": False},
+                        30,
+                    )
+                screenshot_path = None
+            state_id = str(data.get("state_id") or "")
+            if not state_id:
+                raise RuntimeError("Remote gui_state returned no state_id")
+            refreshed = await _remote_worker_data(
+                machine,
+                "gui_state_refresh",
+                {"window_id": window_id, "state_id": state_id},
+                30,
+            )
+            if not isinstance(refreshed, dict):
+                raise RuntimeError("Remote gui_state_refresh returned invalid data")
+            data["state_ttl_s"] = float(refreshed.get("state_ttl_s") or 0)
         else:
             data = await get_gui_manager().snapshot(**args)
             screenshot_path = (

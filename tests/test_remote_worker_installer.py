@@ -301,7 +301,7 @@ def test_gui_dependency_bootstrap_reuses_available_modules(tmp_path, monkeypatch
     assert result["available"] is True
     assert result["installed"] is False
     assert result["missing"] == []
-    assert imported == ["dbus_next", "Xlib"]
+    assert imported == ["PIL", "dbus_next", "Xlib"]
 
 
 def test_gui_dependency_bootstrap_installs_missing_modules(tmp_path, monkeypatch):
@@ -309,17 +309,17 @@ def test_gui_dependency_bootstrap_installs_missing_modules(tmp_path, monkeypatch
     monkeypatch.setattr(installer.sys, "platform", "win32")
     monkeypatch.setattr(installer.sys, "path", list(installer.sys.path))
     monkeypatch.setenv("PYTHONPATH", "")
-    attempts = 0
+    installed = False
     captured = {}
 
     def import_module(name):
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
+        if not installed:
             raise ImportError(name)
         return SimpleNamespace()
 
     def run(argv, **kwargs):
+        nonlocal installed
+        installed = True
         captured["argv"] = argv
         captured["kwargs"] = kwargs
         return subprocess.CompletedProcess(argv, 0, stdout="installed", stderr="")
@@ -359,7 +359,7 @@ def test_gui_dependency_bootstrap_failure_is_nonfatal_status(tmp_path, monkeypat
 
     assert result["available"] is False
     assert result["installed"] is False
-    assert result["missing"] == ["ApplicationServices", "Quartz"]
+    assert result["missing"] == ["PIL", "ApplicationServices", "Quartz"]
     assert "timed out" in result["error"]
 
 
