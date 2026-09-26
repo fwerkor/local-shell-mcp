@@ -356,7 +356,13 @@ class MacOSGuiBackend:
         if kind == "type":
             text = str(action.get("text", ""))
             if locator is not None:
-                AX.AXUIElementSetAttributeValue(locator, AX.kAXFocusedAttribute, True)
+                error = AX.AXUIElementSetAttributeValue(
+                    locator, AX.kAXFocusedAttribute, True
+                )
+                if int(error) != 0:
+                    raise RuntimeError(
+                        f"Target AX element could not be focused: {error}"
+                    )
             for chunk in _unicode_chunks(text):
                 event = Quartz.CGEventCreateKeyboardEvent(None, 0, True)
                 Quartz.CGEventKeyboardSetUnicodeString(
@@ -371,7 +377,13 @@ class MacOSGuiBackend:
 
         if kind == "key":
             if locator is not None:
-                AX.AXUIElementSetAttributeValue(locator, AX.kAXFocusedAttribute, True)
+                error = AX.AXUIElementSetAttributeValue(
+                    locator, AX.kAXFocusedAttribute, True
+                )
+                if int(error) != 0:
+                    raise RuntimeError(
+                        f"Target AX element could not be focused: {error}"
+                    )
             self._send_key_chord(Quartz, action.get("keys"))
             return {"keys": action.get("keys")}
 
@@ -450,10 +462,20 @@ class MacOSGuiBackend:
     ) -> tuple[int, int]:
         if locator is not None and action.get("x") is None and action.get("y") is None:
             bounds = _ax_bounds(AX, locator)
-            return (
-                bounds["x"] + bounds["width"] // 2,
-                bounds["y"] + bounds["height"] // 2,
-            )
+            width = int(bounds.get("width", 0))
+            height = int(bounds.get("height", 0))
+            if width <= 0 or height <= 0:
+                raise ValueError("Target element has no usable screen bounds")
+            x = int(bounds.get("x", 0)) + width // 2
+            y = int(bounds.get("y", 0)) + height // 2
+            window_bounds = window["bounds"]
+            left = int(window_bounds["x"])
+            top = int(window_bounds["y"])
+            right = left + int(window_bounds["width"])
+            bottom = top + int(window_bounds["height"])
+            if not (left <= x < right and top <= y < bottom):
+                raise ValueError("Target element center is outside the selected window")
+            return x, y
         if action.get("x") is None or action.get("y") is None:
             raise ValueError("Coordinate action requires x and y, or an element_id")
         bounds = window["bounds"]

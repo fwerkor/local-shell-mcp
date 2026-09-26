@@ -100,11 +100,14 @@ def _windows() -> list[tuple[Any, Any, int]]:
         except Exception:
             continue
         for index in range(count):
-            window = app.get_child_at_index(index)
-            if window is None:
+            try:
+                window = app.get_child_at_index(index)
+                if window is None:
+                    continue
+                bounds = _bounds(window)
+                role = str(window.get_role_name() or "")
+            except Exception:
                 continue
-            bounds = _bounds(window)
-            role = str(window.get_role_name() or "")
             if bounds["width"] <= 1 or bounds["height"] <= 1:
                 continue
             if role not in {"frame", "dialog", "window", "application"} and index > 0:
@@ -354,10 +357,13 @@ def _main(payload: dict[str, Any]) -> dict[str, Any]:
     _atspi()
     command = str(payload.get("command") or "")
     if command == "list":
-        return {
-            "windows": [_record(app, window, index) for app, window, index in _windows()],
-            "monitors": _monitors(),
-        }
+        windows = []
+        for app, window, index in _windows():
+            try:
+                windows.append(_record(app, window, index))
+            except Exception:
+                continue
+        return {"windows": windows, "monitors": _monitors()}
     if command == "snapshot":
         return _snapshot(payload)
     if command == "semantic_action":
@@ -373,7 +379,11 @@ def main() -> int:
         response = {"ok": True, "data": _main(request)}
         code = 0
     except Exception as exc:
-        response = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        response = {
+            "ok": False,
+            "error_type": type(exc).__name__,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
         code = 2
     print(json.dumps(response, ensure_ascii=False))
     return code

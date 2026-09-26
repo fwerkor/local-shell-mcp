@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, Icon, ImageContent, TextContent, ToolAnnotations
 from pathspec.gitignore import GitIgnoreSpec
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 
 from . import __version__
 from .audit import audit, audit_call_context, audit_result_ok
@@ -47,6 +47,7 @@ from .fs_ops import (
     write_text,
 )
 from .gui import get_gui_manager
+from .gui.base import GUI_MAX_KEY_PARTS, GUI_MAX_KEYS_BYTES, GUI_MAX_TEXT_BYTES
 from .image_ops import ImageFile, assert_view_image_size, read_image
 from .jobs import (
     JOB_LIST_DEFAULT_LIMIT,
@@ -174,6 +175,33 @@ class GuiAction(BaseModel):
     text: str | None = None
     keys: str | list[str] | None = None
     seconds: float | None = None
+
+    @model_validator(mode="after")
+    def validate_payload_size(self) -> GuiAction:
+        if self.text is not None and len(self.text.encode("utf-8")) > GUI_MAX_TEXT_BYTES:
+            raise ValueError(
+                f"text may not exceed {GUI_MAX_TEXT_BYTES} UTF-8 bytes"
+            )
+        if self.keys is not None:
+            if isinstance(self.keys, str):
+                parts = [
+                    part.strip()
+                    for part in self.keys.replace("+", " ").split()
+                    if part.strip()
+                ]
+                byte_count = len(self.keys.encode("utf-8"))
+            else:
+                parts = [str(part).strip() for part in self.keys if str(part).strip()]
+                byte_count = sum(len(part.encode("utf-8")) for part in parts)
+            if len(parts) > GUI_MAX_KEY_PARTS:
+                raise ValueError(
+                    f"keys may contain at most {GUI_MAX_KEY_PARTS} parts"
+                )
+            if byte_count > GUI_MAX_KEYS_BYTES:
+                raise ValueError(
+                    f"keys may not exceed {GUI_MAX_KEYS_BYTES} UTF-8 bytes"
+                )
+        return self
 
 
 class GuiStateResult(BaseModel):
@@ -2684,31 +2712,35 @@ async def _gui_frame_data(
         )
         if not screenshot_path:
             raise RuntimeError("Remote gui_frame returned no screenshot")
-        stat = await _remote_transfer_data(
-            machine,
-            "transfer_stat",
-            {"path": screenshot_path, "sha256": False},
-        )
-        if not isinstance(stat, dict) or stat.get("type") != "file":
-            raise RuntimeError("Remote GUI frame is not a file")
-        temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".png")
-        local_path = temporary["path"]
         try:
-            await _copy_remote_file_to_local(machine, screenshot_path, local_path, True)
-            image = await asyncio.to_thread(read_image, local_path)
+            stat = await _remote_transfer_data(
+                machine,
+                "transfer_stat",
+                {"path": screenshot_path, "sha256": False},
+            )
+            if not isinstance(stat, dict) or stat.get("type") != "file":
+                raise RuntimeError("Remote GUI frame is not a file")
+            temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".png")
+            local_path = temporary["path"]
+            try:
+                await _copy_remote_file_to_local(
+                    machine, screenshot_path, local_path, True
+                )
+                image = await asyncio.to_thread(read_image, local_path)
+            finally:
+                with suppress(Exception):
+                    await asyncio.to_thread(delete_path, local_path, False)
+            data = dict(data)
+            data.pop("screenshot_path", None)
+            return data, image
         finally:
             with suppress(Exception):
-                await asyncio.to_thread(delete_path, local_path, False)
-        with suppress(Exception):
-            await _remote_worker_data(
-                machine,
-                "delete_file_or_dir",
-                {"path": screenshot_path, "recursive": False},
-                30,
-            )
-        data = dict(data)
-        data.pop("screenshot_path", None)
-        return data, image
+                await _remote_worker_data(
+                    machine,
+                    "delete_file_or_dir",
+                    {"path": screenshot_path, "recursive": False},
+                    30,
+                )
 
     data = await get_gui_manager().frame(window_id)
     screenshot_path = str(data.get("screenshot_path") or "")

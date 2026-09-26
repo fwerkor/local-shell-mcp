@@ -12,7 +12,13 @@ from typing import Any
 
 from PIL import Image, ImageGrab
 
-from .base import GuiSnapshot, GuiUnavailableError, display_screenshot_path, quantize_scroll_amount
+from .base import (
+    GuiSnapshot,
+    GuiStaleStateError,
+    GuiUnavailableError,
+    display_screenshot_path,
+    quantize_scroll_amount,
+)
 from .linux_portal import PortalDesktop, portal_screenshot
 
 _DESKTOP_ENV_KEYS = {
@@ -102,6 +108,10 @@ def _helper_python(env: dict[str, str]) -> str:
     )
 
 
+class _SemanticActionUnavailableError(GuiUnavailableError):
+    """Raised only when an AT-SPI element lacks a semantic click action."""
+
+
 def _run_helper(payload: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
     result = subprocess.run(
         [_helper_python(env), str(_helper_path())],
@@ -123,7 +133,16 @@ def _run_helper(payload: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
         detail = (result.stderr or result.stdout or "").strip()
         raise GuiUnavailableError(f"AT-SPI helper failed: {detail or result.returncode}")
     if not response.get("ok"):
-        raise GuiUnavailableError(str(response.get("error") or "AT-SPI helper failed"))
+        message = str(response.get("error") or "AT-SPI helper failed")
+        error_type = str(response.get("error_type") or "")
+        if error_type == "LookupError":
+            raise GuiStaleStateError(message)
+        if error_type == "ValueError" and (
+            "no AT-SPI action interface" in message
+            or "no AT-SPI actions" in message
+        ):
+            raise _SemanticActionUnavailableError(message)
+        raise GuiUnavailableError(message)
     data = response.get("data")
     return data if isinstance(data, dict) else {}
 
@@ -594,7 +613,7 @@ class LinuxGuiBackend:
                         "action": action,
                     },
                 )
-            except GuiUnavailableError:
+            except _SemanticActionUnavailableError:
                 pass
 
         if kind in {"type", "key"}:

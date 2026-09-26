@@ -363,6 +363,53 @@ def test_gui_dependency_bootstrap_failure_is_nonfatal_status(tmp_path, monkeypat
     assert "timed out" in result["error"]
 
 
+def test_gui_dependency_bootstrap_serializes_inflight_install(tmp_path, monkeypatch):
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(installer.sys, "platform", "win32")
+    monkeypatch.setattr(installer.sys, "path", list(installer.sys.path))
+    monkeypatch.setenv("PYTHONPATH", "")
+
+    installed = False
+    started = threading.Event()
+    release = threading.Event()
+    run_calls = []
+
+    def import_module(name):
+        if not installed:
+            raise ImportError(name)
+        return SimpleNamespace()
+
+    def run(argv, **kwargs):
+        nonlocal installed
+        run_calls.append(argv)
+        started.set()
+        assert release.wait(timeout=2)
+        installed = True
+        return subprocess.CompletedProcess(argv, 0, stdout="installed", stderr="")
+
+    monkeypatch.setattr(installer.importlib, "import_module", import_module)
+    monkeypatch.setattr(installer.importlib, "invalidate_caches", lambda: None)
+    monkeypatch.setattr(installer.subprocess, "run", run)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(installer.ensure_gui_dependencies)
+        assert started.wait(timeout=1)
+        second = pool.submit(installer.ensure_gui_dependencies)
+        time.sleep(0.05)
+        assert len(run_calls) == 1
+        release.set()
+        first_result = first.result(timeout=2)
+        second_result = second.result(timeout=2)
+
+    assert first_result["available"] is True
+    assert second_result["available"] is True
+    assert len(run_calls) == 1
+
+
 def test_gui_dependency_bootstrap_unknown_platform_is_noop(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setattr(installer.sys, "platform", "plan9")

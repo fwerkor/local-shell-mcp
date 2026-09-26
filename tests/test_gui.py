@@ -690,10 +690,26 @@ async def test_gui_frame_data_rejects_invalid_sources(tmp_path, monkeypatch):
     async def bad_stat(*_args, **_kwargs):
         return {"type": "directory"}
 
-    monkeypatch.setattr(tools, "_remote_worker_data", remote_frame)
+    cleanup_calls = []
+
+    async def remote_frame_with_cleanup(machine, tool, args, timeout_s=None):
+        if tool == "gui_frame":
+            return {"window": {"id": "w"}, "screenshot_path": "remote.png"}
+        cleanup_calls.append((machine, tool, args, timeout_s))
+        return {"deleted": True}
+
+    monkeypatch.setattr(tools, "_remote_worker_data", remote_frame_with_cleanup)
     monkeypatch.setattr(tools, "_remote_transfer_data", bad_stat)
     with pytest.raises(RuntimeError, match="not a file"):
         await tools._gui_frame_data("w", "node")
+    assert cleanup_calls == [
+        (
+            "node",
+            "delete_file_or_dir",
+            {"path": "remote.png", "recursive": False},
+            30,
+        )
+    ]
 
 
 def test_native_gui_dependencies_are_available_on_platform():
@@ -1007,7 +1023,18 @@ async def test_windows_native_traversal_is_offloaded(monkeypatch):
         max_elements=1,
         max_depth=1,
     )
-    assert calls == ["<lambda>", "<lambda>"]
+    monkeypatch.setattr(
+        backend,
+        "_perform_action_sync",
+        lambda *_args, **_kwargs: {"performed": True},
+    )
+    result = await backend.perform_action(
+        {"id": "hwnd:1", "bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
+        None,
+        {"type": "click", "x": 1, "y": 1},
+    )
+    assert result == {"performed": True}
+    assert calls == ["<lambda>", "<lambda>", "<lambda>"]
 
 
 @pytest.mark.asyncio
@@ -1341,8 +1368,14 @@ def test_atspi_element_locator_rejects_reordered_replacement(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_portal_request_subscribes_before_immediate_response():
-    from dbus_next import MessageType
+async def test_portal_request_subscribes_before_immediate_response(monkeypatch):
+    import sys
+    from types import ModuleType
+
+    signal_type = object()
+    dbus_next = ModuleType("dbus_next")
+    dbus_next.MessageType = SimpleNamespace(SIGNAL=signal_type)
+    monkeypatch.setitem(sys.modules, "dbus_next", dbus_next)
 
     class Bus:
         unique_name = ":1.42"
@@ -1373,7 +1406,7 @@ async def test_portal_request_subscribes_before_immediate_response():
         assert bus.handler is not None
         bus.handler(
             SimpleNamespace(
-                message_type=MessageType.SIGNAL,
+                message_type=signal_type,
                 path=path,
                 interface="org.freedesktop.portal.Request",
                 member="Response",
@@ -1415,6 +1448,235 @@ async def test_portal_pointer_mapping_is_fail_closed_and_right_click_is_right_bu
     await portal.button(3, True)
     await portal.button(3, False)
     assert calls == [("session", 0x111, 1), ("session", 0x111, 0)]
+
+
+def test_windows_and_macos_locator_centers_must_stay_inside_window(monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    window = {"bounds": {"x": 100, "y": 100, "width": 200, "height": 100}}
+
+    class Rect:
+        left = 120
+        top = 130
+        right = 140
+        bottom = 150
+
+    class Locator:
+        BoundingRectangle = Rect()
+
+    assert WindowsGuiBackend._screen_point(
+        window,
+        {"type": "move"},
+        Locator(),
+    ) == (130, 140)
+
+    class EmptyLocator:
+        BoundingRectangle = None
+
+    with pytest.raises(ValueError, match="no usable"):
+        WindowsGuiBackend._screen_point(window, {"type": "scroll"}, EmptyLocator())
+
+    class OutsideRect:
+        left = 400
+        top = 130
+        right = 420
+        bottom = 150
+
+    class OutsideLocator:
+        BoundingRectangle = OutsideRect()
+
+    with pytest.raises(ValueError, match="outside"):
+        WindowsGuiBackend._screen_point(window, {"type": "drag"}, OutsideLocator())
+
+    monkeypatch.setattr(
+        macos,
+        "_ax_bounds",
+        lambda _ax, locator: locator,
+    )
+    assert MacOSGuiBackend._screen_point(
+        object(),
+        window,
+        {"type": "move"},
+        {"x": 120, "y": 130, "width": 20, "height": 20},
+    ) == (130, 140)
+    with pytest.raises(ValueError, match="no usable"):
+        MacOSGuiBackend._screen_point(
+            object(),
+            window,
+            {"type": "scroll"},
+            {"x": 0, "y": 0, "width": 0, "height": 0},
+        )
+    with pytest.raises(ValueError, match="outside"):
+        MacOSGuiBackend._screen_point(
+            object(),
+            window,
+            {"type": "drag"},
+            {"x": 400, "y": 130, "width": 20, "height": 20},
+        )
+
+
+@pytest.mark.asyncio
+async def test_macos_element_focus_failure_aborts_keyboard_injection(monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    class AX:
+        kAXFocusedAttribute = "focused"
+        kAXRaiseAction = "raise"
+
+        @staticmethod
+        def AXIsProcessTrusted():
+            return True
+
+        @staticmethod
+        def AXUIElementPerformAction(_target, _action):
+            return 0
+
+        @staticmethod
+        def AXUIElementSetAttributeValue(target, _attribute, _value):
+            return 7 if target == "element" else 0
+
+    class Quartz:
+        @staticmethod
+        def CGEventCreateKeyboardEvent(*_args):
+            raise AssertionError("keyboard event must not be created after focus failure")
+
+    backend = MacOSGuiBackend()
+    monkeypatch.setattr(macos, "_native", lambda: (AX, Quartz))
+    monkeypatch.setattr(backend, "_find_ax_window", lambda _window: "window")
+
+    with pytest.raises(RuntimeError, match="could not be focused"):
+        await backend.perform_action(
+            {"id": "cg:1", "bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
+            "element",
+            {"type": "type", "text": "x"},
+        )
+    with pytest.raises(RuntimeError, match="could not be focused"):
+        await backend.perform_action(
+            {"id": "cg:1", "bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
+            "element",
+            {"type": "key", "keys": "A"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_human_batch_prevalidates_all_coordinates(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    backend = FakeBackend()
+    manager = GuiManager(backend)
+    observed = dict(backend.bounds)
+
+    with pytest.raises(ValueError, match="outside the selected window"):
+        await manager.human_act(
+            "window:1",
+            observed,
+            [
+                {"type": "click", "x": 1, "y": 1},
+                {"type": "drag", "x": 2, "y": 2, "to_x": 999, "to_y": 2},
+            ],
+        )
+    assert backend.actions == []
+
+
+@pytest.mark.asyncio
+async def test_gui_payload_limits_precede_state_consumption(tmp_path, monkeypatch):
+    import local_shell_mcp.tools as tools
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    manager = GuiManager(FakeBackend())
+    state = await manager.snapshot("window:1", screenshot=False)
+
+    with pytest.raises(ValueError, match="text may not exceed"):
+        await manager.act(
+            "window:1",
+            state["state_id"],
+            [{"type": "type", "text": "x" * 4097}],
+        )
+    assert state["state_id"] in manager._states
+
+    with pytest.raises(ValueError, match="keys may contain at most"):
+        await manager.act(
+            "window:1",
+            state["state_id"],
+            [{"type": "key", "keys": ["A"] * 17}],
+        )
+    assert state["state_id"] in manager._states
+
+    with pytest.raises(ValueError, match="text may not exceed"):
+        tools.GuiAction.model_validate({"type": "type", "text": "x" * 4097})
+    assert tools.GuiAction.model_validate(
+        {"type": "key", "keys": "CTRL+A"}
+    ).keys == "CTRL+A"
+    assert tools.GuiAction.model_validate(
+        {"type": "key", "keys": ["CTRL", "A"]}
+    ).keys == ["CTRL", "A"]
+    with pytest.raises(ValueError, match="keys may not exceed"):
+        tools.GuiAction.model_validate({"type": "key", "keys": "X" * 257})
+    with pytest.raises(ValueError, match="keys may contain at most"):
+        tools.GuiAction.model_validate(
+            {"type": "key", "keys": [str(index) for index in range(17)]}
+        )
+
+
+@pytest.mark.asyncio
+async def test_linux_stale_semantic_click_never_falls_back(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    monkeypatch.setattr(linux, "_desktop_environment", lambda: {"XDG_SESSION_TYPE": "x11"})
+    backend = linux.LinuxGuiBackend()
+    calls = []
+
+    def stale(_payload):
+        raise GuiStaleStateError("AT-SPI target element changed since observation")
+
+    async def raw(*_args, **_kwargs):
+        calls.append("raw")
+        return {"performed": True}
+
+    monkeypatch.setattr(backend, "_helper", stale)
+    monkeypatch.setattr(backend, "_perform_x11", raw)
+
+    with pytest.raises(GuiStaleStateError):
+        await backend.perform_action(
+            {"id": "w", "bounds": {"x": 0, "y": 0, "width": 100, "height": 100}},
+            {
+                "semantic": {"path": [0], "fingerprint": "old"},
+                "bounds": {"x": 10, "y": 10, "width": 20, "height": 20},
+            },
+            {"type": "click"},
+        )
+    assert calls == []
+
+
+def test_atspi_listing_skips_defunct_children(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    class GoodWindow:
+        def get_role_name(self):
+            return "frame"
+
+    good = GoodWindow()
+
+    class App:
+        def get_process_id(self):
+            return 42
+
+        def get_child_count(self):
+            return 2
+
+        def get_child_at_index(self, index):
+            if index == 0:
+                raise RuntimeError("defunct")
+            return good
+
+    monkeypatch.setattr(helper, "_apps", lambda: [App()])
+    monkeypatch.setattr(
+        helper,
+        "_bounds",
+        lambda _window: {"x": 0, "y": 0, "width": 100, "height": 100},
+    )
+    windows = helper._windows()
+    assert len(windows) == 1
+    assert windows[0][1] is good
 
 
 def test_macos_utf16_text_units_and_chunks():

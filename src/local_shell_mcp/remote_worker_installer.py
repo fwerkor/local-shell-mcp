@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -24,6 +25,7 @@ from .remote_worker_state import (
 
 _WORKER_MANIFEST_PATH = "/remote/worker-bundle.tgz?manifest=1"
 _WINDOWS_PTY_REQUIREMENT = "pywinpty>=2.0.13"
+_GUI_DEPENDENCY_LOCK = threading.Lock()
 _GUI_REQUIREMENTS: dict[str, tuple[tuple[str, str], ...]] = {
     "win32": (
         ("PIL", "pillow>=10.3.0"),
@@ -119,7 +121,7 @@ def ensure_platform_dependencies() -> dict[str, Any]:
     return result
 
 
-def ensure_gui_dependencies() -> dict[str, Any]:
+def _ensure_gui_dependencies_unlocked() -> dict[str, Any]:
     path = worker_dependency_dir()
     _activate_worker_dependency_dir(path)
     required = _GUI_REQUIREMENTS.get(sys.platform, ())
@@ -199,6 +201,11 @@ def ensure_gui_dependencies() -> dict[str, Any]:
             or f"pip exited with code {completed.returncode}"
         )
     return result
+
+
+def ensure_gui_dependencies() -> dict[str, Any]:
+    with _GUI_DEPENDENCY_LOCK:
+        return _ensure_gui_dependencies_unlocked()
 
 
 def _fetch_bytes(url: str, timeout: float = 60) -> bytes:

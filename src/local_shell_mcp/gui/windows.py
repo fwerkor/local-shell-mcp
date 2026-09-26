@@ -258,13 +258,21 @@ class WindowsGuiBackend:
         locator: Any | None,
         action: dict[str, Any],
     ) -> dict[str, Any]:
-        auto = _automation()
         kind = action["type"]
-
         if kind == "wait":
             seconds = max(0.0, min(float(action.get("seconds", 1.0)), 30.0))
             await asyncio.sleep(seconds)
             return {"waited_s": seconds}
+        return await asyncio.to_thread(self._perform_action_sync, window, locator, action)
+
+    def _perform_action_sync(
+        self,
+        window: dict[str, Any],
+        locator: Any | None,
+        action: dict[str, Any],
+    ) -> dict[str, Any]:
+        auto = _automation()
+        kind = action["type"]
 
         if kind == "focus":
             target = locator or self._find_window(str(window["id"]))
@@ -362,10 +370,20 @@ class WindowsGuiBackend:
     ) -> tuple[int, int]:
         if locator is not None and action.get("x") is None and action.get("y") is None:
             bounds = _rect_dict(_safe_property(locator, "BoundingRectangle"))
-            return (
-                bounds["x"] + bounds["width"] // 2,
-                bounds["y"] + bounds["height"] // 2,
-            )
+            width = int(bounds.get("width", 0))
+            height = int(bounds.get("height", 0))
+            if width <= 0 or height <= 0:
+                raise ValueError("Target element has no usable screen bounds")
+            x = int(bounds.get("x", 0)) + width // 2
+            y = int(bounds.get("y", 0)) + height // 2
+            window_bounds = window["bounds"]
+            left = int(window_bounds["x"])
+            top = int(window_bounds["y"])
+            right = left + int(window_bounds["width"])
+            bottom = top + int(window_bounds["height"])
+            if not (left <= x < right and top <= y < bottom):
+                raise ValueError("Target element center is outside the selected window")
+            return x, y
         if action.get("x") is None or action.get("y") is None:
             raise ValueError("Coordinate action requires x and y, or an element_id")
         bounds = window["bounds"]

@@ -19,6 +19,9 @@ GUI_MAX_ELEMENTS = 1000
 GUI_MAX_DEPTH = 20
 GUI_MAX_ACTIONS = 32
 GUI_MAX_TOTAL_WAIT_S = 30.0
+GUI_MAX_TEXT_BYTES = 4096
+GUI_MAX_KEY_PARTS = 16
+GUI_MAX_KEYS_BYTES = 256
 
 _COORDINATE_ACTIONS = {
     "click",
@@ -415,6 +418,12 @@ class GuiManager:
             if action.get("element_id") is not None:
                 raise ValueError("Human GUI actions do not accept element_id")
             action["type"] = kind
+            if kind in _COORDINATE_ACTIONS:
+                _validate_coordinate_action(
+                    {"bounds": dict(observed_bounds)},
+                    action,
+                    has_locator=False,
+                )
             normalized.append(action)
 
         results: list[dict[str, Any]] = []
@@ -450,7 +459,37 @@ class GuiManager:
             raise ValueError(f"actions may contain at most {GUI_MAX_ACTIONS} GUI actions")
         total_wait = 0.0
         for index, raw_action in enumerate(actions):
-            if str(raw_action.get("type") or "").strip().lower() != "wait":
+            kind = str(raw_action.get("type") or "").strip().lower()
+            text = raw_action.get("text")
+            if text is not None and len(str(text).encode("utf-8")) > GUI_MAX_TEXT_BYTES:
+                raise ValueError(
+                    f"actions[{index}].text may not exceed {GUI_MAX_TEXT_BYTES} UTF-8 bytes"
+                )
+            keys = raw_action.get("keys")
+            if keys is not None:
+                if isinstance(keys, str):
+                    key_parts = [
+                        part.strip()
+                        for part in keys.replace("+", " ").split()
+                        if part.strip()
+                    ]
+                    key_bytes = len(keys.encode("utf-8"))
+                elif isinstance(keys, list):
+                    key_parts = [str(part).strip() for part in keys if str(part).strip()]
+                    key_bytes = sum(len(part.encode("utf-8")) for part in key_parts)
+                else:
+                    raise ValueError(
+                        f"actions[{index}].keys must be a string or list"
+                    )
+                if len(key_parts) > GUI_MAX_KEY_PARTS:
+                    raise ValueError(
+                        f"actions[{index}].keys may contain at most {GUI_MAX_KEY_PARTS} parts"
+                    )
+                if key_bytes > GUI_MAX_KEYS_BYTES:
+                    raise ValueError(
+                        f"actions[{index}].keys may not exceed {GUI_MAX_KEYS_BYTES} UTF-8 bytes"
+                    )
+            if kind != "wait":
                 continue
             try:
                 seconds = float(raw_action.get("seconds", 1.0))
