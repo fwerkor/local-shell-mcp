@@ -33,6 +33,7 @@ _COORDINATE_ACTIONS = {
     "drag",
 }
 _HUMAN_ACTIONS = _COORDINATE_ACTIONS | {"type", "key"}
+_GUI_ACTIONS = _HUMAN_ACTIONS | {"set_value", "focus", "wait"}
 
 
 class GuiUnavailableError(RuntimeError):
@@ -469,6 +470,36 @@ class GuiManager:
         total_wait = 0.0
         for index, raw_action in enumerate(actions):
             kind = str(raw_action.get("type") or "").strip().lower()
+            if not kind:
+                raise ValueError(f"actions[{index}].type is required")
+            if kind not in _GUI_ACTIONS:
+                raise ValueError(f"Unsupported GUI action type: {kind}")
+
+            target = raw_action.get("element_id")
+            if target is not None and not str(target).strip():
+                raise ValueError(f"actions[{index}].element_id must not be empty")
+            if kind in _COORDINATE_ACTIONS:
+                has_x = raw_action.get("x") is not None
+                has_y = raw_action.get("y") is not None
+                if has_x != has_y:
+                    raise ValueError(
+                        f"{kind} requires both x and y when either coordinate is provided"
+                    )
+                if target is None and not has_x:
+                    raise ValueError(
+                        f"actions[{index}] requires x and y, or an element_id"
+                    )
+                if kind == "drag" and (
+                    raw_action.get("to_x") is None or raw_action.get("to_y") is None
+                ):
+                    raise ValueError(f"actions[{index}] drag requires to_x and to_y")
+            if kind == "type" and raw_action.get("text") is None:
+                raise ValueError(f"actions[{index}].text is required for type")
+            if kind == "key" and raw_action.get("keys") is None:
+                raise ValueError(f"actions[{index}].keys is required for key")
+            if kind == "set_value" and target is None:
+                raise ValueError(f"actions[{index}].element_id is required for set_value")
+
             text = raw_action.get("text")
             if text is not None and len(str(text).encode("utf-8")) > GUI_MAX_TEXT_BYTES:
                 raise ValueError(
@@ -489,6 +520,10 @@ class GuiManager:
                 else:
                     raise ValueError(
                         f"actions[{index}].keys must be a string or list"
+                    )
+                if not key_parts:
+                    raise ValueError(
+                        f"actions[{index}].keys must contain at least one key"
                     )
                 if len(key_parts) > GUI_MAX_KEY_PARTS:
                     raise ValueError(

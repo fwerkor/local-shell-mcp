@@ -52,10 +52,21 @@ def _state(obj: Any, state: Any) -> bool:
 
 def _apps() -> list[Any]:
     apps = []
-    for desktop_index in range(Atspi.get_desktop_count()):
-        desktop = Atspi.get_desktop(desktop_index)
-        for index in range(desktop.get_child_count()):
-            app = desktop.get_child_at_index(index)
+    try:
+        desktop_count = Atspi.get_desktop_count()
+    except Exception:
+        return apps
+    for desktop_index in range(desktop_count):
+        try:
+            desktop = Atspi.get_desktop(desktop_index)
+            child_count = desktop.get_child_count()
+        except Exception:
+            continue
+        for index in range(child_count):
+            try:
+                app = desktop.get_child_at_index(index)
+            except Exception:
+                continue
             if app is not None:
                 apps.append(app)
     return apps

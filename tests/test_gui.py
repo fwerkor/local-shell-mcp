@@ -657,9 +657,41 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
     assert result.structuredContent["screenshot"] is True
     assert [call[1] for call in calls] == [
         "gui_state",
+        "gui_state_refresh",
         "delete_file_or_dir",
         "gui_state_refresh",
     ]
+
+    calls.clear()
+    monkeypatch.setattr(tools, "_REMOTE_GUI_STATE_REFRESH_INTERVAL_S", 0.001)
+
+    async def slow_copy(machine, source, destination, overwrite):
+        del machine, source, overwrite
+        await asyncio.sleep(0.01)
+        Image.new("RGB", (4, 4)).save(destination, format="PNG")
+
+    monkeypatch.setattr(tools, "_copy_remote_file_to_local", slow_copy)
+    kept_alive = await tools._gui_state_result(
+        "w",
+        screenshot=True,
+        include_elements=False,
+        max_elements=1,
+        max_depth=1,
+        machine="node",
+    )
+    assert kept_alive.isError is False
+    refresh_calls = [call for call in calls if call[1] == "gui_state_refresh"]
+    assert len(refresh_calls) >= 3
+
+    async def invalid_refresh(*_args, **_kwargs):
+        return "bad"
+
+    monkeypatch.setattr(tools, "_remote_worker_data", invalid_refresh)
+    with pytest.raises(RuntimeError, match="invalid data"):
+        await tools._refresh_remote_gui_state_once("node", "w", "s")
+    monkeypatch.setattr(tools, "_REMOTE_GUI_STATE_REFRESH_INTERVAL_S", 0)
+    with pytest.raises(RuntimeError, match="invalid data"):
+        await tools._refresh_remote_gui_state_lease("node", "w", "s")
 
     async def invalid_remote(*args, **kwargs):
         return "bad"
@@ -1355,6 +1387,34 @@ async def test_gui_action_batch_limits_do_not_consume_state(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_gui_action_specific_validation_precedes_state_consumption(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    backend = FakeBackend()
+    manager = GuiManager(backend)
+    state = await manager.snapshot("window:1", screenshot=False)
+    state_id = state["state_id"]
+
+    for invalid in (
+        {"type": "key"},
+        {"type": "set_value", "text": "secret"},
+        {"type": "type"},
+        {"type": "focus", "element_id": " "},
+        {"type": "unknown"},
+    ):
+        with pytest.raises(ValueError):
+            await manager.act(
+                "window:1",
+                state_id,
+                [
+                    {"type": "click", "x": 1, "y": 1},
+                    invalid,
+                ],
+            )
+        assert state_id in manager._states
+        assert backend.actions == []
+
+
+@pytest.mark.asyncio
 async def test_gui_input_batches_are_serialized(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
 
@@ -2041,6 +2101,20 @@ async def test_gui_payload_limits_precede_state_consumption(tmp_path, monkeypatc
         tools.GuiAction.model_validate(
             {"type": "key", "keys": [str(index) for index in range(17)]}
         )
+    with pytest.raises(ValueError, match="key requires keys"):
+        tools.GuiAction.model_validate({"type": "key"})
+    with pytest.raises(ValueError, match="set_value requires element_id"):
+        tools.GuiAction.model_validate({"type": "set_value", "text": "secret"})
+    with pytest.raises(ValueError, match="element_id must not be empty"):
+        tools.GuiAction.model_validate({"type": "focus", "element_id": " "})
+    with pytest.raises(ValueError, match="requires x and y"):
+        tools.GuiAction.model_validate({"type": "click"})
+    with pytest.raises(ValueError, match="drag requires to_x and to_y"):
+        tools.GuiAction.model_validate({"type": "drag", "x": 1, "y": 1})
+    with pytest.raises(ValueError, match="type requires text"):
+        tools.GuiAction.model_validate({"type": "type"})
+    with pytest.raises(ValueError, match="at least one key"):
+        tools.GuiAction.model_validate({"type": "key", "keys": []})
 
 
 @pytest.mark.asyncio
@@ -2071,6 +2145,31 @@ async def test_linux_stale_semantic_click_never_falls_back(monkeypatch):
             {"type": "click"},
         )
     assert calls == []
+
+
+def test_atspi_apps_skip_defunct_desktop_children(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    good = object()
+
+    class Desktop:
+        def get_child_count(self):
+            return 3
+
+        def get_child_at_index(self, index):
+            if index == 1:
+                raise RuntimeError("defunct app")
+            return good if index == 2 else None
+
+    monkeypatch.setattr(
+        helper,
+        "Atspi",
+        SimpleNamespace(
+            get_desktop_count=lambda: 1,
+            get_desktop=lambda _index: Desktop(),
+        ),
+    )
+    assert helper._apps() == [good]
 
 
 def test_atspi_listing_skips_defunct_children(monkeypatch):

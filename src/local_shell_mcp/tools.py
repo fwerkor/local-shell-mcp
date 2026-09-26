@@ -184,6 +184,29 @@ class GuiAction(BaseModel):
 
     @model_validator(mode="after")
     def validate_payload_size(self) -> GuiAction:
+        if self.element_id is not None and not self.element_id.strip():
+            raise ValueError("element_id must not be empty")
+        coordinate_actions = {
+            "click",
+            "double_click",
+            "right_click",
+            "move",
+            "scroll",
+            "drag",
+        }
+        if self.type in coordinate_actions and self.element_id is None and (
+            self.x is None or self.y is None
+        ):
+            raise ValueError(f"{self.type} requires x and y, or an element_id")
+        if self.type == "drag" and (self.to_x is None or self.to_y is None):
+            raise ValueError("drag requires to_x and to_y")
+        if self.type == "type" and self.text is None:
+            raise ValueError("type requires text")
+        if self.type == "key" and self.keys is None:
+            raise ValueError("key requires keys")
+        if self.type == "set_value" and self.element_id is None:
+            raise ValueError("set_value requires element_id")
+
         if self.text is not None and len(self.text.encode("utf-8")) > GUI_MAX_TEXT_BYTES:
             raise ValueError(
                 f"text may not exceed {GUI_MAX_TEXT_BYTES} UTF-8 bytes"
@@ -199,6 +222,8 @@ class GuiAction(BaseModel):
             else:
                 parts = [str(part).strip() for part in self.keys if str(part).strip()]
                 byte_count = sum(len(part.encode("utf-8")) for part in parts)
+            if not parts:
+                raise ValueError("keys must contain at least one key")
             if len(parts) > GUI_MAX_KEY_PARTS:
                 raise ValueError(
                     f"keys may contain at most {GUI_MAX_KEY_PARTS} parts"
@@ -563,6 +588,24 @@ def _safe_audit_call_arguments(tool_name: str, arguments: dict[str, Any]) -> dic
                 safe[field_name] = {str(key): "<redacted>" for key in value}
         if str(safe.get("action") or "").lower() in {"env_set", "header_set"}:
             safe["value"] = "<redacted>"
+        return safe
+    if tool_name == "gui_action":
+        safe = dict(arguments)
+        actions = safe.get("actions")
+        if isinstance(actions, list):
+            sanitized_actions = []
+            for action in actions:
+                if isinstance(action, BaseModel):
+                    item: Any = action.model_dump(exclude_none=True)
+                elif isinstance(action, dict):
+                    item = dict(action)
+                else:
+                    sanitized_actions.append(action)
+                    continue
+                if "text" in item:
+                    item["text"] = "<redacted>"
+                sanitized_actions.append(item)
+            safe["actions"] = sanitized_actions
         return safe
     if tool_name == "browser_act":
         safe = dict(arguments)
@@ -2800,6 +2843,42 @@ async def _gui_frame_data(
     return data, image
 
 
+_REMOTE_GUI_STATE_REFRESH_INTERVAL_S = 10.0
+
+
+async def _refresh_remote_gui_state_lease(
+    machine: str,
+    window_id: str,
+    state_id: str,
+) -> None:
+    while True:
+        await asyncio.sleep(_REMOTE_GUI_STATE_REFRESH_INTERVAL_S)
+        refreshed = await _remote_worker_data(
+            machine,
+            "gui_state_refresh",
+            {"window_id": window_id, "state_id": state_id},
+            30,
+        )
+        if not isinstance(refreshed, dict):
+            raise RuntimeError("Remote gui_state_refresh returned invalid data")
+
+
+async def _refresh_remote_gui_state_once(
+    machine: str,
+    window_id: str,
+    state_id: str,
+) -> dict[str, Any]:
+    refreshed = await _remote_worker_data(
+        machine,
+        "gui_state_refresh",
+        {"window_id": window_id, "state_id": state_id},
+        30,
+    )
+    if not isinstance(refreshed, dict):
+        raise RuntimeError("Remote gui_state_refresh returned invalid data")
+    return refreshed
+
+
 async def _gui_state_result(
     window_id: str,
     *,
@@ -2825,44 +2904,61 @@ async def _gui_state_result(
             data = await _remote_worker_data(machine, "gui_state", args, 120)
             if not isinstance(data, dict):
                 raise RuntimeError("Remote gui_state returned invalid data")
-            screenshot_path = (
-                str(data.get("screenshot_path")) if data.get("screenshot_path") else None
-            )
-            if screenshot_path:
-                stat = await _remote_transfer_data(
-                    machine,
-                    "transfer_stat",
-                    {"path": screenshot_path, "sha256": False},
-                )
-                if not isinstance(stat, dict) or stat.get("type") != "file":
-                    raise RuntimeError("Remote GUI screenshot is not a file")
-                temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".png")
-                local_path = temporary["path"]
-                try:
-                    await _copy_remote_file_to_local(machine, screenshot_path, local_path, True)
-                    image = await asyncio.to_thread(_read_gui_temp_image, local_path)
-                finally:
-                    with suppress(Exception):
-                        await asyncio.to_thread(_delete_gui_temp_file, local_path)
-                with suppress(Exception):
-                    await _remote_worker_data(
-                        machine,
-                        "delete_file_or_dir",
-                        {"path": screenshot_path, "recursive": False},
-                        30,
-                    )
-                screenshot_path = None
             state_id = str(data.get("state_id") or "")
             if not state_id:
                 raise RuntimeError("Remote gui_state returned no state_id")
-            refreshed = await _remote_worker_data(
+            refreshed = await _refresh_remote_gui_state_once(
                 machine,
-                "gui_state_refresh",
-                {"window_id": window_id, "state_id": state_id},
-                30,
+                window_id,
+                state_id,
             )
-            if not isinstance(refreshed, dict):
-                raise RuntimeError("Remote gui_state_refresh returned invalid data")
+            data["state_ttl_s"] = float(refreshed.get("state_ttl_s") or 0)
+
+            screenshot_path = (
+                str(data.get("screenshot_path")) if data.get("screenshot_path") else None
+            )
+            keepalive: asyncio.Task[None] | None = None
+            if screenshot_path:
+                keepalive = asyncio.create_task(
+                    _refresh_remote_gui_state_lease(machine, window_id, state_id)
+                )
+                try:
+                    stat = await _remote_transfer_data(
+                        machine,
+                        "transfer_stat",
+                        {"path": screenshot_path, "sha256": False},
+                    )
+                    if not isinstance(stat, dict) or stat.get("type") != "file":
+                        raise RuntimeError("Remote GUI screenshot is not a file")
+                    temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".png")
+                    local_path = temporary["path"]
+                    try:
+                        await _copy_remote_file_to_local(
+                            machine, screenshot_path, local_path, True
+                        )
+                        image = await asyncio.to_thread(_read_gui_temp_image, local_path)
+                    finally:
+                        with suppress(Exception):
+                            await asyncio.to_thread(_delete_gui_temp_file, local_path)
+                    with suppress(Exception):
+                        await _remote_worker_data(
+                            machine,
+                            "delete_file_or_dir",
+                            {"path": screenshot_path, "recursive": False},
+                            30,
+                        )
+                    screenshot_path = None
+                finally:
+                    if keepalive is not None:
+                        keepalive.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await keepalive
+
+            refreshed = await _refresh_remote_gui_state_once(
+                machine,
+                window_id,
+                state_id,
+            )
             data["state_ttl_s"] = float(refreshed.get("state_ttl_s") or 0)
         else:
             data = await get_gui_manager().snapshot(**args)

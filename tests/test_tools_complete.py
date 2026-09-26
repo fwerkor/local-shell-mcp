@@ -476,6 +476,29 @@ def test_tool_helpers_audit_serialization_timeout_and_tail(tmp_path, monkeypatch
     )
     assert browser_call["actions"][0]["value"] == "<redacted>"
 
+    gui_call = tools._safe_audit_call_arguments(
+        "gui_action",
+        {
+            "window_id": "w",
+            "state_id": "s",
+            "actions": [
+                tools.GuiAction.model_validate(
+                    {"type": "type", "text": "hunter2"}
+                ),
+                {
+                    "type": "set_value",
+                    "element_id": "e1",
+                    "text": "another-secret",
+                },
+                {"type": "key", "keys": ["CTRL", "A"]},
+            ],
+        },
+    )
+    assert gui_call["actions"][0] == {"type": "type", "text": "<redacted>"}
+    assert gui_call["actions"][1]["text"] == "<redacted>"
+    assert gui_call["actions"][1]["element_id"] == "e1"
+    assert gui_call["actions"][2]["keys"] == ["CTRL", "A"]
+
     assert tools._audit_tool_purpose("x", "  purpose ", " explanation ") == {
         "purpose": "purpose",
         "explanation": "explanation",

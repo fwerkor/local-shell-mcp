@@ -1140,6 +1140,8 @@ async def api_gui_frame(request: Request) -> Response:
     window_id = str(request.query_params.get("window_id") or "")
     try:
         _require_ui_scopes(request, "shell:read", machine=machine)
+        if machine == "local" and get_settings().disable_local:
+            raise RuntimeError("Local access is disabled; select a remote machine")
         if not window_id:
             raise ValueError("window_id is required")
 
@@ -1176,6 +1178,8 @@ async def api_gui_action(request: Request) -> Response:
         observed_bounds = body.get("bounds")
         raw_actions = body.get("actions")
         _require_ui_scopes(request, "shell:read", "shell:execute", machine=machine)
+        if machine == "local" and get_settings().disable_local:
+            raise RuntimeError("Local access is disabled; select a remote machine")
         live_id = _require_live_human_mutation(request)
 
         if not window_id:

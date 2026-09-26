@@ -70,6 +70,49 @@ describe("Native WebUI desktop window refresh", () => {
   })
 })
 
+describe("Native WebUI desktop shortcut encoding", () => {
+  test("preserves Ctrl+Plus and Ctrl+Space as unambiguous key arrays", () => {
+    const context: NativePageContext = {
+      api: {
+        get: async () => undefined as never,
+        send: async () => undefined as never,
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller: any = new DesktopController(context)
+    const stage = { contains: () => true }
+    controller.root = { querySelector: () => stage }
+    const queued: unknown[] = []
+    controller.queueAction = (action: unknown) => { queued.push(action) }
+
+    const target = { closest: () => null }
+    const makeEvent = (
+      key: string,
+      { ctrl = false, shift = false }: { ctrl?: boolean; shift?: boolean },
+    ) => ({
+      key,
+      ctrlKey: ctrl,
+      metaKey: false,
+      altKey: false,
+      shiftKey: shift,
+      target,
+      preventDefault: () => undefined,
+    })
+
+    controller.onKeyDown(makeEvent("+", { ctrl: true, shift: true }))
+    controller.onKeyDown(makeEvent(" ", { ctrl: true }))
+
+    expect(queued).toEqual([
+      { type: "key", keys: ["CTRL", "SHIFT", "="] },
+      { type: "key", keys: ["CTRL", "SPACE"] },
+    ])
+  })
+})
+
 describe("Native WebUI desktop wheel mapping", () => {
   test("keeps zero a no-op and maps browser-down to native-down", () => {
     expect(wheelScrollAmount(0)).toBe(0)

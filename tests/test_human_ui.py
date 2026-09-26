@@ -1219,6 +1219,49 @@ def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
     ]
 
 
+def test_webui_gui_frame_and_action_respect_disable_local(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_DISABLE_LOCAL", "true")
+    get_settings.cache_clear()
+
+    frame_called = []
+    action_called = []
+
+    async def frame_data(*_args, **_kwargs):
+        frame_called.append(True)
+        raise AssertionError("local frame helper must not be reached")
+
+    class Manager:
+        async def human_act(self, *_args, **_kwargs):
+            action_called.append(True)
+            raise AssertionError("local GUI action backend must not be reached")
+
+    monkeypatch.setattr("local_shell_mcp.tools._gui_frame_data", frame_data)
+    monkeypatch.setattr("local_shell_mcp.gui.get_gui_manager", lambda: Manager())
+
+    client = TestClient(build_http_app())
+    frame = client.get(
+        "/api/ui/gui/frame",
+        params={"machine": "local", "window_id": "window:1"},
+    )
+    assert frame.status_code >= 400
+    assert "Local access is disabled" in frame.json()["message"]
+    assert frame_called == []
+
+    action = client.post(
+        "/api/ui/gui/action",
+        json={
+            "machine": "local",
+            "window_id": "window:1",
+            "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+            "actions": [{"type": "click", "x": 1, "y": 1}],
+        },
+    )
+    assert action.status_code >= 400
+    assert "Local access is disabled" in action.json()["message"]
+    assert action_called == []
+
+
 def test_webui_gui_action_validates_human_payload(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     client = TestClient(build_http_app())

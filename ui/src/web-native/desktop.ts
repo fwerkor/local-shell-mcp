@@ -38,7 +38,7 @@ type GuiAction = {
   to_y?: number
   delta_y?: number
   text?: string
-  keys?: string
+  keys?: string | string[]
 }
 
 type Point = { x: number; y: number }
@@ -67,6 +67,7 @@ const SPECIAL_KEYS: Record<string, string> = {
   End: "END",
   PageUp: "PAGEUP",
   PageDown: "PAGEDOWN",
+  " ": "SPACE",
 }
 
 function numericHeader(response: Response, name: string): number {
@@ -636,7 +637,7 @@ export class DesktopController extends BaseController {
       return
     }
 
-    const key = special || (event.key.length === 1 ? event.key.toUpperCase() : "")
+    const key = special || (event.key === "+" ? "=" : (event.key.length === 1 ? event.key.toUpperCase() : ""))
     if (!key) return
     const parts: string[] = []
     if (event.ctrlKey) parts.push("CTRL")
@@ -645,7 +646,7 @@ export class DesktopController extends BaseController {
     if (event.shiftKey && (special || hasCommandModifier)) parts.push("SHIFT")
     parts.push(key)
     event.preventDefault()
-    this.queueAction({ type: "key", keys: parts.join("+") })
+    this.queueAction({ type: "key", keys: parts })
   }
 
   private onTextSubmit(event: SubmitEvent): void {
