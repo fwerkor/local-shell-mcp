@@ -76,6 +76,9 @@ class FakeBackend:
             capabilities={"semantic_actions": True},
         )
 
+    async def focus_window(self, window: dict[str, Any]) -> None:
+        self.actions.append((window, None, {"type": "focus_window"}))
+
     async def perform_action(
         self,
         window: dict[str, Any],
@@ -803,6 +806,16 @@ def test_atspi_window_identity_survives_child_reordering(monkeypatch):
 
     target = Window("Target")
     other = Window("Other")
+    monkeypatch.setattr(
+        helper,
+        "_bounds",
+        lambda window: {
+            "x": 100 if window is target else 400,
+            "y": 50,
+            "width": 300,
+            "height": 200,
+        },
+    )
     signature = helper._window_signature(target)
     app = App([other, target])
     monkeypatch.setattr(helper, "_apps", lambda: [app])
@@ -810,6 +823,15 @@ def test_atspi_window_identity_survives_child_reordering(monkeypatch):
     _app, resolved, index = helper._resolve_window(f"atspi:42:0:{signature}")
     assert resolved is target
     assert index == 1
+
+    monkeypatch.setattr(
+        helper,
+        "_bounds",
+        lambda _window: {"x": 0, "y": 0, "width": 300, "height": 200},
+    )
+    ambiguous_signature = helper._window_signature(target)
+    with pytest.raises(LookupError, match="ambiguous"):
+        helper._resolve_window(f"atspi:42:0:{ambiguous_signature}")
 
 
 @pytest.mark.asyncio
@@ -912,3 +934,71 @@ async def test_gui_manager_validation_and_refresh_error_paths(tmp_path, monkeypa
 
     elements = [{"id": "e1", "bounds": {"x": 3, "y": 4, "width": 5, "height": 6}}]
     assert base._window_relative_elements(elements, {}) == elements
+
+
+@pytest.mark.asyncio
+async def test_gui_manager_human_actions_validate_observed_geometry(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    backend = FakeBackend()
+    manager = GuiManager(backend)
+    observed = dict(backend.bounds)
+
+    result = await manager.human_act(
+        "window:1",
+        observed,
+        [
+            {"type": "click", "x": 10, "y": 12},
+            {"type": "type", "text": "hello"},
+        ],
+    )
+
+    assert result["human_control"] is True
+    assert [item["type"] for item in result["actions"]] == ["click", "type"]
+    assert [item[2]["type"] for item in backend.actions] == [
+        "click",
+        "focus_window",
+        "type",
+    ]
+
+    backend.bounds["x"] += 1
+    with pytest.raises(GuiStaleStateError, match="displayed frame"):
+        await manager.human_act(
+            "window:1",
+            observed,
+            [{"type": "click", "x": 10, "y": 12}],
+        )
+
+
+@pytest.mark.asyncio
+async def test_gui_manager_human_actions_reject_unscoped_targets(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    backend = FakeBackend()
+    manager = GuiManager(backend)
+    observed = dict(backend.bounds)
+
+    with pytest.raises(ValueError, match="outside the selected window"):
+        await manager.human_act(
+            "window:1",
+            observed,
+            [{"type": "click", "x": 999, "y": 1}],
+        )
+    with pytest.raises(ValueError, match="do not accept element_id"):
+        await manager.human_act(
+            "window:1",
+            observed,
+            [{"type": "click", "element_id": "e1"}],
+        )
+    with pytest.raises(ValueError, match="Unsupported human GUI action"):
+        await manager.human_act(
+            "window:1",
+            observed,
+            [{"type": "wait", "seconds": 1}],
+        )
+    with pytest.raises(ValueError, match="Observed window bounds"):
+        await manager.human_act("window:1", {}, [{"type": "type", "text": "x"}])
+    with pytest.raises(GuiStaleStateError, match="no longer available"):
+        await manager.human_act(
+            "missing",
+            observed,
+            [{"type": "type", "text": "x"}],
+        )

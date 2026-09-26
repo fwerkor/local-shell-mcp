@@ -229,6 +229,14 @@ class WindowsGuiBackend:
             max_depth=max_depth,
         )
 
+    async def focus_window(self, window: dict[str, Any]) -> None:
+        def focus() -> None:
+            target = self._find_window(str(window["id"]))
+            if not target.SetFocus():
+                raise RuntimeError("UI Automation could not focus the target window")
+
+        await asyncio.to_thread(focus)
+
     async def perform_action(
         self,
         window: dict[str, Any],

@@ -272,6 +272,20 @@ class MacOSGuiBackend:
             },
         )
 
+    async def focus_window(self, window: dict[str, Any]) -> None:
+        def focus() -> None:
+            AX, _Quartz = _native()
+            target = self._find_ax_window(window)
+            if target is None:
+                raise RuntimeError("Could not resolve the target AX window")
+            error = AX.AXUIElementSetAttributeValue(target, AX.kAXFocusedAttribute, True)
+            if int(error) != 0:
+                error = AX.AXUIElementPerformAction(target, AX.kAXRaiseAction)
+            if int(error) != 0:
+                raise RuntimeError(f"AX focus action failed with error {error}")
+
+        await asyncio.to_thread(focus)
+
     async def perform_action(
         self,
         window: dict[str, Any],

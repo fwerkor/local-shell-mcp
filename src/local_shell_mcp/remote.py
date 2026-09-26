@@ -1404,6 +1404,7 @@ WORKER_GUI_TOOLS = frozenset(
         "gui_list",
         "gui_state",
         "gui_state_refresh",
+        "gui_human_action",
         "gui_action",
     }
 )
@@ -2232,6 +2233,12 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         )
     if tool == "gui_state_refresh":
         return await manager.refresh_state(args["window_id"], args["state_id"])
+    if tool == "gui_human_action":
+        return await manager.human_act(
+            args["window_id"],
+            args["bounds"],
+            args["actions"],
+        )
     if tool == "gui_action":
         return await manager.act(
             args["window_id"],

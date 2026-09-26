@@ -26,6 +26,7 @@ _COORDINATE_ACTIONS = {
     "scroll",
     "drag",
 }
+_HUMAN_ACTIONS = _COORDINATE_ACTIONS | {"type", "key"}
 
 
 class GuiUnavailableError(RuntimeError):
@@ -66,6 +67,8 @@ class GuiBackend(Protocol):
         locator: Any | None,
         action: dict[str, Any],
     ) -> dict[str, Any]: ...
+
+    async def focus_window(self, window: dict[str, Any]) -> None: ...
 
 
 @dataclass(slots=True)
@@ -352,6 +355,72 @@ class GuiManager:
             "actions": results,
         }
 
+    async def human_act(
+        self,
+        window_id: str,
+        observed_bounds: dict[str, Any],
+        actions: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        expected_bounds = _bounds_tuple(observed_bounds)
+        if expected_bounds is None:
+            raise ValueError("Observed window bounds are invalid")
+        if not actions:
+            raise ValueError("At least one GUI action is required")
+
+        normalized: list[dict[str, Any]] = []
+        for index, raw_action in enumerate(actions):
+            action = dict(raw_action)
+            kind = str(action.get("type") or "").strip().lower()
+            if not kind:
+                raise ValueError(f"actions[{index}].type is required")
+            if kind not in _HUMAN_ACTIONS:
+                raise ValueError(f"Unsupported human GUI action type: {kind}")
+            if action.get("element_id") is not None:
+                raise ValueError("Human GUI actions do not accept element_id")
+            action["type"] = kind
+            normalized.append(action)
+
+        results: list[dict[str, Any]] = []
+        for index, action in enumerate(normalized):
+            current = await self._current_window(
+                window_id,
+                "refresh the displayed frame and try again",
+            )
+            if _bounds_tuple(current.get("bounds")) != expected_bounds:
+                raise GuiStaleStateError(
+                    "Target window moved or resized since the displayed frame; refresh it and try again"
+                )
+            if action["type"] in _COORDINATE_ACTIONS:
+                _validate_coordinate_action(current, action, has_locator=False)
+            if action["type"] in {"type", "key"}:
+                await self._backend.focus_window(current)
+            result = await self._backend.perform_action(current, None, action)
+            results.append({"index": index, "type": action["type"], **(result or {})})
+
+        return {
+            "backend": self._backend.name,
+            "window_id": str(window_id),
+            "human_control": True,
+            "actions": results,
+        }
+
+    async def _current_window(
+        self,
+        window_id: str,
+        stale_hint: str = "call gui_state again",
+    ) -> dict[str, Any]:
+        current = await self._backend.list_windows()
+        wanted = str(window_id)
+        match = next(
+            (item for item in current.get("windows", []) if str(item.get("id")) == wanted),
+            None,
+        )
+        if match is None:
+            raise GuiStaleStateError(
+                f"Target window is no longer available; {stale_hint}"
+            )
+        return match
+
     async def refresh_state(self, window_id: str, state_id: str) -> dict[str, Any]:
         now = time.monotonic()
         async with self._lock:
@@ -369,14 +438,7 @@ class GuiManager:
         return {"state_id": state_id, "state_ttl_s": GUI_STATE_TTL_S}
 
     async def _assert_window_geometry_unchanged(self, observed: dict[str, Any]) -> None:
-        current = await self._backend.list_windows()
-        observed_id = str(observed.get("id"))
-        match = next(
-            (item for item in current.get("windows", []) if str(item.get("id")) == observed_id),
-            None,
-        )
-        if match is None:
-            raise GuiStaleStateError("Target window is no longer available; call gui_state again")
+        match = await self._current_window(str(observed.get("id")))
         old_bounds = _bounds_tuple(observed.get("bounds"))
         new_bounds = _bounds_tuple(match.get("bounds"))
         if old_bounds is not None and new_bounds is not None and old_bounds != new_bounds:

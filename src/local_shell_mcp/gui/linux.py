@@ -517,6 +517,17 @@ class LinuxGuiBackend:
             },
         )
 
+    async def focus_window(self, window: dict[str, Any]) -> None:
+        await asyncio.to_thread(
+            self._helper,
+            {
+                "command": "semantic_action",
+                "window_id": window["id"],
+                "locator": [],
+                "action": {"type": "focus"},
+            },
+        )
+
     async def perform_action(
         self,
         window: dict[str, Any],

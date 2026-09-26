@@ -30,6 +30,7 @@ def test_remote_worker_allowlist_covers_core_capabilities():
         "gui_list",
         "gui_state",
         "gui_state_refresh",
+        "gui_human_action",
         "gui_action",
     } <= REMOTE_WORKER_TOOL_NAMES
 
@@ -91,6 +92,10 @@ async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
             calls.append(("refresh", window_id, state_id))
             return {"state_id": state_id, "state_ttl_s": 30}
 
+        async def human_act(self, window_id, bounds, actions):
+            calls.append(("human_act", window_id, bounds, actions))
+            return {"human_control": True}
+
         async def act(self, window_id, state_id, actions):
             calls.append(("act", window_id, state_id, actions))
             return {"state_consumed": True}
@@ -132,12 +137,23 @@ async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
     assert refreshed["state_ttl_s"] == 30
     assert len(dependency_calls) == 3
 
+    human = await remote._execute_gui_worker_tool(
+        "gui_human_action",
+        {
+            "window_id": "w",
+            "bounds": {"x": 0, "y": 0, "width": 10, "height": 10},
+            "actions": [{"type": "click", "x": 1, "y": 1}],
+        },
+    )
+    assert human["human_control"] is True
+    assert len(dependency_calls) == 4
+
     acted = await remote._execute_gui_worker_tool(
         "gui_action",
         {"window_id": "w", "state_id": "s", "actions": [{"type": "wait"}]},
     )
     assert acted["state_consumed"] is True
-    assert len(dependency_calls) == 4
+    assert len(dependency_calls) == 5
     assert calls[-1][0] == "act"
 
     with pytest.raises(ValueError, match="unsupported remote GUI worker tool"):

@@ -115,16 +115,12 @@ def _windows() -> list[tuple[Any, Any, int]]:
 
 def _window_signature(window: Any) -> str:
     try:
-        title = str(window.get_name() or "")
-    except Exception:
-        title = ""
-    try:
         role = str(window.get_role_name() or "")
     except Exception:
         role = ""
     bounds = _bounds(window)
     fingerprint = (
-        f"{role}\0{title}\0{bounds['x']}\0{bounds['y']}\0"
+        f"{role}\0{bounds['x']}\0{bounds['y']}\0"
         f"{bounds['width']}\0{bounds['height']}"
     )
     return hashlib.sha256(fingerprint.encode()).hexdigest()[:12]
@@ -172,12 +168,6 @@ def _resolve_window(window_id: str) -> tuple[Any, Any, int]:
                 candidates.append((window, index))
 
         if signature is not None:
-            preferred = next(
-                (item for item in candidates if item[1] == preferred_index),
-                None,
-            )
-            if preferred is not None:
-                return app, preferred[0], preferred[1]
             if len(candidates) == 1:
                 window, index = candidates[0]
                 return app, window, index

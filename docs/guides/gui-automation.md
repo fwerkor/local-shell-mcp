@@ -27,6 +27,14 @@ A `state_id` expires after 30 seconds and is single-use. Coordinate actions also
 
 Supported actions are `click`, `double_click`, `right_click`, `move`, `scroll`, `drag`, `type`, `key`, `set_value`, `focus`, and `wait`.
 
+## Human control in Native WebUI
+
+The Native WebUI has a **Desktop** page for direct human control of the same native GUI backends. Choose a machine and a window, then interact with the live window image using click, double-click, right-click, drag, wheel, keyboard shortcuts, or the text field for IME/CJK input.
+
+This path is intentionally separate from model `state_id` semantics. Each displayed frame carries the observed window geometry; every human input request validates that the window still has exactly that geometry before injecting input. If the window moved, resized, or disappeared, the action is rejected and the WebUI refreshes the observation. Raw coordinates remain bounded to the selected window.
+
+Keyboard and text actions explicitly focus the selected native window before injection. The WebUI uses lightweight screenshot polling rather than VNC/WebRTC video streaming, and the remote-only `gui_human_action` RPC is an internal controller-to-worker operation rather than an MCP tool exposed to models.
+
 ## Native backends
 
 | Platform | Accessibility / semantic control | Capture and raw input |
