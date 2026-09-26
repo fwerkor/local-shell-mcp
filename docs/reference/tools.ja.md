@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 63f9fb40c4fd1c085e87c30ed221598cccacef1a6fb4aeb2bb4f1db520590ada -->
+<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
 # Tools reference
 
 このページは実際の MCP tool schema から構成されます。Public tool surface を変更した後は `python scripts/generate-tools-reference.py` を実行して English reference を更新します。
@@ -18,6 +18,7 @@
 | External MCP capability を発見 | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Page と interaction | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Custom browser logic を実行 | `browser_run_script` |
+| Control a native desktop app | `gui_list`, `gui_state`, then `gui_action` |
 | Remote machine で作業 | 同じ tool に `machine` を指定し、worker administration のみ `remote_*` を使う |
 
 ## Interactive workspace
@@ -445,6 +446,7 @@ Local または remote machine に UTF-8 text file を書き込みます。
 | `path` | `string` | required |  |
 | `content` | `string` | required |  |
 | `overwrite` | `boolean` | `true` |  |
+| `encoding` | `string` | `"utf-8"` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
@@ -703,6 +705,55 @@ Local または remote machine で full Python Playwright script を実行しま
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 `machine` を指定した場合、この call は追加で `remote:use` を必要とし、remote worker protocol 経由で実行されます。
+
+## デスクトップ GUI 自動化
+
+### `gui_list`
+
+List visible desktop application windows and GUI backend capabilities locally or remotely.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+
+### `gui_state`
+
+Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `window_id` | `string` | required |  |
+| `screenshot` | `boolean` | `true` |  |
+| `include_elements` | `boolean` | `true` |  |
+| `max_elements` | `integer` | `300` |  |
+| `max_depth` | `integer` | `12` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+
+### `gui_action`
+
+Execute GUI actions against a fresh gui_state observation locally or remotely. The state_id is single-use. Prefer semantic element_id targeting; raw x/y coordinates are window-relative. Supported actions are click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, and wait.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `window_id` | `string` | required |  |
+| `state_id` | `string` | required |  |
+| `actions` | `array[GuiAction]` | required |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
 
 ## Remote worker administration
 

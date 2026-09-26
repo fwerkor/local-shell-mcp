@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, Icon, ImageContent, TextContent, ToolAnnotations
 from pathspec.gitignore import GitIgnoreSpec
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 
 from . import __version__
 from .audit import audit, audit_call_context, audit_result_ok
@@ -46,7 +46,15 @@ from .fs_ops import (
     write_content,
     write_text,
 )
-from .image_ops import ImageFile, assert_view_image_size, read_image
+from .gui import get_gui_manager
+from .gui.base import GUI_MAX_KEY_PARTS, GUI_MAX_KEYS_BYTES, GUI_MAX_TEXT_BYTES
+from .image_ops import (
+    MAX_VIEW_IMAGE_BYTES,
+    ImageFile,
+    assert_view_image_size,
+    detect_image_type,
+    read_image,
+)
 from .jobs import (
     JOB_LIST_DEFAULT_LIMIT,
     ManagedJobContext,
@@ -138,6 +146,109 @@ class ViewImageResult(BaseModel):
     ok: bool
     path: str
     machine: str | None = None
+    mime_type: str | None = None
+    bytes: int | None = None
+    message: str = ""
+    error_type: str | None = None
+
+
+class GuiAction(BaseModel):
+    """One action against a fresh gui_state observation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal[
+        "click",
+        "double_click",
+        "right_click",
+        "move",
+        "scroll",
+        "drag",
+        "type",
+        "key",
+        "set_value",
+        "focus",
+        "wait",
+    ]
+    element_id: str | None = None
+    x: int | None = None
+    y: int | None = None
+    to_x: int | None = None
+    to_y: int | None = None
+    delta_x: float | None = None
+    delta_y: float | None = None
+    amount: int | None = None
+    text: str | None = None
+    keys: str | list[str] | None = None
+    seconds: float | None = None
+
+    @model_validator(mode="after")
+    def validate_payload_size(self) -> GuiAction:
+        if self.element_id is not None and not self.element_id.strip():
+            raise ValueError("element_id must not be empty")
+        coordinate_actions = {
+            "click",
+            "double_click",
+            "right_click",
+            "move",
+            "scroll",
+            "drag",
+        }
+        if self.type in coordinate_actions and self.element_id is None and (
+            self.x is None or self.y is None
+        ):
+            raise ValueError(f"{self.type} requires x and y, or an element_id")
+        if self.type == "drag" and (self.to_x is None or self.to_y is None):
+            raise ValueError("drag requires to_x and to_y")
+        if self.type == "type" and self.text is None:
+            raise ValueError("type requires text")
+        if self.type == "key" and self.keys is None:
+            raise ValueError("key requires keys")
+        if self.type == "set_value" and self.element_id is None:
+            raise ValueError("set_value requires element_id")
+
+        if self.text is not None and len(self.text.encode("utf-8")) > GUI_MAX_TEXT_BYTES:
+            raise ValueError(
+                f"text may not exceed {GUI_MAX_TEXT_BYTES} UTF-8 bytes"
+            )
+        if self.keys is not None:
+            if isinstance(self.keys, str):
+                parts = [
+                    part.strip()
+                    for part in self.keys.replace("+", " ").split()
+                    if part.strip()
+                ]
+                byte_count = len(self.keys.encode("utf-8"))
+            else:
+                parts = [str(part).strip() for part in self.keys if str(part).strip()]
+                byte_count = sum(len(part.encode("utf-8")) for part in parts)
+            if not parts:
+                raise ValueError("keys must contain at least one key")
+            if len(parts) > GUI_MAX_KEY_PARTS:
+                raise ValueError(
+                    f"keys may contain at most {GUI_MAX_KEY_PARTS} parts"
+                )
+            if byte_count > GUI_MAX_KEYS_BYTES:
+                raise ValueError(
+                    f"keys may not exceed {GUI_MAX_KEYS_BYTES} UTF-8 bytes"
+                )
+        return self
+
+
+class GuiStateResult(BaseModel):
+    """Structured GUI observation accompanying optional native image content."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ok: bool
+    machine: str | None = None
+    backend: str | None = None
+    state_id: str | None = None
+    state_ttl_s: float | None = None
+    window: dict[str, Any] | None = None
+    elements: list[dict[str, Any]] = Field(default_factory=list)
+    capabilities: dict[str, Any] = Field(default_factory=dict)
+    screenshot: bool = False
     mime_type: str | None = None
     bytes: int | None = None
     message: str = ""
@@ -325,6 +436,7 @@ NON_CANCELLABLE_TOOL_NAMES = frozenset(
         "link_create",
         "link_revoke",
         "image_view",
+        "gui_action",
         "file_write",
         "file_edit",
         "file_delete",
@@ -476,6 +588,24 @@ def _safe_audit_call_arguments(tool_name: str, arguments: dict[str, Any]) -> dic
                 safe[field_name] = {str(key): "<redacted>" for key in value}
         if str(safe.get("action") or "").lower() in {"env_set", "header_set"}:
             safe["value"] = "<redacted>"
+        return safe
+    if tool_name == "gui_action":
+        safe = dict(arguments)
+        actions = safe.get("actions")
+        if isinstance(actions, list):
+            sanitized_actions = []
+            for action in actions:
+                if isinstance(action, BaseModel):
+                    item: Any = action.model_dump(exclude_none=True)
+                elif isinstance(action, dict):
+                    item = dict(action)
+                else:
+                    sanitized_actions.append(action)
+                    continue
+                if "text" in item:
+                    item["text"] = "<redacted>"
+                sanitized_actions.append(item)
+            safe["actions"] = sanitized_actions
         return safe
     if tool_name == "browser_act":
         safe = dict(arguments)
@@ -1191,6 +1321,9 @@ MACHINE_CAPABLE_TOOL_NAMES = {
     "file_grep",
     "file_read",
     "image_view",
+    "gui_list",
+    "gui_state",
+    "gui_action",
     "file_write",
     "file_edit",
     "file_delete",
@@ -1429,6 +1562,15 @@ async def _remote_transfer_data(
     return _unwrap_remote_transfer_result(result, machine=machine, tool=tool)
 
 
+async def _remote_worker_data(
+    machine: str, tool: str, args: dict, timeout_s: int | None = None
+) -> Any:
+    result = await remote_manager().call(
+        machine, tool, args, timeout_s, lane=REMOTE_WORKER_INTERACTIVE_LANE
+    )
+    return _unwrap_remote_transfer_result(result, machine=machine, tool=tool)
+
+
 _REMOTE_STAGED_LEASE_REFRESH_INTERVAL_S = 60.0
 
 
@@ -1492,6 +1634,9 @@ async def _stream_remote_file_to_upload_ticket(
     expected_sha256: str | None,
     ticket: dict[str, Any],
     progress: TransferProgress | None = None,
+    *,
+    put_tool: str = "transfer_put_url",
+    stat_tool: str = "transfer_stat",
 ) -> dict[str, Any]:
     timeout_s = get_settings().remote_job_timeout_s
     last_error: Exception | None = None
@@ -1509,7 +1654,7 @@ async def _stream_remote_file_to_upload_ticket(
         if not digest:
             source_stat = await _remote_transfer_data(
                 src_machine,
-                "transfer_stat",
+                stat_tool,
                 {"path": src_path, "sha256": True},
                 timeout_s,
             )
@@ -1524,7 +1669,7 @@ async def _stream_remote_file_to_upload_ticket(
         task = asyncio.create_task(
             _remote_transfer_data(
                 src_machine,
-                "transfer_put_url",
+                put_tool,
                 {
                     "path": src_path,
                     "url": ticket["url"],
@@ -1704,6 +1849,46 @@ async def _copy_local_file_to_remote(
         "sha256": digest,
         "chunks": 1,
         "chunk_size": total_bytes,
+        "transport": "http-stream",
+    }
+
+
+async def _copy_remote_gui_temp_to_local(
+    src_machine: str,
+    src_path: str,
+    destination_path: str,
+) -> dict[str, Any]:
+    stat = await _remote_transfer_data(
+        src_machine,
+        "transfer_gui_temp_stat",
+        {"path": src_path, "sha256": False},
+    )
+    if not isinstance(stat, dict) or stat.get("type") != "file":
+        raise RuntimeError(f"Remote GUI temp source is not a file: {src_path}")
+    total_bytes = int(stat["size"])
+    ticket = create_upload_ticket(
+        destination_path,
+        total_bytes,
+        None,
+        True,
+    )
+    try:
+        finish = await _stream_remote_file_to_upload_ticket(
+            src_machine,
+            src_path,
+            total_bytes,
+            None,
+            ticket,
+            put_tool="transfer_gui_temp_put_url",
+            stat_tool="transfer_gui_temp_stat",
+        )
+    finally:
+        revoke_transfer_ticket(ticket["token"])
+    return {
+        "source": {"machine": src_machine, "path": stat["path"]},
+        "destination": {"machine": "controller", "path": finish["path"]},
+        "bytes": total_bytes,
+        "sha256": finish.get("sha256"),
         "transport": "http-stream",
     }
 
@@ -2513,6 +2698,403 @@ async def _view_image_result(path: str, machine: str | None = None) -> CallToolR
         return _view_image_error_result(path, machine, exc)
 
 
+GUI_ELEMENT_TEXT_FIELD_MAX_BYTES = 1024
+GUI_ELEMENT_VALUE_FIELD_MAX_BYTES = 2048
+GUI_ELEMENT_ACTION_MAX_ITEMS = 32
+GUI_ELEMENT_ACTION_MAX_BYTES = 128
+GUI_ELEMENTS_TOTAL_BYTES = 64 * 1024
+
+
+def _truncate_gui_utf8(value: Any, limit: int) -> str:
+    text = str(value or "")
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text
+    suffix = "..."
+    budget = max(0, limit - len(suffix))
+    return encoded[:budget].decode("utf-8", errors="ignore") + suffix
+
+
+def _bounded_gui_element(element: dict[str, Any]) -> dict[str, Any]:
+    bounded: dict[str, Any] = {}
+    for key in ("id", "role", "name", "automation_id"):
+        if key in element:
+            bounded[key] = _truncate_gui_utf8(
+                element.get(key),
+                GUI_ELEMENT_TEXT_FIELD_MAX_BYTES,
+            )
+    if "value" in element:
+        bounded["value"] = _truncate_gui_utf8(
+            element.get("value"),
+            GUI_ELEMENT_VALUE_FIELD_MAX_BYTES,
+        )
+    bounds = element.get("bounds")
+    if isinstance(bounds, dict):
+        bounded["bounds"] = {
+            key: bounds.get(key)
+            for key in ("x", "y", "width", "height")
+            if key in bounds
+        }
+    for key in ("enabled", "offscreen", "focused", "editable"):
+        if key in element:
+            bounded[key] = bool(element.get(key))
+    if "depth" in element:
+        try:
+            bounded["depth"] = int(element.get("depth"))
+        except (TypeError, ValueError):
+            bounded["depth"] = 0
+    actions = element.get("actions")
+    if isinstance(actions, list):
+        bounded["actions"] = [
+            _truncate_gui_utf8(action, GUI_ELEMENT_ACTION_MAX_BYTES)
+            for action in actions[:GUI_ELEMENT_ACTION_MAX_ITEMS]
+        ]
+    return bounded
+
+
+def _bounded_gui_elements(elements: list[Any]) -> list[dict[str, Any]]:
+    bounded: list[dict[str, Any]] = []
+    used = 2
+    for raw in elements:
+        if not isinstance(raw, dict):
+            continue
+        element = _bounded_gui_element(raw)
+        encoded_size = len(
+            json.dumps(
+                element,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        )
+        extra = encoded_size + (1 if bounded else 0)
+        if used + extra > GUI_ELEMENTS_TOTAL_BYTES:
+            break
+        bounded.append(element)
+        used += extra
+    return bounded
+
+
+def _format_gui_state_text(metadata: GuiStateResult) -> str:
+    if not metadata.ok:
+        return f"Unable to observe GUI state: {metadata.message}"
+    window = metadata.window or {}
+    bounds = window.get("bounds") or {}
+    lines = [
+        (
+            f"GUI state {metadata.state_id} on {metadata.backend}: "
+            f"{window.get('app', '')} — {window.get('title', '')}"
+        ),
+        (
+            "window bounds: "
+            f"x={bounds.get('x')} y={bounds.get('y')} "
+            f"width={bounds.get('width')} height={bounds.get('height')}"
+        ),
+        "Coordinates for gui_action are window-relative. Prefer element_id when available.",
+    ]
+    if metadata.elements:
+        lines.append("Accessibility elements:")
+        for element in metadata.elements:
+            eb = element.get("bounds") or {}
+            name = str(element.get("name") or "").replace("\n", " ")
+            if len(name) > 160:
+                name = name[:157] + "..."
+            lines.append(
+                f"[{element.get('id')}] {element.get('role', '')} {name!r} "
+                f"@({eb.get('x')},{eb.get('y')},{eb.get('width')},{eb.get('height')})"
+            )
+    return "\n".join(lines)
+
+
+def _gui_state_call_result(
+    data: dict[str, Any],
+    machine: str | None,
+    image: ImageFile | None,
+) -> CallToolResult:
+    metadata = GuiStateResult(
+        ok=True,
+        machine=machine,
+        backend=str(data.get("backend") or "") or None,
+        state_id=str(data.get("state_id") or "") or None,
+        state_ttl_s=float(data.get("state_ttl_s") or 0) or None,
+        window=data.get("window") if isinstance(data.get("window"), dict) else None,
+        elements=_bounded_gui_elements(data.get("elements"))
+        if isinstance(data.get("elements"), list)
+        else [],
+        capabilities=(
+            data.get("capabilities") if isinstance(data.get("capabilities"), dict) else {}
+        ),
+        screenshot=image is not None,
+        mime_type=image.mime_type if image is not None else None,
+        bytes=image.size if image is not None else None,
+    )
+    content: list[ImageContent | TextContent] = [
+        TextContent(type="text", text=_format_gui_state_text(metadata))
+    ]
+    if image is not None:
+        content.insert(
+            0,
+            ImageContent(
+                type="image",
+                data=base64.b64encode(image.data).decode("ascii"),
+                mimeType=image.mime_type,
+            ),
+        )
+    return CallToolResult(
+        content=content,
+        structuredContent=metadata.model_dump(mode="json"),
+    )
+
+
+def _gui_state_error_result(machine: str | None, exc: Exception) -> CallToolResult:
+    audit("tool_error", error=repr(exc))
+    message = f"{type(exc).__name__}: {exc}"
+    metadata = GuiStateResult(
+        ok=False,
+        machine=machine,
+        message=message,
+        error_type=type(exc).__name__,
+    )
+    return CallToolResult(
+        content=[TextContent(type="text", text=f"Unable to observe GUI state: {message}")],
+        structuredContent=metadata.model_dump(mode="json"),
+        isError=True,
+    )
+
+
+def _gui_temp_path(path: str, *, must_exist: bool) -> Path:
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = get_settings().workspace_root / candidate
+    root = temp_dir().resolve(strict=False)
+    parent = candidate.parent.resolve(strict=False)
+    if parent != root:
+        raise ValueError("GUI screenshot path is outside the internal temp directory")
+    resolved = candidate.resolve(strict=must_exist)
+    if resolved.parent != root:
+        raise ValueError("GUI screenshot path escapes the internal temp directory")
+    return resolved
+
+
+def _read_gui_temp_image(path: str) -> ImageFile:
+    resolved = _gui_temp_path(path, must_exist=True)
+    if not resolved.is_file():
+        raise IsADirectoryError(str(resolved))
+    expected_size = resolved.stat().st_size
+    assert_view_image_size(expected_size)
+    with resolved.open("rb") as handle:
+        data = handle.read(MAX_VIEW_IMAGE_BYTES + 1)
+    assert_view_image_size(len(data))
+    image_format, mime_type = detect_image_type(data[:16])
+    return ImageFile(
+        path=relative_display(resolved),
+        data=data,
+        format=image_format,
+        mime_type=mime_type,
+        size=len(data),
+    )
+
+
+def _delete_gui_temp_file(path: str) -> None:
+    candidate = _gui_temp_path(path, must_exist=False)
+    candidate.unlink(missing_ok=True)
+
+
+async def _gui_frame_data(
+    window_id: str,
+    machine: str | None,
+) -> tuple[dict[str, Any], ImageFile]:
+    screenshot_path: str | None = None
+    if machine:
+        if not get_settings().remote_enabled:
+            raise RuntimeError("Remote workers are disabled")
+        data = await _remote_worker_data(
+            machine,
+            "gui_frame",
+            {"window_id": window_id},
+            210,
+        )
+        if not isinstance(data, dict):
+            raise RuntimeError("Remote gui_frame returned invalid data")
+        screenshot_path = (
+            str(data.get("screenshot_path")) if data.get("screenshot_path") else None
+        )
+        if not screenshot_path:
+            raise RuntimeError("Remote gui_frame returned no screenshot")
+        try:
+            temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".png")
+            local_path = temporary["path"]
+            try:
+                await _copy_remote_gui_temp_to_local(
+                    machine, screenshot_path, local_path
+                )
+                image = await asyncio.to_thread(_read_gui_temp_image, local_path)
+            finally:
+                with suppress(Exception):
+                    await asyncio.to_thread(_delete_gui_temp_file, local_path)
+            data = dict(data)
+            data.pop("screenshot_path", None)
+            return data, image
+        finally:
+            with suppress(Exception):
+                await _remote_transfer_data(
+                    machine,
+                    "transfer_gui_temp_delete",
+                    {"path": screenshot_path},
+                    30,
+                )
+
+    data = await get_gui_manager().frame(window_id)
+    screenshot_path = str(data.get("screenshot_path") or "")
+    if not screenshot_path:
+        raise RuntimeError("Local gui_frame returned no screenshot")
+    try:
+        image = await asyncio.to_thread(_read_gui_temp_image, screenshot_path)
+    finally:
+        with suppress(Exception):
+            await asyncio.to_thread(_delete_gui_temp_file, screenshot_path)
+    data = dict(data)
+    data.pop("screenshot_path", None)
+    return data, image
+
+
+_REMOTE_GUI_STATE_REFRESH_INTERVAL_S = 10.0
+
+
+async def _refresh_remote_gui_state_lease(
+    machine: str,
+    window_id: str,
+    state_id: str,
+) -> None:
+    while True:
+        await asyncio.sleep(_REMOTE_GUI_STATE_REFRESH_INTERVAL_S)
+        refreshed = await _remote_worker_data(
+            machine,
+            "gui_state_refresh",
+            {"window_id": window_id, "state_id": state_id},
+            30,
+        )
+        if not isinstance(refreshed, dict):
+            raise RuntimeError("Remote gui_state_refresh returned invalid data")
+
+
+async def _refresh_remote_gui_state_once(
+    machine: str,
+    window_id: str,
+    state_id: str,
+) -> dict[str, Any]:
+    refreshed = await _remote_worker_data(
+        machine,
+        "gui_state_refresh",
+        {"window_id": window_id, "state_id": state_id},
+        30,
+    )
+    if not isinstance(refreshed, dict):
+        raise RuntimeError("Remote gui_state_refresh returned invalid data")
+    return refreshed
+
+
+async def _gui_state_result(
+    window_id: str,
+    *,
+    screenshot: bool,
+    include_elements: bool,
+    max_elements: int,
+    max_depth: int,
+    machine: str | None,
+) -> CallToolResult:
+    image: ImageFile | None = None
+    screenshot_path: str | None = None
+    try:
+        args = {
+            "window_id": window_id,
+            "screenshot": screenshot,
+            "include_elements": include_elements,
+            "max_elements": max_elements,
+            "max_depth": max_depth,
+        }
+        if machine:
+            if not get_settings().remote_enabled:
+                raise RuntimeError("Remote workers are disabled")
+            data = await _remote_worker_data(machine, "gui_state", args, 210)
+            if not isinstance(data, dict):
+                raise RuntimeError("Remote gui_state returned invalid data")
+            state_id = str(data.get("state_id") or "")
+            if not state_id:
+                raise RuntimeError("Remote gui_state returned no state_id")
+            refreshed = await _refresh_remote_gui_state_once(
+                machine,
+                window_id,
+                state_id,
+            )
+            data["state_ttl_s"] = float(refreshed.get("state_ttl_s") or 0)
+
+            screenshot_path = (
+                str(data.get("screenshot_path")) if data.get("screenshot_path") else None
+            )
+            keepalive: asyncio.Task[None] | None = None
+            if screenshot_path:
+                keepalive = asyncio.create_task(
+                    _refresh_remote_gui_state_lease(machine, window_id, state_id)
+                )
+                try:
+                    temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".png")
+                    local_path = temporary["path"]
+                    try:
+                        await _copy_remote_gui_temp_to_local(
+                            machine, screenshot_path, local_path
+                        )
+                        image = await asyncio.to_thread(_read_gui_temp_image, local_path)
+                    finally:
+                        with suppress(Exception):
+                            await asyncio.to_thread(_delete_gui_temp_file, local_path)
+                    with suppress(Exception):
+                        await _remote_transfer_data(
+                            machine,
+                            "transfer_gui_temp_delete",
+                            {"path": screenshot_path},
+                            30,
+                        )
+                    screenshot_path = None
+                finally:
+                    if keepalive is not None:
+                        keepalive.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await keepalive
+
+            refreshed = await _refresh_remote_gui_state_once(
+                machine,
+                window_id,
+                state_id,
+            )
+            data["state_ttl_s"] = float(refreshed.get("state_ttl_s") or 0)
+        else:
+            data = await get_gui_manager().snapshot(**args)
+            screenshot_path = (
+                str(data.get("screenshot_path")) if data.get("screenshot_path") else None
+            )
+            if screenshot_path:
+                try:
+                    image = await asyncio.to_thread(_read_gui_temp_image, screenshot_path)
+                finally:
+                    with suppress(Exception):
+                        await asyncio.to_thread(_delete_gui_temp_file, screenshot_path)
+        data = dict(data)
+        data.pop("screenshot_path", None)
+        return _gui_state_call_result(data, machine, image)
+    except Exception as exc:
+        return _gui_state_error_result(machine, exc)
+    finally:
+        if machine and screenshot_path:
+            with suppress(Exception):
+                await _remote_transfer_data(
+                    machine,
+                    "transfer_gui_temp_delete",
+                    {"path": screenshot_path},
+                    30,
+                )
+
+
 def _read_audit_tail_entries(lines: int = 100) -> dict:
     settings = get_settings()
     line_limit = max(1, min(lines, 1000))
@@ -2992,6 +3574,58 @@ def _register_workspace_read_tools(
     ) -> ViewImageResult:
         """View a PNG, JPEG, GIF, or WebP file as native MCP image content locally or on a remote machine. Use this instead of file_read when visual inspection is needed. Remote images reuse the existing file-transfer protocol, so the worker does not need a new image-specific RPC."""
         return cast(ViewImageResult, await _view_image_result(path, machine))
+
+
+def _register_gui_tools(
+    mcp: FastMCP,
+    settings: Any,
+    read_only_tool: ToolAnnotations,
+) -> None:
+    shell_read_meta = _oauth_meta(["shell:read"])
+    shell_execute_meta = _oauth_meta(["shell:read", "shell:execute"])
+
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
+    async def gui_list(machine: str | None = None) -> ToolResult:
+        """List visible desktop application windows and GUI backend capabilities locally or remotely."""
+        if machine:
+            return await _remote_call(settings, machine, "gui_list", {}, 210)
+        return await _tool_call(get_gui_manager().list_windows)
+
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
+    async def gui_state(
+        window_id: str,
+        screenshot: bool = True,
+        include_elements: bool = True,
+        max_elements: int = 300,
+        max_depth: int = 12,
+        machine: str | None = None,
+    ) -> GuiStateResult:
+        """Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized."""
+        return cast(
+            GuiStateResult,
+            await _gui_state_result(
+                window_id,
+                screenshot=screenshot,
+                include_elements=include_elements,
+                max_elements=max_elements,
+                max_depth=max_depth,
+                machine=machine,
+            ),
+        )
+
+    @mcp.tool(structured_output=True, meta=shell_execute_meta)
+    async def gui_action(
+        window_id: str,
+        state_id: str,
+        actions: list[GuiAction],
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Execute GUI actions against a fresh gui_state observation locally or remotely. The state_id is single-use. Prefer semantic element_id targeting; raw x/y coordinates are window-relative. Supported actions are click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, and wait."""
+        payload = [action.model_dump(exclude_none=True) for action in actions]
+        args = {"window_id": window_id, "state_id": state_id, "actions": payload}
+        if machine:
+            return await _remote_call(settings, machine, "gui_action", args, 210)
+        return await _tool_call(get_gui_manager().act, window_id, state_id, payload)
 
 
 def _register_download_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -> None:
@@ -3679,6 +4313,7 @@ def build_mcp() -> FastMCP:
     _register_shell_tools(mcp, settings, read_only_tool)
     _register_job_tools(mcp, settings, read_only_tool)
     _register_workspace_read_tools(mcp, settings, read_only_tool)
+    _register_gui_tools(mcp, settings, read_only_tool)
     _register_download_tools(mcp, read_only_tool)
     _register_workspace_write_tools(mcp, settings)
     _register_maintenance_tools(mcp, read_only_tool)

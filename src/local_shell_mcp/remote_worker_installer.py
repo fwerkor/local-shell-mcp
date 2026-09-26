@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -24,6 +25,26 @@ from .remote_worker_state import (
 
 _WORKER_MANIFEST_PATH = "/remote/worker-bundle.tgz?manifest=1"
 _WINDOWS_PTY_REQUIREMENT = "pywinpty>=2.0.13"
+_GUI_DEPENDENCY_LOCK = threading.Lock()
+_GUI_REQUIREMENTS: dict[str, tuple[tuple[str, str], ...]] = {
+    "win32": (("uiautomation", "uiautomation>=2.0.29,<3"),),
+    "darwin": (
+        ("ApplicationServices", "pyobjc-framework-ApplicationServices>=11.1,<13"),
+        ("Quartz", "pyobjc-framework-Quartz>=11.1,<13"),
+    ),
+    "linux-x11": (("Xlib", "python-xlib>=0.33,<1"),),
+    "linux-wayland": (("dbus_next", "dbus-next>=0.2.3,<1"),),
+}
+
+
+def _gui_requirement_key(session_type: str | None) -> str | None:
+    if sys.platform == "linux":
+        normalized = str(session_type or "").strip().lower()
+        if normalized in {"x11", "wayland"}:
+            return f"linux-{normalized}"
+        return None
+    return sys.platform
+
 
 
 def worker_dependency_dir() -> Path:
@@ -101,6 +122,98 @@ def ensure_platform_dependencies() -> dict[str, Any]:
             or f"pip exited with code {completed.returncode}"
         )
     return result
+
+
+def _ensure_gui_dependencies_unlocked(
+    session_type: str | None = None,
+) -> dict[str, Any]:
+    path = worker_dependency_dir()
+    _activate_worker_dependency_dir(path)
+    key = _gui_requirement_key(session_type)
+    required = _GUI_REQUIREMENTS.get(key or "", ())
+    if not required:
+        return {
+            "available": True,
+            "installed": False,
+            "path": str(path),
+            "missing": [],
+        }
+
+    missing: list[tuple[str, str]] = []
+    for module_name, requirement in required:
+        try:
+            importlib.import_module(module_name)
+        except (ImportError, OSError):
+            missing.append((module_name, requirement))
+    if not missing:
+        return {
+            "available": True,
+            "installed": False,
+            "path": str(path),
+            "missing": [],
+        }
+
+    path.mkdir(parents=True, exist_ok=True)
+    argv = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--disable-pip-version-check",
+        "--no-input",
+        "--retries",
+        "1",
+        "--timeout",
+        "10",
+        "--target",
+        str(path),
+        *[requirement for _module_name, requirement in missing],
+    ]
+    try:
+        completed = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=180,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {
+            "available": False,
+            "installed": False,
+            "path": str(path),
+            "missing": [module for module, _requirement in missing],
+            "error": str(exc),
+        }
+
+    importlib.invalidate_caches()
+    still_missing: list[str] = []
+    for module_name, _requirement in missing:
+        try:
+            importlib.import_module(module_name)
+        except (ImportError, OSError):
+            still_missing.append(module_name)
+    available = not still_missing
+    result: dict[str, Any] = {
+        "available": available,
+        "installed": available and completed.returncode == 0,
+        "path": str(path),
+        "missing": still_missing,
+    }
+    if not available:
+        result["error"] = (
+            completed.stderr.strip()
+            or completed.stdout.strip()
+            or f"pip exited with code {completed.returncode}"
+        )
+    return result
+
+
+def ensure_gui_dependencies(
+    session_type: str | None = None,
+) -> dict[str, Any]:
+    with _GUI_DEPENDENCY_LOCK:
+        return _ensure_gui_dependencies_unlocked(session_type)
 
 
 def _fetch_bytes(url: str, timeout: float = 60) -> bytes:

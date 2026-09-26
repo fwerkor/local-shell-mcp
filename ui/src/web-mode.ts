@@ -1,4 +1,4 @@
-export const WEB_VIEWS = ["overview", "files", "terminals", "sessions", "remotes", "audit", "workloads", "activity"] as const
+export const WEB_VIEWS = ["overview", "files", "terminals", "desktop", "sessions", "remotes", "audit", "workloads", "activity"] as const
 export type WebViewName = (typeof WEB_VIEWS)[number] | "console"
 export type InterfaceMode = "web" | "tui"
 

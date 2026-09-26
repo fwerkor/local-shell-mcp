@@ -605,6 +605,7 @@ const PAGE_COPY: Record<Exclude<WebViewName, "console">, { name: string; title: 
   overview: { name: "Overview", title: "Control plane overview", description: "System health across your local and remote machines." },
   files: { name: "Files", title: "File manager", description: "Browse, preview, edit, and organize files on local or remote machines." },
   terminals: { name: "Terminals", title: "Persistent terminals", description: "Low-latency interactive shells with session, machine, and mobile controls." },
+  desktop: { name: "Desktop", title: "Desktop control", description: "View and control native application windows on local or remote machines." },
   sessions: { name: "Sessions", title: "Logical Sessions", description: "Create, inspect, hand off, and close durable agent tasks by explicit session_id." },
   remotes: { name: "Remotes", title: "Remote workers", description: "Create invitations and manage persistent remote worker identities." },
   audit: { name: "Audit", title: "Audit records", description: "Filter MCP calls and inspect call results and inputs in a TUI-aligned layout." },
@@ -660,6 +661,7 @@ function renderActiveView(): void {
   nativeController = createNativePage(activeView, {
     api: { get: apiGet, send: apiSend },
     uiPath: UI_PATH,
+    apiPrefix: API_PREFIX,
     accessToken,
     machines: uiMachines,
     notify,

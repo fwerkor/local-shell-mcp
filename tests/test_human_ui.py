@@ -1127,3 +1127,296 @@ def test_windows_worker_paths_use_windows_semantics():
     )
     assert [entry["name"] for entry in normalized] == ["folder", ".hidden"]
     assert normalized[1]["hidden"] is True
+
+
+def test_webui_remote_gui_windows_uses_bootstrap_safe_timeout(tmp_path, monkeypatch):
+    import local_shell_mcp.human_ui as human_ui
+
+    _configure(tmp_path, monkeypatch)
+    calls = []
+
+    async def dispatch(machine, local_call, remote_tool, remote_args, remote_timeout_s=None):
+        del local_call
+        calls.append((machine, remote_tool, remote_args, remote_timeout_s))
+        return {"backend": "remote", "windows": [], "capabilities": {}}
+
+    monkeypatch.setattr(human_ui, "_machine_dispatch", dispatch)
+    client = TestClient(build_http_app())
+    response = client.get("/api/ui/gui/windows", params={"machine": "node"})
+    assert response.status_code == 200
+    assert calls == [("node", "gui_list", {}, 210)]
+
+
+def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    calls = []
+
+    class FakeGuiManager:
+        async def list_windows(self):
+            return {
+                "backend": "fake-native",
+                "platform": "linux",
+                "windows": [
+                    {
+                        "id": "window:1",
+                        "title": "Demo",
+                        "app": "Example",
+                        "bounds": {"x": 20, "y": 30, "width": 320, "height": 180},
+                    }
+                ],
+                "capabilities": {"coordinate_input": True},
+            }
+
+        async def human_act(self, window_id, bounds, actions):
+            calls.append((window_id, bounds, actions))
+            return {
+                "backend": "fake-native",
+                "window_id": window_id,
+                "human_control": True,
+                "actions": [{"index": 0, "type": actions[0]["type"]}],
+            }
+
+    manager = FakeGuiManager()
+    monkeypatch.setattr("local_shell_mcp.gui.get_gui_manager", lambda: manager)
+
+    async def gui_frame_data(window_id, machine):
+        assert window_id == "window:1"
+        assert machine is None
+        image = type("Image", (), {"data": b"fake-png", "mime_type": "image/png"})()
+        return (
+            {
+                "backend": "fake-native",
+                "window": {
+                    "id": "window:1",
+                    "title": "Demo",
+                    "bounds": {"x": 20, "y": 30, "width": 320, "height": 180},
+                },
+                "capabilities": {},
+            },
+            image,
+        )
+
+    monkeypatch.setattr("local_shell_mcp.tools._gui_frame_data", gui_frame_data)
+    client = TestClient(build_http_app())
+
+    windows = client.get("/api/ui/gui/windows", params={"machine": "local"})
+    assert windows.status_code == 200
+    payload = windows.json()["data"]
+    assert payload["machine"] == "local"
+    assert payload["backend"] == "fake-native"
+    assert payload["windows"][0]["id"] == "window:1"
+
+    frame = client.get(
+        "/api/ui/gui/frame",
+        params={"machine": "local", "window_id": "window:1"},
+    )
+    assert frame.status_code == 200
+    assert frame.content == b"fake-png"
+    assert frame.headers["content-type"] == "image/png"
+    assert frame.headers["cache-control"] == "no-store"
+    assert frame.headers["x-lsm-gui-window-width"] == "320"
+    assert frame.headers["x-lsm-gui-window-height"] == "180"
+
+    action = client.post(
+        "/api/ui/gui/action",
+        json={
+            "machine": "local",
+            "window_id": "window:1",
+            "bounds": {"x": 20, "y": 30, "width": 320, "height": 180},
+            "actions": [{"type": "click", "x": 12, "y": 8}],
+        },
+    )
+    assert action.status_code == 200
+    assert action.json()["data"]["human_control"] is True
+    assert calls == [
+        (
+            "window:1",
+            {"x": 20, "y": 30, "width": 320, "height": 180},
+            [{"type": "click", "x": 12, "y": 8}],
+        )
+    ]
+
+
+def test_webui_gui_frame_and_action_respect_disable_local(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_DISABLE_LOCAL", "true")
+    get_settings.cache_clear()
+
+    frame_called = []
+    action_called = []
+
+    async def frame_data(*_args, **_kwargs):
+        frame_called.append(True)
+        raise AssertionError("local frame helper must not be reached")
+
+    class Manager:
+        async def human_act(self, *_args, **_kwargs):
+            action_called.append(True)
+            raise AssertionError("local GUI action backend must not be reached")
+
+    monkeypatch.setattr("local_shell_mcp.tools._gui_frame_data", frame_data)
+    monkeypatch.setattr("local_shell_mcp.gui.get_gui_manager", lambda: Manager())
+
+    client = TestClient(build_http_app())
+    frame = client.get(
+        "/api/ui/gui/frame",
+        params={"machine": "local", "window_id": "window:1"},
+    )
+    assert frame.status_code >= 400
+    assert "Local access is disabled" in frame.json()["message"]
+    assert frame_called == []
+
+    action = client.post(
+        "/api/ui/gui/action",
+        json={
+            "machine": "local",
+            "window_id": "window:1",
+            "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+            "actions": [{"type": "click", "x": 1, "y": 1}],
+        },
+    )
+    assert action.status_code >= 400
+    assert "Local access is disabled" in action.json()["message"]
+    assert action_called == []
+
+
+def test_webui_gui_action_validates_human_payload(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    client = TestClient(build_http_app())
+
+    missing_bounds = client.post(
+        "/api/ui/gui/action",
+        json={
+            "machine": "local",
+            "window_id": "window:1",
+            "actions": [{"type": "click", "x": 1, "y": 1}],
+        },
+    )
+    assert missing_bounds.status_code == 400
+    assert "bounds is required" in missing_bounds.json()["message"]
+
+    too_many = client.post(
+        "/api/ui/gui/action",
+        json={
+            "machine": "local",
+            "window_id": "window:1",
+            "bounds": {"x": 0, "y": 0, "width": 10, "height": 10},
+            "actions": [{"type": "wait"}] * 9,
+        },
+    )
+    assert too_many.status_code == 400
+    assert "At most 8" in too_many.json()["message"]
+
+
+def test_webui_gui_api_error_paths(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+
+    class InvalidGuiManager:
+        async def list_windows(self):
+            return ["invalid"]
+
+    monkeypatch.setattr(
+        "local_shell_mcp.gui.get_gui_manager",
+        lambda: InvalidGuiManager(),
+    )
+    client = TestClient(build_http_app())
+
+    invalid_windows = client.get("/api/ui/gui/windows", params={"machine": "local"})
+    assert invalid_windows.status_code >= 400
+    assert "invalid payload" in invalid_windows.json()["message"]
+
+    missing_window = client.get("/api/ui/gui/frame", params={"machine": "local"})
+    assert missing_window.status_code == 400
+    assert "window_id is required" in missing_window.json()["message"]
+
+    async def failed_frame(*_args, **_kwargs):
+        raise RuntimeError("capture failed")
+
+    monkeypatch.setattr("local_shell_mcp.tools._gui_frame_data", failed_frame)
+    failed_frame = client.get(
+        "/api/ui/gui/frame",
+        params={"machine": "local", "window_id": "window:1"},
+    )
+    assert failed_frame.status_code >= 400
+    assert "capture failed" in failed_frame.json()["message"]
+
+    async def missing_image(*_args, **_kwargs):
+        raise RuntimeError("GUI backend returned no screenshot")
+
+    monkeypatch.setattr("local_shell_mcp.tools._gui_frame_data", missing_image)
+    no_image = client.get(
+        "/api/ui/gui/frame",
+        params={"machine": "local", "window_id": "window:1"},
+    )
+    assert no_image.status_code >= 400
+    assert "no screenshot" in no_image.json()["message"]
+
+    missing_action_window = client.post(
+        "/api/ui/gui/action",
+        json={
+            "machine": "local",
+            "bounds": {"x": 0, "y": 0, "width": 10, "height": 10},
+            "actions": [{"type": "click", "x": 1, "y": 1}],
+        },
+    )
+    assert missing_action_window.status_code == 400
+    assert "window_id is required" in missing_action_window.json()["message"]
+
+    missing_actions = client.post(
+        "/api/ui/gui/action",
+        json={
+            "machine": "local",
+            "window_id": "window:1",
+            "bounds": {"x": 0, "y": 0, "width": 10, "height": 10},
+            "actions": [],
+        },
+    )
+    assert missing_actions.status_code == 400
+    assert "non-empty list" in missing_actions.json()["message"]
+
+
+def test_webui_gui_remote_human_action_dispatch(tmp_path, monkeypatch):
+    import local_shell_mcp.human_ui as human_ui
+
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "true")
+    get_settings.cache_clear()
+    calls = []
+
+    async def remote_call(machine, tool, args, timeout_s=None):
+        calls.append((machine, tool, args, timeout_s))
+        return {
+            "backend": "remote-gui",
+            "window_id": args["window_id"],
+            "human_control": True,
+            "actions": [{"index": 0, "type": "click"}],
+        }
+
+    monkeypatch.setattr(human_ui, "_remote_call", remote_call)
+    client = TestClient(build_http_app())
+    bounds = {"x": 20, "y": 30, "width": 320, "height": 180}
+
+    response = client.post(
+        "/api/ui/gui/action",
+        json={
+            "machine": "desktop-node",
+            "window_id": "window:1",
+            "bounds": bounds,
+            "actions": [{"type": "click", "x": 10, "y": 11}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["human_control"] is True
+    assert calls == [
+        (
+            "desktop-node",
+            "gui_human_action",
+            {
+                "window_id": "window:1",
+                "bounds": bounds,
+                "actions": [{"type": "click", "x": 10, "y": 11}],
+            },
+            210,
+        )
+    ]

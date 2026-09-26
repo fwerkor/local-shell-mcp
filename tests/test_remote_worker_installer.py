@@ -276,3 +276,174 @@ def test_windows_worker_falls_back_when_pywinpty_install_fails(tmp_path, monkeyp
     assert result["available"] is False
     assert result["installed"] is False
     assert "timed out" in result["error"]
+
+
+def test_gui_dependency_bootstrap_reuses_available_modules(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(installer.sys, "platform", "linux")
+    monkeypatch.setattr(installer.sys, "path", list(installer.sys.path))
+    monkeypatch.setenv("PYTHONPATH", "")
+    imported = []
+
+    def import_module(name):
+        imported.append(name)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(installer.importlib, "import_module", import_module)
+    monkeypatch.setattr(
+        installer.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("pip should not run when GUI deps are available"),
+    )
+
+    result = installer.ensure_gui_dependencies("x11")
+
+    assert result["available"] is True
+    assert result["installed"] is False
+    assert result["missing"] == []
+    assert imported == ["Xlib"]
+
+    imported.clear()
+    result = installer.ensure_gui_dependencies("wayland")
+    assert result["available"] is True
+    assert result["missing"] == []
+    assert imported == ["dbus_next"]
+
+
+def test_gui_dependency_bootstrap_installs_missing_modules(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(installer.sys, "platform", "win32")
+    monkeypatch.setattr(installer.sys, "path", list(installer.sys.path))
+    monkeypatch.setenv("PYTHONPATH", "")
+    installed = False
+    captured = {}
+
+    def import_module(name):
+        if not installed:
+            raise ImportError(name)
+        return SimpleNamespace()
+
+    def run(argv, **kwargs):
+        nonlocal installed
+        installed = True
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(argv, 0, stdout="installed", stderr="")
+
+    monkeypatch.setattr(installer.importlib, "import_module", import_module)
+    monkeypatch.setattr(installer.importlib, "invalidate_caches", lambda: None)
+    monkeypatch.setattr(installer.subprocess, "run", run)
+
+    result = installer.ensure_gui_dependencies()
+
+    assert result["available"] is True
+    assert result["installed"] is True
+    assert result["missing"] == []
+    assert "uiautomation>=2.0.29,<3" in captured["argv"]
+    assert captured["kwargs"]["timeout"] == 180
+
+
+def test_gui_dependency_bootstrap_failure_is_nonfatal_status(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(installer.sys, "platform", "darwin")
+    monkeypatch.setattr(installer.sys, "path", list(installer.sys.path))
+    monkeypatch.setenv("PYTHONPATH", "")
+
+    def missing(name):
+        raise ImportError(name)
+
+    monkeypatch.setattr(installer.importlib, "import_module", missing)
+    monkeypatch.setattr(
+        installer.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            subprocess.TimeoutExpired(args[0], 180)
+        ),
+    )
+
+    result = installer.ensure_gui_dependencies()
+
+    assert result["available"] is False
+    assert result["installed"] is False
+    assert result["missing"] == ["ApplicationServices", "Quartz"]
+    assert "timed out" in result["error"]
+
+
+def test_gui_dependency_bootstrap_serializes_inflight_install(tmp_path, monkeypatch):
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(installer.sys, "platform", "win32")
+    monkeypatch.setattr(installer.sys, "path", list(installer.sys.path))
+    monkeypatch.setenv("PYTHONPATH", "")
+
+    installed = False
+    started = threading.Event()
+    release = threading.Event()
+    run_calls = []
+
+    def import_module(name):
+        if not installed:
+            raise ImportError(name)
+        return SimpleNamespace()
+
+    def run(argv, **kwargs):
+        nonlocal installed
+        run_calls.append(argv)
+        started.set()
+        assert release.wait(timeout=2)
+        installed = True
+        return subprocess.CompletedProcess(argv, 0, stdout="installed", stderr="")
+
+    monkeypatch.setattr(installer.importlib, "import_module", import_module)
+    monkeypatch.setattr(installer.importlib, "invalidate_caches", lambda: None)
+    monkeypatch.setattr(installer.subprocess, "run", run)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(installer.ensure_gui_dependencies)
+        assert started.wait(timeout=1)
+        second = pool.submit(installer.ensure_gui_dependencies)
+        time.sleep(0.05)
+        assert len(run_calls) == 1
+        release.set()
+        first_result = first.result(timeout=2)
+        second_result = second.result(timeout=2)
+
+    assert first_result["available"] is True
+    assert second_result["available"] is True
+    assert len(run_calls) == 1
+
+
+def test_gui_dependency_bootstrap_unknown_linux_session_is_noop(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(installer.sys, "platform", "linux")
+    monkeypatch.setattr(installer.sys, "path", list(installer.sys.path))
+    monkeypatch.setenv("PYTHONPATH", "")
+    monkeypatch.setattr(
+        installer.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail(
+            "unknown/headless Linux session must not install GUI packages"
+        ),
+    )
+
+    result = installer.ensure_gui_dependencies("unknown")
+
+    assert result["available"] is True
+    assert result["installed"] is False
+    assert result["missing"] == []
+
+
+def test_gui_dependency_bootstrap_unknown_platform_is_noop(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(installer.sys, "platform", "plan9")
+    monkeypatch.setattr(installer.sys, "path", list(installer.sys.path))
+    monkeypatch.setenv("PYTHONPATH", "")
+
+    result = installer.ensure_gui_dependencies()
+
+    assert result["available"] is True
+    assert result["installed"] is False
+    assert result["missing"] == []

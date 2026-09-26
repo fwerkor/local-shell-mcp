@@ -40,6 +40,7 @@ The intended safety boundary is the container or VM, not the host.
 | Workspace-aware file tools | Read, write, patch, search, and review files under a controlled root. |
 | Git workflow support | Run the standard Git CLI through shell tools without a second, incomplete Git abstraction. |
 | Browser automation | Extract page text, capture PNG/PDF evidence, or run a full Playwright script. |
+| Native desktop GUI | Observe accessibility trees plus screenshots and control Linux, Windows, or macOS applications with guarded semantic/coordinate actions. |
 | Remote workers | Control NAT, firewall, HPC, NPU, or lab machines that can only connect outward. |
 | Agent Skills | Discover, load, and read reusable `SKILL.md` workflows through three fixed tools without changing the MCP tool list. |
 | ChatGPT connector support | OAuth 2.1, `/mcp`, discovery controls, and ChatGPT-compatible tool schemas. |
@@ -199,6 +200,7 @@ The public MCP surface includes:
 - Transfer: `remote_transfer` for files or directories across controller and worker endpoints.
 - Dynamic MCP: `mcp_manage`, `mcp_tool_search`, `mcp_tool_inspect`, and `mcp_tool_call`. External tools are discovered progressively and never expand LSM's own `tools/list` surface.
 - Browser: persistent high-level `browser_session`, `browser_snapshot`, and `browser_act`; `browser_run_script` is the low-level Playwright escape hatch.
+- Desktop GUI: `gui_list`, `gui_state`, and `gui_action` for native Linux/Windows/macOS application control with accessibility-first targeting and screenshot fallback; Native WebUI also provides a human-operated Desktop page over the same backends.
 - File links: `link_create`, `link_list`, `link_revoke`.
 - Remote workers: `remote_manage` with `invite`, `list`, `rename`, and `revoke` actions; normal execution tools accept optional `machine`.
 - Agent Skills: `skill_list`, `skill_load`, `skill_read`.

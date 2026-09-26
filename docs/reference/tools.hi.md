@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 63f9fb40c4fd1c085e87c30ed221598cccacef1a6fb4aeb2bb4f1db520590ada -->
+<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
 # Tools reference
 
 यह page वास्तविक MCP tool schemas से बनती है। Public tool surface बदलने के बाद English reference update करने के लिए `python scripts/generate-tools-reference.py` चलाएँ।
@@ -18,6 +18,7 @@
 | External MCP capability discover करना | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Page से interact करना | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Custom browser logic चलाना | `browser_run_script` |
+| Control a native desktop app | `gui_list`, `gui_state`, then `gui_action` |
 | Remote machine पर काम करना | उसी tool के साथ `machine` उपयोग करें; केवल worker administration के लिए `remote_*` |
 
 ## Interactive workspace
@@ -445,6 +446,7 @@ Local या remote machine पर UTF-8 text file लिखती है।
 | `path` | `string` | required |  |
 | `content` | `string` | required |  |
 | `overwrite` | `boolean` | `true` |  |
+| `encoding` | `string` | `"utf-8"` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
@@ -703,6 +705,55 @@ Local या remote machine पर full Python Playwright script चलाती
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 `machine` देने पर call को अतिरिक्त `remote:use` चाहिए और वह remote worker protocol के जरिए चलता है।
+
+## डेस्कटॉप GUI ऑटोमेशन
+
+### `gui_list`
+
+List visible desktop application windows and GUI backend capabilities locally or remotely.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+
+### `gui_state`
+
+Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `window_id` | `string` | required |  |
+| `screenshot` | `boolean` | `true` |  |
+| `include_elements` | `boolean` | `true` |  |
+| `max_elements` | `integer` | `300` |  |
+| `max_depth` | `integer` | `12` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+
+### `gui_action`
+
+Execute GUI actions against a fresh gui_state observation locally or remotely. The state_id is single-use. Prefer semantic element_id targeting; raw x/y coordinates are window-relative. Supported actions are click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, and wait.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `window_id` | `string` | required |  |
+| `state_id` | `string` | required |  |
+| `actions` | `array[GuiAction]` | required |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
 
 ## Remote worker administration
 
