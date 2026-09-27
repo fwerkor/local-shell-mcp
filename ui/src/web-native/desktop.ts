@@ -52,6 +52,7 @@ type PointerStart = {
 }
 
 export const SINGLE_CLICK_DELAY_MS = 500
+export const MAX_PENDING_DESKTOP_ACTIONS = 4
 
 const PHYSICAL_KEY_CODES: Record<string, string> = {
   Digit0: "0",
@@ -131,6 +132,7 @@ export class DesktopController extends BaseController {
   private windows: GuiWindow[] = []
   private selectedWindowId = ""
   private backend = ""
+  private captureRequiresFocus = false
   private loadingWindows = false
   private pendingWindowsRefresh = false
   private pendingWindowsForceFrame = false
@@ -218,7 +220,12 @@ export class DesktopController extends BaseController {
     if (form) this.listen(form, "submit", (event) => this.onTextSubmit(event as SubmitEvent))
 
     this.every(() => {
-      if (!this.destroyed && this.selectedWindowId && this.pendingActions === 0) void this.refreshFrame()
+      if (
+        !this.destroyed
+        && this.selectedWindowId
+        && this.pendingActions === 0
+        && !this.captureRequiresFocus
+      ) void this.refreshFrame()
     }, 1000)
     this.every(() => {
       if (!this.destroyed && !this.loadingWindows) void this.refreshWindows(false)
@@ -328,13 +335,21 @@ export class DesktopController extends BaseController {
       const previous = this.selectedWindowId
       this.windows = payload.windows || []
       this.backend = payload.backend || ""
+      this.captureRequiresFocus = (
+        requestedMachine === "local"
+        && payload.capabilities?.capture_requires_focus === true
+      )
       if (!this.windows.some((window) => window.id === previous)) {
         this.selectedWindowId = this.windows[0]?.id || ""
         this.invalidateActionTarget()
         this.clearFrame()
       }
       this.renderSelectors()
-      if (this.selectedWindowId && (forceFrame || !this.frameBounds)) await this.refreshFrame()
+      if (
+        this.selectedWindowId
+        && (forceFrame || !this.frameBounds)
+        && !this.captureRequiresFocus
+      ) await this.refreshFrame()
     } catch (error) {
       if (requestedMachine !== this.machine) return
       this.windows = []
@@ -485,6 +500,7 @@ export class DesktopController extends BaseController {
     const targetEpoch = this.actionTargetEpoch
     const bounds = observedBounds ? { ...observedBounds } : this.frameBounds ? { ...this.frameBounds } : null
     if (!windowId || !bounds) return
+    if (this.pendingActions >= MAX_PENDING_DESKTOP_ACTIONS) return
 
     this.pendingActions += 1
     this.renderInputPulse()
@@ -549,6 +565,7 @@ export class DesktopController extends BaseController {
       this.windows = []
       this.selectedWindowId = ""
       this.backend = ""
+      this.captureRequiresFocus = false
       this.invalidateActionTarget()
       this.clearFrame()
       this.renderSelectors()
@@ -561,7 +578,7 @@ export class DesktopController extends BaseController {
       this.invalidateActionTarget()
       this.clearFrame()
       this.renderSelectors()
-      void this.refreshFrame()
+      if (!this.captureRequiresFocus) void this.refreshFrame()
     }
   }
 

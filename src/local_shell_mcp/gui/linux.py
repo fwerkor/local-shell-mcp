@@ -706,6 +706,7 @@ class LinuxGuiBackend:
                 "coordinate_input": True,
                 "semantic_actions": True,
                 "wayland_input": "xdg-desktop-portal" if session_type == "wayland" else None,
+                "capture_requires_focus": session_type == "wayland",
             },
         }
 

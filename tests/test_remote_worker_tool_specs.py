@@ -237,9 +237,12 @@ def test_gui_temp_worker_path_allows_external_state_dir_only(tmp_path, monkeypat
     assert uploads[0][0] == shot
     assert uploads[0][3:] == (3, 12)
 
+    released = []
+    monkeypatch.setattr(remote, "release_temp_file_lease", released.append)
     deleted = remote._worker_gui_temp_delete(str(shot))
     assert deleted["deleted"] is True
     assert not shot.exists()
+    assert released == [shot]
 
     outside = workspace / ("gui-frame-" + "b" * 32 + ".png")
     outside.write_bytes(b"png")
@@ -347,6 +350,32 @@ def test_linux_gui_preflight_caches_positive_session(monkeypatch):
     assert remote._linux_gui_preflight_session_type() == "x11"
     assert remote._linux_gui_preflight_session_type() == "x11"
     assert calls == ["discover"]
+
+
+def test_linux_gui_preflight_briefly_caches_unknown_session(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+    import local_shell_mcp.remote as remote
+
+    calls = []
+
+    def discover():
+        calls.append("discover")
+        return {}
+
+    monkeypatch.setattr(linux, "_desktop_environment", discover)
+    monkeypatch.setattr(linux, "_session_type", lambda _env: "unknown")
+    monkeypatch.setattr(remote, "_GUI_LINUX_PREFLIGHT_SESSION_TYPE", None)
+    monkeypatch.setattr(remote, "_GUI_LINUX_PREFLIGHT_ENV_SIGNATURE", None)
+    monkeypatch.setattr(remote, "_GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN", None)
+    monkeypatch.setattr(remote, "_GUI_LINUX_PREFLIGHT_EXPIRES_AT", 0.0)
+
+    assert remote._linux_gui_preflight_session_type() == "unknown"
+    assert remote._linux_gui_preflight_session_type() == "unknown"
+    assert calls == ["discover"]
+
+    monkeypatch.setattr(remote, "_GUI_LINUX_PREFLIGHT_EXPIRES_AT", 0.0)
+    assert remote._linux_gui_preflight_session_type() == "unknown"
+    assert calls == ["discover", "discover"]
 
 
 @pytest.mark.asyncio

@@ -13,7 +13,12 @@ from typing import Any, Protocol
 
 from PIL import Image
 
-from ..fs_ops import relative_display, temp_dir
+from ..fs_ops import (
+    acquire_temp_file_lease,
+    relative_display,
+    release_temp_file_lease,
+    temp_dir,
+)
 
 GUI_STATE_TTL_S = 30.0
 GUI_STATE_CACHE_LIMIT = 32
@@ -298,6 +303,21 @@ def quantize_scroll_amount(value: Any, *, limit: int = 100) -> int:
     return -magnitude if amount < 0 else magnitude
 
 
+async def _await_native_operation(awaitable: Any) -> Any:
+    task = asyncio.create_task(awaitable)
+    try:
+        return await asyncio.shield(task)
+    except BaseException:
+        with contextlib.suppress(BaseException):
+            await asyncio.shield(task)
+        raise
+
+
+def _cleanup_gui_screenshot(path: Path) -> None:
+    path.unlink(missing_ok=True)
+    release_temp_file_lease(path)
+
+
 class GuiManager:
     """Own short-lived observed states and dispatch actions to the native backend."""
 
@@ -332,6 +352,7 @@ class GuiManager:
         if screenshot:
             screenshot_path = temp_dir() / f"gui-{uuid.uuid4().hex}.png"
             screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+            acquire_temp_file_lease(screenshot_path)
 
         capture = asyncio.create_task(
             self._backend.snapshot(
@@ -348,7 +369,7 @@ class GuiManager:
             except BaseException:
                 if screenshot_path is not None and not capture.done():
                     capture.add_done_callback(
-                        lambda _task: screenshot_path.unlink(missing_ok=True)
+                        lambda _task: _cleanup_gui_screenshot(screenshot_path)
                     )
                 with contextlib.suppress(BaseException):
                     await asyncio.shield(capture)
@@ -356,7 +377,7 @@ class GuiManager:
 
             if screenshot_path is not None:
                 if snapshot.screenshot_path is None:
-                    screenshot_path.unlink(missing_ok=True)
+                    _cleanup_gui_screenshot(screenshot_path)
                 elif not screenshot_path.is_file():
                     raise GuiUnavailableError(
                         "GUI backend did not produce the requested screenshot"
@@ -377,7 +398,7 @@ class GuiManager:
                         raise
         except BaseException:
             if screenshot_path is not None:
-                screenshot_path.unlink(missing_ok=True)
+                _cleanup_gui_screenshot(screenshot_path)
             raise
 
         state_id = uuid.uuid4().hex
@@ -407,6 +428,7 @@ class GuiManager:
     async def frame(self, window_id: str) -> dict[str, Any]:
         screenshot_path = temp_dir() / f"gui-frame-{uuid.uuid4().hex}.png"
         screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+        acquire_temp_file_lease(screenshot_path)
         keep_file = False
         capture = asyncio.create_task(
             self._backend.snapshot(
@@ -424,7 +446,7 @@ class GuiManager:
             except BaseException:
                 if not capture.done():
                     capture.add_done_callback(
-                        lambda _task: screenshot_path.unlink(missing_ok=True)
+                        lambda _task: _cleanup_gui_screenshot(screenshot_path)
                     )
                 with contextlib.suppress(BaseException):
                     await asyncio.shield(capture)
@@ -453,7 +475,7 @@ class GuiManager:
             }
         finally:
             if not keep_file:
-                screenshot_path.unlink(missing_ok=True)
+                _cleanup_gui_screenshot(screenshot_path)
 
     async def act(
         self,
@@ -505,7 +527,9 @@ class GuiManager:
                     )
                 if action["type"] in _COORDINATE_ACTIONS:
                     await self._assert_window_geometry_unchanged(record.window)
-                result = await self._backend.perform_action(record.window, locator, action)
+                result = await _await_native_operation(
+                    self._backend.perform_action(record.window, locator, action)
+                )
                 results.append({"index": index, "type": action["type"], **(result or {})})
 
         return {
@@ -560,8 +584,10 @@ class GuiManager:
                 if action["type"] in _COORDINATE_ACTIONS:
                     _validate_coordinate_action(current, action, has_locator=False)
                 if action["type"] in {"type", "key"}:
-                    await self._backend.focus_window(current)
-                result = await self._backend.perform_action(current, None, action)
+                    await _await_native_operation(self._backend.focus_window(current))
+                result = await _await_native_operation(
+                    self._backend.perform_action(current, None, action)
+                )
                 results.append({"index": index, "type": action["type"], **(result or {})})
 
         return {

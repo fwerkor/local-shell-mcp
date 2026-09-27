@@ -127,23 +127,18 @@ def _windows() -> list[tuple[Any, Any, int]]:
     return result
 
 
-def _window_signature(window: Any) -> str:
+def _window_signature(window: Any) -> str | None:
     try:
         accessible_id = str(window.get_accessible_id() or "")
     except Exception:
         accessible_id = ""
+    if not accessible_id:
+        return None
     try:
         role = str(window.get_role_name() or "")
     except Exception:
         role = ""
-    if accessible_id:
-        fingerprint = f"id\0{role}\0{accessible_id}"
-    else:
-        bounds = _bounds(window)
-        fingerprint = (
-            f"fallback\0{role}\0{bounds['x']}\0{bounds['y']}\0"
-            f"{bounds['width']}\0{bounds['height']}"
-        )
+    fingerprint = f"id\0{role}\0{accessible_id}"
     return hashlib.sha256(fingerprint.encode()).hexdigest()[:12]
 
 
@@ -167,8 +162,11 @@ def _element_signature(obj: Any) -> str:
 def _record(app: Any, window: Any, index: int) -> dict[str, Any]:
     del index
     pid = int(app.get_process_id())
+    signature = _window_signature(window)
+    if not signature:
+        raise LookupError("AT-SPI window does not expose a stable accessible id")
     return {
-        "id": f"atspi:{pid}:{_window_signature(window)}",
+        "id": f"atspi:{pid}:{signature}",
         "title": str(window.get_name() or ""),
         "app": str(app.get_name() or ""),
         "pid": pid,

@@ -46,6 +46,7 @@ from .fs_ops import (
     read_texts,
     refresh_temp_file_lease,
     relative_display,
+    release_temp_file_lease,
     resolve_path,
     temp_dir,
     write_content,
@@ -1469,7 +1470,10 @@ def _worker_gui_temp_stat(path: str, sha256: bool = False) -> dict[str, Any]:
 
 def _worker_gui_temp_delete(path: str) -> dict[str, Any]:
     source = _worker_gui_temp_path(path, must_exist=False)
-    source.unlink(missing_ok=True)
+    try:
+        source.unlink(missing_ok=True)
+    finally:
+        release_temp_file_lease(source)
     return {"path": relative_display(source), "deleted": True}
 
 
@@ -2305,6 +2309,8 @@ _GUI_LINUX_PREFLIGHT_LOCK = threading.Lock()
 _GUI_LINUX_PREFLIGHT_SESSION_TYPE: str | None = None
 _GUI_LINUX_PREFLIGHT_ENV_SIGNATURE: tuple[str, str, str, str] | None = None
 _GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN: tuple[int, int] | None = None
+_GUI_LINUX_PREFLIGHT_EXPIRES_AT = 0.0
+_GUI_LINUX_NEGATIVE_CACHE_S = 30.0
 
 
 def _linux_gui_preflight_session_type() -> str:
@@ -2312,6 +2318,7 @@ def _linux_gui_preflight_session_type() -> str:
 
     global _GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN
     global _GUI_LINUX_PREFLIGHT_ENV_SIGNATURE
+    global _GUI_LINUX_PREFLIGHT_EXPIRES_AT
     global _GUI_LINUX_PREFLIGHT_SESSION_TYPE
 
     discovery_token = (id(_desktop_environment), id(_session_type))
@@ -2322,18 +2329,27 @@ def _linux_gui_preflight_session_type() -> str:
         os.environ.get("DBUS_SESSION_BUS_ADDRESS", ""),
     )
     with _GUI_LINUX_PREFLIGHT_LOCK:
+        now = time.monotonic()
         if (
             _GUI_LINUX_PREFLIGHT_SESSION_TYPE is not None
             and signature == _GUI_LINUX_PREFLIGHT_ENV_SIGNATURE
             and discovery_token == _GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN
+            and (
+                _GUI_LINUX_PREFLIGHT_SESSION_TYPE != "unknown"
+                or now < _GUI_LINUX_PREFLIGHT_EXPIRES_AT
+            )
         ):
             return _GUI_LINUX_PREFLIGHT_SESSION_TYPE
         desktop_env = _desktop_environment()
         session_type = _session_type(desktop_env)
-        if session_type != "unknown":
-            _GUI_LINUX_PREFLIGHT_ENV_SIGNATURE = signature
-            _GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN = discovery_token
-            _GUI_LINUX_PREFLIGHT_SESSION_TYPE = session_type
+        _GUI_LINUX_PREFLIGHT_ENV_SIGNATURE = signature
+        _GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN = discovery_token
+        _GUI_LINUX_PREFLIGHT_SESSION_TYPE = session_type
+        _GUI_LINUX_PREFLIGHT_EXPIRES_AT = (
+            now + _GUI_LINUX_NEGATIVE_CACHE_S
+            if session_type == "unknown"
+            else float("inf")
+        )
         return session_type
 
 

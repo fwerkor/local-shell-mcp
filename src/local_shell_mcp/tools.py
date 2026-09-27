@@ -41,6 +41,7 @@ from .fs_ops import (
     read_texts,
     refresh_temp_file_lease,
     relative_display,
+    release_temp_file_lease,
     resolve_path,
     temp_dir,
     write_content,
@@ -1627,6 +1628,31 @@ def _controller_relay_staging_path() -> str:
     return relative_display(directory / f"relay-{uuid.uuid4().hex}.bin")
 
 
+def _controller_gui_staging_path() -> str:
+    settings = get_settings()
+    root = settings.workspace_root.resolve()
+    parent = (root / ".local-shell-mcp").resolve(strict=False)
+    try:
+        parent.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("GUI staging parent escapes workspace") from exc
+
+    directory = parent / "gui-relay"
+    if directory.is_symlink():
+        raise ValueError("GUI staging directory must not be a symlink")
+    directory.mkdir(parents=True, exist_ok=True)
+    resolved_directory = directory.resolve(strict=True)
+    try:
+        resolved_directory.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("GUI staging directory escapes workspace") from exc
+    if resolved_directory != directory:
+        raise ValueError("GUI staging directory must not resolve through a symlink")
+    with suppress(OSError):
+        directory.chmod(0o700)
+    return str(directory / f"gui-{uuid.uuid4().hex}.png")
+
+
 async def _stream_remote_file_to_upload_ticket(
     src_machine: str,
     src_path: str,
@@ -1866,6 +1892,7 @@ async def _copy_remote_gui_temp_to_local(
     if not isinstance(stat, dict) or stat.get("type") != "file":
         raise RuntimeError(f"Remote GUI temp source is not a file: {src_path}")
     total_bytes = int(stat["size"])
+    assert_view_image_size(total_bytes)
     ticket = create_upload_ticket(
         destination_path,
         total_bytes,
@@ -2923,7 +2950,10 @@ def _read_gui_temp_image(path: str) -> ImageFile:
 
 def _delete_gui_temp_file(path: str) -> None:
     candidate = _gui_temp_path(path, must_exist=False)
-    candidate.unlink(missing_ok=True)
+    try:
+        candidate.unlink(missing_ok=True)
+    finally:
+        release_temp_file_lease(candidate)
 
 
 async def _gui_frame_data(
@@ -2948,16 +2978,15 @@ async def _gui_frame_data(
         if not screenshot_path:
             raise RuntimeError("Remote gui_frame returned no screenshot")
         try:
-            temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".png")
-            local_path = temporary["path"]
+            local_path = await asyncio.to_thread(_controller_gui_staging_path)
             try:
                 await _copy_remote_gui_temp_to_local(
                     machine, screenshot_path, local_path
                 )
-                image = await asyncio.to_thread(_read_gui_temp_image, local_path)
+                image = await asyncio.to_thread(read_image, local_path)
             finally:
                 with suppress(Exception):
-                    await asyncio.to_thread(_delete_gui_temp_file, local_path)
+                    await asyncio.to_thread(delete_path, local_path, False)
             data = dict(data)
             data.pop("screenshot_path", None)
             return data, image
@@ -3064,16 +3093,15 @@ async def _gui_state_result(
                     _refresh_remote_gui_state_lease(machine, window_id, state_id)
                 )
                 try:
-                    temporary = await asyncio.to_thread(transfer_alloc_temp_path, ".png")
-                    local_path = temporary["path"]
+                    local_path = await asyncio.to_thread(_controller_gui_staging_path)
                     try:
                         await _copy_remote_gui_temp_to_local(
                             machine, screenshot_path, local_path
                         )
-                        image = await asyncio.to_thread(_read_gui_temp_image, local_path)
+                        image = await asyncio.to_thread(read_image, local_path)
                     finally:
                         with suppress(Exception):
-                            await asyncio.to_thread(_delete_gui_temp_file, local_path)
+                            await asyncio.to_thread(delete_path, local_path, False)
                     with suppress(Exception):
                         await _remote_transfer_data(
                             machine,

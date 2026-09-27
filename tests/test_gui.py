@@ -829,6 +829,68 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
     assert failed.isError is True
     assert "invalid data" in failed.structuredContent["message"]
 
+def test_controller_gui_staging_stays_inside_workspace_with_external_state_dir(
+    tmp_path, monkeypatch
+):
+    import local_shell_mcp.tools as tools
+
+    workspace = tmp_path / "workspace"
+    state = tmp_path / "state"
+    workspace.mkdir()
+    state.mkdir()
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(workspace))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER_ACCESS", "false")
+    tools.get_settings.cache_clear()
+
+    staging = Path(tools._controller_gui_staging_path())
+    staging.relative_to(workspace)
+    assert staging.parent == workspace / ".local-shell-mcp" / "gui-relay"
+    assert not staging.is_relative_to(state)
+
+
+def test_controller_gui_staging_rejects_symlink(tmp_path, monkeypatch):
+    import local_shell_mcp.tools as tools
+
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    parent = workspace / ".local-shell-mcp"
+    parent.mkdir()
+    (parent / "gui-relay").symlink_to(outside, target_is_directory=True)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(workspace))
+    tools.get_settings.cache_clear()
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        tools._controller_gui_staging_path()
+
+
+@pytest.mark.asyncio
+async def test_copy_remote_gui_temp_rejects_oversized_source_before_transfer(monkeypatch):
+    import local_shell_mcp.tools as tools
+
+    async def remote_transfer(_machine, tool, _args, timeout_s=None):
+        del timeout_s
+        assert tool == "transfer_gui_temp_stat"
+        return {
+            "type": "file",
+            "size": tools.MAX_VIEW_IMAGE_BYTES + 1,
+            "path": "gui.png",
+        }
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", remote_transfer)
+    monkeypatch.setattr(
+        tools,
+        "create_upload_ticket",
+        lambda *_args, **_kwargs: pytest.fail(
+            "oversized screenshot must be rejected before staging"
+        ),
+    )
+    with pytest.raises(ValueError, match="Refusing image"):
+        await tools._copy_remote_gui_temp_to_local("node", "gui.png", "unused.png")
+
+
 @pytest.mark.asyncio
 async def test_copy_remote_gui_temp_to_local_uses_internal_transfer_tools(tmp_path, monkeypatch):
     import local_shell_mcp.tools as tools
@@ -1343,6 +1405,32 @@ def test_windows_traversal_stops_before_querying_children_at_budget(monkeypatch)
     assert len(snapshot.elements) == 1
 
 
+def test_atspi_window_without_stable_accessible_id_is_not_exposed():
+    import local_shell_mcp.gui.linux_atspi_helper as helper
+
+    class Window:
+        def get_accessible_id(self):
+            return ""
+
+        def get_role_name(self):
+            return "frame"
+
+        def get_name(self):
+            return "Mutable"
+
+    class App:
+        def get_process_id(self):
+            return 42
+
+        def get_name(self):
+            return "App"
+
+    window = Window()
+    assert helper._window_signature(window) is None
+    with pytest.raises(LookupError, match="stable accessible id"):
+        helper._record(App(), window, 0)
+
+
 def test_atspi_public_window_id_ignores_sibling_index(monkeypatch):
     import local_shell_mcp.gui.linux_atspi_helper as helper
 
@@ -1555,6 +1643,29 @@ def test_screenshot_normalization_rejects_oversized_provider_dimensions(tmp_path
             },
         )
     assert Image.open(path).size == (4, 4)
+
+
+@pytest.mark.asyncio
+async def test_gui_frame_holds_temp_lease_until_consumer_cleanup(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.base as base
+    import local_shell_mcp.tools as tools
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(base, "temp_dir", lambda: tmp_path)
+    acquired = []
+    released = []
+    monkeypatch.setattr(base, "acquire_temp_file_lease", lambda path: acquired.append(path) or True)
+    monkeypatch.setattr(base, "release_temp_file_lease", lambda path: released.append(path))
+    monkeypatch.setattr(tools, "temp_dir", lambda: tmp_path)
+    monkeypatch.setattr(tools, "release_temp_file_lease", lambda path: released.append(path))
+
+    manager = GuiManager(FakeBackend())
+    frame = await manager.frame("window:1")
+    path = Path(frame["screenshot_path"])
+    assert acquired == [path]
+    assert released == []
+    tools._delete_gui_temp_file(str(path))
+    assert released == [path]
 
 
 @pytest.mark.asyncio
@@ -1843,6 +1954,63 @@ async def test_gui_action_specific_validation_precedes_state_consumption(tmp_pat
             )
         assert state_id in manager._states
         assert backend.actions == []
+
+
+@pytest.mark.asyncio
+async def test_cancelled_native_action_keeps_execution_lock_until_backend_settles(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+
+    class BlockingBackend(FakeBackend):
+        def __init__(self):
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.calls = 0
+            self.active = 0
+            self.max_active = 0
+
+        async def perform_action(self, window, locator, action):
+            del window, locator, action
+            self.calls += 1
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            if self.calls == 1:
+                self.started.set()
+                await self.release.wait()
+            self.active -= 1
+            return {"performed": True}
+
+    backend = BlockingBackend()
+    manager = GuiManager(backend)
+    bounds = dict(backend.bounds)
+    first = asyncio.create_task(
+        manager.human_act(
+            "window:1",
+            bounds,
+            [{"type": "click", "x": 1, "y": 1}],
+        )
+    )
+    await backend.started.wait()
+    first.cancel()
+    second = asyncio.create_task(
+        manager.human_act(
+            "window:1",
+            bounds,
+            [{"type": "click", "x": 2, "y": 2}],
+        )
+    )
+    await asyncio.sleep(0.01)
+    assert backend.calls == 1
+    assert backend.max_active == 1
+
+    backend.release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    await second
+    assert backend.calls == 2
+    assert backend.max_active == 1
 
 
 @pytest.mark.asyncio
@@ -3153,6 +3321,52 @@ def test_macos_ax_window_matching_rejects_ambiguous_weaker_matches(monkeypatch):
             {
                 "pid": 1,
                 "title": "Shared",
+                "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+            }
+        )
+        is None
+    )
+
+
+def test_macos_ax_window_matching_rejects_sole_unrelated_window(monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    remaining = object()
+
+    class AX:
+        kAXWindowsAttribute = "windows"
+        kAXTitleAttribute = "title"
+
+        @staticmethod
+        def AXIsProcessTrusted():
+            return True
+
+        @staticmethod
+        def AXUIElementCreateApplication(_pid):
+            return "app"
+
+    monkeypatch.setattr(macos, "_native", lambda: (AX, object()))
+    monkeypatch.setattr(
+        macos,
+        "_ax_copy",
+        lambda _ax, obj, attr, default=None: (
+            [remaining]
+            if attr == AX.kAXWindowsAttribute
+            else ("Other document" if obj is remaining else default)
+        ),
+    )
+    monkeypatch.setattr(
+        macos,
+        "_ax_bounds",
+        lambda _ax, _window: {"x": 500, "y": 500, "width": 80, "height": 80},
+    )
+
+    backend = MacOSGuiBackend()
+    assert (
+        backend._find_ax_window(
+            {
+                "pid": 1,
+                "title": "Closed document",
                 "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
             }
         )

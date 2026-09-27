@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { DesktopController, SINGLE_CLICK_DELAY_MS, framePoint, wheelScrollAmount } from "./desktop"
+import {
+  DesktopController,
+  MAX_PENDING_DESKTOP_ACTIONS,
+  SINGLE_CLICK_DELAY_MS,
+  framePoint,
+  wheelScrollAmount,
+} from "./desktop"
 import type { NativePageContext } from "./common"
 
 describe("Native WebUI desktop coordinate mapping", () => {
@@ -70,7 +76,81 @@ describe("Native WebUI desktop window refresh", () => {
   })
 })
 
+describe("Native WebUI desktop Wayland capture", () => {
+  test("does not auto-refresh focus-changing local Wayland frames", async () => {
+    const context: NativePageContext = {
+      api: {
+        get: async () => ({
+          windows: [{ id: "window:1" }],
+          backend: "linux-atspi",
+          capabilities: { capture_requires_focus: true },
+        }) as never,
+        send: async () => undefined as never,
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller: any = new DesktopController(context)
+    controller.root = { querySelector: () => null }
+    controller.renderSelectors = () => undefined
+    controller.clearFrame = () => undefined
+    let frames = 0
+    controller.refreshFrame = async () => { frames += 1 }
+
+    controller.machine = "local"
+    await controller.refreshWindows(true)
+    expect(controller.captureRequiresFocus).toBe(true)
+    expect(frames).toBe(0)
+
+    controller.machine = "node"
+    await controller.refreshWindows(true)
+    expect(controller.captureRequiresFocus).toBe(false)
+    expect(frames).toBe(1)
+  })
+})
+
 describe("Native WebUI desktop queued input", () => {
+  test("bounds same-target input backlog", async () => {
+    const sends: unknown[] = []
+    let releaseFirst!: () => void
+    const gate = new Promise<void>((resolve) => { releaseFirst = resolve })
+    const context: NativePageContext = {
+      api: {
+        get: async () => undefined as never,
+        send: async (_url: string, _method: string, body?: unknown) => {
+          sends.push(body)
+          if (sends.length === 1) await gate
+          return {} as never
+        },
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller: any = new DesktopController(context)
+    controller.root = { querySelector: () => null }
+    controller.machine = "node"
+    controller.selectedWindowId = "window:1"
+    controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
+    controller.refreshFrame = async () => undefined
+
+    for (let index = 0; index < MAX_PENDING_DESKTOP_ACTIONS + 20; index += 1) {
+      controller.queueAction({ type: "key", keys: ["A"] })
+    }
+    expect(controller.pendingActions).toBe(MAX_PENDING_DESKTOP_ACTIONS)
+    await Promise.resolve()
+    releaseFirst()
+    await controller.actionQueue
+
+    expect(sends).toHaveLength(MAX_PENDING_DESKTOP_ACTIONS)
+    expect(controller.pendingActions).toBe(0)
+  })
+
   test("invalidates later queued actions after a stale-frame rejection", async () => {
     const sends: unknown[] = []
     let releaseFirst!: () => void

@@ -193,7 +193,7 @@ class MacOSGuiBackend:
             not geometry_matches or geometry_matches[0] is title_matches[0]
         ):
             return title_matches[0]
-        return windows[0] if len(windows) == 1 else None
+        return None
 
     def _list_windows_sync(self) -> dict[str, Any]:
         AX, _Quartz = _native()
