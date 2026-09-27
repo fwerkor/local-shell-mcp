@@ -18,7 +18,7 @@ La mayoría de las herramientas devuelve un `ToolResult` estructurado con `ok`, 
 | Descubrir una capability MCP externa | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Interactuar con una página | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Ejecutar lógica browser personalizada | `browser_run_script` |
-| Control a native desktop app | `gui_list`, `gui_state`, then `gui_action` |
+| Controlar una aplicación de escritorio nativa | `gui_list`, `gui_state`, then `gui_action` |
 | Trabajar en una máquina remota | use la misma tool con `machine`; use `remote_*` solo para administración de workers |
 
 ## Workspace interactivo
@@ -706,54 +706,54 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 Cuando se proporciona `machine`, la llamada también requiere `remote:use` y se ejecuta mediante el protocolo de remote worker.
 
-## Automatización de GUI de escritorio
+## Automatización de la GUI de escritorio
 
 ### `gui_list`
 
-List visible desktop application windows and GUI backend capabilities locally or remotely.
+Enumere las ventanas de aplicaciones de escritorio visibles y las capacidades de backend de la GUI de forma local o remota.
 
-| Parameter | Type | Required/default | Description |
+| Parámetro | Tipo | Requerido/predeterminado | Descripción |
 |---|---|---|---|
-| `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `machine` | `cadena\| nulo` | `null` |  |
+| `logical_session_id` | `cadena\| nulo` | requerido | Sesión lógica para esta llamada a herramienta. Pase el session_id devuelto por session_manage mientras trabaja en esa tarea. Utilice nulo solo cuando no haya ninguna sesión lógica activa. Este es el mismo session_id duradero utilizado por session_manage. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+Ámbitos de OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+Cuando se proporciona `machine`, la llamada requiere adicionalmente `remote:use` y se ejecuta a través del protocolo de trabajador remoto.
 
 ### `gui_state`
 
-Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized.
+Observe una ventana del escritorio antes de actuar. Devuelve sus elementos de accesibilidad más una captura de pantalla MCP nativa opcional y un state_id de corta duración. Prefiere acciones element_id; Las acciones de coordenadas son relativas a la ventana observada y se rechazan si la ventana se mueve o cambia de tamaño.
 
-| Parameter | Type | Required/default | Description |
+| Parámetro | Tipo | Requerido/predeterminado | Descripción |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
+| `window_id` | `string` | requerido |  |
 | `screenshot` | `boolean` | `true` |  |
 | `include_elements` | `boolean` | `true` |  |
 | `max_elements` | `integer` | `300` |  |
 | `max_depth` | `integer` | `12` |  |
-| `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `machine` | `cadena\| nulo` | `null` |  |
+| `logical_session_id` | `cadena\| nulo` | requerido | Sesión lógica para esta llamada a herramienta. Pase el session_id devuelto por session_manage mientras trabaja en esa tarea. Utilice nulo solo cuando no haya ninguna sesión lógica activa. Este es el mismo session_id duradero utilizado por session_manage. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+Ámbitos de OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+Cuando se proporciona `machine`, la llamada requiere adicionalmente `remote:use` y se ejecuta a través del protocolo de trabajador remoto.
 
 ### `gui_action`
 
-Execute GUI actions against a fresh gui_state observation locally or remotely. The state_id is single-use. Prefer semantic element_id targeting; raw x/y coordinates are window-relative. Supported actions are click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, and wait.
+Ejecute acciones de GUI contra una observación gui_state nueva de forma local o remota. El state_id es de un solo uso. Prefiere la orientación semántica element_id; Las coordenadas x/y sin procesar son relativas a la ventana. Las acciones admitidas son hacer clic, hacer doble clic, hacer clic con el botón derecho, mover, desplazarse, arrastrar, escribir, escribir, establecer valor, enfocar y esperar.
 
-| Parameter | Type | Required/default | Description |
+| Parámetro | Tipo | Requerido/predeterminado | Descripción |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
-| `state_id` | `string` | required |  |
-| `actions` | `array[GuiAction]` | required |  |
-| `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `window_id` | `string` | requerido |  |
+| `state_id` | `string` | requerido |  |
+| `actions` | `array[GuiAction]` | requerido |  |
+| `machine` | `cadena\| nulo` | `null` |  |
+| `logical_session_id` | `cadena\| nulo` | requerido | Sesión lógica para esta llamada a herramienta. Pase el session_id devuelto por session_manage mientras trabaja en esa tarea. Utilice nulo solo cuando no haya ninguna sesión lógica activa. Este es el mismo session_id duradero utilizado por session_manage. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+Ámbitos de OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+Cuando se proporciona `machine`, la llamada requiere adicionalmente `remote:use` y se ejecuta a través del protocolo de trabajador remoto.
 
 ## Administración de remote workers
 

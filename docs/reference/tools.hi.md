@@ -18,7 +18,7 @@
 | External MCP capability discover करना | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Page से interact करना | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Custom browser logic चलाना | `browser_run_script` |
-| Control a native desktop app | `gui_list`, `gui_state`, then `gui_action` |
+| एक देशी डेस्कटॉप ऐप को नियंत्रित करें | `gui_list`, `gui_state`, then `gui_action` |
 | Remote machine पर काम करना | उसी tool के साथ `machine` उपयोग करें; केवल worker administration के लिए `remote_*` |
 
 ## Interactive workspace
@@ -706,54 +706,54 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 `machine` देने पर call को अतिरिक्त `remote:use` चाहिए और वह remote worker protocol के जरिए चलता है।
 
-## डेस्कटॉप GUI ऑटोमेशन
+## डेस्कटॉप जीयूआई स्वचालन
 
 ### `gui_list`
 
-List visible desktop application windows and GUI backend capabilities locally or remotely.
+स्थानीय या दूरस्थ रूप से दृश्यमान डेस्कटॉप एप्लिकेशन विंडो और जीयूआई बैकएंड क्षमताओं की सूची बनाएं।
 
-| Parameter | Type | Required/default | Description |
+| पैरामीटर | प्रकार | आवश्यक/डिफ़ॉल्ट | विवरण |
 |---|---|---|---|
-| `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `machine` | `स्ट्रिंग \| शून्य` | `null` |  |
+| `logical_session_id` | `स्ट्रिंग \| शून्य` | आवश्यक | इस टूल कॉल के लिए तार्किक सत्र। उस कार्य में काम करते समय session_manage द्वारा लौटाए गए session_id को पास करें। शून्य का उपयोग तभी करें जब कोई तार्किक सत्र सक्रिय न हो। यह वही टिकाऊ session_id है जिसका उपयोग session_manage द्वारा किया जाता है। |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth क्षेत्र: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+जब `machine` की आपूर्ति की जाती है, तो कॉल के लिए अतिरिक्त रूप से `remote:use` की आवश्यकता होती है और यह रिमोट वर्कर प्रोटोकॉल के माध्यम से चलता है।
 
 ### `gui_state`
 
-Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized.
+कार्य करने से पहले एक डेस्कटॉप विंडो का निरीक्षण करें। इसके एक्सेसिबिलिटी तत्वों के साथ-साथ एक वैकल्पिक देशी एमसीपी स्क्रीनशॉट और एक अल्पकालिक स्टेट_आईडी लौटाता है। element_id क्रियाओं को प्राथमिकता दें; समन्वित क्रियाएं प्रेक्षित विंडो से संबंधित होती हैं और यदि विंडो स्थानांतरित हो जाती है या उसका आकार बदल जाता है तो उन्हें अस्वीकार कर दिया जाता है।
 
-| Parameter | Type | Required/default | Description |
+| पैरामीटर | प्रकार | आवश्यक/डिफ़ॉल्ट | विवरण |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
+| `window_id` | `string` | आवश्यक |  |
 | `screenshot` | `boolean` | `true` |  |
 | `include_elements` | `boolean` | `true` |  |
 | `max_elements` | `integer` | `300` |  |
 | `max_depth` | `integer` | `12` |  |
-| `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `machine` | `स्ट्रिंग \| शून्य` | `null` |  |
+| `logical_session_id` | `स्ट्रिंग \| शून्य` | आवश्यक | इस टूल कॉल के लिए तार्किक सत्र। उस कार्य में काम करते समय session_manage द्वारा लौटाए गए session_id को पास करें। शून्य का उपयोग तभी करें जब कोई तार्किक सत्र सक्रिय न हो। यह वही टिकाऊ session_id है जिसका उपयोग session_manage द्वारा किया जाता है। |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth क्षेत्र: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+जब `machine` की आपूर्ति की जाती है, तो कॉल के लिए अतिरिक्त रूप से `remote:use` की आवश्यकता होती है और यह रिमोट वर्कर प्रोटोकॉल के माध्यम से चलता है।
 
 ### `gui_action`
 
-Execute GUI actions against a fresh gui_state observation locally or remotely. The state_id is single-use. Prefer semantic element_id targeting; raw x/y coordinates are window-relative. Supported actions are click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, and wait.
+स्थानीय या दूरस्थ रूप से एक ताज़ा gui_state अवलोकन के विरुद्ध GUI क्रियाएँ निष्पादित करें। State_id एकल-उपयोग है। सिमेंटिक element_id लक्ष्यीकरण को प्राथमिकता दें; कच्चे x/y निर्देशांक विंडो-सापेक्ष हैं। समर्थित क्रियाएँ क्लिक, डबल_क्लिक, राइट_क्लिक, मूव, स्क्रॉल, ड्रैग, टाइप, कुंजी, सेट_वैल्यू, फोकस और प्रतीक्षा हैं।
 
-| Parameter | Type | Required/default | Description |
+| पैरामीटर | प्रकार | आवश्यक/डिफ़ॉल्ट | विवरण |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
-| `state_id` | `string` | required |  |
-| `actions` | `array[GuiAction]` | required |  |
-| `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `window_id` | `string` | आवश्यक |  |
+| `state_id` | `string` | आवश्यक |  |
+| `actions` | `array[GuiAction]` | आवश्यक |  |
+| `machine` | `स्ट्रिंग \| शून्य` | `null` |  |
+| `logical_session_id` | `स्ट्रिंग \| शून्य` | आवश्यक | इस टूल कॉल के लिए तार्किक सत्र। उस कार्य में काम करते समय session_manage द्वारा लौटाए गए session_id को पास करें। शून्य का उपयोग तभी करें जब कोई तार्किक सत्र सक्रिय न हो। यह वही टिकाऊ session_id है जिसका उपयोग session_manage द्वारा किया जाता है। |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth क्षेत्र: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+जब `machine` की आपूर्ति की जाती है, तो कॉल के लिए अतिरिक्त रूप से `remote:use` की आवश्यकता होती है और यह रिमोट वर्कर प्रोटोकॉल के माध्यम से चलता है।
 
 ## Remote worker administration
 

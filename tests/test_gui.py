@@ -397,6 +397,78 @@ async def test_gui_manager_bounds_window_list_metadata(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_gui_snapshot_bounds_element_metadata_before_return(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.base as base
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+
+    class LargeMetadataBackend(FakeBackend):
+        async def snapshot(
+            self,
+            window_id,
+            *,
+            screenshot_path,
+            include_elements,
+            max_elements,
+            max_depth,
+        ):
+            del screenshot_path, include_elements, max_elements, max_depth
+            elements = [
+                {
+                    "id": f"e{index}",
+                    "role": "R" * 5000,
+                    "name": "N" * 5000,
+                    "automation_id": "I" * 5000,
+                    "value": "V" * 5000,
+                    "description": "D" * 5000,
+                    "enabled": True,
+                    "focused": index == 0,
+                    "offscreen": False,
+                    "depth": 3,
+                    "actions": ["A" * 5000] * 40,
+                    "bounds": {"x": 10, "y": 20, "width": 20, "height": 10},
+                }
+                for index in range(100)
+            ]
+            return GuiSnapshot(
+                window={
+                    "id": window_id,
+                    "title": "Demo",
+                    "bounds": dict(self.bounds),
+                },
+                elements=elements,
+                locators={item["id"]: object() for item in elements},
+            )
+
+    manager = GuiManager(LargeMetadataBackend())
+    state = await manager.snapshot("window:1", screenshot=False)
+    encoded = json.dumps(
+        state["elements"], ensure_ascii=False, separators=(",", ":")
+    ).encode()
+    assert len(encoded) <= base.GUI_MAX_ELEMENTS_TOTAL_BYTES
+    assert state["elements"]
+    assert all(
+        len(item["name"].encode()) <= base.GUI_MAX_ELEMENT_TEXT_BYTES
+        for item in state["elements"]
+    )
+    assert all(
+        len(item["automation_id"].encode()) <= base.GUI_MAX_ELEMENT_TEXT_BYTES
+        for item in state["elements"]
+    )
+    assert all(
+        len(item["description"].encode()) <= base.GUI_MAX_ELEMENT_VALUE_BYTES
+        for item in state["elements"]
+    )
+    assert state["elements"][0]["enabled"] is True
+    assert state["elements"][0]["focused"] is True
+    assert state["elements"][0]["offscreen"] is False
+    assert state["elements"][0]["depth"] == 3
+    assert len(state["elements"][0]["actions"]) == 32
+    record = manager._states[state["state_id"]]
+    assert set(record.locators) == {item["id"] for item in state["elements"]}
+
+
+@pytest.mark.asyncio
 async def test_gui_manager_action_validation_and_staleness(tmp_path, monkeypatch):
     import local_shell_mcp.gui.base as base
 
@@ -1373,6 +1445,57 @@ def test_atspi_window_identity_survives_child_reordering(monkeypatch):
         helper._resolve_window(f"atspi:42:0:{ambiguous_signature}")
 
 
+def test_windows_capture_rejects_oversized_rect_before_gdi_allocation(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.windows as windows
+
+    class Fn:
+        def __init__(self, callback):
+            self.callback = callback
+            self.argtypes = None
+            self.restype = None
+
+        def __call__(self, *args):
+            return self.callback(*args)
+
+    def get_window_rect(_hwnd, rect_ptr):
+        rect = windows.ctypes.cast(
+            rect_ptr, windows.ctypes.POINTER(windows._WinRect)
+        ).contents
+        rect.left = 0
+        rect.top = 0
+        rect.right = windows.GUI_MAX_CAPTURE_DIMENSION + 1
+        rect.bottom = 10
+        return 1
+
+    class User32:
+        GetWindowRect = Fn(get_window_rect)
+        IsIconic = Fn(lambda _hwnd: 0)
+        GetWindowDC = Fn(
+            lambda _hwnd: pytest.fail(
+                "GetWindowDC must not run for oversized windows"
+            )
+        )
+        ReleaseDC = Fn(lambda *_args: 1)
+        PrintWindow = Fn(lambda *_args: 1)
+
+    class GDI32:
+        CreateCompatibleDC = Fn(lambda *_args: 1)
+        CreateCompatibleBitmap = Fn(lambda *_args: 1)
+        SelectObject = Fn(lambda *_args: 1)
+        GetDIBits = Fn(lambda *_args: 1)
+        DeleteObject = Fn(lambda *_args: 1)
+        DeleteDC = Fn(lambda *_args: 1)
+
+    monkeypatch.setattr(
+        windows.ctypes,
+        "windll",
+        SimpleNamespace(user32=User32(), gdi32=GDI32()),
+        raising=False,
+    )
+    with pytest.raises(GuiUnavailableError, match="safe budget"):
+        windows._capture_window_image(123, tmp_path / "oversized.png")
+
+
 def test_windows_snapshot_uses_hwnd_capture_not_visible_rectangle(tmp_path, monkeypatch):
     import local_shell_mcp.gui.windows as windows
 
@@ -1525,6 +1648,34 @@ def test_atspi_public_window_id_ignores_sibling_index(monkeypatch):
     _resolved_app, resolved, index = helper._resolve_window(first_id)
     assert resolved is target
     assert index == 1
+
+
+def test_windows_control_mouse_fallback_focuses_verified_window(monkeypatch):
+    import local_shell_mcp.gui.windows as windows
+
+    calls = []
+
+    class Locator:
+        def GetInvokePattern(self):
+            return None
+
+        def Click(self, waitTime=0):
+            calls.append(("click", waitTime))
+
+    class Target:
+        def SetFocus(self):
+            calls.append(("focus",))
+
+    backend = WindowsGuiBackend()
+    monkeypatch.setattr(windows, "_automation", lambda: SimpleNamespace())
+    monkeypatch.setattr(backend, "_find_window", lambda _window_id: Target())
+    result = backend._perform_action_sync(
+        {"id": "hwnd:1:fingerprint", "bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
+        Locator(),
+        {"type": "click"},
+    )
+    assert result == {"semantic": True, "method": "control"}
+    assert calls == [("focus",), ("click", 0)]
 
 
 @pytest.mark.asyncio
@@ -2560,6 +2711,31 @@ def test_linux_environment_discovery_timeout_is_nonfatal(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_linux_desktop_environment_refreshes_and_resets_portal(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    backend = linux.LinuxGuiBackend()
+    times = iter([100.0, 100.0, 131.0, 131.0])
+    environments = iter([
+        {"XDG_SESSION_TYPE": "x11", "DISPLAY": ":0"},
+        {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-1"},
+    ])
+    monkeypatch.setattr(
+        linux,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(times)),
+    )
+    monkeypatch.setattr(linux, "_desktop_environment", lambda: next(environments))
+
+    first = await backend._ensure_env()
+    backend._portal = object()
+    second = await backend._ensure_env()
+    assert first["DISPLAY"] == ":0"
+    assert second["WAYLAND_DISPLAY"] == "wayland-1"
+    assert backend._portal is None
+
+
+@pytest.mark.asyncio
 async def test_wayland_snapshot_focuses_target_before_visible_region_capture(tmp_path, monkeypatch):
     import local_shell_mcp.gui.linux as linux
 
@@ -2933,6 +3109,50 @@ async def test_portal_closed_signal_clears_cached_session(monkeypatch):
     assert portal._session is None
     assert portal._session_iface is None
     assert portal._streams == []
+
+
+@pytest.mark.asyncio
+async def test_portal_screenshot_deletes_portal_source_after_copy(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.linux_portal as portal_module
+
+    source = tmp_path / "portal-source.png"
+    source.write_bytes(b"png")
+    destination = tmp_path / "copy.png"
+
+    class Screenshot:
+        def call_screenshot(self, *_args):
+            return object()
+
+    class Obj:
+        def get_interface(self, _name):
+            return Screenshot()
+
+    class Bus:
+        async def connect(self):
+            return self
+
+        async def introspect(self, *_args):
+            return object()
+
+        def get_proxy_object(self, *_args):
+            return Obj()
+
+        def disconnect(self):
+            pass
+
+    class Variant:
+        def __init__(self, *_args):
+            pass
+
+    monkeypatch.setattr(portal_module, "_portal_modules", lambda: (Bus, Variant))
+
+    async def request(*_args, **_kwargs):
+        return {"uri": source.as_uri()}
+
+    monkeypatch.setattr(portal_module, "_portal_request", request)
+    await portal_module.portal_screenshot(destination, {})
+    assert destination.read_bytes() == b"png"
+    assert not source.exists()
 
 
 @pytest.mark.asyncio

@@ -351,6 +351,10 @@ def test_linux_gui_preflight_caches_positive_session(monkeypatch):
     assert remote._linux_gui_preflight_session_type() == "x11"
     assert calls == ["discover"]
 
+    monkeypatch.setattr(remote, "_GUI_LINUX_PREFLIGHT_EXPIRES_AT", 0.0)
+    assert remote._linux_gui_preflight_session_type() == "x11"
+    assert calls == ["discover", "discover"]
+
 
 def test_linux_gui_preflight_briefly_caches_unknown_session(monkeypatch):
     import local_shell_mcp.gui.linux as linux

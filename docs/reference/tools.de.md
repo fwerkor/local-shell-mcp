@@ -18,7 +18,7 @@ Die meisten Tools liefern ein strukturiertes `ToolResult` mit `ok`, `message` un
 | Externe MCP-Capability entdecken | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Mit einer Seite interagieren | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Eigene Browser-Logik ausführen | `browser_run_script` |
-| Control a native desktop app | `gui_list`, `gui_state`, then `gui_action` |
+| Steuern Sie eine native Desktop-App | `gui_list`, `gui_state`, then `gui_action` |
 | Auf einer Remote-Maschine arbeiten | dasselbe Tool mit `machine` verwenden; `remote_*` nur zur Worker-Administration |
 
 ## Interaktiver Workspace
@@ -710,50 +710,50 @@ Wenn `machine` angegeben ist, benötigt der Aufruf zusätzlich `remote:use` und 
 
 ### `gui_list`
 
-List visible desktop application windows and GUI backend capabilities locally or remotely.
+Listen Sie sichtbare Desktop-Anwendungsfenster und GUI-Backend-Funktionen lokal oder remote auf.
 
-| Parameter | Type | Required/default | Description |
+| Parameter | Typ | Erforderlich/Standard | Beschreibung |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | erforderlich | Logische Sitzung für diesen Toolaufruf. Übergeben Sie die von session_manage zurückgegebene session_id, während Sie an dieser Aufgabe arbeiten. Verwenden Sie null nur, wenn keine logische Sitzung aktiv ist. Dies ist dieselbe dauerhafte session_id, die von session_manage verwendet wird. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth-Bereiche: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+Wenn `machine` angegeben wird, erfordert der Aufruf zusätzlich `remote:use` und läuft über das Remote-Worker-Protokoll.
 
 ### `gui_state`
 
-Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized.
+Beobachten Sie ein Desktop-Fenster, bevor Sie handeln. Gibt seine Barrierefreiheitselemente sowie einen optionalen nativen MCP-Screenshot und eine kurzlebige state_id zurück. Element_id-Aktionen bevorzugen; Koordinatenaktionen beziehen sich auf das beobachtete Fenster und werden abgelehnt, wenn das Fenster verschoben oder in der Größe geändert wird.
 
-| Parameter | Type | Required/default | Description |
+| Parameter | Typ | Erforderlich/Standard | Beschreibung |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
+| `window_id` | `string` | erforderlich |  |
 | `screenshot` | `boolean` | `true` |  |
 | `include_elements` | `boolean` | `true` |  |
 | `max_elements` | `integer` | `300` |  |
 | `max_depth` | `integer` | `12` |  |
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | erforderlich | Logische Sitzung für diesen Toolaufruf. Übergeben Sie die von session_manage zurückgegebene session_id, während Sie an dieser Aufgabe arbeiten. Verwenden Sie null nur, wenn keine logische Sitzung aktiv ist. Dies ist dieselbe dauerhafte session_id, die von session_manage verwendet wird. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth-Bereiche: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+Wenn `machine` angegeben wird, erfordert der Aufruf zusätzlich `remote:use` und läuft über das Remote-Worker-Protokoll.
 
 ### `gui_action`
 
-Execute GUI actions against a fresh gui_state observation locally or remotely. The state_id is single-use. Prefer semantic element_id targeting; raw x/y coordinates are window-relative. Supported actions are click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, and wait.
+Führen Sie GUI-Aktionen für eine neue gui_state-Beobachtung lokal oder remote aus. Die state_id ist zur einmaligen Verwendung bestimmt. Semantisches element_id-Targeting bevorzugen; Roh-X/Y-Koordinaten sind fensterbezogen. Unterstützte Aktionen sind Klicken, Doppelklick, Rechtsklick, Verschieben, Scrollen, Ziehen, Eingabe, Taste, Wert festlegen, Fokus und Warten.
 
-| Parameter | Type | Required/default | Description |
+| Parameter | Typ | Erforderlich/Standard | Beschreibung |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
-| `state_id` | `string` | required |  |
-| `actions` | `array[GuiAction]` | required |  |
+| `window_id` | `string` | erforderlich |  |
+| `state_id` | `string` | erforderlich |  |
+| `actions` | `array[GuiAction]` | erforderlich |  |
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | erforderlich | Logische Sitzung für diesen Toolaufruf. Übergeben Sie die von session_manage zurückgegebene session_id, während Sie an dieser Aufgabe arbeiten. Verwenden Sie null nur, wenn keine logische Sitzung aktiv ist. Dies ist dieselbe dauerhafte session_id, die von session_manage verwendet wird. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth-Bereiche: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+Wenn `machine` angegeben wird, erfordert der Aufruf zusätzlich `remote:use` und läuft über das Remote-Worker-Protokoll.
 
 ## Remote-Worker-Administration
 

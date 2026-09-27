@@ -560,6 +560,10 @@ async def portal_screenshot(destination: Path, env: dict[str, str]) -> None:
         if parsed.scheme != "file":
             raise GuiUnavailableError(f"Screenshot portal returned unsupported URI: {uri}")
         source = Path(unquote(parsed.path))
-        await asyncio.to_thread(shutil.copyfile, source, destination)
+        try:
+            await asyncio.to_thread(shutil.copyfile, source, destination)
+        finally:
+            with contextlib.suppress(OSError):
+                await asyncio.to_thread(source.unlink, missing_ok=True)
     finally:
         bus.disconnect()

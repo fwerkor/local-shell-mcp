@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -679,18 +680,29 @@ def _x11_key_chord(keys: Any, env: dict[str, str]) -> None:
 
 class LinuxGuiBackend:
     name = "linux-atspi"
+    _ENV_REFRESH_S = 30.0
 
     def __init__(self) -> None:
         self._env: dict[str, str] | None = None
+        self._env_refreshed_at = 0.0
         self._portal: PortalDesktop | None = None
         self._env_lock = asyncio.Lock()
 
     async def _ensure_env(self) -> dict[str, str]:
-        if self._env is not None:
+        now = time.monotonic()
+        if self._env is not None and self._env_refreshed_at == 0.0:
+            self._env_refreshed_at = now
+            return self._env
+        if self._env is not None and now - self._env_refreshed_at < self._ENV_REFRESH_S:
             return self._env
         async with self._env_lock:
-            if self._env is None:
-                self._env = await asyncio.to_thread(_desktop_environment)
+            now = time.monotonic()
+            if self._env is None or now - self._env_refreshed_at >= self._ENV_REFRESH_S:
+                refreshed = await asyncio.to_thread(_desktop_environment)
+                if self._env is not None and refreshed != self._env:
+                    self._portal = None
+                self._env = refreshed
+                self._env_refreshed_at = now
             return self._env
 
     def _helper(self, payload: dict[str, Any]) -> dict[str, Any]:

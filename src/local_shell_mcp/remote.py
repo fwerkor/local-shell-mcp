@@ -2316,6 +2316,7 @@ _GUI_LINUX_PREFLIGHT_ENV_SIGNATURE: tuple[str, str, str, str] | None = None
 _GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN: tuple[int, int] | None = None
 _GUI_LINUX_PREFLIGHT_EXPIRES_AT = 0.0
 _GUI_LINUX_NEGATIVE_CACHE_S = 30.0
+_GUI_LINUX_POSITIVE_CACHE_S = 30.0
 
 
 def _linux_gui_preflight_session_type() -> str:
@@ -2339,10 +2340,7 @@ def _linux_gui_preflight_session_type() -> str:
             _GUI_LINUX_PREFLIGHT_SESSION_TYPE is not None
             and signature == _GUI_LINUX_PREFLIGHT_ENV_SIGNATURE
             and discovery_token == _GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN
-            and (
-                _GUI_LINUX_PREFLIGHT_SESSION_TYPE != "unknown"
-                or now < _GUI_LINUX_PREFLIGHT_EXPIRES_AT
-            )
+            and now < _GUI_LINUX_PREFLIGHT_EXPIRES_AT
         ):
             return _GUI_LINUX_PREFLIGHT_SESSION_TYPE
         desktop_env = _desktop_environment()
@@ -2350,10 +2348,10 @@ def _linux_gui_preflight_session_type() -> str:
         _GUI_LINUX_PREFLIGHT_ENV_SIGNATURE = signature
         _GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN = discovery_token
         _GUI_LINUX_PREFLIGHT_SESSION_TYPE = session_type
-        _GUI_LINUX_PREFLIGHT_EXPIRES_AT = (
-            now + _GUI_LINUX_NEGATIVE_CACHE_S
+        _GUI_LINUX_PREFLIGHT_EXPIRES_AT = now + (
+            _GUI_LINUX_NEGATIVE_CACHE_S
             if session_type == "unknown"
-            else float("inf")
+            else _GUI_LINUX_POSITIVE_CACHE_S
         )
         return session_type
 

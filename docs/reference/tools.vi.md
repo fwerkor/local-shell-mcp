@@ -18,7 +18,7 @@ Phần lớn tool trả về `ToolResult` có cấu trúc gồm `ok`, `message` 
 | Discover external MCP capability | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Tương tác với page | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Chạy custom browser logic | `browser_run_script` |
-| Control a native desktop app | `gui_list`, `gui_state`, then `gui_action` |
+| Điều khiển ứng dụng desktop gốc | `gui_list`, `gui_state`, sau đó `gui_action` |
 | Làm việc trên remote machine | dùng cùng tool với `machine`; chỉ dùng `remote_*` cho worker administration |
 
 ## Interactive workspace
@@ -710,51 +710,50 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 
 ### `gui_list`
 
-List visible desktop application windows and GUI backend capabilities locally or remotely.
+Liệt kê cục bộ hoặc từ xa các cửa sổ ứng dụng desktop đang hiển thị và khả năng của backend GUI.
 
-| Parameter | Type | Required/default | Description |
+| Tham số | Kiểu | Bắt buộc/mặc định | Mô tả |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | bắt buộc | Logical Session cho lời gọi công cụ này. Khi làm việc trong tác vụ, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session đang hoạt động. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+Phạm vi OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+Khi cung cấp `machine`, lời gọi cũng yêu cầu `remote:use` và chạy qua giao thức worker từ xa.
 
 ### `gui_state`
 
-Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized.
+Quan sát một cửa sổ desktop trước khi hành động. Trả về các phần tử accessibility, ảnh chụp MCP gốc tùy chọn và state_id ngắn hạn. Ưu tiên hành động bằng element_id; tọa độ tương đối với cửa sổ đã quan sát và sẽ bị từ chối nếu cửa sổ đã di chuyển hoặc đổi kích thước.
 
-| Parameter | Type | Required/default | Description |
+| Tham số | Kiểu | Bắt buộc/mặc định | Mô tả |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
+| `window_id` | `string` | bắt buộc |  |
 | `screenshot` | `boolean` | `true` |  |
 | `include_elements` | `boolean` | `true` |  |
 | `max_elements` | `integer` | `300` |  |
 | `max_depth` | `integer` | `12` |  |
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | bắt buộc | Logical Session cho lời gọi công cụ này. Khi làm việc trong tác vụ, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session đang hoạt động. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+Phạm vi OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+Khi cung cấp `machine`, lời gọi cũng yêu cầu `remote:use` và chạy qua giao thức worker từ xa.
 
 ### `gui_action`
 
-Execute GUI actions against a fresh gui_state observation locally or remotely. The state_id is single-use. Prefer semantic element_id targeting; raw x/y coordinates are window-relative. Supported actions are click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, and wait.
+Thực thi hành động GUI cục bộ hoặc từ xa trên một quan sát gui_state mới. state_id chỉ dùng một lần. Ưu tiên định vị ngữ nghĩa bằng element_id; tọa độ x/y thô tương đối với cửa sổ. Hỗ trợ click, double_click, right_click, move, scroll, drag, type, key, set_value, focus và wait.
 
-| Parameter | Type | Required/default | Description |
+| Tham số | Kiểu | Bắt buộc/mặc định | Mô tả |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
-| `state_id` | `string` | required |  |
-| `actions` | `array[GuiAction]` | required |  |
+| `window_id` | `string` | bắt buộc |  |
+| `state_id` | `string` | bắt buộc |  |
+| `actions` | `array[GuiAction]` | bắt buộc |  |
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | bắt buộc | Logical Session cho lời gọi công cụ này. Khi làm việc trong tác vụ, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session đang hoạt động. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+Phạm vi OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
-
+Khi cung cấp `machine`, lời gọi cũng yêu cầu `remote:use` và chạy qua giao thức worker từ xa.
 ## Remote worker administration
 
 ### `remote_manage`

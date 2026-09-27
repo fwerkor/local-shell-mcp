@@ -18,7 +18,7 @@
 | 探索外部 MCP capability | `mcp_tool_search`, then `mcp_tool_inspect` |
 | 與頁面互動 | `browser_session`, `browser_snapshot`, then `browser_act` |
 | 執行自訂 browser 邏輯 | `browser_run_script` |
-| Control a native desktop app | `gui_list`, `gui_state`, then `gui_action` |
+| 控制原生桌面應用程式 | `gui_list`、`gui_state`，接著 `gui_action` |
 | 在遠端機器工作 | 使用相同工具並提供 `machine`；僅 worker 管理使用 `remote_*` |
 
 ## 互動式 workspace
@@ -710,51 +710,50 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `gui_list`
 
-List visible desktop application windows and GUI backend capabilities locally or remotely.
+在本機或遠端列出可見的桌面應用程式視窗及 GUI 後端能力。
 
-| Parameter | Type | Required/default | Description |
+| 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | 必填 | 本次工具呼叫對應的 Logical Session。在該工作中操作時，請傳入 session_manage 回傳的 session_id。只有目前沒有 Logical Session 時才使用 null。 |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth scope：`shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`。
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+指定 `machine` 時，本次呼叫還需要 `remote:use`，並透過遠端 worker 協定執行。
 
 ### `gui_state`
 
-Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized.
+操作前觀察一個桌面視窗。回傳其無障礙元素、可選的原生 MCP 截圖以及短期有效的 state_id。優先使用 element_id 動作；座標相對於觀察視窗，若視窗已移動或改變大小則會被拒絕。
 
-| Parameter | Type | Required/default | Description |
+| 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
+| `window_id` | `string` | 必填 |  |
 | `screenshot` | `boolean` | `true` |  |
 | `include_elements` | `boolean` | `true` |  |
 | `max_elements` | `integer` | `300` |  |
 | `max_depth` | `integer` | `12` |  |
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | 必填 | 本次工具呼叫對應的 Logical Session。在該工作中操作時，請傳入 session_manage 回傳的 session_id。只有目前沒有 Logical Session 時才使用 null。 |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth scope：`shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`。
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+指定 `machine` 時，本次呼叫還需要 `remote:use`，並透過遠端 worker 協定執行。
 
 ### `gui_action`
 
-Execute GUI actions against a fresh gui_state observation locally or remotely. The state_id is single-use. Prefer semantic element_id targeting; raw x/y coordinates are window-relative. Supported actions are click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, and wait.
+在本機或遠端針對最新的 gui_state 觀察執行 GUI 動作。state_id 只能使用一次。優先使用語意 element_id 定位；原始 x/y 座標相對於視窗。支援 click、double_click、right_click、move、scroll、drag、type、key、set_value、focus 與 wait。
 
-| Parameter | Type | Required/default | Description |
+| 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
-| `state_id` | `string` | required |  |
-| `actions` | `array[GuiAction]` | required |  |
+| `window_id` | `string` | 必填 |  |
+| `state_id` | `string` | 必填 |  |
+| `actions` | `array[GuiAction]` | 必填 |  |
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | 必填 | 本次工具呼叫對應的 Logical Session。在該工作中操作時，請傳入 session_manage 回傳的 session_id。只有目前沒有 Logical Session 時才使用 null。 |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth scope：`shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`。
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
-
+指定 `machine` 時，本次呼叫還需要 `remote:use`，並透過遠端 worker 協定執行。
 ## 遠端 worker 管理
 
 ### `remote_manage`

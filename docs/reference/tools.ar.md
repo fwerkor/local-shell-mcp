@@ -18,7 +18,7 @@
 | اكتشاف capability MCP خارجية | `mcp_tool_search`, then `mcp_tool_inspect` |
 | التفاعل مع صفحة | `browser_session`, `browser_snapshot`, then `browser_act` |
 | تشغيل browser logic مخصصة | `browser_run_script` |
-| Control a native desktop app | `gui_list`, `gui_state`, then `gui_action` |
+| التحكم في تطبيق سطح مكتب أصلي | `gui_list` ثم `gui_state` ثم `gui_action` |
 | العمل على machine بعيدة | استخدم الأداة نفسها مع `machine`؛ استخدم `remote_*` فقط لإدارة workers |
 
 ## Workspace تفاعلي
@@ -710,51 +710,50 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `gui_list`
 
-List visible desktop application windows and GUI backend capabilities locally or remotely.
+يسرد محلياً أو عن بعد نوافذ تطبيقات سطح المكتب المرئية وإمكانات backend الخاصة بـ GUI.
 
-| Parameter | Type | Required/default | Description |
+| المعامل | النوع | مطلوب/افتراضي | الوصف |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | مطلوب | Logical Session لهذا الاستدعاء. أثناء العمل في المهمة مرّر session_id الذي يعيده session_manage. استخدم null فقط إذا لم تكن هناك Logical Session نشطة. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+نطاقات OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+عند توفير `machine` يحتاج الاستدعاء أيضاً إلى `remote:use` ويعمل عبر بروتوكول worker البعيد.
 
 ### `gui_state`
 
-Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized.
+يراقب نافذة سطح مكتب قبل تنفيذ أي إجراء. يعيد عناصر إمكانية الوصول ولقطة MCP أصلية اختيارية وstate_id قصير العمر. فضّل الإجراءات عبر element_id؛ الإحداثيات نسبية للنافذة المراقبة وتُرفض إذا تحركت النافذة أو تغير حجمها.
 
-| Parameter | Type | Required/default | Description |
+| المعامل | النوع | مطلوب/افتراضي | الوصف |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
+| `window_id` | `string` | مطلوب |  |
 | `screenshot` | `boolean` | `true` |  |
 | `include_elements` | `boolean` | `true` |  |
 | `max_elements` | `integer` | `300` |  |
 | `max_depth` | `integer` | `12` |  |
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | مطلوب | Logical Session لهذا الاستدعاء. أثناء العمل في المهمة مرّر session_id الذي يعيده session_manage. استخدم null فقط إذا لم تكن هناك Logical Session نشطة. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+نطاقات OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+عند توفير `machine` يحتاج الاستدعاء أيضاً إلى `remote:use` ويعمل عبر بروتوكول worker البعيد.
 
 ### `gui_action`
 
-Execute GUI actions against a fresh gui_state observation locally or remotely. The state_id is single-use. Prefer semantic element_id targeting; raw x/y coordinates are window-relative. Supported actions are click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, and wait.
+ينفذ إجراءات GUI محلياً أو عن بعد على ملاحظة gui_state حديثة. state_id أحادي الاستخدام. فضّل الاستهداف الدلالي عبر element_id؛ إحداثيات x/y الخام نسبية للنافذة. الإجراءات المدعومة هي click وdouble_click وright_click وmove وscroll وdrag وtype وkey وset_value وfocus وwait.
 
-| Parameter | Type | Required/default | Description |
+| المعامل | النوع | مطلوب/افتراضي | الوصف |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
-| `state_id` | `string` | required |  |
-| `actions` | `array[GuiAction]` | required |  |
+| `window_id` | `string` | مطلوب |  |
+| `state_id` | `string` | مطلوب |  |
+| `actions` | `array[GuiAction]` | مطلوب |  |
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | مطلوب | Logical Session لهذا الاستدعاء. أثناء العمل في المهمة مرّر session_id الذي يعيده session_manage. استخدم null فقط إذا لم تكن هناك Logical Session نشطة. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+نطاقات OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
-
+عند توفير `machine` يحتاج الاستدعاء أيضاً إلى `remote:use` ويعمل عبر بروتوكول worker البعيد.
 ## إدارة remote workers
 
 ### `remote_manage`

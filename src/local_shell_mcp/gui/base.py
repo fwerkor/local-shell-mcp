@@ -35,6 +35,9 @@ GUI_MAX_WINDOW_TEXT_BYTES = 1024
 GUI_MAX_WINDOWS_TOTAL_BYTES = 128 * 1024
 GUI_MAX_CAPTURE_DIMENSION = 16_384
 GUI_MAX_CAPTURE_PIXELS = 64_000_000
+GUI_MAX_ELEMENT_TEXT_BYTES = 1024
+GUI_MAX_ELEMENT_VALUE_BYTES = 2048
+GUI_MAX_ELEMENTS_TOTAL_BYTES = 64 * 1024
 
 _COORDINATE_ACTIONS = {
     "click",
@@ -123,6 +126,60 @@ def _truncate_gui_text(value: Any, limit: int) -> str:
     suffix = "..."
     budget = max(0, limit - len(suffix))
     return encoded[:budget].decode("utf-8", errors="ignore") + suffix
+
+
+def _bounded_element_record(element: dict[str, Any]) -> dict[str, Any]:
+    bounded: dict[str, Any] = {}
+    for key in ("id", "role", "name", "automation_id"):
+        if key in element:
+            bounded[key] = _truncate_gui_text(element.get(key), GUI_MAX_ELEMENT_TEXT_BYTES)
+    for key in ("value", "description"):
+        if key in element:
+            bounded[key] = _truncate_gui_text(element.get(key), GUI_MAX_ELEMENT_VALUE_BYTES)
+    for key in ("enabled", "focused", "offscreen", "depth"):
+        if key in element:
+            bounded[key] = element.get(key)
+    bounds = element.get("bounds")
+    if isinstance(bounds, dict):
+        bounded["bounds"] = {
+            key: bounds.get(key)
+            for key in ("x", "y", "width", "height")
+            if key in bounds
+        }
+    actions = element.get("actions")
+    if isinstance(actions, list):
+        bounded["actions"] = [
+            _truncate_gui_text(item, GUI_MAX_ELEMENT_TEXT_BYTES)
+            for item in actions[:32]
+        ]
+    return bounded
+
+
+def _bounded_elements(
+    elements: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], set[str]]:
+    bounded: list[dict[str, Any]] = []
+    kept_ids: set[str] = set()
+    used = 2
+    for raw in elements[:GUI_MAX_ELEMENTS]:
+        if not isinstance(raw, dict):
+            continue
+        record = _bounded_element_record(raw)
+        encoded = json.dumps(
+            record,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+        extra = len(encoded) + (1 if bounded else 0)
+        if used + extra > GUI_MAX_ELEMENTS_TOTAL_BYTES:
+            break
+        bounded.append(record)
+        used += extra
+        element_id = record.get("id")
+        if isinstance(element_id, str):
+            kept_ids.add(element_id)
+    return bounded, kept_ids
 
 
 def _bounded_window_record(window: dict[str, Any]) -> dict[str, Any] | None:
@@ -398,6 +455,13 @@ class GuiManager:
                 _cleanup_gui_screenshot(screenshot_path)
             raise
 
+        bounded_elements, kept_ids = _bounded_elements(snapshot.elements)
+        bounded_locators = {
+            element_id: locator
+            for element_id, locator in snapshot.locators.items()
+            if element_id in kept_ids
+        }
+
         state_id = uuid.uuid4().hex
         now = time.monotonic()
         async with self._lock:
@@ -405,7 +469,7 @@ class GuiManager:
             self._states[state_id] = _StateRecord(
                 state_id=state_id,
                 window=dict(snapshot.window),
-                locators=dict(snapshot.locators),
+                locators=bounded_locators,
                 created_at=now,
             )
             while len(self._states) > GUI_STATE_CACHE_LIMIT:
@@ -417,7 +481,7 @@ class GuiManager:
             "state_id": state_id,
             "state_ttl_s": GUI_STATE_TTL_S,
             "window": snapshot.window,
-            "elements": _window_relative_elements(snapshot.elements, snapshot.window),
+            "elements": _window_relative_elements(bounded_elements, snapshot.window),
             "capabilities": snapshot.capabilities,
             "screenshot_path": snapshot.screenshot_path,
         }

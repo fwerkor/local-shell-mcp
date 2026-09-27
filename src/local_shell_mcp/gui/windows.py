@@ -11,7 +11,14 @@ from typing import Any
 
 from PIL import Image
 
-from .base import GuiSnapshot, GuiUnavailableError, display_screenshot_path, quantize_scroll_amount
+from .base import (
+    GUI_MAX_CAPTURE_DIMENSION,
+    GUI_MAX_CAPTURE_PIXELS,
+    GuiSnapshot,
+    GuiUnavailableError,
+    display_screenshot_path,
+    quantize_scroll_amount,
+)
 
 
 def _automation():  # noqa: ANN202
@@ -151,6 +158,14 @@ def _capture_window_image(hwnd: int, destination: Path) -> None:
     height = int(rect.bottom - rect.top)
     if width <= 0 or height <= 0:
         raise GuiUnavailableError("Win32 target window has invalid capture bounds")
+    if (
+        width > GUI_MAX_CAPTURE_DIMENSION
+        or height > GUI_MAX_CAPTURE_DIMENSION
+        or width * height > GUI_MAX_CAPTURE_PIXELS
+    ):
+        raise GuiUnavailableError(
+            f"Windows capture dimensions exceed the safe budget: {width}x{height}"
+        )
     if user32.IsIconic(ctypes.c_void_p(hwnd)):
         raise GuiUnavailableError("Cannot capture a minimized Windows window safely")
 
@@ -498,6 +513,9 @@ class WindowsGuiBackend:
                 if pattern is not None:
                     pattern.Invoke()
                     return {"semantic": True, "method": "invoke"}
+            target_window = self._find_window(str(window["id"]))
+            target_window.SetFocus()
+            if kind == "click":
                 locator.Click(waitTime=0)
             elif kind == "double_click":
                 locator.DoubleClick(waitTime=0)

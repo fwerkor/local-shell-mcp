@@ -18,7 +18,7 @@ Bu page gerçek MCP tool schemas üzerinden oluşturulur. Public tool surface de
 | External MCP capability discover etmek | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Page ile interact etmek | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Custom browser logic çalıştırmak | `browser_run_script` |
-| Control a native desktop app | `gui_list`, `gui_state`, then `gui_action` |
+| Yerel masaüstü uygulamasını kontrol et | `gui_list`, `gui_state`, ardından `gui_action` |
 | Remote machine üzerinde çalışmak | aynı tool ile `machine` kullanın; yalnız worker administration için `remote_*` |
 
 ## Interactive workspace
@@ -710,51 +710,50 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `gui_list`
 
-List visible desktop application windows and GUI backend capabilities locally or remotely.
+Görünür masaüstü uygulama pencerelerini ve GUI backend yeteneklerini yerel veya uzak olarak listeler.
 
-| Parameter | Type | Required/default | Description |
+| Parametre | Tür | Zorunlu/varsayılan | Açıklama |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | zorunlu | Bu araç çağrısının Logical Session kimliği. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id'yi geçirin. Etkin Logical Session yoksa null kullanın. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth kapsamları: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+`machine` verildiğinde çağrı ayrıca `remote:use` gerektirir ve uzak worker protokolü üzerinden çalışır.
 
 ### `gui_state`
 
-Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized.
+Eylemden önce bir masaüstü penceresini gözlemler. Erişilebilirlik öğelerini, isteğe bağlı yerel MCP ekran görüntüsünü ve kısa ömürlü state_id'yi döndürür. element_id eylemlerini tercih edin; koordinatlar gözlenen pencereye göredir ve pencere taşınmış veya yeniden boyutlandırılmışsa reddedilir.
 
-| Parameter | Type | Required/default | Description |
+| Parametre | Tür | Zorunlu/varsayılan | Açıklama |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
+| `window_id` | `string` | zorunlu |  |
 | `screenshot` | `boolean` | `true` |  |
 | `include_elements` | `boolean` | `true` |  |
 | `max_elements` | `integer` | `300` |  |
 | `max_depth` | `integer` | `12` |  |
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | zorunlu | Bu araç çağrısının Logical Session kimliği. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id'yi geçirin. Etkin Logical Session yoksa null kullanın. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth kapsamları: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+`machine` verildiğinde çağrı ayrıca `remote:use` gerektirir ve uzak worker protokolü üzerinden çalışır.
 
 ### `gui_action`
 
-Execute GUI actions against a fresh gui_state observation locally or remotely. The state_id is single-use. Prefer semantic element_id targeting; raw x/y coordinates are window-relative. Supported actions are click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, and wait.
+Yeni bir gui_state gözlemine karşı yerel veya uzak GUI eylemleri yürütür. state_id tek kullanımlıktır. Semantik element_id hedeflemeyi tercih edin; ham x/y koordinatları pencereye göredir. click, double_click, right_click, move, scroll, drag, type, key, set_value, focus ve wait desteklenir.
 
-| Parameter | Type | Required/default | Description |
+| Parametre | Tür | Zorunlu/varsayılan | Açıklama |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
-| `state_id` | `string` | required |  |
-| `actions` | `array[GuiAction]` | required |  |
+| `window_id` | `string` | zorunlu |  |
+| `state_id` | `string` | zorunlu |  |
+| `actions` | `array[GuiAction]` | zorunlu |  |
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | zorunlu | Bu araç çağrısının Logical Session kimliği. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id'yi geçirin. Etkin Logical Session yoksa null kullanın. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth kapsamları: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
-
+`machine` verildiğinde çağrı ayrıca `remote:use` gerektirir ve uzak worker protokolü üzerinden çalışır.
 ## Remote worker administration
 
 ### `remote_manage`

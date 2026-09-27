@@ -555,6 +555,19 @@ def _serialize_audit_value(value: Any) -> Any:
 
 def _safe_audit_result(tool_name: str, value: Any) -> Any:
     serialized = _serialize_audit_value(value)
+    if tool_name == "gui_state" and isinstance(serialized, dict):
+        sanitized = dict(serialized)
+        content = sanitized.get("content")
+        if isinstance(content, list):
+            sanitized["content"] = [
+                item
+                for item in content
+                if not (
+                    isinstance(item, dict)
+                    and str(item.get("type") or "").lower() == "image"
+                )
+            ]
+        return sanitized
     if tool_name not in {
         "workspace_open",
         "open_live_workspace",

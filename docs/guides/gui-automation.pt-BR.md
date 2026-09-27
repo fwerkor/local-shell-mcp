@@ -1,19 +1,19 @@
 <!-- i18n-source-sha256: 696652d73445aaa9f3fc920f090fdaad3b7dd627a2bba4f5c8530f054a937506 -->
 # Automação de GUI de desktop
 
-`local-shell-mcp` can observe and control native desktop applications on Linux, Windows, and macOS. The public surface stays intentionally small:
+`local-shell-mcp` pode observar e controlar aplicativos nativos de desktop no Linux, Windows e macOS. A superfície pública é mantida intencionalmente pequena:
 
 | Ferramenta | Finalidade |
 |---|---|
-| `gui_list` | List visible application windows and report the active native backend/capabilities. |
-| `gui_state` | Observe one window. Returns a short-lived `state_id`, accessibility elements, window geometry, and optionally a native MCP screenshot. |
-| `gui_action` | Execute semantic or coordinate actions against that exact observation. |
+| `gui_list` | Lista janelas visíveis de aplicativos e informa o backend nativo ativo e suas capacidades. |
+| `gui_state` | Observa uma janela. Retorna um `state_id` de curta duração, elementos de acessibilidade, geometria da janela e, opcionalmente, uma captura de tela MCP nativa. |
+| `gui_action` | Executa ações semânticas ou por coordenadas exatamente contra essa observação. |
 
-All three tools accept optional `machine`, so the same workflow can target a connected desktop worker.
+As três ferramentas aceitam o parâmetro opcional `machine`, portanto o mesmo fluxo pode operar em um worker desktop conectado.
 
-## Observar e depois agir
+## Observe e depois aja
 
-Start with `gui_list`, select a `window_id`, then call `gui_state`. Prefer the returned accessibility `element_id` whenever one represents the target control:
+Comece com `gui_list`, escolha um `window_id` e então chame `gui_state`. Prefira o `element_id` de acessibilidade retornado sempre que ele representar o controle de destino:
 
 ```text
 gui_list
@@ -22,59 +22,59 @@ gui_list
   -> gui_state(window_id)
 ```
 
-Use window-relative `x`/`y` coordinates only when the UI has no useful accessibility element, such as a canvas or custom-drawn control. Returned element bounds and screenshots use the same window-relative logical pixel space, including HiDPI/Retina desktops. Raw coordinates outside the selected window are rejected.
+Use coordenadas `x`/`y` relativas à janela somente quando a interface não tiver um elemento de acessibilidade útil, como um canvas ou controle desenhado de forma personalizada. Os limites dos elementos e as capturas usam o mesmo espaço de pixels lógicos relativo à janela, inclusive em desktops HiDPI/Retina. Coordenadas brutas fora da janela selecionada são rejeitadas.
 
-A `state_id` expires after 30 seconds and is single-use. Coordinate actions also verify that the target window has not moved or resized since observation. If either check fails, call `gui_state` again instead of reusing stale coordinates.
+Um `state_id` expira após 30 segundos e só pode ser usado uma vez. Ações por coordenadas também verificam se a janela alvo não foi movida ou redimensionada desde a observação. Se qualquer verificação falhar, chame `gui_state` novamente em vez de reutilizar coordenadas antigas.
 
-Supported actions are `click`, `double_click`, `right_click`, `move`, `scroll`, `drag`, `type`, `key`, `set_value`, `focus`, and `wait`.
+As ações compatíveis são `click`, `double_click`, `right_click`, `move`, `scroll`, `drag`, `type`, `key`, `set_value`, `focus` e `wait`.
 
 ## Controle humano na Native WebUI
 
-The Native WebUI has a **Desktop** page for direct human control of the same native GUI backends. Choose a machine and a window, then interact with the live window image using click, double-click, right-click, drag, wheel, keyboard shortcuts, or the text field for IME/CJK input.
+A Native WebUI possui uma página **Desktop** para controle humano direto dos mesmos backends GUI nativos. Escolha uma máquina e uma janela e interaja com a imagem da janela usando clique, clique duplo, botão direito, arrastar, roda do mouse, atalhos de teclado ou o campo de texto para entrada IME/CJK.
 
-This path is intentionally separate from model `state_id` semantics. Each displayed frame carries the observed window geometry; every human input request validates that the window still has exactly that geometry before injecting input. If the window moved, resized, or disappeared, the action is rejected and the WebUI refreshes the observation. Raw coordinates remain bounded to the selected window.
+Esse caminho é deliberadamente separado da semântica de `state_id` usada pelo modelo. Cada frame exibido leva a geometria observada da janela; toda solicitação de entrada humana valida que a janela ainda tem exatamente essa geometria antes de injetar a entrada. Se a janela foi movida, redimensionada ou desapareceu, a ação é rejeitada e a WebUI atualiza a observação. Coordenadas brutas continuam limitadas à janela selecionada.
 
-Keyboard and text actions explicitly focus the selected native window before injection. The WebUI uses lightweight screenshot polling rather than VNC/WebRTC video streaming, and the remote-only `gui_human_action` RPC is an internal controller-to-worker operation rather than an MCP tool exposed to models.
+Ações de teclado e texto colocam explicitamente o foco na janela nativa selecionada antes da injeção. A WebUI usa polling leve de capturas de tela em vez de streaming de vídeo VNC/WebRTC; o RPC remoto `gui_human_action` é uma operação interna controller-worker, não uma ferramenta MCP exposta aos modelos.
 
 ## Backends nativos
 
-| Platform | Accessibility / semantic control | Capture and raw input |
+| Plataforma | Acessibilidade / controle semântico | Captura e entrada bruta |
 |---|---|---|
-| Windows | Microsoft UI Automation | UIA/window capture plus native Windows mouse and keyboard input |
-| macOS | Accessibility (`AXUIElement`) | `screencapture` for the selected window plus Quartz `CGEvent` input |
-| Linux | AT-SPI | X11 native input/capture; Wayland uses native desktop capture and XDG Desktop Portal RemoteDesktop/ScreenCast for raw input |
+| Windows | Microsoft UI Automation | Captura da janela e entrada nativa de mouse e teclado do Windows |
+| macOS | Accessibility (`AXUIElement`) | `screencapture` da janela selecionada e entrada Quartz `CGEvent` |
+| Linux | AT-SPI | Entrada/captura nativas X11; Wayland usa captura nativa do desktop e XDG Desktop Portal RemoteDesktop/ScreenCast |
 
-Semantic actions are attempted first where possible. A button with a native invoke/press action can therefore be activated without guessing a pixel coordinate. Visual coordinates remain the fallback for inaccessible or custom-drawn content.
+Ações semânticas são tentadas primeiro quando possível. Assim, um botão com ação nativa invoke/press pode ser ativado sem adivinhar coordenadas de pixel. Coordenadas visuais permanecem como fallback para conteúdo inacessível ou desenhado de forma personalizada.
 
-## Configuração por plataforma
+## Configuração da plataforma
 
 ### Windows
 
-Run LSM in the same interactive desktop session as the applications it should control. The base `local-shell-mcp` install stays headless-safe and does not require the Windows UI Automation adapter; install the optional `local-shell-mcp[gui]` extra when local Windows GUI control is needed.
+Execute o LSM na mesma sessão de desktop interativa dos aplicativos que ele deve controlar. A instalação base do `local-shell-mcp` continua segura em modo headless e não exige o adaptador Windows UI Automation; instale o extra opcional `local-shell-mcp[gui]` quando o controle GUI local do Windows for necessário.
 
 ### macOS
 
-Grant the LSM host process:
+Conceda ao processo host do LSM:
 
-- **Accessibility** permission for semantic control and input.
-- **Screen Recording** permission for screenshots.
+- permissão de **Acessibilidade** para controle semântico e entrada;
+- permissão de **Gravação da Tela** para capturas.
 
-The base package does not require PyObjC. Install the optional `local-shell-mcp[gui]` extra when local macOS GUI control is needed; machines that never use GUI tools do not need these frameworks.
+O pacote base não exige PyObjC. Instale o extra opcional `local-shell-mcp[gui]` quando precisar de controle GUI local no macOS; máquinas que nunca usam ferramentas GUI não precisam desses frameworks.
 
 ### Linux
 
-The desktop session must expose AT-SPI. Debian/Ubuntu systems normally provide the required system bindings with:
+A sessão de desktop deve expor AT-SPI. Em Debian/Ubuntu, os bindings de sistema necessários normalmente podem ser instalados com:
 
 ```bash
 sudo apt install python3-gi gir1.2-atspi-2.0
 ```
 
-The base package does not require the Python X11 or D-Bus adapters. The optional `local-shell-mcp[gui]` extra installs them for local GUI use. Remote workers detect the active Linux session before any GUI dependency bootstrap: X11 only needs the X11 adapter, Wayland only needs the D-Bus adapter, and headless workers install neither. On Wayland, raw pointer/keyboard fallback uses the XDG Desktop Portal RemoteDesktop API, so the desktop may show a one-time permission/session picker. KDE and GNOME portal implementations are supported. Window screenshots use the available native desktop capture path and fall back to the Screenshot portal when needed.
+O pacote base não exige os adaptadores Python X11 ou D-Bus. O extra opcional `local-shell-mcp[gui]` os instala para uso GUI local. Workers remotos detectam a sessão Linux ativa antes de qualquer bootstrap de dependência GUI: X11 precisa apenas do adaptador X11, Wayland apenas do adaptador D-Bus e workers headless não instalam nenhum dos dois. No Wayland, o fallback de ponteiro/teclado bruto usa a API XDG Desktop Portal RemoteDesktop, portanto o desktop pode exibir um seletor de permissão/sessão uma única vez. As implementações de portal do KDE e GNOME são compatíveis. Capturas da janela usam o caminho nativo disponível e recorrem ao portal Screenshot quando necessário.
 
-LSM workers commonly start outside the graphical login environment. The Linux backend recovers `DISPLAY`, `WAYLAND_DISPLAY`, `XDG_SESSION_TYPE`, and related variables from the user systemd environment when they are not inherited directly.
+Workers LSM frequentemente iniciam fora do ambiente de login gráfico. O backend Linux recupera `DISPLAY`, `WAYLAND_DISPLAY`, `XDG_SESSION_TYPE` e variáveis relacionadas do ambiente systemd do usuário quando elas não são herdadas diretamente.
 
 ## Desktops remotos
 
-GUI tools run on the selected machine, not on the controller. The remote worker must belong to the user/session that owns the target desktop. GUI adapters are lazy and scoped to GUI calls: normal worker startup and shell/files/browser use do not install or import them. On Linux, a headless worker returns GUI unavailable before any GUI pip bootstrap; a graphical worker only checks or installs the adapter required by its active X11 or Wayland session.
+As ferramentas GUI são executadas na máquina selecionada, não no controller. O worker remoto deve pertencer ao usuário/sessão dono do desktop alvo. Adaptadores GUI são carregados de forma lazy e limitados a chamadas GUI: a inicialização normal do worker e o uso de shell/files/browser não os instalam nem importam. No Linux, um worker headless retorna GUI indisponível antes de qualquer bootstrap pip GUI; um worker gráfico verifica ou instala apenas o adaptador exigido pela sessão X11 ou Wayland ativa.
 
-Screenshots returned by a remote `gui_state` are transferred through LSM's file-transfer path and exposed to the model as native MCP image content; they are not embedded in the worker JSON response.
+As capturas retornadas por um `gui_state` remoto são transferidas pelo caminho de transferência de arquivos do LSM e expostas ao modelo como conteúdo de imagem MCP nativo; elas não são incorporadas à resposta JSON do worker.

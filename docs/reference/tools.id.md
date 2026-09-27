@@ -18,7 +18,7 @@ Sebagian besar tool mengembalikan `ToolResult` terstruktur berisi `ok`, `message
 | Menemukan external MCP capability | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Berinteraksi dengan page | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Menjalankan custom browser logic | `browser_run_script` |
-| Control a native desktop app | `gui_list`, `gui_state`, then `gui_action` |
+| Kontrol aplikasi desktop asli | `gui_list`, `gui_state`, then `gui_action` |
 | Bekerja pada remote machine | gunakan tool yang sama dengan `machine`; gunakan `remote_*` hanya untuk worker administration |
 
 ## Interactive workspace
@@ -706,54 +706,54 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 Saat `machine` diberikan, call juga memerlukan `remote:use` dan dijalankan melalui protokol remote worker.
 
-## Otomasi GUI desktop
+## Otomatisasi GUI desktop
 
 ### `gui_list`
 
-List visible desktop application windows and GUI backend capabilities locally or remotely.
+Daftar jendela aplikasi desktop yang terlihat dan kemampuan backend GUI secara lokal atau jarak jauh.
 
-| Parameter | Type | Required/default | Description |
+| Parameter | Jenis | Wajib/default | Keterangan |
 |---|---|---|---|
-| `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `machine` | `tali \| batal` | `null` |  |
+| `logical_session_id` | `tali \| batal` | diperlukan | Sesi Logis untuk panggilan alat ini. Lewati session_id yang dikembalikan oleh session_manage saat mengerjakan tugas itu. Gunakan null hanya jika tidak ada Sesi Logis yang aktif. Ini adalah session_id tahan lama yang sama yang digunakan oleh session_manage. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+Cakupan OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+Ketika `machine` diberikan, panggilan tersebut juga memerlukan `remote:use` dan dijalankan melalui protokol pekerja jarak jauh.
 
 ### `gui_state`
 
-Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized.
+Amati satu jendela desktop sebelum bertindak. Mengembalikan elemen aksesibilitasnya ditambah tangkapan layar MCP asli opsional dan state_id yang berumur pendek. Lebih suka tindakan element_id; tindakan koordinat bersifat relatif terhadap jendela yang diamati dan ditolak jika jendela dipindahkan atau diubah ukurannya.
 
-| Parameter | Type | Required/default | Description |
+| Parameter | Jenis | Wajib/default | Keterangan |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
+| `window_id` | `string` | diperlukan |  |
 | `screenshot` | `boolean` | `true` |  |
 | `include_elements` | `boolean` | `true` |  |
 | `max_elements` | `integer` | `300` |  |
 | `max_depth` | `integer` | `12` |  |
-| `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `machine` | `tali \| batal` | `null` |  |
+| `logical_session_id` | `tali \| batal` | diperlukan | Sesi Logis untuk panggilan alat ini. Lewati session_id yang dikembalikan oleh session_manage saat mengerjakan tugas itu. Gunakan null hanya jika tidak ada Sesi Logis yang aktif. Ini adalah session_id tahan lama yang sama yang digunakan oleh session_manage. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+Cakupan OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+Ketika `machine` diberikan, panggilan tersebut juga memerlukan `remote:use` dan dijalankan melalui protokol pekerja jarak jauh.
 
 ### `gui_action`
 
-Execute GUI actions against a fresh gui_state observation locally or remotely. The state_id is single-use. Prefer semantic element_id targeting; raw x/y coordinates are window-relative. Supported actions are click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, and wait.
+Jalankan tindakan GUI terhadap observasi gui_state baru secara lokal atau jarak jauh. state_id hanya sekali pakai. Lebih memilih penargetan elemen_id semantik; koordinat x/y mentah bersifat relatif terhadap jendela. Tindakan yang didukung adalah klik, klik ganda, klik kanan, pindahkan, gulir, seret, ketik, kunci, set_nilai, fokus, dan tunggu.
 
-| Parameter | Type | Required/default | Description |
+| Parameter | Jenis | Wajib/default | Keterangan |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
-| `state_id` | `string` | required |  |
-| `actions` | `array[GuiAction]` | required |  |
-| `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `window_id` | `string` | diperlukan |  |
+| `state_id` | `string` | diperlukan |  |
+| `actions` | `array[GuiAction]` | diperlukan |  |
+| `machine` | `tali \| batal` | `null` |  |
+| `logical_session_id` | `tali \| batal` | diperlukan | Sesi Logis untuk panggilan alat ini. Lewati session_id yang dikembalikan oleh session_manage saat mengerjakan tugas itu. Gunakan null hanya jika tidak ada Sesi Logis yang aktif. Ini adalah session_id tahan lama yang sama yang digunakan oleh session_manage. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+Cakupan OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+Ketika `machine` diberikan, panggilan tersebut juga memerlukan `remote:use` dan dijalankan melalui protokol pekerja jarak jauh.
 
 ## Remote worker administration
 

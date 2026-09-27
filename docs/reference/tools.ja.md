@@ -18,7 +18,7 @@
 | External MCP capability を発見 | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Page と interaction | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Custom browser logic を実行 | `browser_run_script` |
-| Control a native desktop app | `gui_list`, `gui_state`, then `gui_action` |
+| ネイティブデスクトップアプリを操作 | `gui_list`、`gui_state`、その後 `gui_action` |
 | Remote machine で作業 | 同じ tool に `machine` を指定し、worker administration のみ `remote_*` を使う |
 
 ## Interactive workspace
@@ -710,51 +710,50 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `gui_list`
 
-List visible desktop application windows and GUI backend capabilities locally or remotely.
+ローカルまたはリモートで、表示中のデスクトップアプリケーションウィンドウと GUI バックエンド機能を一覧表示します。
 
-| Parameter | Type | Required/default | Description |
+| パラメーター | 型 | 必須/既定値 | 説明 |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | 必須 | このツール呼び出しの Logical Session。作業中のタスクでは session_manage が返した session_id を渡します。Logical Session がない場合のみ null を使用します。 |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth スコープ: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`。
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+`machine` を指定した場合、この呼び出しには `remote:use` も必要で、リモート worker プロトコルを経由します。
 
 ### `gui_state`
 
-Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized.
+操作前に 1 つのデスクトップウィンドウを観察します。アクセシビリティ要素、任意のネイティブ MCP スクリーンショット、短時間有効な state_id を返します。element_id による操作を優先してください。座標は観察ウィンドウ相対で、ウィンドウが移動またはサイズ変更されていると拒否されます。
 
-| Parameter | Type | Required/default | Description |
+| パラメーター | 型 | 必須/既定値 | 説明 |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
+| `window_id` | `string` | 必須 |  |
 | `screenshot` | `boolean` | `true` |  |
 | `include_elements` | `boolean` | `true` |  |
 | `max_elements` | `integer` | `300` |  |
 | `max_depth` | `integer` | `12` |  |
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | 必須 | このツール呼び出しの Logical Session。作業中のタスクでは session_manage が返した session_id を渡します。Logical Session がない場合のみ null を使用します。 |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth スコープ: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`。
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+`machine` を指定した場合、この呼び出しには `remote:use` も必要で、リモート worker プロトコルを経由します。
 
 ### `gui_action`
 
-Execute GUI actions against a fresh gui_state observation locally or remotely. The state_id is single-use. Prefer semantic element_id targeting; raw x/y coordinates are window-relative. Supported actions are click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, and wait.
+ローカルまたはリモートで、新しい gui_state 観察に対して GUI 操作を実行します。state_id は 1 回だけ使用できます。element_id によるセマンティック指定を優先し、生の x/y はウィンドウ相対です。click、double_click、right_click、move、scroll、drag、type、key、set_value、focus、wait を使用できます。
 
-| Parameter | Type | Required/default | Description |
+| パラメーター | 型 | 必須/既定値 | 説明 |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
-| `state_id` | `string` | required |  |
-| `actions` | `array[GuiAction]` | required |  |
+| `window_id` | `string` | 必須 |  |
+| `state_id` | `string` | 必須 |  |
+| `actions` | `array[GuiAction]` | 必須 |  |
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | 必須 | このツール呼び出しの Logical Session。作業中のタスクでは session_manage が返した session_id を渡します。Logical Session がない場合のみ null を使用します。 |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth スコープ: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`。
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
-
+`machine` を指定した場合、この呼び出しには `remote:use` も必要で、リモート worker プロトコルを経由します。
 ## Remote worker administration
 
 ### `remote_manage`

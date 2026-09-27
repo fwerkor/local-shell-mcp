@@ -18,7 +18,7 @@
 | External MCP capability 발견 | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Page와 interaction | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Custom browser logic 실행 | `browser_run_script` |
-| Control a native desktop app | `gui_list`, `gui_state`, then `gui_action` |
+| 네이티브 데스크톱 앱 제어 | `gui_list`, `gui_state`, 이후 `gui_action` |
 | Remote machine 작업 | 동일 tool에 `machine`을 지정하고 worker administration에만 `remote_*` 사용 |
 
 ## Interactive workspace
@@ -710,51 +710,50 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `gui_list`
 
-List visible desktop application windows and GUI backend capabilities locally or remotely.
+로컬 또는 원격에서 표시 중인 데스크톱 애플리케이션 창과 GUI 백엔드 기능을 나열합니다.
 
-| Parameter | Type | Required/default | Description |
+| 매개변수 | 형식 | 필수/기본값 | 설명 |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | 필수 | 이 도구 호출의 Logical Session입니다. 해당 작업을 수행하는 동안 session_manage가 반환한 session_id를 전달하십시오. 활성 Logical Session이 없을 때만 null을 사용합니다. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth 범위: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+`machine`을 지정하면 호출에 `remote:use` 권한도 필요하며 원격 worker 프로토콜을 통해 실행됩니다.
 
 ### `gui_state`
 
-Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized.
+동작 전에 하나의 데스크톱 창을 관찰합니다. 접근성 요소, 선택적 네이티브 MCP 스크린샷, 짧은 수명의 state_id를 반환합니다. element_id 기반 동작을 우선 사용하십시오. 좌표는 관찰된 창에 상대적이며 창이 이동하거나 크기가 바뀌면 거부됩니다.
 
-| Parameter | Type | Required/default | Description |
+| 매개변수 | 형식 | 필수/기본값 | 설명 |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
+| `window_id` | `string` | 필수 |  |
 | `screenshot` | `boolean` | `true` |  |
 | `include_elements` | `boolean` | `true` |  |
 | `max_elements` | `integer` | `300` |  |
 | `max_depth` | `integer` | `12` |  |
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | 필수 | 이 도구 호출의 Logical Session입니다. 해당 작업을 수행하는 동안 session_manage가 반환한 session_id를 전달하십시오. 활성 Logical Session이 없을 때만 null을 사용합니다. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth 범위: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+`machine`을 지정하면 호출에 `remote:use` 권한도 필요하며 원격 worker 프로토콜을 통해 실행됩니다.
 
 ### `gui_action`
 
-Execute GUI actions against a fresh gui_state observation locally or remotely. The state_id is single-use. Prefer semantic element_id targeting; raw x/y coordinates are window-relative. Supported actions are click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, and wait.
+로컬 또는 원격에서 최신 gui_state 관찰을 대상으로 GUI 동작을 수행합니다. state_id는 한 번만 사용할 수 있습니다. 의미 기반 element_id 지정을 우선 사용하고, 원시 x/y 좌표는 창에 상대적입니다. click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, wait를 지원합니다.
 
-| Parameter | Type | Required/default | Description |
+| 매개변수 | 형식 | 필수/기본값 | 설명 |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
-| `state_id` | `string` | required |  |
-| `actions` | `array[GuiAction]` | required |  |
+| `window_id` | `string` | 필수 |  |
+| `state_id` | `string` | 필수 |  |
+| `actions` | `array[GuiAction]` | 필수 |  |
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | 필수 | 이 도구 호출의 Logical Session입니다. 해당 작업을 수행하는 동안 session_manage가 반환한 session_id를 전달하십시오. 활성 Logical Session이 없을 때만 null을 사용합니다. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth 범위: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
-
+`machine`을 지정하면 호출에 `remote:use` 권한도 필요하며 원격 worker 프로토콜을 통해 실행됩니다.
 ## Remote worker administration
 
 ### `remote_manage`

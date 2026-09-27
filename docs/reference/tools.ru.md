@@ -18,7 +18,7 @@
 | Обнаружить external MCP capability | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Взаимодействовать с page | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Запустить custom browser logic | `browser_run_script` |
-| Control a native desktop app | `gui_list`, `gui_state`, then `gui_action` |
+| Управлять нативным desktop-приложением | `gui_list`, `gui_state`, затем `gui_action` |
 | Работать на remote machine | используйте тот же tool с `machine`; `remote_*` только для worker administration |
 
 ## Interactive workspace
@@ -710,51 +710,50 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `gui_list`
 
-List visible desktop application windows and GUI backend capabilities locally or remotely.
+Локально или удалённо перечисляет видимые окна desktop-приложений и возможности GUI-backend.
 
-| Parameter | Type | Required/default | Description |
+| Параметр | Тип | Обязателен/по умолчанию | Описание |
 |---|---|---|---|
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | обязателен | Logical Session для этого вызова. Во время работы над задачей передайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth scope: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+Если задан `machine`, вызову также требуется `remote:use`, и он выполняется через протокол удалённого worker.
 
 ### `gui_state`
 
-Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized.
+Наблюдает одно окно перед действием. Возвращает элементы доступности, необязательный нативный MCP-снимок и краткоживущий state_id. Предпочитайте element_id; координаты относятся к наблюдаемому окну и отклоняются, если окно перемещено или изменено в размере.
 
-| Parameter | Type | Required/default | Description |
+| Параметр | Тип | Обязателен/по умолчанию | Описание |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
+| `window_id` | `string` | обязателен |  |
 | `screenshot` | `boolean` | `true` |  |
 | `include_elements` | `boolean` | `true` |  |
 | `max_elements` | `integer` | `300` |  |
 | `max_depth` | `integer` | `12` |  |
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | обязателен | Logical Session для этого вызова. Во время работы над задачей передайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth scope: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
+Если задан `machine`, вызову также требуется `remote:use`, и он выполняется через протокол удалённого worker.
 
 ### `gui_action`
 
-Execute GUI actions against a fresh gui_state observation locally or remotely. The state_id is single-use. Prefer semantic element_id targeting; raw x/y coordinates are window-relative. Supported actions are click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, and wait.
+Локально или удалённо выполняет GUI-действия над свежим наблюдением gui_state. state_id одноразовый. Предпочитайте семантический element_id; сырые x/y относятся к окну. Поддерживаются click, double_click, right_click, move, scroll, drag, type, key, set_value, focus и wait.
 
-| Parameter | Type | Required/default | Description |
+| Параметр | Тип | Обязателен/по умолчанию | Описание |
 |---|---|---|---|
-| `window_id` | `string` | required |  |
-| `state_id` | `string` | required |  |
-| `actions` | `array[GuiAction]` | required |  |
+| `window_id` | `string` | обязателен |  |
+| `state_id` | `string` | обязателен |  |
+| `actions` | `array[GuiAction]` | обязателен |  |
 | `machine` | `string \| null` | `null` |  |
-| `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
+| `logical_session_id` | `string \| null` | обязателен | Logical Session для этого вызова. Во время работы над задачей передайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
 
-OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+OAuth scope: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
-When `machine` is supplied, the call additionally requires `remote:use` and runs through the remote worker protocol.
-
+Если задан `machine`, вызову также требуется `remote:use`, и он выполняется через протокол удалённого worker.
 ## Remote worker administration
 
 ### `remote_manage`
