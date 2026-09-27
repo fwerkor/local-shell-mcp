@@ -577,7 +577,7 @@ class WindowsGuiBackend:
                 elif amount_y > 0:
                     auto.WheelUp(amount_y, interval=0.0, waitTime=0)
                 if amount_x:
-                    _horizontal_wheel(amount_x)
+                    _horizontal_wheel(-amount_x)
             return {"screen_x": x, "screen_y": y}
 
         if kind == "drag":

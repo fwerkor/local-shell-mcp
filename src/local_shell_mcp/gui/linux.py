@@ -38,8 +38,7 @@ _HELPER_PYTHON: str | None = None
 
 def _desktop_environment() -> dict[str, str]:
     env = dict(os.environ)
-    missing = [key for key in _DESKTOP_ENV_KEYS if not env.get(key)]
-    if missing and shutil.which("systemctl"):
+    if shutil.which("systemctl"):
         try:
             result = subprocess.run(
                 ["systemctl", "--user", "show-environment"],
@@ -56,7 +55,7 @@ def _desktop_environment() -> dict[str, str]:
                 if "=" not in line:
                     continue
                 key, value = line.split("=", 1)
-                if key in _DESKTOP_ENV_KEYS and value and not env.get(key):
+                if key in _DESKTOP_ENV_KEYS and value:
                     env[key] = value
     return env
 
@@ -308,6 +307,17 @@ def _crop_desktop_capture(
     monitors: list[dict[str, Any]],
 ) -> None:
     with Image.open(path) as image:
+        width, height = image.size
+        if (
+            width <= 0
+            or height <= 0
+            or width > GUI_MAX_CAPTURE_DIMENSION
+            or height > GUI_MAX_CAPTURE_DIMENSION
+            or width * height > GUI_MAX_CAPTURE_PIXELS
+        ):
+            raise GuiUnavailableError(
+                "Captured Wayland desktop exceeds GUI screenshot safety limits"
+            )
         image.load()
         if image.size == (int(bounds["width"]), int(bounds["height"])):
             return

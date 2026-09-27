@@ -2804,6 +2804,36 @@ def test_linux_environment_discovery_timeout_is_nonfatal(monkeypatch):
     assert linux._session_type(env) == "unknown"
 
 
+def test_linux_environment_discovery_replaces_stale_inherited_values(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    for key in linux._DESKTOP_ENV_KEYS:
+        monkeypatch.setenv(key, f"stale-{key.lower()}")
+    monkeypatch.setattr(linux.shutil, "which", lambda _name: "/usr/bin/systemctl")
+    calls = []
+
+    def run(*_args, **_kwargs):
+        calls.append(True)
+        return SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "DISPLAY=:9\n"
+                "WAYLAND_DISPLAY=wayland-9\n"
+                "XDG_SESSION_TYPE=wayland\n"
+                "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus\n"
+            ),
+        )
+
+    monkeypatch.setattr(linux.subprocess, "run", run)
+    env = linux._desktop_environment()
+
+    assert calls == [True]
+    assert env["DISPLAY"] == ":9"
+    assert env["WAYLAND_DISPLAY"] == "wayland-9"
+    assert env["XDG_SESSION_TYPE"] == "wayland"
+    assert env["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/run/user/1000/bus"
+
+
 @pytest.mark.asyncio
 async def test_linux_desktop_environment_refreshes_and_resets_portal(monkeypatch):
     import local_shell_mcp.gui.linux as linux
@@ -2827,6 +2857,33 @@ async def test_linux_desktop_environment_refreshes_and_resets_portal(monkeypatch
     assert first["DISPLAY"] == ":0"
     assert second["WAYLAND_DISPLAY"] == "wayland-1"
     assert backend._portal is None
+
+
+def test_wayland_desktop_crop_rejects_oversized_header_before_decode(
+    tmp_path, monkeypatch
+):
+    import local_shell_mcp.gui.linux as linux
+
+    class OversizedImage:
+        size = (linux.GUI_MAX_CAPTURE_DIMENSION + 1, 1)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def load(self):
+            pytest.fail("oversized capture must be rejected before decoding pixels")
+
+    monkeypatch.setattr(linux.Image, "open", lambda _path: OversizedImage())
+
+    with pytest.raises(GuiUnavailableError, match="screenshot safety limits"):
+        linux._crop_desktop_capture(
+            tmp_path / "desktop.png",
+            {"x": 0, "y": 0, "width": 10, "height": 10},
+            [],
+        )
 
 
 @pytest.mark.asyncio
@@ -3420,6 +3477,33 @@ async def test_portal_scroll_translates_to_positive_down_axis():
     portal._remote = Remote()
     await portal.scroll(10, 20, 2.0, -3.0, session="session")
     assert axes == [("session", -2.0, 3.0)]
+
+
+@pytest.mark.asyncio
+async def test_portal_type_text_maps_tabs_and_line_endings_to_keysyms():
+    portal = PortalDesktop({})
+    portal._session = "session"
+    events = []
+
+    class Remote:
+        async def call_notify_keyboard_keysym(
+            self, session, _options, keysym, pressed
+        ):
+            events.append((session, keysym, pressed))
+
+    portal._remote = Remote()
+    await portal.type_text("a\tb\r\nc\rd", session="session")
+
+    pressed = [keysym for _session, keysym, state in events if state == 1]
+    assert pressed == [
+        ord("a"),
+        0xFF09,
+        ord("b"),
+        0xFF0D,
+        ord("c"),
+        0xFF0D,
+        ord("d"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -4210,5 +4294,5 @@ async def test_windows_horizontal_only_scroll_does_not_inject_vertical_scroll(mo
         {"type": "scroll", "x": 10, "y": 10, "delta_x": 2},
     )
 
-    assert ("horizontal", 2) in calls
+    assert ("horizontal", -2) in calls
     assert not any(item[0] in {"up", "down"} for item in calls)

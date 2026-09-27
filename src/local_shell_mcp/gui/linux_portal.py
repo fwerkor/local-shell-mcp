@@ -485,8 +485,14 @@ class PortalDesktop:
 
     async def type_text(self, text: str, *, session: str | None = None) -> None:
         session = await self._bind_session(session)
-        for char in text:
-            symbol = _keysym("ENTER" if char == "\n" else char)
+        normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+        for char in normalized:
+            if char == "\n":
+                symbol = _keysym("ENTER")
+            elif char == "\t":
+                symbol = _keysym("TAB")
+            else:
+                symbol = _keysym(char)
             pressed = False
             try:
                 await self._key_event(symbol, True, session=session)
