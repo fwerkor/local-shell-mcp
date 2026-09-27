@@ -1571,6 +1571,11 @@ def _worker_put_stream_url(
         "Expect:",
         "-H",
         "Content-Type: application/octet-stream",
+        "-H",
+        f"Content-Length: {total}",
+        # curl otherwise adds chunked transfer encoding for stdin uploads.
+        "-H",
+        "Transfer-Encoding:",
         "--upload-file",
         "-",
         "--write-out",

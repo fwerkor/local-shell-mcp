@@ -659,6 +659,7 @@ def test_worker_unknown_digest_put_streams_pinned_source_once(tmp_path, monkeypa
     replacement = tmp_path / "replacement.bin"
     replacement.write_bytes(replacement_data)
     sent = bytearray()
+    spawned_command: list[str] = []
 
     class FakeStdin:
         def __init__(self):
@@ -682,7 +683,8 @@ def test_worker_unknown_digest_put_streams_pinned_source_once(tmp_path, monkeypa
 
     class FakeProcess:
         def __init__(self, command, **kwargs):
-            del command, kwargs
+            spawned_command[:] = command
+            del kwargs
             self.stdin = FakeStdin()
             self.returncode = 0
 
@@ -703,6 +705,13 @@ def test_worker_unknown_digest_put_streams_pinned_source_once(tmp_path, monkeypa
         60,
     )
 
+    headers = [
+        spawned_command[index + 1]
+        for index, argument in enumerate(spawned_command[:-1])
+        if argument == "-H"
+    ]
+    assert f"Content-Length: {len(data)}" in headers
+    assert "Transfer-Encoding:" in headers
     assert bytes(sent) == data
     assert result["sha256"] == hashlib.sha256(data).hexdigest()
     assert source.read_bytes() == replacement_data
