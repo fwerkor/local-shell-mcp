@@ -97,7 +97,8 @@ REMOTE_POWERSHELL_JOIN_PATH = REMOTE_JOIN_PATH + ".ps1"
 REMOTE_API_PREFIX = "/remote"
 REMOTE_WORKER_BUNDLE_PATH = "/remote/worker-bundle.tgz"
 REMOTE_WORKER_LANE_PROTOCOL_VERSION = 3
-REMOTE_WORKER_POLL_PROTOCOL_VERSION = REMOTE_WORKER_LANE_PROTOCOL_VERSION
+REMOTE_WORKER_RESET_PROTOCOL_VERSION = 4
+REMOTE_WORKER_POLL_PROTOCOL_VERSION = REMOTE_WORKER_RESET_PROTOCOL_VERSION
 _WORKER_CONNECT_TIMEOUT_S = 10.0
 _WORKER_POLL_TIMEOUT_GRACE_S = 10.0
 _WORKER_TRANSFER_LEASE_REFRESH_INTERVAL_S = 60.0
@@ -331,8 +332,10 @@ class RemoteManager:
         self.tokens: dict[str, str] = {}
         self.pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self.pending_machines: dict[str, str] = {}
+        self.pending_tools: dict[str, str] = {}
         self.cancelled_jobs: dict[str, float] = {}
         self.claimed_jobs: set[str] = set()
+        self.started_jobs: set[str] = set()
         self._lock = asyncio.Lock()
         self._state_lock = threading.RLock()
         self._registry_loaded = False
@@ -746,7 +749,9 @@ class RemoteManager:
     def _cancel_job_locked(self, job_id: str) -> None:
         future = self.pending.pop(job_id, None)
         self.pending_machines.pop(job_id, None)
+        self.pending_tools.pop(job_id, None)
         self.claimed_jobs.discard(job_id)
+        self.started_jobs.discard(job_id)
         now = _utc()
         self.cancelled_jobs[job_id] = now
         self._prune_cancelled_jobs_locked(now)
@@ -853,7 +858,10 @@ class RemoteManager:
 
     async def heartbeat(self, token: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         worker = self._worker_by_token(token)
-        job_id = str((payload or {}).get("job_id") or "")
+        payload = payload or {}
+        job_id = str(payload.get("job_id") or "")
+        starting = bool(payload.get("starting"))
+        requested_generation = _worker_reset_generation(payload)
         with self._state_lock:
             worker.status = "online"
             worker.last_seen = _utc()
@@ -861,6 +869,15 @@ class RemoteManager:
             self._prune_cancelled_jobs_locked()
             cancelled = bool(job_id and job_id in self.cancelled_jobs)
             reset_generation = worker.reset_generation
+            if starting and job_id:
+                assigned_machine = self.pending_machines.get(job_id)
+                if job_id not in self.claimed_jobs or assigned_machine != worker.name or (
+                    requested_generation is not None
+                    and requested_generation != reset_generation
+                ):
+                    cancelled = True
+                elif not cancelled:
+                    self.started_jobs.add(job_id)
         result = {
             "accepted": not cancelled,
             "name": name,
@@ -889,12 +906,16 @@ class RemoteManager:
                     f"remote job {job_id!r} belongs to machine {assigned_machine!r}"
                 )
             if assigned_machine is None:
+                self.pending_tools.pop(job_id, None)
                 self.cancelled_jobs.pop(job_id, None)
                 self.claimed_jobs.discard(job_id)
+                self.started_jobs.discard(job_id)
                 return {"accepted": False}
             self.pending_machines.pop(job_id, None)
+            self.pending_tools.pop(job_id, None)
             self.cancelled_jobs.pop(job_id, None)
             self.claimed_jobs.discard(job_id)
+            self.started_jobs.discard(job_id)
             future = self.pending.pop(job_id, None)
             if future and not future.done():
                 future.set_result(payload)
@@ -929,6 +950,7 @@ class RemoteManager:
                 raise RuntimeError(f"remote machine queue is full: {machine}")
             self.pending[job_id] = future
             self.pending_machines[job_id] = machine
+            self.pending_tools[job_id] = tool
             protocol_version = _worker_poll_protocol_version(worker.info)
             job_lane = _worker_job_lane(tool, lane)
             queue = (
@@ -971,7 +993,9 @@ class RemoteManager:
                     with self._state_lock:
                         self.pending.pop(job_id, None)
                         self.pending_machines.pop(job_id, None)
+                        self.pending_tools.pop(job_id, None)
                         self.claimed_jobs.discard(job_id)
+                        self.started_jobs.discard(job_id)
 
                 future.add_done_callback(cleanup)
             elif tool not in REMOTE_NON_CANCELLABLE_WORKER_TOOLS:
@@ -982,7 +1006,9 @@ class RemoteManager:
                 with self._state_lock:
                     self.pending.pop(job_id, None)
                     self.pending_machines.pop(job_id, None)
+                    self.pending_tools.pop(job_id, None)
                     self.claimed_jobs.discard(job_id)
+                    self.started_jobs.discard(job_id)
         if not result.get("ok", False):
             data = result.get("data")
             if not isinstance(data, dict):
@@ -1059,10 +1085,20 @@ class RemoteManager:
                 if pending_machine == machine
             ]
             active_jobs = sum(job_id in self.claimed_jobs for job_id in pending_job_ids)
+            preserved_job_ids = {
+                job_id
+                for job_id in pending_job_ids
+                if job_id in self.started_jobs
+                and self.pending_tools.get(job_id) in REMOTE_NON_CANCELLABLE_WORKER_TOOLS
+            }
 
             worker.reset_generation += 1
+            cancelled_jobs = 0
             for job_id in pending_job_ids:
+                if job_id in preserved_job_ids:
+                    continue
                 self._cancel_job_locked(job_id)
+                cancelled_jobs += 1
 
             cleared_interactive = self._drain_queue(worker.queue)
             cleared_transfer = self._drain_queue(worker.transfer_queue)
@@ -1074,8 +1110,9 @@ class RemoteManager:
                 "remote_worker_reset",
                 machine=machine,
                 reset_generation=generation,
-                cancelled_jobs=len(pending_job_ids),
+                cancelled_jobs=cancelled_jobs,
                 active_jobs=active_jobs,
+                preserved_jobs=len(preserved_job_ids),
                 cleared_interactive_queue=cleared_interactive,
                 cleared_transfer_queue=cleared_transfer,
             )
@@ -1083,8 +1120,9 @@ class RemoteManager:
             "machine": machine,
             "reset": True,
             "reset_generation": generation,
-            "cancelled_jobs": len(pending_job_ids),
+            "cancelled_jobs": cancelled_jobs,
             "active_jobs": active_jobs,
+            "preserved_jobs": len(preserved_job_ids),
             "cleared_interactive_queue": cleared_interactive,
             "cleared_transfer_queue": cleared_transfer,
         }
@@ -2868,8 +2906,33 @@ async def _execute_worker_job_with_heartbeat(
     headers: dict[str, str],
     heartbeat_interval_s: float,
 ) -> Any:
+    job_generation = _worker_reset_generation(job)
+    start_payload: dict[str, Any] = {"job_id": job.get("id"), "starting": True}
+    if job_generation is not None:
+        start_payload["reset_generation"] = job_generation
+    start_response = await _worker_post_json_forever(
+        f"{server}{REMOTE_API_PREFIX}/heartbeat",
+        start_payload,
+        headers,
+        30,
+        "start remote job",
+    )
+    start_data = start_response.get("data", {}) if isinstance(start_response, dict) else {}
+    start_generation = _worker_reset_generation(start_data)
+    if (
+        start_data.get("accepted") is False
+        or start_data.get("cancelled")
+        or (
+            start_generation is not None
+            and job_generation is not None
+            and start_generation != job_generation
+        )
+    ):
+        raise RemoteJobCancelled("remote job was cancelled by the controller")
+
     task = asyncio.create_task(execute_worker_tool(job["tool"], dict(job.get("args") or {})))
     cancelled_by_controller = False
+    preserve_across_reset = str(job.get("tool") or "") in REMOTE_NON_CANCELLABLE_WORKER_TOOLS
 
     async def heartbeat_loop() -> None:
         nonlocal cancelled_by_controller
@@ -2890,7 +2953,8 @@ async def _execute_worker_job_with_heartbeat(
                 reset_generation = _worker_reset_generation(data)
                 job_generation = _worker_reset_generation(job)
                 if data.get("cancelled") or (
-                    reset_generation is not None
+                    not preserve_across_reset
+                    and reset_generation is not None
                     and job_generation is not None
                     and reset_generation != job_generation
                 ):
@@ -2919,6 +2983,8 @@ async def _submit_worker_result_with_heartbeat(
     server: str,
     headers: dict[str, str],
     heartbeat_interval_s: float,
+    *,
+    preserve_across_reset: bool = False,
 ) -> dict[str, Any]:
     result_timeout_s = _worker_result_request_timeout_s(result)
     submission = asyncio.create_task(
@@ -2951,7 +3017,8 @@ async def _submit_worker_result_with_heartbeat(
                 reset_generation = _worker_reset_generation(data)
                 result_generation = _worker_reset_generation(result)
                 if data.get("cancelled") or (
-                    reset_generation is not None
+                    not preserve_across_reset
+                    and reset_generation is not None
                     and result_generation is not None
                     and reset_generation != result_generation
                 ):
@@ -2999,7 +3066,13 @@ async def _run_worker_job(
             out = {"job_id": job.get("id"), **_handled_remote_exception(exc)}
     if "reset_generation" in job:
         out["reset_generation"] = job["reset_generation"]
-    await _submit_worker_result_with_heartbeat(out, server, headers, heartbeat_interval_s)
+    await _submit_worker_result_with_heartbeat(
+        out,
+        server,
+        headers,
+        heartbeat_interval_s,
+        preserve_across_reset=str(job.get("tool") or "") in REMOTE_NON_CANCELLABLE_WORKER_TOOLS,
+    )
 
 
 @dataclass

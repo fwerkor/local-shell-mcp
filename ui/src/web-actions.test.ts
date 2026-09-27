@@ -40,6 +40,17 @@ describe("Native WebUI actions", () => {
     expect(files).toContain("this.select(entryPath, true)")
   })
 
+  test("rerenders remote details when reset queue state changes", async () => {
+    const remotes = await Bun.file(new URL("./web-native/remotes.ts", import.meta.url)).text()
+    const revision = remotes.slice(
+      remotes.indexOf("function remoteDetailRevision"),
+      remotes.indexOf("export class RemotesController"),
+    )
+
+    expect(revision).toContain("machine.queue_depth")
+    expect(revision).toContain("machine.reset_generation")
+  })
+
   test("keeps the terminal overlay inside the terminal grid row", async () => {
     const styles = await Bun.file(new URL("./web-native.css", import.meta.url)).text()
     const overlayRule = styles.match(/\.terminal-overlay\s*\{([^}]*)\}/)?.[1] || ""

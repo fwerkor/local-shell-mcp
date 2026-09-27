@@ -821,6 +821,7 @@ async def test_remote_reset_clears_both_queues_and_cancels_claimed_job(tmp_path,
         "reset_generation": 8,
         "cancelled_jobs": 3,
         "active_jobs": 1,
+        "preserved_jobs": 0,
         "cleared_interactive_queue": 1,
         "cleared_transfer_queue": 1,
     }
@@ -844,8 +845,163 @@ async def test_remote_reset_clears_both_queues_and_cancels_claimed_job(tmp_path,
 
 
 @pytest.mark.asyncio
-async def test_worker_job_is_cancelled_when_reset_generation_changes(monkeypatch):
+async def test_remote_reset_preserves_started_non_cancellable_mutation(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    manager = remote.RemoteManager()
+    manager._registry_loaded = True
+    worker = remote.RemoteWorker(
+        name="worker-a",
+        token="token-a",
+        last_seen=100,
+        reset_generation=4,
+        info={"poll_protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION},
+    )
+    manager.workers[worker.name] = worker
+    manager.tokens[worker.token] = worker.name
+    monkeypatch.setattr(remote, "_utc", lambda: 100.0)
+
+    mutation = asyncio.create_task(
+        manager.call("worker-a", "write_file", {"path": "x", "content": "y"}, timeout_s=10)
+    )
+    await asyncio.sleep(0)
+    claimed = await manager.poll(
+        worker.token,
+        {
+            "protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+            "worker_version": remote.__version__,
+        },
+    )
+    job_id = claimed["job"]["id"]
+    start = await manager.heartbeat(
+        worker.token,
+        {"job_id": job_id, "starting": True, "reset_generation": 4},
+    )
+    assert start == {"accepted": True, "name": "worker-a", "reset_generation": 4}
+    assert job_id in manager.started_jobs
+
+    result = manager.reset("worker-a")
+
+    assert result == {
+        "machine": "worker-a",
+        "reset": True,
+        "reset_generation": 5,
+        "cancelled_jobs": 0,
+        "active_jobs": 1,
+        "preserved_jobs": 1,
+        "cleared_interactive_queue": 0,
+        "cleared_transfer_queue": 0,
+    }
+    assert job_id in manager.pending
+    assert job_id in manager.claimed_jobs
+    assert job_id in manager.started_jobs
+
+    accepted = await manager.submit_result(
+        worker.token,
+        {"job_id": job_id, "ok": True, "data": {"written": True}},
+    )
+    assert accepted == {"accepted": True}
+    assert await mutation == {"ok": True, "message": "", "data": {"written": True}}
+
+
+@pytest.mark.asyncio
+async def test_remote_reset_cancels_claimed_mutation_that_has_not_started(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    manager = remote.RemoteManager()
+    manager._registry_loaded = True
+    worker = remote.RemoteWorker(
+        name="worker-a",
+        token="token-a",
+        last_seen=100,
+        reset_generation=9,
+        info={"poll_protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION},
+    )
+    manager.workers[worker.name] = worker
+    manager.tokens[worker.token] = worker.name
+    monkeypatch.setattr(remote, "_utc", lambda: 100.0)
+
+    mutation = asyncio.create_task(
+        manager.call("worker-a", "write_file", {"path": "x", "content": "y"}, timeout_s=10)
+    )
+    await asyncio.sleep(0)
+    claimed = await manager.poll(
+        worker.token,
+        {
+            "protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+            "worker_version": remote.__version__,
+        },
+    )
+    job_id = claimed["job"]["id"]
+    assert job_id in manager.claimed_jobs
+    assert job_id not in manager.started_jobs
+
+    result = manager.reset("worker-a")
+
+    assert result["cancelled_jobs"] == 1
+    assert result["preserved_jobs"] == 0
+    start = await manager.heartbeat(
+        worker.token,
+        {"job_id": job_id, "starting": True, "reset_generation": 9},
+    )
+    assert start == {
+        "accepted": False,
+        "name": "worker-a",
+        "reset_generation": 10,
+        "cancelled": True,
+    }
+    with pytest.raises(asyncio.CancelledError):
+        await mutation
+
+
+@pytest.mark.asyncio
+async def test_worker_job_is_rejected_before_execution_when_reset_generation_changed(monkeypatch):
+    executed = False
+
+    async def fake_execute(_tool, _args):
+        nonlocal executed
+        executed = True
+        return None
+
+    def fake_post(url, payload, headers=None, timeout=None):
+        assert url.endswith("/heartbeat")
+        assert payload == {
+            "job_id": "job-reset",
+            "starting": True,
+            "reset_generation": 1,
+        }
+        assert headers == {"Authorization": "Bearer token"}
+        assert timeout == 30
+        return {
+            "ok": True,
+            "data": {"accepted": False, "cancelled": True, "reset_generation": 2},
+        }
+
+    monkeypatch.setattr(remote, "execute_worker_tool", fake_execute)
+    monkeypatch.setattr(remote, "_worker_post_json", fake_post)
+
+    with pytest.raises(remote.RemoteJobCancelled, match="cancelled by the controller"):
+        await remote._execute_worker_job_with_heartbeat(  # noqa: SLF001
+            {
+                "id": "job-reset",
+                "tool": "slow_tool",
+                "args": {},
+                "reset_generation": 1,
+            },
+            "https://example.test",
+            {"Authorization": "Bearer token"},
+            0.001,
+        )
+
+    assert executed is False
+
+
+@pytest.mark.asyncio
+async def test_worker_job_is_cancelled_when_reset_happens_after_start(monkeypatch):
     cancelled = asyncio.Event()
+    heartbeat_count = 0
 
     async def fake_execute(_tool, _args):
         try:
@@ -855,10 +1011,19 @@ async def test_worker_job_is_cancelled_when_reset_generation_changes(monkeypatch
             raise
 
     def fake_post(url, payload, headers=None, timeout=None):
+        nonlocal heartbeat_count
         assert url.endswith("/heartbeat")
-        assert payload == {"job_id": "job-reset"}
         assert headers == {"Authorization": "Bearer token"}
         assert timeout == 30
+        if payload.get("starting"):
+            assert payload == {
+                "job_id": "job-reset",
+                "starting": True,
+                "reset_generation": 1,
+            }
+            return {"ok": True, "data": {"accepted": True, "reset_generation": 1}}
+        assert payload == {"job_id": "job-reset"}
+        heartbeat_count += 1
         return {"ok": True, "data": {"accepted": True, "reset_generation": 2}}
 
     monkeypatch.setattr(remote, "execute_worker_tool", fake_execute)
@@ -877,7 +1042,51 @@ async def test_worker_job_is_cancelled_when_reset_generation_changes(monkeypatch
             0.001,
         )
 
+    assert heartbeat_count >= 1
     assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_started_non_cancellable_worker_job_ignores_reset_generation_change(monkeypatch):
+    heartbeat_seen = asyncio.Event()
+
+    async def fake_execute(tool, args):
+        assert tool == "write_file"
+        assert args == {"path": "x", "content": "y"}
+        await asyncio.wait_for(heartbeat_seen.wait(), timeout=1)
+        return {"written": True}
+
+    def fake_post(url, payload, headers=None, timeout=None):
+        assert url.endswith("/heartbeat")
+        assert headers == {"Authorization": "Bearer token"}
+        assert timeout == 30
+        if payload.get("starting"):
+            assert payload == {
+                "job_id": "job-write",
+                "starting": True,
+                "reset_generation": 5,
+            }
+            return {"ok": True, "data": {"accepted": True, "reset_generation": 5}}
+        assert payload == {"job_id": "job-write"}
+        heartbeat_seen.set()
+        return {"ok": True, "data": {"accepted": True, "reset_generation": 6}}
+
+    monkeypatch.setattr(remote, "execute_worker_tool", fake_execute)
+    monkeypatch.setattr(remote, "_worker_post_json", fake_post)
+
+    result = await remote._execute_worker_job_with_heartbeat(  # noqa: SLF001
+        {
+            "id": "job-write",
+            "tool": "write_file",
+            "args": {"path": "x", "content": "y"},
+            "reset_generation": 5,
+        },
+        "https://example.test",
+        {"Authorization": "Bearer token"},
+        0.001,
+    )
+
+    assert result == {"written": True}
 
 
 @pytest.mark.asyncio
@@ -894,9 +1103,12 @@ async def test_worker_job_sends_heartbeats_while_running(monkeypatch):
 
     def fake_post(url, payload, headers=None, timeout=None):
         posted_urls.append(url)
-        assert payload == {"job_id": "job-1"}
         assert headers == {"Authorization": "Bearer token"}
         assert timeout == 30
+        if payload.get("starting"):
+            assert payload == {"job_id": "job-1", "starting": True}
+            return {"ok": True, "data": {"accepted": True}}
+        assert payload == {"job_id": "job-1"}
         loop.call_soon_threadsafe(heartbeat_seen.set)
         return {"ok": True, "data": {"accepted": True}}
 
@@ -1040,6 +1252,49 @@ async def test_worker_result_submission_stops_when_reset_generation_changes(monk
     attempts_after_reset = result_attempts
     await asyncio.sleep(0.06)
     assert result_attempts == attempts_after_reset
+
+
+@pytest.mark.asyncio
+async def test_worker_result_submission_preserves_started_mutation_across_reset(monkeypatch):
+    result_attempts = 0
+    heartbeat_calls = 0
+    result = {
+        "job_id": "job-write",
+        "ok": True,
+        "data": {"written": True},
+        "reset_generation": 3,
+    }
+    headers = {"Authorization": "Bearer token"}
+
+    def fake_post(url, payload, request_headers=None, timeout=None):
+        nonlocal result_attempts, heartbeat_calls
+        assert request_headers == headers
+        if url.endswith("/result"):
+            result_attempts += 1
+            if result_attempts < 3:
+                raise RuntimeError("slow result upload")
+            return {"ok": True, "data": {"accepted": True}}
+        assert url.endswith("/heartbeat")
+        assert timeout == 30
+        assert payload == {"job_id": "job-write"}
+        heartbeat_calls += 1
+        return {"ok": True, "data": {"accepted": True, "reset_generation": 4}}
+
+    monkeypatch.setattr(remote, "_worker_post_json", fake_post)
+    monkeypatch.setattr(remote, "_WORKER_RETRY_INITIAL_DELAY_S", 0.02)
+    monkeypatch.setattr(remote, "_WORKER_RETRY_MAX_DELAY_S", 0.02)
+
+    response = await remote._submit_worker_result_with_heartbeat(  # noqa: SLF001
+        result,
+        "https://example.test",
+        headers,
+        0.005,
+        preserve_across_reset=True,
+    )
+
+    assert response == {"ok": True, "data": {"accepted": True}}
+    assert result_attempts == 3
+    assert heartbeat_calls >= 1
 
 
 @pytest.mark.asyncio

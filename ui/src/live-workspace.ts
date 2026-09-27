@@ -1466,10 +1466,10 @@ async function renameRemote(machine: string): Promise<void> {
 
 async function resetRemote(machine: string): Promise<void> {
   if (!machine) return
-  const confirmation = await promptValue("Reset remote", `Type ${machine} to confirm`, "", "This cancels active LSM requests and clears queued commands without disconnecting the worker.")
+  const confirmation = await promptValue("Reset remote", `Type ${machine} to confirm`, "", "This clears queued commands and safely cancellable active requests without disconnecting the worker. Already-running mutations may finish.")
   if (confirmation !== machine) return
   const result = await api<JsonRecord>("/api/ui/remotes/reset", { method: "POST", body: JSON.stringify({ machine }) })
-  notify(`Reset ${machine}; cancelled ${String(result.cancelled_jobs ?? 0)} request(s)`, "success")
+  notify(`Reset ${machine}; cancelled ${String(result.cancelled_jobs ?? 0)} request(s), preserved ${String(result.preserved_jobs ?? 0)} running mutation(s)`, "success")
   await refreshRemotes()
 }
 
