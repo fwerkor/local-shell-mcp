@@ -461,6 +461,9 @@ class GuiManager:
             for element_id, locator in snapshot.locators.items()
             if element_id in kept_ids
         }
+        bounded_window = _bounded_window_record(snapshot.window)
+        if bounded_window is None:
+            raise GuiUnavailableError("GUI backend returned unsafe window metadata")
 
         state_id = uuid.uuid4().hex
         now = time.monotonic()
@@ -480,8 +483,8 @@ class GuiManager:
             "backend": self._backend.name,
             "state_id": state_id,
             "state_ttl_s": GUI_STATE_TTL_S,
-            "window": snapshot.window,
-            "elements": _window_relative_elements(bounded_elements, snapshot.window),
+            "window": bounded_window,
+            "elements": _window_relative_elements(bounded_elements, bounded_window),
             "capabilities": snapshot.capabilities,
             "screenshot_path": snapshot.screenshot_path,
         }
@@ -517,10 +520,13 @@ class GuiManager:
                 with contextlib.suppress(BaseException):
                     await asyncio.shield(normalize)
                 raise
+            bounded_window = _bounded_window_record(snapshot.window)
+            if bounded_window is None:
+                raise GuiUnavailableError("GUI backend returned unsafe window metadata")
             keep_file = True
             return {
                 "backend": self._backend.name,
-                "window": snapshot.window,
+                "window": bounded_window,
                 "capabilities": snapshot.capabilities,
                 "screenshot_path": snapshot.screenshot_path,
             }

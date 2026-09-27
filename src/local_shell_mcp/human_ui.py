@@ -1560,6 +1560,8 @@ async def api_remote_action(request: Request) -> Response:
             raise ValueError("machine is required")
         if action == "rename":
             result = remote_manager().rename(machine, str(body.get("new_name") or ""))
+        elif action == "reset":
+            result = remote_manager().reset(machine)
         elif action == "revoke":
             result = remote_manager().revoke(machine)
         else:

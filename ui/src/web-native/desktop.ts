@@ -145,6 +145,7 @@ export class DesktopController extends BaseController {
   private actionTargetEpoch = 0
   private actionQueue: Promise<void> = Promise.resolve()
   private pendingActions = 0
+  private frameDirty = false
   private pointerStart: PointerStart | null = null
   private suppressClickUntil = 0
   private clickTimer: number | null = null
@@ -159,6 +160,7 @@ export class DesktopController extends BaseController {
 
   private invalidateActionTarget(): void {
     this.actionTargetEpoch += 1
+    this.frameDirty = false
   }
 
   mount(root: HTMLElement): void {
@@ -438,6 +440,23 @@ export class DesktopController extends BaseController {
         || windowId !== this.selectedWindowId
       ) return
       const nextUrl = URL.createObjectURL(blob)
+      try {
+        await this.decodeFrame(nextUrl)
+      } catch (error) {
+        URL.revokeObjectURL(nextUrl)
+        throw error
+      }
+      if (
+        this.destroyed
+        || controller.signal.aborted
+        || requestKey !== this.frameRequestKey
+        || epoch !== this.frameEpoch
+        || requestedMachine !== this.machine
+        || windowId !== this.selectedWindowId
+      ) {
+        URL.revokeObjectURL(nextUrl)
+        return
+      }
       const previousUrl = this.frameUrl
       this.frameUrl = nextUrl
       this.frameBounds = bounds
@@ -462,6 +481,12 @@ export class DesktopController extends BaseController {
       this.clearFrame()
       this.renderStatus(message, true)
     }
+  }
+
+  private async decodeFrame(url: string): Promise<void> {
+    const image = document.createElement("img")
+    image.src = url
+    await image.decode()
   }
 
   private clearFrame(): void {
@@ -518,8 +543,12 @@ export class DesktopController extends BaseController {
           bounds,
           actions: [action],
         })
-        if (machine === this.machine && windowId === this.selectedWindowId) {
-          void this.refreshFrame()
+        if (
+          targetEpoch === this.actionTargetEpoch
+          && machine === this.machine
+          && windowId === this.selectedWindowId
+        ) {
+          this.frameDirty = true
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
@@ -535,6 +564,16 @@ export class DesktopController extends BaseController {
       } finally {
         this.pendingActions = Math.max(0, this.pendingActions - 1)
         this.renderInputPulse()
+        if (
+          this.pendingActions === 0
+          && this.frameDirty
+          && targetEpoch === this.actionTargetEpoch
+          && machine === this.machine
+          && windowId === this.selectedWindowId
+        ) {
+          this.frameDirty = false
+          await this.refreshFrame()
+        }
       }
     }
     this.actionQueue = this.actionQueue.then(run, run)

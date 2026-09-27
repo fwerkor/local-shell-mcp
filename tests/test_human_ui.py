@@ -574,11 +574,13 @@ def test_remotes_api_honors_disabled_server_configuration(tmp_path, monkeypatch)
         "/api/ui/remotes/rename",
         json={"machine": "missing", "new_name": "other"},
     )
+    reset = client.post("/api/ui/remotes/reset", json={"machine": "missing"})
 
     assert listing.status_code == 200
     assert listing.json()["data"]["enabled"] is False
     assert invite.status_code == 400
     assert rename.status_code == 400
+    assert reset.status_code == 400
     assert "disabled" in invite.json()["message"]
 
 

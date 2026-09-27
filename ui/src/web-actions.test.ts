@@ -40,6 +40,32 @@ describe("Native WebUI actions", () => {
     expect(files).toContain("this.select(entryPath, true)")
   })
 
+  test("rerenders remote details when reset queue state changes", async () => {
+    const remotes = await Bun.file(new URL("./web-native/remotes.ts", import.meta.url)).text()
+    const revision = remotes.slice(
+      remotes.indexOf("function remoteDetailRevision"),
+      remotes.indexOf("export class RemotesController"),
+    )
+
+    expect(revision).toContain("machine.queue_depth")
+    expect(revision).toContain("machine.reset_generation")
+  })
+
+  test("locks Native WebUI reset while its request is in flight", async () => {
+    const remotes = await Bun.file(new URL("./web-native/remotes.ts", import.meta.url)).text()
+    const resetMethod = remotes.slice(
+      remotes.indexOf("private async reset()"),
+      remotes.indexOf("private async revoke()"),
+    )
+
+    expect(remotes).toContain("private resetRequestInFlight = false")
+    expect(remotes).toContain("reset.disabled = !current || !this.enabled || this.resetRequestInFlight")
+    expect(resetMethod).toContain("if (this.resetRequestInFlight) return")
+    expect(resetMethod.match(/if \(this\.resetRequestInFlight\) return/g)?.length).toBe(2)
+    expect(resetMethod).toContain("this.resetRequestInFlight = true")
+    expect(resetMethod).toContain("this.resetRequestInFlight = false")
+  })
+
   test("keeps the terminal overlay inside the terminal grid row", async () => {
     const styles = await Bun.file(new URL("./web-native.css", import.meta.url)).text()
     const overlayRule = styles.match(/\.terminal-overlay\s*\{([^}]*)\}/)?.[1] || ""

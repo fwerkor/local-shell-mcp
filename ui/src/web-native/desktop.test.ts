@@ -151,6 +151,44 @@ describe("Native WebUI desktop queued input", () => {
     expect(controller.pendingActions).toBe(0)
   })
 
+  test("refreshes once after the queued action batch drains", async () => {
+    const sends: unknown[] = []
+    let releaseFirst!: () => void
+    const gate = new Promise<void>((resolve) => { releaseFirst = resolve })
+    const context: NativePageContext = {
+      api: {
+        get: async () => undefined as never,
+        send: async (_url: string, _method: string, body?: unknown) => {
+          sends.push(body)
+          if (sends.length === 1) await gate
+          return {} as never
+        },
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller: any = new DesktopController(context)
+    controller.root = { querySelector: () => null }
+    controller.machine = "node"
+    controller.selectedWindowId = "window:1"
+    controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
+    let frames = 0
+    controller.refreshFrame = async () => { frames += 1 }
+
+    controller.queueAction({ type: "click", x: 1, y: 1 })
+    await Promise.resolve()
+    controller.queueAction({ type: "click", x: 2, y: 2 })
+    releaseFirst()
+    await controller.actionQueue
+
+    expect(sends).toHaveLength(2)
+    expect(frames).toBe(1)
+    expect(controller.pendingActions).toBe(0)
+  })
+
   test("invalidates later queued actions after a stale-frame rejection", async () => {
     const sends: unknown[] = []
     let releaseFirst!: () => void
@@ -238,6 +276,71 @@ describe("Native WebUI desktop queued input", () => {
       bounds: { x: 0, y: 0, width: 100, height: 100 },
       actions: [{ type: "click", x: 1, y: 1 }],
     })
+  })
+})
+
+describe("Native WebUI desktop frame replacement", () => {
+  test("publishes new geometry only after the replacement image decodes", async () => {
+    const context: NativePageContext = {
+      api: {
+        get: async () => undefined as never,
+        send: async () => undefined as never,
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller: any = new DesktopController(context)
+    const visibleImage: any = { src: "blob:old", hidden: false }
+    controller.root = {
+      querySelector: (selector: string) => (
+        selector === "[data-role=desktop-frame]" ? visibleImage : null
+      ),
+    }
+    controller.machine = "local"
+    controller.selectedWindowId = "window:1"
+    controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
+    controller.frameUrl = "blob:old"
+    controller.frameRequestKey = "local\0window:1"
+    controller.frameEpoch = 0
+
+    let releaseDecode!: () => void
+    const decodeGate = new Promise<void>((resolve) => { releaseDecode = resolve })
+    controller.decodeFrame = async () => { await decodeGate }
+
+    const originalFetch = globalThis.fetch
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
+    globalThis.fetch = (async () => new Response(new Blob(["frame"]), {
+      status: 200,
+      headers: {
+        "X-LSM-GUI-Window-X": "0",
+        "X-LSM-GUI-Window-Y": "0",
+        "X-LSM-GUI-Window-Width": "200",
+        "X-LSM-GUI-Window-Height": "150",
+      },
+    })) as unknown as typeof fetch
+    URL.createObjectURL = () => "blob:new"
+    URL.revokeObjectURL = () => undefined
+
+    try {
+      const task = controller.loadFrame("local\0window:1", new AbortController())
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(controller.frameBounds).toEqual({ x: 0, y: 0, width: 100, height: 100 })
+      expect(visibleImage.src).toBe("blob:old")
+
+      releaseDecode()
+      await task
+      expect(controller.frameBounds).toEqual({ x: 0, y: 0, width: 200, height: 150 })
+      expect(visibleImage.src).toBe("blob:new")
+    } finally {
+      globalThis.fetch = originalFetch
+      URL.createObjectURL = originalCreateObjectURL
+      URL.revokeObjectURL = originalRevokeObjectURL
+    }
   })
 })
 

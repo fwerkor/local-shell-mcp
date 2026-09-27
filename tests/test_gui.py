@@ -2149,6 +2149,32 @@ async def test_gui_frame_does_not_allocate_model_state(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_gui_manager_bounds_window_metadata_before_return(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.base as base
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    oversized = "x" * (base.GUI_MAX_WINDOW_TEXT_BYTES * 2)
+
+    class OversizedWindowBackend(FakeBackend):
+        async def snapshot(self, window_id, **kwargs):
+            snapshot = await super().snapshot(window_id, **kwargs)
+            snapshot.window["title"] = oversized
+            snapshot.window["app"] = oversized
+            return snapshot
+
+    manager = GuiManager(OversizedWindowBackend())
+    state = await manager.snapshot("window:1", screenshot=False)
+    frame = await manager.frame("window:1")
+
+    assert len(state["window"]["title"].encode("utf-8")) <= base.GUI_MAX_WINDOW_TEXT_BYTES
+    assert len(state["window"]["app"].encode("utf-8")) <= base.GUI_MAX_WINDOW_TEXT_BYTES
+    assert len(frame["window"]["title"].encode("utf-8")) <= base.GUI_MAX_WINDOW_TEXT_BYTES
+    assert len(frame["window"]["app"].encode("utf-8")) <= base.GUI_MAX_WINDOW_TEXT_BYTES
+    assert manager._states[state["state_id"]].window["title"] == oversized
+    Path(frame["screenshot_path"]).unlink()
+
+
+@pytest.mark.asyncio
 async def test_gui_action_batch_limits_do_not_consume_state(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     manager = GuiManager(FakeBackend())

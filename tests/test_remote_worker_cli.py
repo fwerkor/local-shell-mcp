@@ -220,6 +220,10 @@ async def test_run_worker_transfer_does_not_block_interactive_jobs(tmp_path, mon
                 }
             await asyncio.wait_for(interactive_result_submitted.wait(), timeout=1)
             raise RuntimeError("stop polling")
+        if url.endswith("/remote/heartbeat"):
+            assert payload.get("starting") is True
+            assert payload.get("job_id") in {"transfer", "interactive"}
+            return {"ok": True, "data": {"accepted": True}}
         if url.endswith("/remote/result"):
             submitted_results.append(payload)
             if payload.get("job_id") == "interactive":

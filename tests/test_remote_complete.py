@@ -172,7 +172,9 @@ def test_controller_poll_result_errors_and_cancellation(tmp_path, monkeypatch):
     manager.tokens[worker.token] = worker.name
     monkeypatch.setattr(remote, "_utc", lambda: 100.0)
 
-    assert asyncio.run(manager.heartbeat("token", {"job_id": "none"}))["accepted"] is True
+    missing = asyncio.run(manager.heartbeat("token", {"job_id": "none"}))
+    assert missing["accepted"] is False
+    assert missing["cancelled"] is True
     assert asyncio.run(manager.submit_result("token", {"job_id": "unknown"})) == {"accepted": False}
 
     async def failed_call():
