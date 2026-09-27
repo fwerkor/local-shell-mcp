@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 import threading
 import tomllib
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -1845,10 +1846,14 @@ async def test_gui_input_batches_are_serialized(tmp_path, monkeypatch):
     assert backend.max_active == 1
 
 
-def test_x11_window_matching_and_pixmap_decode():
-    from Xlib import X
-
+def test_x11_window_matching_and_pixmap_decode(monkeypatch):
     import local_shell_mcp.gui.linux as linux
+
+    xlib = ModuleType("Xlib")
+    xlib.X = SimpleNamespace(LSBFirst=0, MSBFirst=1)
+    xlib.Xatom = SimpleNamespace(WINDOW=1, CARDINAL=2)
+    monkeypatch.setitem(sys.modules, "Xlib", xlib)
+    X = xlib.X
 
     class Window:
         def __init__(self, xid, pid, title, bounds):
@@ -1934,8 +1939,6 @@ def test_x11_window_matching_and_pixmap_decode():
 
 
 def test_x11_capture_uses_composite_window_pixmap(tmp_path, monkeypatch):
-    import Xlib.display
-
     import local_shell_mcp.gui.linux as linux
 
     calls = []
@@ -1980,7 +1983,10 @@ def test_x11_capture_uses_composite_window_pixmap(tmp_path, monkeypatch):
             calls.append(("close",))
 
     connection = Connection()
-    monkeypatch.setattr(Xlib.display, "Display", lambda _display: connection)
+    xlib = ModuleType("Xlib")
+    xlib.X = SimpleNamespace(ZPixmap=2)
+    xlib.display = SimpleNamespace(Display=lambda _display: connection)
+    monkeypatch.setitem(sys.modules, "Xlib", xlib)
     monkeypatch.setattr(linux, "_x11_match_window", lambda _connection, _record: Window())
     monkeypatch.setattr(
         linux,
@@ -2002,8 +2008,6 @@ def test_x11_capture_uses_composite_window_pixmap(tmp_path, monkeypatch):
 
 
 def test_x11_capture_fails_closed_without_compositor(tmp_path, monkeypatch):
-    import Xlib.display
-
     import local_shell_mcp.gui.linux as linux
 
     class Connection:
@@ -2023,7 +2027,10 @@ def test_x11_capture_fails_closed_without_compositor(tmp_path, monkeypatch):
         def close(self):
             pass
 
-    monkeypatch.setattr(Xlib.display, "Display", lambda _display: Connection())
+    xlib = ModuleType("Xlib")
+    xlib.X = SimpleNamespace(ZPixmap=2)
+    xlib.display = SimpleNamespace(Display=lambda _display: Connection())
+    monkeypatch.setitem(sys.modules, "Xlib", xlib)
     with pytest.raises(GuiUnavailableError, match="compositing manager"):
         linux._capture_x11_window_sync(
             tmp_path / "window.png",
