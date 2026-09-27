@@ -321,6 +321,7 @@ class RemoteWorker:
     info: dict[str, Any] = field(default_factory=dict)
     queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
     transfer_queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
+    reset_generation: int = 0
 
 
 class RemoteManager:
@@ -473,6 +474,10 @@ class RemoteManager:
             worker.created_at = float(item.get("created_at") or _utc())
             worker.capabilities = list(item.get("capabilities") or [])
             worker.info = dict(item.get("info") or {})
+            try:
+                worker.reset_generation = max(0, int(item.get("reset_generation") or 0))
+            except (TypeError, ValueError):
+                worker.reset_generation = 0
             workers[name] = worker
             tokens[access] = name
         now = _utc()
@@ -516,6 +521,7 @@ class RemoteManager:
                     "created_at": worker.created_at,
                     "capabilities": worker.capabilities,
                     "info": worker.info,
+                    "reset_generation": worker.reset_generation,
                 }
                 for worker in sorted(self.workers.values(), key=lambda item: item.name)
             ],
@@ -679,6 +685,7 @@ class RemoteManager:
             "poll_timeout_s": get_settings().remote_poll_timeout_s,
             "heartbeat_interval_s": _remote_heartbeat_interval_s(),
             "poll_protocol_version": REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+            "reset_generation": worker.reset_generation,
         }
 
     async def resume_worker(self, access: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -708,6 +715,7 @@ class RemoteManager:
             "poll_timeout_s": get_settings().remote_poll_timeout_s,
             "heartbeat_interval_s": _remote_heartbeat_interval_s(),
             "poll_protocol_version": REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+            "reset_generation": worker.reset_generation,
         }
 
     def _default_machine_name(self, payload: dict[str, Any]) -> str:
@@ -793,11 +801,13 @@ class RemoteManager:
                 worker.info["poll_protocol_version"] = protocol_version
             if protocol_version >= REMOTE_WORKER_LANE_PROTOCOL_VERSION:
                 _migrate_worker_lane_queues(worker)
+            reset_generation = worker.reset_generation
         if upgrade and upgrade["required"]:
             return {
                 "job": None,
                 "upgrade": upgrade,
                 "poll_timeout_s": configured_poll_timeout_s,
+                "reset_generation": reset_generation,
             }
         queue = (
             worker.transfer_queue
@@ -815,6 +825,7 @@ class RemoteManager:
                     "heartbeat": True,
                     "upgrade": upgrade,
                     "poll_timeout_s": configured_poll_timeout_s,
+                    "reset_generation": worker.reset_generation,
                 }
             try:
                 job = await _wait_for_remote_poll_item(queue, remaining)
@@ -824,6 +835,7 @@ class RemoteManager:
                     "heartbeat": True,
                     "upgrade": upgrade,
                     "poll_timeout_s": configured_poll_timeout_s,
+                    "reset_generation": worker.reset_generation,
                 }
             job_id = str(job.get("id") or "")
             with self._state_lock:
@@ -836,6 +848,7 @@ class RemoteManager:
                 "job": job,
                 "upgrade": upgrade,
                 "poll_timeout_s": configured_poll_timeout_s,
+                "reset_generation": worker.reset_generation,
             }
 
     async def heartbeat(self, token: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -847,7 +860,12 @@ class RemoteManager:
             name = worker.name
             self._prune_cancelled_jobs_locked()
             cancelled = bool(job_id and job_id in self.cancelled_jobs)
-        result = {"accepted": not cancelled, "name": name}
+            reset_generation = worker.reset_generation
+        result = {
+            "accepted": not cancelled,
+            "name": name,
+            "reset_generation": reset_generation,
+        }
         if cancelled:
             result["cancelled"] = True
         return result
@@ -926,6 +944,7 @@ class RemoteManager:
                     "args": args,
                     "lane": job_lane,
                     "expires_at": _utc() + effective_timeout,
+                    "reset_generation": worker.reset_generation,
                 }
             )
         preserve_pending = False
@@ -1006,6 +1025,7 @@ class RemoteManager:
                         "queue_depth": worker.queue.qsize() + worker.transfer_queue.qsize(),
                         "interactive_queue_depth": worker.queue.qsize(),
                         "transfer_queue_depth": worker.transfer_queue.qsize(),
+                        "reset_generation": worker.reset_generation,
                         "capabilities": list(worker.capabilities),
                         "info": dict(worker.info),
                     }
@@ -1014,6 +1034,59 @@ class RemoteManager:
         return {
             "machines": rows,
             "counts": {**counts, "total": len(rows)},
+        }
+
+    @staticmethod
+    def _drain_queue(queue: asyncio.Queue[dict[str, Any]]) -> int:
+        cleared = 0
+        while True:
+            try:
+                queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return cleared
+            queue.task_done()
+            cleared += 1
+
+    def reset(self, machine: str) -> dict[str, Any]:
+        with self._state_lock, self._registry_transaction_unlocked():
+            worker = self.workers.get(machine)
+            if not worker:
+                raise ValueError(f"unknown remote machine: {machine}")
+
+            pending_job_ids = [
+                job_id
+                for job_id, pending_machine in self.pending_machines.items()
+                if pending_machine == machine
+            ]
+            active_jobs = sum(job_id in self.claimed_jobs for job_id in pending_job_ids)
+
+            worker.reset_generation += 1
+            for job_id in pending_job_ids:
+                self._cancel_job_locked(job_id)
+
+            cleared_interactive = self._drain_queue(worker.queue)
+            cleared_transfer = self._drain_queue(worker.transfer_queue)
+            self._save_registry_unlocked()
+            generation = worker.reset_generation
+
+        with contextlib.suppress(Exception):
+            audit(
+                "remote_worker_reset",
+                machine=machine,
+                reset_generation=generation,
+                cancelled_jobs=len(pending_job_ids),
+                active_jobs=active_jobs,
+                cleared_interactive_queue=cleared_interactive,
+                cleared_transfer_queue=cleared_transfer,
+            )
+        return {
+            "machine": machine,
+            "reset": True,
+            "reset_generation": generation,
+            "cancelled_jobs": len(pending_job_ids),
+            "active_jobs": active_jobs,
+            "cleared_interactive_queue": cleared_interactive,
+            "cleared_transfer_queue": cleared_transfer,
         }
 
     def revoke(self, machine: str) -> dict[str, Any]:
@@ -2612,6 +2685,16 @@ def _worker_poll_request_timeout_s(data: dict[str, Any]) -> float | None:
     return poll_timeout_s + _WORKER_POLL_TIMEOUT_GRACE_S
 
 
+def _worker_reset_generation(data: dict[str, Any]) -> int | None:
+    if "reset_generation" not in data:
+        return None
+    try:
+        generation = int(data["reset_generation"])
+    except (TypeError, ValueError):
+        return None
+    return generation if generation >= 0 else None
+
+
 def _worker_retry_delay(attempt: int) -> float:
     return min(_WORKER_RETRY_INITIAL_DELAY_S * (2 ** min(attempt, 5)), _WORKER_RETRY_MAX_DELAY_S)
 
@@ -2804,7 +2887,13 @@ async def _execute_worker_job_with_heartbeat(
                     30,
                 )
                 data = response.get("data", {}) if isinstance(response, dict) else {}
-                if data.get("cancelled"):
+                reset_generation = _worker_reset_generation(data)
+                job_generation = _worker_reset_generation(job)
+                if data.get("cancelled") or (
+                    reset_generation is not None
+                    and job_generation is not None
+                    and reset_generation != job_generation
+                ):
                     cancelled_by_controller = True
                     task.cancel()
                     return
@@ -2859,7 +2948,13 @@ async def _submit_worker_result_with_heartbeat(
                     30,
                 )
                 data = response.get("data", {}) if isinstance(response, dict) else {}
-                if data.get("cancelled"):
+                reset_generation = _worker_reset_generation(data)
+                result_generation = _worker_reset_generation(result)
+                if data.get("cancelled") or (
+                    reset_generation is not None
+                    and result_generation is not None
+                    and reset_generation != result_generation
+                ):
                     cancelled_by_controller = True
                     submission.cancel()
                     return
@@ -2902,6 +2997,8 @@ async def _run_worker_job(
             out = {"job_id": job["id"], "ok": True, "data": result}
         except Exception as exc:  # noqa: BLE001
             out = {"job_id": job.get("id"), **_handled_remote_exception(exc)}
+    if "reset_generation" in job:
+        out["reset_generation"] = job["reset_generation"]
     await _submit_worker_result_with_heartbeat(out, server, headers, heartbeat_interval_s)
 
 

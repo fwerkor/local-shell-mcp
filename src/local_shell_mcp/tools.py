@@ -3432,7 +3432,7 @@ def _register_remote_admin_tools(mcp: FastMCP) -> None:
         machine: str | None = None,
         new_name: str | None = None,
     ) -> ToolResult:
-        """Manage remote workers with action=invite, list, revoke, or rename. invite accepts name/workdir/ttl_s; revoke requires machine; rename requires machine and new_name."""
+        """Manage remote workers with action=invite, list, reset, revoke, or rename. invite accepts name/workdir/ttl_s; reset/revoke require machine; rename requires machine and new_name. reset clears queued and active control-plane requests without disconnecting the worker."""
 
         async def run() -> Any:
             manager = remote_manager()
@@ -3441,6 +3441,10 @@ def _register_remote_admin_tools(mcp: FastMCP) -> None:
                 return await manager.create_invite(name, workdir, ttl_s)
             if normalized == "list":
                 return manager.list_machines()
+            if normalized == "reset":
+                if not machine:
+                    raise ValueError("machine is required for action=reset")
+                return manager.reset(machine)
             if normalized == "revoke":
                 if not machine:
                     raise ValueError("machine is required for action=revoke")
@@ -3451,7 +3455,7 @@ def _register_remote_admin_tools(mcp: FastMCP) -> None:
                 if not new_name:
                     raise ValueError("new_name is required for action=rename")
                 return manager.rename(machine, new_name)
-            raise ValueError("action must be one of: invite, list, revoke, rename")
+            raise ValueError("action must be one of: invite, list, reset, revoke, rename")
 
         return await _tool_call(run)
 

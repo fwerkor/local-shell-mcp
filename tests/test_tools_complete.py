@@ -135,6 +135,9 @@ class FakeRemoteManager:
     def list_machines(self):
         return {"machines": [{"name": "node"}]}
 
+    def reset(self, machine):
+        return {"machine": machine, "reset": True, "cancelled_jobs": 2}
+
     def revoke(self, machine):
         return {"machine": machine, "revoked": True}
 
@@ -282,12 +285,18 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
     )
     assert renamed["ok"] is True
     assert renamed["data"] == {"old_name": "node", "new_name": "renamed"}
+    reset = await _raw_tool(mcp, "remote_manage")(action="reset", machine="node")
+    assert reset["ok"] is True
+    assert reset["data"] == {"machine": "node", "reset": True, "cancelled_jobs": 2}
     revoked = await _raw_tool(mcp, "remote_manage")(action="revoke", machine="node")
     assert revoked["ok"] is True
     assert revoked["data"] == {"machine": "node", "revoked": True}
     invalid = await _raw_tool(mcp, "remote_manage")(action="rename", machine="node")
     assert invalid.isError is True
     assert _handled_error_data(invalid)["message"] == "new_name is required for action=rename"
+    missing_reset_machine = await _raw_tool(mcp, "remote_manage")(action="reset")
+    assert missing_reset_machine.isError is True
+    assert _handled_error_data(missing_reset_machine)["message"] == "machine is required for action=reset"
 
     remote_cases = {
         "environment_get": {},

@@ -59,7 +59,7 @@ function waitForRetry(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
-type Machine = { name: string; status?: string; workdir?: string; version?: string; platform?: string }
+type Machine = { name: string; status?: string; workdir?: string; version?: string; platform?: string; queue_depth?: number; reset_generation?: number }
 type TerminalSession = { session_id: string; backend?: string; created?: number; attached?: number; cwd?: string; name?: string }
 type FileEntry = { name: string; path: string; type: string; size?: number; modified?: number; hidden?: boolean }
 
@@ -574,6 +574,7 @@ async function handleAction(action: string, target: HTMLElement): Promise<void> 
     else if (action === "file-ask") await shareSelectedFile(true)
     else if (action === "remote-invite") await createRemoteInvite()
     else if (action === "remote-rename") await renameRemote(target.dataset.machine || "")
+    else if (action === "remote-reset") await resetRemote(target.dataset.machine || "")
     else if (action === "remote-revoke") await revokeRemote(target.dataset.machine || "")
     else if (action === "audit-ask") await askAboutAudit(target.dataset.id || "")
   } catch (error) {
@@ -1384,7 +1385,7 @@ function renderRemotes(): void {
 }
 
 function remoteCard(machine: Machine): string {
-  return `<article class="remote-card"><div class="remote-head"><span class="machine-icon">${icon("remotes")}</span><div><strong>${escapeHtml(machine.name)}</strong><span class="status-chip ${machine.status === "online" ? "online" : "offline"}">${escapeHtml(machine.status || "unknown")}</span></div></div><dl><div><dt>Workdir</dt><dd>${escapeHtml(machine.workdir || "—")}</dd></div><div><dt>Version</dt><dd>${escapeHtml(machine.version || "—")}</dd></div><div><dt>Platform</dt><dd>${escapeHtml(machine.platform || "—")}</dd></div></dl><footer><button class="text-button" data-action="remote-rename" data-machine="${escapeHtml(machine.name)}">Rename</button><button class="text-button danger" data-action="remote-revoke" data-machine="${escapeHtml(machine.name)}">Revoke</button></footer></article>`
+  return `<article class="remote-card"><div class="remote-head"><span class="machine-icon">${icon("remotes")}</span><div><strong>${escapeHtml(machine.name)}</strong><span class="status-chip ${machine.status === "online" ? "online" : "offline"}">${escapeHtml(machine.status || "unknown")}</span></div></div><dl><div><dt>Workdir</dt><dd>${escapeHtml(machine.workdir || "—")}</dd></div><div><dt>Version</dt><dd>${escapeHtml(machine.version || "—")}</dd></div><div><dt>Platform</dt><dd>${escapeHtml(machine.platform || "—")}</dd></div><div><dt>Queue</dt><dd>${escapeHtml(String(machine.queue_depth ?? 0))}</dd></div><div><dt>Reset generation</dt><dd>${escapeHtml(String(machine.reset_generation ?? 0))}</dd></div></dl><footer><button class="text-button" data-action="remote-rename" data-machine="${escapeHtml(machine.name)}">Rename</button><button class="text-button" data-action="remote-reset" data-machine="${escapeHtml(machine.name)}">Reset queue</button><button class="text-button danger" data-action="remote-revoke" data-machine="${escapeHtml(machine.name)}">Revoke</button></footer></article>`
 }
 
 async function refreshRemotes(): Promise<void> {
@@ -1460,6 +1461,15 @@ async function renameRemote(machine: string): Promise<void> {
   await api("/api/ui/remotes/rename", { method: "POST", body: JSON.stringify({ machine, new_name: newName }) })
   replaceMachineSelection(machine, newName)
   await refreshAllCore()
+  await refreshRemotes()
+}
+
+async function resetRemote(machine: string): Promise<void> {
+  if (!machine) return
+  const confirmation = await promptValue("Reset remote", `Type ${machine} to confirm`, "", "This cancels active LSM requests and clears queued commands without disconnecting the worker.")
+  if (confirmation !== machine) return
+  const result = await api<JsonRecord>("/api/ui/remotes/reset", { method: "POST", body: JSON.stringify({ machine }) })
+  notify(`Reset ${machine}; cancelled ${String(result.cancelled_jobs ?? 0)} request(s)`, "success")
   await refreshRemotes()
 }
 

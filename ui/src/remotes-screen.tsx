@@ -22,6 +22,7 @@ type RemoteDialog =
   | { type: "invite" }
   | { type: "invite-result"; invite: InvitePayload }
   | { type: "rename"; machine: Machine }
+  | { type: "reset"; machine: Machine }
   | { type: "revoke"; machine: Machine }
 
 export function RemoteInviteResultDialog({
@@ -196,6 +197,7 @@ export function RemotesScreen({
   }
   const createRemoteInvite = () => enabled && setDialog({ type: "invite" })
   const renameCurrent = () => current && enabled && setDialog({ type: "rename", machine: current })
+  const resetCurrent = () => current && enabled && setDialog({ type: "reset", machine: current })
   const revokeCurrent = () => current && enabled && setDialog({ type: "revoke", machine: current })
   const footerLocked = !keyboardEnabled || dialog.type !== "none"
 
@@ -207,6 +209,20 @@ export function RemotesScreen({
     }
     if (dialog.type === "invite-result") {
       if (key.name === "escape" || key.name === "return") setDialog({ type: "none" })
+      return
+    }
+    if (dialog.type === "reset") {
+      if (key.name === "escape" || key.name === "n") setDialog({ type: "none" })
+      if (key.name === "y" || key.name === "return") {
+        void api
+          .remoteAction<{ cancelled_jobs?: number }>("reset", { machine: dialog.machine.name })
+          .then(async (result) => {
+            setDialog({ type: "none" })
+            setStatus(`Reset ${dialog.machine.name}; cancelled ${String(result.cancelled_jobs ?? 0)} request(s)`)
+            await refresh(true)
+          })
+          .catch((error) => setStatus(`Reset: ${formatError(error)}`))
+      }
       return
     }
     if (dialog.type === "revoke") {
@@ -230,6 +246,7 @@ export function RemotesScreen({
     else if (moveOrScroll(key)) return
     else if (key.name === "n") createRemoteInvite()
     else if (key.name === "e") renameCurrent()
+    else if (key.name === "x") resetCurrent()
     else if (key.name === "d") revokeCurrent()
     else if (key.name === "r") void refresh(true)
   })
@@ -350,6 +367,8 @@ export function RemotesScreen({
               <text fg={theme.faint} content={`LSM version  ${remoteVersion(current)}`} />
               <text fg={theme.faint} content={`Last seen    ${formatAge(current.last_seen)}`} />
               <text fg={theme.faint} content={`Workdir      ${current.workdir || "—"}`} />
+              <text fg={theme.faint} content={`Queue        ${current.queue_depth ?? 0}`} />
+              <text fg={theme.faint} content={`Reset gen    ${current.reset_generation ?? 0}`} />
               <text fg={theme.faint} content={`Capabilities ${(current.capabilities || []).join(", ") || "—"}`} />
               <text fg={theme.borderBright} content="\nSystem information" />
               <text fg={theme.muted} content={JSON.stringify(remoteSystemInfo(current), null, 2)} />
@@ -369,6 +388,7 @@ export function RemotesScreen({
           { key: "k", label: activePane === "details" ? "scroll up" : "up", onPress: () => moveOrScroll({ name: "k" }), disabled: footerLocked || (activePane === "list" && machines.length === 0) },
           { key: "n", label: "new invite", onPress: createRemoteInvite, disabled: footerLocked || !enabled },
           { key: "e", label: "rename", onPress: renameCurrent, disabled: footerLocked || !enabled || !current },
+          { key: "x", label: "reset queue", onPress: resetCurrent, disabled: footerLocked || !enabled || !current },
           { key: "d", label: "revoke", onPress: revokeCurrent, disabled: footerLocked || !enabled || !current },
           { key: "r", label: "refresh", onPress: () => void refresh(true), disabled: footerLocked || loading },
         ]}
@@ -396,6 +416,13 @@ export function RemotesScreen({
             <input focused value={dialog.machine.name} onSubmit={(value: unknown) => void rename(typeof value === "string" ? value : "")} />
           </box>
           <text style={{ height: 1, flexShrink: 0 }} fg={theme.faint} content="Enter save · Esc cancel" />
+        </Modal>
+      )}
+      {dialog.type === "reset" && (
+        <Modal title="Reset remote queue" height={9}>
+          <text style={{ height: 1, flexShrink: 0 }} fg={theme.orange} attributes={1} content={`Reset ${dialog.machine.name}?`} />
+          <text style={{ height: 2, flexShrink: 0 }} fg={theme.muted} content="Cancels active LSM requests and clears queued commands without disconnecting the worker." />
+          <text style={{ height: 1, flexShrink: 0 }} fg={theme.faint} content="y / Enter confirm · n / Esc cancel" />
         </Modal>
       )}
       {dialog.type === "revoke" && (

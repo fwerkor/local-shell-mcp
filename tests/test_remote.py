@@ -102,6 +102,7 @@ async def test_poll_requires_upgrade_before_dequeuing_jobs(tmp_path, monkeypatch
             "protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
         },
         "poll_timeout_s": 25.0,
+        "reset_generation": 0,
     }
     assert worker.queue.qsize() == 1
     assert worker.info["lsm_version"] == "0.0.0"
@@ -764,9 +765,119 @@ async def test_remote_heartbeat_refreshes_worker_last_seen(monkeypatch):
 
     result = await manager.heartbeat(worker.token)
 
-    assert result == {"accepted": True, "name": "worker-a"}
+    assert result == {"accepted": True, "name": "worker-a", "reset_generation": 0}
     assert worker.last_seen == 123.0
     assert worker.status == "online"
+
+
+@pytest.mark.asyncio
+async def test_remote_reset_clears_both_queues_and_cancels_claimed_job(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    manager = remote.RemoteManager()
+    manager._registry_loaded = True
+    worker = remote.RemoteWorker(
+        name="worker-a",
+        token="token-a",
+        last_seen=100,
+        reset_generation=7,
+        info={"poll_protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION},
+    )
+    manager.workers[worker.name] = worker
+    manager.tokens[worker.token] = worker.name
+    monkeypatch.setattr(remote, "_utc", lambda: 100.0)
+
+    active = asyncio.create_task(
+        manager.call("worker-a", "run_shell_tool", {"command": "sleep 30"}, timeout_s=10)
+    )
+    await asyncio.sleep(0)
+    claimed = await manager.poll(
+        worker.token,
+        {
+            "protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+            "worker_version": remote.__version__,
+            "lane": remote.REMOTE_WORKER_INTERACTIVE_LANE,
+        },
+    )
+    active_job_id = claimed["job"]["id"]
+    assert claimed["job"]["reset_generation"] == 7
+
+    queued = asyncio.create_task(
+        manager.call("worker-a", "list_files", {"path": "."}, timeout_s=10)
+    )
+    transfer = asyncio.create_task(
+        manager.call("worker-a", "transfer_pack_dir", {"path": "."}, timeout_s=10)
+    )
+    await asyncio.sleep(0)
+    assert worker.queue.qsize() == 1
+    assert worker.transfer_queue.qsize() == 1
+
+    result = manager.reset("worker-a")
+
+    assert result == {
+        "machine": "worker-a",
+        "reset": True,
+        "reset_generation": 8,
+        "cancelled_jobs": 3,
+        "active_jobs": 1,
+        "cleared_interactive_queue": 1,
+        "cleared_transfer_queue": 1,
+    }
+    assert manager.workers["worker-a"] is worker
+    assert manager.tokens["token-a"] == "worker-a"
+    assert worker.queue.empty()
+    assert worker.transfer_queue.empty()
+    assert worker.reset_generation == 8
+
+    heartbeat = await manager.heartbeat(worker.token, {"job_id": active_job_id})
+    assert heartbeat == {
+        "accepted": False,
+        "name": "worker-a",
+        "reset_generation": 8,
+        "cancelled": True,
+    }
+
+    for task in (active, queued, transfer):
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+
+@pytest.mark.asyncio
+async def test_worker_job_is_cancelled_when_reset_generation_changes(monkeypatch):
+    cancelled = asyncio.Event()
+
+    async def fake_execute(_tool, _args):
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    def fake_post(url, payload, headers=None, timeout=None):
+        assert url.endswith("/heartbeat")
+        assert payload == {"job_id": "job-reset"}
+        assert headers == {"Authorization": "Bearer token"}
+        assert timeout == 30
+        return {"ok": True, "data": {"accepted": True, "reset_generation": 2}}
+
+    monkeypatch.setattr(remote, "execute_worker_tool", fake_execute)
+    monkeypatch.setattr(remote, "_worker_post_json", fake_post)
+
+    with pytest.raises(remote.RemoteJobCancelled, match="cancelled by the controller"):
+        await remote._execute_worker_job_with_heartbeat(  # noqa: SLF001
+            {
+                "id": "job-reset",
+                "tool": "slow_tool",
+                "args": {},
+                "reset_generation": 1,
+            },
+            "https://example.test",
+            {"Authorization": "Bearer token"},
+            0.001,
+        )
+
+    assert cancelled.is_set()
 
 
 @pytest.mark.asyncio
@@ -890,6 +1001,45 @@ async def test_worker_result_submission_stops_when_controller_cancels(monkeypatc
     attempts_after_cancel = result_attempts
     await asyncio.sleep(0.06)
     assert result_attempts == attempts_after_cancel
+
+
+@pytest.mark.asyncio
+async def test_worker_result_submission_stops_when_reset_generation_changes(monkeypatch):
+    result_attempts = 0
+    result = {
+        "job_id": "job-reset",
+        "ok": True,
+        "data": {"stdout": "x"},
+        "reset_generation": 3,
+    }
+    headers = {"Authorization": "Bearer token"}
+
+    def fake_post(url, payload, request_headers=None, timeout=None):
+        nonlocal result_attempts
+        assert request_headers == headers
+        if url.endswith("/result"):
+            result_attempts += 1
+            raise RuntimeError("slow result upload")
+        assert url.endswith("/heartbeat")
+        assert timeout == 30
+        assert payload == {"job_id": "job-reset"}
+        return {"ok": True, "data": {"accepted": True, "reset_generation": 4}}
+
+    monkeypatch.setattr(remote, "_worker_post_json", fake_post)
+    monkeypatch.setattr(remote, "_WORKER_RETRY_INITIAL_DELAY_S", 0.05)
+    monkeypatch.setattr(remote, "_WORKER_RETRY_MAX_DELAY_S", 0.05)
+
+    response = await remote._submit_worker_result_with_heartbeat(  # noqa: SLF001
+        result,
+        "https://example.test",
+        headers,
+        0.005,
+    )
+
+    assert response == {"ok": True, "data": {"accepted": False, "cancelled": True}}
+    attempts_after_reset = result_attempts
+    await asyncio.sleep(0.06)
+    assert result_attempts == attempts_after_reset
 
 
 @pytest.mark.asyncio
