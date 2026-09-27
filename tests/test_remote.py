@@ -990,6 +990,64 @@ async def test_remote_reset_cancels_claimed_mutation_that_has_not_started(tmp_pa
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool", "lane"),
+    [
+        ("write_file", remote.REMOTE_WORKER_INTERACTIVE_LANE),
+        ("transfer_write_chunk", remote.REMOTE_WORKER_TRANSFER_LANE),
+        ("job_start", remote.REMOTE_WORKER_INTERACTIVE_LANE),
+    ],
+)
+async def test_remote_reset_preserves_claimed_protected_job_on_legacy_worker(
+    tmp_path, monkeypatch, tool, lane
+):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    manager = remote.RemoteManager()
+    manager._registry_loaded = True
+    worker = remote.RemoteWorker(
+        name="worker-a",
+        token="token-a",
+        last_seen=100,
+        reset_generation=7,
+        info={"poll_protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION},
+    )
+    manager.workers[worker.name] = worker
+    manager.tokens[worker.token] = worker.name
+    monkeypatch.setattr(remote, "_utc", lambda: 100.0)
+
+    operation = asyncio.create_task(manager.call("worker-a", tool, {}, timeout_s=10))
+    await asyncio.sleep(0)
+    claimed = await manager.poll(
+        worker.token,
+        {
+            "protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+            "worker_version": remote.__version__,
+            "lane": lane,
+        },
+    )
+    job_id = claimed["job"]["id"]
+    assert job_id in manager.claimed_jobs
+    assert job_id not in manager.started_jobs
+
+    worker.info["poll_protocol_version"] = remote.REMOTE_WORKER_RESET_PROTOCOL_VERSION - 1
+    result = manager.reset("worker-a")
+
+    assert result["cancelled_jobs"] == 0
+    assert result["preserved_jobs"] == 1
+    assert job_id in manager.pending
+    assert job_id in manager.claimed_jobs
+
+    accepted = await manager.submit_result(
+        worker.token,
+        {"job_id": job_id, "ok": True, "data": {"finished": True}},
+    )
+    assert accepted == {"accepted": True}
+    assert await operation == {"ok": True, "message": "", "data": {"finished": True}}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("tool", ["shell_start", "job_start", "job_retry"])
 async def test_remote_reset_preserves_started_persistent_process_mutations(
     tmp_path, monkeypatch, tool

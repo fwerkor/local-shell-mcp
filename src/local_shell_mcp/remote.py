@@ -1103,11 +1103,17 @@ class RemoteManager:
                 if pending_machine == machine
             ]
             active_jobs = sum(job_id in self.claimed_jobs for job_id in pending_job_ids)
+            legacy_worker = (
+                _worker_poll_protocol_version(worker.info) < REMOTE_WORKER_RESET_PROTOCOL_VERSION
+            )
             preserved_job_ids = {
                 job_id
                 for job_id in pending_job_ids
-                if job_id in self.started_jobs
-                and self.pending_tools.get(job_id) in REMOTE_RESET_PRESERVED_WORKER_TOOLS
+                if self.pending_tools.get(job_id) in REMOTE_RESET_PRESERVED_WORKER_TOOLS
+                and (
+                    job_id in self.started_jobs
+                    or (legacy_worker and job_id in self.claimed_jobs)
+                )
             }
 
             previous_generation = worker.reset_generation
