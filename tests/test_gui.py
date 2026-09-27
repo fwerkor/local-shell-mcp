@@ -1394,44 +1394,70 @@ def test_atspi_public_window_id_ignores_sibling_index(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_windows_native_traversal_is_offloaded(monkeypatch):
+async def test_windows_native_traversal_uses_one_initialized_uia_thread(monkeypatch):
     import local_shell_mcp.gui.windows as windows
 
-    backend = WindowsGuiBackend()
     calls = []
+    main_thread = threading.get_ident()
 
-    async def fake_to_thread(func, *args, **kwargs):
-        calls.append(func.__name__)
-        return func(*args, **kwargs)
+    class Initializer:
+        def __enter__(self):
+            calls.append(("init", threading.get_ident()))
+            return self
 
-    monkeypatch.setattr(windows.asyncio, "to_thread", fake_to_thread)
-    monkeypatch.setattr(backend, "_list_windows_sync", lambda: {"windows": []})
-    monkeypatch.setattr(
-        backend,
-        "_snapshot_sync",
-        lambda *args, **kwargs: GuiSnapshot(window={"id": "w", "bounds": {}}, elements=[]),
-    )
+        def __exit__(self, *_args):
+            calls.append(("exit", threading.get_ident()))
 
-    await backend.list_windows()
-    await backend.snapshot(
-        "w",
-        screenshot_path=None,
-        include_elements=False,
-        max_elements=1,
-        max_depth=1,
-    )
-    monkeypatch.setattr(
-        backend,
-        "_perform_action_sync",
-        lambda *_args, **_kwargs: {"performed": True},
-    )
-    result = await backend.perform_action(
-        {"id": "hwnd:1", "bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
-        None,
-        {"type": "click", "x": 1, "y": 1},
-    )
+    class Auto:
+        UIAutomationInitializerInThread = Initializer
+
+    monkeypatch.setattr(windows, "_automation", lambda: Auto())
+    backend = WindowsGuiBackend()
+
+    def list_sync():
+        calls.append(("list", threading.get_ident()))
+        return {"windows": []}
+
+    def snapshot_sync(*_args, **_kwargs):
+        calls.append(("snapshot", threading.get_ident()))
+        return GuiSnapshot(window={"id": "w", "bounds": {}}, elements=[])
+
+    def action_sync(*_args, **_kwargs):
+        calls.append(("action", threading.get_ident()))
+        return {"performed": True}
+
+    monkeypatch.setattr(backend, "_list_windows_sync", list_sync)
+    monkeypatch.setattr(backend, "_snapshot_sync", snapshot_sync)
+    monkeypatch.setattr(backend, "_perform_action_sync", action_sync)
+
+    try:
+        await backend.list_windows()
+        await backend.snapshot(
+            "w",
+            screenshot_path=None,
+            include_elements=False,
+            max_elements=1,
+            max_depth=1,
+        )
+        result = await backend.perform_action(
+            {"id": "hwnd:1", "bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
+            None,
+            {"type": "click", "x": 1, "y": 1},
+        )
+    finally:
+        backend._executor.shutdown(wait=True)
+
     assert result == {"performed": True}
-    assert calls == ["<lambda>", "<lambda>", "<lambda>"]
+    init_threads = [thread_id for kind, thread_id in calls if kind == "init"]
+    operation_threads = [
+        thread_id
+        for kind, thread_id in calls
+        if kind in {"list", "snapshot", "action"}
+    ]
+    assert len(init_threads) == 1
+    assert len(set(operation_threads)) == 1
+    assert operation_threads[0] == init_threads[0]
+    assert operation_threads[0] != main_thread
 
 
 @pytest.mark.asyncio

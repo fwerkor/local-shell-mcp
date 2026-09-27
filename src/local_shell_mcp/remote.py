@@ -1393,6 +1393,9 @@ WORKER_TRANSFER_TOOLS = frozenset(
         "transfer_put_url",
         "transfer_get_url",
         "transfer_close_receiver",
+        "transfer_gui_temp_stat",
+        "transfer_gui_temp_put_url",
+        "transfer_gui_temp_delete",
     }
 )
 WORKER_BROWSER_TOOLS = frozenset(

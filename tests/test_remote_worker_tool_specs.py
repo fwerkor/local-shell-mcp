@@ -300,6 +300,34 @@ async def test_gui_temp_transfer_worker_dispatch(tmp_path, monkeypatch):
     ]
 
 
+@pytest.mark.asyncio
+async def test_gui_temp_transfer_tools_are_registered_with_worker_dispatch(monkeypatch):
+    import local_shell_mcp.remote as remote
+
+    calls = []
+
+    async def execute(tool, args):
+        calls.append((tool, args))
+        return {"ok": tool}
+
+    monkeypatch.setattr(remote, "_execute_transfer_worker_tool", execute)
+    for tool in (
+        "transfer_gui_temp_stat",
+        "transfer_gui_temp_put_url",
+        "transfer_gui_temp_delete",
+    ):
+        assert tool in remote.WORKER_TRANSFER_TOOLS
+        assert tool in remote.REMOTE_WORKER_TOOL_NAMES
+        result = await remote._execute_worker_tool_inner(tool, {"path": "p"})
+        assert result == {"ok": tool}
+
+    assert [tool for tool, _args in calls] == [
+        "transfer_gui_temp_stat",
+        "transfer_gui_temp_put_url",
+        "transfer_gui_temp_delete",
+    ]
+
+
 def test_linux_gui_preflight_caches_positive_session(monkeypatch):
     import local_shell_mcp.gui.linux as linux
     import local_shell_mcp.remote as remote

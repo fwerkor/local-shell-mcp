@@ -183,23 +183,35 @@ describe("Native WebUI desktop shortcut encoding", () => {
     const target = { closest: () => null }
     const makeEvent = (
       key: string,
-      { ctrl = false, shift = false }: { ctrl?: boolean; shift?: boolean },
+      code: string,
+      {
+        ctrl = false,
+        meta = false,
+        shift = false,
+      }: { ctrl?: boolean; meta?: boolean; shift?: boolean },
     ) => ({
       key,
+      code,
       ctrlKey: ctrl,
-      metaKey: false,
+      metaKey: meta,
       altKey: false,
       shiftKey: shift,
       target,
       preventDefault: () => undefined,
     })
 
-    controller.onKeyDown(makeEvent("+", { ctrl: true, shift: true }))
-    controller.onKeyDown(makeEvent(" ", { ctrl: true }))
+    controller.onKeyDown(makeEvent("+", "Equal", { ctrl: true, shift: true }))
+    controller.onKeyDown(makeEvent(" ", "Space", { ctrl: true }))
+    controller.onKeyDown(makeEvent("!", "Digit1", { meta: true, shift: true }))
+    controller.onKeyDown(makeEvent("{", "BracketLeft", { meta: true, shift: true }))
+    controller.onKeyDown(makeEvent("?", "Slash", { meta: true, shift: true }))
 
     expect(queued).toEqual([
       { type: "key", keys: ["CTRL", "SHIFT", "="] },
       { type: "key", keys: ["CTRL", "SPACE"] },
+      { type: "key", keys: ["META", "SHIFT", "1"] },
+      { type: "key", keys: ["META", "SHIFT", "["] },
+      { type: "key", keys: ["META", "SHIFT", "/"] },
     ])
   })
 })

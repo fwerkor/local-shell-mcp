@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import hashlib
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +20,19 @@ def _automation():  # noqa: ANN202
             "Windows GUI automation requires the uiautomation package"
         ) from exc
     return auto
+
+
+_UIA_THREAD_STATE = threading.local()
+
+
+def _initialize_uia_thread() -> None:
+    auto = _automation()
+    initializer_factory = getattr(auto, "UIAutomationInitializerInThread", None)
+    if not callable(initializer_factory):
+        return
+    initializer = initializer_factory()
+    initializer.__enter__()
+    _UIA_THREAD_STATE.initializer = initializer
 
 
 def _rect_dict(rect: Any) -> dict[str, int]:
@@ -149,6 +165,20 @@ def _key_sequence(keys: Any) -> str:
 class WindowsGuiBackend:
     name = "windows-uia"
 
+    def __init__(self) -> None:
+        self._executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="lsm-windows-uia",
+            initializer=_initialize_uia_thread,
+        )
+
+    async def _run_uia(self, func: Any, /, *args: Any, **kwargs: Any) -> Any:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            self._executor,
+            partial(func, *args, **kwargs),
+        )
+
     def _find_window(self, window_id: str) -> Any:
         parts = window_id.split(":")
         if len(parts) != 3 or parts[0] != "hwnd" or not parts[2]:
@@ -187,7 +217,7 @@ class WindowsGuiBackend:
         }
 
     async def list_windows(self) -> dict[str, Any]:
-        return await asyncio.to_thread(self._list_windows_sync)
+        return await self._run_uia(self._list_windows_sync)
 
     def _snapshot_sync(
         self,
@@ -264,7 +294,7 @@ class WindowsGuiBackend:
         max_elements: int,
         max_depth: int,
     ) -> GuiSnapshot:
-        return await asyncio.to_thread(
+        return await self._run_uia(
             self._snapshot_sync,
             window_id,
             screenshot_path=screenshot_path,
@@ -278,7 +308,7 @@ class WindowsGuiBackend:
             target = self._find_window(str(window["id"]))
             target.SetFocus()
 
-        await asyncio.to_thread(focus)
+        await self._run_uia(focus)
 
     async def perform_action(
         self,
@@ -291,7 +321,7 @@ class WindowsGuiBackend:
             seconds = max(0.0, min(float(action.get("seconds", 1.0)), 30.0))
             await asyncio.sleep(seconds)
             return {"waited_s": seconds}
-        return await asyncio.to_thread(self._perform_action_sync, window, locator, action)
+        return await self._run_uia(self._perform_action_sync, window, locator, action)
 
     def _perform_action_sync(
         self,

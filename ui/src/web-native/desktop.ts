@@ -53,6 +53,30 @@ type PointerStart = {
 
 export const SINGLE_CLICK_DELAY_MS = 500
 
+const PHYSICAL_KEY_CODES: Record<string, string> = {
+  Digit0: "0",
+  Digit1: "1",
+  Digit2: "2",
+  Digit3: "3",
+  Digit4: "4",
+  Digit5: "5",
+  Digit6: "6",
+  Digit7: "7",
+  Digit8: "8",
+  Digit9: "9",
+  Minus: "-",
+  Equal: "=",
+  BracketLeft: "[",
+  BracketRight: "]",
+  Backslash: "\\",
+  Semicolon: ";",
+  Quote: "'",
+  Comma: ",",
+  Period: ".",
+  Slash: "/",
+  Backquote: "`",
+}
+
 const SPECIAL_KEYS: Record<string, string> = {
   Enter: "ENTER",
   Tab: "TAB",
@@ -656,7 +680,8 @@ export class DesktopController extends BaseController {
       return
     }
 
-    const key = special || (event.key === "+" ? "=" : (event.key.length === 1 ? event.key.toUpperCase() : ""))
+    const physicalKey = hasCommandModifier ? PHYSICAL_KEY_CODES[event.code] : undefined
+    const key = special || physicalKey || (event.key.length === 1 ? event.key.toUpperCase() : "")
     if (!key) return
     const parts: string[] = []
     if (event.ctrlKey) parts.push("CTRL")
