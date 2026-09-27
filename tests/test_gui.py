@@ -267,6 +267,10 @@ def test_cross_platform_coordinate_and_key_helpers():
     assert mac_key_parts("cmd+shift+p") == ["CMD", "SHIFT", "P"]
     assert _keysym("ENTER") == 0xFF0D
     assert _keysym("你") == 0x01000000 | ord("你")
+    from local_shell_mcp.gui import linux_portal
+
+    assert linux_portal._MODIFIERS["META"] == 0xFFEB
+    assert linux_portal._MODIFIERS["META"] == linux_portal._MODIFIERS["SUPER"]
 
 
 @pytest.mark.parametrize(
@@ -517,13 +521,29 @@ def test_gui_state_result_bounds_accessibility_metadata():
             "backend": "fake",
             "state_id": "s",
             "state_ttl_s": 30,
-            "window": {"id": "w", "bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
+            "window": {
+                "id": "w" * 5000,
+                "title": "T" * 5000,
+                "app": "A" * 5000,
+                "pid": "42",
+                "bounds": {"x": 0, "y": 0, "width": 10, "height": 10, "extra": "ignored"},
+                "unknown": "Z" * 100000,
+            },
             "elements": elements,
             "capabilities": {},
         },
         None,
         None,
     )
+
+    window = result.structuredContent["window"]
+    assert window is not None
+    assert len(window["id"].encode("utf-8")) <= tools.GUI_WINDOW_TEXT_FIELD_MAX_BYTES
+    assert len(window["title"].encode("utf-8")) <= tools.GUI_WINDOW_TEXT_FIELD_MAX_BYTES
+    assert len(window["app"].encode("utf-8")) <= tools.GUI_WINDOW_TEXT_FIELD_MAX_BYTES
+    assert window["pid"] == 42
+    assert "unknown" not in window
+    assert "extra" not in window["bounds"]
 
     bounded = result.structuredContent["elements"]
     assert bounded
@@ -1245,6 +1265,38 @@ def test_atspi_window_identity_survives_child_reordering(monkeypatch):
         helper._resolve_window(f"atspi:42:0:{ambiguous_signature}")
 
 
+def test_windows_traversal_stops_before_querying_children_at_budget(monkeypatch):
+    import local_shell_mcp.gui.windows as windows
+
+    class Root:
+        def GetChildren(self):
+            pytest.fail("GetChildren must not run after max_elements is reached")
+
+    root = Root()
+    backend = WindowsGuiBackend()
+    monkeypatch.setattr(backend, "_find_window", lambda _window_id: root)
+    monkeypatch.setattr(
+        windows,
+        "_window_record",
+        lambda _control: {
+            "id": "hwnd:1:fingerprint",
+            "title": "Window",
+            "app": "App",
+            "pid": 1,
+            "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+        },
+    )
+
+    snapshot = backend._snapshot_sync(
+        "hwnd:1:fingerprint",
+        screenshot_path=None,
+        include_elements=True,
+        max_elements=1,
+        max_depth=12,
+    )
+    assert len(snapshot.elements) == 1
+
+
 @pytest.mark.asyncio
 async def test_windows_native_traversal_is_offloaded(monkeypatch):
     import local_shell_mcp.gui.windows as windows
@@ -1649,6 +1701,193 @@ async def test_gui_input_batches_are_serialized(tmp_path, monkeypatch):
         manager.human_act("window:1", bounds, [{"type": "click", "x": 2, "y": 2}]),
     )
     assert backend.max_active == 1
+
+
+def test_x11_window_matching_and_pixmap_decode():
+    from Xlib import X
+
+    import local_shell_mcp.gui.linux as linux
+
+    class Window:
+        def __init__(self, xid, pid, title, bounds):
+            self.xid = xid
+            self.pid = pid
+            self.title = title
+            self.bounds = bounds
+
+        def get_full_property(self, atom, _kind):
+            if atom == "_NET_WM_PID":
+                return SimpleNamespace(value=[self.pid])
+            if atom == "_NET_WM_NAME":
+                return SimpleNamespace(value=self.title.encode())
+            return None
+
+        def get_wm_name(self):
+            return self.title
+
+        def get_geometry(self):
+            return SimpleNamespace(
+                width=self.bounds["width"],
+                height=self.bounds["height"],
+            )
+
+    first = Window(1, 42, "Other", {"x": 0, "y": 0, "width": 100, "height": 100})
+    target = Window(2, 42, "Target", {"x": 10, "y": 20, "width": 300, "height": 200})
+
+    class Root:
+        def get_full_property(self, atom, _kind):
+            if atom == "_NET_CLIENT_LIST_STACKING":
+                return SimpleNamespace(value=[1, 2])
+            return None
+
+        def translate_coords(self, window, _x, _y):
+            return SimpleNamespace(x=window.bounds["x"], y=window.bounds["y"])
+
+    visual = SimpleNamespace(
+        visual_id=7,
+        red_mask=0x00FF0000,
+        green_mask=0x0000FF00,
+        blue_mask=0x000000FF,
+    )
+    info = SimpleNamespace(
+        pixmap_formats=[
+            SimpleNamespace(depth=24, bits_per_pixel=32, scanline_pad=32)
+        ],
+        image_byte_order=X.LSBFirst,
+        roots=[SimpleNamespace(allowed_depths=[SimpleNamespace(visuals=[visual])])],
+    )
+
+    class Connection:
+        display = SimpleNamespace(info=info)
+
+        def screen(self):
+            return SimpleNamespace(root=Root())
+
+        def intern_atom(self, name, only_if_exists=True):
+            del only_if_exists
+            return name
+
+        def create_resource_object(self, _kind, xid):
+            return {1: first, 2: target}[xid]
+
+    connection = Connection()
+    matched = linux._x11_match_window(
+        connection,
+        {
+            "pid": 42,
+            "title": "Target",
+            "bounds": {"x": 10, "y": 20, "width": 300, "height": 200},
+        },
+    )
+    assert matched is target
+
+    image = linux._x11_pixmap_to_image(
+        connection,
+        SimpleNamespace(depth=24, data=bytes([3, 2, 1, 0])),
+        width=1,
+        height=1,
+        visual_id=7,
+    )
+    assert image.getpixel((0, 0)) == (1, 2, 3)
+
+
+def test_x11_capture_uses_composite_window_pixmap(tmp_path, monkeypatch):
+    import Xlib.display
+
+    import local_shell_mcp.gui.linux as linux
+
+    calls = []
+
+    class Pixmap:
+        def get_image(self, *args):
+            calls.append(("get_image", args))
+            return object()
+
+        def free(self):
+            calls.append(("free",))
+
+    class Window:
+        def get_geometry(self):
+            return SimpleNamespace(width=4, height=3)
+
+        def get_attributes(self):
+            return SimpleNamespace(visual=7)
+
+        def composite_name_window_pixmap(self):
+            calls.append(("name_pixmap",))
+            return Pixmap()
+
+    class Connection:
+        def has_extension(self, name):
+            assert name == "Composite"
+            return True
+
+        def get_default_screen(self):
+            return 0
+
+        def intern_atom(self, name, only_if_exists=True):
+            del only_if_exists
+            assert name == "_NET_WM_CM_S0"
+            return 99
+
+        def get_selection_owner(self, atom):
+            assert atom == 99
+            return SimpleNamespace(id=123)
+
+        def close(self):
+            calls.append(("close",))
+
+    connection = Connection()
+    monkeypatch.setattr(Xlib.display, "Display", lambda _display: connection)
+    monkeypatch.setattr(linux, "_x11_match_window", lambda _connection, _record: Window())
+    monkeypatch.setattr(
+        linux,
+        "_x11_pixmap_to_image",
+        lambda *_args, **_kwargs: Image.new("RGB", (4, 3), (1, 2, 3)),
+    )
+
+    path = tmp_path / "window.png"
+    linux._capture_x11_window_sync(
+        path,
+        {"id": "atspi:1:0:sig", "pid": 1, "title": "Window", "bounds": {}},
+        {"DISPLAY": ":0"},
+    )
+    assert path.is_file()
+    assert ("name_pixmap",) in calls
+    assert any(call[0] == "get_image" for call in calls)
+    assert ("free",) in calls
+    assert calls[-1] == ("close",)
+
+
+def test_x11_capture_fails_closed_without_compositor(tmp_path, monkeypatch):
+    import Xlib.display
+
+    import local_shell_mcp.gui.linux as linux
+
+    class Connection:
+        def has_extension(self, _name):
+            return True
+
+        def get_default_screen(self):
+            return 0
+
+        def intern_atom(self, _name, only_if_exists=True):
+            del only_if_exists
+            return 99
+
+        def get_selection_owner(self, _atom):
+            return None
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(Xlib.display, "Display", lambda _display: Connection())
+    with pytest.raises(GuiUnavailableError, match="compositing manager"):
+        linux._capture_x11_window_sync(
+            tmp_path / "window.png",
+            {"id": "w"},
+            {"DISPLAY": ":0"},
+        )
 
 
 @pytest.mark.asyncio

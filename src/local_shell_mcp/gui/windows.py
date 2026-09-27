@@ -223,13 +223,14 @@ class WindowsGuiBackend:
                 }
                 elements.append(element)
                 locators[element_id] = control
-                if depth >= max_depth:
+                remaining = max_elements - len(elements) - len(queue)
+                if depth >= max_depth or remaining <= 0:
                     continue
                 try:
                     children = control.GetChildren()
                 except Exception:  # noqa: BLE001 - provider-specific tree failure.
                     children = []
-                queue.extend((child, depth + 1) for child in children)
+                queue.extend((child, depth + 1) for child in children[:remaining])
 
         screenshot_display: str | None = None
         if screenshot_path is not None:

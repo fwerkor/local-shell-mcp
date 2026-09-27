@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageGrab
+from PIL import Image
 
 from .base import (
     GuiSnapshot,
@@ -350,23 +350,237 @@ async def _capture_wayland(
     return "xdg-desktop-portal"
 
 
+def _x11_text_property(window: Any, connection: Any, name: str) -> str:
+    try:
+        atom = connection.intern_atom(name, only_if_exists=True)
+        if not atom:
+            return ""
+        prop = window.get_full_property(atom, 0)
+        if prop is None:
+            return ""
+        value = prop.value
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace").rstrip("\0")
+        return str(value or "")
+    except Exception:
+        return ""
+
+
+def _x11_window_geometry(window: Any, root: Any) -> dict[str, int]:
+    geometry = window.get_geometry()
+    translated = root.translate_coords(window, 0, 0)
+    return {
+        "x": int(translated.x),
+        "y": int(translated.y),
+        "width": int(geometry.width),
+        "height": int(geometry.height),
+    }
+
+
+def _x11_match_window(connection: Any, record: dict[str, Any]) -> Any:
+    from Xlib import Xatom
+
+    root = connection.screen().root
+    pid_atom = connection.intern_atom("_NET_WM_PID", only_if_exists=True)
+    ids: list[int] = []
+    for prop_name in ("_NET_CLIENT_LIST_STACKING", "_NET_CLIENT_LIST"):
+        atom = connection.intern_atom(prop_name, only_if_exists=True)
+        if not atom:
+            continue
+        prop = root.get_full_property(atom, Xatom.WINDOW)
+        if prop is not None:
+            ids = [int(value) for value in prop.value]
+            if ids:
+                break
+    if not ids:
+        raise GuiUnavailableError("X11 window manager did not expose a client window list")
+
+    expected_pid = int(record.get("pid") or 0)
+    expected_title = str(record.get("title") or "")
+    expected_bounds = record.get("bounds") if isinstance(record.get("bounds"), dict) else {}
+    candidates: list[tuple[tuple[int, int], Any]] = []
+    for xid in ids:
+        try:
+            window = connection.create_resource_object("window", xid)
+            if pid_atom:
+                pid_prop = window.get_full_property(pid_atom, Xatom.CARDINAL)
+                pid = int(pid_prop.value[0]) if pid_prop is not None and len(pid_prop.value) else 0
+            else:
+                pid = 0
+            if expected_pid and pid != expected_pid:
+                continue
+            geometry = _x11_window_geometry(window, root)
+            title = _x11_text_property(window, connection, "_NET_WM_NAME") or str(
+                window.get_wm_name() or ""
+            )
+            geometry_delta = sum(
+                abs(int(geometry.get(key, 0)) - int(expected_bounds.get(key, 0)))
+                for key in ("x", "y", "width", "height")
+            )
+            title_penalty = 0 if expected_title and title == expected_title else 1
+            candidates.append(((title_penalty, geometry_delta), window))
+        except Exception:
+            continue
+
+    if not candidates:
+        raise GuiUnavailableError("Could not map the AT-SPI target to an X11 client window")
+    candidates.sort(key=lambda item: item[0])
+    if len(candidates) > 1 and candidates[0][0] == candidates[1][0]:
+        raise GuiUnavailableError("X11 target window identity is ambiguous")
+    return candidates[0][1]
+
+
+def _x11_visual_masks(connection: Any, visual_id: int) -> tuple[int, int, int]:
+    for screen in connection.display.info.roots:
+        for depth in screen.allowed_depths:
+            for visual in depth.visuals:
+                if int(visual.visual_id) == int(visual_id):
+                    return (
+                        int(visual.red_mask),
+                        int(visual.green_mask),
+                        int(visual.blue_mask),
+                    )
+    raise GuiUnavailableError("X11 target visual metadata is unavailable")
+
+
+def _x11_pixmap_to_image(
+    connection: Any,
+    image_reply: Any,
+    *,
+    width: int,
+    height: int,
+    visual_id: int,
+) -> Image.Image:
+    from Xlib import X
+
+    format_info = next(
+        (
+            item
+            for item in connection.display.info.pixmap_formats
+            if int(item.depth) == int(image_reply.depth)
+        ),
+        None,
+    )
+    if format_info is None:
+        raise GuiUnavailableError("X11 pixmap format is unavailable")
+    bits_per_pixel = int(format_info.bits_per_pixel)
+    if bits_per_pixel not in {24, 32}:
+        raise GuiUnavailableError(
+            f"Unsupported X11 pixmap depth layout: {bits_per_pixel} bits per pixel"
+        )
+    bytes_per_pixel = bits_per_pixel // 8
+    masks = _x11_visual_masks(connection, visual_id)
+    positions: list[int] = []
+    for mask in masks:
+        if mask <= 0:
+            raise GuiUnavailableError("X11 target visual has invalid RGB masks")
+        shift = (mask & -mask).bit_length() - 1
+        if mask != 0xFF << shift or shift % 8:
+            raise GuiUnavailableError("Unsupported X11 target visual RGB mask layout")
+        byte_index = shift // 8
+        if int(connection.display.info.image_byte_order) == int(X.MSBFirst):
+            byte_index = bytes_per_pixel - 1 - byte_index
+        if byte_index < 0 or byte_index >= bytes_per_pixel:
+            raise GuiUnavailableError("X11 target visual RGB masks exceed pixel width")
+        positions.append(byte_index)
+
+    if len(set(positions)) != 3:
+        raise GuiUnavailableError("X11 target visual RGB masks overlap")
+    raw_layout = ["X"] * bytes_per_pixel
+    for index, channel in zip(positions, "RGB", strict=True):
+        raw_layout[index] = channel
+    raw_mode = "".join(raw_layout)
+    if raw_mode not in {"RGB", "BGR", "RGBX", "BGRX", "XRGB", "XBGR"}:
+        raise GuiUnavailableError(f"Unsupported X11 pixel byte layout: {raw_mode}")
+    pad = int(format_info.scanline_pad)
+    stride = ((width * bits_per_pixel + pad - 1) // pad) * (pad // 8)
+    return Image.frombytes(
+        "RGB",
+        (width, height),
+        bytes(image_reply.data),
+        "raw",
+        raw_mode,
+        stride,
+        1,
+    )
+
+
+def _capture_x11_window_sync(
+    path: Path,
+    record: dict[str, Any],
+    env: dict[str, str],
+) -> None:
+    try:
+        from Xlib import X, display
+    except ImportError as exc:  # pragma: no cover - Linux dependency guard
+        raise GuiUnavailableError("X11 window capture requires python-xlib") from exc
+
+    connection = display.Display(env.get("DISPLAY"))
+    pixmap = None
+    try:
+        if not connection.has_extension("Composite"):
+            raise GuiUnavailableError(
+                "X11 Composite extension is required for safe per-window capture"
+            )
+        screen_number = int(connection.get_default_screen())
+        compositor_atom = connection.intern_atom(
+            f"_NET_WM_CM_S{screen_number}",
+            only_if_exists=True,
+        )
+        compositor = (
+            connection.get_selection_owner(compositor_atom)
+            if compositor_atom
+            else None
+        )
+        if compositor is None or not int(getattr(compositor, "id", 0) or 0):
+            raise GuiUnavailableError(
+                "An X11 compositing manager is required for safe per-window capture"
+            )
+
+        window = _x11_match_window(connection, record)
+        geometry = window.get_geometry()
+        width = int(geometry.width)
+        height = int(geometry.height)
+        if width <= 0 or height <= 0:
+            raise GuiUnavailableError("X11 target window has invalid capture bounds")
+        visual_id = int(window.get_attributes().visual)
+        pixmap = window.composite_name_window_pixmap()
+        image_reply = pixmap.get_image(
+            0,
+            0,
+            width,
+            height,
+            X.ZPixmap,
+            0xFFFFFFFF,
+        )
+        image = _x11_pixmap_to_image(
+            connection,
+            image_reply,
+            width=width,
+            height=height,
+            visual_id=visual_id,
+        )
+        image.save(path, "PNG")
+    except GuiUnavailableError:
+        raise
+    except Exception as exc:
+        raise GuiUnavailableError(
+            f"XComposite window capture failed: {type(exc).__name__}: {exc}"
+        ) from exc
+    finally:
+        if pixmap is not None:
+            with contextlib.suppress(Exception):
+                pixmap.free()
+        connection.close()
+
+
 async def _capture_x11(
     path: Path,
-    bounds: dict[str, Any],
+    record: dict[str, Any],
     env: dict[str, str],
 ) -> str:
-    x = int(bounds["x"])
-    y = int(bounds["y"])
-    width = int(bounds["width"])
-    height = int(bounds["height"])
-    display = env.get("DISPLAY")
-    image = await asyncio.to_thread(
-        ImageGrab.grab,
-        bbox=(x, y, x + width, y + height),
-        xdisplay=display,
-    )
-    await asyncio.to_thread(image.save, path, "PNG")
-    return "x11-xcb"
+    await asyncio.to_thread(_capture_x11_window_sync, path, record, env)
+    return "x11-composite"
 
 
 _X11_KEY_NAMES = {
@@ -549,7 +763,7 @@ class LinuxGuiBackend:
             elif session_type == "x11":
                 capture_backend = await _capture_x11(
                     screenshot_path,
-                    record["bounds"],
+                    record,
                     env,
                 )
             else:

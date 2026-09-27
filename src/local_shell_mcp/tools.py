@@ -2698,6 +2698,7 @@ async def _view_image_result(path: str, machine: str | None = None) -> CallToolR
         return _view_image_error_result(path, machine, exc)
 
 
+GUI_WINDOW_TEXT_FIELD_MAX_BYTES = 1024
 GUI_ELEMENT_TEXT_FIELD_MAX_BYTES = 1024
 GUI_ELEMENT_VALUE_FIELD_MAX_BYTES = 2048
 GUI_ELEMENT_ACTION_MAX_ITEMS = 32
@@ -2713,6 +2714,29 @@ def _truncate_gui_utf8(value: Any, limit: int) -> str:
     suffix = "..."
     budget = max(0, limit - len(suffix))
     return encoded[:budget].decode("utf-8", errors="ignore") + suffix
+
+
+def _bounded_gui_window(window: dict[str, Any]) -> dict[str, Any]:
+    bounded: dict[str, Any] = {}
+    for key in ("id", "title", "app"):
+        if key in window:
+            bounded[key] = _truncate_gui_utf8(
+                window.get(key),
+                GUI_WINDOW_TEXT_FIELD_MAX_BYTES,
+            )
+    if "pid" in window:
+        try:
+            bounded["pid"] = int(window.get("pid"))
+        except (TypeError, ValueError):
+            bounded["pid"] = 0
+    bounds = window.get("bounds")
+    if isinstance(bounds, dict):
+        bounded["bounds"] = {
+            key: bounds.get(key)
+            for key in ("x", "y", "width", "height")
+            if key in bounds
+        }
+    return bounded
 
 
 def _bounded_gui_element(element: dict[str, Any]) -> dict[str, Any]:
@@ -2817,7 +2841,9 @@ def _gui_state_call_result(
         backend=str(data.get("backend") or "") or None,
         state_id=str(data.get("state_id") or "") or None,
         state_ttl_s=float(data.get("state_ttl_s") or 0) or None,
-        window=data.get("window") if isinstance(data.get("window"), dict) else None,
+        window=_bounded_gui_window(data.get("window"))
+        if isinstance(data.get("window"), dict)
+        else None,
         elements=_bounded_gui_elements(data.get("elements"))
         if isinstance(data.get("elements"), list)
         else [],

@@ -57,7 +57,7 @@ _MODIFIERS = {
     "CONTROL": 0xFFE3,
     "ALT": 0xFFE9,
     "OPTION": 0xFFE9,
-    "META": 0xFFE7,
+    "META": 0xFFEB,
     "SUPER": 0xFFEB,
     "WIN": 0xFFEB,
     "CMD": 0xFFEB,
