@@ -131,6 +131,9 @@ REMOTE_NON_CANCELLABLE_WORKER_TOOLS = frozenset(
         "transfer_close_receiver",
     }
 )
+REMOTE_RESET_PRESERVED_WORKER_TOOLS = REMOTE_NON_CANCELLABLE_WORKER_TOOLS | frozenset(
+    {"shell_start", "job_start", "job_retry"}
+)
 
 
 def _worker_job_lane(tool: str, lane: str | None = None) -> str:
@@ -869,11 +872,22 @@ class RemoteManager:
             self._prune_cancelled_jobs_locked()
             cancelled = bool(job_id and job_id in self.cancelled_jobs)
             reset_generation = worker.reset_generation
+            start_preserved = False
             if starting and job_id:
                 assigned_machine = self.pending_machines.get(job_id)
-                if job_id not in self.claimed_jobs or assigned_machine != worker.name or (
+                tool = self.pending_tools.get(job_id)
+                already_started = job_id in self.started_jobs
+                start_preserved = (
+                    already_started and tool in REMOTE_RESET_PRESERVED_WORKER_TOOLS
+                )
+                generation_changed = (
                     requested_generation is not None
                     and requested_generation != reset_generation
+                )
+                if (
+                    job_id not in self.claimed_jobs
+                    or assigned_machine != worker.name
+                    or (generation_changed and not start_preserved)
                 ):
                     cancelled = True
                 elif not cancelled:
@@ -885,6 +899,8 @@ class RemoteManager:
         }
         if cancelled:
             result["cancelled"] = True
+        elif starting and start_preserved:
+            result["preserved"] = True
         return result
 
     async def submit_result(self, token: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1089,10 +1105,17 @@ class RemoteManager:
                 job_id
                 for job_id in pending_job_ids
                 if job_id in self.started_jobs
-                and self.pending_tools.get(job_id) in REMOTE_NON_CANCELLABLE_WORKER_TOOLS
+                and self.pending_tools.get(job_id) in REMOTE_RESET_PRESERVED_WORKER_TOOLS
             }
 
-            worker.reset_generation += 1
+            previous_generation = worker.reset_generation
+            worker.reset_generation = previous_generation + 1
+            try:
+                self._save_registry_unlocked()
+            except BaseException:
+                worker.reset_generation = previous_generation
+                raise
+
             cancelled_jobs = 0
             for job_id in pending_job_ids:
                 if job_id in preserved_job_ids:
@@ -1102,7 +1125,6 @@ class RemoteManager:
 
             cleared_interactive = self._drain_queue(worker.queue)
             cleared_transfer = self._drain_queue(worker.transfer_queue)
-            self._save_registry_unlocked()
             generation = worker.reset_generation
 
         with contextlib.suppress(Exception):
@@ -2928,7 +2950,8 @@ async def _execute_worker_job_with_heartbeat(
         start_data.get("accepted") is False
         or start_data.get("cancelled")
         or (
-            start_generation is not None
+            not start_data.get("preserved")
+            and start_generation is not None
             and job_generation is not None
             and start_generation != job_generation
         )
@@ -2937,7 +2960,7 @@ async def _execute_worker_job_with_heartbeat(
 
     task = asyncio.create_task(execute_worker_tool(job["tool"], dict(job.get("args") or {})))
     cancelled_by_controller = False
-    preserve_across_reset = str(job.get("tool") or "") in REMOTE_NON_CANCELLABLE_WORKER_TOOLS
+    preserve_across_reset = str(job.get("tool") or "") in REMOTE_RESET_PRESERVED_WORKER_TOOLS
 
     async def heartbeat_loop() -> None:
         nonlocal cancelled_by_controller
@@ -3076,7 +3099,7 @@ async def _run_worker_job(
         server,
         headers,
         heartbeat_interval_s,
-        preserve_across_reset=str(job.get("tool") or "") in REMOTE_NON_CANCELLABLE_WORKER_TOOLS,
+        preserve_across_reset=str(job.get("tool") or "") in REMOTE_RESET_PRESERVED_WORKER_TOOLS,
     )
 
 

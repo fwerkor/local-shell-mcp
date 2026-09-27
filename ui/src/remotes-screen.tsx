@@ -218,7 +218,7 @@ export function RemotesScreen({
           .remoteAction<{ cancelled_jobs?: number; preserved_jobs?: number }>("reset", { machine: dialog.machine.name })
           .then(async (result) => {
             setDialog({ type: "none" })
-            setStatus(`Reset ${dialog.machine.name}; cancelled ${String(result.cancelled_jobs ?? 0)} request(s), preserved ${String(result.preserved_jobs ?? 0)} running mutation(s)`)
+            setStatus(`Reset ${dialog.machine.name}; cancelled ${String(result.cancelled_jobs ?? 0)} request(s), preserved ${String(result.preserved_jobs ?? 0)} protected operation(s)`)
             await refresh(true)
           })
           .catch((error) => setStatus(`Reset: ${formatError(error)}`))
@@ -421,7 +421,7 @@ export function RemotesScreen({
       {dialog.type === "reset" && (
         <Modal title="Reset remote queue" height={9}>
           <text style={{ height: 1, flexShrink: 0 }} fg={theme.orange} attributes={1} content={`Reset ${dialog.machine.name}?`} />
-          <text style={{ height: 2, flexShrink: 0 }} fg={theme.muted} content="Clears queued commands and safely cancellable active requests. Already-running mutations may finish." />
+          <text style={{ height: 2, flexShrink: 0 }} fg={theme.muted} content="Clears queued commands and safely cancellable active requests. Already-started protected operations may finish." />
           <text style={{ height: 1, flexShrink: 0 }} fg={theme.faint} content="y / Enter confirm · n / Esc cancel" />
         </Modal>
       )}

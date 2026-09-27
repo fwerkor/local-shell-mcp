@@ -151,10 +151,10 @@ export class RemotesController extends BaseController {
 
   private async reset(): Promise<void> {
     const current = this.current()
-    if (!current || !await confirmDialog(`Reset ${current.name}?`, "This clears queued commands and safely cancellable active requests without disconnecting the worker. Already-running mutations may finish.", "Reset queue")) return
+    if (!current || !await confirmDialog(`Reset ${current.name}?`, "This clears queued commands and safely cancellable active requests without disconnecting the worker. Already-started protected operations may finish.", "Reset queue")) return
     try {
       const result = await this.context.api.send<{ cancelled_jobs?: number; preserved_jobs?: number }>("/remotes/reset", "POST", { machine: current.name })
-      this.context.notify(`Reset ${current.name}; cancelled ${result.cancelled_jobs ?? 0} request(s), preserved ${result.preserved_jobs ?? 0} running mutation(s)`, "success")
+      this.context.notify(`Reset ${current.name}; cancelled ${result.cancelled_jobs ?? 0} request(s), preserved ${result.preserved_jobs ?? 0} protected operation(s)`, "success")
       await this.refresh()
     } catch (error) {
       this.context.notify(`Reset: ${error instanceof Error ? error.message : String(error)}`, "error")
