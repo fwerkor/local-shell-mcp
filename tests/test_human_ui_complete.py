@@ -95,6 +95,9 @@ class FakeRemoteManager:
     def rename(self, machine, new_name):
         return {"old_name": machine, "new_name": new_name}
 
+    def reset(self, machine):
+        return {"machine": machine, "reset": True, "cancelled_jobs": 2}
+
     def revoke(self, machine):
         return {"machine": machine, "revoked": True}
 
@@ -653,6 +656,9 @@ def test_remote_file_terminal_audit_and_admin_routes(tmp_path, monkeypatch):
     assert client.post(
         "/api/ui/remotes/rename", json={"machine": "node", "new_name": "new"}
     ).status_code == 200
+    reset = client.post("/api/ui/remotes/reset", json={"machine": "node"})
+    assert reset.status_code == 200
+    assert reset.json()["data"]["cancelled_jobs"] == 2
     assert client.post(
         "/api/ui/remotes/revoke", json={"machine": "node"}
     ).status_code == 200
