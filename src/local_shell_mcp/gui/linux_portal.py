@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 from .base import GuiUnavailableError
 
@@ -559,7 +560,7 @@ async def portal_screenshot(destination: Path, env: dict[str, str]) -> None:
         parsed = urlparse(uri)
         if parsed.scheme != "file":
             raise GuiUnavailableError(f"Screenshot portal returned unsupported URI: {uri}")
-        source = Path(unquote(parsed.path))
+        source = Path(url2pathname(unquote(parsed.path)))
         try:
             await asyncio.to_thread(shutil.copyfile, source, destination)
         finally:
