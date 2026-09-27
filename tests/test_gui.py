@@ -351,6 +351,51 @@ async def test_gui_manager_list_snapshot_errors_and_cache(tmp_path, monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_gui_manager_bounds_window_list_metadata(monkeypatch):
+    import local_shell_mcp.gui.base as base
+
+    class ManyWindows(FakeBackend):
+        async def list_windows(self):
+            windows = [
+                {
+                    "id": f"window:{index}",
+                    "title": "T" * 5000,
+                    "app": "A" * 5000,
+                    "pid": index,
+                    "bounds": {"x": 0, "y": 0, "width": 100, "height": 100, "extra": "x"},
+                    "unknown": "Z" * 10000,
+                }
+                for index in range(base.GUI_MAX_WINDOWS + 20)
+            ]
+            windows.insert(
+                0,
+                {
+                    "id": "x" * (base.GUI_MAX_WINDOW_ID_BYTES + 1),
+                    "title": "bad",
+                    "bounds": {},
+                },
+            )
+            return {"windows": windows}
+
+    listed = await GuiManager(ManyWindows()).list_windows()
+    windows = listed["windows"]
+    assert len(windows) <= base.GUI_MAX_WINDOWS
+    assert all(
+        len(item["title"].encode("utf-8")) <= base.GUI_MAX_WINDOW_TEXT_BYTES
+        for item in windows
+    )
+    assert all(
+        len(item["app"].encode("utf-8")) <= base.GUI_MAX_WINDOW_TEXT_BYTES
+        for item in windows
+    )
+    assert all(len(item["id"].encode("utf-8")) <= base.GUI_MAX_WINDOW_ID_BYTES for item in windows)
+    assert all("unknown" not in item for item in windows)
+    assert all("extra" not in item.get("bounds", {}) for item in windows)
+    encoded = json.dumps(windows, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    assert len(encoded) <= base.GUI_MAX_WINDOWS_TOTAL_BYTES
+
+
+@pytest.mark.asyncio
 async def test_gui_manager_action_validation_and_staleness(tmp_path, monkeypatch):
     import local_shell_mcp.gui.base as base
 
@@ -1297,6 +1342,56 @@ def test_windows_traversal_stops_before_querying_children_at_budget(monkeypatch)
     assert len(snapshot.elements) == 1
 
 
+def test_atspi_public_window_id_ignores_sibling_index(monkeypatch):
+    import local_shell_mcp.gui.linux_atspi_helper as helper
+
+    class Window:
+        def get_accessible_id(self):
+            return "stable-window"
+
+        def get_role_name(self):
+            return "frame"
+
+        def get_name(self):
+            return "Target"
+
+    class App:
+        def __init__(self, children):
+            self.children = children
+
+        def get_process_id(self):
+            return 42
+
+        def get_name(self):
+            return "App"
+
+        def get_child_count(self):
+            return len(self.children)
+
+        def get_child_at_index(self, index):
+            return self.children[index]
+
+    target = Window()
+    other = Window()
+    other.get_accessible_id = lambda: "other-window"
+    app = App([target, other])
+    monkeypatch.setattr(helper, "_apps", lambda: [app])
+    monkeypatch.setattr(
+        helper,
+        "_bounds",
+        lambda _window: {"x": 0, "y": 0, "width": 100, "height": 100},
+    )
+
+    first_id = helper._record(app, target, 0)["id"]
+    app.children = [other, target]
+    second_id = helper._record(app, target, 1)["id"]
+    assert first_id == second_id
+    assert first_id.count(":") == 2
+    _resolved_app, resolved, index = helper._resolve_window(first_id)
+    assert resolved is target
+    assert index == 1
+
+
 @pytest.mark.asyncio
 async def test_windows_native_traversal_is_offloaded(monkeypatch):
     import local_shell_mcp.gui.windows as windows
@@ -1417,6 +1512,24 @@ async def test_gui_state_cancellation_cleans_late_capture(tmp_path, monkeypatch)
     assert manager._states == {}
 
 
+def test_screenshot_normalization_rejects_oversized_provider_dimensions(tmp_path):
+    import local_shell_mcp.gui.base as base
+
+    path = tmp_path / "small.png"
+    Image.new("RGB", (4, 4)).save(path)
+    with pytest.raises(GuiUnavailableError, match="safe screenshot budget"):
+        base._normalize_screenshot_coordinates(
+            path,
+            {
+                "bounds": {
+                    "width": base.GUI_MAX_CAPTURE_DIMENSION + 1,
+                    "height": 4,
+                }
+            },
+        )
+    assert Image.open(path).size == (4, 4)
+
+
 @pytest.mark.asyncio
 async def test_gui_frame_cancellation_waits_for_normalization_before_cleanup(tmp_path, monkeypatch):
     import local_shell_mcp.gui.base as base
@@ -1468,6 +1581,35 @@ async def test_gui_action_rechecks_state_ttl_after_execution_queue(tmp_path, mon
     with pytest.raises(GuiStaleStateError, match="stale"):
         await task
     assert backend.actions == []
+
+
+@pytest.mark.asyncio
+async def test_gui_action_rechecks_state_ttl_between_batch_actions(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.base as base
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(base, "GUI_STATE_TTL_S", 0.02)
+
+    class WaitBackend(FakeBackend):
+        async def perform_action(self, window, locator, action):
+            self.actions.append((window, locator, action))
+            if action["type"] == "wait":
+                await asyncio.sleep(float(action["seconds"]))
+            return {"performed": True}
+
+    backend = WaitBackend()
+    manager = GuiManager(backend)
+    state = await manager.snapshot("window:1", screenshot=False)
+    with pytest.raises(GuiStaleStateError, match="expired during action batch"):
+        await manager.act(
+            "window:1",
+            state["state_id"],
+            [
+                {"type": "wait", "seconds": 0.03},
+                {"type": "click", "x": 1, "y": 1},
+            ],
+        )
+    assert [action[2]["type"] for action in backend.actions] == ["wait"]
 
 
 @pytest.mark.asyncio
@@ -2047,6 +2189,123 @@ def test_linux_environment_discovery_timeout_is_nonfatal(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_wayland_snapshot_focuses_target_before_visible_region_capture(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    backend = linux.LinuxGuiBackend()
+    backend._env = {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-0"}
+    calls = []
+
+    def helper(payload):
+        if payload["command"] == "snapshot":
+            return {
+                "window": {
+                    "id": "atspi:1:sig",
+                    "title": "Target",
+                    "app": "App",
+                    "pid": 1,
+                    "bounds": {"x": 0, "y": 0, "width": 10, "height": 10},
+                },
+                "elements": [],
+                "locators": {},
+            }
+        if payload["command"] == "list":
+            return {"windows": [], "monitors": []}
+        raise AssertionError(payload)
+
+    async def focus(_window):
+        calls.append("focus")
+
+    async def capture(path, bounds, monitors, env):
+        del bounds, monitors, env
+        calls.append("capture")
+        Image.new("RGB", (10, 10)).save(path)
+        return "test-wayland"
+
+    monkeypatch.setattr(backend, "_helper", helper)
+    monkeypatch.setattr(backend, "focus_window", focus)
+    monkeypatch.setattr(linux, "_capture_wayland", capture)
+
+    result = await backend.snapshot(
+        "atspi:1:sig",
+        screenshot_path=tmp_path / "wayland.png",
+        include_elements=False,
+        max_elements=10,
+        max_depth=2,
+    )
+    assert result.capabilities["capture_backend"] == "test-wayland"
+    assert calls == ["focus", "capture"]
+
+
+@pytest.mark.asyncio
+async def test_linux_raw_element_action_reresolves_locator_bounds(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    backend = linux.LinuxGuiBackend()
+    backend._env = {"XDG_SESSION_TYPE": "x11", "DISPLAY": ":0"}
+    helper_calls = []
+    received = []
+
+    def helper(payload):
+        helper_calls.append(payload)
+        assert payload["command"] == "resolve_locator"
+        return {"bounds": {"x": 40, "y": 50, "width": 20, "height": 10}}
+
+    async def focus(_window):
+        return None
+
+    async def raw(_window, locator, _action):
+        received.append(locator)
+        return {"performed": True}
+
+    monkeypatch.setattr(backend, "_helper", helper)
+    monkeypatch.setattr(backend, "focus_window", focus)
+    monkeypatch.setattr(backend, "_perform_x11", raw)
+
+    locator = {
+        "semantic": {"path": [1], "fingerprint": "fp"},
+        "bounds": {"x": 1, "y": 2, "width": 3, "height": 4},
+    }
+    await backend.perform_action(
+        {"id": "atspi:1:sig", "bounds": {"x": 0, "y": 0, "width": 100, "height": 100}},
+        locator,
+        {"type": "right_click"},
+    )
+    assert helper_calls[0]["locator"]["fingerprint"] == "fp"
+    assert received[0]["bounds"] == {"x": 40, "y": 50, "width": 20, "height": 10}
+
+
+@pytest.mark.asyncio
+async def test_wayland_refocuses_target_after_portal_bootstrap(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    backend = linux.LinuxGuiBackend()
+    backend._env = {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-0"}
+    calls = []
+
+    class Portal:
+        async def ensure_session(self):
+            calls.append("bootstrap")
+
+        async def click(self, *_args, **_kwargs):
+            calls.append("click")
+
+    backend._portal = Portal()
+
+    async def focus(_window):
+        calls.append("focus")
+
+    monkeypatch.setattr(backend, "focus_window", focus)
+    result = await backend._perform_wayland(
+        {"id": "atspi:1:sig", "bounds": {"x": 0, "y": 0, "width": 100, "height": 100}},
+        None,
+        {"type": "click", "x": 5, "y": 6},
+    )
+    assert result["method"] == "xdg-desktop-portal"
+    assert calls == ["bootstrap", "focus", "click"]
+
+
+@pytest.mark.asyncio
 async def test_linux_raw_pointer_focuses_target_before_injection(monkeypatch):
     import local_shell_mcp.gui.linux as linux
 
@@ -2298,6 +2557,67 @@ async def test_portal_closed_signal_clears_cached_session(monkeypatch):
     assert len(callbacks) == 1
     assert portal._session_iface is not None
     callbacks[0]()
+    assert portal._session is None
+    assert portal._session_iface is None
+    assert portal._streams == []
+
+
+@pytest.mark.asyncio
+async def test_portal_session_setup_resets_when_closed_observation_fails(monkeypatch):
+    import local_shell_mcp.gui.linux_portal as portal_module
+
+    portal = PortalDesktop({})
+    closed = []
+
+    class Remote:
+        def call_create_session(self, _options):
+            return "create"
+
+        def call_select_devices(self, *_args):
+            return "devices"
+
+        def call_start(self, *_args):
+            return "start"
+
+    class Screen:
+        def call_select_sources(self, *_args):
+            return "sources"
+
+    async def connect():
+        portal._remote = Remote()
+        portal._screen = Screen()
+
+    responses = iter(
+        [
+            {"session_handle": "/session/1"},
+            {},
+            {},
+            {"streams": []},
+        ]
+    )
+
+    async def request(_awaitable, **_kwargs):
+        return next(responses)
+
+    async def observe(_session):
+        raise RuntimeError("cannot subscribe")
+
+    async def close(session):
+        closed.append(session)
+
+    class Variant:
+        def __init__(self, *_args):
+            pass
+
+    monkeypatch.setattr(portal, "_connect", connect)
+    monkeypatch.setattr(portal, "_request", request)
+    monkeypatch.setattr(portal, "_observe_session_closed", observe)
+    monkeypatch.setattr(portal, "_close_session", close)
+    monkeypatch.setattr(portal_module, "_portal_modules", lambda: (object, Variant))
+
+    with pytest.raises(GuiUnavailableError, match="closure observation"):
+        await portal.ensure_session()
+    assert closed == ["/session/1"]
     assert portal._session is None
     assert portal._session_iface is None
     assert portal._streams == []

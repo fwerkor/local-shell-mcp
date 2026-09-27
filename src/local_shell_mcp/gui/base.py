@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import math
 import platform
 import time
@@ -23,6 +24,12 @@ GUI_MAX_TOTAL_WAIT_S = 30.0
 GUI_MAX_TEXT_BYTES = 4096
 GUI_MAX_KEY_PARTS = 16
 GUI_MAX_KEYS_BYTES = 256
+GUI_MAX_WINDOWS = 256
+GUI_MAX_WINDOW_ID_BYTES = 1024
+GUI_MAX_WINDOW_TEXT_BYTES = 1024
+GUI_MAX_WINDOWS_TOTAL_BYTES = 128 * 1024
+GUI_MAX_CAPTURE_DIMENSION = 16_384
+GUI_MAX_CAPTURE_PIXELS = 64_000_000
 
 _COORDINATE_ACTIONS = {
     "click",
@@ -103,6 +110,66 @@ def _backend_for_platform() -> GuiBackend:
     raise GuiUnavailableError(f"GUI automation is unsupported on {system or platform.platform()}")
 
 
+def _truncate_gui_text(value: Any, limit: int) -> str:
+    text = str(value or "")
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text
+    suffix = "..."
+    budget = max(0, limit - len(suffix))
+    return encoded[:budget].decode("utf-8", errors="ignore") + suffix
+
+
+def _bounded_window_record(window: dict[str, Any]) -> dict[str, Any] | None:
+    bounded: dict[str, Any] = {}
+    if "id" in window:
+        window_id = str(window.get("id") or "")
+        if len(window_id.encode("utf-8")) > GUI_MAX_WINDOW_ID_BYTES:
+            return None
+        bounded["id"] = window_id
+    for key in ("title", "app"):
+        if key in window:
+            bounded[key] = _truncate_gui_text(window.get(key), GUI_MAX_WINDOW_TEXT_BYTES)
+    if "pid" in window:
+        try:
+            bounded["pid"] = int(window.get("pid"))
+        except (TypeError, ValueError):
+            bounded["pid"] = 0
+    bounds = window.get("bounds")
+    if isinstance(bounds, dict):
+        bounded["bounds"] = {
+            key: bounds.get(key)
+            for key in ("x", "y", "width", "height")
+            if key in bounds
+        }
+    return bounded
+
+
+def _bounded_window_records(windows: Any) -> list[dict[str, Any]]:
+    if not isinstance(windows, list):
+        return []
+    bounded: list[dict[str, Any]] = []
+    used = 2
+    for raw in windows[:GUI_MAX_WINDOWS]:
+        if not isinstance(raw, dict):
+            continue
+        record = _bounded_window_record(raw)
+        if record is None:
+            continue
+        encoded = json.dumps(
+            record,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+        extra = len(encoded) + (1 if bounded else 0)
+        if used + extra > GUI_MAX_WINDOWS_TOTAL_BYTES:
+            break
+        bounded.append(record)
+        used += extra
+    return bounded
+
+
 def _normalize_screenshot_coordinates(path: Path, window: dict[str, Any]) -> None:
     bounds = window.get("bounds")
     if not isinstance(bounds, dict):
@@ -114,6 +181,14 @@ def _normalize_screenshot_coordinates(path: Path, window: dict[str, Any]) -> Non
         return
     if width <= 0 or height <= 0:
         return
+    if (
+        width > GUI_MAX_CAPTURE_DIMENSION
+        or height > GUI_MAX_CAPTURE_DIMENSION
+        or width * height > GUI_MAX_CAPTURE_PIXELS
+    ):
+        raise GuiUnavailableError(
+            f"GUI window dimensions exceed the safe screenshot budget: {width}x{height}"
+        )
     with Image.open(path) as image:
         image.load()
         if image.size == (width, height):
@@ -239,6 +314,7 @@ class GuiManager:
     async def list_windows(self) -> dict[str, Any]:
         result = await self._backend.list_windows()
         result.setdefault("backend", self._backend.name)
+        result["windows"] = _bounded_window_records(result.get("windows"))
         return result
 
     async def snapshot(
@@ -423,6 +499,10 @@ class GuiManager:
                 normalized.append((action, locator))
 
             for index, (action, locator) in enumerate(normalized):
+                if time.monotonic() - record.created_at > GUI_STATE_TTL_S:
+                    raise GuiStaleStateError(
+                        "GUI state expired during action batch; call gui_state again"
+                    )
                 if action["type"] in _COORDINATE_ACTIONS:
                     await self._assert_window_geometry_unchanged(record.window)
                 result = await self._backend.perform_action(record.window, locator, action)

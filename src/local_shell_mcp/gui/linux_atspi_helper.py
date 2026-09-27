@@ -165,9 +165,10 @@ def _element_signature(obj: Any) -> str:
 
 
 def _record(app: Any, window: Any, index: int) -> dict[str, Any]:
+    del index
     pid = int(app.get_process_id())
     return {
-        "id": f"atspi:{pid}:{index}:{_window_signature(window)}",
+        "id": f"atspi:{pid}:{_window_signature(window)}",
         "title": str(window.get_name() or ""),
         "app": str(app.get_name() or ""),
         "pid": pid,
@@ -180,8 +181,17 @@ def _resolve_window(window_id: str) -> tuple[Any, Any, int]:
     if len(parts) not in {3, 4} or parts[0] != "atspi":
         raise ValueError(f"Invalid AT-SPI window id: {window_id}")
     pid = int(parts[1])
-    preferred_index = int(parts[2])
-    signature = parts[3] if len(parts) == 4 else None
+    preferred_index: int | None
+    signature: str | None
+    if len(parts) == 4:
+        preferred_index = int(parts[2])
+        signature = parts[3]
+    elif parts[2].isdigit():
+        preferred_index = int(parts[2])
+        signature = None
+    else:
+        preferred_index = None
+        signature = parts[2]
     for app in _apps():
         try:
             if int(app.get_process_id()) != pid:
@@ -199,7 +209,7 @@ def _resolve_window(window_id: str) -> tuple[Any, Any, int]:
             if window is None:
                 continue
             if signature is None:
-                if index == preferred_index:
+                if preferred_index is not None and index == preferred_index:
                     return app, window, index
                 continue
             if _window_signature(window) == signature:
@@ -287,6 +297,21 @@ def _snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         "elements": elements,
         "locators": locators,
     }
+
+
+def _resolve_locator(payload: dict[str, Any]) -> dict[str, Any]:
+    _app, window, _window_index = _resolve_window(str(payload["window_id"]))
+    raw_locator = payload.get("locator", {})
+    if isinstance(raw_locator, dict):
+        locator = [int(value) for value in raw_locator.get("path", [])]
+        expected_fingerprint = str(raw_locator.get("fingerprint") or "")
+    else:
+        locator = [int(value) for value in raw_locator]
+        expected_fingerprint = ""
+    obj = _resolve_path(window, locator)
+    if expected_fingerprint and _element_signature(obj) != expected_fingerprint:
+        raise LookupError("AT-SPI target element changed since observation")
+    return {"bounds": _bounds(obj)}
 
 
 def _semantic_action(payload: dict[str, Any]) -> dict[str, Any]:
@@ -383,6 +408,8 @@ def _main(payload: dict[str, Any]) -> dict[str, Any]:
         return _snapshot(payload)
     if command == "semantic_action":
         return _semantic_action(payload)
+    if command == "resolve_locator":
+        return _resolve_locator(payload)
     if command == "raw":
         return _raw(payload)
     raise ValueError(f"Unknown helper command: {command}")

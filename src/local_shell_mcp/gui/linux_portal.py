@@ -224,8 +224,11 @@ class PortalDesktop:
         )
         iface = obj.get_interface("org.freedesktop.portal.Session")
         on_closed = getattr(iface, "on_closed", None)
-        if callable(on_closed):
-            on_closed(self._on_session_closed)
+        if not callable(on_closed):
+            raise GuiUnavailableError(
+                "Wayland portal Session interface does not expose a Closed signal"
+            )
+        on_closed(self._on_session_closed)
         if self._session == session:
             self._session_iface = iface
 
@@ -316,8 +319,15 @@ class PortalDesktop:
                 self._streams.append({"node_id": node_id, "properties": props})
             try:
                 await self._observe_session_closed(session)
-            except Exception:
+            except Exception as exc:
+                with contextlib.suppress(BaseException):
+                    await asyncio.shield(self._close_session(session))
+                self._session = None
                 self._session_iface = None
+                self._streams = []
+                raise GuiUnavailableError(
+                    "Wayland portal session closure observation could not be installed"
+                ) from exc
 
     def _stream_point(self, x: int, y: int) -> tuple[int, float, float]:
         if not self._streams:

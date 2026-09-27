@@ -369,6 +369,41 @@ def test_gui_dependency_bootstrap_failure_is_nonfatal_status(tmp_path, monkeypat
     assert "timed out" in result["error"]
 
 
+def test_gui_dependency_failure_is_cached_between_polling_requests(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(installer.sys, "platform", "darwin")
+    monkeypatch.setattr(installer.sys, "path", list(installer.sys.path))
+    monkeypatch.setenv("PYTHONPATH", "")
+    monkeypatch.setattr(installer, "_GUI_DEPENDENCY_FAILURES", {})
+
+    installed = False
+    runs = []
+
+    def import_module(name):
+        if not installed:
+            raise ImportError(name)
+        return SimpleNamespace()
+
+    def run(*_args, **_kwargs):
+        runs.append(True)
+        return subprocess.CompletedProcess([], 1, stdout="", stderr="offline")
+
+    monkeypatch.setattr(installer.importlib, "import_module", import_module)
+    monkeypatch.setattr(installer.importlib, "invalidate_caches", lambda: None)
+    monkeypatch.setattr(installer.subprocess, "run", run)
+
+    first = installer.ensure_gui_dependencies()
+    second = installer.ensure_gui_dependencies()
+    assert first["available"] is False
+    assert second == first
+    assert len(runs) == 1
+
+    installed = True
+    third = installer.ensure_gui_dependencies()
+    assert third["available"] is True
+    assert len(runs) == 1
+
+
 def test_gui_dependency_bootstrap_serializes_inflight_install(tmp_path, monkeypatch):
     import threading
     import time

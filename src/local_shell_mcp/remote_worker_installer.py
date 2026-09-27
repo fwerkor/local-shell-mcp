@@ -10,6 +10,7 @@ import sys
 import tarfile
 import tempfile
 import threading
+import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -26,6 +27,8 @@ from .remote_worker_state import (
 _WORKER_MANIFEST_PATH = "/remote/worker-bundle.tgz?manifest=1"
 _WINDOWS_PTY_REQUIREMENT = "pywinpty>=2.0.13"
 _GUI_DEPENDENCY_LOCK = threading.Lock()
+_GUI_DEPENDENCY_FAILURE_RETRY_S = 300.0
+_GUI_DEPENDENCY_FAILURES: dict[str, tuple[float, dict[str, Any]]] = {}
 _GUI_REQUIREMENTS: dict[str, tuple[tuple[str, str], ...]] = {
     "win32": (("uiautomation", "uiautomation>=2.0.29,<3"),),
     "darwin": (
@@ -146,12 +149,22 @@ def _ensure_gui_dependencies_unlocked(
         except (ImportError, OSError):
             missing.append((module_name, requirement))
     if not missing:
+        if key:
+            _GUI_DEPENDENCY_FAILURES.pop(key, None)
         return {
             "available": True,
             "installed": False,
             "path": str(path),
             "missing": [],
         }
+
+    if key:
+        cached = _GUI_DEPENDENCY_FAILURES.get(key)
+        if cached is not None:
+            retry_at, cached_result = cached
+            if time.monotonic() < retry_at:
+                return dict(cached_result)
+            _GUI_DEPENDENCY_FAILURES.pop(key, None)
 
     path.mkdir(parents=True, exist_ok=True)
     argv = [
@@ -178,13 +191,19 @@ def _ensure_gui_dependencies_unlocked(
             timeout=180,
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        return {
+        result = {
             "available": False,
             "installed": False,
             "path": str(path),
             "missing": [module for module, _requirement in missing],
             "error": str(exc),
         }
+        if key:
+            _GUI_DEPENDENCY_FAILURES[key] = (
+                time.monotonic() + _GUI_DEPENDENCY_FAILURE_RETRY_S,
+                dict(result),
+            )
+        return result
 
     importlib.invalidate_caches()
     still_missing: list[str] = []
@@ -206,6 +225,13 @@ def _ensure_gui_dependencies_unlocked(
             or completed.stdout.strip()
             or f"pip exited with code {completed.returncode}"
         )
+        if key:
+            _GUI_DEPENDENCY_FAILURES[key] = (
+                time.monotonic() + _GUI_DEPENDENCY_FAILURE_RETRY_S,
+                dict(result),
+            )
+    elif key:
+        _GUI_DEPENDENCY_FAILURES.pop(key, None)
     return result
 
 

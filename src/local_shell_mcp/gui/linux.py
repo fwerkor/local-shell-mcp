@@ -754,6 +754,7 @@ class LinuxGuiBackend:
             list_data = await asyncio.to_thread(self._list_data)
             monitors = list_data.get("monitors", [])
             if session_type == "wayland":
+                await self.focus_window(record)
                 capture_backend = await _capture_wayland(
                     screenshot_path,
                     record["bounds"],
@@ -852,6 +853,25 @@ class LinuxGuiBackend:
                 )
             except _SemanticActionUnavailableError:
                 pass
+
+        if (
+            locator is not None
+            and kind in {"click", "double_click", "right_click", "move", "scroll", "drag"}
+        ):
+            resolved = await asyncio.to_thread(
+                self._helper,
+                {
+                    "command": "resolve_locator",
+                    "window_id": window["id"],
+                    "locator": locator["semantic"],
+                },
+            )
+            bounds = resolved.get("bounds")
+            if not isinstance(bounds, dict):
+                raise GuiStaleStateError(
+                    "AT-SPI target element no longer has usable bounds"
+                )
+            locator = {**locator, "bounds": bounds}
 
         if kind in {"type", "key"}:
             if locator is not None:
@@ -1029,6 +1049,19 @@ class LinuxGuiBackend:
             self._portal = PortalDesktop(await self._ensure_env())
         portal = self._portal
         kind = action["type"]
+        await portal.ensure_session()
+        if kind in {"type", "key"} and locator is not None:
+            await asyncio.to_thread(
+                self._helper,
+                {
+                    "command": "semantic_action",
+                    "window_id": window["id"],
+                    "locator": locator["semantic"],
+                    "action": {"type": "focus"},
+                },
+            )
+        else:
+            await self.focus_window(window)
         if kind == "type":
             text = str(action.get("text", ""))
             await portal.type_text(text)

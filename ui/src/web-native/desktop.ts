@@ -489,6 +489,7 @@ export class DesktopController extends BaseController {
           && windowId === this.selectedWindowId
           && /moved|resized|no longer available|stale/i.test(message)
         ) {
+          this.invalidateActionTarget()
           await this.refreshWindows(true)
         }
       } finally {
