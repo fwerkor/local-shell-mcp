@@ -255,10 +255,26 @@ def _window_fingerprint(control: Any) -> str:
     return hashlib.sha256("\0".join(fields).encode("utf-8")).hexdigest()[:16]
 
 
+def _is_iconic_window(handle: int) -> bool:
+    windll = getattr(ctypes, "windll", None)
+    if windll is None:
+        return False
+    user32 = windll.user32
+    user32.IsIconic.argtypes = [ctypes.c_void_p]
+    user32.IsIconic.restype = ctypes.c_int
+    return bool(user32.IsIconic(ctypes.c_void_p(handle)))
+
+
 def _window_record(control: Any) -> dict[str, Any] | None:
     handle = int(_safe_property(control, "NativeWindowHandle", 0) or 0)
     bounds = _rect_dict(_safe_property(control, "BoundingRectangle"))
-    if not handle or bounds["width"] <= 0 or bounds["height"] <= 0:
+    if (
+        not handle
+        or bool(_safe_property(control, "IsOffscreen", False))
+        or _is_iconic_window(handle)
+        or bounds["width"] <= 0
+        or bounds["height"] <= 0
+    ):
         return None
     return {
         "id": f"hwnd:{handle}:{_window_fingerprint(control)}",

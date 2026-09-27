@@ -14,6 +14,8 @@ from typing import Any
 from PIL import Image
 
 from .base import (
+    GUI_MAX_CAPTURE_DIMENSION,
+    GUI_MAX_CAPTURE_PIXELS,
     GuiSnapshot,
     GuiStaleStateError,
     GuiUnavailableError,
@@ -241,6 +243,27 @@ def _desktop_crop_box(
 
     if _monitor_for_window(bounds, monitors) is None:
         raise GuiUnavailableError("Could not map the target window to a captured monitor")
+
+    # GDK exposes integer scale factors even when the compositor captures a
+    # uniformly fractionally-scaled desktop (for example 1.5x). When all
+    # outputs report the same scale and the captured desktop has a consistent
+    # x/y ratio, prefer the observed capture ratio over the rounded metadata.
+    reported_scales = {float(item.get("scale", 1) or 1) for item in monitors}
+    ratio_x = image_size[0] / logical_size[0] if logical_size[0] > 0 else 0.0
+    ratio_y = image_size[1] / logical_size[1] if logical_size[1] > 0 else 0.0
+    if (
+        len(reported_scales) == 1
+        and ratio_x > 0
+        and ratio_y > 0
+        and abs(ratio_x - ratio_y) <= 0.02
+    ):
+        ratio = (ratio_x + ratio_y) / 2.0
+        left = int(round((x - origin_x) * ratio))
+        top = int(round((y - origin_y) * ratio))
+        right = int(round((x + width - origin_x) * ratio))
+        bottom = int(round((y + height - origin_y) * ratio))
+        if 0 <= left < right <= image_size[0] and 0 <= top < bottom <= image_size[1]:
+            return left, top, right, bottom
 
     center_x, center_y = _window_center(bounds)
     left = _scaled_axis_offset(
@@ -559,6 +582,14 @@ def _capture_x11_window_sync(
         height = int(geometry.height)
         if width <= 0 or height <= 0:
             raise GuiUnavailableError("X11 target window has invalid capture bounds")
+        if (
+            width > GUI_MAX_CAPTURE_DIMENSION
+            or height > GUI_MAX_CAPTURE_DIMENSION
+            or width * height > GUI_MAX_CAPTURE_PIXELS
+        ):
+            raise GuiUnavailableError(
+                f"X11 capture dimensions exceed the safe budget: {width}x{height}"
+            )
         visual_id = int(window.get_attributes().visual)
         pixmap = window.composite_name_window_pixmap()
         image_reply = pixmap.get_image(
@@ -984,6 +1015,7 @@ class LinuxGuiBackend:
                 default_y = action.get("amount", -3) if "delta_x" not in action else 0
                 amount_y = quantize_scroll_amount(action.get("delta_y", default_y))
                 amount_x = quantize_scroll_amount(action.get("delta_x", 0))
+                events: list[dict[str, Any]] = []
                 for amount, negative_button, positive_button in (
                     (amount_y, 5, 4),
                     (amount_x, 7, 6),
@@ -991,31 +1023,26 @@ class LinuxGuiBackend:
                     if not amount:
                         continue
                     button = negative_button if amount < 0 else positive_button
-                    for _ in range(abs(amount)):
-                        await asyncio.to_thread(
-                            self._helper,
-                            {
-                                "command": "raw",
-                                "kind": "mouse",
-                                "x": x,
-                                "y": y,
-                                "event": f"b{button}c",
-                            },
-                        )
+                    events.extend(
+                        {"x": x, "y": y, "event": f"b{button}c"}
+                        for _ in range(abs(amount))
+                    )
+                if events:
+                    await asyncio.to_thread(
+                        self._helper,
+                        {"command": "raw", "kind": "mouse_sequence", "events": events},
+                    )
             else:
                 button = 3 if kind == "right_click" else 1
                 count = 2 if kind == "double_click" else 1
-                for _ in range(count):
-                    await asyncio.to_thread(
-                        self._helper,
-                        {
-                            "command": "raw",
-                            "kind": "mouse",
-                            "x": x,
-                            "y": y,
-                            "event": f"b{button}c",
-                        },
-                    )
+                events = [
+                    {"x": x, "y": y, "event": f"b{button}c"}
+                    for _ in range(count)
+                ]
+                await asyncio.to_thread(
+                    self._helper,
+                    {"command": "raw", "kind": "mouse_sequence", "events": events},
+                )
             return {"screen_x": x, "screen_y": y}
 
         if kind == "drag":

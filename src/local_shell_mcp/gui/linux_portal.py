@@ -462,8 +462,8 @@ class PortalDesktop:
         await remote.call_notify_pointer_axis(
             session,
             {},
-            float(delta_x),
-            float(delta_y),
+            -float(delta_x),
+            -float(delta_y),
         )
 
     async def _key_event(

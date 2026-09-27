@@ -1375,6 +1375,19 @@ def test_mixed_dpi_desktop_crop_uses_each_monitor_scale():
     )
 
 
+def test_fractional_wayland_desktop_crop_infers_capture_ratio():
+    monitors = [
+        {"x": 0, "y": 0, "width": 1920, "height": 1080, "scale": 1},
+    ]
+    bounds = {"x": 100, "y": 50, "width": 200, "height": 100}
+    assert _desktop_crop_box(bounds, monitors, (2880, 1620)) == (
+        150,
+        75,
+        450,
+        225,
+    )
+
+
 def test_atspi_window_identity_survives_child_reordering(monkeypatch):
     from local_shell_mcp.gui import linux_atspi_helper as helper
 
@@ -1443,6 +1456,42 @@ def test_atspi_window_identity_survives_child_reordering(monkeypatch):
     ambiguous_signature = helper._window_signature(target)
     with pytest.raises(LookupError, match="ambiguous"):
         helper._resolve_window(f"atspi:42:0:{ambiguous_signature}")
+
+
+def test_windows_window_record_excludes_offscreen_windows(monkeypatch):
+    import local_shell_mcp.gui.windows as windows
+
+    class Rect:
+        left = 10
+        top = 20
+        right = 210
+        bottom = 120
+
+    class Control:
+        NativeWindowHandle = 123
+        BoundingRectangle = Rect()
+        IsOffscreen = True
+
+    monkeypatch.setattr(windows, "_is_iconic_window", lambda _handle: False)
+    assert windows._window_record(Control()) is None
+
+
+def test_windows_window_record_excludes_minimized_windows(monkeypatch):
+    import local_shell_mcp.gui.windows as windows
+
+    class Rect:
+        left = -32000
+        top = -32000
+        right = -31800
+        bottom = -31900
+
+    class Control:
+        NativeWindowHandle = 456
+        BoundingRectangle = Rect()
+        IsOffscreen = False
+
+    monkeypatch.setattr(windows, "_is_iconic_window", lambda handle: handle == 456)
+    assert windows._window_record(Control()) is None
 
 
 def test_windows_capture_rejects_oversized_rect_before_gdi_allocation(tmp_path, monkeypatch):
@@ -2453,6 +2502,51 @@ def test_x11_match_rejects_sole_same_process_window_without_title_or_geometry_ma
         )
 
 
+def test_x11_capture_rejects_oversized_window_before_pixmap_read(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    class Window:
+        def get_geometry(self):
+            return SimpleNamespace(
+                width=linux.GUI_MAX_CAPTURE_DIMENSION + 1,
+                height=10,
+            )
+
+        def composite_name_window_pixmap(self):
+            pytest.fail("oversized X11 window must be rejected before pixmap allocation")
+
+    class Connection:
+        def has_extension(self, name):
+            assert name == "Composite"
+            return True
+
+        def get_default_screen(self):
+            return 0
+
+        def intern_atom(self, _name, only_if_exists=True):
+            del only_if_exists
+            return 99
+
+        def get_selection_owner(self, _atom):
+            return SimpleNamespace(id=123)
+
+        def close(self):
+            pass
+
+    xlib = ModuleType("Xlib")
+    xlib.X = SimpleNamespace(ZPixmap=2)
+    xlib.display = SimpleNamespace(Display=lambda _display: Connection())
+    monkeypatch.setitem(sys.modules, "Xlib", xlib)
+    monkeypatch.setattr(linux, "_x11_match_window", lambda *_args: Window())
+
+    with pytest.raises(GuiUnavailableError, match="safe budget"):
+        linux._capture_x11_window_sync(
+            tmp_path / "oversized.png",
+            {"id": "w"},
+            {"DISPLAY": ":0"},
+        )
+
+
 def test_x11_capture_uses_composite_window_pixmap(tmp_path, monkeypatch):
     import local_shell_mcp.gui.linux as linux
 
@@ -2881,6 +2975,63 @@ async def test_linux_raw_pointer_focuses_target_before_injection(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_x11_compound_pointer_actions_use_one_helper_invocation(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    backend = linux.LinuxGuiBackend()
+    calls = []
+
+    def helper(payload):
+        calls.append(payload)
+        return {"generated": True}
+
+    monkeypatch.setattr(backend, "_helper", helper)
+    window = {"id": "w", "bounds": {"x": 0, "y": 0, "width": 100, "height": 100}}
+
+    await backend._perform_x11(
+        window,
+        None,
+        {"type": "double_click", "x": 10, "y": 20},
+    )
+    await backend._perform_x11(
+        window,
+        None,
+        {"type": "scroll", "x": 10, "y": 20, "delta_y": -3},
+    )
+
+    assert len(calls) == 2
+    assert calls[0]["kind"] == "mouse_sequence"
+    assert [item["event"] for item in calls[0]["events"]] == ["b1c", "b1c"]
+    assert calls[1]["kind"] == "mouse_sequence"
+    assert [item["event"] for item in calls[1]["events"]] == ["b5c"] * 3
+
+
+def test_atspi_mouse_sequence_runs_in_one_helper_process(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    generated = []
+
+    class Atspi:
+        @staticmethod
+        def generate_mouse_event(x, y, event):
+            generated.append((x, y, event))
+            return True
+
+    monkeypatch.setattr(helper, "Atspi", Atspi)
+    result = helper._raw(
+        {
+            "kind": "mouse_sequence",
+            "events": [
+                {"x": 1, "y": 2, "event": "b1c"},
+                {"x": 1, "y": 2, "event": "b1c"},
+            ],
+        }
+    )
+    assert result == {"generated": True, "events": 2}
+    assert generated == [(1, 2, "b1c"), (1, 2, "b1c")]
+
+
+@pytest.mark.asyncio
 async def test_x11_drag_releases_button_after_motion_failure(monkeypatch):
     import local_shell_mcp.gui.linux as linux
 
@@ -3243,6 +3394,32 @@ async def test_portal_click_releases_pressed_button_after_release_failure(monkey
     with pytest.raises(RuntimeError, match="release failed"):
         await portal.click(1, 2)
     assert calls == [True, False, False]
+
+
+@pytest.mark.asyncio
+async def test_portal_scroll_translates_to_positive_down_axis():
+    portal = PortalDesktop({})
+    portal._session = "session"
+    portal._streams = [
+        {
+            "node_id": 7,
+            "properties": {"position": [0, 0], "size": [100, 100]},
+        }
+    ]
+    axes = []
+
+    class Remote:
+        async def call_notify_pointer_motion_absolute(self, *_args):
+            pass
+
+        async def call_notify_pointer_axis(
+            self, session, _options, delta_x, delta_y
+        ):
+            axes.append((session, delta_x, delta_y))
+
+    portal._remote = Remote()
+    await portal.scroll(10, 20, 2.0, -3.0, session="session")
+    assert axes == [("session", -2.0, 3.0)]
 
 
 @pytest.mark.asyncio

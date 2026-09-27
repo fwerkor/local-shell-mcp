@@ -373,6 +373,21 @@ def _raw(payload: dict[str, Any]) -> dict[str, Any]:
         if not ok:
             raise RuntimeError("AT-SPI mouse synthesis failed")
         return {"generated": True}
+    if kind == "mouse_sequence":
+        events = payload.get("events")
+        if not isinstance(events, list) or not events or len(events) > 200:
+            raise ValueError("mouse_sequence requires 1..200 events")
+        for event in events:
+            if not isinstance(event, dict):
+                raise ValueError("mouse_sequence events must be objects")
+            ok = Atspi.generate_mouse_event(
+                int(event["x"]),
+                int(event["y"]),
+                str(event["event"]),
+            )
+            if not ok:
+                raise RuntimeError("AT-SPI mouse synthesis failed")
+        return {"generated": True, "events": len(events)}
     if kind == "text":
         text = str(payload.get("text", ""))
         ok = Atspi.generate_keyboard_event(0, text, Atspi.KeySynthType.STRING)
