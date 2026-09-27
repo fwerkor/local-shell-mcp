@@ -354,26 +354,23 @@ class GuiManager:
             screenshot_path.parent.mkdir(parents=True, exist_ok=True)
             acquire_temp_file_lease(screenshot_path)
 
-        capture = asyncio.create_task(
-            self._backend.snapshot(
-                str(window_id),
-                screenshot_path=screenshot_path,
-                include_elements=include_elements,
-                max_elements=max_elements,
-                max_depth=max_depth,
+        async def capture_snapshot() -> GuiSnapshot:
+            return await _await_native_operation(
+                self._backend.snapshot(
+                    str(window_id),
+                    screenshot_path=screenshot_path,
+                    include_elements=include_elements,
+                    max_elements=max_elements,
+                    max_depth=max_depth,
+                )
             )
-        )
+
         try:
-            try:
-                snapshot = await asyncio.shield(capture)
-            except BaseException:
-                if screenshot_path is not None and not capture.done():
-                    capture.add_done_callback(
-                        lambda _task: _cleanup_gui_screenshot(screenshot_path)
-                    )
-                with contextlib.suppress(BaseException):
-                    await asyncio.shield(capture)
-                raise
+            if screenshot_path is not None:
+                async with self._execution_lock:
+                    snapshot = await capture_snapshot()
+            else:
+                snapshot = await capture_snapshot()
 
             if screenshot_path is not None:
                 if snapshot.screenshot_path is None:
@@ -430,27 +427,17 @@ class GuiManager:
         screenshot_path.parent.mkdir(parents=True, exist_ok=True)
         acquire_temp_file_lease(screenshot_path)
         keep_file = False
-        capture = asyncio.create_task(
-            self._backend.snapshot(
-                str(window_id),
-                screenshot_path=screenshot_path,
-                include_elements=False,
-                max_elements=1,
-                max_depth=1,
-            )
-        )
-
         try:
-            try:
-                snapshot = await asyncio.shield(capture)
-            except BaseException:
-                if not capture.done():
-                    capture.add_done_callback(
-                        lambda _task: _cleanup_gui_screenshot(screenshot_path)
+            async with self._execution_lock:
+                snapshot = await _await_native_operation(
+                    self._backend.snapshot(
+                        str(window_id),
+                        screenshot_path=screenshot_path,
+                        include_elements=False,
+                        max_elements=1,
+                        max_depth=1,
                     )
-                with contextlib.suppress(BaseException):
-                    await asyncio.shield(capture)
-                raise
+                )
             if snapshot.screenshot_path is None or not screenshot_path.is_file():
                 raise GuiUnavailableError("GUI backend did not produce the requested screenshot")
             normalize = asyncio.create_task(

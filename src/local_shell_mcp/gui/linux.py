@@ -413,12 +413,27 @@ def _x11_match_window(connection: Any, record: dict[str, Any]) -> Any:
             title = _x11_text_property(window, connection, "_NET_WM_NAME") or str(
                 window.get_wm_name() or ""
             )
-            geometry_delta = sum(
+            geometry_deltas = [
                 abs(int(geometry.get(key, 0)) - int(expected_bounds.get(key, 0)))
                 for key in ("x", "y", "width", "height")
+            ]
+            geometry_delta = sum(geometry_deltas)
+            geometry_match = bool(expected_bounds) and all(
+                delta <= 3 for delta in geometry_deltas
             )
-            title_penalty = 0 if expected_title and title == expected_title else 1
-            candidates.append(((title_penalty, geometry_delta), window))
+            title_match = bool(expected_title) and title == expected_title
+            if not title_match and not geometry_match:
+                continue
+            candidates.append(
+                (
+                    (
+                        0 if title_match else 1,
+                        0 if geometry_match else 1,
+                        geometry_delta,
+                    ),
+                    window,
+                )
+            )
         except Exception:
             continue
 
@@ -1050,7 +1065,7 @@ class LinuxGuiBackend:
             self._portal = PortalDesktop(await self._ensure_env())
         portal = self._portal
         kind = action["type"]
-        await portal.ensure_session()
+        session = await portal.ensure_session()
         if kind in {"type", "key"} and locator is not None:
             await asyncio.to_thread(
                 self._helper,
@@ -1065,28 +1080,35 @@ class LinuxGuiBackend:
             await self.focus_window(window)
         if kind == "type":
             text = str(action.get("text", ""))
-            await portal.type_text(text)
+            await portal.type_text(text, session=session)
             return {"characters": len(text), "method": "xdg-desktop-portal"}
         if kind == "key":
-            await portal.key_chord(action.get("keys"))
+            await portal.key_chord(action.get("keys"), session=session)
             return {"keys": action.get("keys"), "method": "xdg-desktop-portal"}
 
         if kind in {"click", "double_click", "right_click", "move", "scroll"}:
             x, y = self._screen_point(window, action, locator)
             if kind == "move":
-                await portal.move(x, y)
+                await portal.move(x, y, session=session)
             elif kind == "scroll":
                 default_y = action.get("amount", -3) if "delta_x" not in action else 0
                 amount_y = quantize_scroll_amount(action.get("delta_y", default_y))
                 amount_x = quantize_scroll_amount(action.get("delta_x", 0))
                 if amount_x or amount_y:
-                    await portal.scroll(x, y, float(amount_x), float(amount_y))
+                    await portal.scroll(
+                        x,
+                        y,
+                        float(amount_x),
+                        float(amount_y),
+                        session=session,
+                    )
             else:
                 await portal.click(
                     x,
                     y,
                     button=3 if kind == "right_click" else 1,
                     count=2 if kind == "double_click" else 1,
+                    session=session,
                 )
             return {
                 "screen_x": x,
@@ -1101,7 +1123,7 @@ class LinuxGuiBackend:
             to_x, to_y = self._screen_point(
                 window, {"x": action.get("to_x"), "y": action.get("to_y")}, None
             )
-            await portal.drag(x, y, to_x, to_y)
+            await portal.drag(x, y, to_x, to_y, session=session)
             return {
                 "from": {"x": x, "y": y},
                 "to": {"x": to_x, "y": to_y},

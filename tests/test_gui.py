@@ -1373,6 +1373,52 @@ def test_atspi_window_identity_survives_child_reordering(monkeypatch):
         helper._resolve_window(f"atspi:42:0:{ambiguous_signature}")
 
 
+def test_windows_snapshot_uses_hwnd_capture_not_visible_rectangle(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.windows as windows
+
+    class Window:
+        NativeWindowHandle = 123
+
+        def GetChildren(self):
+            return []
+
+        def CaptureToImage(self, *_args, **_kwargs):
+            pytest.fail("UIA rectangle capture must not be used")
+
+    backend = WindowsGuiBackend()
+    window = Window()
+    monkeypatch.setattr(backend, "_find_window", lambda _window_id: window)
+    monkeypatch.setattr(
+        windows,
+        "_window_record",
+        lambda _control: {
+            "id": "hwnd:123:fingerprint",
+            "title": "Window",
+            "app": "App",
+            "pid": 1,
+            "bounds": {"x": 10, "y": 20, "width": 100, "height": 80},
+        },
+    )
+    captures = []
+
+    def capture(hwnd, destination):
+        captures.append((hwnd, destination))
+        Image.new("RGB", (100, 80), (1, 2, 3)).save(destination, format="PNG")
+
+    monkeypatch.setattr(windows, "_capture_window_image", capture)
+    path = tmp_path / "window.png"
+    snapshot = backend._snapshot_sync(
+        "hwnd:123:fingerprint",
+        screenshot_path=path,
+        include_elements=False,
+        max_elements=1,
+        max_depth=1,
+    )
+    assert captures == [(123, path)]
+    assert snapshot.screenshot_path is not None
+    assert path.is_file()
+
+
 def test_windows_traversal_stops_before_querying_children_at_budget(monkeypatch):
     import local_shell_mcp.gui.windows as windows
 
@@ -2014,6 +2060,78 @@ async def test_cancelled_native_action_keeps_execution_lock_until_backend_settle
 
 
 @pytest.mark.asyncio
+async def test_cancelled_gui_capture_holds_execution_lock_until_backend_settles(
+    tmp_path, monkeypatch
+):
+    import local_shell_mcp.gui.base as base
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(base, "temp_dir", lambda: tmp_path)
+
+    class BlockingCaptureBackend(FakeBackend):
+        def __init__(self):
+            super().__init__()
+            self.capture_started = asyncio.Event()
+            self.release_capture = asyncio.Event()
+            self.action_started = asyncio.Event()
+
+        async def snapshot(
+            self,
+            window_id,
+            *,
+            screenshot_path,
+            include_elements,
+            max_elements,
+            max_depth,
+        ):
+            del include_elements, max_elements, max_depth
+            self.capture_started.set()
+            await self.release_capture.wait()
+            if screenshot_path is not None:
+                Image.new("RGB", (300, 200), (1, 2, 3)).save(
+                    screenshot_path, format="PNG"
+                )
+            return GuiSnapshot(
+                window={
+                    "id": window_id,
+                    "title": "Demo",
+                    "app": "demo",
+                    "pid": 1,
+                    "bounds": dict(self.bounds),
+                },
+                elements=[],
+                screenshot_path=str(screenshot_path) if screenshot_path else None,
+            )
+
+        async def perform_action(self, window, locator, action):
+            del window, locator, action
+            self.action_started.set()
+            return {"performed": True}
+
+    backend = BlockingCaptureBackend()
+    manager = GuiManager(backend)
+    frame = asyncio.create_task(manager.frame("window:1"))
+    await backend.capture_started.wait()
+    frame.cancel()
+
+    action = asyncio.create_task(
+        manager.human_act(
+            "window:1",
+            dict(backend.bounds),
+            [{"type": "click", "x": 1, "y": 1}],
+        )
+    )
+    await asyncio.sleep(0.01)
+    assert not backend.action_started.is_set()
+
+    backend.release_capture.set()
+    with pytest.raises(asyncio.CancelledError):
+        await frame
+    await action
+    assert backend.action_started.is_set()
+
+
+@pytest.mark.asyncio
 async def test_gui_input_batches_are_serialized(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
 
@@ -2130,6 +2248,58 @@ def test_x11_window_matching_and_pixmap_decode(monkeypatch):
         visual_id=7,
     )
     assert image.getpixel((0, 0)) == (1, 2, 3)
+
+
+def test_x11_match_rejects_sole_same_process_window_without_title_or_geometry_match(
+    monkeypatch,
+):
+    import local_shell_mcp.gui.linux as linux
+
+    xlib = ModuleType("Xlib")
+    xlib.Xatom = SimpleNamespace(WINDOW=1, CARDINAL=2)
+    monkeypatch.setitem(sys.modules, "Xlib", xlib)
+
+    class Window:
+        def get_full_property(self, _atom, _kind):
+            return SimpleNamespace(value=[42])
+
+        def get_wm_name(self):
+            return "Other"
+
+        def get_geometry(self):
+            return SimpleNamespace(width=50, height=40)
+
+    window = Window()
+
+    class Root:
+        def get_full_property(self, atom, _kind):
+            if atom == "_NET_CLIENT_LIST_STACKING":
+                return SimpleNamespace(value=[1])
+            return None
+
+        def translate_coords(self, _window, _x, _y):
+            return SimpleNamespace(x=500, y=600)
+
+    class Connection:
+        def screen(self):
+            return SimpleNamespace(root=Root())
+
+        def intern_atom(self, name, only_if_exists=True):
+            del only_if_exists
+            return name
+
+        def create_resource_object(self, _kind, _xid):
+            return window
+
+    with pytest.raises(GuiUnavailableError, match="Could not map"):
+        linux._x11_match_window(
+            Connection(),
+            {
+                "pid": 42,
+                "title": "Target",
+                "bounds": {"x": 10, "y": 20, "width": 300, "height": 200},
+            },
+        )
 
 
 def test_x11_capture_uses_composite_window_pixmap(tmp_path, monkeypatch):
@@ -2487,8 +2657,10 @@ async def test_wayland_refocuses_target_after_portal_bootstrap(monkeypatch):
     class Portal:
         async def ensure_session(self):
             calls.append("bootstrap")
+            return "session-1"
 
-        async def click(self, *_args, **_kwargs):
+        async def click(self, *_args, **kwargs):
+            assert kwargs["session"] == "session-1"
             calls.append("click")
 
     backend._portal = Portal()
@@ -2830,20 +3002,61 @@ async def test_portal_click_releases_pressed_button_after_release_failure(monkey
     calls = []
     release_failures = {"remaining": 1}
 
-    async def move(_x, _y):
-        return None
+    async def ready():
+        return "session"
 
-    async def button(_button, pressed):
+    async def move(_x, _y, *, session=None):
+        assert session == "session"
+
+    async def button(_button, pressed, *, session=None):
+        assert session == "session"
         calls.append(pressed)
         if not pressed and release_failures["remaining"]:
             release_failures["remaining"] -= 1
             raise RuntimeError("release failed")
 
+    portal._session = "session"
+    portal._remote = object()
+    monkeypatch.setattr(portal, "ensure_session", ready)
     monkeypatch.setattr(portal, "move", move)
     monkeypatch.setattr(portal, "button", button)
     with pytest.raises(RuntimeError, match="release failed"):
         await portal.click(1, 2)
     assert calls == [True, False, False]
+
+
+@pytest.mark.asyncio
+async def test_portal_click_does_not_reopen_session_mid_gesture(monkeypatch):
+    portal = PortalDesktop({})
+    portal._session = "session-1"
+    portal._streams = [
+        {
+            "node_id": 7,
+            "properties": {"position": [0, 0], "size": [100, 100]},
+        }
+    ]
+    ensure_calls = []
+
+    async def ensure():
+        ensure_calls.append(True)
+        return "session-2"
+
+    class Remote:
+        async def call_notify_pointer_motion_absolute(
+            self, session, _options, _stream, _x, _y
+        ):
+            assert session == "session-1"
+            portal._on_session_closed()
+
+        async def call_notify_pointer_button(self, *_args):
+            pytest.fail("button must not be sent after the bound session closes")
+
+    portal._remote = Remote()
+    monkeypatch.setattr(portal, "ensure_session", ensure)
+
+    with pytest.raises(GuiUnavailableError, match="closed during the current gesture"):
+        await portal.click(10, 10, session="session-1")
+    assert ensure_calls == []
 
 
 @pytest.mark.asyncio
@@ -2853,15 +3066,23 @@ async def test_portal_drag_retries_release_after_release_failure(monkeypatch):
     moves = []
     release_failures = {"remaining": 1}
 
-    async def move(x, y):
+    async def ready():
+        return "session"
+
+    async def move(x, y, *, session=None):
+        assert session == "session"
         moves.append((x, y))
 
-    async def button(_button, pressed):
+    async def button(_button, pressed, *, session=None):
+        assert session == "session"
         button_calls.append(pressed)
         if not pressed and release_failures["remaining"]:
             release_failures["remaining"] -= 1
             raise RuntimeError("release failed")
 
+    portal._session = "session"
+    portal._remote = object()
+    monkeypatch.setattr(portal, "ensure_session", ready)
     monkeypatch.setattr(portal, "move", move)
     monkeypatch.setattr(portal, "button", button)
 
@@ -2878,12 +3099,19 @@ async def test_portal_key_chord_releases_every_successfully_pressed_key(monkeypa
     events = []
     fail_once = {"value": True}
 
-    async def key_event(symbol, pressed):
+    async def ready():
+        return "session"
+
+    async def key_event(symbol, pressed, *, session=None):
+        assert session == "session"
         events.append((symbol, pressed))
         if symbol == 0x41 and pressed and fail_once["value"]:
             fail_once["value"] = False
             raise RuntimeError("key down failed")
 
+    portal._session = "session"
+    portal._remote = object()
+    monkeypatch.setattr(portal, "ensure_session", ready)
     monkeypatch.setattr(portal, "_key_event", key_event)
     with pytest.raises(RuntimeError, match="key down failed"):
         await portal.key_chord("CTRL+SHIFT+A")
@@ -2954,7 +3182,7 @@ async def test_portal_pointer_mapping_is_fail_closed_and_right_click_is_right_bu
             calls.append((session, code, state))
 
     async def ready():
-        return None
+        return "session"
 
     portal._remote = Remote()
     portal._session = "session"
@@ -3230,6 +3458,12 @@ def test_atspi_listing_skips_defunct_children(monkeypatch):
     windows = helper._windows()
     assert len(windows) == 1
     assert windows[0][1] is good
+
+
+def test_macos_key_table_includes_physical_backquote():
+    import local_shell_mcp.gui.macos as macos
+
+    assert macos._MAC_KEY_CODES["`"] == 50
 
 
 def test_macos_accessibility_traversal_does_not_fetch_children_after_budget(monkeypatch):

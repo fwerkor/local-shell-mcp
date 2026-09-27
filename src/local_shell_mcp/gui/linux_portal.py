@@ -247,10 +247,10 @@ class PortalDesktop:
         iface = obj.get_interface("org.freedesktop.portal.Session")
         await iface.call_close()
 
-    async def ensure_session(self) -> None:
+    async def ensure_session(self) -> str:
         async with self._lock:
             if self._session is not None:
-                return
+                return self._session
             await self._connect()
             assert self._remote is not None and self._screen is not None
             _MessageBus, Variant = _portal_modules()
@@ -328,6 +328,20 @@ class PortalDesktop:
                 raise GuiUnavailableError(
                     "Wayland portal session closure observation could not be installed"
                 ) from exc
+            if self._session != session:
+                raise GuiUnavailableError("Wayland portal session closed during setup")
+            return session
+
+    def _require_session(self, session: str) -> Any:
+        if not session or self._session != session or self._remote is None:
+            raise GuiUnavailableError("Wayland portal session closed during the current gesture")
+        return self._remote
+
+    async def _bind_session(self, session: str | None) -> str:
+        if session is None:
+            return await self.ensure_session()
+        self._require_session(session)
+        return session
 
     def _stream_point(self, x: int, y: int) -> tuple[int, float, float]:
         if not self._streams:
@@ -352,96 +366,139 @@ class PortalDesktop:
             "Target point is outside the ScreenCast streams granted by the desktop portal"
         )
 
-    async def move(self, x: int, y: int) -> None:
-        await self.ensure_session()
-        assert self._remote is not None and self._session is not None
+    async def move(self, x: int, y: int, *, session: str | None = None) -> None:
+        session = await self._bind_session(session)
+        remote = self._require_session(session)
         stream, local_x, local_y = self._stream_point(x, y)
-        await self._remote.call_notify_pointer_motion_absolute(
-            self._session,
+        await remote.call_notify_pointer_motion_absolute(
+            session,
             {},
             stream,
             local_x,
             local_y,
         )
 
-    async def button(self, button: int, pressed: bool) -> None:
-        await self.ensure_session()
-        assert self._remote is not None and self._session is not None
+    async def button(
+        self,
+        button: int,
+        pressed: bool,
+        *,
+        session: str | None = None,
+    ) -> None:
+        session = await self._bind_session(session)
+        remote = self._require_session(session)
         codes = {1: 0x110, 2: 0x112, 3: 0x111}
         try:
             code = codes[int(button)]
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError(f"Unsupported pointer button: {button}") from exc
-        await self._remote.call_notify_pointer_button(
-            self._session,
+        await remote.call_notify_pointer_button(
+            session,
             {},
             code,
             1 if pressed else 0,
         )
 
-    async def click(self, x: int, y: int, button: int = 1, count: int = 1) -> None:
-        await self.move(x, y)
+    async def click(
+        self,
+        x: int,
+        y: int,
+        button: int = 1,
+        count: int = 1,
+        *,
+        session: str | None = None,
+    ) -> None:
+        session = await self._bind_session(session)
+        await self.move(x, y, session=session)
         for _ in range(max(1, count)):
             pressed = False
             try:
-                await self.button(button, True)
+                await self.button(button, True, session=session)
                 pressed = True
-                await self.button(button, False)
+                await self.button(button, False, session=session)
                 pressed = False
             finally:
                 if pressed:
                     with contextlib.suppress(BaseException):
-                        await asyncio.shield(self.button(button, False))
+                        await asyncio.shield(
+                            self.button(button, False, session=session)
+                        )
 
-    async def drag(self, x: int, y: int, to_x: int, to_y: int) -> None:
-        await self.move(x, y)
+    async def drag(
+        self,
+        x: int,
+        y: int,
+        to_x: int,
+        to_y: int,
+        *,
+        session: str | None = None,
+    ) -> None:
+        session = await self._bind_session(session)
+        await self.move(x, y, session=session)
         pressed = False
         try:
-            await self.button(1, True)
+            await self.button(1, True, session=session)
             pressed = True
-            await self.move(to_x, to_y)
-            await self.button(1, False)
+            await self.move(to_x, to_y, session=session)
+            await self.button(1, False, session=session)
             pressed = False
         finally:
             if pressed:
                 with contextlib.suppress(BaseException):
-                    await asyncio.shield(self.button(1, False))
+                    await asyncio.shield(self.button(1, False, session=session))
 
-    async def scroll(self, x: int, y: int, delta_x: float, delta_y: float) -> None:
-        await self.move(x, y)
-        assert self._remote is not None and self._session is not None
-        await self._remote.call_notify_pointer_axis(
-            self._session,
+    async def scroll(
+        self,
+        x: int,
+        y: int,
+        delta_x: float,
+        delta_y: float,
+        *,
+        session: str | None = None,
+    ) -> None:
+        session = await self._bind_session(session)
+        await self.move(x, y, session=session)
+        remote = self._require_session(session)
+        await remote.call_notify_pointer_axis(
+            session,
             {},
             float(delta_x),
             float(delta_y),
         )
 
-    async def _key_event(self, keysym: int, pressed: bool) -> None:
-        await self.ensure_session()
-        assert self._remote is not None and self._session is not None
-        await self._remote.call_notify_keyboard_keysym(
-            self._session,
+    async def _key_event(
+        self,
+        keysym: int,
+        pressed: bool,
+        *,
+        session: str | None = None,
+    ) -> None:
+        session = await self._bind_session(session)
+        remote = self._require_session(session)
+        await remote.call_notify_keyboard_keysym(
+            session,
             {},
             int(keysym),
             1 if pressed else 0,
         )
 
-    async def type_text(self, text: str) -> None:
+    async def type_text(self, text: str, *, session: str | None = None) -> None:
+        session = await self._bind_session(session)
         for char in text:
             symbol = _keysym("ENTER" if char == "\n" else char)
             pressed = False
             try:
-                await self._key_event(symbol, True)
+                await self._key_event(symbol, True, session=session)
                 pressed = True
-                await self._key_event(symbol, False)
+                await self._key_event(symbol, False, session=session)
                 pressed = False
             finally:
                 if pressed:
                     with contextlib.suppress(Exception):
-                        await self._key_event(symbol, False)
+                        await self._key_event(symbol, False, session=session)
 
-    async def key_chord(self, keys: Any) -> None:
+    async def key_chord(self, keys: Any, *, session: str | None = None) -> None:
+        session = await self._bind_session(session)
         parts = _key_parts(keys)
         modifiers = []
         ordinary = []
@@ -457,17 +514,17 @@ class PortalDesktop:
         pressed: list[int] = []
         try:
             for symbol in modifiers:
-                await self._key_event(symbol, True)
+                await self._key_event(symbol, True, session=session)
                 pressed.append(symbol)
             ordinary_symbol = ordinary[0]
-            await self._key_event(ordinary_symbol, True)
+            await self._key_event(ordinary_symbol, True, session=session)
             pressed.append(ordinary_symbol)
-            await self._key_event(ordinary_symbol, False)
+            await self._key_event(ordinary_symbol, False, session=session)
             pressed.pop()
         finally:
             for symbol in reversed(pressed):
                 with contextlib.suppress(Exception):
-                    await self._key_event(symbol, False)
+                    await self._key_event(symbol, False, session=session)
 
 
 async def portal_screenshot(destination: Path, env: dict[str, str]) -> None:
