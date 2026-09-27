@@ -91,6 +91,7 @@ export function RemotesScreen({
   const refreshRequest = useRef(0)
   const detailsScrollRef = useRef<ScrollBoxRenderable | null>(null)
   const refreshController = useRef<AbortController | null>(null)
+  const resetRequestInFlight = useRef(false)
   const current = machines[selected]
   const compact = width < 92
   const { rows, start } = useVisibleRows(machines, selected, Math.max(5, height - (compact ? 21 : 13)))
@@ -213,15 +214,20 @@ export function RemotesScreen({
     }
     if (dialog.type === "reset") {
       if (key.name === "escape" || key.name === "n") setDialog({ type: "none" })
-      if (key.name === "y" || key.name === "return") {
+      if ((key.name === "y" || key.name === "return") && !resetRequestInFlight.current) {
+        const machine = dialog.machine.name
+        resetRequestInFlight.current = true
+        setDialog({ type: "none" })
         void api
-          .remoteAction<{ cancelled_jobs?: number; preserved_jobs?: number }>("reset", { machine: dialog.machine.name })
+          .remoteAction<{ cancelled_jobs?: number; preserved_jobs?: number }>("reset", { machine })
           .then(async (result) => {
-            setDialog({ type: "none" })
-            setStatus(`Reset ${dialog.machine.name}; cancelled ${String(result.cancelled_jobs ?? 0)} request(s), preserved ${String(result.preserved_jobs ?? 0)} protected operation(s)`)
+            setStatus(`Reset ${machine}; cancelled ${String(result.cancelled_jobs ?? 0)} request(s), preserved ${String(result.preserved_jobs ?? 0)} protected operation(s)`)
             await refresh(true)
           })
           .catch((error) => setStatus(`Reset: ${formatError(error)}`))
+          .finally(() => {
+            resetRequestInFlight.current = false
+          })
       }
       return
     }

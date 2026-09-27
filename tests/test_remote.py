@@ -771,6 +771,28 @@ async def test_remote_heartbeat_refreshes_worker_last_seen(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_remote_heartbeat_rejects_job_missing_from_pending_state(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    manager = remote.RemoteManager()
+    manager._registry_loaded = True
+    worker = remote.RemoteWorker(name="worker-a", token="token-a", last_seen=1)
+    manager.workers[worker.name] = worker
+    manager.tokens[worker.token] = worker.name
+    manager.cancelled_jobs.clear()
+
+    result = await manager.heartbeat(worker.token, {"job_id": "job-reset-long-ago"})
+
+    assert result == {
+        "accepted": False,
+        "name": "worker-a",
+        "reset_generation": 0,
+        "cancelled": True,
+    }
+
+
+@pytest.mark.asyncio
 async def test_remote_reset_clears_both_queues_and_cancels_claimed_job(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))

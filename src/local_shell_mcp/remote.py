@@ -870,11 +870,14 @@ class RemoteManager:
             worker.last_seen = _utc()
             name = worker.name
             self._prune_cancelled_jobs_locked()
-            cancelled = bool(job_id and job_id in self.cancelled_jobs)
+            assigned_machine = self.pending_machines.get(job_id) if job_id else None
+            cancelled = bool(
+                job_id
+                and (job_id in self.cancelled_jobs or assigned_machine != worker.name)
+            )
             reset_generation = worker.reset_generation
             start_preserved = False
             if starting and job_id:
-                assigned_machine = self.pending_machines.get(job_id)
                 tool = self.pending_tools.get(job_id)
                 already_started = job_id in self.started_jobs
                 start_preserved = (
@@ -886,7 +889,6 @@ class RemoteManager:
                 )
                 if (
                     job_id not in self.claimed_jobs
-                    or assigned_machine != worker.name
                     or (generation_changed and not start_preserved)
                 ):
                     cancelled = True
