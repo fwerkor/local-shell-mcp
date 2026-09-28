@@ -2039,13 +2039,19 @@ def test_windows_snapshot_revalidates_native_identity_after_capture(tmp_path, mo
         def GetChildren(self):
             return []
 
+        def GetNextSiblingControl(self):
+            return None
+
     original = Control()
     replacement = Control()
     monkeypatch.setattr(windows, "_is_iconic_window", lambda _handle: False)
 
     class Root:
+        def GetFirstChildControl(self):
+            return replacement
+
         def GetChildren(self):
-            return [replacement]
+            raise AssertionError("window lookup must stay lazy")
 
     class Auto:
         @staticmethod
@@ -2532,7 +2538,7 @@ def test_windows_control_mouse_fallback_focuses_verified_window(monkeypatch):
     result = backend._perform_action_sync(
         {"id": "hwnd:1:fingerprint", "bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
         {"path": [0], "fingerprint": "observed"},
-        {"type": "click"},
+        {"type": "click", "_focus_prepared": True},
     )
     assert result == {"semantic": True, "method": "control"}
     assert calls == [("focus",), ("click", 0)]
@@ -3105,6 +3111,36 @@ async def test_gui_frame_does_not_allocate_model_state(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_gui_frame_capacity_preserves_unexpired_observation_ttl(
+    tmp_path,
+    monkeypatch,
+):
+    import local_shell_mcp.gui.base as base
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(base, "GUI_STATE_CACHE_LIMIT", 2)
+    manager = GuiManager(FakeBackend())
+
+    first = await manager.frame("window:1")
+    second = await manager.frame("window:1")
+    first_path = Path(first["screenshot_path"])
+    second_path = Path(second["screenshot_path"])
+    try:
+        with pytest.raises(GuiUnavailableError, match="Too many active GUI frame observations"):
+            await manager.frame("window:1")
+        assert first["observation_id"] in manager._frame_observations
+        assert second["observation_id"] in manager._frame_observations
+        refreshed = await manager.refresh_frame_observation(
+            "window:1",
+            first["observation_id"],
+        )
+        assert refreshed["observation_ttl_s"] == base.GUI_STATE_TTL_S
+    finally:
+        first_path.unlink(missing_ok=True)
+        second_path.unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
 async def test_gui_human_action_uses_native_identity_from_displayed_frame(
     tmp_path,
     monkeypatch,
@@ -3640,6 +3676,8 @@ def test_x11_capture_uses_composite_window_pixmap(tmp_path, monkeypatch):
             calls.append(("free",))
 
     class Window:
+        id = 77
+
         def get_geometry(self):
             return SimpleNamespace(width=4, height=3)
 
@@ -3667,6 +3705,9 @@ def test_x11_capture_uses_composite_window_pixmap(tmp_path, monkeypatch):
             assert atom == 99
             return SimpleNamespace(id=123)
 
+        def screen(self):
+            return SimpleNamespace(root=object())
+
         def close(self):
             calls.append(("close",))
 
@@ -3675,7 +3716,13 @@ def test_x11_capture_uses_composite_window_pixmap(tmp_path, monkeypatch):
     xlib.X = SimpleNamespace(ZPixmap=2)
     xlib.display = SimpleNamespace(Display=lambda _display: connection)
     monkeypatch.setitem(sys.modules, "Xlib", xlib)
-    monkeypatch.setattr(linux, "_x11_match_window", lambda _connection, _record: Window())
+    window = Window()
+    monkeypatch.setattr(linux, "_x11_match_window", lambda _connection, _record: window)
+    monkeypatch.setattr(
+        linux,
+        "_x11_window_geometry",
+        lambda _window, _root: {"x": 10, "y": 20, "width": 4, "height": 3},
+    )
     monkeypatch.setattr(
         linux,
         "_x11_pixmap_to_image",
@@ -3685,7 +3732,12 @@ def test_x11_capture_uses_composite_window_pixmap(tmp_path, monkeypatch):
     path = tmp_path / "window.png"
     linux._capture_x11_window_sync(
         path,
-        {"id": "atspi:1:0:sig", "pid": 1, "title": "Window", "bounds": {}},
+        {
+            "id": "atspi:1:0:sig",
+            "pid": 1,
+            "title": "Window",
+            "bounds": {"x": 10, "y": 20, "width": 4, "height": 3},
+        },
         {"DISPLAY": ":0"},
     )
     assert path.is_file()
@@ -3693,6 +3745,80 @@ def test_x11_capture_uses_composite_window_pixmap(tmp_path, monkeypatch):
     assert any(call[0] == "get_image" for call in calls)
     assert ("free",) in calls
     assert calls[-1] == ("close",)
+
+
+def test_x11_capture_revalidates_target_after_pixmap_read(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    class Pixmap:
+        def get_image(self, *_args):
+            return object()
+
+        def free(self):
+            return None
+
+    class Window:
+        id = 77
+
+        def get_geometry(self):
+            return SimpleNamespace(width=4, height=3)
+
+        def get_attributes(self):
+            return SimpleNamespace(visual=7)
+
+        def composite_name_window_pixmap(self):
+            return Pixmap()
+
+    class Connection:
+        def has_extension(self, _name):
+            return True
+
+        def get_default_screen(self):
+            return 0
+
+        def intern_atom(self, _name, only_if_exists=True):
+            del only_if_exists
+            return 99
+
+        def get_selection_owner(self, _atom):
+            return SimpleNamespace(id=123)
+
+        def screen(self):
+            return SimpleNamespace(root=object())
+
+        def close(self):
+            return None
+
+    connection = Connection()
+    xlib = ModuleType("Xlib")
+    xlib.X = SimpleNamespace(ZPixmap=2)
+    xlib.display = SimpleNamespace(Display=lambda _display: connection)
+    monkeypatch.setitem(sys.modules, "Xlib", xlib)
+    window = Window()
+    monkeypatch.setattr(linux, "_x11_match_window", lambda _connection, _record: window)
+    monkeypatch.setattr(
+        linux,
+        "_x11_pixmap_to_image",
+        lambda *_args, **_kwargs: Image.new("RGB", (4, 3)),
+    )
+    monkeypatch.setattr(
+        linux,
+        "_x11_window_geometry",
+        lambda _window, _root: {"x": 30, "y": 20, "width": 4, "height": 3},
+    )
+
+    with pytest.raises(GuiUnavailableError, match="moved or resized during capture"):
+        linux._capture_x11_window_sync(
+            tmp_path / "moved.png",
+            {
+                "id": "atspi:1:0:sig",
+                "pid": 1,
+                "title": "Window",
+                "bounds": {"x": 10, "y": 20, "width": 4, "height": 3},
+            },
+            {"DISPLAY": ":0"},
+        )
+    assert not (tmp_path / "moved.png").exists()
 
 
 def test_x11_capture_fails_closed_without_compositor(tmp_path, monkeypatch):
@@ -4643,6 +4769,42 @@ def test_atspi_snapshot_bounds_direct_child_provider_calls(monkeypatch):
     assert child_calls == [0, 1]
 
 
+def test_atspi_element_signature_bounds_provider_role_and_name(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    huge = "x" * (helper.GUI_MAX_ELEMENT_TEXT_BYTES * 100)
+    hashed = []
+
+    class Node:
+        def get_accessible_id(self):
+            return "stable-id"
+
+        def get_role_name(self):
+            return huge
+
+        def get_name(self):
+            return huge
+
+    class Digest:
+        def hexdigest(self):
+            return "a" * 64
+
+    def sha256(data):
+        hashed.append(data)
+        return Digest()
+
+    monkeypatch.setattr(helper.hashlib, "sha256", sha256)
+    monkeypatch.setattr(
+        helper,
+        "_bounds",
+        lambda _obj: {"x": 1, "y": 2, "width": 3, "height": 4},
+    )
+
+    assert helper._element_signature(Node()) == "a" * 16
+    assert len(hashed) == 1
+    assert len(hashed[0]) <= helper.GUI_MAX_ELEMENT_TEXT_BYTES * 3 + 128
+
+
 def test_atspi_element_locator_requires_stable_accessible_identity(monkeypatch):
     from local_shell_mcp.gui import linux_atspi_helper as helper
 
@@ -4874,6 +5036,54 @@ async def test_portal_connect_failure_does_not_poison_cached_connection(monkeypa
     assert portal._bus is attempts[1]
     assert portal._remote == "org.freedesktop.portal.RemoteDesktop"
     assert portal._screen == "org.freedesktop.portal.ScreenCast"
+
+
+@pytest.mark.asyncio
+async def test_portal_connect_and_introspection_are_bounded(monkeypatch):
+    import local_shell_mcp.gui.linux_portal as linux_portal
+
+    monkeypatch.setattr(linux_portal, "_PORTAL_LIFECYCLE_TIMEOUT_S", 0.01)
+
+    class HangingBus:
+        def __init__(self, *, hang_on_connect):
+            self.hang_on_connect = hang_on_connect
+            self.disconnected = False
+
+        async def connect(self):
+            if self.hang_on_connect:
+                await asyncio.Event().wait()
+            return self
+
+        async def introspect(self, *_args):
+            await asyncio.Event().wait()
+
+        def disconnect(self):
+            self.disconnected = True
+
+    created = []
+
+    class MessageBus:
+        def __init__(self, **_kwargs):
+            bus = HangingBus(hang_on_connect=not created)
+            created.append(bus)
+            self._bus = bus
+
+        async def connect(self):
+            return await self._bus.connect()
+
+        def disconnect(self):
+            self._bus.disconnect()
+
+    monkeypatch.setattr(linux_portal, "_portal_modules", lambda: (MessageBus, object))
+    portal = PortalDesktop({})
+
+    with pytest.raises(GuiUnavailableError, match="connecting to D-Bus"):
+        await portal._connect()
+    assert created[0].disconnected is True
+
+    with pytest.raises(GuiUnavailableError, match="introspecting the desktop portal"):
+        await portal._connect()
+    assert created[1].disconnected is True
 
 
 @pytest.mark.asyncio
@@ -6091,23 +6301,48 @@ async def test_macos_snapshot_marks_unresolved_ax_window_non_interactive(
     monkeypatch,
 ):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    import local_shell_mcp.gui.macos as macos
+
     backend = MacOSGuiBackend()
     record = {
         "id": "cg:7",
         "pid": 42,
         "title": "Ambiguous",
+        "app": "Editor",
         "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
-        "_ax_identity_required": True,
     }
+
+    class AX:
+        @staticmethod
+        def AXIsProcessTrusted():
+            return True
+
+    monkeypatch.setattr(macos, "_native", lambda: (AX, object()))
+    monkeypatch.setattr(backend, "_find_record", lambda _window_id: dict(record))
+    monkeypatch.setattr(backend, "_find_ax_window", lambda _record: None)
+    observed, trusted, elements, locators = backend._snapshot_accessibility_sync(
+        "cg:7",
+        include_elements=False,
+        max_elements=1,
+        max_depth=1,
+    )
+    assert trusted is True
+    assert observed["_ax_identity_required"] is False
     monkeypatch.setattr(
         backend,
         "_snapshot_accessibility_sync",
-        lambda *_args, **_kwargs: (record, True, [], {}),
+        lambda *_args, **_kwargs: (observed, trusted, elements, locators),
     )
 
+    def capture(argv, **_kwargs):
+        Image.new("RGB", (100, 100)).save(Path(argv[-1]), format="PNG")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(macos.subprocess, "run", capture)
+    screenshot_path = tmp_path / "view-only.png"
     snapshot = await backend.snapshot(
         "cg:7",
-        screenshot_path=None,
+        screenshot_path=screenshot_path,
         include_elements=False,
         max_elements=1,
         max_depth=1,
@@ -6117,6 +6352,7 @@ async def test_macos_snapshot_marks_unresolved_ax_window_non_interactive(
     assert snapshot.capabilities["coordinate_input"] is False
     assert snapshot.capabilities["semantic_actions"] is False
     assert snapshot.capabilities["accessibility_permission_required"] is False
+    assert screenshot_path.is_file()
 
 
 @pytest.mark.asyncio
@@ -6450,7 +6686,8 @@ def test_macos_drag_failure_releases_pressed_mouse_button(monkeypatch):
             return True
 
         @staticmethod
-        def AXUIElementSetAttributeValue(*_args):
+        def AXUIElementSetAttributeValue(target, attribute, value):
+            calls.append(("focus", target, attribute, value))
             return 0
 
         @staticmethod
@@ -6484,9 +6721,17 @@ def test_macos_drag_failure_releases_pressed_mouse_button(monkeypatch):
         backend._perform_action_sync(
             window,
             None,
-            {"type": "drag", "x": 1, "y": 2, "to_x": 30, "to_y": 40},
+            {
+                "type": "drag",
+                "x": 1,
+                "y": 2,
+                "to_x": 30,
+                "to_y": 40,
+                "_focus_prepared": True,
+            },
         )
-    assert calls == [
+    assert calls[0] == ("focus", "ax-window", "focused", True)
+    assert calls[1:] == [
         (Quartz.kCGEventLeftMouseDown, 1, 2),
         (Quartz.kCGEventLeftMouseDragged, 30, 40),
         (Quartz.kCGEventLeftMouseUp, 1, 2),
@@ -6620,6 +6865,7 @@ def test_windows_window_id_ignores_mutable_title(monkeypatch):
 
     first = Control("Document A")
     second = Control("Document A *")
+    second.GetNextSiblingControl = lambda: None
     first_record = windows._window_record(first)
     second_record = windows._window_record(second)
     assert first_record is not None
@@ -6627,8 +6873,11 @@ def test_windows_window_id_ignores_mutable_title(monkeypatch):
     assert first_record["id"] == second_record["id"]
 
     class Root:
+        def GetFirstChildControl(self):
+            return second
+
         def GetChildren(self):
-            return [second]
+            raise AssertionError("window lookup must stay lazy")
 
     class Auto:
         def GetRootControl(self):
@@ -6664,13 +6913,17 @@ def test_windows_window_id_rejects_reused_hwnd(monkeypatch):
     assert record is not None
 
     replacement = Control()
+    replacement.GetNextSiblingControl = lambda: None
     replacement.ProcessId = 202
     replacement.Name = "Document B"
     replacement.GetRuntimeId = lambda: [9, 9, 9]
 
     class Root:
+        def GetFirstChildControl(self):
+            return replacement
+
         def GetChildren(self):
-            return [replacement]
+            raise AssertionError("window lookup must stay lazy")
 
     class Auto:
         def GetRootControl(self):
@@ -6705,13 +6958,17 @@ def test_windows_window_id_rejects_same_fingerprint_reused_hwnd(monkeypatch):
 
     original = Control()
     replacement = Control()
+    replacement.GetNextSiblingControl = lambda: None
     monkeypatch.setattr(windows, "_is_iconic_window", lambda _handle: False)
     record = windows._window_record(original)
     assert record is not None
 
     class Root:
+        def GetFirstChildControl(self):
+            return replacement
+
         def GetChildren(self):
-            return [replacement]
+            raise AssertionError("window lookup must stay lazy")
 
     class Auto:
         @staticmethod

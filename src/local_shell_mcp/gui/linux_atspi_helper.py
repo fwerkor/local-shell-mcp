@@ -271,11 +271,17 @@ def _element_signature(obj: Any) -> str | None:
     if accessible_id is None:
         return None
     try:
-        role = str(obj.get_role_name() or "")
+        role = _truncate_text(
+            obj.get_role_name(),
+            GUI_MAX_ELEMENT_TEXT_BYTES,
+        )
     except Exception:
         role = ""
     try:
-        name = str(obj.get_name() or "")
+        name = _truncate_text(
+            obj.get_name(),
+            GUI_MAX_ELEMENT_TEXT_BYTES,
+        )
     except Exception:
         name = ""
     bounds = _bounds(obj)

@@ -627,6 +627,32 @@ def _capture_x11_window_sync(
             height=height,
             visual_id=visual_id,
         )
+        current_window = _x11_match_window(connection, record)
+        if int(getattr(current_window, "id", 0) or 0) != int(
+            getattr(window, "id", 0) or 0
+        ):
+            raise GuiUnavailableError(
+                "X11 target window identity changed during capture"
+            )
+        current_bounds = _x11_window_geometry(
+            current_window,
+            connection.screen().root,
+        )
+        expected_bounds = record.get("bounds")
+        if (
+            not isinstance(expected_bounds, dict)
+            or any(
+                abs(
+                    int(current_bounds.get(key, 0))
+                    - int(expected_bounds.get(key, 0))
+                )
+                > 3
+                for key in ("x", "y", "width", "height")
+            )
+        ):
+            raise GuiUnavailableError(
+                "X11 target window moved or resized during capture"
+            )
         image.save(path, "PNG")
     except GuiUnavailableError:
         raise

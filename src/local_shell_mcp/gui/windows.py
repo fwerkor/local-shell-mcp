@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 import threading
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
@@ -331,6 +332,18 @@ def _same_uia_control(observed: Any, current: Any) -> bool:
         return False
 
 
+def _iter_root_children(root: Any) -> Iterator[Any]:
+    control = root.GetFirstChildControl()
+    scanned = 0
+    while control is not None and scanned < GUI_MAX_WINDOWS * 4:
+        scanned += 1
+        yield control
+        try:
+            control = control.GetNextSiblingControl()
+        except Exception:  # noqa: BLE001 - broken provider sibling traversal.
+            break
+
+
 def _element_fingerprint(control: Any) -> str:
     bounds = _rect_dict(_safe_property(control, "BoundingRectangle"))
     fields = [
@@ -477,7 +490,7 @@ class WindowsGuiBackend:
         wanted = int(parts[1])
         expected_fingerprint = parts[2]
         root = _automation().GetRootControl()
-        for control in root.GetChildren():
+        for control in _iter_root_children(root):
             if int(_safe_property(control, "NativeWindowHandle", 0) or 0) != wanted:
                 continue
             if _window_fingerprint(control) != expected_fingerprint:
@@ -535,10 +548,7 @@ class WindowsGuiBackend:
         windows = []
         used_bytes = 2
         root = auto.GetRootControl()
-        control = root.GetFirstChildControl()
-        scanned = 0
-        while control is not None and scanned < GUI_MAX_WINDOWS * 4:
-            scanned += 1
+        for control in _iter_root_children(root):
             try:
                 record = _window_record(control)
             except Exception:  # noqa: BLE001 - skip broken third-party UIA providers.
@@ -563,10 +573,6 @@ class WindowsGuiBackend:
                 used_bytes += extra
                 if len(windows) >= GUI_MAX_WINDOWS:
                     break
-            try:
-                control = control.GetNextSiblingControl()
-            except Exception:  # noqa: BLE001 - broken provider sibling traversal.
-                break
         return {
             "backend": self.name,
             "platform": "windows",
@@ -759,8 +765,7 @@ class WindowsGuiBackend:
                     pattern.Invoke()
                     return {"semantic": True, "method": "invoke"}
             target_window = self._find_window(str(window["id"]), window)
-            if not action.get("_focus_prepared"):
-                target_window.SetFocus()
+            target_window.SetFocus()
             self._screen_point(window, {}, locator)
             if kind == "click":
                 locator.Click(waitTime=0)
@@ -771,7 +776,10 @@ class WindowsGuiBackend:
             return {"semantic": True, "method": "control"}
 
         target_window = self._find_window(str(window["id"]), window)
-        if not action.get("_focus_prepared"):
+        if (
+            kind in {"click", "double_click", "right_click", "move", "scroll", "drag"}
+            or not action.get("_focus_prepared")
+        ):
             target_window.SetFocus()
 
         if kind == "type":

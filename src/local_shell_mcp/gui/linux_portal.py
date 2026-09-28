@@ -12,6 +12,19 @@ from urllib.request import url2pathname
 from .base import GuiUnavailableError
 
 _PORTAL_INPUT_TIMEOUT_S = 15.0
+_PORTAL_LIFECYCLE_TIMEOUT_S = 15.0
+
+
+async def _portal_lifecycle_wait(awaitable: Any, operation: str) -> Any:
+    try:
+        return await asyncio.wait_for(
+            awaitable,
+            timeout=_PORTAL_LIFECYCLE_TIMEOUT_S,
+        )
+    except TimeoutError as exc:
+        raise GuiUnavailableError(
+            f"Timed out while {operation} on the desktop portal"
+        ) from exc
 
 
 def _portal_modules():  # noqa: ANN202
@@ -178,10 +191,16 @@ class PortalDesktop:
         candidate = MessageBus(bus_address=address) if address else MessageBus()
         connected = None
         try:
-            connected = await candidate.connect()
-            intro = await connected.introspect(
-                "org.freedesktop.portal.Desktop",
-                "/org/freedesktop/portal/desktop",
+            connected = await _portal_lifecycle_wait(
+                candidate.connect(),
+                "connecting to D-Bus",
+            )
+            intro = await _portal_lifecycle_wait(
+                connected.introspect(
+                    "org.freedesktop.portal.Desktop",
+                    "/org/freedesktop/portal/desktop",
+                ),
+                "introspecting the desktop portal",
             )
             obj = connected.get_proxy_object(
                 "org.freedesktop.portal.Desktop",
@@ -191,9 +210,8 @@ class PortalDesktop:
             remote = obj.get_interface("org.freedesktop.portal.RemoteDesktop")
             screen = obj.get_interface("org.freedesktop.portal.ScreenCast")
         except BaseException:
-            if connected is not None:
-                with contextlib.suppress(Exception):
-                    connected.disconnect()
+            with contextlib.suppress(Exception):
+                (connected or candidate).disconnect()
             raise
         self._bus = connected
         self._remote = remote
@@ -252,9 +270,12 @@ class PortalDesktop:
     async def _observe_session_closed(self, session: str) -> None:
         if self._bus is None:
             return
-        intro = await self._bus.introspect(
-            "org.freedesktop.portal.Desktop",
-            session,
+        intro = await _portal_lifecycle_wait(
+            self._bus.introspect(
+                "org.freedesktop.portal.Desktop",
+                session,
+            ),
+            "introspecting the portal session",
         )
         obj = self._bus.get_proxy_object(
             "org.freedesktop.portal.Desktop",
@@ -274,9 +295,12 @@ class PortalDesktop:
     async def _close_session(self, session: str) -> None:
         if self._bus is None:
             return
-        intro = await self._bus.introspect(
-            "org.freedesktop.portal.Desktop",
-            session,
+        intro = await _portal_lifecycle_wait(
+            self._bus.introspect(
+                "org.freedesktop.portal.Desktop",
+                session,
+            ),
+            "introspecting the portal session",
         )
         obj = self._bus.get_proxy_object(
             "org.freedesktop.portal.Desktop",
@@ -284,7 +308,10 @@ class PortalDesktop:
             intro,
         )
         iface = obj.get_interface("org.freedesktop.portal.Session")
-        await iface.call_close()
+        await _portal_lifecycle_wait(
+            iface.call_close(),
+            "closing the portal session",
+        )
 
     async def ensure_session(self) -> str:
         async with self._lock:
@@ -581,12 +608,23 @@ class PortalDesktop:
 async def portal_screenshot(destination: Path, env: dict[str, str]) -> None:
     MessageBus, Variant = _portal_modules()
     address = env.get("DBUS_SESSION_BUS_ADDRESS")
-    bus = MessageBus(bus_address=address) if address else MessageBus()
-    bus = await bus.connect()
+    candidate = MessageBus(bus_address=address) if address else MessageBus()
     try:
-        intro = await bus.introspect(
-            "org.freedesktop.portal.Desktop",
-            "/org/freedesktop/portal/desktop",
+        bus = await _portal_lifecycle_wait(
+            candidate.connect(),
+            "connecting to D-Bus",
+        )
+    except BaseException:
+        with contextlib.suppress(Exception):
+            candidate.disconnect()
+        raise
+    try:
+        intro = await _portal_lifecycle_wait(
+            bus.introspect(
+                "org.freedesktop.portal.Desktop",
+                "/org/freedesktop/portal/desktop",
+            ),
+            "introspecting the screenshot portal",
         )
         obj = bus.get_proxy_object(
             "org.freedesktop.portal.Desktop",

@@ -582,18 +582,17 @@ class GuiManager:
             now = time.monotonic()
             async with self._lock:
                 self._prune_locked(now)
+                if len(self._frame_observations) >= GUI_STATE_CACHE_LIMIT:
+                    raise GuiUnavailableError(
+                        "Too many active GUI frame observations; "
+                        "retry after an existing observation expires"
+                    )
                 self._frame_observations[observation_id] = _StateRecord(
                     state_id=observation_id,
                     window=dict(snapshot.window),
                     locators={},
                     created_at=now,
                 )
-                while len(self._frame_observations) > GUI_STATE_CACHE_LIMIT:
-                    oldest = min(
-                        self._frame_observations.values(),
-                        key=lambda item: item.created_at,
-                    )
-                    self._frame_observations.pop(oldest.state_id, None)
             keep_file = True
             return {
                 "backend": self._backend.name,

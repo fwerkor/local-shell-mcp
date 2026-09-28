@@ -388,9 +388,11 @@ class MacOSGuiBackend:
         locators: dict[str, Any] = {}
 
         ax_window = self._find_ax_window(record) if trusted else None
-        record["_ax_identity_required"] = trusted
         if ax_window is not None:
+            record["_ax_identity_required"] = True
             record["_ax_window"] = ax_window
+        else:
+            record["_ax_identity_required"] = False
         if include_elements and ax_window is not None:
             queue: list[tuple[Any, int, list[int]]] = [(ax_window, 0, [])]
             used_bytes = 2
@@ -577,7 +579,15 @@ class MacOSGuiBackend:
             if int(error) == 0:
                 return {"semantic": True, "method": "AXPress"}
 
-        if not action.get("_focus_prepared"):
+        requires_native_focus = kind in {
+            "click",
+            "double_click",
+            "right_click",
+            "move",
+            "scroll",
+            "drag",
+        }
+        if requires_native_focus or not action.get("_focus_prepared"):
             ax_window = self._find_ax_window(current_window)
             if ax_window is None:
                 raise RuntimeError("Could not resolve the target AX window unambiguously")
