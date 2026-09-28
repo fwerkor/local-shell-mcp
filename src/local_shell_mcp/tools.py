@@ -460,6 +460,15 @@ def _oauth_meta(scopes: list[str]) -> dict[str, Any]:
     return _security_meta([_oauth_security_scheme(scopes)])
 
 
+def _current_principal_allows(scope: str) -> bool:
+    principal = current_principal()
+    if principal is None:
+        return True
+    if principal.claims.get("auth") in {"none", "native-tui", "localhost-bypass"}:
+        return True
+    return scope in principal_scopes(principal)
+
+
 def _live_workspace_api_base() -> str:
     settings = get_settings()
     if settings.public_base_url:
@@ -3655,10 +3664,20 @@ def _register_gui_tools(
     async def gui_list(machine: str | None = None) -> ToolResult:
         """List visible desktop application windows and GUI backend capabilities locally or remotely."""
         if machine:
-            return await _remote_call(settings, machine, "gui_list", {}, 210)
+            return await _remote_call(
+                settings,
+                machine,
+                "gui_list",
+                {
+                    "_allow_dependency_install": _current_principal_allows(
+                        "shell:execute"
+                    )
+                },
+                210,
+            )
         return await _tool_call(get_gui_manager().list_windows)
 
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
+    @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def gui_state(
         window_id: str,
         screenshot: bool = True,
@@ -3668,6 +3687,7 @@ def _register_gui_tools(
         machine: str | None = None,
     ) -> GuiStateResult:
         """Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized."""
+        require_current_scopes(("shell:read", "shell:execute"))
         return cast(
             GuiStateResult,
             await _gui_state_result(

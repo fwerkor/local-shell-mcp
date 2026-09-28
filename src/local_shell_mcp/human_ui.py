@@ -28,7 +28,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from . import __version__
 from .audit import get_audit_entry, query_audit, suppress_audit
-from .auth import Principal, require_scopes, verify_request
+from .auth import Principal, principal_scopes, require_scopes, verify_request
 from .fs_ops import (
     FileConflictError,
     delete_path,
@@ -347,6 +347,13 @@ def _require_ui_scopes(
     if machine and machine != "local":
         required.append("remote:use")
     require_scopes(_request_principal(request), required)
+
+
+def _ui_principal_allows(request: Request, scope: str) -> bool:
+    principal = _request_principal(request)
+    if principal.claims.get("auth") in {"none", "native-tui", "localhost-bypass"}:
+        return True
+    return scope in principal_scopes(principal)
 
 
 def _live_channel_id(request: Request) -> str | None:
@@ -1133,11 +1140,21 @@ async def api_gui_windows(request: Request) -> Response:
         _require_ui_scopes(request, "shell:read", machine=machine)
         from .gui import get_gui_manager
 
+        remote_args = (
+            {
+                "_allow_dependency_install": _ui_principal_allows(
+                    request,
+                    "shell:execute",
+                )
+            }
+            if machine != "local"
+            else {}
+        )
         payload = await _machine_dispatch(
             machine,
             get_gui_manager().list_windows,
             "gui_list",
-            {},
+            remote_args,
             210,
         )
         if not isinstance(payload, dict):
@@ -1151,7 +1168,12 @@ async def api_gui_frame(request: Request) -> Response:
     machine = str(request.query_params.get("machine") or "local")
     window_id = str(request.query_params.get("window_id") or "")
     try:
-        _require_ui_scopes(request, "shell:read", machine=machine)
+        _require_ui_scopes(
+            request,
+            "shell:read",
+            "shell:execute",
+            machine=machine,
+        )
         if machine == "local" and get_settings().disable_local:
             raise RuntimeError("Local access is disabled; select a remote machine")
         if not window_id:

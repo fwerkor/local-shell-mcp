@@ -456,13 +456,12 @@ def _x11_match_window(connection: Any, record: dict[str, Any]) -> Any:
                 delta <= 3 for delta in geometry_deltas
             )
             title_match = bool(expected_title) and title == expected_title
-            if not title_match and not geometry_match:
+            if not geometry_match:
                 continue
             candidates.append(
                 (
                     (
                         0 if title_match else 1,
-                        0 if geometry_match else 1,
                         geometry_delta,
                     ),
                     window,

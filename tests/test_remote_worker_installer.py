@@ -343,6 +343,33 @@ def test_gui_dependency_bootstrap_installs_missing_modules(tmp_path, monkeypatch
     assert captured["kwargs"]["timeout"] == 180
 
 
+def test_gui_dependency_read_only_check_never_installs_missing_modules(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(installer.sys, "platform", "win32")
+    monkeypatch.setattr(installer.sys, "path", list(installer.sys.path))
+    monkeypatch.setenv("PYTHONPATH", "")
+
+    def missing(name):
+        raise ImportError(name)
+
+    monkeypatch.setattr(installer.importlib, "import_module", missing)
+    monkeypatch.setattr(
+        installer.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail(
+            "read-only dependency checks must not invoke pip"
+        ),
+    )
+
+    result = installer.ensure_gui_dependencies(install_missing=False)
+
+    assert result["available"] is False
+    assert result["installed"] is False
+    assert result["missing"] == ["uiautomation"]
+    assert "execute-authorized" in result["error"]
+    assert not installer.worker_dependency_dir().exists()
+
+
 def test_gui_dependency_bootstrap_failure_is_nonfatal_status(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setattr(installer.sys, "platform", "darwin")

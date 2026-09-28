@@ -2509,16 +2509,29 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
                 "No graphical Linux session was found; GUI dependencies were not installed"
             )
 
-    dependency_status = await asyncio.to_thread(
-        ensure_gui_dependencies,
-        session_type,
-    )
-    if not dependency_status.get("available"):
-        missing = ", ".join(dependency_status.get("missing") or []) or "GUI dependencies"
-        raise GuiUnavailableError(
-            f"{missing} unavailable for native GUI automation: "
-            f"{dependency_status.get('error') or 'installation failed'}"
+    allow_dependency_install = bool(args.pop("_allow_dependency_install", False))
+    if tool in {"gui_state", "gui_frame", "gui_human_action", "gui_action"}:
+        allow_dependency_install = True
+
+    dependency_check_required = tool != "gui_state_refresh"
+    if sys.platform == "linux" and (
+        tool == "gui_list"
+        or (tool == "gui_state" and not bool(args.get("screenshot", True)))
+    ):
+        dependency_check_required = False
+
+    if dependency_check_required:
+        dependency_status = await asyncio.to_thread(
+            ensure_gui_dependencies,
+            session_type,
+            install_missing=allow_dependency_install,
         )
+        if not dependency_status.get("available"):
+            missing = ", ".join(dependency_status.get("missing") or []) or "GUI dependencies"
+            raise GuiUnavailableError(
+                f"{missing} unavailable for native GUI automation: "
+                f"{dependency_status.get('error') or 'installation failed'}"
+            )
 
 
     manager = get_gui_manager()

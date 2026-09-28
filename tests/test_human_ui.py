@@ -87,6 +87,28 @@ def test_trusted_local_ui_maps_logical_session_subject_for_listing_and_creation(
     assert _logical_session_subject(request, create=True) == "local-mcp-client"
 
 
+def test_ui_gui_dependency_bootstrap_requires_execute_scope(monkeypatch):
+    import local_shell_mcp.human_ui as human_ui
+
+    read_only = Principal(
+        email=None,
+        subject="reader",
+        claims={"auth": "oauth", "scope": "shell:read remote:use"},
+    )
+    execute = Principal(
+        email=None,
+        subject="operator",
+        claims={"auth": "oauth", "scope": "shell:read shell:execute remote:use"},
+    )
+    request = object()
+
+    monkeypatch.setattr(human_ui, "_request_principal", lambda _request: read_only)
+    assert human_ui._ui_principal_allows(request, "shell:execute") is False
+
+    monkeypatch.setattr(human_ui, "_request_principal", lambda _request: execute)
+    assert human_ui._ui_principal_allows(request, "shell:execute") is True
+
+
 def test_webui_logical_sessions_api_ignores_unknown_status_in_counts(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
 
@@ -1146,12 +1168,27 @@ def test_webui_remote_gui_windows_uses_bootstrap_safe_timeout(tmp_path, monkeypa
     client = TestClient(build_http_app())
     response = client.get("/api/ui/gui/windows", params={"machine": "node"})
     assert response.status_code == 200
-    assert calls == [("node", "gui_list", {}, 210)]
+    assert calls == [
+        (
+            "node",
+            "gui_list",
+            {"_allow_dependency_install": True},
+            210,
+        )
+    ]
 
 
 def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
+    import local_shell_mcp.human_ui as human_ui
+
     _configure(tmp_path, monkeypatch)
     calls = []
+    scope_calls = []
+
+    def require_scopes(request, *scopes, machine=None):
+        scope_calls.append((request.url.path, scopes, machine))
+
+    monkeypatch.setattr(human_ui, "_require_ui_scopes", require_scopes)
 
     class FakeGuiManager:
         async def list_windows(self):
@@ -1218,6 +1255,11 @@ def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
     assert frame.headers["cache-control"] == "no-store"
     assert frame.headers["x-lsm-gui-window-width"] == "320"
     assert frame.headers["x-lsm-gui-window-height"] == "180"
+    assert (
+        "/api/ui/gui/frame",
+        ("shell:read", "shell:execute"),
+        "local",
+    ) in scope_calls
 
     action = client.post(
         "/api/ui/gui/action",

@@ -211,6 +211,25 @@ class PortalDesktop:
         self._session_iface = None
         self._streams = []
 
+    def _invalidate_transport(self) -> None:
+        bus = self._bus
+        self._bus = None
+        self._remote = None
+        self._screen = None
+        self._session = None
+        self._session_iface = None
+        self._streams = []
+        if bus is not None:
+            with contextlib.suppress(Exception):
+                bus.disconnect()
+
+    async def _call_remote(self, operation: Any, *args: Any) -> Any:
+        try:
+            return await operation(*args)
+        except BaseException:
+            self._invalidate_transport()
+            raise
+
     async def _observe_session_closed(self, session: str) -> None:
         if self._bus is None:
             return
@@ -256,17 +275,21 @@ class PortalDesktop:
             assert self._remote is not None and self._screen is not None
             _MessageBus, Variant = _portal_modules()
             token = f"lsm_req_{uuid.uuid4().hex}"
-            created = await self._request(
-                self._remote.call_create_session(
-                    {
-                        "handle_token": Variant("s", token),
-                        "session_handle_token": Variant(
-                            "s", f"lsm_session_{uuid.uuid4().hex}"
-                        ),
-                    }
-                ),
-                handle_token=token,
-            )
+            try:
+                created = await self._request(
+                    self._remote.call_create_session(
+                        {
+                            "handle_token": Variant("s", token),
+                            "session_handle_token": Variant(
+                                "s", f"lsm_session_{uuid.uuid4().hex}"
+                            ),
+                        }
+                    ),
+                    handle_token=token,
+                )
+            except BaseException:
+                self._invalidate_transport()
+                raise
             session = str(created["session_handle"])
             try:
                 source_token = f"lsm_req_{uuid.uuid4().hex}"
@@ -305,9 +328,7 @@ class PortalDesktop:
             except BaseException:
                 with contextlib.suppress(BaseException):
                     await asyncio.shield(self._close_session(session))
-                self._session = None
-                self._session_iface = None
-                self._streams = []
+                self._invalidate_transport()
                 raise
             self._session = session
             self._session_iface = None
@@ -323,13 +344,12 @@ class PortalDesktop:
             except Exception as exc:
                 with contextlib.suppress(BaseException):
                     await asyncio.shield(self._close_session(session))
-                self._session = None
-                self._session_iface = None
-                self._streams = []
+                self._invalidate_transport()
                 raise GuiUnavailableError(
                     "Wayland portal session closure observation could not be installed"
                 ) from exc
             if self._session != session:
+                self._invalidate_transport()
                 raise GuiUnavailableError("Wayland portal session closed during setup")
             return session
 
@@ -371,7 +391,8 @@ class PortalDesktop:
         session = await self._bind_session(session)
         remote = self._require_session(session)
         stream, local_x, local_y = self._stream_point(x, y)
-        await remote.call_notify_pointer_motion_absolute(
+        await self._call_remote(
+            remote.call_notify_pointer_motion_absolute,
             session,
             {},
             stream,
@@ -393,7 +414,8 @@ class PortalDesktop:
             code = codes[int(button)]
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError(f"Unsupported pointer button: {button}") from exc
-        await remote.call_notify_pointer_button(
+        await self._call_remote(
+            remote.call_notify_pointer_button,
             session,
             {},
             code,
@@ -460,7 +482,8 @@ class PortalDesktop:
         session = await self._bind_session(session)
         await self.move(x, y, session=session)
         remote = self._require_session(session)
-        await remote.call_notify_pointer_axis(
+        await self._call_remote(
+            remote.call_notify_pointer_axis,
             session,
             {},
             -float(delta_x),
@@ -476,7 +499,8 @@ class PortalDesktop:
     ) -> None:
         session = await self._bind_session(session)
         remote = self._require_session(session)
-        await remote.call_notify_keyboard_keysym(
+        await self._call_remote(
+            remote.call_notify_keyboard_keysym,
             session,
             {},
             int(keysym),

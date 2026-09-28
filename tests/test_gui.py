@@ -2528,6 +2528,56 @@ def test_x11_match_rejects_sole_same_process_window_without_title_or_geometry_ma
         )
 
 
+def test_x11_match_rejects_same_title_with_different_geometry(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    xlib = ModuleType("Xlib")
+    xlib.Xatom = SimpleNamespace(WINDOW=1, CARDINAL=2)
+    monkeypatch.setitem(sys.modules, "Xlib", xlib)
+
+    class Window:
+        def get_full_property(self, _atom, _kind):
+            return SimpleNamespace(value=[42])
+
+        def get_wm_name(self):
+            return "Untitled"
+
+        def get_geometry(self):
+            return SimpleNamespace(width=80, height=60)
+
+    window = Window()
+
+    class Root:
+        def get_full_property(self, atom, _kind):
+            if atom == "_NET_CLIENT_LIST_STACKING":
+                return SimpleNamespace(value=[1])
+            return None
+
+        def translate_coords(self, _window, _x, _y):
+            return SimpleNamespace(x=500, y=600)
+
+    class Connection:
+        def screen(self):
+            return SimpleNamespace(root=Root())
+
+        def intern_atom(self, name, only_if_exists=True):
+            del only_if_exists
+            return name
+
+        def create_resource_object(self, _kind, _xid):
+            return window
+
+    with pytest.raises(GuiUnavailableError, match="Could not map"):
+        linux._x11_match_window(
+            Connection(),
+            {
+                "pid": 42,
+                "title": "Untitled",
+                "bounds": {"x": 10, "y": 20, "width": 300, "height": 200},
+            },
+        )
+
+
 def test_x11_capture_rejects_oversized_window_before_pixmap_read(tmp_path, monkeypatch):
     import local_shell_mcp.gui.linux as linux
 
@@ -3340,6 +3390,43 @@ async def test_portal_closed_signal_clears_cached_session(monkeypatch):
     assert len(callbacks) == 1
     assert portal._session_iface is not None
     callbacks[0]()
+    assert portal._session is None
+    assert portal._session_iface is None
+    assert portal._streams == []
+
+
+@pytest.mark.asyncio
+async def test_portal_transport_failure_invalidates_cached_connection():
+    portal = PortalDesktop({})
+    portal._session = "/session/1"
+    portal._streams = [
+        {
+            "node_id": 7,
+            "properties": {"position": [0, 0], "size": [100, 100]},
+        }
+    ]
+    disconnected = []
+
+    class Bus:
+        def disconnect(self):
+            disconnected.append(True)
+
+    class Remote:
+        async def call_notify_pointer_motion_absolute(self, *_args):
+            raise RuntimeError("portal transport failed")
+
+    portal._bus = Bus()
+    portal._remote = Remote()
+    portal._screen = object()
+    portal._session_iface = object()
+
+    with pytest.raises(RuntimeError, match="transport failed"):
+        await portal.move(10, 20, session="/session/1")
+
+    assert disconnected == [True]
+    assert portal._bus is None
+    assert portal._remote is None
+    assert portal._screen is None
     assert portal._session is None
     assert portal._session_iface is None
     assert portal._streams == []

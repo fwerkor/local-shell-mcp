@@ -129,6 +129,8 @@ def ensure_platform_dependencies() -> dict[str, Any]:
 
 def _ensure_gui_dependencies_unlocked(
     session_type: str | None = None,
+    *,
+    install_missing: bool = True,
 ) -> dict[str, Any]:
     path = worker_dependency_dir()
     _activate_worker_dependency_dir(path)
@@ -156,6 +158,18 @@ def _ensure_gui_dependencies_unlocked(
             "installed": False,
             "path": str(path),
             "missing": [],
+        }
+
+    if not install_missing:
+        return {
+            "available": False,
+            "installed": False,
+            "path": str(path),
+            "missing": [module for module, _requirement in missing],
+            "error": (
+                "GUI dependencies are not installed; an execute-authorized GUI "
+                "operation is required to install them"
+            ),
         }
 
     if key:
@@ -237,9 +251,14 @@ def _ensure_gui_dependencies_unlocked(
 
 def ensure_gui_dependencies(
     session_type: str | None = None,
+    *,
+    install_missing: bool = True,
 ) -> dict[str, Any]:
     with _GUI_DEPENDENCY_LOCK:
-        return _ensure_gui_dependencies_unlocked(session_type)
+        return _ensure_gui_dependencies_unlocked(
+            session_type,
+            install_missing=install_missing,
+        )
 
 
 def _fetch_bytes(url: str, timeout: float = 60) -> bytes:
