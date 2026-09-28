@@ -108,6 +108,26 @@ async def test_poll_requires_upgrade_before_dequeuing_jobs(tmp_path, monkeypatch
     assert worker.info["lsm_version"] == "0.0.0"
     assert worker.info["poll_protocol_version"] == 1
 
+    protocol2 = await manager.poll(
+        worker.token,
+        {
+            "protocol_version": 2,
+            "worker_version": "4.3.1",
+        },
+    )
+    from local_shell_mcp.remote_worker_routes import worker_bundle_manifest
+
+    manifest = worker_bundle_manifest()
+    assert protocol2["job"] is None
+    assert protocol2["upgrade"] == {
+        "required": True,
+        "version": remote.__version__,
+        "protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+        "sha256": manifest["sha256"],
+        "manifest_path": "/remote/worker-bundle.tgz?manifest=1",
+    }
+    assert worker.queue.qsize() == 1
+
     stale_protocol = await manager.poll(
         worker.token,
         {

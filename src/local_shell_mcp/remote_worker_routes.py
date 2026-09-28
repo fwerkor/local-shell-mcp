@@ -55,7 +55,7 @@ def worker_bundle_bytes() -> bytes:
     return buffer.getvalue()
 
 
-def _worker_manifest_data() -> dict[str, Any]:
+def worker_bundle_manifest() -> dict[str, Any]:
     settings = get_settings()
     server = (settings.public_base_url or f"http://{settings.host}:{settings.port}").rstrip("/")
     payload = worker_bundle_bytes()
@@ -74,7 +74,7 @@ async def worker_bundle(request: Any):  # noqa: ANN201
 
     query = getattr(request, "query_params", {}) if request is not None else {}
     if query.get("manifest") == "1":
-        return JSONResponse(_worker_manifest_data(), headers={"Cache-Control": "no-store"})
+        return JSONResponse(worker_bundle_manifest(), headers={"Cache-Control": "no-store"})
     return Response(
         worker_bundle_bytes(),
         media_type="application/gzip",
@@ -85,7 +85,7 @@ async def worker_bundle(request: Any):  # noqa: ANN201
 async def worker_manifest(request: Any):  # noqa: ARG001, ANN201
     from starlette.responses import JSONResponse
 
-    return JSONResponse(_worker_manifest_data(), headers={"Cache-Control": "no-store"})
+    return JSONResponse(worker_bundle_manifest(), headers={"Cache-Control": "no-store"})
 
 
 async def join_script(request: Any):  # noqa: ARG001, ANN201
