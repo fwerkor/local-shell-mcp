@@ -67,6 +67,7 @@ describe("Native WebUI desktop click handling", () => {
       ),
     }
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
+    controller.frameObservationId = "obs-1"
     const actions: unknown[] = []
     controller.queueAction = (action: unknown) => { actions.push(action) }
     const target = {
@@ -79,6 +80,207 @@ describe("Native WebUI desktop click handling", () => {
     controller.onClick({ target, button: 0, detail: 3, clientX: 10, clientY: 10 })
 
     expect(actions).toEqual([{ type: "double_click", x: 10, y: 10 }])
+  })
+
+  test("keeps a delayed single click bound to the frame that was clicked", async () => {
+    const previousWindow = (globalThis as any).window
+    ;(globalThis as any).window = globalThis
+    const sends: any[] = []
+    const context: NativePageContext = {
+      api: {
+        get: async () => undefined as never,
+        send: async (_url: string, _method: string, body?: unknown) => {
+          sends.push(body)
+          return {} as never
+        },
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller: any = new DesktopController(context)
+    const image: any = {
+      hidden: false,
+      getBoundingClientRect: () => ({
+        left: 0,
+        top: 0,
+        right: 100,
+        bottom: 100,
+        width: 100,
+        height: 100,
+      }),
+    }
+    const stage = { focus: () => undefined }
+    controller.root = {
+      querySelector: (selector: string) => (
+        selector === "[data-role=desktop-frame]"
+          ? image
+          : selector === "[data-role=desktop-stage]"
+            ? stage
+            : null
+      ),
+    }
+    controller.machine = "node"
+    controller.selectedWindowId = "window:1"
+    controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
+    controller.frameObservationId = "obs-old"
+    controller.refreshFrame = async () => undefined
+    const target = {
+      closest: (selector: string) => (
+        selector === "[data-role=desktop-frame]" ? image : null
+      ),
+    }
+
+    try {
+      controller.onClick({
+        target,
+        button: 0,
+        detail: 1,
+        clientX: 10,
+        clientY: 10,
+      })
+      controller.frameObservationId = "obs-new"
+      await new Promise((resolve) => setTimeout(resolve, SINGLE_CLICK_DELAY_MS + 25))
+      await controller.actionQueue
+
+      expect(sends).toHaveLength(1)
+      expect(sends[0].observation_id).toBe("obs-old")
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as any).window
+      else (globalThis as any).window = previousWindow
+    }
+  })
+
+  test("keeps coalesced wheel input bound to its source frame", async () => {
+    const previousWindow = (globalThis as any).window
+    ;(globalThis as any).window = globalThis
+    const sends: any[] = []
+    const context: NativePageContext = {
+      api: {
+        get: async () => undefined as never,
+        send: async (_url: string, _method: string, body?: unknown) => {
+          sends.push(body)
+          return {} as never
+        },
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller: any = new DesktopController(context)
+    const image: any = {
+      hidden: false,
+      getBoundingClientRect: () => ({
+        left: 0,
+        top: 0,
+        right: 100,
+        bottom: 100,
+        width: 100,
+        height: 100,
+      }),
+    }
+    controller.root = {
+      querySelector: (selector: string) => (
+        selector === "[data-role=desktop-frame]" ? image : null
+      ),
+    }
+    controller.machine = "node"
+    controller.selectedWindowId = "window:1"
+    controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
+    controller.frameObservationId = "obs-wheel"
+    controller.refreshFrame = async () => undefined
+    const target = {
+      closest: (selector: string) => (
+        selector === "[data-role=desktop-frame]" ? image : null
+      ),
+    }
+
+    try {
+      controller.onWheel({
+        target,
+        deltaY: 120,
+        clientX: 20,
+        clientY: 20,
+        preventDefault: () => undefined,
+      })
+      controller.frameObservationId = "obs-new"
+      await new Promise((resolve) => setTimeout(resolve, 80))
+      await controller.actionQueue
+
+      expect(sends).toHaveLength(1)
+      expect(sends[0].observation_id).toBe("obs-wheel")
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as any).window
+      else (globalThis as any).window = previousWindow
+    }
+  })
+
+  test("drops a drag when the frame changes mid-gesture", async () => {
+    const sends: any[] = []
+    const context: NativePageContext = {
+      api: {
+        get: async () => undefined as never,
+        send: async (_url: string, _method: string, body?: unknown) => {
+          sends.push(body)
+          return {} as never
+        },
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller: any = new DesktopController(context)
+    const image: any = {
+      hidden: false,
+      setPointerCapture: () => undefined,
+      getBoundingClientRect: () => ({
+        left: 0,
+        top: 0,
+        right: 100,
+        bottom: 100,
+        width: 100,
+        height: 100,
+      }),
+    }
+    controller.root = {
+      querySelector: (selector: string) => (
+        selector === "[data-role=desktop-frame]" ? image : null
+      ),
+    }
+    controller.machine = "node"
+    controller.selectedWindowId = "window:1"
+    controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
+    controller.frameObservationId = "obs-drag"
+    const target = {
+      closest: (selector: string) => (
+        selector === "[data-role=desktop-frame]" ? image : null
+      ),
+    }
+
+    controller.onPointerDown({
+      target,
+      button: 0,
+      pointerId: 1,
+      clientX: 10,
+      clientY: 10,
+    })
+    controller.frameObservationId = "obs-new"
+    controller.onPointerUp({
+      target,
+      pointerId: 1,
+      clientX: 30,
+      clientY: 30,
+      preventDefault: () => undefined,
+    })
+    await controller.actionQueue
+
+    expect(sends).toHaveLength(0)
   })
 })
 

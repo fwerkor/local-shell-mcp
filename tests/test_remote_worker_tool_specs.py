@@ -31,6 +31,7 @@ def test_remote_worker_allowlist_covers_core_capabilities():
         "gui_state",
         "gui_state_refresh",
         "gui_frame",
+        "gui_frame_refresh",
         "gui_human_action",
         "gui_action",
     } <= REMOTE_WORKER_TOOL_NAMES
@@ -101,6 +102,10 @@ async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
                 "screenshot_path": "/tmp/frame.png",
             }
 
+        async def refresh_frame_observation(self, window_id, observation_id):
+            calls.append(("refresh_frame", window_id, observation_id))
+            return {"observation_id": observation_id, "observation_ttl_s": 30}
+
         async def human_act(self, window_id, observation_id, bounds, actions):
             calls.append(("human_act", window_id, observation_id, bounds, actions))
             return {"human_control": True}
@@ -155,6 +160,13 @@ async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
         {"window_id": "w"},
     )
     assert frame["screenshot_path"] == "/tmp/frame.png"
+    assert dependency_calls == [("x11", True)]
+
+    refreshed_frame = await remote._execute_gui_worker_tool(
+        "gui_frame_refresh",
+        {"window_id": "w", "observation_id": "obs-remote"},
+    )
+    assert refreshed_frame["observation_ttl_s"] == 30
     assert dependency_calls == [("x11", True)]
 
     human = await remote._execute_gui_worker_tool(

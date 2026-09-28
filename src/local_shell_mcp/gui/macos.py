@@ -458,18 +458,19 @@ class MacOSGuiBackend:
                 )
             screenshot_display = display_screenshot_path(screenshot_path)
 
+        interactive = trusted and record.get("_ax_window") is not None
         return GuiSnapshot(
             window=record,
             elements=elements,
             locators=locators,
             screenshot_path=screenshot_display,
             capabilities={
-                "accessibility": "AXUIElement" if trusted else False,
+                "accessibility": "AXUIElement" if interactive else False,
                 "accessibility_permission_required": not trusted,
                 "window_capture": screenshot_path is not None,
                 "coordinate_space": "window-relative",
-                "coordinate_input": trusted,
-                "semantic_actions": trusted,
+                "coordinate_input": interactive,
+                "semantic_actions": interactive,
             },
         )
 

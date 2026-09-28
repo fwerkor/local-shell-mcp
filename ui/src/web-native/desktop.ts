@@ -46,6 +46,7 @@ type Point = { x: number; y: number }
 type PointerStart = {
   point: Point
   bounds: GuiBounds
+  observationId: string
   clientX: number
   clientY: number
   pointerId: number
@@ -154,6 +155,7 @@ export class DesktopController extends BaseController {
   private wheelDelta = 0
   private wheelPoint: Point | null = null
   private wheelBounds: GuiBounds | null = null
+  private wheelObservationId = ""
 
   constructor(context: NativePageContext) {
     super(context)
@@ -530,12 +532,16 @@ export class DesktopController extends BaseController {
     return framePoint(event.clientX, event.clientY, image.getBoundingClientRect(), bounds)
   }
 
-  private queueAction(action: GuiAction, observedBounds?: GuiBounds): void {
+  private queueAction(
+    action: GuiAction,
+    observedBounds?: GuiBounds,
+    observedObservationId?: string,
+  ): void {
     const windowId = this.selectedWindowId
     const machine = this.machine
     const targetEpoch = this.actionTargetEpoch
     const bounds = observedBounds ? { ...observedBounds } : this.frameBounds ? { ...this.frameBounds } : null
-    const observationId = this.frameObservationId
+    const observationId = observedObservationId || this.frameObservationId
     if (!windowId || !bounds || !observationId) return
     if (this.pendingActions >= MAX_PENDING_DESKTOP_ACTIONS) return
 
@@ -602,6 +608,7 @@ export class DesktopController extends BaseController {
     this.wheelDelta = 0
     this.wheelPoint = null
     this.wheelBounds = null
+    this.wheelObservationId = ""
     this.pointerStart = null
   }
 
@@ -651,21 +658,30 @@ export class DesktopController extends BaseController {
     if (!image || event.button !== 0 || Date.now() < this.suppressClickUntil) return
     const point = this.pointForEvent(event)
     const observedBounds = this.frameBounds ? { ...this.frameBounds } : null
-    if (!point || !observedBounds) return
+    const observedObservationId = this.frameObservationId
+    if (!point || !observedBounds || !observedObservationId) return
     this.root.querySelector<HTMLElement>("[data-role=desktop-stage]")?.focus({ preventScroll: true })
     if (event.detail === 2) {
       if (this.clickTimer !== null) {
         window.clearTimeout(this.clickTimer)
         this.clickTimer = null
       }
-      this.queueAction({ type: "double_click", ...point }, observedBounds)
+      this.queueAction(
+        { type: "double_click", ...point },
+        observedBounds,
+        observedObservationId,
+      )
       return
     }
     if (event.detail > 2) return
     if (this.clickTimer !== null) window.clearTimeout(this.clickTimer)
     this.clickTimer = window.setTimeout(() => {
       this.clickTimer = null
-      this.queueAction({ type: "click", ...point }, observedBounds)
+      this.queueAction(
+        { type: "click", ...point },
+        observedBounds,
+        observedObservationId,
+      )
     }, SINGLE_CLICK_DELAY_MS)
   }
 
@@ -675,10 +691,12 @@ export class DesktopController extends BaseController {
     if (!image) return
     const point = this.pointForEvent(event)
     const bounds = this.frameBounds ? { ...this.frameBounds } : null
-    if (!point || !bounds) return
+    const observationId = this.frameObservationId
+    if (!point || !bounds || !observationId) return
     this.pointerStart = {
       point,
       bounds,
+      observationId,
       clientX: event.clientX,
       clientY: event.clientY,
       pointerId: event.pointerId,
@@ -690,6 +708,7 @@ export class DesktopController extends BaseController {
     const start = this.pointerStart
     if (!start || start.pointerId !== event.pointerId) return
     this.pointerStart = null
+    if (this.frameObservationId !== start.observationId) return
     const end = this.pointForEvent(event)
     if (!end) return
     const distance = Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY)
@@ -702,40 +721,59 @@ export class DesktopController extends BaseController {
       y: start.point.y,
       to_x: end.x,
       to_y: end.y,
-    }, start.bounds)
+    }, start.bounds, start.observationId)
   }
 
   private onContextMenu(event: MouseEvent): void {
     const image = (event.target as HTMLElement).closest<HTMLImageElement>("[data-role=desktop-frame]")
     if (!image) return
     const point = this.pointForEvent(event)
-    if (!point) return
+    const bounds = this.frameBounds ? { ...this.frameBounds } : null
+    const observationId = this.frameObservationId
+    if (!point || !bounds || !observationId) return
     event.preventDefault()
     this.root.querySelector<HTMLElement>("[data-role=desktop-stage]")?.focus({ preventScroll: true })
-    this.queueAction({ type: "right_click", ...point })
+    this.queueAction({ type: "right_click", ...point }, bounds, observationId)
   }
 
   private onWheel(event: WheelEvent): void {
     const image = (event.target as HTMLElement).closest<HTMLImageElement>("[data-role=desktop-frame]")
     if (!image) return
     const point = this.pointForEvent(event)
-    if (!point) return
+    const bounds = this.frameBounds ? { ...this.frameBounds } : null
+    const observationId = this.frameObservationId
+    if (!point || !bounds || !observationId) return
     event.preventDefault()
+    if (
+      this.wheelObservationId
+      && this.wheelObservationId !== observationId
+    ) {
+      this.wheelDelta = 0
+    }
     this.wheelDelta += event.deltaY
     this.wheelPoint = point
-    this.wheelBounds = this.frameBounds ? { ...this.frameBounds } : null
+    this.wheelBounds = bounds
+    this.wheelObservationId = observationId
     if (this.wheelTimer !== null) window.clearTimeout(this.wheelTimer)
     this.wheelTimer = window.setTimeout(() => {
       this.wheelTimer = null
       const delta = this.wheelDelta
       const target = this.wheelPoint
       const observedBounds = this.wheelBounds
+      const observedObservationId = this.wheelObservationId
       this.wheelDelta = 0
       this.wheelPoint = null
       this.wheelBounds = null
-      if (!target || !observedBounds || !delta) return
+      this.wheelObservationId = ""
+      if (!target || !observedBounds || !observedObservationId || !delta) return
       const amount = wheelScrollAmount(delta)
-      if (amount) this.queueAction({ type: "scroll", ...target, delta_y: amount }, observedBounds)
+      if (amount) {
+        this.queueAction(
+          { type: "scroll", ...target, delta_y: amount },
+          observedBounds,
+          observedObservationId,
+        )
+      }
     }, 55)
   }
 

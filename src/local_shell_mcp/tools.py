@@ -2999,6 +2999,16 @@ async def _gui_frame_data(
         )
         if not screenshot_path:
             raise RuntimeError("Remote gui_frame returned no screenshot")
+        observation_id = str(data.get("observation_id") or "")
+        if not observation_id:
+            raise RuntimeError("Remote gui_frame returned no observation_id")
+        keepalive = asyncio.create_task(
+            _refresh_remote_gui_frame_lease(
+                machine,
+                window_id,
+                observation_id,
+            )
+        )
         try:
             local_path = await asyncio.to_thread(_controller_gui_staging_path)
             try:
@@ -3009,10 +3019,21 @@ async def _gui_frame_data(
             finally:
                 with suppress(Exception):
                     await asyncio.to_thread(delete_path, local_path, False)
+            refreshed = await _refresh_remote_gui_frame_once(
+                machine,
+                window_id,
+                observation_id,
+            )
             data = dict(data)
+            data["observation_ttl_s"] = float(
+                refreshed.get("observation_ttl_s") or 0
+            )
             data.pop("screenshot_path", None)
             return data, image
         finally:
+            keepalive.cancel()
+            with suppress(asyncio.CancelledError):
+                await keepalive
             with suppress(Exception):
                 await _remote_transfer_data(
                     machine,
@@ -3053,6 +3074,39 @@ async def _refresh_remote_gui_state_lease(
         )
         if not isinstance(refreshed, dict):
             raise RuntimeError("Remote gui_state_refresh returned invalid data")
+
+
+async def _refresh_remote_gui_frame_lease(
+    machine: str,
+    window_id: str,
+    observation_id: str,
+) -> None:
+    while True:
+        await asyncio.sleep(_REMOTE_GUI_STATE_REFRESH_INTERVAL_S)
+        refreshed = await _remote_worker_data(
+            machine,
+            "gui_frame_refresh",
+            {"window_id": window_id, "observation_id": observation_id},
+            30,
+        )
+        if not isinstance(refreshed, dict):
+            raise RuntimeError("Remote gui_frame_refresh returned invalid data")
+
+
+async def _refresh_remote_gui_frame_once(
+    machine: str,
+    window_id: str,
+    observation_id: str,
+) -> dict[str, Any]:
+    refreshed = await _remote_worker_data(
+        machine,
+        "gui_frame_refresh",
+        {"window_id": window_id, "observation_id": observation_id},
+        30,
+    )
+    if not isinstance(refreshed, dict):
+        raise RuntimeError("Remote gui_frame_refresh returned invalid data")
+    return refreshed
 
 
 async def _refresh_remote_gui_state_once(

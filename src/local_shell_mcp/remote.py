@@ -1564,6 +1564,7 @@ WORKER_GUI_TOOLS = frozenset(
         "gui_state",
         "gui_state_refresh",
         "gui_frame",
+        "gui_frame_refresh",
         "gui_human_action",
         "gui_action",
     }
@@ -2523,7 +2524,7 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool in {"gui_state", "gui_frame", "gui_human_action", "gui_action"}:
         allow_dependency_install = True
 
-    dependency_check_required = tool != "gui_state_refresh"
+    dependency_check_required = tool not in {"gui_state_refresh", "gui_frame_refresh"}
     if sys.platform == "linux" and (
         tool == "gui_list"
         or (tool == "gui_state" and not bool(args.get("screenshot", True)))
@@ -2559,6 +2560,11 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         return await manager.refresh_state(args["window_id"], args["state_id"])
     if tool == "gui_frame":
         return await manager.frame(args["window_id"])
+    if tool == "gui_frame_refresh":
+        return await manager.refresh_frame_observation(
+            args["window_id"],
+            args["observation_id"],
+        )
     if tool == "gui_human_action":
         return await manager.human_act(
             args["window_id"],

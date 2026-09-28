@@ -880,6 +880,29 @@ class GuiManager:
             record.created_at = now
         return {"state_id": state_id, "state_ttl_s": GUI_STATE_TTL_S}
 
+    async def refresh_frame_observation(
+        self,
+        window_id: str,
+        observation_id: str,
+    ) -> dict[str, Any]:
+        now = time.monotonic()
+        async with self._lock:
+            self._prune_locked(now)
+            record = self._frame_observations.get(str(observation_id))
+            if record is None:
+                raise GuiStaleStateError(
+                    "Displayed GUI frame is stale or unknown; refresh the frame and try again"
+                )
+            if str(record.window.get("id")) != str(window_id):
+                raise GuiStaleStateError(
+                    "Displayed GUI frame belongs to a different window; refresh it and try again"
+                )
+            record.created_at = now
+        return {
+            "observation_id": str(observation_id),
+            "observation_ttl_s": GUI_STATE_TTL_S,
+        }
+
     async def _assert_window_geometry_unchanged(
         self,
         observed: dict[str, Any],

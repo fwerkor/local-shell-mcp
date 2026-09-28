@@ -412,7 +412,7 @@ def _x11_text_property(window: Any, connection: Any, name: str) -> str:
 
 def _x11_window_geometry(window: Any, root: Any) -> dict[str, int]:
     geometry = window.get_geometry()
-    translated = root.translate_coords(window, 0, 0)
+    translated = window.translate_coords(root, 0, 0)
     return {
         "x": int(translated.x),
         "y": int(translated.y),
@@ -1149,6 +1149,28 @@ class LinuxGuiBackend:
         portal = self._portal
         kind = action["type"]
         session = await portal.ensure_session()
+        if action.get("_focus_prepared"):
+            await self.focus_window(window)
+            refreshed = await asyncio.to_thread(
+                self._helper,
+                {
+                    "command": "snapshot",
+                    "window_id": window["id"],
+                    "include_elements": False,
+                    "max_elements": 1,
+                    "max_depth": 1,
+                },
+            )
+            refreshed_window = refreshed.get("window")
+            if (
+                not isinstance(refreshed_window, dict)
+                or _bounds_tuple(refreshed_window.get("bounds"))
+                != _bounds_tuple(window.get("bounds"))
+            ):
+                raise GuiStaleStateError(
+                    "Target window moved or resized while preparing Wayland input; "
+                    "refresh the displayed frame and try again"
+                )
         if kind in {"type", "key"} and locator is not None:
             await asyncio.to_thread(
                 self._helper,
