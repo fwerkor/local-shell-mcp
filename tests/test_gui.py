@@ -4570,7 +4570,8 @@ async def test_wayland_portal_fallback_keeps_precreated_private_destination(
     async def screenshot(destination, _env):
         assert destination == path
         assert destination.exists()
-        assert destination.stat().st_mode & 0o777 == 0o600
+        if linux.os.name == "posix":
+            assert destination.stat().st_mode & 0o777 == 0o600
         Image.new("RGB", (10, 10)).save(destination, format="PNG")
 
     monkeypatch.setattr(linux, "portal_screenshot", screenshot)
@@ -4584,7 +4585,8 @@ async def test_wayland_portal_fallback_keeps_precreated_private_destination(
     )
 
     assert method == "xdg-desktop-portal"
-    assert path.stat().st_mode & 0o777 == 0o600
+    if linux.os.name == "posix":
+        assert path.stat().st_mode & 0o777 == 0o600
 
 
 @pytest.mark.asyncio
