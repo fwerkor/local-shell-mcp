@@ -19,6 +19,7 @@ from .base import (
     GuiSnapshot,
     GuiStaleStateError,
     GuiUnavailableError,
+    _bounds_tuple,
     display_screenshot_path,
     quantize_scroll_amount,
 )
@@ -306,23 +307,31 @@ def _crop_desktop_capture(
     bounds: dict[str, Any],
     monitors: list[dict[str, Any]],
 ) -> None:
+    _validate_capture_image_header(path)
     with Image.open(path) as image:
-        width, height = image.size
-        if (
-            width <= 0
-            or height <= 0
-            or width > GUI_MAX_CAPTURE_DIMENSION
-            or height > GUI_MAX_CAPTURE_DIMENSION
-            or width * height > GUI_MAX_CAPTURE_PIXELS
-        ):
-            raise GuiUnavailableError(
-                "Captured Wayland desktop exceeds GUI screenshot safety limits"
-            )
         image.load()
         if image.size == (int(bounds["width"]), int(bounds["height"])):
             return
         cropped = image.crop(_desktop_crop_box(bounds, monitors, image.size))
         cropped.save(path, format="PNG")
+
+
+def _validate_capture_image_header(path: Path) -> None:
+    try:
+        with Image.open(path) as image:
+            width, height = image.size
+    except Exception as exc:
+        raise GuiUnavailableError("Captured Wayland image is invalid") from exc
+    if (
+        width <= 0
+        or height <= 0
+        or width > GUI_MAX_CAPTURE_DIMENSION
+        or height > GUI_MAX_CAPTURE_DIMENSION
+        or width * height > GUI_MAX_CAPTURE_PIXELS
+    ):
+        raise GuiUnavailableError(
+            "Captured Wayland image exceeds GUI screenshot safety limits"
+        )
 
 
 async def _capture_wayland(
@@ -347,6 +356,7 @@ async def _capture_wayland(
             env=env,
         )
         if result.returncode == 0 and path.is_file():
+            await asyncio.to_thread(_validate_capture_image_header, path)
             return "grim-region"
 
     full_capture_commands: list[tuple[str, list[str]]] = []
@@ -823,6 +833,26 @@ class LinuxGuiBackend:
             monitors = list_data.get("monitors", [])
             if session_type == "wayland":
                 await self.focus_window(record)
+                refreshed = await asyncio.to_thread(
+                    self._helper,
+                    {
+                        "command": "snapshot",
+                        "window_id": window_id,
+                        "include_elements": False,
+                        "max_elements": 1,
+                        "max_depth": 1,
+                    },
+                )
+                refreshed_record = refreshed.get("window")
+                if (
+                    not isinstance(refreshed_record, dict)
+                    or _bounds_tuple(refreshed_record.get("bounds"))
+                    != _bounds_tuple(record.get("bounds"))
+                ):
+                    raise GuiStaleStateError(
+                        "Target window moved or resized while preparing the Wayland capture; "
+                        "call gui_state again"
+                    )
                 capture_backend = await _capture_wayland(
                     screenshot_path,
                     record["bounds"],
@@ -1062,6 +1092,7 @@ class LinuxGuiBackend:
                 window, {"x": action.get("to_x"), "y": action.get("to_y")}, None
             )
             pressed = False
+            release_x, release_y = x, y
             pending_error: BaseException | None = None
             try:
                 await asyncio.to_thread(
@@ -1079,6 +1110,7 @@ class LinuxGuiBackend:
                         "event": "abs",
                     },
                 )
+                release_x, release_y = to_x, to_y
             except BaseException as exc:
                 pending_error = exc
             finally:
@@ -1089,8 +1121,8 @@ class LinuxGuiBackend:
                             {
                                 "command": "raw",
                                 "kind": "mouse",
-                                "x": to_x,
-                                "y": to_y,
+                                "x": release_x,
+                                "y": release_y,
                                 "event": "b1r",
                             },
                         )

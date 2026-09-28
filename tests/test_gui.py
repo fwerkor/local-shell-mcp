@@ -1623,6 +1623,153 @@ def test_windows_traversal_stops_before_querying_children_at_budget(monkeypatch)
     assert len(snapshot.elements) == 1
 
 
+def test_windows_uia_traversal_bounds_provider_strings_and_total_bytes(monkeypatch):
+    import local_shell_mcp.gui.windows as windows
+
+    huge = "x" * (windows.GUI_MAX_ELEMENT_TEXT_BYTES * 8)
+
+    class Rect:
+        left = 0
+        top = 0
+        right = 100
+        bottom = 20
+
+    class Control:
+        ControlTypeName = huge
+        Name = huge
+        AutomationId = huge
+        BoundingRectangle = Rect()
+        IsEnabled = True
+        IsOffscreen = False
+        ProcessId = 1
+        ClassName = huge
+
+        def __init__(self, children=None, runtime_id=1):
+            self.children = list(children or [])
+            self.runtime_id = runtime_id
+
+        def GetChildren(self):
+            return self.children
+
+        def GetRuntimeId(self):
+            return [self.runtime_id]
+
+    children = [Control(runtime_id=index + 2) for index in range(200)]
+    root = Control(children=children)
+    backend = WindowsGuiBackend()
+    monkeypatch.setattr(backend, "_find_window", lambda _window_id: root)
+    monkeypatch.setattr(
+        windows,
+        "_window_record",
+        lambda _control: {
+            "id": "hwnd:1:fingerprint",
+            "title": "Window",
+            "app": "App",
+            "pid": 1,
+            "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+        },
+    )
+
+    snapshot = backend._snapshot_sync(
+        "hwnd:1:fingerprint",
+        screenshot_path=None,
+        include_elements=True,
+        max_elements=1000,
+        max_depth=2,
+    )
+
+    assert snapshot.elements
+    assert len(json.dumps(snapshot.elements, ensure_ascii=False).encode()) <= (
+        windows.GUI_MAX_ELEMENTS_TOTAL_BYTES
+    )
+    assert len(snapshot.locators) == len(snapshot.elements)
+    for element in snapshot.elements:
+        assert len(element["role"].encode()) <= windows.GUI_MAX_ELEMENT_TEXT_BYTES
+        assert len(element["name"].encode()) <= windows.GUI_MAX_ELEMENT_TEXT_BYTES
+        assert len(element["automation_id"].encode()) <= windows.GUI_MAX_ELEMENT_TEXT_BYTES
+
+
+def test_windows_semantic_action_rejects_recycled_uia_element(monkeypatch):
+    import local_shell_mcp.gui.windows as windows
+
+    class Rect:
+        left = 10
+        top = 10
+        right = 40
+        bottom = 30
+
+    class Child:
+        ControlTypeName = "Button"
+        AutomationId = "save"
+        BoundingRectangle = Rect()
+        IsEnabled = True
+        IsOffscreen = False
+        ProcessId = 1
+        ClassName = "Button"
+
+        def __init__(self):
+            self.Name = "Save"
+
+        def GetRuntimeId(self):
+            return [7, 8, 9]
+
+        def GetChildren(self):
+            return []
+
+        def GetInvokePattern(self):
+            pytest.fail("recycled UIA element must be rejected before Invoke")
+
+    class Root(Child):
+        NativeWindowHandle = 1
+        AutomationId = "root"
+        ClassName = "Window"
+
+        def __init__(self, child):
+            super().__init__()
+            self.Name = "Window"
+            self.child = child
+
+        def GetRuntimeId(self):
+            return [1]
+
+        def GetChildren(self):
+            return [self.child]
+
+    child = Child()
+    root = Root(child)
+    backend = WindowsGuiBackend()
+    record = {
+        "id": "hwnd:1:fingerprint",
+        "title": "Window",
+        "app": "App",
+        "pid": 1,
+        "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+    }
+    monkeypatch.setattr(backend, "_find_window", lambda _window_id: root)
+    monkeypatch.setattr(windows, "_window_record", lambda _control: record)
+    monkeypatch.setattr(windows, "_automation", lambda: SimpleNamespace())
+
+    snapshot = backend._snapshot_sync(
+        record["id"],
+        screenshot_path=None,
+        include_elements=True,
+        max_elements=10,
+        max_depth=2,
+    )
+    child_id = next(
+        item["id"] for item in snapshot.elements if item["automation_id"] == "save"
+    )
+    locator = snapshot.locators[child_id]
+    child.Name = "Delete"
+
+    with pytest.raises(LookupError, match="changed since observation"):
+        backend._perform_action_sync(
+            record,
+            locator,
+            {"type": "click"},
+        )
+
+
 def test_atspi_window_without_stable_accessible_id_is_not_exposed():
     import local_shell_mcp.gui.linux_atspi_helper as helper
 
@@ -1718,9 +1865,15 @@ def test_windows_control_mouse_fallback_focuses_verified_window(monkeypatch):
     backend = WindowsGuiBackend()
     monkeypatch.setattr(windows, "_automation", lambda: SimpleNamespace())
     monkeypatch.setattr(backend, "_find_window", lambda _window_id: Target())
+    locator = Locator()
+    monkeypatch.setattr(
+        backend,
+        "_resolve_element_locator",
+        lambda _window_id, _locator: locator,
+    )
     result = backend._perform_action_sync(
         {"id": "hwnd:1:fingerprint", "bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
-        Locator(),
+        {"path": [0], "fingerprint": "observed"},
         {"type": "click"},
     )
     assert result == {"semantic": True, "method": "control"}
@@ -1889,6 +2042,56 @@ def test_screenshot_normalization_rejects_oversized_provider_dimensions(tmp_path
             },
         )
     assert Image.open(path).size == (4, 4)
+
+
+def test_screenshot_normalization_rejects_oversized_actual_image_before_decode(
+    tmp_path,
+    monkeypatch,
+):
+    import local_shell_mcp.gui.base as base
+
+    class OversizedImage:
+        size = (base.GUI_MAX_CAPTURE_DIMENSION + 1, 1)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def load(self):
+            pytest.fail("oversized screenshot must be rejected before pixel decode")
+
+    monkeypatch.setattr(base.Image, "open", lambda _path: OversizedImage())
+    with pytest.raises(GuiUnavailableError, match="safe screenshot budget"):
+        base._normalize_screenshot_coordinates(
+            tmp_path / "oversized.png",
+            {"bounds": {"width": 10, "height": 10}},
+        )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits are not enforced on Windows")
+@pytest.mark.asyncio
+async def test_gui_screenshots_use_private_permissions(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.base as base
+
+    monkeypatch.setattr(base, "temp_dir", lambda: tmp_path)
+    manager = GuiManager(FakeBackend())
+
+    state = await manager.snapshot("window:1", screenshot=True)
+    screenshot = Path(state["screenshot_path"])
+    try:
+        assert tmp_path.stat().st_mode & 0o777 == 0o700
+        assert screenshot.stat().st_mode & 0o777 == 0o600
+    finally:
+        screenshot.unlink(missing_ok=True)
+
+    frame = await manager.frame("window:1")
+    frame_path = Path(frame["screenshot_path"])
+    try:
+        assert frame_path.stat().st_mode & 0o777 == 0o600
+    finally:
+        frame_path.unlink(missing_ok=True)
 
 
 @pytest.mark.asyncio
@@ -3012,6 +3215,94 @@ async def test_wayland_snapshot_focuses_target_before_visible_region_capture(tmp
 
 
 @pytest.mark.asyncio
+async def test_wayland_snapshot_rejects_bounds_change_after_focus(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    backend = linux.LinuxGuiBackend()
+    backend._env = {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-0"}
+    snapshot_calls = 0
+
+    def helper(payload):
+        nonlocal snapshot_calls
+        if payload["command"] == "snapshot":
+            snapshot_calls += 1
+            x = 0 if snapshot_calls == 1 else 50
+            return {
+                "window": {
+                    "id": "atspi:1:sig",
+                    "title": "Target",
+                    "app": "App",
+                    "pid": 1,
+                    "bounds": {"x": x, "y": 0, "width": 10, "height": 10},
+                },
+                "elements": [],
+                "locators": {},
+            }
+        if payload["command"] == "list":
+            return {"windows": [], "monitors": []}
+        raise AssertionError(payload)
+
+    async def focus(_window):
+        return None
+
+    async def capture(*_args, **_kwargs):
+        pytest.fail("capture must not run with stale Wayland bounds")
+
+    monkeypatch.setattr(backend, "_helper", helper)
+    monkeypatch.setattr(backend, "focus_window", focus)
+    monkeypatch.setattr(linux, "_capture_wayland", capture)
+
+    with pytest.raises(GuiStaleStateError, match="moved or resized"):
+        await backend.snapshot(
+            "atspi:1:sig",
+            screenshot_path=tmp_path / "wayland.png",
+            include_elements=False,
+            max_elements=10,
+            max_depth=2,
+        )
+    assert snapshot_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_wayland_grim_rejects_oversized_output_before_decode(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    path = tmp_path / "grim.png"
+
+    class OversizedImage:
+        size = (linux.GUI_MAX_CAPTURE_DIMENSION + 1, 1)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def load(self):
+            pytest.fail("oversized grim output must be rejected before decoding")
+
+    def run(argv, **_kwargs):
+        Path(argv[-1]).write_bytes(b"png")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        linux.shutil,
+        "which",
+        lambda name: "/usr/bin/grim" if name == "grim" else None,
+    )
+    monkeypatch.setattr(linux.subprocess, "run", run)
+    monkeypatch.setattr(linux.Image, "open", lambda _path: OversizedImage())
+
+    with pytest.raises(GuiUnavailableError, match="screenshot safety limits"):
+        await linux._capture_wayland(
+            path,
+            {"x": 0, "y": 0, "width": 10, "height": 10},
+            [],
+            {},
+        )
+
+
+@pytest.mark.asyncio
 async def test_linux_raw_element_action_reresolves_locator_bounds(monkeypatch):
     import local_shell_mcp.gui.linux as linux
 
@@ -3174,7 +3465,7 @@ async def test_x11_drag_releases_button_after_motion_failure(monkeypatch):
 
     def helper(payload):
         event = payload.get("event")
-        events.append(event)
+        events.append(dict(payload))
         if event == "abs":
             raise RuntimeError("motion failed")
         return {"generated": True}
@@ -3187,7 +3478,9 @@ async def test_x11_drag_releases_button_after_motion_failure(monkeypatch):
             None,
             {"type": "drag", "x": 1, "y": 1, "to_x": 10, "to_y": 10},
         )
-    assert events == ["b1p", "abs", "b1r"]
+    assert [item["event"] for item in events] == ["b1p", "abs", "b1r"]
+    assert events[-1]["x"] == 1
+    assert events[-1]["y"] == 1
 
 
 def test_atspi_snapshot_bounds_direct_child_provider_calls(monkeypatch):

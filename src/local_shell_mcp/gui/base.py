@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import math
+import os
 import platform
 import time
 import uuid
@@ -252,6 +253,17 @@ def _normalize_screenshot_coordinates(path: Path, window: dict[str, Any]) -> Non
             f"GUI window dimensions exceed the safe screenshot budget: {width}x{height}"
         )
     with Image.open(path) as image:
+        image_width, image_height = image.size
+        if (
+            image_width <= 0
+            or image_height <= 0
+            or image_width > GUI_MAX_CAPTURE_DIMENSION
+            or image_height > GUI_MAX_CAPTURE_DIMENSION
+            or image_width * image_height > GUI_MAX_CAPTURE_PIXELS
+        ):
+            raise GuiUnavailableError(
+                "Captured GUI image exceeds the safe screenshot budget"
+            )
         image.load()
         if image.size == (width, height):
             return
@@ -271,6 +283,43 @@ def _bounds_tuple(value: Any) -> tuple[int, int, int, int] | None:
         )
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def _prepare_gui_screenshot_path(prefix: str) -> Path:
+    directory = temp_dir()
+    try:
+        directory.chmod(0o700)
+    except OSError as exc:
+        if os.name != "nt":
+            raise GuiUnavailableError(
+                "Could not secure the GUI screenshot directory"
+            ) from exc
+    path = directory / f"{prefix}-{uuid.uuid4().hex}.png"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    fd = os.open(path, flags, 0o600)
+    os.close(fd)
+    try:
+        path.chmod(0o600)
+    except OSError as exc:
+        if os.name != "nt":
+            path.unlink(missing_ok=True)
+            raise GuiUnavailableError("Could not secure the GUI screenshot file") from exc
+    try:
+        acquire_temp_file_lease(path)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    return path
+
+
+def _secure_gui_screenshot_file(path: Path) -> None:
+    try:
+        path.chmod(0o600)
+    except OSError as exc:
+        if os.name != "nt":
+            raise GuiUnavailableError("Could not secure the GUI screenshot file") from exc
 
 
 def _window_relative_elements(
@@ -407,9 +456,7 @@ class GuiManager:
         max_depth = max(1, min(int(max_depth), GUI_MAX_DEPTH))
         screenshot_path: Path | None = None
         if screenshot:
-            screenshot_path = temp_dir() / f"gui-{uuid.uuid4().hex}.png"
-            screenshot_path.parent.mkdir(parents=True, exist_ok=True)
-            acquire_temp_file_lease(screenshot_path)
+            screenshot_path = _prepare_gui_screenshot_path("gui")
 
         async def capture_snapshot() -> GuiSnapshot:
             return await _await_native_operation(
@@ -432,11 +479,15 @@ class GuiManager:
             if screenshot_path is not None:
                 if snapshot.screenshot_path is None:
                     _cleanup_gui_screenshot(screenshot_path)
-                elif not screenshot_path.is_file():
+                elif (
+                    not screenshot_path.is_file()
+                    or screenshot_path.stat().st_size <= 0
+                ):
                     raise GuiUnavailableError(
                         "GUI backend did not produce the requested screenshot"
                     )
                 else:
+                    _secure_gui_screenshot_file(screenshot_path)
                     normalize = asyncio.create_task(
                         asyncio.to_thread(
                             _normalize_screenshot_coordinates,
@@ -490,9 +541,7 @@ class GuiManager:
         }
 
     async def frame(self, window_id: str) -> dict[str, Any]:
-        screenshot_path = temp_dir() / f"gui-frame-{uuid.uuid4().hex}.png"
-        screenshot_path.parent.mkdir(parents=True, exist_ok=True)
-        acquire_temp_file_lease(screenshot_path)
+        screenshot_path = _prepare_gui_screenshot_path("gui-frame")
         keep_file = False
         try:
             async with self._execution_lock:
@@ -505,8 +554,13 @@ class GuiManager:
                         max_depth=1,
                     )
                 )
-            if snapshot.screenshot_path is None or not screenshot_path.is_file():
+            if (
+                snapshot.screenshot_path is None
+                or not screenshot_path.is_file()
+                or screenshot_path.stat().st_size <= 0
+            ):
                 raise GuiUnavailableError("GUI backend did not produce the requested screenshot")
+            _secure_gui_screenshot_file(screenshot_path)
             normalize = asyncio.create_task(
                 asyncio.to_thread(
                     _normalize_screenshot_coordinates,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import hashlib
+import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -14,8 +15,11 @@ from PIL import Image
 from .base import (
     GUI_MAX_CAPTURE_DIMENSION,
     GUI_MAX_CAPTURE_PIXELS,
+    GUI_MAX_ELEMENT_TEXT_BYTES,
+    GUI_MAX_ELEMENTS_TOTAL_BYTES,
     GuiSnapshot,
     GuiUnavailableError,
+    _truncate_gui_text,
     display_screenshot_path,
     quantize_scroll_amount,
 )
@@ -248,9 +252,44 @@ def _window_fingerprint(control: Any) -> str:
     fields = [
         str(int(_safe_property(control, "NativeWindowHandle", 0) or 0)),
         str(int(_safe_property(control, "ProcessId", 0) or 0)),
-        str(_safe_property(control, "ClassName", "") or ""),
-        str(_safe_property(control, "AutomationId", "") or ""),
-        _control_runtime_id(control),
+        _truncate_gui_text(
+            _safe_property(control, "ClassName", ""),
+            GUI_MAX_ELEMENT_TEXT_BYTES,
+        ),
+        _truncate_gui_text(
+            _safe_property(control, "AutomationId", ""),
+            GUI_MAX_ELEMENT_TEXT_BYTES,
+        ),
+        _truncate_gui_text(_control_runtime_id(control), GUI_MAX_ELEMENT_TEXT_BYTES),
+    ]
+    return hashlib.sha256("\0".join(fields).encode("utf-8")).hexdigest()[:16]
+
+
+def _element_fingerprint(control: Any) -> str:
+    bounds = _rect_dict(_safe_property(control, "BoundingRectangle"))
+    fields = [
+        _truncate_gui_text(_control_runtime_id(control), GUI_MAX_ELEMENT_TEXT_BYTES),
+        str(int(_safe_property(control, "ProcessId", 0) or 0)),
+        _truncate_gui_text(
+            _safe_property(control, "ControlTypeName", ""),
+            GUI_MAX_ELEMENT_TEXT_BYTES,
+        ),
+        _truncate_gui_text(
+            _safe_property(control, "Name", ""),
+            GUI_MAX_ELEMENT_TEXT_BYTES,
+        ),
+        _truncate_gui_text(
+            _safe_property(control, "AutomationId", ""),
+            GUI_MAX_ELEMENT_TEXT_BYTES,
+        ),
+        _truncate_gui_text(
+            _safe_property(control, "ClassName", ""),
+            GUI_MAX_ELEMENT_TEXT_BYTES,
+        ),
+        str(bounds["x"]),
+        str(bounds["y"]),
+        str(bounds["width"]),
+        str(bounds["height"]),
     ]
     return hashlib.sha256("\0".join(fields).encode("utf-8")).hexdigest()[:16]
 
@@ -369,6 +408,35 @@ class WindowsGuiBackend:
             return control
         raise LookupError(f"Window is no longer available: {window_id}")
 
+    def _resolve_element_locator(
+        self,
+        window_id: str,
+        locator: dict[str, Any],
+    ) -> Any:
+        path = locator.get("path")
+        expected_fingerprint = str(locator.get("fingerprint") or "")
+        if not isinstance(path, list) or not expected_fingerprint:
+            raise LookupError("Windows UIA locator is invalid or incomplete")
+        control = self._find_window(window_id)
+        for raw_index in path:
+            try:
+                index = int(raw_index)
+                children = control.GetChildren()
+                control = children[index]
+            except (IndexError, TypeError, ValueError) as exc:
+                raise LookupError(
+                    "Target UIA element is no longer available; call gui_state again"
+                ) from exc
+            except Exception as exc:  # noqa: BLE001 - provider-specific tree failure.
+                raise LookupError(
+                    "Target UIA element could not be re-resolved; call gui_state again"
+                ) from exc
+        if _element_fingerprint(control) != expected_fingerprint:
+            raise LookupError(
+                "Target UIA element changed since observation; call gui_state again"
+            )
+        return control
+
     def _list_windows_sync(self) -> dict[str, Any]:
         auto = _automation()
         windows = []
@@ -411,23 +479,46 @@ class WindowsGuiBackend:
         elements: list[dict[str, Any]] = []
         locators: dict[str, Any] = {}
         if include_elements:
-            queue: list[tuple[Any, int]] = [(window, 0)]
+            queue: list[tuple[Any, int, list[int]]] = [(window, 0, [])]
+            used_bytes = 2
             while queue and len(elements) < max_elements:
-                control, depth = queue.pop(0)
+                control, depth, path = queue.pop(0)
                 element_id = f"e{len(elements) + 1}"
                 bounds = _rect_dict(_safe_property(control, "BoundingRectangle"))
                 element = {
                     "id": element_id,
-                    "role": str(_safe_property(control, "ControlTypeName", "") or ""),
-                    "name": str(_safe_property(control, "Name", "") or ""),
-                    "automation_id": str(_safe_property(control, "AutomationId", "") or ""),
+                    "role": _truncate_gui_text(
+                        _safe_property(control, "ControlTypeName", ""),
+                        GUI_MAX_ELEMENT_TEXT_BYTES,
+                    ),
+                    "name": _truncate_gui_text(
+                        _safe_property(control, "Name", ""),
+                        GUI_MAX_ELEMENT_TEXT_BYTES,
+                    ),
+                    "automation_id": _truncate_gui_text(
+                        _safe_property(control, "AutomationId", ""),
+                        GUI_MAX_ELEMENT_TEXT_BYTES,
+                    ),
                     "bounds": bounds,
                     "enabled": bool(_safe_property(control, "IsEnabled", True)),
                     "offscreen": bool(_safe_property(control, "IsOffscreen", False)),
                     "depth": depth,
                 }
+                encoded = json.dumps(
+                    element,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode("utf-8")
+                extra = len(encoded) + (1 if elements else 0)
+                if used_bytes + extra > GUI_MAX_ELEMENTS_TOTAL_BYTES:
+                    break
                 elements.append(element)
-                locators[element_id] = control
+                used_bytes += extra
+                locators[element_id] = {
+                    "path": list(path),
+                    "fingerprint": _element_fingerprint(control),
+                }
                 remaining = max_elements - len(elements) - len(queue)
                 if depth >= max_depth or remaining <= 0:
                     continue
@@ -435,7 +526,10 @@ class WindowsGuiBackend:
                     children = control.GetChildren()
                 except Exception:  # noqa: BLE001 - provider-specific tree failure.
                     children = []
-                queue.extend((child, depth + 1) for child in children[:remaining])
+                queue.extend(
+                    (child, depth + 1, [*path, index])
+                    for index, child in enumerate(children[:remaining])
+                )
 
         screenshot_display: str | None = None
         if screenshot_path is not None:
@@ -507,6 +601,10 @@ class WindowsGuiBackend:
     ) -> dict[str, Any]:
         auto = _automation()
         kind = action["type"]
+        if locator is not None:
+            if not isinstance(locator, dict):
+                raise LookupError("Windows UIA locator is invalid; call gui_state again")
+            locator = self._resolve_element_locator(str(window["id"]), locator)
 
         if kind == "focus":
             target = locator or self._find_window(str(window["id"]))
