@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import subprocess
 from pathlib import Path
 from typing import Any
 
-from .base import GuiSnapshot, GuiUnavailableError, display_screenshot_path, quantize_scroll_amount
+from .base import (
+    GUI_MAX_CAPTURE_DIMENSION,
+    GUI_MAX_CAPTURE_PIXELS,
+    GuiSnapshot,
+    GuiUnavailableError,
+    display_screenshot_path,
+    quantize_scroll_amount,
+)
 
 
 def _native():  # noqa: ANN202
@@ -78,6 +86,21 @@ def _ax_bounds(AX: Any, element: Any) -> dict[str, int]:
 
 def _same_bounds(left: dict[str, int], right: dict[str, int], tolerance: int = 3) -> bool:
     return all(abs(int(left[key]) - int(right[key])) <= tolerance for key in left)
+
+
+def _validate_capture_bounds(bounds: dict[str, Any]) -> None:
+    width = int(bounds.get("width", 0) or 0)
+    height = int(bounds.get("height", 0) or 0)
+    if width <= 0 or height <= 0:
+        raise GuiUnavailableError("macOS target window has invalid capture bounds")
+    if (
+        width > GUI_MAX_CAPTURE_DIMENSION
+        or height > GUI_MAX_CAPTURE_DIMENSION
+        or width * height > GUI_MAX_CAPTURE_PIXELS
+    ):
+        raise GuiUnavailableError(
+            f"macOS capture dimensions exceed the safe budget: {width}x{height}"
+        )
 
 
 _MAC_KEY_CODES = {
@@ -157,6 +180,13 @@ class MacOSGuiBackend:
         if record is None:
             raise LookupError(f"Window is no longer available: {window_id}")
         return record
+
+    def _current_record(self, observed: dict[str, Any]) -> dict[str, Any]:
+        window_id = str(observed.get("id") or "")
+        current = self._find_record(window_id)
+        if int(current.get("pid", 0) or 0) != int(observed.get("pid", 0) or 0):
+            raise LookupError(f"Window identity changed since observation: {window_id}")
+        return current
 
     def _find_ax_window(self, record: dict[str, Any]) -> Any | None:
         AX, _Quartz = _native()
@@ -282,6 +312,7 @@ class MacOSGuiBackend:
 
         screenshot_display: str | None = None
         if screenshot_path is not None:
+            _validate_capture_bounds(record.get("bounds", {}))
             window_number = str(window_id).split(":", 1)[1]
             result = await asyncio.to_thread(
                 subprocess.run,
@@ -317,7 +348,7 @@ class MacOSGuiBackend:
     async def focus_window(self, window: dict[str, Any]) -> None:
         def focus() -> None:
             AX, _Quartz = _native()
-            target = self._find_ax_window(window)
+            target = self._find_ax_window(self._current_record(window))
             if target is None:
                 raise RuntimeError("Could not resolve the target AX window")
             error = AX.AXUIElementSetAttributeValue(target, AX.kAXFocusedAttribute, True)
@@ -351,9 +382,10 @@ class MacOSGuiBackend:
         if not bool(AX.AXIsProcessTrusted()):
             raise GuiUnavailableError("Grant Accessibility permission to local-shell-mcp on macOS")
 
+        current_window = self._current_record(window)
         kind = action["type"]
         if kind == "focus":
-            target = locator or self._find_ax_window(window)
+            target = locator or self._find_ax_window(current_window)
             if target is None:
                 raise RuntimeError("Could not resolve the target AX element")
             error = AX.AXUIElementSetAttributeValue(target, AX.kAXFocusedAttribute, True)
@@ -378,7 +410,7 @@ class MacOSGuiBackend:
             if int(error) == 0:
                 return {"semantic": True, "method": "AXPress"}
 
-        ax_window = self._find_ax_window(window)
+        ax_window = self._find_ax_window(current_window)
         if ax_window is None:
             raise RuntimeError("Could not resolve the target AX window unambiguously")
         window_error = AX.AXUIElementSetAttributeValue(
@@ -457,8 +489,26 @@ class MacOSGuiBackend:
                         Quartz.CGEventSetIntegerValueField(
                             up_event, Quartz.kCGMouseEventClickState, click_count
                         )
-                    Quartz.CGEventPost(Quartz.kCGHIDEventTap, down_event)
-                    Quartz.CGEventPost(Quartz.kCGHIDEventTap, up_event)
+                    down_posted = False
+                    up_posted = False
+                    try:
+                        Quartz.CGEventPost(Quartz.kCGHIDEventTap, down_event)
+                        down_posted = True
+                        Quartz.CGEventPost(Quartz.kCGHIDEventTap, up_event)
+                        up_posted = True
+                    finally:
+                        if down_posted and not up_posted:
+                            with contextlib.suppress(Exception):
+                                cleanup = Quartz.CGEventCreateMouseEvent(
+                                    None, up, (x, y), button
+                                )
+                                if count == 2:
+                                    Quartz.CGEventSetIntegerValueField(
+                                        cleanup,
+                                        Quartz.kCGMouseEventClickState,
+                                        click_count,
+                                    )
+                                Quartz.CGEventPost(Quartz.kCGHIDEventTap, cleanup)
             return {"screen_x": x, "screen_y": y}
 
         if kind == "drag":
@@ -468,15 +518,43 @@ class MacOSGuiBackend:
             end_x, end_y = self._screen_point(
                 AX, window, {"x": action.get("to_x"), "y": action.get("to_y")}, None
             )
-            self._mouse(
-                Quartz, Quartz.kCGEventLeftMouseDown, start_x, start_y, Quartz.kCGMouseButtonLeft
-            )
-            self._mouse(
-                Quartz, Quartz.kCGEventLeftMouseDragged, end_x, end_y, Quartz.kCGMouseButtonLeft
-            )
-            self._mouse(
-                Quartz, Quartz.kCGEventLeftMouseUp, end_x, end_y, Quartz.kCGMouseButtonLeft
-            )
+            pressed = False
+            release_x, release_y = start_x, start_y
+            try:
+                self._mouse(
+                    Quartz,
+                    Quartz.kCGEventLeftMouseDown,
+                    start_x,
+                    start_y,
+                    Quartz.kCGMouseButtonLeft,
+                )
+                pressed = True
+                self._mouse(
+                    Quartz,
+                    Quartz.kCGEventLeftMouseDragged,
+                    end_x,
+                    end_y,
+                    Quartz.kCGMouseButtonLeft,
+                )
+                release_x, release_y = end_x, end_y
+                self._mouse(
+                    Quartz,
+                    Quartz.kCGEventLeftMouseUp,
+                    end_x,
+                    end_y,
+                    Quartz.kCGMouseButtonLeft,
+                )
+                pressed = False
+            finally:
+                if pressed:
+                    with contextlib.suppress(Exception):
+                        self._mouse(
+                            Quartz,
+                            Quartz.kCGEventLeftMouseUp,
+                            release_x,
+                            release_y,
+                            Quartz.kCGMouseButtonLeft,
+                        )
             return {
                 "from": {"x": start_x, "y": start_y},
                 "to": {"x": end_x, "y": end_y},

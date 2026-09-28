@@ -8,6 +8,37 @@ from typing import Any
 
 Atspi: Any | None = None
 
+GUI_MAX_ELEMENTS = 1000
+GUI_MAX_DEPTH = 20
+GUI_MAX_WINDOWS = 256
+GUI_MAX_WINDOW_TEXT_BYTES = 1024
+GUI_MAX_WINDOWS_TOTAL_BYTES = 128 * 1024
+GUI_MAX_ELEMENT_TEXT_BYTES = 1024
+GUI_MAX_ELEMENTS_TOTAL_BYTES = 64 * 1024
+GUI_MAX_ELEMENT_ACTIONS = 32
+GUI_MAX_RESPONSE_BYTES = 256 * 1024
+
+
+def _truncate_text(value: Any, limit: int) -> str:
+    text = str(value or "")
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text
+    suffix = "..."
+    budget = max(0, limit - len(suffix))
+    return encoded[:budget].decode("utf-8", errors="ignore") + suffix
+
+
+def _json_size(value: Any) -> int:
+    return len(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    )
+
 
 def _atspi() -> Any:
     global Atspi
@@ -123,8 +154,34 @@ def _windows() -> list[tuple[Any, Any, int]]:
                 continue
             if role not in {"frame", "dialog", "window", "application"} and index > 0:
                 continue
+            if not _window_is_visible(window):
+                continue
             result.append((app, window, index))
+            if len(result) >= GUI_MAX_WINDOWS:
+                return result
     return result
+
+
+def _window_is_visible(window: Any) -> bool:
+    try:
+        state_set = window.get_state_set()
+    except Exception:
+        return True
+    state_type = getattr(Atspi, "StateType", None)
+    if state_type is None:
+        return True
+    iconified = getattr(state_type, "ICONIFIED", None)
+    if iconified is not None:
+        with contextlib.suppress(Exception):
+            if bool(state_set.contains(iconified)):
+                return False
+    showing = getattr(state_type, "SHOWING", None)
+    if showing is not None:
+        try:
+            return bool(state_set.contains(showing))
+        except Exception:
+            return True
+    return True
 
 
 def _window_signature(window: Any) -> str | None:
@@ -167,8 +224,8 @@ def _record(app: Any, window: Any, index: int) -> dict[str, Any]:
         raise LookupError("AT-SPI window does not expose a stable accessible id")
     return {
         "id": f"atspi:{pid}:{signature}",
-        "title": str(window.get_name() or ""),
-        "app": str(app.get_name() or ""),
+        "title": _truncate_text(window.get_name(), GUI_MAX_WINDOW_TEXT_BYTES),
+        "app": _truncate_text(app.get_name(), GUI_MAX_WINDOW_TEXT_BYTES),
         "pid": pid,
         "bounds": _bounds(window),
     }
@@ -233,11 +290,12 @@ def _resolve_path(window: Any, path: list[int]) -> Any:
 
 def _snapshot(payload: dict[str, Any]) -> dict[str, Any]:
     app, window, window_index = _resolve_window(str(payload["window_id"]))
-    max_elements = max(1, int(payload.get("max_elements", 300)))
-    max_depth = max(1, int(payload.get("max_depth", 12)))
+    max_elements = max(1, min(int(payload.get("max_elements", 300)), GUI_MAX_ELEMENTS))
+    max_depth = max(1, min(int(payload.get("max_depth", 12)), GUI_MAX_DEPTH))
     include_elements = bool(payload.get("include_elements", True))
     elements = []
     locators = {}
+    elements_bytes = 2
     if include_elements:
         queue: list[tuple[Any, list[int], int]] = [(window, [], 0)]
         while queue and len(elements) < max_elements:
@@ -246,32 +304,39 @@ def _snapshot(payload: dict[str, Any]) -> dict[str, Any]:
             role = ""
             name = ""
             with contextlib.suppress(Exception):
-                role = str(obj.get_role_name() or "")
+                role = _truncate_text(obj.get_role_name(), GUI_MAX_ELEMENT_TEXT_BYTES)
             with contextlib.suppress(Exception):
-                name = str(obj.get_name() or "")
+                name = _truncate_text(obj.get_name(), GUI_MAX_ELEMENT_TEXT_BYTES)
             actions = []
             try:
                 iface = obj.get_action_iface()
                 if iface is not None:
+                    action_count = max(0, min(int(iface.get_n_actions()), GUI_MAX_ELEMENT_ACTIONS))
                     actions = [
-                        str(iface.get_action_name(i) or "")
-                        for i in range(iface.get_n_actions())
+                        _truncate_text(
+                            iface.get_action_name(i),
+                            GUI_MAX_ELEMENT_TEXT_BYTES,
+                        )
+                        for i in range(action_count)
                     ]
             except Exception:
                 pass
-            elements.append(
-                {
-                    "id": element_id,
-                    "role": role,
-                    "name": name,
-                    "bounds": _bounds(obj),
-                    "enabled": _state(obj, Atspi.StateType.ENABLED),
-                    "focused": _state(obj, Atspi.StateType.FOCUSED),
-                    "editable": _state(obj, Atspi.StateType.EDITABLE),
-                    "actions": actions,
-                    "depth": depth,
-                }
-            )
+            element = {
+                "id": element_id,
+                "role": role,
+                "name": name,
+                "bounds": _bounds(obj),
+                "enabled": _state(obj, Atspi.StateType.ENABLED),
+                "focused": _state(obj, Atspi.StateType.FOCUSED),
+                "editable": _state(obj, Atspi.StateType.EDITABLE),
+                "actions": actions,
+                "depth": depth,
+            }
+            extra = _json_size(element) + (1 if elements else 0)
+            if elements_bytes + extra > GUI_MAX_ELEMENTS_TOTAL_BYTES:
+                break
+            elements.append(element)
+            elements_bytes += extra
             locators[element_id] = {
                 "path": path,
                 "fingerprint": _element_signature(obj),
@@ -411,11 +476,19 @@ def _main(payload: dict[str, Any]) -> dict[str, Any]:
     command = str(payload.get("command") or "")
     if command == "list":
         windows = []
+        windows_bytes = 2
         for app, window, index in _windows():
             try:
-                windows.append(_record(app, window, index))
+                record = _record(app, window, index)
             except Exception:
                 continue
+            extra = _json_size(record) + (1 if windows else 0)
+            if windows_bytes + extra > GUI_MAX_WINDOWS_TOTAL_BYTES:
+                break
+            windows.append(record)
+            windows_bytes += extra
+            if len(windows) >= GUI_MAX_WINDOWS:
+                break
         return {"windows": windows, "monitors": _monitors()}
     if command == "snapshot":
         return _snapshot(payload)
@@ -434,13 +507,26 @@ def main() -> int:
         response = {"ok": True, "data": _main(request)}
         code = 0
     except Exception as exc:
+        detail = _truncate_text(
+            f"{type(exc).__name__}: {exc}",
+            GUI_MAX_ELEMENT_TEXT_BYTES * 4,
+        )
         response = {
             "ok": False,
             "error_type": type(exc).__name__,
-            "error": f"{type(exc).__name__}: {exc}",
+            "error": detail,
         }
         code = 2
-    print(json.dumps(response, ensure_ascii=False))
+    encoded = json.dumps(response, ensure_ascii=False)
+    if len(encoded.encode("utf-8")) > GUI_MAX_RESPONSE_BYTES:
+        response = {
+            "ok": False,
+            "error_type": "ValueError",
+            "error": "ValueError: AT-SPI helper response exceeds the safe size budget",
+        }
+        code = 2
+        encoded = json.dumps(response, ensure_ascii=False)
+    print(encoded)
     return code
 
 

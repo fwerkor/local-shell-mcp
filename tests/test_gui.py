@@ -3791,6 +3791,7 @@ async def test_macos_element_focus_failure_aborts_keyboard_injection(monkeypatch
 
     backend = MacOSGuiBackend()
     monkeypatch.setattr(macos, "_native", lambda: (AX, Quartz))
+    monkeypatch.setattr(backend, "_current_record", lambda window: window)
     monkeypatch.setattr(backend, "_find_ax_window", lambda _window: "window")
 
     with pytest.raises(RuntimeError, match="could not be focused"):
@@ -3967,6 +3968,150 @@ def test_atspi_listing_skips_defunct_children(monkeypatch):
     assert windows[0][1] is good
 
 
+def test_atspi_listing_skips_iconified_and_nonshowing_windows(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    class StateSet:
+        def __init__(self, states):
+            self.states = set(states)
+
+        def contains(self, state):
+            return state in self.states
+
+    class Window:
+        def __init__(self, states):
+            self.states = states
+
+        def get_role_name(self):
+            return "frame"
+
+        def get_state_set(self):
+            return StateSet(self.states)
+
+    visible = Window({"showing"})
+    minimized = Window({"showing", "iconified"})
+    hidden = Window(set())
+
+    class App:
+        def get_process_id(self):
+            return 42
+
+        def get_child_count(self):
+            return 3
+
+        def get_child_at_index(self, index):
+            return [visible, minimized, hidden][index]
+
+    monkeypatch.setattr(
+        helper,
+        "Atspi",
+        SimpleNamespace(
+            StateType=SimpleNamespace(ICONIFIED="iconified", SHOWING="showing")
+        ),
+    )
+    monkeypatch.setattr(helper, "_apps", lambda: [App()])
+    monkeypatch.setattr(
+        helper,
+        "_bounds",
+        lambda _window: {"x": 0, "y": 0, "width": 100, "height": 100},
+    )
+
+    windows = helper._windows()
+    assert [item[1] for item in windows] == [visible]
+
+
+def test_atspi_helper_bounds_provider_controlled_snapshot_fields(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    huge = "x" * (helper.GUI_MAX_ELEMENT_TEXT_BYTES * 4)
+
+    class StateSet:
+        def contains(self, _state):
+            return False
+
+    class ActionIface:
+        def get_n_actions(self):
+            return helper.GUI_MAX_ELEMENT_ACTIONS * 4
+
+        def get_action_name(self, _index):
+            return huge
+
+    class Element:
+        def __init__(self, index=0):
+            self.index = index
+
+        def get_accessible_id(self):
+            return f"element-{self.index}"
+
+        def get_role_name(self):
+            return huge
+
+        def get_name(self):
+            return huge
+
+        def get_action_iface(self):
+            return ActionIface()
+
+        def get_state_set(self):
+            return StateSet()
+
+        def get_child_count(self):
+            return 100 if self.index == 0 else 0
+
+        def get_child_at_index(self, index):
+            return Element(index + 1)
+
+    class App:
+        def get_process_id(self):
+            return 42
+
+        def get_name(self):
+            return huge
+
+    root = Element()
+    monkeypatch.setattr(
+        helper,
+        "Atspi",
+        SimpleNamespace(
+            StateType=SimpleNamespace(
+                ENABLED="enabled",
+                FOCUSED="focused",
+                EDITABLE="editable",
+            )
+        ),
+    )
+    monkeypatch.setattr(helper, "_resolve_window", lambda _id: (App(), root, 0))
+    monkeypatch.setattr(
+        helper,
+        "_bounds",
+        lambda _obj: {"x": 0, "y": 0, "width": 100, "height": 100},
+    )
+
+    result = helper._snapshot(
+        {
+            "window_id": "atspi:42:sig",
+            "include_elements": True,
+            "max_elements": helper.GUI_MAX_ELEMENTS,
+            "max_depth": helper.GUI_MAX_DEPTH,
+        }
+    )
+
+    assert len(result["window"]["title"].encode()) <= helper.GUI_MAX_WINDOW_TEXT_BYTES
+    assert len(result["window"]["app"].encode()) <= helper.GUI_MAX_WINDOW_TEXT_BYTES
+    assert len(json.dumps(result["elements"], ensure_ascii=False).encode()) <= (
+        helper.GUI_MAX_ELEMENTS_TOTAL_BYTES
+    )
+    assert result["elements"]
+    for element in result["elements"]:
+        assert len(element["role"].encode()) <= helper.GUI_MAX_ELEMENT_TEXT_BYTES
+        assert len(element["name"].encode()) <= helper.GUI_MAX_ELEMENT_TEXT_BYTES
+        assert len(element["actions"]) <= helper.GUI_MAX_ELEMENT_ACTIONS
+        assert all(
+            len(action.encode()) <= helper.GUI_MAX_ELEMENT_TEXT_BYTES
+            for action in element["actions"]
+        )
+
+
 def test_macos_key_table_includes_physical_backquote():
     import local_shell_mcp.gui.macos as macos
 
@@ -4115,6 +4260,199 @@ def test_macos_ax_window_matching_rejects_sole_unrelated_window(monkeypatch):
     )
 
 
+def test_macos_raw_input_rejects_closed_cg_window_before_ax_title_fallback(monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    class AX:
+        @staticmethod
+        def AXIsProcessTrusted():
+            return True
+
+    backend = MacOSGuiBackend()
+    monkeypatch.setattr(macos, "_native", lambda: (AX, object()))
+    monkeypatch.setattr(
+        backend,
+        "_find_record",
+        lambda _window_id: (_ for _ in ()).throw(LookupError("closed")),
+    )
+    monkeypatch.setattr(backend, "_find_ax_window", lambda _record: object())
+
+    with pytest.raises(LookupError, match="closed"):
+        backend._perform_action_sync(
+            {
+                "id": "cg:1",
+                "pid": 42,
+                "title": "Untitled",
+                "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+            },
+            None,
+            {"type": "type", "text": "x"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_macos_rejects_oversized_capture_before_screencapture(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    backend = MacOSGuiBackend()
+    record = {
+        "id": "cg:1",
+        "pid": 42,
+        "title": "Huge",
+        "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": macos.GUI_MAX_CAPTURE_DIMENSION + 1,
+            "height": 100,
+        },
+    }
+    monkeypatch.setattr(
+        backend,
+        "_snapshot_accessibility_sync",
+        lambda *_args, **_kwargs: (record, True, [], {}),
+    )
+    called = []
+    monkeypatch.setattr(
+        macos.subprocess,
+        "run",
+        lambda *_args, **_kwargs: called.append(True),
+    )
+
+    with pytest.raises(GuiUnavailableError, match="safe budget"):
+        await backend.snapshot(
+            "cg:1",
+            screenshot_path=tmp_path / "capture.png",
+            include_elements=False,
+            max_elements=1,
+            max_depth=1,
+        )
+    assert called == []
+
+
+def test_macos_click_failure_releases_pressed_mouse_button(monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    posted = []
+    up_attempts = 0
+
+    class AX:
+        kAXFocusedAttribute = "focused"
+        kAXRaiseAction = "raise"
+
+        @staticmethod
+        def AXIsProcessTrusted():
+            return True
+
+        @staticmethod
+        def AXUIElementSetAttributeValue(*_args):
+            return 0
+
+        @staticmethod
+        def AXUIElementPerformAction(*_args):
+            return 0
+
+    class Quartz:
+        kCGHIDEventTap = 1
+        kCGMouseButtonLeft = 0
+        kCGMouseButtonRight = 1
+        kCGEventLeftMouseDown = 10
+        kCGEventLeftMouseUp = 11
+        kCGEventRightMouseDown = 12
+        kCGEventRightMouseUp = 13
+        kCGMouseEventClickState = 20
+
+        @staticmethod
+        def CGEventCreateMouseEvent(_source, event_type, _point, _button):
+            return {"type": event_type}
+
+        @staticmethod
+        def CGEventPost(_tap, event):
+            nonlocal up_attempts
+            posted.append(event["type"])
+            if event["type"] == Quartz.kCGEventLeftMouseUp and up_attempts == 0:
+                up_attempts += 1
+                raise RuntimeError("up failed")
+
+    backend = MacOSGuiBackend()
+    window = {
+        "id": "cg:1",
+        "pid": 42,
+        "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+    }
+    monkeypatch.setattr(macos, "_native", lambda: (AX, Quartz))
+    monkeypatch.setattr(backend, "_current_record", lambda _window: window)
+    monkeypatch.setattr(backend, "_find_ax_window", lambda _window: "ax-window")
+
+    with pytest.raises(RuntimeError, match="up failed"):
+        backend._perform_action_sync(
+            window,
+            None,
+            {"type": "click", "x": 5, "y": 6},
+        )
+    assert posted == [
+        Quartz.kCGEventLeftMouseDown,
+        Quartz.kCGEventLeftMouseUp,
+        Quartz.kCGEventLeftMouseUp,
+    ]
+
+
+def test_macos_drag_failure_releases_pressed_mouse_button(monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    calls = []
+
+    class AX:
+        kAXFocusedAttribute = "focused"
+        kAXRaiseAction = "raise"
+
+        @staticmethod
+        def AXIsProcessTrusted():
+            return True
+
+        @staticmethod
+        def AXUIElementSetAttributeValue(*_args):
+            return 0
+
+        @staticmethod
+        def AXUIElementPerformAction(*_args):
+            return 0
+
+    class Quartz:
+        kCGMouseButtonLeft = 0
+        kCGEventLeftMouseDown = 10
+        kCGEventLeftMouseDragged = 11
+        kCGEventLeftMouseUp = 12
+
+    backend = MacOSGuiBackend()
+    window = {
+        "id": "cg:1",
+        "pid": 42,
+        "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+    }
+    monkeypatch.setattr(macos, "_native", lambda: (AX, Quartz))
+    monkeypatch.setattr(backend, "_current_record", lambda _window: window)
+    monkeypatch.setattr(backend, "_find_ax_window", lambda _window: "ax-window")
+
+    def mouse(_quartz, event_type, x, y, _button):
+        calls.append((event_type, x, y))
+        if event_type == Quartz.kCGEventLeftMouseDragged:
+            raise RuntimeError("drag failed")
+
+    monkeypatch.setattr(backend, "_mouse", mouse)
+
+    with pytest.raises(RuntimeError, match="drag failed"):
+        backend._perform_action_sync(
+            window,
+            None,
+            {"type": "drag", "x": 1, "y": 2, "to_x": 30, "to_y": 40},
+        )
+    assert calls == [
+        (Quartz.kCGEventLeftMouseDown, 1, 2),
+        (Quartz.kCGEventLeftMouseDragged, 30, 40),
+        (Quartz.kCGEventLeftMouseUp, 1, 2),
+    ]
+
+
 def test_macos_raw_input_requires_unambiguous_focusable_window(monkeypatch):
     import local_shell_mcp.gui.macos as macos
 
@@ -4151,6 +4489,7 @@ def test_macos_raw_input_requires_unambiguous_focusable_window(monkeypatch):
 
     backend = MacOSGuiBackend()
     monkeypatch.setattr(macos, "_native", lambda: (AX, Quartz))
+    monkeypatch.setattr(backend, "_current_record", lambda window: window)
     monkeypatch.setattr(backend, "_find_ax_window", lambda _window: None)
 
     with pytest.raises(RuntimeError, match="unambiguously"):
