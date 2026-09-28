@@ -150,6 +150,8 @@ def test_controller_registration_resume_rename_revoke_and_defaults(tmp_path, mon
     renamed = manager.rename("alice@host", "renamed")
     assert renamed == {"old_name": "alice@host", "new_name": "renamed"}
     assert manager.tokens[token] == "renamed"
+    resumed_after_rename = asyncio.run(manager.resume_worker(token, {}))
+    assert resumed_after_rename["name"] == "renamed"
     with pytest.raises(ValueError, match="already exists"):
         manager.rename("renamed", "alice@host-2")
     with pytest.raises(ValueError, match="unknown"):
