@@ -291,6 +291,14 @@ def test_gui_dependency_bootstrap_reuses_available_modules(tmp_path, monkeypatch
 
     monkeypatch.setattr(installer.importlib, "import_module", import_module)
     monkeypatch.setattr(
+        installer.importlib.metadata,
+        "version",
+        lambda name: {
+            "python-xlib": "0.33",
+            "dbus-next": "0.2.3",
+        }[name],
+    )
+    monkeypatch.setattr(
         installer.subprocess,
         "run",
         lambda *args, **kwargs: pytest.fail("pip should not run when GUI deps are available"),
@@ -332,6 +340,7 @@ def test_gui_dependency_bootstrap_installs_missing_modules(tmp_path, monkeypatch
 
     monkeypatch.setattr(installer.importlib, "import_module", import_module)
     monkeypatch.setattr(installer.importlib, "invalidate_caches", lambda: None)
+    monkeypatch.setattr(installer.importlib.metadata, "version", lambda _name: "2.0.29")
     monkeypatch.setattr(installer.subprocess, "run", run)
 
     result = installer.ensure_gui_dependencies()
@@ -368,6 +377,63 @@ def test_gui_dependency_read_only_check_never_installs_missing_modules(tmp_path,
     assert result["missing"] == ["uiautomation"]
     assert "execute-authorized" in result["error"]
     assert not installer.worker_dependency_dir().exists()
+
+
+def test_gui_dependency_bootstrap_rejects_importable_unsupported_version(
+    tmp_path,
+    monkeypatch,
+):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(installer.sys, "platform", "linux")
+    monkeypatch.setattr(installer.sys, "path", list(installer.sys.path))
+    monkeypatch.setenv("PYTHONPATH", "")
+    installed = False
+    runs = []
+
+    monkeypatch.setattr(installer.importlib, "import_module", lambda _name: SimpleNamespace())
+    monkeypatch.setattr(
+        installer.importlib.metadata,
+        "version",
+        lambda _name: "0.32" if not installed else "0.33",
+    )
+    monkeypatch.setattr(installer.importlib, "invalidate_caches", lambda: None)
+
+    def run(argv, **_kwargs):
+        nonlocal installed
+        installed = True
+        runs.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="installed", stderr="")
+
+    monkeypatch.setattr(installer.subprocess, "run", run)
+    result = installer.ensure_gui_dependencies("x11")
+
+    assert result["available"] is True
+    assert result["installed"] is True
+    assert len(runs) == 1
+    assert "python-xlib>=0.33,<1" in runs[0]
+
+
+def test_gui_dependency_read_only_rejects_unsupported_version_without_install(
+    tmp_path,
+    monkeypatch,
+):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(installer.sys, "platform", "linux")
+    monkeypatch.setattr(installer.sys, "path", list(installer.sys.path))
+    monkeypatch.setenv("PYTHONPATH", "")
+    monkeypatch.setattr(installer.importlib, "import_module", lambda _name: SimpleNamespace())
+    monkeypatch.setattr(installer.importlib.metadata, "version", lambda _name: "0.32")
+    monkeypatch.setattr(
+        installer.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("read-only version checks must not run pip"),
+    )
+
+    result = installer.ensure_gui_dependencies("x11", install_missing=False)
+
+    assert result["available"] is False
+    assert result["missing"] == ["Xlib"]
+    assert "execute-authorized" in result["error"]
 
 
 def test_gui_dependency_bootstrap_failure_is_nonfatal_status(tmp_path, monkeypatch):
@@ -417,6 +483,7 @@ def test_gui_dependency_failure_is_cached_between_polling_requests(tmp_path, mon
 
     monkeypatch.setattr(installer.importlib, "import_module", import_module)
     monkeypatch.setattr(installer.importlib, "invalidate_caches", lambda: None)
+    monkeypatch.setattr(installer.importlib.metadata, "version", lambda _name: "11.1")
     monkeypatch.setattr(installer.subprocess, "run", run)
 
     first = installer.ensure_gui_dependencies()
@@ -461,6 +528,7 @@ def test_gui_dependency_bootstrap_serializes_inflight_install(tmp_path, monkeypa
 
     monkeypatch.setattr(installer.importlib, "import_module", import_module)
     monkeypatch.setattr(installer.importlib, "invalidate_caches", lambda: None)
+    monkeypatch.setattr(installer.importlib.metadata, "version", lambda _name: "2.0.29")
     monkeypatch.setattr(installer.subprocess, "run", run)
 
     with ThreadPoolExecutor(max_workers=2) as pool:

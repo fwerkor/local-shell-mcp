@@ -4,6 +4,8 @@ import asyncio
 import ctypes
 import hashlib
 import json
+import subprocess
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -113,7 +115,10 @@ class _BitmapInfo(ctypes.Structure):
     ]
 
 
-def _capture_window_image(hwnd: int, destination: Path) -> None:
+_WINDOW_CAPTURE_TIMEOUT_S = 15.0
+
+
+def _capture_window_image_native(hwnd: int, destination: Path) -> None:
     windll = getattr(ctypes, "windll", None)
     if windll is None:  # pragma: no cover - Windows-only runtime guard.
         raise GuiUnavailableError("Win32 window capture is unavailable on this platform")
@@ -229,6 +234,44 @@ def _capture_window_image(hwnd: int, destination: Path) -> None:
         if memory_dc:
             gdi32.DeleteDC(memory_dc)
         user32.ReleaseDC(ctypes.c_void_p(hwnd), window_dc)
+
+
+def _capture_window_image(hwnd: int, destination: Path) -> None:
+    if getattr(sys, "frozen", False):
+        argv = [
+            sys.executable,
+            "_gui-capture-window",
+            str(int(hwnd)),
+            str(destination),
+        ]
+    else:
+        argv = [
+            sys.executable,
+            "-m",
+            "local_shell_mcp.main",
+            "_gui-capture-window",
+            str(int(hwnd)),
+            str(destination),
+        ]
+    try:
+        completed = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_WINDOW_CAPTURE_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as exc:
+        destination.unlink(missing_ok=True)
+        raise GuiUnavailableError(
+            f"Win32 window capture exceeded {_WINDOW_CAPTURE_TIMEOUT_S:g}s and was terminated"
+        ) from exc
+    if completed.returncode != 0:
+        destination.unlink(missing_ok=True)
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        raise GuiUnavailableError(
+            f"Win32 window capture helper failed: {detail or completed.returncode}"
+        )
 
 
 def _safe_property(control: Any, name: str, default: Any = None) -> Any:

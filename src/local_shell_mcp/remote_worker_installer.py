@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import importlib.metadata
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -38,6 +40,9 @@ _GUI_REQUIREMENTS: dict[str, tuple[tuple[str, str], ...]] = {
     "linux-x11": (("Xlib", "python-xlib>=0.33,<1"),),
     "linux-wayland": (("dbus_next", "dbus-next>=0.2.3,<1"),),
 }
+_SIMPLE_REQUIREMENT_RE = re.compile(
+    r"^(?P<distribution>[A-Za-z0-9_.-]+)>=(?P<minimum>\d+(?:\.\d+)*),<(?P<maximum>\d+(?:\.\d+)*)$"
+)
 
 
 def _gui_requirement_key(session_type: str | None) -> str | None:
@@ -47,6 +52,43 @@ def _gui_requirement_key(session_type: str | None) -> str | None:
             return f"linux-{normalized}"
         return None
     return sys.platform
+
+
+def _version_release(value: str) -> tuple[int, ...] | None:
+    match = re.match(r"^(\d+(?:\.\d+)*)", str(value).strip())
+    if match is None:
+        return None
+    return tuple(int(part) for part in match.group(1).split("."))
+
+
+def _release_compare(left: tuple[int, ...], right: tuple[int, ...]) -> int:
+    length = max(len(left), len(right))
+    normalized_left = left + (0,) * (length - len(left))
+    normalized_right = right + (0,) * (length - len(right))
+    return (normalized_left > normalized_right) - (normalized_left < normalized_right)
+
+
+def _gui_requirement_satisfied(module_name: str, requirement: str) -> bool:
+    try:
+        importlib.import_module(module_name)
+    except (ImportError, OSError):
+        return False
+    match = _SIMPLE_REQUIREMENT_RE.fullmatch(requirement)
+    if match is None:
+        return False
+    try:
+        installed = importlib.metadata.version(match.group("distribution"))
+    except importlib.metadata.PackageNotFoundError:
+        return False
+    installed_release = _version_release(installed)
+    minimum = _version_release(match.group("minimum"))
+    maximum = _version_release(match.group("maximum"))
+    if installed_release is None or minimum is None or maximum is None:
+        return False
+    return (
+        _release_compare(installed_release, minimum) >= 0
+        and _release_compare(installed_release, maximum) < 0
+    )
 
 
 
@@ -146,9 +188,7 @@ def _ensure_gui_dependencies_unlocked(
 
     missing: list[tuple[str, str]] = []
     for module_name, requirement in required:
-        try:
-            importlib.import_module(module_name)
-        except (ImportError, OSError):
+        if not _gui_requirement_satisfied(module_name, requirement):
             missing.append((module_name, requirement))
     if not missing:
         if key:
@@ -221,10 +261,9 @@ def _ensure_gui_dependencies_unlocked(
 
     importlib.invalidate_caches()
     still_missing: list[str] = []
-    for module_name, _requirement in missing:
-        try:
-            importlib.import_module(module_name)
-        except (ImportError, OSError):
+    for module_name, requirement in missing:
+        sys.modules.pop(module_name, None)
+        if not _gui_requirement_satisfied(module_name, requirement):
             still_missing.append(module_name)
     available = not still_missing
     result: dict[str, Any] = {

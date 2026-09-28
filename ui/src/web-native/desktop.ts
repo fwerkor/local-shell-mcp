@@ -337,10 +337,7 @@ export class DesktopController extends BaseController {
       const previous = this.selectedWindowId
       this.windows = payload.windows || []
       this.backend = payload.backend || ""
-      this.captureRequiresFocus = (
-        requestedMachine === "local"
-        && payload.capabilities?.capture_requires_focus === true
-      )
+      this.captureRequiresFocus = payload.capabilities?.capture_requires_focus === true
       if (!this.windows.some((window) => window.id === previous)) {
         this.selectedWindowId = this.windows[0]?.id || ""
         this.invalidateActionTarget()

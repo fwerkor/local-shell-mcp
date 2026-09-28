@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -9,8 +10,12 @@ from typing import Any
 from .base import (
     GUI_MAX_CAPTURE_DIMENSION,
     GUI_MAX_CAPTURE_PIXELS,
+    GUI_MAX_ELEMENT_TEXT_BYTES,
+    GUI_MAX_ELEMENT_VALUE_BYTES,
+    GUI_MAX_ELEMENTS_TOTAL_BYTES,
     GuiSnapshot,
     GuiUnavailableError,
+    _truncate_gui_text,
     display_screenshot_path,
     quantize_scroll_amount,
 )
@@ -262,28 +267,42 @@ class MacOSGuiBackend:
         ax_window = self._find_ax_window(record) if include_elements and trusted else None
         if ax_window is not None:
             queue: list[tuple[Any, int]] = [(ax_window, 0)]
+            used_bytes = 2
             while queue and len(elements) < max_elements:
                 element, depth = queue.pop(0)
                 element_id = f"e{len(elements) + 1}"
-                elements.append(
-                    {
-                        "id": element_id,
-                        "role": str(_ax_copy(AX, element, AX.kAXRoleAttribute, "") or ""),
-                        "name": str(
-                            _ax_copy(AX, element, AX.kAXTitleAttribute, "")
-                            or _ax_copy(AX, element, AX.kAXDescriptionAttribute, "")
-                            or ""
-                        ),
-                        "value": str(
-                            _ax_copy(AX, element, AX.kAXValueAttribute, "") or ""
-                        )[:1000],
-                        "bounds": _ax_bounds(AX, element),
-                        "enabled": bool(
-                            _ax_copy(AX, element, AX.kAXEnabledAttribute, True)
-                        ),
-                        "depth": depth,
-                    }
-                )
+                item = {
+                    "id": element_id,
+                    "role": _truncate_gui_text(
+                        _ax_copy(AX, element, AX.kAXRoleAttribute, ""),
+                        GUI_MAX_ELEMENT_TEXT_BYTES,
+                    ),
+                    "name": _truncate_gui_text(
+                        _ax_copy(AX, element, AX.kAXTitleAttribute, "")
+                        or _ax_copy(AX, element, AX.kAXDescriptionAttribute, ""),
+                        GUI_MAX_ELEMENT_TEXT_BYTES,
+                    ),
+                    "value": _truncate_gui_text(
+                        _ax_copy(AX, element, AX.kAXValueAttribute, ""),
+                        GUI_MAX_ELEMENT_VALUE_BYTES,
+                    ),
+                    "bounds": _ax_bounds(AX, element),
+                    "enabled": bool(
+                        _ax_copy(AX, element, AX.kAXEnabledAttribute, True)
+                    ),
+                    "depth": depth,
+                }
+                encoded = json.dumps(
+                    item,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode("utf-8")
+                extra = len(encoded) + (1 if elements else 0)
+                if used_bytes + extra > GUI_MAX_ELEMENTS_TOTAL_BYTES:
+                    break
+                elements.append(item)
+                used_bytes += extra
                 locators[element_id] = element
                 remaining = max_elements - len(elements) - len(queue)
                 if depth >= max_depth or remaining <= 0:

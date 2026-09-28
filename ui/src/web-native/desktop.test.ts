@@ -77,7 +77,7 @@ describe("Native WebUI desktop window refresh", () => {
 })
 
 describe("Native WebUI desktop Wayland capture", () => {
-  test("does not auto-refresh focus-changing local Wayland frames", async () => {
+  test("does not auto-refresh focus-changing Wayland frames locally or remotely", async () => {
     const context: NativePageContext = {
       api: {
         get: async () => ({
@@ -107,8 +107,8 @@ describe("Native WebUI desktop Wayland capture", () => {
 
     controller.machine = "node"
     await controller.refreshWindows(true)
-    expect(controller.captureRequiresFocus).toBe(false)
-    expect(frames).toBe(1)
+    expect(controller.captureRequiresFocus).toBe(true)
+    expect(frames).toBe(0)
   })
 })
 

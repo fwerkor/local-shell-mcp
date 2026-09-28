@@ -1542,7 +1542,23 @@ def test_windows_capture_rejects_oversized_rect_before_gdi_allocation(tmp_path, 
         raising=False,
     )
     with pytest.raises(GuiUnavailableError, match="safe budget"):
-        windows._capture_window_image(123, tmp_path / "oversized.png")
+        windows._capture_window_image_native(123, tmp_path / "oversized.png")
+
+
+def test_windows_capture_helper_times_out_and_removes_partial_output(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.windows as windows
+
+    destination = tmp_path / "window.png"
+    destination.write_bytes(b"partial")
+
+    def run(argv, **kwargs):
+        raise windows.subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+    monkeypatch.setattr(windows.subprocess, "run", run)
+
+    with pytest.raises(GuiUnavailableError, match="exceeded"):
+        windows._capture_window_image(123, destination)
+    assert not destination.exists()
 
 
 def test_windows_snapshot_uses_hwnd_capture_not_visible_rectangle(tmp_path, monkeypatch):
@@ -4545,6 +4561,75 @@ def test_macos_accessibility_traversal_does_not_fetch_children_after_budget(monk
     )
     assert len(elements) == 1
     assert child_queries == []
+
+
+def test_macos_accessibility_traversal_bounds_provider_strings_and_total_bytes(monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    huge = "x" * (macos.GUI_MAX_ELEMENT_TEXT_BYTES * 8)
+
+    class AX:
+        kAXRoleAttribute = "role"
+        kAXTitleAttribute = "title"
+        kAXDescriptionAttribute = "description"
+        kAXValueAttribute = "value"
+        kAXEnabledAttribute = "enabled"
+        kAXChildrenAttribute = "children"
+
+        @staticmethod
+        def AXIsProcessTrusted():
+            return True
+
+    children = [object() for _ in range(200)]
+    root = object()
+    backend = MacOSGuiBackend()
+    monkeypatch.setattr(macos, "_native", lambda: (AX, object()))
+    monkeypatch.setattr(
+        backend,
+        "_find_record",
+        lambda _window_id: {
+            "id": "cg:1",
+            "pid": 1,
+            "title": "Window",
+            "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+        },
+    )
+    monkeypatch.setattr(backend, "_find_ax_window", lambda _record: root)
+    monkeypatch.setattr(
+        macos,
+        "_ax_bounds",
+        lambda _ax, _element: {"x": 0, "y": 0, "width": 10, "height": 10},
+    )
+
+    def ax_copy(_ax, element, attr, default=None):
+        if attr == AX.kAXChildrenAttribute:
+            return children if element is root else []
+        if attr in {AX.kAXRoleAttribute, AX.kAXTitleAttribute, AX.kAXDescriptionAttribute}:
+            return huge
+        if attr == AX.kAXValueAttribute:
+            return huge
+        if attr == AX.kAXEnabledAttribute:
+            return True
+        return default
+
+    monkeypatch.setattr(macos, "_ax_copy", ax_copy)
+
+    _record, _trusted, elements, locators = backend._snapshot_accessibility_sync(
+        "cg:1",
+        include_elements=True,
+        max_elements=1000,
+        max_depth=2,
+    )
+
+    assert elements
+    assert len(json.dumps(elements, ensure_ascii=False).encode()) <= (
+        macos.GUI_MAX_ELEMENTS_TOTAL_BYTES
+    )
+    assert len(locators) == len(elements)
+    for element in elements:
+        assert len(element["role"].encode()) <= macos.GUI_MAX_ELEMENT_TEXT_BYTES
+        assert len(element["name"].encode()) <= macos.GUI_MAX_ELEMENT_TEXT_BYTES
+        assert len(element["value"].encode()) <= macos.GUI_MAX_ELEMENT_VALUE_BYTES
 
 
 def test_macos_ax_window_matching_rejects_ambiguous_weaker_matches(monkeypatch):
