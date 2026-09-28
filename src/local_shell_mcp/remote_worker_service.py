@@ -279,12 +279,16 @@ def _systemd_linger_enabled(user: str | None = None) -> bool | None:
 def _ensure_systemd_linger() -> tuple[bool | None, str | None]:
     user = os.getenv("USER") or os.getenv("LOGNAME") or getpass.getuser()
     enabled = _systemd_linger_enabled(user)
-    if enabled is not False:
-        return enabled, None
+    if enabled is True:
+        return True, None
 
     loginctl = shutil.which("loginctl")
     if not loginctl:
-        return None, None
+        return (
+            None,
+            "systemd user service is enabled, but login lingering could not be verified "
+            "because loginctl is unavailable; boot-time startup without login is not guaranteed",
+        )
 
     attempts = [[loginctl, "--no-ask-password", "enable-linger", user]]
     sudo = shutil.which("sudo")
@@ -297,8 +301,9 @@ def _ensure_systemd_linger() -> tuple[bool | None, str | None]:
             return True, None
         last_error = result.stderr.strip() or result.stdout.strip()
 
+    state = "disabled" if enabled is False else "could not be verified"
     message = (
-        "systemd user service is enabled, but login lingering is disabled; "
+        f"systemd user service is enabled, but login lingering {state}; "
         f"run 'sudo loginctl enable-linger {user}' for boot-time startup without login"
     )
     if last_error:
