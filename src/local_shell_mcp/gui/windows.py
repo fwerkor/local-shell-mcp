@@ -499,7 +499,12 @@ class WindowsGuiBackend:
     ) -> Any:
         path = locator.get("path")
         expected_fingerprint = str(locator.get("fingerprint") or "")
-        if not isinstance(path, list) or not expected_fingerprint:
+        observed_control = locator.get("_uia_control")
+        if (
+            not isinstance(path, list)
+            or not expected_fingerprint
+            or observed_control is None
+        ):
             raise LookupError("Windows UIA locator is invalid or incomplete")
         control = self._find_window(window_id, observed_window)
         for raw_index in path:
@@ -518,6 +523,10 @@ class WindowsGuiBackend:
         if _element_fingerprint(control) != expected_fingerprint:
             raise LookupError(
                 "Target UIA element changed since observation; call gui_state again"
+            )
+        if not _same_uia_control(observed_control, control):
+            raise LookupError(
+                "Target UIA element identity changed since observation; call gui_state again"
             )
         return control
 
@@ -629,6 +638,7 @@ class WindowsGuiBackend:
                 locators[element_id] = {
                     "path": list(path),
                     "fingerprint": _element_fingerprint(control),
+                    "_uia_control": control,
                 }
                 remaining = max_elements - len(elements) - len(queue)
                 if depth >= max_depth or remaining <= 0:

@@ -473,6 +473,7 @@ async def test_gui_snapshot_bounds_element_metadata_before_return(tmp_path, monk
                     "description": "D" * 5000,
                     "enabled": True,
                     "focused": index == 0,
+                    "editable": index == 0,
                     "offscreen": False,
                     "depth": 3,
                     "actions": ["A" * 5000] * 40,
@@ -511,6 +512,7 @@ async def test_gui_snapshot_bounds_element_metadata_before_return(tmp_path, monk
     )
     assert state["elements"][0]["enabled"] is True
     assert state["elements"][0]["focused"] is True
+    assert state["elements"][0]["editable"] is True
     assert state["elements"][0]["offscreen"] is False
     assert state["elements"][0]["depth"] == 3
     assert len(state["elements"][0]["actions"]) == 32
@@ -2333,6 +2335,91 @@ def test_windows_semantic_action_rejects_recycled_uia_element(monkeypatch):
         )
 
 
+def test_windows_semantic_action_rejects_identical_replacement_uia_element(monkeypatch):
+    import local_shell_mcp.gui.windows as windows
+
+    class Rect:
+        left = 10
+        top = 10
+        right = 40
+        bottom = 30
+
+    class Child:
+        ControlTypeName = "Button"
+        AutomationId = "save"
+        BoundingRectangle = Rect()
+        IsEnabled = True
+        IsOffscreen = False
+        ProcessId = 1
+        ClassName = "Button"
+        Name = "Save"
+
+        def GetRuntimeId(self):
+            return [7, 8, 9]
+
+        def GetChildren(self):
+            return []
+
+        def GetInvokePattern(self):
+            pytest.fail("replacement UIA element must be rejected before Invoke")
+
+    class Root(Child):
+        NativeWindowHandle = 1
+        AutomationId = "root"
+        ClassName = "Window"
+        Name = "Window"
+
+        def __init__(self, child):
+            self.child = child
+
+        def GetRuntimeId(self):
+            return [1]
+
+        def GetChildren(self):
+            return [self.child]
+
+    observed_child = Child()
+    replacement_child = Child()
+    root = Root(observed_child)
+    backend = WindowsGuiBackend()
+    record = {
+        "id": "hwnd:1:fingerprint",
+        "title": "Window",
+        "app": "App",
+        "pid": 1,
+        "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+    }
+    monkeypatch.setattr(backend, "_find_window", lambda _window_id, _observed_window=None: root)
+    monkeypatch.setattr(windows, "_window_record", lambda _control: record)
+
+    class Auto:
+        @staticmethod
+        def ControlsAreSame(left, right):
+            return left is right
+
+    monkeypatch.setattr(windows, "_automation", lambda: Auto())
+
+    snapshot = backend._snapshot_sync(
+        record["id"],
+        screenshot_path=None,
+        include_elements=True,
+        max_elements=10,
+        max_depth=2,
+    )
+    child_id = next(
+        item["id"] for item in snapshot.elements if item["automation_id"] == "save"
+    )
+    locator = snapshot.locators[child_id]
+    root.child = replacement_child
+
+    with pytest.raises(LookupError, match="identity changed since observation"):
+        backend._perform_action_sync(
+            record,
+            locator,
+            {"type": "click"},
+        )
+
+
 def test_atspi_window_without_stable_accessible_id_is_not_exposed():
     import local_shell_mcp.gui.linux_atspi_helper as helper
 
@@ -3851,7 +3938,13 @@ async def test_linux_snapshot_preserves_accessible_id_in_semantic_locator(monkey
                     "role": "button",
                     "name": "Save",
                     "bounds": {"x": 10, "y": 10, "width": 20, "height": 20},
-                }
+                },
+                {
+                    "id": "e2",
+                    "role": "label",
+                    "name": "Unstable",
+                    "bounds": {"x": 40, "y": 10, "width": 20, "height": 20},
+                },
             ],
             "locators": {
                 "e1": {
@@ -3876,6 +3969,7 @@ async def test_linux_snapshot_preserves_accessible_id_in_semantic_locator(monkey
         "accessible_id": "save-button",
         "fingerprint": "save-fp",
     }
+    assert "e2" not in snapshot.locators
 
 
 def test_wayland_full_desktop_crop_requires_monitor_geometry():
@@ -4376,9 +4470,11 @@ async def test_x11_compound_pointer_actions_use_one_helper_invocation(monkeypatc
     )
 
     assert len(calls) == 2
-    assert calls[0]["kind"] == "mouse_sequence"
+    assert calls[0]["kind"] == "bound_pointer"
+    assert calls[0]["window_id"] == "w"
+    assert calls[0]["window_bounds"] == window["bounds"]
     assert [item["event"] for item in calls[0]["events"]] == ["b1c", "b1c"]
-    assert calls[1]["kind"] == "mouse_sequence"
+    assert calls[1]["kind"] == "bound_pointer"
     assert [item["event"] for item in calls[1]["events"]] == ["b5c"] * 3
 
 
@@ -4407,32 +4503,92 @@ def test_atspi_mouse_sequence_runs_in_one_helper_process(monkeypatch):
     assert generated == [(1, 2, "b1c"), (1, 2, "b1c")]
 
 
-@pytest.mark.asyncio
-async def test_x11_drag_releases_button_after_motion_failure(monkeypatch):
-    import local_shell_mcp.gui.linux as linux
+def test_atspi_bound_pointer_releases_button_after_motion_failure(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
 
-    monkeypatch.setattr(linux, "_desktop_environment", lambda: {"XDG_SESSION_TYPE": "x11"})
-    backend = linux.LinuxGuiBackend()
     events = []
 
-    def helper(payload):
-        event = payload.get("event")
-        events.append(dict(payload))
-        if event == "abs":
-            raise RuntimeError("motion failed")
-        return {"generated": True}
+    class Atspi:
+        @staticmethod
+        def generate_mouse_event(x, y, event):
+            events.append((x, y, event))
+            return event != "abs"
 
-    monkeypatch.setattr(backend, "_helper", helper)
-    window = {"id": "w", "bounds": {"x": 0, "y": 0, "width": 100, "height": 100}}
-    with pytest.raises(RuntimeError, match="motion failed"):
-        await backend._perform_x11(
-            window,
-            None,
-            {"type": "drag", "x": 1, "y": 1, "to_x": 10, "to_y": 10},
+    monkeypatch.setattr(helper, "Atspi", Atspi)
+    monkeypatch.setattr(
+        helper,
+        "_prepare_pointer_target",
+        lambda _payload: {"x": 0, "y": 0, "width": 100, "height": 100},
+    )
+
+    with pytest.raises(RuntimeError, match="mouse synthesis failed"):
+        helper._raw(
+            {
+                "kind": "bound_pointer",
+                "window_id": "atspi:1:sig",
+                "window_bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+                "events": [
+                    {"x": 1, "y": 1, "event": "b1p"},
+                    {"x": 10, "y": 10, "event": "abs"},
+                    {"x": 10, "y": 10, "event": "b1r"},
+                ],
+            }
         )
-    assert [item["event"] for item in events] == ["b1p", "abs", "b1r"]
-    assert events[-1]["x"] == 1
-    assert events[-1]["y"] == 1
+
+    assert events == [
+        (1, 1, "b1p"),
+        (10, 10, "abs"),
+        (1, 1, "b1r"),
+    ]
+
+
+def test_atspi_bound_pointer_focuses_and_revalidates_before_injection(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    calls = []
+
+    class Component:
+        def grab_focus(self):
+            calls.append("focus")
+            return True
+
+        def get_extents(self, _coord_type):
+            return SimpleNamespace(x=10, y=20, width=100, height=80)
+
+    class Window:
+        def get_component_iface(self):
+            return Component()
+
+    class Atspi:
+        CoordType = SimpleNamespace(SCREEN="screen")
+
+        @staticmethod
+        def generate_mouse_event(x, y, event):
+            calls.append(("mouse", x, y, event))
+            return True
+
+    window = Window()
+    resolves = []
+
+    def resolve(window_id):
+        resolves.append(window_id)
+        return object(), window, 0
+
+    monkeypatch.setattr(helper, "Atspi", Atspi)
+    monkeypatch.setattr(helper, "_resolve_window", resolve)
+
+    result = helper._raw(
+        {
+            "kind": "bound_pointer",
+            "window_id": "atspi:1:sig",
+            "window_bounds": {"x": 10, "y": 20, "width": 100, "height": 80},
+            "events": [{"x": 15, "y": 25, "event": "b1c"}],
+        }
+    )
+
+    assert result == {"generated": True, "events": 1}
+    assert resolves == ["atspi:1:sig", "atspi:1:sig"]
+    assert calls == ["focus", ("mouse", 15, 25, "b1c")]
 
 
 def test_atspi_snapshot_bounds_direct_child_provider_calls(monkeypatch):
@@ -4778,6 +4934,46 @@ async def test_portal_transport_failure_invalidates_cached_connection():
     portal._session_iface = object()
 
     with pytest.raises(RuntimeError, match="transport failed"):
+        await portal.move(10, 20, session="/session/1")
+
+    assert disconnected == [True]
+    assert portal._bus is None
+    assert portal._remote is None
+    assert portal._screen is None
+    assert portal._session is None
+    assert portal._session_iface is None
+    assert portal._streams == []
+
+
+@pytest.mark.asyncio
+async def test_portal_input_timeout_invalidates_cached_connection(monkeypatch):
+    import local_shell_mcp.gui.linux_portal as portal_module
+
+    portal = PortalDesktop({})
+    portal._session = "/session/1"
+    portal._streams = [
+        {
+            "node_id": 7,
+            "properties": {"position": [0, 0], "size": [100, 100]},
+        }
+    ]
+    disconnected = []
+
+    class Bus:
+        def disconnect(self):
+            disconnected.append(True)
+
+    class Remote:
+        async def call_notify_pointer_motion_absolute(self, *_args):
+            await asyncio.Event().wait()
+
+    portal._bus = Bus()
+    portal._remote = Remote()
+    portal._screen = object()
+    portal._session_iface = object()
+    monkeypatch.setattr(portal_module, "_PORTAL_INPUT_TIMEOUT_S", 0.01)
+
+    with pytest.raises(asyncio.TimeoutError):
         await portal.move(10, 20, session="/session/1")
 
     assert disconnected == [True]
@@ -5347,6 +5543,11 @@ async def test_gui_payload_limits_precede_state_consumption(tmp_path, monkeypatc
         tools.GuiAction.model_validate({"type": "key"})
     with pytest.raises(ValueError, match="set_value requires element_id"):
         tools.GuiAction.model_validate({"type": "set_value", "text": "secret"})
+    with pytest.raises(ValueError, match="set_value requires text"):
+        tools.GuiAction.model_validate({"type": "set_value", "element_id": "e1"})
+    assert tools.GuiAction.model_validate(
+        {"type": "set_value", "element_id": "e1", "text": ""}
+    ).text == ""
     with pytest.raises(ValueError, match="element_id must not be empty"):
         tools.GuiAction.model_validate({"type": "focus", "element_id": " "})
     with pytest.raises(ValueError, match="requires x and y"):
@@ -5916,6 +6117,48 @@ async def test_macos_snapshot_marks_unresolved_ax_window_non_interactive(
     assert snapshot.capabilities["coordinate_input"] is False
     assert snapshot.capabilities["semantic_actions"] is False
     assert snapshot.capabilities["accessibility_permission_required"] is False
+
+
+@pytest.mark.asyncio
+async def test_macos_snapshot_revalidates_window_after_capture(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    backend = MacOSGuiBackend()
+    record = {
+        "id": "cg:7",
+        "pid": 42,
+        "title": "Document",
+        "app": "Editor",
+        "bounds": {"x": 0, "y": 0, "width": 100, "height": 80},
+    }
+    monkeypatch.setattr(
+        backend,
+        "_snapshot_accessibility_sync",
+        lambda *_args, **_kwargs: (record, True, [], {}),
+    )
+
+    def capture(argv, **_kwargs):
+        Image.new("RGB", (100, 80)).save(Path(argv[-1]), format="PNG")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(macos.subprocess, "run", capture)
+    monkeypatch.setattr(
+        backend,
+        "_current_record",
+        lambda _observed: {
+            **record,
+            "bounds": {"x": 10, "y": 0, "width": 100, "height": 80},
+        },
+    )
+
+    with pytest.raises(LookupError, match="moved or resized during capture"):
+        await backend.snapshot(
+            "cg:7",
+            screenshot_path=tmp_path / "capture.png",
+            include_elements=False,
+            max_elements=1,
+            max_depth=1,
+        )
 
 
 def test_macos_ax_window_matching_rejects_ambiguous_weaker_matches(monkeypatch):

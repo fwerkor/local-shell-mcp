@@ -205,8 +205,11 @@ class GuiAction(BaseModel):
             raise ValueError("type requires text")
         if self.type == "key" and self.keys is None:
             raise ValueError("key requires keys")
-        if self.type == "set_value" and self.element_id is None:
-            raise ValueError("set_value requires element_id")
+        if self.type == "set_value":
+            if self.element_id is None:
+                raise ValueError("set_value requires element_id")
+            if self.text is None:
+                raise ValueError("set_value requires text")
 
         if self.text is not None and len(self.text.encode("utf-8")) > GUI_MAX_TEXT_BYTES:
             raise ValueError(

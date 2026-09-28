@@ -557,8 +557,103 @@ def _focus_keyboard_target(payload: dict[str, Any]) -> None:
         raise RuntimeError("AT-SPI keyboard target did not remain focused")
 
 
+def _bounds_tuple(bounds: Any) -> tuple[int, int, int, int]:
+    if not isinstance(bounds, dict):
+        return (0, 0, 0, 0)
+    return tuple(
+        int(bounds.get(key, 0) or 0)
+        for key in ("x", "y", "width", "height")
+    )
+
+
+def _prepare_pointer_target(payload: dict[str, Any]) -> dict[str, int]:
+    window_id = str(payload.get("window_id") or "")
+    if not window_id:
+        raise ValueError("pointer synthesis requires window_id")
+    expected_bounds = payload.get("window_bounds")
+    if not isinstance(expected_bounds, dict):
+        raise ValueError("pointer synthesis requires window_bounds")
+
+    _app, window, _window_index = _resolve_window(window_id)
+    if _bounds_tuple(_bounds(window)) != _bounds_tuple(expected_bounds):
+        raise LookupError("AT-SPI target window changed since observation")
+    component = window.get_component_iface()
+    if component is None or not component.grab_focus():
+        raise RuntimeError("AT-SPI target window cannot be focused")
+
+    _app, window, _window_index = _resolve_window(window_id)
+    current_bounds = _bounds(window)
+    if _bounds_tuple(current_bounds) != _bounds_tuple(expected_bounds):
+        raise LookupError("AT-SPI target window changed while focusing")
+
+    raw_locator = payload.get("locator")
+    if raw_locator is not None:
+        if not isinstance(raw_locator, dict):
+            raise LookupError("AT-SPI target locator is invalid")
+        locator = [int(value) for value in raw_locator.get("path", [])]
+        obj = _resolve_path(window, locator)
+        expected_accessible_id = str(raw_locator.get("accessible_id") or "")
+        expected_fingerprint = str(raw_locator.get("fingerprint") or "")
+        if (
+            not expected_accessible_id
+            or _accessible_id(obj) != expected_accessible_id
+            or (
+                expected_fingerprint
+                and _element_signature(obj) != expected_fingerprint
+            )
+        ):
+            raise LookupError("AT-SPI target element changed since observation")
+    return current_bounds
+
+
 def _raw(payload: dict[str, Any]) -> dict[str, Any]:
     kind = str(payload["kind"])
+    if kind == "bound_pointer":
+        window_bounds = _prepare_pointer_target(payload)
+        events = payload.get("events")
+        if not isinstance(events, list) or not events or len(events) > 200:
+            raise ValueError("bound_pointer requires 1..200 events")
+        left = int(window_bounds["x"])
+        top = int(window_bounds["y"])
+        right = left + int(window_bounds["width"])
+        bottom = top + int(window_bounds["height"])
+        pressed_buttons: list[int] = []
+        last_x, last_y = left, top
+        generated = 0
+        try:
+            for event in events:
+                if not isinstance(event, dict):
+                    raise ValueError("bound_pointer events must be objects")
+                x = int(event["x"])
+                y = int(event["y"])
+                name = str(event["event"])
+                if not (left <= x < right and top <= y < bottom):
+                    raise LookupError(
+                        "Pointer target moved outside the selected window"
+                    )
+                if not Atspi.generate_mouse_event(x, y, name):
+                    raise RuntimeError("AT-SPI mouse synthesis failed")
+                generated += 1
+                last_x, last_y = x, y
+                if len(name) >= 3 and name[0] == "b" and name[-1] in {"p", "r"}:
+                    try:
+                        button = int(name[1:-1])
+                    except ValueError:
+                        button = 0
+                    if button > 0:
+                        if name[-1] == "p":
+                            pressed_buttons.append(button)
+                        elif button in pressed_buttons:
+                            pressed_buttons.remove(button)
+        finally:
+            for button in reversed(pressed_buttons):
+                with contextlib.suppress(Exception):
+                    Atspi.generate_mouse_event(
+                        last_x,
+                        last_y,
+                        f"b{button}r",
+                    )
+        return {"generated": True, "events": generated}
     if kind == "mouse":
         ok = Atspi.generate_mouse_event(
             int(payload["x"]),

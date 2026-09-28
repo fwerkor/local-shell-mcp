@@ -738,7 +738,9 @@ class LinuxGuiBackend:
         paths = data.get("locators", {})
         for element in data.get("elements", []):
             element_id = str(element["id"])
-            raw_locator = paths.get(element_id, {})
+            if element_id not in paths:
+                continue
+            raw_locator = paths[element_id]
             if isinstance(raw_locator, dict):
                 semantic_locator = {
                     "path": list(raw_locator.get("path", [])),
@@ -1008,11 +1010,7 @@ class LinuxGuiBackend:
         if kind in {"click", "double_click", "right_click", "move", "scroll"}:
             x, y = self._screen_point(window, action, locator)
             if kind == "move":
-                event = "abs"
-                await asyncio.to_thread(
-                    self._helper,
-                    {"command": "raw", "kind": "mouse", "x": x, "y": y, "event": event},
-                )
+                events = [{"x": x, "y": y, "event": "abs"}]
             elif kind == "scroll":
                 default_y = action.get("amount", -3) if "delta_x" not in action else 0
                 amount_y = quantize_scroll_amount(action.get("delta_y", default_y))
@@ -1029,11 +1027,6 @@ class LinuxGuiBackend:
                         {"x": x, "y": y, "event": f"b{button}c"}
                         for _ in range(abs(amount))
                     )
-                if events:
-                    await asyncio.to_thread(
-                        self._helper,
-                        {"command": "raw", "kind": "mouse_sequence", "events": events},
-                    )
             else:
                 button = 3 if kind == "right_click" else 1
                 count = 2 if kind == "double_click" else 1
@@ -1041,9 +1034,17 @@ class LinuxGuiBackend:
                     {"x": x, "y": y, "event": f"b{button}c"}
                     for _ in range(count)
                 ]
+            if events:
                 await asyncio.to_thread(
                     self._helper,
-                    {"command": "raw", "kind": "mouse_sequence", "events": events},
+                    {
+                        "command": "raw",
+                        "kind": "bound_pointer",
+                        "window_id": window["id"],
+                        "window_bounds": window["bounds"],
+                        "locator": locator["semantic"] if locator is not None else None,
+                        "events": events,
+                    },
                 )
             return {"screen_x": x, "screen_y": y}
 
@@ -1054,46 +1055,21 @@ class LinuxGuiBackend:
             to_x, to_y = self._screen_point(
                 window, {"x": action.get("to_x"), "y": action.get("to_y")}, None
             )
-            pressed = False
-            release_x, release_y = x, y
-            pending_error: BaseException | None = None
-            try:
-                await asyncio.to_thread(
-                    self._helper,
-                    {"command": "raw", "kind": "mouse", "x": x, "y": y, "event": "b1p"},
-                )
-                pressed = True
-                await asyncio.to_thread(
-                    self._helper,
-                    {
-                        "command": "raw",
-                        "kind": "mouse",
-                        "x": to_x,
-                        "y": to_y,
-                        "event": "abs",
-                    },
-                )
-                release_x, release_y = to_x, to_y
-            except BaseException as exc:
-                pending_error = exc
-            finally:
-                if pressed:
-                    try:
-                        await asyncio.to_thread(
-                            self._helper,
-                            {
-                                "command": "raw",
-                                "kind": "mouse",
-                                "x": release_x,
-                                "y": release_y,
-                                "event": "b1r",
-                            },
-                        )
-                    except Exception:
-                        if pending_error is None:
-                            raise
-            if pending_error is not None:
-                raise pending_error
+            await asyncio.to_thread(
+                self._helper,
+                {
+                    "command": "raw",
+                    "kind": "bound_pointer",
+                    "window_id": window["id"],
+                    "window_bounds": window["bounds"],
+                    "locator": locator["semantic"] if locator is not None else None,
+                    "events": [
+                        {"x": x, "y": y, "event": "b1p"},
+                        {"x": to_x, "y": to_y, "event": "abs"},
+                        {"x": to_x, "y": to_y, "event": "b1r"},
+                    ],
+                },
+            )
             return {"from": {"x": x, "y": y}, "to": {"x": to_x, "y": to_y}}
 
         raise ValueError(f"Unsupported GUI action type on X11: {kind}")

@@ -137,7 +137,7 @@ def _bounded_element_record(element: dict[str, Any]) -> dict[str, Any]:
     for key in ("value", "description"):
         if key in element:
             bounded[key] = _truncate_gui_text(element.get(key), GUI_MAX_ELEMENT_VALUE_BYTES)
-    for key in ("enabled", "focused", "offscreen", "depth"):
+    for key in ("enabled", "focused", "editable", "offscreen", "depth"):
         if key in element:
             bounded[key] = element.get(key)
     bounds = element.get("bounds")

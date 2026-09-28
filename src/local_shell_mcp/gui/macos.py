@@ -480,6 +480,16 @@ class MacOSGuiBackend:
                     "macOS window capture failed; grant Screen Recording permission"
                     + (f": {detail}" if detail else "")
                 )
+            current = await asyncio.to_thread(self._current_record, record)
+            if not _same_bounds(current.get("bounds", {}), record.get("bounds", {})):
+                raise LookupError(
+                    f"Window moved or resized during capture: {window_id}"
+                )
+            for key in ("title", "app", "pid"):
+                if current.get(key) != record.get(key):
+                    raise LookupError(
+                        f"Window identity changed during capture: {window_id}"
+                    )
             screenshot_display = display_screenshot_path(screenshot_path)
 
         interactive = trusted and record.get("_ax_window") is not None

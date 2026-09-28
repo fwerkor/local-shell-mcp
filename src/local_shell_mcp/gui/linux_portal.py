@@ -11,6 +11,8 @@ from urllib.request import url2pathname
 
 from .base import GuiUnavailableError
 
+_PORTAL_INPUT_TIMEOUT_S = 15.0
+
 
 def _portal_modules():  # noqa: ANN202
     try:
@@ -239,7 +241,10 @@ class PortalDesktop:
 
     async def _call_remote(self, operation: Any, *args: Any) -> Any:
         try:
-            return await operation(*args)
+            return await asyncio.wait_for(
+                operation(*args),
+                timeout=_PORTAL_INPUT_TIMEOUT_S,
+            )
         except BaseException:
             self._invalidate_transport()
             raise
