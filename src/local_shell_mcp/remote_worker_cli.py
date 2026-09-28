@@ -93,7 +93,10 @@ async def enroll_worker(
     if identity:
         access = str(identity["access"])
         headers = {"Authorization": "Bearer " + access}
-        resume_payload = {**payload, "name": str(identity["name"])}
+        # The controller owns the canonical name for an enrolled token.  A
+        # controller-side rename can make the locally cached name stale, so let
+        # resume resolve the token without asserting the old name.
+        resume_payload = {**payload, "name": None}
         body = await remote._worker_resume_or_none(  # noqa: SLF001
             f"{server}{remote.REMOTE_API_PREFIX}/resume", resume_payload, headers, 30
         )
@@ -140,15 +143,13 @@ def _load_config_or_migrate() -> dict[str, Any]:
 
 async def run_enrolled_worker() -> None:
     config = _load_config_or_migrate()
-    identity = remote._read_worker_identity(
-        str(config["server"]), str(config.get("name") or "")
-    )  # noqa: SLF001
+    identity = remote._read_worker_identity(str(config["server"]))  # noqa: SLF001
     if not identity:
         raise RuntimeError("worker identity is missing or invalid; run the join command again")
     await remote.run_worker(
         str(config["server"]),
         "",
-        str(config.get("name") or "") or None,
+        str(identity.get("name") or config.get("name") or "") or None,
         str(config.get("workdir") or "") or None,
     )
 

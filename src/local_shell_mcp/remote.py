@@ -3504,7 +3504,11 @@ async def _run_worker_locked(
     access = ""
     if identity:
         access = str(identity["access"])
-        resume_payload = {**register_payload, "name": str(identity["name"])}
+        # The access token is the durable worker identity.  The controller may
+        # have renamed that identity since this worker last persisted its local
+        # name, so do not send a potentially stale name during resume.  The
+        # controller returns the current canonical name below.
+        resume_payload = {**register_payload, "name": None}
         resume_headers = {"Author" + "ization": "B" + "earer " + access}
         body = await _worker_resume_or_none(
             f"{server}{REMOTE_API_PREFIX}/res" + "ume", resume_payload, resume_headers, 30
