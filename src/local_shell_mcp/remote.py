@@ -800,6 +800,16 @@ class RemoteManager:
                 "version": __version__,
                 "protocol_version": REMOTE_WORKER_POLL_PROTOCOL_VERSION,
             }
+            if upgrade["required"] and protocol_version == 2:
+                from .remote_worker_routes import worker_bundle_manifest
+
+                manifest = worker_bundle_manifest()
+                upgrade.update(
+                    {
+                        "sha256": manifest["sha256"],
+                        "manifest_path": REMOTE_WORKER_BUNDLE_PATH + "?manifest=1",
+                    }
+                )
         with self._state_lock:
             worker.status = "online"
             worker.last_seen = _utc()
