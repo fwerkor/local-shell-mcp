@@ -52,6 +52,8 @@ def _desktop_environment() -> dict[str, str]:
         except (OSError, subprocess.TimeoutExpired):
             result = None
         if result is not None and result.returncode == 0:
+            for key in ("DISPLAY", "WAYLAND_DISPLAY", "XDG_SESSION_TYPE"):
+                env.pop(key, None)
             for line in result.stdout.splitlines():
                 if "=" not in line:
                     continue
@@ -382,12 +384,12 @@ async def _capture_wayland(
             timeout=20,
             check=False,
             env=env,
+            umask=0o077,
         )
         if result.returncode == 0 and path.is_file():
             await asyncio.to_thread(_crop_desktop_capture, path, bounds, monitors)
             return name
 
-    path.unlink(missing_ok=True)
     await portal_screenshot(path, env)
     if not path.is_file():
         raise GuiUnavailableError("Wayland screenshot portal did not return an image")

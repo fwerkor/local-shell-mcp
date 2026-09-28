@@ -139,8 +139,8 @@ async def _portal_request(
         return False
 
     match_rule = (
-        "type='signal',sender=org.freedesktop.portal.Desktop,"
-        f"interface=org.freedesktop.portal.Request,path={expected_path}"
+        "type='signal',sender='org.freedesktop.portal.Desktop',"
+        f"interface='org.freedesktop.portal.Request',path='{expected_path}'"
     )
     bus._add_match_rule(match_rule)
     bus.add_message_handler(handler)

@@ -1292,7 +1292,7 @@ async def test_gui_frame_data_local_and_remote_paths(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_gui_frame_data_renews_remote_observation_during_slow_transfer(
+async def test_gui_frame_data_checks_remote_observation_during_slow_transfer(
     tmp_path,
     monkeypatch,
 ):
@@ -1318,7 +1318,8 @@ async def test_gui_frame_data_renews_remote_observation_during_slow_transfer(
                 "screenshot_path": ".local-shell-mcp/tmp/slow-frame.png",
             }
         if tool == "gui_frame_refresh":
-            return {"observation_id": "obs-slow", "observation_ttl_s": 30}
+            remaining = max(1, 30 - len([call for call in calls if call[1] == "gui_frame_refresh"]))
+            return {"observation_id": "obs-slow", "observation_ttl_s": remaining}
         raise AssertionError(f"unexpected worker tool: {tool}")
 
     async def remote_transfer(*_args, **_kwargs):
@@ -1341,6 +1342,7 @@ async def test_gui_frame_data_renews_remote_observation_during_slow_transfer(
     data, image = await tools._gui_frame_data("w", "node")
 
     assert data["observation_id"] == "obs-slow"
+    assert 0 < data["observation_ttl_s"] < 30
     assert image.format == "png"
     refreshes = [call for call in calls if call[1] == "gui_frame_refresh"]
     assert len(refreshes) >= 2
@@ -2149,9 +2151,20 @@ def test_windows_uia_traversal_bounds_provider_strings_and_total_bytes(monkeypat
         def __init__(self, children=None, runtime_id=1):
             self.children = list(children or [])
             self.runtime_id = runtime_id
+            for left, right in zip(self.children, self.children[1:], strict=False):
+                left.next = right
+            if self.children:
+                self.children[-1].next = None
+            self.next = None
 
         def GetChildren(self):
-            return self.children
+            pytest.fail("descendant traversal must stay lazy")
+
+        def GetFirstChildControl(self):
+            return self.children[0] if self.children else None
+
+        def GetNextSiblingControl(self):
+            return self.next
 
         def GetRuntimeId(self):
             return [self.runtime_id]
@@ -2285,7 +2298,13 @@ def test_windows_semantic_action_rejects_recycled_uia_element(monkeypatch):
             return [7, 8, 9]
 
         def GetChildren(self):
-            return []
+            pytest.fail("descendant traversal must stay lazy")
+
+        def GetFirstChildControl(self):
+            return None
+
+        def GetNextSiblingControl(self):
+            return None
 
         def GetInvokePattern(self):
             pytest.fail("recycled UIA element must be rejected before Invoke")
@@ -2304,7 +2323,10 @@ def test_windows_semantic_action_rejects_recycled_uia_element(monkeypatch):
             return [1]
 
         def GetChildren(self):
-            return [self.child]
+            pytest.fail("descendant traversal must stay lazy")
+
+        def GetFirstChildControl(self):
+            return self.child
 
     child = Child()
     root = Root(child)
@@ -2364,7 +2386,13 @@ def test_windows_semantic_action_rejects_identical_replacement_uia_element(monke
             return [7, 8, 9]
 
         def GetChildren(self):
-            return []
+            pytest.fail("descendant traversal must stay lazy")
+
+        def GetFirstChildControl(self):
+            return None
+
+        def GetNextSiblingControl(self):
+            return None
 
         def GetInvokePattern(self):
             pytest.fail("replacement UIA element must be rejected before Invoke")
@@ -2382,7 +2410,10 @@ def test_windows_semantic_action_rejects_identical_replacement_uia_element(monke
             return [1]
 
         def GetChildren(self):
-            return [self.child]
+            pytest.fail("descendant traversal must stay lazy")
+
+        def GetFirstChildControl(self):
+            return self.child
 
     observed_child = Child()
     replacement_child = Child()
@@ -2438,6 +2469,32 @@ def test_atspi_window_without_stable_accessible_id_is_not_exposed():
 
         def get_name(self):
             return "Mutable"
+
+    class App:
+        def get_process_id(self):
+            return 42
+
+        def get_name(self):
+            return "App"
+
+    window = Window()
+    assert helper._window_signature(window) is None
+    with pytest.raises(LookupError, match="stable accessible id"):
+        helper._record(App(), window, 0)
+
+
+def test_atspi_window_rejects_oversized_accessible_id_before_fingerprinting():
+    import local_shell_mcp.gui.linux_atspi_helper as helper
+
+    class Window:
+        def get_accessible_id(self):
+            return "x" * (helper.GUI_MAX_WINDOW_TEXT_BYTES + 1)
+
+        def get_role_name(self):
+            return "frame"
+
+        def get_name(self):
+            return "Huge"
 
     class App:
         def get_process_id(self):
@@ -3088,10 +3145,18 @@ async def test_gui_frame_does_not_allocate_model_state(tmp_path, monkeypatch):
         "window:1",
         frame["observation_id"],
     )
-    assert refreshed == {
-        "observation_id": frame["observation_id"],
-        "observation_ttl_s": base.GUI_STATE_TTL_S,
-    }
+    assert refreshed["observation_id"] == frame["observation_id"]
+    assert 0 < refreshed["observation_ttl_s"] <= base.GUI_STATE_TTL_S
+    original_created_at = manager._frame_observations[frame["observation_id"]].created_at
+    second_refresh = await manager.refresh_frame_observation(
+        "window:1",
+        frame["observation_id"],
+    )
+    assert second_refresh["observation_ttl_s"] <= refreshed["observation_ttl_s"]
+    assert (
+        manager._frame_observations[frame["observation_id"]].created_at
+        == original_created_at
+    )
     with pytest.raises(GuiStaleStateError, match="different window"):
         await manager.refresh_frame_observation(
             "window:2",
@@ -3134,7 +3199,7 @@ async def test_gui_frame_capacity_preserves_unexpired_observation_ttl(
             "window:1",
             first["observation_id"],
         )
-        assert refreshed["observation_ttl_s"] == base.GUI_STATE_TTL_S
+        assert 0 < refreshed["observation_ttl_s"] < base.GUI_STATE_TTL_S
     finally:
         first_path.unlink(missing_ok=True)
         second_path.unlink(missing_ok=True)
@@ -4181,6 +4246,31 @@ def test_linux_environment_discovery_replaces_stale_inherited_values(monkeypatch
     assert env["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/run/user/1000/bus"
 
 
+def test_linux_environment_discovery_clears_missing_stale_display_selectors(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    monkeypatch.setenv("DISPLAY", ":stale")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-stale")
+    monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/keep")
+    monkeypatch.setattr(linux.shutil, "which", lambda _name: "/usr/bin/systemctl")
+    monkeypatch.setattr(
+        linux.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="WAYLAND_DISPLAY=wayland-3\nXDG_SESSION_TYPE=wayland\n",
+        ),
+    )
+
+    env = linux._desktop_environment()
+
+    assert "DISPLAY" not in env
+    assert env["WAYLAND_DISPLAY"] == "wayland-3"
+    assert env["XDG_SESSION_TYPE"] == "wayland"
+    assert env["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/keep"
+
+
 @pytest.mark.asyncio
 async def test_linux_desktop_environment_refreshes_and_resets_portal(monkeypatch):
     import local_shell_mcp.gui.linux as linux
@@ -4425,6 +4515,76 @@ async def test_wayland_grim_rejects_oversized_output_before_decode(tmp_path, mon
             [],
             {},
         )
+
+
+@pytest.mark.asyncio
+async def test_wayland_full_capture_fallback_uses_private_creation_mask(
+    tmp_path,
+    monkeypatch,
+):
+    import local_shell_mcp.gui.linux as linux
+
+    path = tmp_path / "spectacle.png"
+    path.write_bytes(b"precreated")
+    path.chmod(0o600)
+    calls = []
+
+    monkeypatch.setattr(
+        linux.shutil,
+        "which",
+        lambda name: "/usr/bin/spectacle" if name == "spectacle" else None,
+    )
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        assert kwargs["umask"] == 0o077
+        Image.new("RGB", (10, 10)).save(path, format="PNG")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(linux.subprocess, "run", run)
+    monkeypatch.setattr(linux, "_crop_desktop_capture", lambda *_args: None)
+
+    method = await linux._capture_wayland(
+        path,
+        {"x": 0, "y": 0, "width": 10, "height": 10},
+        [],
+        {},
+    )
+
+    assert method == "spectacle"
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_wayland_portal_fallback_keeps_precreated_private_destination(
+    tmp_path,
+    monkeypatch,
+):
+    import local_shell_mcp.gui.linux as linux
+
+    path = tmp_path / "portal.png"
+    path.write_bytes(b"precreated")
+    path.chmod(0o600)
+    monkeypatch.setattr(linux.shutil, "which", lambda _name: None)
+
+    async def screenshot(destination, _env):
+        assert destination == path
+        assert destination.exists()
+        assert destination.stat().st_mode & 0o777 == 0o600
+        Image.new("RGB", (10, 10)).save(destination, format="PNG")
+
+    monkeypatch.setattr(linux, "portal_screenshot", screenshot)
+    monkeypatch.setattr(linux, "_crop_desktop_capture", lambda *_args: None)
+
+    method = await linux._capture_wayland(
+        path,
+        {"x": 0, "y": 0, "width": 10, "height": 10},
+        [],
+        {},
+    )
+
+    assert method == "xdg-desktop-portal"
+    assert path.stat().st_mode & 0o777 == 0o600
 
 
 @pytest.mark.asyncio
@@ -4907,9 +5067,11 @@ async def test_portal_request_subscribes_before_immediate_response(monkeypatch):
         def __init__(self):
             self.handler = None
             self.match_rules = []
+            self.added_rules = []
 
         def _add_match_rule(self, rule):
             self.match_rules.append(rule)
+            self.added_rules.append(rule)
 
         def _remove_match_rule(self, rule):
             self.match_rules.remove(rule)
@@ -4940,6 +5102,11 @@ async def test_portal_request_subscribes_before_immediate_response(monkeypatch):
         return path
 
     assert await _portal_request(bus, immediate(), handle_token=token) == {"answer": "ok"}
+    expected_rule = (
+        "type='signal',sender='org.freedesktop.portal.Desktop',"
+        f"interface='org.freedesktop.portal.Request',path='{path}'"
+    )
+    assert bus.added_rules == [expected_rule]
     assert bus.handler is None
     assert bus.match_rules == []
 

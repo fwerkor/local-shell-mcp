@@ -896,10 +896,10 @@ class GuiManager:
                 raise GuiStaleStateError(
                     "Displayed GUI frame belongs to a different window; refresh it and try again"
                 )
-            record.created_at = now
+            remaining_ttl = max(0.0, GUI_STATE_TTL_S - (now - record.created_at))
         return {
             "observation_id": str(observation_id),
-            "observation_ttl_s": GUI_STATE_TTL_S,
+            "observation_ttl_s": remaining_ttl,
         }
 
     async def _assert_window_geometry_unchanged(

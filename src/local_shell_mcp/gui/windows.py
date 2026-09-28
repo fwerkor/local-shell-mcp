@@ -19,6 +19,7 @@ from .base import (
     GUI_MAX_CAPTURE_DIMENSION,
     GUI_MAX_CAPTURE_PIXELS,
     GUI_MAX_ELEMENT_TEXT_BYTES,
+    GUI_MAX_ELEMENTS,
     GUI_MAX_ELEMENTS_TOTAL_BYTES,
     GUI_MAX_WINDOW_TEXT_BYTES,
     GUI_MAX_WINDOWS,
@@ -344,6 +345,23 @@ def _iter_root_children(root: Any) -> Iterator[Any]:
             break
 
 
+def _iter_control_children(control: Any, limit: int) -> Iterator[tuple[int, Any]]:
+    if limit <= 0:
+        return
+    try:
+        child = control.GetFirstChildControl()
+    except Exception:  # noqa: BLE001 - broken provider child traversal.
+        return
+    index = 0
+    while child is not None and index < limit:
+        yield index, child
+        index += 1
+        try:
+            child = child.GetNextSiblingControl()
+        except Exception:  # noqa: BLE001 - broken provider sibling traversal.
+            break
+
+
 def _element_fingerprint(control: Any) -> str:
     bounds = _rect_dict(_safe_property(control, "BoundingRectangle"))
     fields = [
@@ -523,8 +541,22 @@ class WindowsGuiBackend:
         for raw_index in path:
             try:
                 index = int(raw_index)
-                children = control.GetChildren()
-                control = children[index]
+                if index < 0 or index >= GUI_MAX_ELEMENTS:
+                    raise ValueError
+                child = next(
+                    (
+                        candidate
+                        for candidate_index, candidate in _iter_control_children(
+                            control,
+                            index + 1,
+                        )
+                        if candidate_index == index
+                    ),
+                    None,
+                )
+                if child is None:
+                    raise IndexError
+                control = child
             except (IndexError, TypeError, ValueError) as exc:
                 raise LookupError(
                     "Target UIA element is no longer available; call gui_state again"
@@ -649,13 +681,9 @@ class WindowsGuiBackend:
                 remaining = max_elements - len(elements) - len(queue)
                 if depth >= max_depth or remaining <= 0:
                     continue
-                try:
-                    children = control.GetChildren()
-                except Exception:  # noqa: BLE001 - provider-specific tree failure.
-                    children = []
                 queue.extend(
                     (child, depth + 1, [*path, index])
-                    for index, child in enumerate(children[:remaining])
+                    for index, child in _iter_control_children(control, remaining)
                 )
 
         screenshot_display: str | None = None

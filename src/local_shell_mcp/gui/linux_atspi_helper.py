@@ -242,13 +242,25 @@ def _window_is_visible(window: Any) -> bool:
 
 def _window_signature(window: Any) -> str | None:
     try:
-        accessible_id = str(window.get_accessible_id() or "")
+        raw_accessible_id = window.get_accessible_id()
     except Exception:
-        accessible_id = ""
-    if not accessible_id:
+        raw_accessible_id = ""
+    accessible_id = (
+        raw_accessible_id
+        if isinstance(raw_accessible_id, str)
+        else str(raw_accessible_id or "")
+    )
+    if (
+        not accessible_id
+        or len(accessible_id) > GUI_MAX_WINDOW_TEXT_BYTES
+        or len(accessible_id.encode("utf-8")) > GUI_MAX_WINDOW_TEXT_BYTES
+    ):
         return None
     try:
-        role = str(window.get_role_name() or "")
+        role = _truncate_text(
+            window.get_role_name(),
+            GUI_MAX_WINDOW_TEXT_BYTES,
+        )
     except Exception:
         role = ""
     fingerprint = f"id\0{role}\0{accessible_id}"
