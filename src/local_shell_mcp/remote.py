@@ -2537,6 +2537,19 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if sys.platform == "linux" and (
         tool == "gui_list"
         or (tool == "gui_state" and not bool(args.get("screenshot", True)))
+        or (
+            session_type == "x11"
+            and tool in {"gui_action", "gui_human_action"}
+        )
+        or (
+            tool == "gui_action"
+            and all(
+                str(action.get("type") or "").strip().lower()
+                in {"focus", "set_value", "wait"}
+                for action in (args.get("actions") or [])
+                if isinstance(action, dict)
+            )
+        )
     ):
         dependency_check_required = False
 

@@ -179,22 +179,35 @@ async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
         },
     )
     assert human["human_control"] is True
-    assert dependency_calls == [("x11", True), ("x11", True)]
+    assert dependency_calls == [("x11", True)]
 
     acted = await remote._execute_gui_worker_tool(
         "gui_action",
         {"window_id": "w", "state_id": "s", "actions": [{"type": "wait"}]},
     )
     assert acted["state_consumed"] is True
-    assert dependency_calls == [
-        ("x11", True),
-        ("x11", True),
-        ("x11", True),
-    ]
+    assert dependency_calls == [("x11", True)]
     assert calls[-1][0] == "act"
 
     with pytest.raises(ValueError, match="unsupported remote GUI worker tool"):
         await remote._execute_gui_worker_tool("gui_unknown", {})
+
+    monkeypatch.setattr(linux, "_session_type", lambda _env: "wayland")
+    dependency_calls.clear()
+    semantic = await remote._execute_gui_worker_tool(
+        "gui_action",
+        {
+            "window_id": "w",
+            "state_id": "s",
+            "actions": [
+                {"type": "focus", "element_id": "e1"},
+                {"type": "set_value", "element_id": "e1", "text": "x"},
+                {"type": "wait", "seconds": 0},
+            ],
+        },
+    )
+    assert semantic["state_consumed"] is True
+    assert dependency_calls == []
 
 
 @pytest.mark.asyncio

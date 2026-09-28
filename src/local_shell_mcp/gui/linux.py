@@ -146,6 +146,7 @@ def _run_helper(payload: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
         if error_type == "ValueError" and (
             "no AT-SPI action interface" in message
             or "no AT-SPI actions" in message
+            or "no preferred AT-SPI activation action" in message
         ):
             raise _SemanticActionUnavailableError(message)
         raise GuiUnavailableError(message)
@@ -741,6 +742,7 @@ class LinuxGuiBackend:
             if isinstance(raw_locator, dict):
                 semantic_locator = {
                     "path": list(raw_locator.get("path", [])),
+                    "accessible_id": str(raw_locator.get("accessible_id") or ""),
                     "fingerprint": str(raw_locator.get("fingerprint") or ""),
                 }
             else:
@@ -784,6 +786,26 @@ class LinuxGuiBackend:
                     monitors,
                     env,
                 )
+                post_capture = await asyncio.to_thread(
+                    self._helper,
+                    {
+                        "command": "snapshot",
+                        "window_id": window_id,
+                        "include_elements": False,
+                        "max_elements": 1,
+                        "max_depth": 1,
+                    },
+                )
+                post_capture_record = post_capture.get("window")
+                if (
+                    not isinstance(post_capture_record, dict)
+                    or _bounds_tuple(post_capture_record.get("bounds"))
+                    != _bounds_tuple(record.get("bounds"))
+                ):
+                    raise GuiStaleStateError(
+                        "Target window moved or resized during the Wayland capture; "
+                        "call gui_state again"
+                    )
             elif session_type == "x11":
                 capture_backend = await _capture_x11(
                     screenshot_path,

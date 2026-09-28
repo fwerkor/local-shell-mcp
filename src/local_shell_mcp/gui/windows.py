@@ -741,6 +741,7 @@ class WindowsGuiBackend:
             target_window = self._find_window(str(window["id"]), window)
             if not action.get("_focus_prepared"):
                 target_window.SetFocus()
+            self._screen_point(window, {}, locator)
             if kind == "click":
                 locator.Click(waitTime=0)
             elif kind == "double_click":

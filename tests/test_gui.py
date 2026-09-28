@@ -2338,7 +2338,15 @@ def test_windows_control_mouse_fallback_focuses_verified_window(monkeypatch):
 
     calls = []
 
+    class Rect:
+        left = 2
+        top = 2
+        right = 8
+        bottom = 8
+
     class Locator:
+        BoundingRectangle = Rect()
+
         def GetInvokePattern(self):
             return None
 
@@ -2365,6 +2373,63 @@ def test_windows_control_mouse_fallback_focuses_verified_window(monkeypatch):
     )
     assert result == {"semantic": True, "method": "control"}
     assert calls == [("focus",), ("click", 0)]
+
+
+@pytest.mark.parametrize("kind", ["click", "double_click", "right_click"])
+def test_windows_control_mouse_fallback_rejects_element_outside_window(
+    monkeypatch,
+    kind,
+):
+    import local_shell_mcp.gui.windows as windows
+
+    class Rect:
+        left = 100
+        top = 100
+        right = 120
+        bottom = 120
+
+    class Locator:
+        BoundingRectangle = Rect()
+
+        def GetInvokePattern(self):
+            return None
+
+        def Click(self, **_kwargs):
+            pytest.fail("out-of-window control click must not be synthesized")
+
+        def DoubleClick(self, **_kwargs):
+            pytest.fail("out-of-window control double-click must not be synthesized")
+
+        def RightClick(self, **_kwargs):
+            pytest.fail("out-of-window control right-click must not be synthesized")
+
+    class Target:
+        def SetFocus(self):
+            return None
+
+    backend = WindowsGuiBackend()
+    monkeypatch.setattr(windows, "_automation", lambda: SimpleNamespace())
+    monkeypatch.setattr(
+        backend,
+        "_find_window",
+        lambda _window_id, _observed_window=None: Target(),
+    )
+    locator = Locator()
+    monkeypatch.setattr(
+        backend,
+        "_resolve_element_locator",
+        lambda _window_id, _locator, _observed_window=None: locator,
+    )
+
+    with pytest.raises(ValueError, match="outside the selected window"):
+        backend._perform_action_sync(
+            {
+                "id": "hwnd:1:fingerprint",
+                "bounds": {"x": 0, "y": 0, "width": 50, "height": 50},
+            },
+            {"path": [0], "fingerprint": "observed"},
+            {"type": kind},
+        )
 
 
 @pytest.mark.asyncio
@@ -3687,6 +3752,56 @@ async def test_x11_keyboard_payload_carries_target_identity(monkeypatch):
     assert payloads[1]["kind"] == "key_chord"
 
 
+@pytest.mark.asyncio
+async def test_linux_snapshot_preserves_accessible_id_in_semantic_locator(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    backend = linux.LinuxGuiBackend()
+    backend._env = {"XDG_SESSION_TYPE": "x11", "DISPLAY": ":0"}
+
+    def helper(payload):
+        assert payload["command"] == "snapshot"
+        return {
+            "window": {
+                "id": "atspi:1:window",
+                "title": "Window",
+                "app": "App",
+                "pid": 1,
+                "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+            },
+            "elements": [
+                {
+                    "id": "e1",
+                    "role": "button",
+                    "name": "Save",
+                    "bounds": {"x": 10, "y": 10, "width": 20, "height": 20},
+                }
+            ],
+            "locators": {
+                "e1": {
+                    "path": [0],
+                    "accessible_id": "save-button",
+                    "fingerprint": "save-fp",
+                }
+            },
+        }
+
+    monkeypatch.setattr(backend, "_helper", helper)
+    snapshot = await backend.snapshot(
+        "atspi:1:window",
+        screenshot_path=None,
+        include_elements=True,
+        max_elements=10,
+        max_depth=2,
+    )
+
+    assert snapshot.locators["e1"]["semantic"] == {
+        "path": [0],
+        "accessible_id": "save-button",
+        "fingerprint": "save-fp",
+    }
+
+
 def test_wayland_full_desktop_crop_requires_monitor_geometry():
     with pytest.raises(GuiUnavailableError, match="Monitor geometry is unavailable"):
         _desktop_crop_box(
@@ -3925,6 +4040,56 @@ async def test_wayland_snapshot_rejects_bounds_change_after_focus(tmp_path, monk
             max_depth=2,
         )
     assert snapshot_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_wayland_snapshot_rejects_bounds_change_during_capture(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    backend = linux.LinuxGuiBackend()
+    backend._env = {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-0"}
+    snapshot_calls = 0
+
+    def helper(payload):
+        nonlocal snapshot_calls
+        if payload["command"] == "snapshot":
+            snapshot_calls += 1
+            x = 50 if snapshot_calls == 3 else 0
+            return {
+                "window": {
+                    "id": "atspi:1:sig",
+                    "title": "Target",
+                    "app": "App",
+                    "pid": 1,
+                    "bounds": {"x": x, "y": 0, "width": 10, "height": 10},
+                },
+                "elements": [],
+                "locators": {},
+            }
+        if payload["command"] == "list":
+            return {"windows": [], "monitors": []}
+        raise AssertionError(payload)
+
+    async def focus(_window):
+        return None
+
+    async def capture(path, *_args, **_kwargs):
+        Image.new("RGB", (10, 10)).save(path, format="PNG")
+        return "grim-region"
+
+    monkeypatch.setattr(backend, "_helper", helper)
+    monkeypatch.setattr(backend, "focus_window", focus)
+    monkeypatch.setattr(linux, "_capture_wayland", capture)
+
+    with pytest.raises(GuiStaleStateError, match="during the Wayland capture"):
+        await backend.snapshot(
+            "atspi:1:sig",
+            screenshot_path=tmp_path / "wayland.png",
+            include_elements=False,
+            max_elements=10,
+            max_depth=2,
+        )
+    assert snapshot_calls == 3
 
 
 @pytest.mark.asyncio
@@ -4269,6 +4434,47 @@ def test_atspi_element_locator_requires_stable_accessible_identity(monkeypatch):
                     "fingerprint": "same-fingerprint",
                 },
                 "action": {"type": "focus"},
+            }
+        )
+
+
+def test_atspi_semantic_click_rejects_unrelated_actions(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    class ActionIface:
+        def get_n_actions(self):
+            return 2
+
+        def get_action_name(self, index):
+            return ["decrement", "expand"][index]
+
+        def do_action(self, _index):
+            pytest.fail("unrelated AT-SPI action must not be invoked as a click")
+
+    class Element:
+        def get_action_iface(self):
+            return ActionIface()
+
+    element = Element()
+    monkeypatch.setattr(
+        helper,
+        "_resolve_window",
+        lambda _window_id: (None, object(), 0),
+    )
+    monkeypatch.setattr(helper, "_resolve_path", lambda _window, _path: element)
+    monkeypatch.setattr(helper, "_accessible_id", lambda _obj: "button-id")
+    monkeypatch.setattr(helper, "_element_signature", lambda _obj: "button-fp")
+
+    with pytest.raises(ValueError, match="preferred AT-SPI activation action"):
+        helper._semantic_action(
+            {
+                "window_id": "atspi:1:sig",
+                "locator": {
+                    "path": [0],
+                    "accessible_id": "button-id",
+                    "fingerprint": "button-fp",
+                },
+                "action": {"type": "click"},
             }
         )
 

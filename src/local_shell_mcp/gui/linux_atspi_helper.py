@@ -505,12 +505,14 @@ def _semantic_action(payload: dict[str, Any]) -> dict[str, Any]:
         if count <= 0:
             raise ValueError("Target element has no AT-SPI actions")
         preferred = {"click", "press", "activate", "jump", "open"}
-        chosen = 0
+        chosen: int | None = None
         for index in range(count):
             name = str(iface.get_action_name(index) or "").lower()
             if name in preferred:
                 chosen = index
                 break
+        if chosen is None:
+            raise ValueError("Target element has no preferred AT-SPI activation action")
         if not iface.do_action(chosen):
             raise RuntimeError("AT-SPI action failed")
         return {"semantic": True, "method": str(iface.get_action_name(chosen) or "action")}
