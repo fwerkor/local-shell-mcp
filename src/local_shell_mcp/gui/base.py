@@ -430,6 +430,7 @@ class GuiManager:
     def __init__(self, backend: GuiBackend | None = None) -> None:
         self._backend = backend or _backend_for_platform()
         self._states: dict[str, _StateRecord] = {}
+        self._frame_observations: dict[str, _StateRecord] = {}
         self._lock = asyncio.Lock()
         self._execution_lock = asyncio.Lock()
 
@@ -577,11 +578,29 @@ class GuiManager:
             bounded_window = _bounded_window_record(snapshot.window)
             if bounded_window is None:
                 raise GuiUnavailableError("GUI backend returned unsafe window metadata")
+            observation_id = uuid.uuid4().hex
+            now = time.monotonic()
+            async with self._lock:
+                self._prune_locked(now)
+                self._frame_observations[observation_id] = _StateRecord(
+                    state_id=observation_id,
+                    window=dict(snapshot.window),
+                    locators={},
+                    created_at=now,
+                )
+                while len(self._frame_observations) > GUI_STATE_CACHE_LIMIT:
+                    oldest = min(
+                        self._frame_observations.values(),
+                        key=lambda item: item.created_at,
+                    )
+                    self._frame_observations.pop(oldest.state_id, None)
             keep_file = True
             return {
                 "backend": self._backend.name,
                 "window": bounded_window,
                 "capabilities": snapshot.capabilities,
+                "observation_id": observation_id,
+                "observation_ttl_s": GUI_STATE_TTL_S,
                 "screenshot_path": snapshot.screenshot_path,
             }
         finally:
@@ -659,6 +678,7 @@ class GuiManager:
     async def human_act(
         self,
         window_id: str,
+        observation_id: str,
         observed_bounds: dict[str, Any],
         actions: list[dict[str, Any]],
     ) -> dict[str, Any]:
@@ -688,32 +708,51 @@ class GuiManager:
 
         results: list[dict[str, Any]] = []
         async with self._execution_lock:
-            for index, action in enumerate(normalized):
-                current = await self._current_window(
-                    window_id,
-                    "refresh the displayed frame and try again",
+            async with self._lock:
+                self._prune_locked(time.monotonic())
+                observation = self._frame_observations.get(str(observation_id))
+            if observation is None:
+                raise GuiStaleStateError(
+                    "Displayed GUI frame is stale or unknown; refresh the frame and try again"
                 )
-                if _bounds_tuple(current.get("bounds")) != expected_bounds:
+            if str(observation.window.get("id")) != str(window_id):
+                raise GuiStaleStateError(
+                    "Displayed GUI frame belongs to a different window; refresh it and try again"
+                )
+            if _bounds_tuple(observation.window.get("bounds")) != expected_bounds:
+                raise GuiStaleStateError(
+                    "Displayed GUI frame bounds do not match the action; refresh it and try again"
+                )
+            observed_window = observation.window
+            for index, action in enumerate(normalized):
+                if time.monotonic() - observation.created_at > GUI_STATE_TTL_S:
                     raise GuiStaleStateError(
-                        "Target window moved or resized since the displayed frame; refresh it and try again"
+                        "Displayed GUI frame expired during input; refresh it and try again"
                     )
+                await self._assert_window_geometry_unchanged(
+                    observed_window,
+                    stale_hint="refresh the displayed frame and try again",
+                )
                 if action["type"] in _COORDINATE_ACTIONS:
-                    await _await_native_operation(self._backend.focus_window(current))
-                    current = await self._current_window(
-                        window_id,
-                        "refresh the displayed frame and try again",
+                    await _await_native_operation(
+                        self._backend.focus_window(observed_window)
                     )
-                    if _bounds_tuple(current.get("bounds")) != expected_bounds:
-                        raise GuiStaleStateError(
-                            "Target window moved or resized while focusing it; "
-                            "refresh the displayed frame and try again"
-                        )
-                    _validate_coordinate_action(current, action, has_locator=False)
+                    await self._assert_window_geometry_unchanged(
+                        observed_window,
+                        stale_hint="refresh the displayed frame and try again",
+                    )
+                    _validate_coordinate_action(
+                        observed_window,
+                        action,
+                        has_locator=False,
+                    )
                     action["_focus_prepared"] = True
                 if action["type"] in {"type", "key"}:
-                    await _await_native_operation(self._backend.focus_window(current))
+                    await _await_native_operation(
+                        self._backend.focus_window(observed_window)
+                    )
                 result = await _await_native_operation(
-                    self._backend.perform_action(current, None, action)
+                    self._backend.perform_action(observed_window, None, action)
                 )
                 results.append({"index": index, "type": action["type"], **(result or {})})
 
@@ -841,12 +880,17 @@ class GuiManager:
             record.created_at = now
         return {"state_id": state_id, "state_ttl_s": GUI_STATE_TTL_S}
 
-    async def _assert_window_geometry_unchanged(self, observed: dict[str, Any]) -> None:
-        match = await self._current_window(str(observed.get("id")))
+    async def _assert_window_geometry_unchanged(
+        self,
+        observed: dict[str, Any],
+        *,
+        stale_hint: str = "call gui_state again",
+    ) -> None:
+        match = await self._current_window(str(observed.get("id")), stale_hint)
         old_bounds = _bounds_tuple(observed.get("bounds"))
         new_bounds = _bounds_tuple(match.get("bounds"))
         if old_bounds is not None and new_bounds is not None and old_bounds != new_bounds:
-            raise GuiStaleStateError("Target window moved or resized; call gui_state again")
+            raise GuiStaleStateError(f"Target window moved or resized; {stale_hint}")
 
     def _prune_locked(self, now: float) -> None:
         expired = [
@@ -856,6 +900,13 @@ class GuiManager:
         ]
         for state_id in expired:
             self._states.pop(state_id, None)
+        expired_observations = [
+            observation_id
+            for observation_id, record in self._frame_observations.items()
+            if now - record.created_at > GUI_STATE_TTL_S
+        ]
+        for observation_id in expired_observations:
+            self._frame_observations.pop(observation_id, None)
 
 
 _manager: GuiManager | None = None

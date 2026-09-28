@@ -141,6 +141,7 @@ export class DesktopController extends BaseController {
   private frameAbort: AbortController | null = null
   private frameUrl = ""
   private frameBounds: GuiBounds | null = null
+  private frameObservationId = ""
   private frameEpoch = 0
   private actionTargetEpoch = 0
   private actionQueue: Promise<void> = Promise.resolve()
@@ -436,6 +437,8 @@ export class DesktopController extends BaseController {
         height: numericHeader(response, "X-LSM-GUI-Window-Height"),
       }
       if (!bounds.width || !bounds.height) throw new Error("GUI frame returned invalid window bounds")
+      const observationId = response.headers.get("X-LSM-GUI-Observation-ID") || ""
+      if (!observationId) throw new Error("GUI frame returned no observation token")
       const blob = await response.blob()
       if (
         this.destroyed
@@ -466,6 +469,7 @@ export class DesktopController extends BaseController {
       const previousUrl = this.frameUrl
       this.frameUrl = nextUrl
       this.frameBounds = bounds
+      this.frameObservationId = observationId
       const image = this.root.querySelector<HTMLImageElement>("[data-role=desktop-frame]")
       const placeholder = this.root.querySelector<HTMLElement>("[data-role=desktop-placeholder]")
       if (image) {
@@ -502,6 +506,7 @@ export class DesktopController extends BaseController {
     this.frameAbort = null
     this.frameRequestKey = ""
     this.frameBounds = null
+    this.frameObservationId = ""
     this.revokeFrame()
     const image = this.root?.querySelector<HTMLImageElement>("[data-role=desktop-frame]")
     const placeholder = this.root?.querySelector<HTMLElement>("[data-role=desktop-placeholder]")
@@ -530,7 +535,8 @@ export class DesktopController extends BaseController {
     const machine = this.machine
     const targetEpoch = this.actionTargetEpoch
     const bounds = observedBounds ? { ...observedBounds } : this.frameBounds ? { ...this.frameBounds } : null
-    if (!windowId || !bounds) return
+    const observationId = this.frameObservationId
+    if (!windowId || !bounds || !observationId) return
     if (this.pendingActions >= MAX_PENDING_DESKTOP_ACTIONS) return
 
     this.invalidatePendingFrameRequest()
@@ -547,6 +553,7 @@ export class DesktopController extends BaseController {
         await this.context.api.send("/gui/action", "POST", {
           machine,
           window_id: windowId,
+          observation_id: observationId,
           bounds,
           actions: [action],
         })
@@ -563,9 +570,10 @@ export class DesktopController extends BaseController {
         if (
           machine === this.machine
           && windowId === this.selectedWindowId
-          && /moved|resized|no longer available|stale/i.test(message)
+          && /moved|resized|no longer available|stale|expired|changed since observation|different window|frame bounds/i.test(message)
         ) {
           this.invalidateActionTarget()
+          this.clearFrame()
           await this.refreshWindows(true)
         }
       } finally {
@@ -645,7 +653,7 @@ export class DesktopController extends BaseController {
     const observedBounds = this.frameBounds ? { ...this.frameBounds } : null
     if (!point || !observedBounds) return
     this.root.querySelector<HTMLElement>("[data-role=desktop-stage]")?.focus({ preventScroll: true })
-    if (event.detail >= 2) {
+    if (event.detail === 2) {
       if (this.clickTimer !== null) {
         window.clearTimeout(this.clickTimer)
         this.clickTimer = null
@@ -653,6 +661,7 @@ export class DesktopController extends BaseController {
       this.queueAction({ type: "double_click", ...point }, observedBounds)
       return
     }
+    if (event.detail > 2) return
     if (this.clickTimer !== null) window.clearTimeout(this.clickTimer)
     this.clickTimer = window.setTimeout(() => {
       this.clickTimer = null

@@ -32,6 +32,54 @@ describe("Native WebUI desktop click handling", () => {
   test("waits for the browser double-click window before dispatching a single click", () => {
     expect(SINGLE_CLICK_DELAY_MS).toBeGreaterThanOrEqual(500)
   })
+
+  test("does not turn click detail 3 into a second native double-click", () => {
+    const context: NativePageContext = {
+      api: {
+        get: async () => undefined as never,
+        send: async () => undefined as never,
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller: any = new DesktopController(context)
+    const image = {
+      hidden: false,
+      getBoundingClientRect: () => ({
+        left: 0,
+        top: 0,
+        right: 100,
+        bottom: 100,
+        width: 100,
+        height: 100,
+      }),
+    }
+    controller.root = {
+      querySelector: (selector: string) => (
+        selector === "[data-role=desktop-frame]"
+          ? image
+          : selector === "[data-role=desktop-stage]"
+            ? { focus: () => undefined }
+            : null
+      ),
+    }
+    controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
+    const actions: unknown[] = []
+    controller.queueAction = (action: unknown) => { actions.push(action) }
+    const target = {
+      closest: (selector: string) => (
+        selector === "[data-role=desktop-frame]" ? image : null
+      ),
+    }
+
+    controller.onClick({ target, button: 0, detail: 2, clientX: 10, clientY: 10 })
+    controller.onClick({ target, button: 0, detail: 3, clientX: 10, clientY: 10 })
+
+    expect(actions).toEqual([{ type: "double_click", x: 10, y: 10 }])
+  })
 })
 
 describe("Native WebUI desktop window refresh", () => {
@@ -137,6 +185,7 @@ describe("Native WebUI desktop queued input", () => {
     controller.machine = "node"
     controller.selectedWindowId = "window:1"
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
+    controller.frameObservationId = "obs-1"
     controller.refreshFrame = async () => undefined
 
     for (let index = 0; index < MAX_PENDING_DESKTOP_ACTIONS + 20; index += 1) {
@@ -175,6 +224,7 @@ describe("Native WebUI desktop queued input", () => {
     controller.machine = "node"
     controller.selectedWindowId = "window:1"
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
+    controller.frameObservationId = "obs-1"
     let frames = 0
     controller.refreshFrame = async () => { frames += 1 }
 
@@ -206,6 +256,7 @@ describe("Native WebUI desktop queued input", () => {
     controller.machine = "node"
     controller.selectedWindowId = "window:1"
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
+    controller.frameObservationId = "obs-1"
     controller.framePromise = new Promise<void>(() => undefined)
     controller.frameRequestKey = "node\0window:1"
     let aborts = 0
@@ -249,6 +300,7 @@ describe("Native WebUI desktop queued input", () => {
     controller.machine = "node"
     controller.selectedWindowId = "window:1"
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
+    controller.frameObservationId = "obs-1"
     controller.refreshFrame = async () => undefined
     controller.refreshWindows = async (force: boolean) => { refreshes.push(force) }
 
@@ -260,6 +312,8 @@ describe("Native WebUI desktop queued input", () => {
 
     expect(sends).toHaveLength(1)
     expect(refreshes).toEqual([true])
+    expect(controller.frameBounds).toBeNull()
+    expect(controller.frameObservationId).toBe("")
   })
 
   test("drops queued actions after the target changes", async () => {
@@ -287,6 +341,7 @@ describe("Native WebUI desktop queued input", () => {
     controller.machine = "old"
     controller.selectedWindowId = "window:1"
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
+    controller.frameObservationId = "obs-1"
     controller.refreshFrame = async () => undefined
 
     controller.queueAction({ type: "click", x: 1, y: 1 })
@@ -304,6 +359,7 @@ describe("Native WebUI desktop queued input", () => {
     expect(sends[0]).toEqual({
       machine: "old",
       window_id: "window:1",
+      observation_id: "obs-1",
       bounds: { x: 0, y: 0, width: 100, height: 100 },
       actions: [{ type: "click", x: 1, y: 1 }],
     })
@@ -333,6 +389,7 @@ describe("Native WebUI desktop frame replacement", () => {
     controller.machine = "local"
     controller.selectedWindowId = "window:1"
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
+    controller.frameObservationId = "obs-old"
     controller.frameUrl = "blob:old"
     controller.frameRequestKey = "local\0window:1"
     controller.frameEpoch = 0
@@ -351,6 +408,7 @@ describe("Native WebUI desktop frame replacement", () => {
         "X-LSM-GUI-Window-Y": "0",
         "X-LSM-GUI-Window-Width": "200",
         "X-LSM-GUI-Window-Height": "150",
+        "X-LSM-GUI-Observation-ID": "obs-new",
       },
     })) as unknown as typeof fetch
     URL.createObjectURL = () => "blob:new"
@@ -361,11 +419,13 @@ describe("Native WebUI desktop frame replacement", () => {
       await Promise.resolve()
       await Promise.resolve()
       expect(controller.frameBounds).toEqual({ x: 0, y: 0, width: 100, height: 100 })
+      expect(controller.frameObservationId).toBe("obs-old")
       expect(visibleImage.src).toBe("blob:old")
 
       releaseDecode()
       await task
       expect(controller.frameBounds).toEqual({ x: 0, y: 0, width: 200, height: 150 })
+      expect(controller.frameObservationId).toBe("obs-new")
       expect(visibleImage.src).toBe("blob:new")
     } finally {
       globalThis.fetch = originalFetch

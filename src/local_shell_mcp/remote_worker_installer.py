@@ -234,6 +234,7 @@ def _ensure_gui_dependencies_unlocked(
         "10",
         "--target",
         str(path),
+        "--upgrade",
         *[requirement for _module_name, requirement in missing],
     ]
     try:

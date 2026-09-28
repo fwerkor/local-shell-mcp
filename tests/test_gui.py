@@ -4,6 +4,7 @@ import asyncio
 import json
 import sys
 import threading
+import time
 import tomllib
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -169,6 +170,28 @@ class FakeBackend:
     ) -> dict[str, Any]:
         self.actions.append((window, locator, action))
         return {"performed": True}
+
+
+def _install_frame_observation(
+    manager: GuiManager,
+    backend: FakeBackend,
+    *,
+    observation_id: str = "frame-observation",
+    window_id: str = "window:1",
+) -> str:
+    manager._frame_observations[observation_id] = SimpleNamespace(
+        state_id=observation_id,
+        window={
+            "id": window_id,
+            "title": "Demo",
+            "app": "demo",
+            "pid": 1,
+            "bounds": dict(backend.bounds),
+        },
+        locators={},
+        created_at=time.monotonic(),
+    )
+    return observation_id
 
 
 @pytest.mark.asyncio
@@ -2384,9 +2407,11 @@ async def test_gui_manager_human_actions_validate_observed_geometry(tmp_path, mo
     backend = FakeBackend()
     manager = GuiManager(backend)
     observed = dict(backend.bounds)
+    observation_id = _install_frame_observation(manager, backend)
 
     result = await manager.human_act(
         "window:1",
+        observation_id,
         observed,
         [
             {"type": "click", "x": 10, "y": 12},
@@ -2407,6 +2432,7 @@ async def test_gui_manager_human_actions_validate_observed_geometry(tmp_path, mo
     with pytest.raises(GuiStaleStateError, match="displayed frame"):
         await manager.human_act(
             "window:1",
+            observation_id,
             observed,
             [{"type": "click", "x": 10, "y": 12}],
         )
@@ -2418,30 +2444,40 @@ async def test_gui_manager_human_actions_reject_unscoped_targets(tmp_path, monke
     backend = FakeBackend()
     manager = GuiManager(backend)
     observed = dict(backend.bounds)
+    observation_id = _install_frame_observation(manager, backend)
 
     with pytest.raises(ValueError, match="outside the selected window"):
         await manager.human_act(
             "window:1",
+            observation_id,
             observed,
             [{"type": "click", "x": 999, "y": 1}],
         )
     with pytest.raises(ValueError, match="do not accept element_id"):
         await manager.human_act(
             "window:1",
+            observation_id,
             observed,
             [{"type": "click", "element_id": "e1"}],
         )
     with pytest.raises(ValueError, match="Unsupported human GUI action"):
         await manager.human_act(
             "window:1",
+            observation_id,
             observed,
             [{"type": "wait", "seconds": 1}],
         )
     with pytest.raises(ValueError, match="Observed window bounds"):
-        await manager.human_act("window:1", {}, [{"type": "type", "text": "x"}])
+        await manager.human_act(
+            "window:1", observation_id, {}, [{"type": "type", "text": "x"}]
+        )
+    missing_observation = _install_frame_observation(
+        manager, backend, observation_id="missing-frame", window_id="missing"
+    )
     with pytest.raises(GuiStaleStateError, match="no longer available"):
         await manager.human_act(
             "missing",
+            missing_observation,
             observed,
             [{"type": "type", "text": "x"}],
         )
@@ -2457,10 +2493,51 @@ async def test_gui_frame_does_not_allocate_model_state(tmp_path, monkeypatch):
 
     assert frame["window"]["id"] == "window:1"
     assert "state_id" not in frame
+    assert frame["observation_id"] in manager._frame_observations
     assert manager._states == {}
     screenshot = Path(frame["screenshot_path"])
     assert screenshot.is_file()
     screenshot.unlink()
+
+
+@pytest.mark.asyncio
+async def test_gui_human_action_uses_native_identity_from_displayed_frame(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    native_identity = object()
+
+    class IdentityBackend(FakeBackend):
+        async def snapshot(self, window_id, **kwargs):
+            snapshot = await super().snapshot(window_id, **kwargs)
+            snapshot.window["_native_identity"] = native_identity
+            return snapshot
+
+        async def focus_window(self, window):
+            assert window.get("_native_identity") is native_identity
+            await super().focus_window(window)
+
+        async def perform_action(self, window, locator, action):
+            assert window.get("_native_identity") is native_identity
+            return await super().perform_action(window, locator, action)
+
+    backend = IdentityBackend()
+    manager = GuiManager(backend)
+    frame = await manager.frame("window:1")
+    screenshot = Path(frame["screenshot_path"])
+    try:
+        assert "_native_identity" not in frame["window"]
+        result = await manager.human_act(
+            "window:1",
+            frame["observation_id"],
+            frame["window"]["bounds"],
+            [{"type": "click", "x": 1, "y": 1}],
+        )
+    finally:
+        screenshot.unlink(missing_ok=True)
+
+    assert result["human_control"] is True
 
 
 @pytest.mark.asyncio
@@ -2572,9 +2649,11 @@ async def test_cancelled_native_action_keeps_execution_lock_until_backend_settle
     backend = BlockingBackend()
     manager = GuiManager(backend)
     bounds = dict(backend.bounds)
+    observation_id = _install_frame_observation(manager, backend)
     first = asyncio.create_task(
         manager.human_act(
             "window:1",
+            observation_id,
             bounds,
             [{"type": "click", "x": 1, "y": 1}],
         )
@@ -2584,6 +2663,7 @@ async def test_cancelled_native_action_keeps_execution_lock_until_backend_settle
     second = asyncio.create_task(
         manager.human_act(
             "window:1",
+            observation_id,
             bounds,
             [{"type": "click", "x": 2, "y": 2}],
         )
@@ -2651,6 +2731,7 @@ async def test_cancelled_gui_capture_holds_execution_lock_until_backend_settles(
 
     backend = BlockingCaptureBackend()
     manager = GuiManager(backend)
+    observation_id = _install_frame_observation(manager, backend)
     frame = asyncio.create_task(manager.frame("window:1"))
     await backend.capture_started.wait()
     frame.cancel()
@@ -2658,6 +2739,7 @@ async def test_cancelled_gui_capture_holds_execution_lock_until_backend_settles(
     action = asyncio.create_task(
         manager.human_act(
             "window:1",
+            observation_id,
             dict(backend.bounds),
             [{"type": "click", "x": 1, "y": 1}],
         )
@@ -2692,9 +2774,10 @@ async def test_gui_input_batches_are_serialized(tmp_path, monkeypatch):
     backend = SlowBackend()
     manager = GuiManager(backend)
     bounds = dict(backend.bounds)
+    observation_id = _install_frame_observation(manager, backend)
     await asyncio.gather(
-        manager.human_act("window:1", bounds, [{"type": "click", "x": 1, "y": 1}]),
-        manager.human_act("window:1", bounds, [{"type": "click", "x": 2, "y": 2}]),
+        manager.human_act("window:1", observation_id, bounds, [{"type": "click", "x": 1, "y": 1}]),
+        manager.human_act("window:1", observation_id, bounds, [{"type": "click", "x": 2, "y": 2}]),
     )
     assert backend.max_active == 1
 
@@ -4311,10 +4394,12 @@ async def test_human_batch_prevalidates_all_coordinates(tmp_path, monkeypatch):
     backend = FakeBackend()
     manager = GuiManager(backend)
     observed = dict(backend.bounds)
+    observation_id = _install_frame_observation(manager, backend)
 
     with pytest.raises(ValueError, match="outside the selected window"):
         await manager.human_act(
             "window:1",
+            observation_id,
             observed,
             [
                 {"type": "click", "x": 1, "y": 1},
@@ -4804,6 +4889,40 @@ def test_macos_semantic_action_rejects_recycled_ax_element(monkeypatch):
             locators[child_id],
             {"type": "click"},
         )
+
+
+def test_macos_current_record_rejects_reused_cg_id_with_new_ax_window(monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    original_ax = object()
+    replacement_ax = object()
+    observed = {
+        "id": "cg:7",
+        "pid": 42,
+        "title": "Document",
+        "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+        "_ax_identity_required": True,
+        "_ax_window": original_ax,
+    }
+    current = {
+        "id": "cg:7",
+        "pid": 42,
+        "title": "Document",
+        "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+    }
+
+    class AX:
+        @staticmethod
+        def CFEqual(left, right):
+            return left is right
+
+    backend = MacOSGuiBackend()
+    monkeypatch.setattr(macos, "_native", lambda: (AX, object()))
+    monkeypatch.setattr(backend, "_find_record", lambda _window_id: dict(current))
+    monkeypatch.setattr(backend, "_find_ax_window", lambda _record: replacement_ax)
+
+    with pytest.raises(LookupError, match="AX identity changed"):
+        backend._current_record(observed)
 
 
 def test_macos_ax_window_matching_rejects_ambiguous_weaker_matches(monkeypatch):

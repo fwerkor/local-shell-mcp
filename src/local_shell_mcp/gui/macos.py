@@ -128,6 +128,18 @@ def _same_bounds(left: dict[str, int], right: dict[str, int], tolerance: int = 3
     return all(abs(int(left[key]) - int(right[key])) <= tolerance for key in left)
 
 
+def _same_ax_element(AX: Any, left: Any, right: Any) -> bool:
+    if left is right:
+        return True
+    compare = getattr(AX, "CFEqual", None)
+    if callable(compare):
+        with contextlib.suppress(Exception):
+            return bool(compare(left, right))
+    with contextlib.suppress(Exception):
+        return bool(left == right)
+    return False
+
+
 def _validate_capture_bounds(bounds: dict[str, Any]) -> None:
     width = int(bounds.get("width", 0) or 0)
     height = int(bounds.get("height", 0) or 0)
@@ -222,10 +234,39 @@ class MacOSGuiBackend:
         return record
 
     def _current_record(self, observed: dict[str, Any]) -> dict[str, Any]:
+        AX, _Quartz = _native()
         window_id = str(observed.get("id") or "")
         current = self._find_record(window_id)
         if int(current.get("pid", 0) or 0) != int(observed.get("pid", 0) or 0):
             raise LookupError(f"Window identity changed since observation: {window_id}")
+        if observed.get("_ax_identity_required"):
+            observed_ax_window = observed.get("_ax_window")
+            current_ax_window = self._find_ax_window(current)
+            if (
+                observed_ax_window is None
+                or current_ax_window is None
+                or not _same_ax_element(
+                    AX,
+                    observed_ax_window,
+                    current_ax_window,
+                )
+            ):
+                raise LookupError(
+                    f"Window AX identity changed since observation: {window_id}"
+                )
+            current["_ax_identity_required"] = True
+            current["_ax_window"] = current_ax_window
+        elif observed.get("_ax_window") is not None:
+            current_ax_window = self._find_ax_window(current)
+            if current_ax_window is None or not _same_ax_element(
+                AX,
+                observed["_ax_window"],
+                current_ax_window,
+            ):
+                raise LookupError(
+                    f"Window AX identity changed since observation: {window_id}"
+                )
+            current["_ax_window"] = current_ax_window
         return current
 
     def _find_ax_window(self, record: dict[str, Any]) -> Any | None:
@@ -323,8 +364,11 @@ class MacOSGuiBackend:
         elements: list[dict[str, Any]] = []
         locators: dict[str, Any] = {}
 
-        ax_window = self._find_ax_window(record) if include_elements and trusted else None
+        ax_window = self._find_ax_window(record) if trusted else None
+        record["_ax_identity_required"] = trusted
         if ax_window is not None:
+            record["_ax_window"] = ax_window
+        if include_elements and ax_window is not None:
             queue: list[tuple[Any, int, list[int]]] = [(ax_window, 0, [])]
             used_bytes = 2
             while queue and len(elements) < max_elements:

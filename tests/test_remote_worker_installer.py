@@ -410,6 +410,7 @@ def test_gui_dependency_bootstrap_rejects_importable_unsupported_version(
     assert result["available"] is True
     assert result["installed"] is True
     assert len(runs) == 1
+    assert "--upgrade" in runs[0]
     assert "python-xlib>=0.33,<1" in runs[0]
 
 

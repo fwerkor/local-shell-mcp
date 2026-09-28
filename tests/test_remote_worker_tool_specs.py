@@ -95,10 +95,14 @@ async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
 
         async def frame(self, window_id):
             calls.append(("frame", window_id))
-            return {"window": {"id": window_id}, "screenshot_path": "/tmp/frame.png"}
+            return {
+                "window": {"id": window_id},
+                "observation_id": "obs-remote",
+                "screenshot_path": "/tmp/frame.png",
+            }
 
-        async def human_act(self, window_id, bounds, actions):
-            calls.append(("human_act", window_id, bounds, actions))
+        async def human_act(self, window_id, observation_id, bounds, actions):
+            calls.append(("human_act", window_id, observation_id, bounds, actions))
             return {"human_control": True}
 
         async def act(self, window_id, state_id, actions):
@@ -157,6 +161,7 @@ async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
         "gui_human_action",
         {
             "window_id": "w",
+            "observation_id": "obs-remote",
             "bounds": {"x": 0, "y": 0, "width": 10, "height": 10},
             "actions": [{"type": "click", "x": 1, "y": 1}],
         },

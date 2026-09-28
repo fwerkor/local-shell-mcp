@@ -1206,8 +1206,8 @@ def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
                 "capabilities": {"coordinate_input": True},
             }
 
-        async def human_act(self, window_id, bounds, actions):
-            calls.append((window_id, bounds, actions))
+        async def human_act(self, window_id, observation_id, bounds, actions):
+            calls.append((window_id, observation_id, bounds, actions))
             return {
                 "backend": "fake-native",
                 "window_id": window_id,
@@ -1225,6 +1225,7 @@ def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
         return (
             {
                 "backend": "fake-native",
+                "observation_id": "obs-1",
                 "window": {
                     "id": "window:1",
                     "title": "Demo",
@@ -1255,6 +1256,7 @@ def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
     assert frame.headers["cache-control"] == "no-store"
     assert frame.headers["x-lsm-gui-window-width"] == "320"
     assert frame.headers["x-lsm-gui-window-height"] == "180"
+    assert frame.headers["x-lsm-gui-observation-id"] == "obs-1"
     assert (
         "/api/ui/gui/frame",
         ("shell:read", "shell:execute"),
@@ -1266,6 +1268,7 @@ def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
         json={
             "machine": "local",
             "window_id": "window:1",
+            "observation_id": "obs-1",
             "bounds": {"x": 20, "y": 30, "width": 320, "height": 180},
             "actions": [{"type": "click", "x": 12, "y": 8}],
         },
@@ -1275,6 +1278,7 @@ def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
     assert calls == [
         (
             "window:1",
+            "obs-1",
             {"x": 20, "y": 30, "width": 320, "height": 180},
             [{"type": "click", "x": 12, "y": 8}],
         )
@@ -1328,11 +1332,24 @@ def test_webui_gui_action_validates_human_payload(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     client = TestClient(build_http_app())
 
+    missing_observation = client.post(
+        "/api/ui/gui/action",
+        json={
+            "machine": "local",
+            "window_id": "window:1",
+            "bounds": {"x": 0, "y": 0, "width": 10, "height": 10},
+            "actions": [{"type": "click", "x": 1, "y": 1}],
+        },
+    )
+    assert missing_observation.status_code == 400
+    assert "observation_id is required" in missing_observation.json()["message"]
+
     missing_bounds = client.post(
         "/api/ui/gui/action",
         json={
             "machine": "local",
             "window_id": "window:1",
+            "observation_id": "obs-1",
             "actions": [{"type": "click", "x": 1, "y": 1}],
         },
     )
@@ -1344,6 +1361,7 @@ def test_webui_gui_action_validates_human_payload(tmp_path, monkeypatch):
         json={
             "machine": "local",
             "window_id": "window:1",
+            "observation_id": "obs-1",
             "bounds": {"x": 0, "y": 0, "width": 10, "height": 10},
             "actions": [{"type": "wait"}] * 9,
         },
@@ -1411,6 +1429,7 @@ def test_webui_gui_api_error_paths(tmp_path, monkeypatch):
         json={
             "machine": "local",
             "window_id": "window:1",
+            "observation_id": "obs-1",
             "bounds": {"x": 0, "y": 0, "width": 10, "height": 10},
             "actions": [],
         },
@@ -1445,6 +1464,7 @@ def test_webui_gui_remote_human_action_dispatch(tmp_path, monkeypatch):
         json={
             "machine": "desktop-node",
             "window_id": "window:1",
+            "observation_id": "remote-obs",
             "bounds": bounds,
             "actions": [{"type": "click", "x": 10, "y": 11}],
         },
@@ -1458,6 +1478,7 @@ def test_webui_gui_remote_human_action_dispatch(tmp_path, monkeypatch):
             "gui_human_action",
             {
                 "window_id": "window:1",
+                "observation_id": "remote-obs",
                 "bounds": bounds,
                 "actions": [{"type": "click", "x": 10, "y": 11}],
             },

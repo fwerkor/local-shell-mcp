@@ -1194,6 +1194,7 @@ async def api_gui_frame(request: Request) -> Response:
             "X-LSM-GUI-Window-Width": str(bounds.get("width") or 0),
             "X-LSM-GUI-Window-Height": str(bounds.get("height") or 0),
             "X-LSM-GUI-Backend": str(data.get("backend") or ""),
+            "X-LSM-GUI-Observation-ID": str(data.get("observation_id") or ""),
         }
         return Response(
             image.data,
@@ -1209,6 +1210,7 @@ async def api_gui_action(request: Request) -> Response:
         body = await request.json()
         machine = str(body.get("machine") or "local")
         window_id = str(body.get("window_id") or "")
+        observation_id = str(body.get("observation_id") or "")
         observed_bounds = body.get("bounds")
         raw_actions = body.get("actions")
         _require_ui_scopes(request, "shell:read", "shell:execute", machine=machine)
@@ -1218,6 +1220,8 @@ async def api_gui_action(request: Request) -> Response:
 
         if not window_id:
             raise ValueError("window_id is required")
+        if not observation_id:
+            raise ValueError("observation_id is required")
         if not isinstance(observed_bounds, dict):
             raise ValueError("bounds is required")
         if not isinstance(raw_actions, list) or not raw_actions:
@@ -1236,6 +1240,7 @@ async def api_gui_action(request: Request) -> Response:
 
             result = await get_gui_manager().human_act(
                 window_id,
+                observation_id,
                 observed_bounds,
                 actions,
             )
@@ -1245,6 +1250,7 @@ async def api_gui_action(request: Request) -> Response:
                 "gui_human_action",
                 {
                     "window_id": window_id,
+                    "observation_id": observation_id,
                     "bounds": observed_bounds,
                     "actions": actions,
                 },

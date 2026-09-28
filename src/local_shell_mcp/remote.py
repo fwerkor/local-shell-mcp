@@ -2562,6 +2562,7 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "gui_human_action":
         return await manager.human_act(
             args["window_id"],
+            args["observation_id"],
             args["bounds"],
             args["actions"],
         )
