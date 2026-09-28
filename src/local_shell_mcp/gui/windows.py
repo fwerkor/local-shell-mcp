@@ -184,6 +184,7 @@ def _capture_window_image_native(hwnd: int, destination: Path) -> None:
     memory_dc = gdi32.CreateCompatibleDC(window_dc)
     bitmap = gdi32.CreateCompatibleBitmap(window_dc, width, height) if memory_dc else None
     old_object = gdi32.SelectObject(memory_dc, bitmap) if bitmap else None
+    bitmap_selected = bool(old_object)
     try:
         if not memory_dc or not bitmap or not old_object:
             raise GuiUnavailableError("Win32 could not allocate an off-screen window capture")
@@ -205,6 +206,12 @@ def _capture_window_image_native(hwnd: int, destination: Path) -> None:
         info.bmiHeader.biBitCount = 32
         info.bmiHeader.biCompression = 0
         info.bmiHeader.biSizeImage = byte_count
+        restored = gdi32.SelectObject(memory_dc, old_object)
+        if not restored:
+            raise GuiUnavailableError(
+                "Win32 could not unselect the capture bitmap before reading pixels"
+            )
+        bitmap_selected = False
         copied = gdi32.GetDIBits(
             memory_dc,
             bitmap,
@@ -227,7 +234,7 @@ def _capture_window_image_native(hwnd: int, destination: Path) -> None:
         )
         image.save(destination, format="PNG")
     finally:
-        if old_object:
+        if old_object and bitmap_selected:
             gdi32.SelectObject(memory_dc, old_object)
         if bitmap:
             gdi32.DeleteObject(bitmap)
@@ -308,6 +315,19 @@ def _window_fingerprint(control: Any) -> str:
     return hashlib.sha256("\0".join(fields).encode("utf-8")).hexdigest()[:16]
 
 
+def _same_uia_control(observed: Any, current: Any) -> bool:
+    if observed is None or current is None:
+        return False
+    auto = _automation()
+    compare = getattr(auto, "ControlsAreSame", None)
+    if not callable(compare):
+        return False
+    try:
+        return bool(compare(observed, current))
+    except Exception:  # noqa: BLE001 - fail closed if UIA identity comparison is unavailable.
+        return False
+
+
 def _element_fingerprint(control: Any) -> str:
     bounds = _rect_dict(_safe_property(control, "BoundingRectangle"))
     fields = [
@@ -364,6 +384,7 @@ def _window_record(control: Any) -> dict[str, Any] | None:
         "app": str(_safe_property(control, "ClassName", "") or ""),
         "pid": int(_safe_property(control, "ProcessId", 0) or 0),
         "bounds": bounds,
+        "_uia_control": control,
     }
 
 
@@ -436,7 +457,11 @@ class WindowsGuiBackend:
             partial(func, *args, **kwargs),
         )
 
-    def _find_window(self, window_id: str) -> Any:
+    def _find_window(
+        self,
+        window_id: str,
+        observed_window: dict[str, Any] | None = None,
+    ) -> Any:
         parts = window_id.split(":")
         if len(parts) != 3 or parts[0] != "hwnd" or not parts[2]:
             raise ValueError(f"Invalid Windows window id: {window_id}")
@@ -448,6 +473,12 @@ class WindowsGuiBackend:
                 continue
             if _window_fingerprint(control) != expected_fingerprint:
                 raise LookupError(f"Window identity changed since observation: {window_id}")
+            if observed_window is not None and "_uia_control" in observed_window:
+                observed_control = observed_window.get("_uia_control")
+                if not _same_uia_control(observed_control, control):
+                    raise LookupError(
+                        f"Window UIA identity changed since observation: {window_id}"
+                    )
             return control
         raise LookupError(f"Window is no longer available: {window_id}")
 
@@ -455,12 +486,13 @@ class WindowsGuiBackend:
         self,
         window_id: str,
         locator: dict[str, Any],
+        observed_window: dict[str, Any] | None = None,
     ) -> Any:
         path = locator.get("path")
         expected_fingerprint = str(locator.get("fingerprint") or "")
         if not isinstance(path, list) or not expected_fingerprint:
             raise LookupError("Windows UIA locator is invalid or incomplete")
-        control = self._find_window(window_id)
+        control = self._find_window(window_id, observed_window)
         for raw_index in path:
             try:
                 index = int(raw_index)
@@ -618,7 +650,7 @@ class WindowsGuiBackend:
 
     async def focus_window(self, window: dict[str, Any]) -> None:
         def focus() -> None:
-            target = self._find_window(str(window["id"]))
+            target = self._find_window(str(window["id"]), window)
             target.SetFocus()
 
         await self._run_uia(focus)
@@ -647,10 +679,10 @@ class WindowsGuiBackend:
         if locator is not None:
             if not isinstance(locator, dict):
                 raise LookupError("Windows UIA locator is invalid; call gui_state again")
-            locator = self._resolve_element_locator(str(window["id"]), locator)
+            locator = self._resolve_element_locator(str(window["id"]), locator, window)
 
         if kind == "focus":
-            target = locator or self._find_window(str(window["id"]))
+            target = locator or self._find_window(str(window["id"]), window)
             target.SetFocus()
             return {"semantic": True}
 
@@ -670,8 +702,9 @@ class WindowsGuiBackend:
                 if pattern is not None:
                     pattern.Invoke()
                     return {"semantic": True, "method": "invoke"}
-            target_window = self._find_window(str(window["id"]))
-            target_window.SetFocus()
+            target_window = self._find_window(str(window["id"]), window)
+            if not action.get("_focus_prepared"):
+                target_window.SetFocus()
             if kind == "click":
                 locator.Click(waitTime=0)
             elif kind == "double_click":
@@ -680,8 +713,9 @@ class WindowsGuiBackend:
                 locator.RightClick(waitTime=0)
             return {"semantic": True, "method": "control"}
 
-        target_window = self._find_window(str(window["id"]))
-        target_window.SetFocus()
+        target_window = self._find_window(str(window["id"]), window)
+        if not action.get("_focus_prepared"):
+            target_window.SetFocus()
 
         if kind == "type":
             text = str(action.get("text", ""))

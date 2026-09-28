@@ -189,6 +189,37 @@ describe("Native WebUI desktop queued input", () => {
     expect(controller.pendingActions).toBe(0)
   })
 
+  test("invalidates a pre-action frame request before requesting the final frame", async () => {
+    const context: NativePageContext = {
+      api: {
+        get: async () => undefined as never,
+        send: async () => ({} as never),
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller: any = new DesktopController(context)
+    controller.root = { querySelector: () => null }
+    controller.machine = "node"
+    controller.selectedWindowId = "window:1"
+    controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
+    controller.framePromise = new Promise<void>(() => undefined)
+    controller.frameRequestKey = "node\0window:1"
+    let aborts = 0
+    controller.frameAbort = { abort: () => { aborts += 1 } }
+    let frames = 0
+    controller.refreshFrame = async () => { frames += 1 }
+
+    controller.queueAction({ type: "click", x: 1, y: 1 })
+    await controller.actionQueue
+
+    expect(aborts).toBe(1)
+    expect(frames).toBe(1)
+  })
+
   test("invalidates later queued actions after a stale-frame rejection", async () => {
     const sends: unknown[] = []
     let releaseFirst!: () => void

@@ -638,6 +638,11 @@ class GuiManager:
                     )
                 if action["type"] in _COORDINATE_ACTIONS:
                     await self._assert_window_geometry_unchanged(record.window)
+                    await _await_native_operation(
+                        self._backend.focus_window(record.window)
+                    )
+                    await self._assert_window_geometry_unchanged(record.window)
+                    action["_focus_prepared"] = True
                 result = await _await_native_operation(
                     self._backend.perform_action(record.window, locator, action)
                 )
@@ -693,7 +698,18 @@ class GuiManager:
                         "Target window moved or resized since the displayed frame; refresh it and try again"
                     )
                 if action["type"] in _COORDINATE_ACTIONS:
+                    await _await_native_operation(self._backend.focus_window(current))
+                    current = await self._current_window(
+                        window_id,
+                        "refresh the displayed frame and try again",
+                    )
+                    if _bounds_tuple(current.get("bounds")) != expected_bounds:
+                        raise GuiStaleStateError(
+                            "Target window moved or resized while focusing it; "
+                            "refresh the displayed frame and try again"
+                        )
                     _validate_coordinate_action(current, action, has_locator=False)
+                    action["_focus_prepared"] = True
                 if action["type"] in {"type", "key"}:
                     await _await_native_operation(self._backend.focus_window(current))
                 result = await _await_native_operation(

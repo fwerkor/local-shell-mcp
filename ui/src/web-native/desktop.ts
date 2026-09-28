@@ -391,6 +391,15 @@ export class DesktopController extends BaseController {
     return promise
   }
 
+  private invalidatePendingFrameRequest(): void {
+    if (!this.framePromise) return
+    this.frameEpoch += 1
+    this.frameAbort?.abort()
+    this.frameAbort = null
+    this.framePromise = null
+    this.frameRequestKey = ""
+  }
+
   private async loadFrame(requestKey: string, controller: AbortController): Promise<void> {
     const windowId = this.selectedWindowId
     if (!windowId) {
@@ -524,6 +533,7 @@ export class DesktopController extends BaseController {
     if (!windowId || !bounds) return
     if (this.pendingActions >= MAX_PENDING_DESKTOP_ACTIONS) return
 
+    this.invalidatePendingFrameRequest()
     this.pendingActions += 1
     this.renderInputPulse()
     const run = async () => {

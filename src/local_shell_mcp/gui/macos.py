@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -87,6 +88,40 @@ def _ax_bounds(AX: Any, element: Any) -> dict[str, int]:
         "width": max(0, int(round(float(size.width)))),
         "height": max(0, int(round(float(size.height)))),
     }
+
+
+def _ax_element_fingerprint(AX: Any, element: Any) -> str:
+    name = (
+        _ax_copy(AX, element, AX.kAXTitleAttribute, "")
+        or _ax_copy(AX, element, AX.kAXDescriptionAttribute, "")
+    )
+    payload = {
+        "role": _truncate_gui_text(
+            _ax_copy(AX, element, AX.kAXRoleAttribute, ""),
+            GUI_MAX_ELEMENT_TEXT_BYTES,
+        ),
+        "name": _truncate_gui_text(name, GUI_MAX_ELEMENT_TEXT_BYTES),
+        "value": _truncate_gui_text(
+            _ax_copy(AX, element, AX.kAXValueAttribute, ""),
+            GUI_MAX_ELEMENT_VALUE_BYTES,
+        ),
+        "bounds": _ax_bounds(AX, element),
+    }
+    identifier_attr = getattr(AX, "kAXIdentifierAttribute", None)
+    if identifier_attr is not None:
+        payload["identifier"] = _truncate_gui_text(
+            _ax_copy(AX, element, identifier_attr, ""),
+            GUI_MAX_ELEMENT_TEXT_BYTES,
+        )
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()[:16]
 
 
 def _same_bounds(left: dict[str, int], right: dict[str, int], tolerance: int = 3) -> bool:
@@ -230,6 +265,30 @@ class MacOSGuiBackend:
             return title_matches[0]
         return None
 
+    def _resolve_ax_locator(self, record: dict[str, Any], locator: dict[str, Any]) -> Any:
+        AX, _Quartz = _native()
+        path = locator.get("path")
+        expected = str(locator.get("fingerprint") or "")
+        if not isinstance(path, list) or not expected:
+            raise LookupError("macOS AX locator is invalid or incomplete")
+        element = self._find_ax_window(record)
+        if element is None:
+            raise LookupError("Target AX window is no longer available")
+        for raw_index in path:
+            try:
+                index = int(raw_index)
+                children = _ax_copy(AX, element, AX.kAXChildrenAttribute, []) or []
+                element = children[index]
+            except (IndexError, TypeError, ValueError) as exc:
+                raise LookupError(
+                    "Target AX element is no longer available; call gui_state again"
+                ) from exc
+        if _ax_element_fingerprint(AX, element) != expected:
+            raise LookupError(
+                "Target AX element changed since observation; call gui_state again"
+            )
+        return element
+
     def _list_windows_sync(self) -> dict[str, Any]:
         AX, _Quartz = _native()
         trusted = bool(AX.AXIsProcessTrusted())
@@ -266,10 +325,10 @@ class MacOSGuiBackend:
 
         ax_window = self._find_ax_window(record) if include_elements and trusted else None
         if ax_window is not None:
-            queue: list[tuple[Any, int]] = [(ax_window, 0)]
+            queue: list[tuple[Any, int, list[int]]] = [(ax_window, 0, [])]
             used_bytes = 2
             while queue and len(elements) < max_elements:
-                element, depth = queue.pop(0)
+                element, depth, path = queue.pop(0)
                 element_id = f"e{len(elements) + 1}"
                 item = {
                     "id": element_id,
@@ -303,12 +362,18 @@ class MacOSGuiBackend:
                     break
                 elements.append(item)
                 used_bytes += extra
-                locators[element_id] = element
+                locators[element_id] = {
+                    "path": list(path),
+                    "fingerprint": _ax_element_fingerprint(AX, element),
+                }
                 remaining = max_elements - len(elements) - len(queue)
                 if depth >= max_depth or remaining <= 0:
                     continue
                 children = _ax_copy(AX, element, AX.kAXChildrenAttribute, []) or []
-                queue.extend((child, depth + 1) for child in children[:remaining])
+                queue.extend(
+                    (child, depth + 1, [*path, index])
+                    for index, child in enumerate(children[:remaining])
+                )
 
         return record, trusted, elements, locators
 
@@ -402,6 +467,10 @@ class MacOSGuiBackend:
             raise GuiUnavailableError("Grant Accessibility permission to local-shell-mcp on macOS")
 
         current_window = self._current_record(window)
+        if locator is not None:
+            if not isinstance(locator, dict):
+                raise LookupError("macOS AX locator is invalid; call gui_state again")
+            locator = self._resolve_ax_locator(current_window, locator)
         kind = action["type"]
         if kind == "focus":
             target = locator or self._find_ax_window(current_window)
@@ -429,16 +498,17 @@ class MacOSGuiBackend:
             if int(error) == 0:
                 return {"semantic": True, "method": "AXPress"}
 
-        ax_window = self._find_ax_window(current_window)
-        if ax_window is None:
-            raise RuntimeError("Could not resolve the target AX window unambiguously")
-        window_error = AX.AXUIElementSetAttributeValue(
-            ax_window, AX.kAXFocusedAttribute, True
-        )
-        if int(window_error) != 0:
-            window_error = AX.AXUIElementPerformAction(ax_window, AX.kAXRaiseAction)
-        if int(window_error) != 0:
-            raise RuntimeError(f"AX target window focus/raise failed with error {window_error}")
+        if not action.get("_focus_prepared"):
+            ax_window = self._find_ax_window(current_window)
+            if ax_window is None:
+                raise RuntimeError("Could not resolve the target AX window unambiguously")
+            window_error = AX.AXUIElementSetAttributeValue(
+                ax_window, AX.kAXFocusedAttribute, True
+            )
+            if int(window_error) != 0:
+                window_error = AX.AXUIElementPerformAction(ax_window, AX.kAXRaiseAction)
+            if int(window_error) != 0:
+                raise RuntimeError(f"AX target window focus/raise failed with error {window_error}")
 
         if kind == "type":
             text = str(action.get("text", ""))

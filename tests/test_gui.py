@@ -192,7 +192,11 @@ async def test_gui_manager_state_is_single_use_and_resolves_element(tmp_path, mo
         "height": 30,
     }
     assert result["state_consumed"] is True
-    assert backend.actions[0][1] == "native-element"
+    assert [item[2]["type"] for item in backend.actions] == [
+        "focus_window",
+        "click",
+    ]
+    assert backend.actions[1][1] == "native-element"
     with pytest.raises(GuiStaleStateError, match="stale"):
         await manager.act(
             "window:1",
@@ -216,6 +220,29 @@ async def test_gui_manager_rejects_coordinate_action_after_window_moves(tmp_path
             [{"type": "click", "x": 10, "y": 10}],
         )
     assert backend.actions == []
+
+
+@pytest.mark.asyncio
+async def test_gui_manager_rechecks_geometry_after_coordinate_focus(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+
+    class FocusMovesBackend(FakeBackend):
+        async def focus_window(self, window):
+            await super().focus_window(window)
+            self.bounds["x"] += 20
+
+    backend = FocusMovesBackend()
+    manager = GuiManager(backend)
+    state = await manager.snapshot("window:1", screenshot=False)
+
+    with pytest.raises(GuiStaleStateError, match="moved or resized"):
+        await manager.act(
+            "window:1",
+            state["state_id"],
+            [{"type": "click", "x": 10, "y": 10}],
+        )
+
+    assert [item[2]["type"] for item in backend.actions] == ["focus_window"]
 
 
 @pytest.mark.asyncio
@@ -1545,6 +1572,74 @@ def test_windows_capture_rejects_oversized_rect_before_gdi_allocation(tmp_path, 
         windows._capture_window_image_native(123, tmp_path / "oversized.png")
 
 
+def test_windows_capture_unselects_bitmap_before_getdibits(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.windows as windows
+
+    class Fn:
+        def __init__(self, callback):
+            self.callback = callback
+            self.argtypes = None
+            self.restype = None
+
+        def __call__(self, *args):
+            return self.callback(*args)
+
+    restored = False
+    select_calls = 0
+
+    def get_window_rect(_hwnd, rect_ptr):
+        rect = windows.ctypes.cast(
+            rect_ptr, windows.ctypes.POINTER(windows._WinRect)
+        ).contents
+        rect.left = 0
+        rect.top = 0
+        rect.right = 2
+        rect.bottom = 2
+        return 1
+
+    def select_object(_dc, obj):
+        nonlocal restored, select_calls
+        select_calls += 1
+        if select_calls == 1:
+            return 99
+        assert obj == 99
+        restored = True
+        return 3
+
+    def get_dibits(*_args):
+        assert restored is True
+        return 2
+
+    class User32:
+        GetWindowRect = Fn(get_window_rect)
+        IsIconic = Fn(lambda _hwnd: 0)
+        GetWindowDC = Fn(lambda _hwnd: 1)
+        ReleaseDC = Fn(lambda *_args: 1)
+        PrintWindow = Fn(lambda *_args: 1)
+
+    class GDI32:
+        CreateCompatibleDC = Fn(lambda *_args: 2)
+        CreateCompatibleBitmap = Fn(lambda *_args: 3)
+        SelectObject = Fn(select_object)
+        GetDIBits = Fn(get_dibits)
+        DeleteObject = Fn(lambda *_args: 1)
+        DeleteDC = Fn(lambda *_args: 1)
+
+    monkeypatch.setattr(
+        windows.ctypes,
+        "windll",
+        SimpleNamespace(user32=User32(), gdi32=GDI32()),
+        raising=False,
+    )
+
+    destination = tmp_path / "capture.png"
+    windows._capture_window_image_native(123, destination)
+
+    assert restored is True
+    assert select_calls == 2
+    assert destination.is_file()
+
+
 def test_windows_capture_helper_times_out_and_removes_partial_output(tmp_path, monkeypatch):
     import local_shell_mcp.gui.windows as windows
 
@@ -1616,7 +1711,7 @@ def test_windows_traversal_stops_before_querying_children_at_budget(monkeypatch)
 
     root = Root()
     backend = WindowsGuiBackend()
-    monkeypatch.setattr(backend, "_find_window", lambda _window_id: root)
+    monkeypatch.setattr(backend, "_find_window", lambda _window_id, _observed_window=None: root)
     monkeypatch.setattr(
         windows,
         "_window_record",
@@ -1673,7 +1768,7 @@ def test_windows_uia_traversal_bounds_provider_strings_and_total_bytes(monkeypat
     children = [Control(runtime_id=index + 2) for index in range(200)]
     root = Control(children=children)
     backend = WindowsGuiBackend()
-    monkeypatch.setattr(backend, "_find_window", lambda _window_id: root)
+    monkeypatch.setattr(backend, "_find_window", lambda _window_id, _observed_window=None: root)
     monkeypatch.setattr(
         windows,
         "_window_record",
@@ -1761,7 +1856,7 @@ def test_windows_semantic_action_rejects_recycled_uia_element(monkeypatch):
         "pid": 1,
         "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
     }
-    monkeypatch.setattr(backend, "_find_window", lambda _window_id: root)
+    monkeypatch.setattr(backend, "_find_window", lambda _window_id, _observed_window=None: root)
     monkeypatch.setattr(windows, "_window_record", lambda _control: record)
     monkeypatch.setattr(windows, "_automation", lambda: SimpleNamespace())
 
@@ -1880,12 +1975,12 @@ def test_windows_control_mouse_fallback_focuses_verified_window(monkeypatch):
 
     backend = WindowsGuiBackend()
     monkeypatch.setattr(windows, "_automation", lambda: SimpleNamespace())
-    monkeypatch.setattr(backend, "_find_window", lambda _window_id: Target())
+    monkeypatch.setattr(backend, "_find_window", lambda _window_id, _observed_window=None: Target())
     locator = Locator()
     monkeypatch.setattr(
         backend,
         "_resolve_element_locator",
-        lambda _window_id, _locator: locator,
+        lambda _window_id, _locator, _observed_window=None: locator,
     )
     result = backend._perform_action_sync(
         {"id": "hwnd:1:fingerprint", "bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
@@ -2302,6 +2397,7 @@ async def test_gui_manager_human_actions_validate_observed_geometry(tmp_path, mo
     assert result["human_control"] is True
     assert [item["type"] for item in result["actions"]] == ["click", "type"]
     assert [item[2]["type"] for item in backend.actions] == [
+        "focus_window",
         "click",
         "focus_window",
         "type",
@@ -4189,17 +4285,22 @@ async def test_macos_element_focus_failure_aborts_keyboard_injection(monkeypatch
     monkeypatch.setattr(macos, "_native", lambda: (AX, Quartz))
     monkeypatch.setattr(backend, "_current_record", lambda window: window)
     monkeypatch.setattr(backend, "_find_ax_window", lambda _window: "window")
+    monkeypatch.setattr(
+        backend,
+        "_resolve_ax_locator",
+        lambda _window, _locator: "element",
+    )
 
     with pytest.raises(RuntimeError, match="could not be focused"):
         await backend.perform_action(
             {"id": "cg:1", "bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
-            "element",
+            {"path": [0], "fingerprint": "observed"},
             {"type": "type", "text": "x"},
         )
     with pytest.raises(RuntimeError, match="could not be focused"):
         await backend.perform_action(
             {"id": "cg:1", "bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
-            "element",
+            {"path": [0], "fingerprint": "observed"},
             {"type": "key", "keys": "A"},
         )
 
@@ -4632,6 +4733,79 @@ def test_macos_accessibility_traversal_bounds_provider_strings_and_total_bytes(m
         assert len(element["value"].encode()) <= macos.GUI_MAX_ELEMENT_VALUE_BYTES
 
 
+def test_macos_semantic_action_rejects_recycled_ax_element(monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    class AX:
+        kAXRoleAttribute = "role"
+        kAXTitleAttribute = "title"
+        kAXDescriptionAttribute = "description"
+        kAXValueAttribute = "value"
+        kAXEnabledAttribute = "enabled"
+        kAXChildrenAttribute = "children"
+
+        @staticmethod
+        def AXIsProcessTrusted():
+            return True
+
+    root = object()
+    child = object()
+    titles = {root: "Window", child: "Save"}
+    record = {
+        "id": "cg:1",
+        "pid": 1,
+        "title": "Window",
+        "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+    }
+    backend = MacOSGuiBackend()
+    monkeypatch.setattr(macos, "_native", lambda: (AX, object()))
+    monkeypatch.setattr(backend, "_find_record", lambda _window_id: record)
+    monkeypatch.setattr(backend, "_current_record", lambda _window: record)
+    monkeypatch.setattr(backend, "_find_ax_window", lambda _record: root)
+    monkeypatch.setattr(
+        macos,
+        "_ax_bounds",
+        lambda _ax, element: (
+            {"x": 10, "y": 10, "width": 20, "height": 20}
+            if element is child
+            else {"x": 0, "y": 0, "width": 100, "height": 100}
+        ),
+    )
+
+    def ax_copy(_ax, element, attr, default=None):
+        if attr == AX.kAXChildrenAttribute:
+            return [child] if element is root else []
+        if attr == AX.kAXRoleAttribute:
+            return "button" if element is child else "window"
+        if attr == AX.kAXTitleAttribute:
+            return titles[element]
+        if attr == AX.kAXDescriptionAttribute:
+            return ""
+        if attr == AX.kAXValueAttribute:
+            return ""
+        if attr == AX.kAXEnabledAttribute:
+            return True
+        return default
+
+    monkeypatch.setattr(macos, "_ax_copy", ax_copy)
+
+    _record, _trusted, elements, locators = backend._snapshot_accessibility_sync(
+        "cg:1",
+        include_elements=True,
+        max_elements=10,
+        max_depth=2,
+    )
+    child_id = next(item["id"] for item in elements if item["name"] == "Save")
+    titles[child] = "Delete"
+
+    with pytest.raises(LookupError, match="changed since observation"):
+        backend._perform_action_sync(
+            record,
+            locators[child_id],
+            {"type": "click"},
+        )
+
+
 def test_macos_ax_window_matching_rejects_ambiguous_weaker_matches(monkeypatch):
     import local_shell_mcp.gui.macos as macos
 
@@ -5059,6 +5233,53 @@ def test_windows_window_id_rejects_reused_hwnd(monkeypatch):
         backend._find_window(record["id"])
 
 
+def test_windows_window_id_rejects_same_fingerprint_reused_hwnd(monkeypatch):
+    import local_shell_mcp.gui.windows as windows
+
+    class Rect:
+        left = 0
+        top = 0
+        right = 100
+        bottom = 100
+
+    class Control:
+        NativeWindowHandle = 7
+        ProcessId = 101
+        ClassName = "Editor"
+        AutomationId = "main"
+        Name = "Document"
+        BoundingRectangle = Rect()
+        IsOffscreen = False
+
+        def GetRuntimeId(self):
+            return [7]
+
+    original = Control()
+    replacement = Control()
+    monkeypatch.setattr(windows, "_is_iconic_window", lambda _handle: False)
+    record = windows._window_record(original)
+    assert record is not None
+
+    class Root:
+        def GetChildren(self):
+            return [replacement]
+
+    class Auto:
+        @staticmethod
+        def GetRootControl():
+            return Root()
+
+        @staticmethod
+        def ControlsAreSame(left, right):
+            return left is right
+
+    monkeypatch.setattr(windows, "_automation", lambda: Auto())
+    backend = WindowsGuiBackend()
+
+    with pytest.raises(LookupError, match="UIA identity changed"):
+        backend._find_window(record["id"], record)
+
+
 @pytest.mark.asyncio
 async def test_windows_focus_and_shortcuts_use_uiautomation_semantics(monkeypatch):
     import local_shell_mcp.gui.windows as windows
@@ -5077,7 +5298,7 @@ async def test_windows_focus_and_shortcuts_use_uiautomation_semantics(monkeypatc
     target = Target()
     backend = WindowsGuiBackend()
     monkeypatch.setattr(windows, "_automation", lambda: Auto())
-    monkeypatch.setattr(backend, "_find_window", lambda _window_id: target)
+    monkeypatch.setattr(backend, "_find_window", lambda _window_id, _observed_window=None: target)
 
     await backend.focus_window({"id": "hwnd:1"})
     await backend.perform_action(
@@ -5111,7 +5332,7 @@ async def test_windows_horizontal_only_scroll_does_not_inject_vertical_scroll(mo
 
     backend = WindowsGuiBackend()
     monkeypatch.setattr(windows, "_automation", lambda: Auto())
-    monkeypatch.setattr(backend, "_find_window", lambda _window_id: Target())
+    monkeypatch.setattr(backend, "_find_window", lambda _window_id, _observed_window=None: Target())
     monkeypatch.setattr(
         windows,
         "_horizontal_wheel",

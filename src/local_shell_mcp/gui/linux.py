@@ -985,7 +985,10 @@ class LinuxGuiBackend:
             else:
                 await self.focus_window(window)
 
-        if kind in {"click", "double_click", "right_click", "move", "scroll", "drag"}:
+        if (
+            kind in {"click", "double_click", "right_click", "move", "scroll", "drag"}
+            and not action.get("_focus_prepared")
+        ):
             await self.focus_window(window)
 
         env = await self._ensure_env()
@@ -1156,7 +1159,7 @@ class LinuxGuiBackend:
                     "action": {"type": "focus"},
                 },
             )
-        else:
+        elif not action.get("_focus_prepared"):
             await self.focus_window(window)
         if kind == "type":
             text = str(action.get("text", ""))
