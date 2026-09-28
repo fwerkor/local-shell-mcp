@@ -1232,7 +1232,7 @@ def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
                     "title": "Demo",
                     "bounds": {"x": 20, "y": 30, "width": 320, "height": 180},
                 },
-                "capabilities": {},
+                "capabilities": {"coordinate_input": True},
             },
             image,
         )
@@ -1259,6 +1259,7 @@ def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
     assert frame.headers["x-lsm-gui-window-height"] == "180"
     assert frame.headers["x-lsm-gui-observation-id"] == "obs-1"
     assert frame.headers["x-lsm-gui-observation-ttl-s"] == "30"
+    assert frame.headers["x-lsm-gui-coordinate-input"] == "1"
     assert (
         "/api/ui/gui/frame",
         ("shell:read", "shell:execute"),

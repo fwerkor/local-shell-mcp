@@ -198,6 +198,44 @@ async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_remote_gui_cache_refresh_skips_linux_session_preflight(monkeypatch):
+    import local_shell_mcp.gui as gui
+    import local_shell_mcp.remote as remote
+
+    calls = []
+
+    class Manager:
+        async def refresh_state(self, window_id, state_id):
+            calls.append(("state", window_id, state_id))
+            return {"state_id": state_id, "state_ttl_s": 30}
+
+        async def refresh_frame_observation(self, window_id, observation_id):
+            calls.append(("frame", window_id, observation_id))
+            return {"observation_id": observation_id, "observation_ttl_s": 30}
+
+    monkeypatch.setattr(gui, "get_gui_manager", lambda: Manager())
+    monkeypatch.setattr(remote.sys, "platform", "linux")
+    monkeypatch.setattr(
+        remote,
+        "_linux_gui_preflight_session_type",
+        lambda: pytest.fail("cache refresh must not inspect the live display"),
+    )
+
+    state = await remote._execute_gui_worker_tool(
+        "gui_state_refresh",
+        {"window_id": "w", "state_id": "s"},
+    )
+    frame = await remote._execute_gui_worker_tool(
+        "gui_frame_refresh",
+        {"window_id": "w", "observation_id": "obs"},
+    )
+
+    assert state["state_ttl_s"] == 30
+    assert frame["observation_ttl_s"] == 30
+    assert calls == [("state", "w", "s"), ("frame", "w", "obs")]
+
+
+@pytest.mark.asyncio
 async def test_remote_gui_worker_dependency_failure_is_scoped_to_gui(monkeypatch):
     import local_shell_mcp.remote as remote
     import local_shell_mcp.remote_worker_installer as installer

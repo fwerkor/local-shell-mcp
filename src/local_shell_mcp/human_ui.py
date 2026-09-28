@@ -1187,6 +1187,11 @@ async def api_gui_frame(request: Request) -> Response:
         )
         window = data.get("window") if isinstance(data.get("window"), dict) else {}
         bounds = window.get("bounds") if isinstance(window.get("bounds"), dict) else {}
+        capabilities = (
+            data.get("capabilities")
+            if isinstance(data.get("capabilities"), dict)
+            else {}
+        )
         headers = {
             "Cache-Control": "no-store",
             "X-LSM-GUI-Window-X": str(bounds.get("x") or 0),
@@ -1197,6 +1202,9 @@ async def api_gui_frame(request: Request) -> Response:
             "X-LSM-GUI-Observation-ID": str(data.get("observation_id") or ""),
             "X-LSM-GUI-Observation-TTL-S": str(
                 data.get("observation_ttl_s") or 0
+            ),
+            "X-LSM-GUI-Coordinate-Input": (
+                "1" if capabilities.get("coordinate_input") is True else "0"
             ),
         }
         return Response(

@@ -827,10 +827,15 @@ async def test_gui_screenshot_temp_can_live_outside_workspace(tmp_path, monkeypa
         async def frame(self, _window_id):
             return {
                 "backend": "fake",
+                "observation_id": "obs-local",
                 "window": {"id": "w", "bounds": {"x": 0, "y": 0, "width": 4, "height": 4}},
                 "capabilities": {},
                 "screenshot_path": str(shot),
             }
+
+        async def refresh_frame_observation(self, window_id, observation_id):
+            assert (window_id, observation_id) == ("w", "obs-local")
+            return {"observation_id": observation_id, "observation_ttl_s": 30}
 
     monkeypatch.setattr(tools, "get_gui_manager", lambda: Manager())
     data, image = await tools._gui_frame_data("w", None)
@@ -954,6 +959,134 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
     )
     assert failed.isError is True
     assert "invalid data" in failed.structuredContent["message"]
+
+
+@pytest.mark.asyncio
+async def test_gui_state_remote_cleanup_failure_is_retried(tmp_path, monkeypatch):
+    import local_shell_mcp.tools as tools
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "true")
+    tools.get_settings.cache_clear()
+    delete_attempts = 0
+
+    async def remote_worker(_machine, tool, _args, timeout_s=None):
+        del timeout_s
+        if tool == "gui_state":
+            return {
+                "backend": "remote",
+                "state_id": "s",
+                "window": {
+                    "id": "w",
+                    "bounds": {"x": 0, "y": 0, "width": 4, "height": 4},
+                },
+                "elements": [],
+                "capabilities": {},
+                "screenshot_path": ".local-shell-mcp/tmp/retry.png",
+            }
+        if tool == "gui_state_refresh":
+            return {"state_id": "s", "state_ttl_s": 30}
+        raise AssertionError(f"unexpected worker tool: {tool}")
+
+    async def remote_transfer(_machine, tool, _args, timeout_s=None):
+        nonlocal delete_attempts
+        del timeout_s
+        assert tool == "transfer_gui_temp_delete"
+        delete_attempts += 1
+        if delete_attempts == 1:
+            raise RuntimeError("transient delete failure")
+        return {"deleted": True}
+
+    async def copy_remote(_machine, _source, destination):
+        Image.new("RGB", (4, 4)).save(destination, format="PNG")
+        return {"bytes": 7}
+
+    monkeypatch.setattr(tools, "_remote_worker_data", remote_worker)
+    monkeypatch.setattr(tools, "_remote_transfer_data", remote_transfer)
+    monkeypatch.setattr(tools, "_copy_remote_gui_temp_to_local", copy_remote)
+    monkeypatch.setattr(
+        tools,
+        "transfer_alloc_temp_path",
+        lambda suffix: {"path": str(tools.temp_dir() / f"retry{suffix}")},
+    )
+
+    result = await tools._gui_state_result(
+        "w",
+        screenshot=True,
+        include_elements=False,
+        max_elements=1,
+        max_depth=1,
+        machine="node",
+    )
+
+    assert result.isError is False
+    assert delete_attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_gui_state_transient_keepalive_failure_uses_final_refresh(
+    tmp_path,
+    monkeypatch,
+):
+    import local_shell_mcp.tools as tools
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "true")
+    monkeypatch.setattr(tools, "_REMOTE_GUI_STATE_REFRESH_INTERVAL_S", 0.001)
+    tools.get_settings.cache_clear()
+    refresh_calls = 0
+
+    async def remote_worker(_machine, tool, _args, timeout_s=None):
+        nonlocal refresh_calls
+        del timeout_s
+        if tool == "gui_state":
+            return {
+                "backend": "remote",
+                "state_id": "s",
+                "window": {
+                    "id": "w",
+                    "bounds": {"x": 0, "y": 0, "width": 4, "height": 4},
+                },
+                "elements": [],
+                "capabilities": {},
+                "screenshot_path": ".local-shell-mcp/tmp/state.png",
+            }
+        if tool == "gui_state_refresh":
+            refresh_calls += 1
+            if refresh_calls == 2:
+                raise RuntimeError("transient keepalive failure")
+            return {"state_id": "s", "state_ttl_s": 30}
+        raise AssertionError(f"unexpected worker tool: {tool}")
+
+    async def remote_transfer(*_args, **_kwargs):
+        return {"deleted": True}
+
+    async def slow_copy(_machine, _source, destination):
+        await asyncio.sleep(0.01)
+        Image.new("RGB", (4, 4)).save(destination, format="PNG")
+        return {"bytes": 7}
+
+    monkeypatch.setattr(tools, "_remote_worker_data", remote_worker)
+    monkeypatch.setattr(tools, "_remote_transfer_data", remote_transfer)
+    monkeypatch.setattr(tools, "_copy_remote_gui_temp_to_local", slow_copy)
+    monkeypatch.setattr(
+        tools,
+        "transfer_alloc_temp_path",
+        lambda suffix: {"path": str(tools.temp_dir() / f"state{suffix}")},
+    )
+
+    result = await tools._gui_state_result(
+        "w",
+        screenshot=True,
+        include_elements=False,
+        max_elements=1,
+        max_depth=1,
+        machine="node",
+    )
+
+    assert result.isError is False
+    assert refresh_calls >= 3
+
 
 def test_controller_gui_staging_stays_inside_workspace_with_external_state_dir(
     tmp_path, monkeypatch
@@ -1088,15 +1221,22 @@ async def test_gui_frame_data_local_and_remote_paths(tmp_path, monkeypatch):
             assert window_id == "w"
             return {
                 "backend": "local",
+                "observation_id": "obs-local",
                 "window": {"id": "w", "bounds": {"x": 0, "y": 0, "width": 4, "height": 4}},
                 "capabilities": {},
                 "screenshot_path": str(local_shot),
             }
 
+        async def refresh_frame_observation(self, window_id, observation_id):
+            assert (window_id, observation_id) == ("w", "obs-local")
+            return {"observation_id": observation_id, "observation_ttl_s": 30}
+
     monkeypatch.setattr(tools, "get_gui_manager", lambda: Manager())
 
     local_data, local_image = await tools._gui_frame_data("w", None)
     assert local_data["backend"] == "local"
+    assert local_data["observation_id"] == "obs-local"
+    assert local_data["observation_ttl_s"] == 30
     assert "screenshot_path" not in local_data
     assert local_image.format == "png"
     assert not local_shot.exists()
@@ -1965,6 +2105,75 @@ def test_windows_uia_traversal_bounds_provider_strings_and_total_bytes(monkeypat
         assert len(element["role"].encode()) <= windows.GUI_MAX_ELEMENT_TEXT_BYTES
         assert len(element["name"].encode()) <= windows.GUI_MAX_ELEMENT_TEXT_BYTES
         assert len(element["automation_id"].encode()) <= windows.GUI_MAX_ELEMENT_TEXT_BYTES
+
+
+def test_windows_window_listing_bounds_provider_metadata_during_enumeration(
+    monkeypatch,
+):
+    import local_shell_mcp.gui.windows as windows
+
+    huge = "x" * (windows.GUI_MAX_WINDOW_TEXT_BYTES * 8)
+
+    class Rect:
+        left = 0
+        top = 0
+        right = 100
+        bottom = 100
+
+    class Control:
+        BoundingRectangle = Rect()
+        IsOffscreen = False
+        ProcessId = 1
+        AutomationId = "window"
+
+        def __init__(self, handle):
+            self.NativeWindowHandle = handle
+            self.Name = huge
+            self.ClassName = huge
+            self.next = None
+
+        def GetRuntimeId(self):
+            return [self.NativeWindowHandle]
+
+        def GetNextSiblingControl(self):
+            return self.next
+
+    controls = [Control(index + 1) for index in range(300)]
+    for left, right in zip(controls, controls[1:], strict=False):
+        left.next = right
+
+    class Root:
+        def GetFirstChildControl(self):
+            return controls[0]
+
+        def GetChildren(self):
+            pytest.fail("window enumeration must stay lazy")
+
+    class Auto:
+        @staticmethod
+        def GetRootControl():
+            return Root()
+
+    monkeypatch.setattr(windows, "_automation", lambda: Auto())
+    monkeypatch.setattr(windows, "_is_iconic_window", lambda _handle: False)
+
+    listed = WindowsGuiBackend()._list_windows_sync()["windows"]
+
+    assert listed
+    assert len(listed) <= windows.GUI_MAX_WINDOWS
+    assert len(listed) < len(controls)
+    public = [
+        {key: value for key, value in item.items() if not key.startswith("_")}
+        for item in listed
+    ]
+    assert len(json.dumps(public, ensure_ascii=False).encode()) <= (
+        windows.GUI_MAX_WINDOWS_TOTAL_BYTES
+    )
+    assert all(
+        len(item["title"].encode()) <= windows.GUI_MAX_WINDOW_TEXT_BYTES
+        and len(item["app"].encode()) <= windows.GUI_MAX_WINDOW_TEXT_BYTES
+        for item in listed
+    )
 
 
 def test_windows_semantic_action_rejects_recycled_uia_element(monkeypatch):
@@ -3350,47 +3559,132 @@ def test_linux_locator_center_must_be_usable_and_inside_window(monkeypatch):
         )
 
 
-def test_x11_key_chord_validates_before_pressing(monkeypatch):
-    import sys
-    from types import ModuleType
-
-    import local_shell_mcp.gui.linux as linux
+def test_atspi_raw_keyboard_focuses_and_revalidates_before_injection(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
 
     events = []
-    closed = []
 
-    class Connection:
-        def keysym_to_keycode(self, keysym):
-            return 10 if keysym == 1 else 0
+    class Component:
+        def grab_focus(self):
+            events.append(("focus",))
+            return True
 
-        def sync(self):
-            events.append(("sync",))
+    class StateSet:
+        def contains(self, _state):
+            return True
 
-        def close(self):
-            closed.append(True)
+    class Target:
+        def get_component_iface(self):
+            return Component()
 
-    connection = Connection()
-    xlib = ModuleType("Xlib")
-    xlib.XK = SimpleNamespace(
-        string_to_keysym=lambda name: 1 if name == "Control_L" else 0
+        def get_state_set(self):
+            return StateSet()
+
+    target = Target()
+
+    def generate_keyboard_event(keysym, text, synth_type):
+        events.append(("key", keysym, text, synth_type))
+        return True
+
+    helper.Atspi = SimpleNamespace(
+        StateType=SimpleNamespace(FOCUSED="focused"),
+        KeySynthType=SimpleNamespace(
+            STRING="string",
+            PRESS="press",
+            RELEASE="release",
+            SYM="sym",
+        ),
+        generate_keyboard_event=generate_keyboard_event,
     )
-    xlib.X = SimpleNamespace(KeyPress=2, KeyRelease=3)
-    xlib.display = SimpleNamespace(Display=lambda _name: connection)
-    ext = ModuleType("Xlib.ext")
-    ext.xtest = SimpleNamespace(
-        fake_input=lambda _connection, event_type, keycode: events.append(
-            (event_type, keycode)
+    monkeypatch.setattr(
+        helper,
+        "_resolve_window",
+        lambda _window_id: (None, target, 0),
+    )
+
+    result = helper._raw(
+        {
+            "kind": "text",
+            "window_id": "atspi:1:sig",
+            "text": "secret",
+        }
+    )
+    assert result["characters"] == 6
+    assert events[:2] == [
+        ("focus",),
+        ("key", 0, "secret", "string"),
+    ]
+
+    events.clear()
+    result = helper._raw(
+        {
+            "kind": "key_chord",
+            "window_id": "atspi:1:sig",
+            "keys": ["CTRL", "A"],
+        }
+    )
+    assert result["generated"] is True
+    assert events[0] == ("focus",)
+    assert [item[-1] for item in events[1:]] == [
+        "press",
+        "press",
+        "release",
+        "release",
+    ]
+
+    events.clear()
+    monkeypatch.setattr(helper, "_state", lambda *_args: False)
+    with pytest.raises(RuntimeError, match="did not remain focused"):
+        helper._raw(
+            {
+                "kind": "text",
+                "window_id": "atspi:1:sig",
+                "text": "must-not-leak",
+            }
         )
+    assert events == [("focus",)]
+
+
+@pytest.mark.asyncio
+async def test_x11_keyboard_payload_carries_target_identity(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    backend = linux.LinuxGuiBackend()
+    payloads = []
+
+    def helper(payload):
+        payloads.append(payload)
+        return {"generated": True}
+
+    monkeypatch.setattr(backend, "_helper", helper)
+    window = {
+        "id": "atspi:1:window",
+        "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+    }
+    locator = {
+        "semantic": {
+            "path": [2],
+            "accessible_id": "field-id",
+            "fingerprint": "field-fp",
+        },
+        "bounds": {"x": 10, "y": 10, "width": 20, "height": 20},
+    }
+
+    await backend._perform_x11(
+        window,
+        locator,
+        {"type": "type", "text": "secret"},
     )
-    xlib.ext = ext
-    monkeypatch.setitem(sys.modules, "Xlib", xlib)
-    monkeypatch.setitem(sys.modules, "Xlib.ext", ext)
+    await backend._perform_x11(
+        window,
+        locator,
+        {"type": "key", "keys": ["CTRL", "A"]},
+    )
 
-    with pytest.raises(ValueError, match="Unsupported X11 key name"):
-        linux._x11_key_chord("CTRL+NOT_A_KEY", {"DISPLAY": ":0"})
-
-    assert events == []
-    assert closed == [True]
+    assert payloads[0]["window_id"] == window["id"]
+    assert payloads[0]["locator"] == locator["semantic"]
+    assert payloads[1]["window_id"] == window["id"]
+    assert payloads[1]["kind"] == "key_chord"
 
 
 def test_wayland_full_desktop_crop_requires_monitor_geometry():
@@ -3494,11 +3788,18 @@ async def test_linux_desktop_environment_refreshes_and_resets_portal(monkeypatch
     monkeypatch.setattr(linux, "_desktop_environment", lambda: next(environments))
 
     first = await backend._ensure_env()
-    backend._portal = object()
+    closed = []
+
+    class Portal:
+        async def close(self):
+            closed.append(True)
+
+    backend._portal = Portal()
     second = await backend._ensure_env()
     assert first["DISPLAY"] == ":0"
     assert second["WAYLAND_DISPLAY"] == "wayland-1"
     assert backend._portal is None
+    assert closed == [True]
 
 
 def test_wayland_desktop_crop_rejects_oversized_header_before_decode(
@@ -3943,6 +4244,33 @@ def test_atspi_snapshot_bounds_direct_child_provider_calls(monkeypatch):
     )
     assert len(result["elements"]) == 3
     assert child_calls == [0, 1]
+
+
+def test_atspi_element_locator_requires_stable_accessible_identity(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    replacement = object()
+    monkeypatch.setattr(
+        helper,
+        "_resolve_window",
+        lambda _window_id: (None, object(), 0),
+    )
+    monkeypatch.setattr(helper, "_resolve_path", lambda _window, _path: replacement)
+    monkeypatch.setattr(helper, "_accessible_id", lambda _obj: "replacement-id")
+    monkeypatch.setattr(helper, "_element_signature", lambda _obj: "same-fingerprint")
+
+    with pytest.raises(LookupError, match="changed since observation"):
+        helper._semantic_action(
+            {
+                "window_id": "atspi:1:sig",
+                "locator": {
+                    "path": [2],
+                    "accessible_id": "observed-id",
+                    "fingerprint": "same-fingerprint",
+                },
+                "action": {"type": "focus"},
+            }
+        )
 
 
 def test_atspi_element_locator_rejects_reordered_replacement(monkeypatch):

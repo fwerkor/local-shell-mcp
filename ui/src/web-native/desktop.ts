@@ -144,6 +144,7 @@ export class DesktopController extends BaseController {
   private frameBounds: GuiBounds | null = null
   private frameObservationId = ""
   private frameExpiresAt = 0
+  private frameInputEnabled = false
   private frameEpoch = 0
   private actionTargetEpoch = 0
   private actionQueue: Promise<void> = Promise.resolve()
@@ -320,7 +321,7 @@ export class DesktopController extends BaseController {
       const label = connection.querySelector<HTMLElement>("strong")
       if (label) label.textContent = error ? "Unavailable" : current ? this.frameBounds ? "Live" : "Connecting" : "Idle"
     }
-    const enabled = Boolean(current && this.frameBounds)
+    const enabled = Boolean(current && this.frameBounds && this.frameInputEnabled)
     if (text) text.disabled = !enabled
     if (submit) submit.disabled = !enabled
   }
@@ -433,6 +434,7 @@ export class DesktopController extends BaseController {
         }
         throw new Error(message)
       }
+      const observationReceivedAt = Date.now()
       const bounds: GuiBounds = {
         x: numericHeader(response, "X-LSM-GUI-Window-X"),
         y: numericHeader(response, "X-LSM-GUI-Window-Y"),
@@ -444,6 +446,7 @@ export class DesktopController extends BaseController {
       if (!observationId) throw new Error("GUI frame returned no observation token")
       const observationTtlS = numericHeader(response, "X-LSM-GUI-Observation-TTL-S")
       if (observationTtlS <= 0) throw new Error("GUI frame returned invalid observation TTL")
+      const coordinateInput = response.headers.get("X-LSM-GUI-Coordinate-Input") === "1"
       const blob = await response.blob()
       if (
         this.destroyed
@@ -471,11 +474,17 @@ export class DesktopController extends BaseController {
         URL.revokeObjectURL(nextUrl)
         return
       }
+      const frameExpiresAt = observationReceivedAt + Math.max(0, observationTtlS * 1000 - 1000)
+      if (frameExpiresAt <= Date.now()) {
+        URL.revokeObjectURL(nextUrl)
+        throw new Error("GUI frame observation expired during transfer; refresh the frame")
+      }
       const previousUrl = this.frameUrl
       this.frameUrl = nextUrl
       this.frameBounds = bounds
       this.frameObservationId = observationId
-      this.frameExpiresAt = Date.now() + Math.max(0, observationTtlS * 1000 - 1000)
+      this.frameExpiresAt = frameExpiresAt
+      this.frameInputEnabled = coordinateInput
       const image = this.root.querySelector<HTMLImageElement>("[data-role=desktop-frame]")
       const placeholder = this.root.querySelector<HTMLElement>("[data-role=desktop-placeholder]")
       if (image) {
@@ -514,6 +523,7 @@ export class DesktopController extends BaseController {
     this.frameBounds = null
     this.frameObservationId = ""
     this.frameExpiresAt = 0
+    this.frameInputEnabled = false
     this.revokeFrame()
     const image = this.root?.querySelector<HTMLImageElement>("[data-role=desktop-frame]")
     const placeholder = this.root?.querySelector<HTMLElement>("[data-role=desktop-placeholder]")
@@ -545,6 +555,7 @@ export class DesktopController extends BaseController {
   }
 
   private pointForEvent(event: MouseEvent): Point | null {
+    if (!this.frameInputEnabled) return null
     const image = this.root.querySelector<HTMLImageElement>("[data-role=desktop-frame]")
     const bounds = this.frameBounds
     if (!image || image.hidden || !bounds?.width || !bounds.height) return null
@@ -561,7 +572,7 @@ export class DesktopController extends BaseController {
     const targetEpoch = this.actionTargetEpoch
     const bounds = observedBounds ? { ...observedBounds } : this.frameBounds ? { ...this.frameBounds } : null
     const observationId = observedObservationId || this.frameObservationId
-    if (!windowId || !bounds || !observationId) return
+    if (!windowId || !bounds || !observationId || !this.frameInputEnabled) return
     if (this.pendingActions >= MAX_PENDING_DESKTOP_ACTIONS) return
 
     this.invalidatePendingFrameRequest()

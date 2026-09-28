@@ -649,84 +649,6 @@ async def _capture_x11(
     return "x11-composite"
 
 
-_X11_KEY_NAMES = {
-    "CTRL": "Control_L",
-    "CONTROL": "Control_L",
-    "ALT": "Alt_L",
-    "OPTION": "Alt_L",
-    "SHIFT": "Shift_L",
-    "META": "Super_L",
-    "SUPER": "Super_L",
-    "WIN": "Super_L",
-    "CMD": "Super_L",
-    "COMMAND": "Super_L",
-    "ENTER": "Return",
-    "RETURN": "Return",
-    "TAB": "Tab",
-    "ESC": "Escape",
-    "ESCAPE": "Escape",
-    "BACKSPACE": "BackSpace",
-    "DELETE": "Delete",
-    "SPACE": "space",
-    "LEFT": "Left",
-    "RIGHT": "Right",
-    "UP": "Up",
-    "DOWN": "Down",
-    "HOME": "Home",
-    "END": "End",
-    "PAGEUP": "Page_Up",
-    "PAGEDOWN": "Page_Down",
-}
-
-
-def _key_parts(keys: Any) -> list[str]:
-    if isinstance(keys, str):
-        parts = [part.strip() for part in keys.replace("+", " ").split() if part.strip()]
-    elif isinstance(keys, list):
-        parts = [str(part).strip() for part in keys if str(part).strip()]
-    else:
-        raise ValueError("key action requires keys as a string or list")
-    if not parts:
-        raise ValueError("key action requires at least one key")
-    return parts
-
-
-def _x11_key_chord(keys: Any, env: dict[str, str]) -> None:
-    try:
-        from Xlib import XK, X, display
-        from Xlib.ext import xtest
-    except ImportError as exc:  # pragma: no cover - Linux dependency guard
-        raise GuiUnavailableError("X11 key chords require python-xlib") from exc
-
-    parts = _key_parts(keys)
-    connection = display.Display(env.get("DISPLAY"))
-    pressed: list[int] = []
-    try:
-        keycodes: list[int] = []
-        for part in parts:
-            name = _X11_KEY_NAMES.get(part.upper(), part)
-            if len(name) == 1 and name.isalpha():
-                name = name.lower()
-            keysym = XK.string_to_keysym(name)
-            if not keysym:
-                raise ValueError(f"Unsupported X11 key name: {part}")
-            keycode = connection.keysym_to_keycode(keysym)
-            if not keycode:
-                raise ValueError(f"No X11 keycode for: {part}")
-            keycodes.append(keycode)
-
-        try:
-            for keycode in keycodes:
-                xtest.fake_input(connection, X.KeyPress, keycode)
-                pressed.append(keycode)
-        finally:
-            for keycode in reversed(pressed):
-                with contextlib.suppress(Exception):
-                    xtest.fake_input(connection, X.KeyRelease, keycode)
-            connection.sync()
-    finally:
-        connection.close()
-
 
 class LinuxGuiBackend:
     name = "linux-atspi"
@@ -750,7 +672,10 @@ class LinuxGuiBackend:
             if self._env is None or now - self._env_refreshed_at >= self._ENV_REFRESH_S:
                 refreshed = await asyncio.to_thread(_desktop_environment)
                 if self._env is not None and refreshed != self._env:
+                    portal = self._portal
                     self._portal = None
+                    if portal is not None:
+                        await portal.close()
                 self._env = refreshed
                 self._env_refreshed_at = now
             return self._env
@@ -1037,13 +962,26 @@ class LinuxGuiBackend:
             text = str(action.get("text", ""))
             result = await asyncio.to_thread(
                 self._helper,
-                {"command": "raw", "kind": "text", "text": text},
+                {
+                    "command": "raw",
+                    "kind": "text",
+                    "window_id": window["id"],
+                    "locator": locator["semantic"] if locator is not None else None,
+                    "text": text,
+                },
             )
             return {**result, "characters": len(text)}
         if kind == "key":
-            env = await self._ensure_env()
-            await asyncio.to_thread(_x11_key_chord, action.get("keys"), env)
-            return {"keys": action.get("keys")}
+            return await asyncio.to_thread(
+                self._helper,
+                {
+                    "command": "raw",
+                    "kind": "key_chord",
+                    "window_id": window["id"],
+                    "locator": locator["semantic"] if locator is not None else None,
+                    "keys": action.get("keys"),
+                },
+            )
 
         if kind in {"click", "double_click", "right_click", "move", "scroll"}:
             x, y = self._screen_point(window, action, locator)

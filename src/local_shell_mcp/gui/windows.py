@@ -19,6 +19,9 @@ from .base import (
     GUI_MAX_CAPTURE_PIXELS,
     GUI_MAX_ELEMENT_TEXT_BYTES,
     GUI_MAX_ELEMENTS_TOTAL_BYTES,
+    GUI_MAX_WINDOW_TEXT_BYTES,
+    GUI_MAX_WINDOWS,
+    GUI_MAX_WINDOWS_TOTAL_BYTES,
     GuiSnapshot,
     GuiUnavailableError,
     _truncate_gui_text,
@@ -380,8 +383,14 @@ def _window_record(control: Any) -> dict[str, Any] | None:
         return None
     return {
         "id": f"hwnd:{handle}:{_window_fingerprint(control)}",
-        "title": str(_safe_property(control, "Name", "") or ""),
-        "app": str(_safe_property(control, "ClassName", "") or ""),
+        "title": _truncate_gui_text(
+            _safe_property(control, "Name", ""),
+            GUI_MAX_WINDOW_TEXT_BYTES,
+        ),
+        "app": _truncate_gui_text(
+            _safe_property(control, "ClassName", ""),
+            GUI_MAX_WINDOW_TEXT_BYTES,
+        ),
         "pid": int(_safe_property(control, "ProcessId", 0) or 0),
         "bounds": bounds,
         "_uia_control": control,
@@ -515,13 +524,40 @@ class WindowsGuiBackend:
     def _list_windows_sync(self) -> dict[str, Any]:
         auto = _automation()
         windows = []
-        for control in auto.GetRootControl().GetChildren():
+        used_bytes = 2
+        root = auto.GetRootControl()
+        control = root.GetFirstChildControl()
+        scanned = 0
+        while control is not None and scanned < GUI_MAX_WINDOWS * 4:
+            scanned += 1
             try:
                 record = _window_record(control)
             except Exception:  # noqa: BLE001 - skip broken third-party UIA providers.
-                continue
+                record = None
             if record is not None:
+                public_record = {
+                    key: record[key]
+                    for key in ("id", "title", "app", "pid", "bounds")
+                    if key in record
+                }
+                extra = len(
+                    json.dumps(
+                        public_record,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        default=str,
+                    ).encode("utf-8")
+                ) + (1 if windows else 0)
+                if used_bytes + extra > GUI_MAX_WINDOWS_TOTAL_BYTES:
+                    break
                 windows.append(record)
+                used_bytes += extra
+                if len(windows) >= GUI_MAX_WINDOWS:
+                    break
+            try:
+                control = control.GetNextSiblingControl()
+            except Exception:  # noqa: BLE001 - broken provider sibling traversal.
+                break
         return {
             "backend": self.name,
             "platform": "windows",

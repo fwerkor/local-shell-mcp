@@ -3044,16 +3044,24 @@ async def _gui_frame_data(
                         30,
                     )
 
-    data = await get_gui_manager().frame(window_id)
+    manager = get_gui_manager()
+    data = await manager.frame(window_id)
     screenshot_path = str(data.get("screenshot_path") or "")
     if not screenshot_path:
         raise RuntimeError("Local gui_frame returned no screenshot")
+    observation_id = str(data.get("observation_id") or "")
+    if not observation_id:
+        raise RuntimeError("Local gui_frame returned no observation_id")
     try:
         image = await asyncio.to_thread(_read_gui_temp_image, screenshot_path)
     finally:
         with suppress(Exception):
             await asyncio.to_thread(_delete_gui_temp_file, screenshot_path)
+    refreshed = await manager.refresh_frame_observation(window_id, observation_id)
     data = dict(data)
+    data["observation_ttl_s"] = float(
+        refreshed.get("observation_ttl_s") or 0
+    )
     data.pop("screenshot_path", None)
     return data, image
 
@@ -3180,18 +3188,21 @@ async def _gui_state_result(
                     finally:
                         with suppress(Exception):
                             await asyncio.to_thread(delete_path, local_path, False)
-                    with suppress(Exception):
+                    try:
                         await _remote_transfer_data(
                             machine,
                             "transfer_gui_temp_delete",
                             {"path": screenshot_path},
                             30,
                         )
-                    screenshot_path = None
+                    except Exception:
+                        pass
+                    else:
+                        screenshot_path = None
                 finally:
                     if keepalive is not None:
                         keepalive.cancel()
-                        with suppress(asyncio.CancelledError):
+                        with suppress(BaseException):
                             await keepalive
 
             refreshed = await _refresh_remote_gui_state_once(

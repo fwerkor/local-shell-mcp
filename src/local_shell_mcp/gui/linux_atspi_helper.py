@@ -18,6 +18,38 @@ GUI_MAX_ELEMENTS_TOTAL_BYTES = 64 * 1024
 GUI_MAX_ELEMENT_ACTIONS = 32
 GUI_MAX_RESPONSE_BYTES = 256 * 1024
 
+_KEYSYMS = {
+    "BACKSPACE": 0xFF08,
+    "TAB": 0xFF09,
+    "ENTER": 0xFF0D,
+    "RETURN": 0xFF0D,
+    "ESC": 0xFF1B,
+    "ESCAPE": 0xFF1B,
+    "HOME": 0xFF50,
+    "LEFT": 0xFF51,
+    "UP": 0xFF52,
+    "RIGHT": 0xFF53,
+    "DOWN": 0xFF54,
+    "PAGEUP": 0xFF55,
+    "PAGEDOWN": 0xFF56,
+    "END": 0xFF57,
+    "DELETE": 0xFFFF,
+    "SPACE": 0x20,
+}
+
+_MODIFIERS = {
+    "SHIFT": 0xFFE1,
+    "CTRL": 0xFFE3,
+    "CONTROL": 0xFFE3,
+    "ALT": 0xFFE9,
+    "OPTION": 0xFFE9,
+    "META": 0xFFEB,
+    "SUPER": 0xFFEB,
+    "WIN": 0xFFEB,
+    "CMD": 0xFFEB,
+    "COMMAND": 0xFFEB,
+}
+
 
 def _truncate_text(value: Any, limit: int) -> str:
     text = str(value or "")
@@ -38,6 +70,30 @@ def _json_size(value: Any) -> int:
             default=str,
         ).encode("utf-8")
     )
+
+
+def _keysym(text: str) -> int:
+    upper = text.upper()
+    if upper in _KEYSYMS:
+        return _KEYSYMS[upper]
+    if len(text) != 1:
+        raise ValueError(f"Unsupported AT-SPI key name: {text}")
+    codepoint = ord(text)
+    if codepoint <= 0xFF:
+        return codepoint
+    return 0x01000000 | codepoint
+
+
+def _key_parts(keys: Any) -> list[str]:
+    if isinstance(keys, str):
+        parts = [part.strip() for part in keys.replace("+", " ").split() if part.strip()]
+    elif isinstance(keys, list):
+        parts = [str(part).strip() for part in keys if str(part).strip()]
+    else:
+        raise ValueError("key action requires keys as a string or list")
+    if not parts:
+        raise ValueError("key action requires at least one key")
+    return parts
 
 
 def _atspi() -> Any:
@@ -199,7 +255,21 @@ def _window_signature(window: Any) -> str | None:
     return hashlib.sha256(fingerprint.encode()).hexdigest()[:12]
 
 
-def _element_signature(obj: Any) -> str:
+def _accessible_id(obj: Any) -> str | None:
+    try:
+        accessible_id = _truncate_text(
+            obj.get_accessible_id(),
+            GUI_MAX_ELEMENT_TEXT_BYTES,
+        )
+    except Exception:
+        accessible_id = ""
+    return accessible_id or None
+
+
+def _element_signature(obj: Any) -> str | None:
+    accessible_id = _accessible_id(obj)
+    if accessible_id is None:
+        return None
     try:
         role = str(obj.get_role_name() or "")
     except Exception:
@@ -210,7 +280,7 @@ def _element_signature(obj: Any) -> str:
         name = ""
     bounds = _bounds(obj)
     fingerprint = (
-        f"{role}\0{name}\0{bounds['x']}\0{bounds['y']}\0"
+        f"{accessible_id}\0{role}\0{name}\0{bounds['x']}\0{bounds['y']}\0"
         f"{bounds['width']}\0{bounds['height']}"
     )
     return hashlib.sha256(fingerprint.encode()).hexdigest()[:16]
@@ -321,6 +391,7 @@ def _snapshot(payload: dict[str, Any]) -> dict[str, Any]:
                     ]
             except Exception:
                 pass
+            signature = _element_signature(obj)
             element = {
                 "id": element_id,
                 "role": role,
@@ -329,7 +400,7 @@ def _snapshot(payload: dict[str, Any]) -> dict[str, Any]:
                 "enabled": _state(obj, Atspi.StateType.ENABLED),
                 "focused": _state(obj, Atspi.StateType.FOCUSED),
                 "editable": _state(obj, Atspi.StateType.EDITABLE),
-                "actions": actions,
+                "actions": actions if signature is not None else [],
                 "depth": depth,
             }
             extra = _json_size(element) + (1 if elements else 0)
@@ -337,10 +408,12 @@ def _snapshot(payload: dict[str, Any]) -> dict[str, Any]:
                 break
             elements.append(element)
             elements_bytes += extra
-            locators[element_id] = {
-                "path": path,
-                "fingerprint": _element_signature(obj),
-            }
+            if signature is not None:
+                locators[element_id] = {
+                    "path": path,
+                    "accessible_id": _accessible_id(obj),
+                    "fingerprint": signature,
+                }
             if depth >= max_depth:
                 continue
             try:
@@ -367,11 +440,20 @@ def _resolve_locator(payload: dict[str, Any]) -> dict[str, Any]:
     raw_locator = payload.get("locator", {})
     if isinstance(raw_locator, dict):
         locator = [int(value) for value in raw_locator.get("path", [])]
+        expected_accessible_id = str(raw_locator.get("accessible_id") or "")
         expected_fingerprint = str(raw_locator.get("fingerprint") or "")
     else:
         locator = [int(value) for value in raw_locator]
+        expected_accessible_id = ""
         expected_fingerprint = ""
     obj = _resolve_path(window, locator)
+    if isinstance(raw_locator, dict):
+        current_accessible_id = _accessible_id(obj)
+        if (
+            not expected_accessible_id
+            or current_accessible_id != expected_accessible_id
+        ):
+            raise LookupError("AT-SPI target element changed since observation")
     if expected_fingerprint and _element_signature(obj) != expected_fingerprint:
         raise LookupError("AT-SPI target element changed since observation")
     return {"bounds": _bounds(obj)}
@@ -382,11 +464,20 @@ def _semantic_action(payload: dict[str, Any]) -> dict[str, Any]:
     raw_locator = payload.get("locator", {})
     if isinstance(raw_locator, dict):
         locator = [int(value) for value in raw_locator.get("path", [])]
+        expected_accessible_id = str(raw_locator.get("accessible_id") or "")
         expected_fingerprint = str(raw_locator.get("fingerprint") or "")
     else:
         locator = [int(value) for value in raw_locator]
+        expected_accessible_id = ""
         expected_fingerprint = ""
     obj = _resolve_path(window, locator)
+    if isinstance(raw_locator, dict):
+        current_accessible_id = _accessible_id(obj)
+        if (
+            not expected_accessible_id
+            or current_accessible_id != expected_accessible_id
+        ):
+            raise LookupError("AT-SPI target element changed since observation")
     if expected_fingerprint and _element_signature(obj) != expected_fingerprint:
         raise LookupError("AT-SPI target element changed since observation")
     action = payload["action"]
@@ -427,6 +518,43 @@ def _semantic_action(payload: dict[str, Any]) -> dict[str, Any]:
     raise ValueError(f"Unsupported semantic AT-SPI action: {kind}")
 
 
+def _focus_keyboard_target(payload: dict[str, Any]) -> None:
+    window_id = str(payload.get("window_id") or "")
+    if not window_id:
+        raise ValueError("keyboard synthesis requires window_id")
+    raw_locator = payload.get("locator")
+    _semantic_action(
+        {
+            "window_id": window_id,
+            "locator": raw_locator if raw_locator is not None else [],
+            "action": {"type": "focus"},
+        }
+    )
+
+    _app, window, _window_index = _resolve_window(window_id)
+    if raw_locator is None:
+        obj = window
+    elif isinstance(raw_locator, dict):
+        locator = [int(value) for value in raw_locator.get("path", [])]
+        obj = _resolve_path(window, locator)
+        expected_accessible_id = str(raw_locator.get("accessible_id") or "")
+        expected_fingerprint = str(raw_locator.get("fingerprint") or "")
+        if (
+            not expected_accessible_id
+            or _accessible_id(obj) != expected_accessible_id
+            or (
+                expected_fingerprint
+                and _element_signature(obj) != expected_fingerprint
+            )
+        ):
+            raise LookupError("AT-SPI target element changed since observation")
+    else:
+        obj = _resolve_path(window, [int(value) for value in raw_locator])
+
+    if not _state(obj, Atspi.StateType.FOCUSED):
+        raise RuntimeError("AT-SPI keyboard target did not remain focused")
+
+
 def _raw(payload: dict[str, Any]) -> dict[str, Any]:
     kind = str(payload["kind"])
     if kind == "mouse":
@@ -454,11 +582,61 @@ def _raw(payload: dict[str, Any]) -> dict[str, Any]:
                 raise RuntimeError("AT-SPI mouse synthesis failed")
         return {"generated": True, "events": len(events)}
     if kind == "text":
+        _focus_keyboard_target(payload)
         text = str(payload.get("text", ""))
         ok = Atspi.generate_keyboard_event(0, text, Atspi.KeySynthType.STRING)
         if not ok:
             raise RuntimeError("AT-SPI text synthesis failed")
         return {"generated": True, "characters": len(text)}
+    if kind == "key_chord":
+        _focus_keyboard_target(payload)
+        parts = _key_parts(payload.get("keys"))
+        modifiers: list[int] = []
+        ordinary: list[int] = []
+        for part in parts:
+            symbol = _MODIFIERS.get(part.upper())
+            if symbol is not None:
+                modifiers.append(symbol)
+                continue
+            key = part.lower() if len(part) == 1 and part.isalpha() else part
+            ordinary.append(_keysym(key))
+        if len(ordinary) != 1:
+            raise ValueError("key action requires exactly one non-modifier key")
+
+        pressed: list[int] = []
+        try:
+            for symbol in modifiers:
+                if not Atspi.generate_keyboard_event(
+                    symbol,
+                    None,
+                    Atspi.KeySynthType.PRESS,
+                ):
+                    raise RuntimeError("AT-SPI key press synthesis failed")
+                pressed.append(symbol)
+            ordinary_symbol = ordinary[0]
+            if not Atspi.generate_keyboard_event(
+                ordinary_symbol,
+                None,
+                Atspi.KeySynthType.PRESS,
+            ):
+                raise RuntimeError("AT-SPI key press synthesis failed")
+            pressed.append(ordinary_symbol)
+            if not Atspi.generate_keyboard_event(
+                ordinary_symbol,
+                None,
+                Atspi.KeySynthType.RELEASE,
+            ):
+                raise RuntimeError("AT-SPI key release synthesis failed")
+            pressed.pop()
+        finally:
+            for symbol in reversed(pressed):
+                with contextlib.suppress(Exception):
+                    Atspi.generate_keyboard_event(
+                        symbol,
+                        None,
+                        Atspi.KeySynthType.RELEASE,
+                    )
+        return {"generated": True, "keys": parts}
     if kind == "keysym":
         ok = Atspi.generate_keyboard_event(
             int(payload["keysym"]),

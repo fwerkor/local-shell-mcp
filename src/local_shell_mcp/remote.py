@@ -2512,6 +2512,15 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     from .gui import GuiUnavailableError, get_gui_manager
     from .remote_worker_installer import ensure_gui_dependencies
 
+    manager = get_gui_manager()
+    if tool == "gui_state_refresh":
+        return await manager.refresh_state(args["window_id"], args["state_id"])
+    if tool == "gui_frame_refresh":
+        return await manager.refresh_frame_observation(
+            args["window_id"],
+            args["observation_id"],
+        )
+
     session_type: str | None = None
     if sys.platform == "linux":
         session_type = await asyncio.to_thread(_linux_gui_preflight_session_type)
@@ -2544,8 +2553,6 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
                 f"{dependency_status.get('error') or 'installation failed'}"
             )
 
-
-    manager = get_gui_manager()
     if tool == "gui_list":
         return await manager.list_windows()
     if tool == "gui_state":
@@ -2556,15 +2563,8 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
             max_elements=args.get("max_elements", 300),
             max_depth=args.get("max_depth", 12),
         )
-    if tool == "gui_state_refresh":
-        return await manager.refresh_state(args["window_id"], args["state_id"])
     if tool == "gui_frame":
         return await manager.frame(args["window_id"])
-    if tool == "gui_frame_refresh":
-        return await manager.refresh_frame_observation(
-            args["window_id"],
-            args["observation_id"],
-        )
     if tool == "gui_human_action":
         return await manager.human_act(
             args["window_id"],

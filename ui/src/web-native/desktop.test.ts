@@ -68,6 +68,7 @@ describe("Native WebUI desktop click handling", () => {
     }
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
     controller.frameObservationId = "obs-1"
+    controller.frameInputEnabled = true
     const actions: unknown[] = []
     controller.queueAction = (action: unknown) => { actions.push(action) }
     const target = {
@@ -126,6 +127,7 @@ describe("Native WebUI desktop click handling", () => {
     controller.selectedWindowId = "window:1"
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
     controller.frameObservationId = "obs-old"
+    controller.frameInputEnabled = true
     controller.refreshFrame = async () => undefined
     const target = {
       closest: (selector: string) => (
@@ -142,6 +144,7 @@ describe("Native WebUI desktop click handling", () => {
         clientY: 10,
       })
       controller.frameObservationId = "obs-new"
+      controller.frameInputEnabled = true
       await new Promise((resolve) => setTimeout(resolve, SINGLE_CLICK_DELAY_MS + 25))
       await controller.actionQueue
 
@@ -192,6 +195,7 @@ describe("Native WebUI desktop click handling", () => {
     controller.selectedWindowId = "window:1"
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
     controller.frameObservationId = "obs-wheel"
+    controller.frameInputEnabled = true
     controller.refreshFrame = async () => undefined
     const target = {
       closest: (selector: string) => (
@@ -208,6 +212,7 @@ describe("Native WebUI desktop click handling", () => {
         preventDefault: () => undefined,
       })
       controller.frameObservationId = "obs-new"
+      controller.frameInputEnabled = true
       await new Promise((resolve) => setTimeout(resolve, 80))
       await controller.actionQueue
 
@@ -257,6 +262,7 @@ describe("Native WebUI desktop click handling", () => {
     controller.selectedWindowId = "window:1"
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
     controller.frameObservationId = "obs-drag"
+    controller.frameInputEnabled = true
     const target = {
       closest: (selector: string) => (
         selector === "[data-role=desktop-frame]" ? image : null
@@ -271,6 +277,7 @@ describe("Native WebUI desktop click handling", () => {
       clientY: 10,
     })
     controller.frameObservationId = "obs-new"
+    controller.frameInputEnabled = true
     controller.onPointerUp({
       target,
       pointerId: 1,
@@ -378,6 +385,7 @@ describe("Native WebUI desktop Wayland capture", () => {
     controller.captureRequiresFocus = true
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
     controller.frameObservationId = "obs-1"
+    controller.frameInputEnabled = true
     controller.frameExpiresAt = 10_000
 
     expect(controller.expireFocusSensitiveFrame(9_999)).toBe(false)
@@ -415,6 +423,7 @@ describe("Native WebUI desktop queued input", () => {
     controller.selectedWindowId = "window:1"
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
     controller.frameObservationId = "obs-1"
+    controller.frameInputEnabled = true
     controller.refreshFrame = async () => undefined
 
     for (let index = 0; index < MAX_PENDING_DESKTOP_ACTIONS + 20; index += 1) {
@@ -454,6 +463,7 @@ describe("Native WebUI desktop queued input", () => {
     controller.selectedWindowId = "window:1"
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
     controller.frameObservationId = "obs-1"
+    controller.frameInputEnabled = true
     let frames = 0
     controller.refreshFrame = async () => { frames += 1 }
 
@@ -486,6 +496,7 @@ describe("Native WebUI desktop queued input", () => {
     controller.selectedWindowId = "window:1"
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
     controller.frameObservationId = "obs-1"
+    controller.frameInputEnabled = true
     controller.framePromise = new Promise<void>(() => undefined)
     controller.frameRequestKey = "node\0window:1"
     let aborts = 0
@@ -530,6 +541,7 @@ describe("Native WebUI desktop queued input", () => {
     controller.selectedWindowId = "window:1"
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
     controller.frameObservationId = "obs-1"
+    controller.frameInputEnabled = true
     controller.refreshFrame = async () => undefined
     controller.refreshWindows = async (force: boolean) => { refreshes.push(force) }
 
@@ -571,6 +583,7 @@ describe("Native WebUI desktop queued input", () => {
     controller.selectedWindowId = "window:1"
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
     controller.frameObservationId = "obs-1"
+    controller.frameInputEnabled = true
     controller.refreshFrame = async () => undefined
 
     controller.queueAction({ type: "click", x: 1, y: 1 })
@@ -619,6 +632,7 @@ describe("Native WebUI desktop frame replacement", () => {
     controller.selectedWindowId = "window:1"
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
     controller.frameObservationId = "obs-old"
+    controller.frameInputEnabled = true
     controller.frameUrl = "blob:old"
     controller.frameRequestKey = "local\0window:1"
     controller.frameEpoch = 0
@@ -639,6 +653,7 @@ describe("Native WebUI desktop frame replacement", () => {
         "X-LSM-GUI-Window-Height": "150",
         "X-LSM-GUI-Observation-ID": "obs-new",
         "X-LSM-GUI-Observation-TTL-S": "30",
+        "X-LSM-GUI-Coordinate-Input": "1",
       },
     })) as unknown as typeof fetch
     URL.createObjectURL = () => "blob:new"
@@ -657,6 +672,126 @@ describe("Native WebUI desktop frame replacement", () => {
       expect(controller.frameBounds).toEqual({ x: 0, y: 0, width: 200, height: 150 })
       expect(controller.frameObservationId).toBe("obs-new")
       expect(visibleImage.src).toBe("blob:new")
+    } finally {
+      globalThis.fetch = originalFetch
+      URL.createObjectURL = originalCreateObjectURL
+      URL.revokeObjectURL = originalRevokeObjectURL
+    }
+  })
+
+  test("counts transfer and decode time against the observation lease", async () => {
+    const context: NativePageContext = {
+      api: {
+        get: async () => undefined as never,
+        send: async () => undefined as never,
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller: any = new DesktopController(context)
+    const image: any = { hidden: true, removeAttribute: () => undefined }
+    controller.root = {
+      querySelector: (selector: string) => (
+        selector === "[data-role=desktop-frame]" ? image : null
+      ),
+    }
+    controller.machine = "local"
+    controller.selectedWindowId = "window:1"
+    controller.frameRequestKey = "local\0window:1"
+    controller.frameEpoch = 0
+
+    const originalFetch = globalThis.fetch
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
+    const originalNow = Date.now
+    let now = 1_000
+    Date.now = () => now
+    globalThis.fetch = (async () => new Response(new Blob(["frame"]), {
+      status: 200,
+      headers: {
+        "X-LSM-GUI-Window-X": "0",
+        "X-LSM-GUI-Window-Y": "0",
+        "X-LSM-GUI-Window-Width": "100",
+        "X-LSM-GUI-Window-Height": "100",
+        "X-LSM-GUI-Observation-ID": "obs-short",
+        "X-LSM-GUI-Observation-TTL-S": "2",
+        "X-LSM-GUI-Coordinate-Input": "1",
+      },
+    })) as unknown as typeof fetch
+    URL.createObjectURL = () => "blob:short"
+    URL.revokeObjectURL = () => undefined
+    controller.decodeFrame = async () => { now = 3_100 }
+
+    try {
+      await controller.loadFrame("local\0window:1", new AbortController())
+      expect(controller.frameBounds).toBeNull()
+      expect(controller.frameObservationId).toBe("")
+      expect(controller.frameInputEnabled).toBe(false)
+    } finally {
+      Date.now = originalNow
+      globalThis.fetch = originalFetch
+      URL.createObjectURL = originalCreateObjectURL
+      URL.revokeObjectURL = originalRevokeObjectURL
+    }
+  })
+
+  test("keeps view-only frames visible but disables input", async () => {
+    const sends: unknown[] = []
+    const context: NativePageContext = {
+      api: {
+        get: async () => undefined as never,
+        send: async (_url: string, _method: string, body?: unknown) => {
+          sends.push(body)
+          return {} as never
+        },
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller: any = new DesktopController(context)
+    const image: any = { hidden: true, src: "", removeAttribute: () => undefined }
+    controller.root = {
+      querySelector: (selector: string) => (
+        selector === "[data-role=desktop-frame]" ? image : null
+      ),
+    }
+    controller.machine = "local"
+    controller.selectedWindowId = "window:1"
+    controller.frameRequestKey = "local\0window:1"
+    controller.frameEpoch = 0
+    controller.decodeFrame = async () => undefined
+
+    const originalFetch = globalThis.fetch
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
+    globalThis.fetch = (async () => new Response(new Blob(["frame"]), {
+      status: 200,
+      headers: {
+        "X-LSM-GUI-Window-X": "0",
+        "X-LSM-GUI-Window-Y": "0",
+        "X-LSM-GUI-Window-Width": "100",
+        "X-LSM-GUI-Window-Height": "100",
+        "X-LSM-GUI-Observation-ID": "obs-view",
+        "X-LSM-GUI-Observation-TTL-S": "30",
+        "X-LSM-GUI-Coordinate-Input": "0",
+      },
+    })) as unknown as typeof fetch
+    URL.createObjectURL = () => "blob:view"
+    URL.revokeObjectURL = () => undefined
+
+    try {
+      await controller.loadFrame("local\0window:1", new AbortController())
+      expect(controller.frameBounds).toEqual({ x: 0, y: 0, width: 100, height: 100 })
+      expect(controller.frameInputEnabled).toBe(false)
+      controller.queueAction({ type: "click", x: 1, y: 1 })
+      await controller.actionQueue
+      expect(sends).toHaveLength(0)
     } finally {
       globalThis.fetch = originalFetch
       URL.createObjectURL = originalCreateObjectURL

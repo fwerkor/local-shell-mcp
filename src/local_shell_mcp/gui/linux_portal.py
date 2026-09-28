@@ -223,6 +223,14 @@ class PortalDesktop:
             with contextlib.suppress(Exception):
                 bus.disconnect()
 
+    async def close(self) -> None:
+        async with self._lock:
+            session = self._session
+            if session is not None and self._bus is not None:
+                with contextlib.suppress(BaseException):
+                    await asyncio.shield(self._close_session(session))
+            self._invalidate_transport()
+
     async def _call_remote(self, operation: Any, *args: Any) -> Any:
         try:
             return await operation(*args)
