@@ -648,6 +648,16 @@ class WindowsGuiBackend:
             if not handle:
                 raise GuiUnavailableError("Windows target has no native HWND for safe capture")
             _capture_window_image(handle, screenshot_path)
+            current = self._find_window(window_id, record)
+            current_record = _window_record(current)
+            if current_record is None:
+                raise LookupError(
+                    f"Window is no longer safely capturable after capture: {window_id}"
+                )
+            if current_record.get("bounds") != record.get("bounds"):
+                raise LookupError(
+                    f"Window moved or resized during capture: {window_id}"
+                )
             if not screenshot_path.is_file():
                 raise GuiUnavailableError("Win32 window capture did not produce an image")
             screenshot_display = display_screenshot_path(screenshot_path)

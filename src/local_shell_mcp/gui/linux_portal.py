@@ -130,12 +130,18 @@ async def _portal_request(
     bus._add_match_rule(match_rule)
     bus.add_message_handler(handler)
     try:
-        path = str(await awaitable)
-        if path != expected_path:
-            raise GuiUnavailableError(
-                f"Desktop portal returned unexpected request path: {path}"
-            )
-        code, results = await asyncio.wait_for(future, timeout=timeout_s)
+        async def request_and_wait() -> tuple[int, dict[str, Any]]:
+            path = str(await awaitable)
+            if path != expected_path:
+                raise GuiUnavailableError(
+                    f"Desktop portal returned unexpected request path: {path}"
+                )
+            return await future
+
+        code, results = await asyncio.wait_for(
+            request_and_wait(),
+            timeout=timeout_s,
+        )
     finally:
         with contextlib.suppress(Exception):
             bus.remove_message_handler(handler)
@@ -546,7 +552,8 @@ class PortalDesktop:
             if symbol is not None:
                 modifiers.append(symbol)
             else:
-                ordinary.append(_keysym(part))
+                normalized = part.lower() if len(part) == 1 and part.isalpha() else part
+                ordinary.append(_keysym(normalized))
         if len(ordinary) != 1:
             raise ValueError("key action requires exactly one non-modifier key")
 

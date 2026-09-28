@@ -14,6 +14,9 @@ from .base import (
     GUI_MAX_ELEMENT_TEXT_BYTES,
     GUI_MAX_ELEMENT_VALUE_BYTES,
     GUI_MAX_ELEMENTS_TOTAL_BYTES,
+    GUI_MAX_WINDOW_TEXT_BYTES,
+    GUI_MAX_WINDOWS,
+    GUI_MAX_WINDOWS_TOTAL_BYTES,
     GuiSnapshot,
     GuiUnavailableError,
     _truncate_gui_text,
@@ -210,21 +213,40 @@ class MacOSGuiBackend:
         options = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
         rows = Quartz.CGWindowListCopyWindowInfo(options, Quartz.kCGNullWindowID) or []
         windows = []
+        used_bytes = 2
         for row in rows:
             layer = int(row.get(Quartz.kCGWindowLayer, 0) or 0)
             bounds = _cg_bounds(row.get(Quartz.kCGWindowBounds))
             window_id = int(row.get(Quartz.kCGWindowNumber, 0) or 0)
             if layer != 0 or not window_id or bounds["width"] <= 1 or bounds["height"] <= 1:
                 continue
-            windows.append(
-                {
-                    "id": f"cg:{window_id}",
-                    "title": str(row.get(Quartz.kCGWindowName, "") or ""),
-                    "app": str(row.get(Quartz.kCGWindowOwnerName, "") or ""),
-                    "pid": int(row.get(Quartz.kCGWindowOwnerPID, 0) or 0),
-                    "bounds": bounds,
-                }
-            )
+            record = {
+                "id": f"cg:{window_id}",
+                "title": _truncate_gui_text(
+                    row.get(Quartz.kCGWindowName, ""),
+                    GUI_MAX_WINDOW_TEXT_BYTES,
+                ),
+                "app": _truncate_gui_text(
+                    row.get(Quartz.kCGWindowOwnerName, ""),
+                    GUI_MAX_WINDOW_TEXT_BYTES,
+                ),
+                "pid": int(row.get(Quartz.kCGWindowOwnerPID, 0) or 0),
+                "bounds": bounds,
+            }
+            extra = len(
+                json.dumps(
+                    record,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode("utf-8")
+            ) + (1 if windows else 0)
+            if used_bytes + extra > GUI_MAX_WINDOWS_TOTAL_BYTES:
+                break
+            windows.append(record)
+            used_bytes += extra
+            if len(windows) >= GUI_MAX_WINDOWS:
+                break
         return windows
 
     def _find_record(self, window_id: str) -> dict[str, Any]:
@@ -306,7 +328,8 @@ class MacOSGuiBackend:
         AX, _Quartz = _native()
         path = locator.get("path")
         expected = str(locator.get("fingerprint") or "")
-        if not isinstance(path, list) or not expected:
+        observed_element = locator.get("_ax_element")
+        if not isinstance(path, list) or not expected or observed_element is None:
             raise LookupError("macOS AX locator is invalid or incomplete")
         element = self._find_ax_window(record)
         if element is None:
@@ -323,6 +346,10 @@ class MacOSGuiBackend:
         if _ax_element_fingerprint(AX, element) != expected:
             raise LookupError(
                 "Target AX element changed since observation; call gui_state again"
+            )
+        if not _same_ax_element(AX, observed_element, element):
+            raise LookupError(
+                "Target AX element identity changed since observation; call gui_state again"
             )
         return element
 
@@ -405,6 +432,7 @@ class MacOSGuiBackend:
                 locators[element_id] = {
                     "path": list(path),
                     "fingerprint": _ax_element_fingerprint(AX, element),
+                    "_ax_element": element,
                 }
                 remaining = max_elements - len(elements) - len(queue)
                 if depth >= max_depth or remaining <= 0:

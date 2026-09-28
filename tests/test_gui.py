@@ -1977,7 +1977,11 @@ def test_windows_snapshot_uses_hwnd_capture_not_visible_rectangle(tmp_path, monk
 
     backend = WindowsGuiBackend()
     window = Window()
-    monkeypatch.setattr(backend, "_find_window", lambda _window_id: window)
+    monkeypatch.setattr(
+        backend,
+        "_find_window",
+        lambda _window_id, _observed_window=None: window,
+    )
     monkeypatch.setattr(
         windows,
         "_window_record",
@@ -2007,6 +2011,78 @@ def test_windows_snapshot_uses_hwnd_capture_not_visible_rectangle(tmp_path, monk
     assert captures == [(123, path)]
     assert snapshot.screenshot_path is not None
     assert path.is_file()
+
+
+def test_windows_snapshot_revalidates_native_identity_after_capture(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.windows as windows
+
+    class Rect:
+        left = 0
+        top = 0
+        right = 100
+        bottom = 80
+
+    class Control:
+        NativeWindowHandle = 123
+        ProcessId = 1
+        ClassName = "Editor"
+        AutomationId = "main"
+        Name = "Window"
+        BoundingRectangle = Rect()
+        IsOffscreen = False
+
+        def GetRuntimeId(self):
+            return [1, 2, 3]
+
+        def GetChildren(self):
+            return []
+
+    original = Control()
+    replacement = Control()
+    monkeypatch.setattr(windows, "_is_iconic_window", lambda _handle: False)
+
+    class Root:
+        def GetChildren(self):
+            return [replacement]
+
+    class Auto:
+        @staticmethod
+        def GetRootControl():
+            return Root()
+
+        @staticmethod
+        def ControlsAreSame(left, right):
+            return left is right
+
+    monkeypatch.setattr(windows, "_automation", lambda: Auto())
+    backend = WindowsGuiBackend()
+    monkeypatch.setattr(
+        backend,
+        "_find_window",
+        lambda _window_id, _observed_window=None: (
+            original
+            if _observed_window is None
+            else WindowsGuiBackend._find_window(
+                backend,
+                _window_id,
+                _observed_window,
+            )
+        ),
+    )
+
+    def capture(_hwnd, destination):
+        Image.new("RGB", (100, 80)).save(destination, format="PNG")
+
+    monkeypatch.setattr(windows, "_capture_window_image", capture)
+    path = tmp_path / "reused-hwnd.png"
+    with pytest.raises(LookupError, match="UIA identity changed"):
+        backend._snapshot_sync(
+            windows._window_record(original)["id"],
+            screenshot_path=path,
+            include_elements=False,
+            max_elements=1,
+            max_depth=1,
+        )
 
 
 def test_windows_traversal_stops_before_querying_children_at_budget(monkeypatch):
@@ -4551,6 +4627,50 @@ async def test_portal_request_subscribes_before_immediate_response(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_portal_request_times_out_while_method_call_is_hung(monkeypatch):
+    import sys
+    from types import ModuleType
+
+    dbus_next = ModuleType("dbus_next")
+    dbus_next.MessageType = SimpleNamespace(SIGNAL=object())
+    monkeypatch.setitem(sys.modules, "dbus_next", dbus_next)
+
+    class Bus:
+        unique_name = ":1.43"
+
+        def __init__(self):
+            self.handler = None
+            self.match_rules = []
+
+        def _add_match_rule(self, rule):
+            self.match_rules.append(rule)
+
+        def _remove_match_rule(self, rule):
+            self.match_rules.remove(rule)
+
+        def add_message_handler(self, handler):
+            self.handler = handler
+
+        def remove_message_handler(self, handler):
+            self.handler = None
+
+    bus = Bus()
+
+    async def hung_method():
+        await asyncio.Event().wait()
+
+    with pytest.raises(asyncio.TimeoutError):
+        await _portal_request(
+            bus,
+            hung_method(),
+            handle_token="lsm_req_hung",
+            timeout_s=0.01,
+        )
+    assert bus.handler is None
+    assert bus.match_rules == []
+
+
+@pytest.mark.asyncio
 async def test_portal_connect_failure_does_not_poison_cached_connection(monkeypatch):
     import local_shell_mcp.gui.linux_portal as linux_portal
 
@@ -4936,7 +5056,7 @@ async def test_portal_key_chord_releases_every_successfully_pressed_key(monkeypa
     async def key_event(symbol, pressed, *, session=None):
         assert session == "session"
         events.append((symbol, pressed))
-        if symbol == 0x41 and pressed and fail_once["value"]:
+        if symbol == 0x61 and pressed and fail_once["value"]:
             fail_once["value"] = False
             raise RuntimeError("key down failed")
 
@@ -4949,6 +5069,33 @@ async def test_portal_key_chord_releases_every_successfully_pressed_key(monkeypa
 
     assert (0xFFE3, False) in events
     assert (0xFFE1, False) in events
+
+
+@pytest.mark.asyncio
+async def test_portal_key_chord_normalizes_alphabetic_shortcuts(monkeypatch):
+    portal = PortalDesktop({})
+    events = []
+
+    async def ready():
+        return "session"
+
+    async def key_event(symbol, pressed, *, session=None):
+        assert session == "session"
+        events.append((symbol, pressed))
+
+    portal._session = "session"
+    portal._remote = object()
+    monkeypatch.setattr(portal, "ensure_session", ready)
+    monkeypatch.setattr(portal, "_key_event", key_event)
+
+    await portal.key_chord("CTRL+A")
+
+    assert events == [
+        (0xFFE3, True),
+        (0x61, True),
+        (0x61, False),
+        (0xFFE3, False),
+    ]
 
 
 @pytest.mark.asyncio
@@ -5640,6 +5787,69 @@ def test_macos_semantic_action_rejects_recycled_ax_element(monkeypatch):
         )
 
 
+def test_macos_locator_rejects_identical_replacement_ax_element(monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    class AX:
+        kAXRoleAttribute = "role"
+        kAXTitleAttribute = "title"
+        kAXDescriptionAttribute = "description"
+        kAXValueAttribute = "value"
+        kAXEnabledAttribute = "enabled"
+        kAXChildrenAttribute = "children"
+
+    root = object()
+    observed_child = object()
+    replacement_child = object()
+    current_child = {"value": observed_child}
+    backend = MacOSGuiBackend()
+    monkeypatch.setattr(macos, "_native", lambda: (AX, object()))
+    monkeypatch.setattr(backend, "_find_ax_window", lambda _record: root)
+    monkeypatch.setattr(
+        macos,
+        "_ax_bounds",
+        lambda _ax, element: (
+            {"x": 10, "y": 10, "width": 20, "height": 20}
+            if element is not root
+            else {"x": 0, "y": 0, "width": 100, "height": 100}
+        ),
+    )
+
+    def ax_copy(_ax, element, attr, default=None):
+        if attr == AX.kAXChildrenAttribute:
+            return [current_child["value"]] if element is root else []
+        if attr == AX.kAXRoleAttribute:
+            return "button" if element is not root else "window"
+        if attr == AX.kAXTitleAttribute:
+            return "Save" if element is not root else "Window"
+        if attr == AX.kAXDescriptionAttribute:
+            return ""
+        if attr == AX.kAXValueAttribute:
+            return ""
+        if attr == AX.kAXEnabledAttribute:
+            return True
+        return default
+
+    monkeypatch.setattr(macos, "_ax_copy", ax_copy)
+    locator = {
+        "path": [0],
+        "fingerprint": macos._ax_element_fingerprint(AX, observed_child),
+        "_ax_element": observed_child,
+    }
+    current_child["value"] = replacement_child
+
+    with pytest.raises(LookupError, match="identity changed since observation"):
+        backend._resolve_ax_locator(
+            {
+                "id": "cg:1",
+                "pid": 1,
+                "title": "Window",
+                "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+            },
+            locator,
+        )
+
+
 def test_macos_current_record_rejects_reused_cg_id_with_new_ax_window(monkeypatch):
     import local_shell_mcp.gui.macos as macos
 
@@ -6093,6 +6303,54 @@ def test_macos_utf16_text_units_and_chunks():
     assert _utf16_units("😀") == 2
     assert _utf16_units("A😀") == 3
     assert _unicode_chunks("A😀B", max_units=2) == ["A", "😀", "B"]
+
+
+def test_macos_window_enumeration_bounds_provider_metadata(monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    huge = "x" * (macos.GUI_MAX_WINDOW_TEXT_BYTES * 4)
+
+    class Quartz:
+        kCGWindowListOptionOnScreenOnly = 1
+        kCGWindowListExcludeDesktopElements = 2
+        kCGNullWindowID = 0
+        kCGWindowLayer = "layer"
+        kCGWindowBounds = "bounds"
+        kCGWindowNumber = "number"
+        kCGWindowName = "name"
+        kCGWindowOwnerName = "owner"
+        kCGWindowOwnerPID = "pid"
+
+        @staticmethod
+        def CGWindowListCopyWindowInfo(_options, _window_id):
+            return [
+                {
+                    "layer": 0,
+                    "bounds": {"X": 0, "Y": 0, "Width": 100, "Height": 100},
+                    "number": index + 1,
+                    "name": huge,
+                    "owner": huge,
+                    "pid": 42,
+                }
+                for index in range(macos.GUI_MAX_WINDOWS * 4)
+            ]
+
+    monkeypatch.setattr(macos, "_native", lambda: (object(), Quartz))
+    windows = MacOSGuiBackend()._windows()
+
+    assert 0 < len(windows) <= macos.GUI_MAX_WINDOWS
+    assert len(
+        json.dumps(
+            windows,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode()
+    ) <= (
+        macos.GUI_MAX_WINDOWS_TOTAL_BYTES
+    )
+    for record in windows:
+        assert len(record["title"].encode()) <= macos.GUI_MAX_WINDOW_TEXT_BYTES
+        assert len(record["app"].encode()) <= macos.GUI_MAX_WINDOW_TEXT_BYTES
 
 
 def test_windows_window_id_ignores_mutable_title(monkeypatch):
