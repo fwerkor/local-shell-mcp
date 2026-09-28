@@ -143,6 +143,7 @@ export class DesktopController extends BaseController {
   private frameUrl = ""
   private frameBounds: GuiBounds | null = null
   private frameObservationId = ""
+  private frameExpiresAt = 0
   private frameEpoch = 0
   private actionTargetEpoch = 0
   private actionQueue: Promise<void> = Promise.resolve()
@@ -225,12 +226,12 @@ export class DesktopController extends BaseController {
     if (form) this.listen(form, "submit", (event) => this.onTextSubmit(event as SubmitEvent))
 
     this.every(() => {
-      if (
-        !this.destroyed
-        && this.selectedWindowId
-        && this.pendingActions === 0
-        && !this.captureRequiresFocus
-      ) void this.refreshFrame()
+      if (this.destroyed || !this.selectedWindowId || this.pendingActions !== 0) return
+      if (this.captureRequiresFocus) {
+        this.expireFocusSensitiveFrame()
+        return
+      }
+      void this.refreshFrame()
     }, 1000)
     this.every(() => {
       if (!this.destroyed && !this.loadingWindows) void this.refreshWindows(false)
@@ -441,6 +442,8 @@ export class DesktopController extends BaseController {
       if (!bounds.width || !bounds.height) throw new Error("GUI frame returned invalid window bounds")
       const observationId = response.headers.get("X-LSM-GUI-Observation-ID") || ""
       if (!observationId) throw new Error("GUI frame returned no observation token")
+      const observationTtlS = numericHeader(response, "X-LSM-GUI-Observation-TTL-S")
+      if (observationTtlS <= 0) throw new Error("GUI frame returned invalid observation TTL")
       const blob = await response.blob()
       if (
         this.destroyed
@@ -472,6 +475,7 @@ export class DesktopController extends BaseController {
       this.frameUrl = nextUrl
       this.frameBounds = bounds
       this.frameObservationId = observationId
+      this.frameExpiresAt = Date.now() + Math.max(0, observationTtlS * 1000 - 1000)
       const image = this.root.querySelector<HTMLImageElement>("[data-role=desktop-frame]")
       const placeholder = this.root.querySelector<HTMLElement>("[data-role=desktop-placeholder]")
       if (image) {
@@ -509,6 +513,7 @@ export class DesktopController extends BaseController {
     this.frameRequestKey = ""
     this.frameBounds = null
     this.frameObservationId = ""
+    this.frameExpiresAt = 0
     this.revokeFrame()
     const image = this.root?.querySelector<HTMLImageElement>("[data-role=desktop-frame]")
     const placeholder = this.root?.querySelector<HTMLElement>("[data-role=desktop-placeholder]")
@@ -517,6 +522,20 @@ export class DesktopController extends BaseController {
       image.removeAttribute("src")
     }
     if (placeholder) placeholder.hidden = false
+  }
+
+  private expireFocusSensitiveFrame(now = Date.now()): boolean {
+    if (
+      !this.captureRequiresFocus
+      || !this.frameBounds
+      || !this.frameObservationId
+      || !this.frameExpiresAt
+      || now < this.frameExpiresAt
+    ) return false
+    this.invalidateActionTarget()
+    this.clearFrame()
+    this.renderStatus("Displayed frame expired; refresh the frame to continue.", true)
+    return true
   }
 
   private revokeFrame(): void {

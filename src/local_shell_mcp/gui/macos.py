@@ -300,10 +300,6 @@ class MacOSGuiBackend:
             not title_matches or title_matches[0] is geometry_matches[0]
         ):
             return geometry_matches[0]
-        if len(title_matches) == 1 and (
-            not geometry_matches or geometry_matches[0] is title_matches[0]
-        ):
-            return title_matches[0]
         return None
 
     def _resolve_ax_locator(self, record: dict[str, Any], locator: dict[str, Any]) -> Any:

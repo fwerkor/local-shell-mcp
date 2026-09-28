@@ -3031,16 +3031,18 @@ async def _gui_frame_data(
             data.pop("screenshot_path", None)
             return data, image
         finally:
-            keepalive.cancel()
-            with suppress(asyncio.CancelledError):
-                await keepalive
-            with suppress(Exception):
-                await _remote_transfer_data(
-                    machine,
-                    "transfer_gui_temp_delete",
-                    {"path": screenshot_path},
-                    30,
-                )
+            try:
+                keepalive.cancel()
+                with suppress(BaseException):
+                    await keepalive
+            finally:
+                with suppress(Exception):
+                    await _remote_transfer_data(
+                        machine,
+                        "transfer_gui_temp_delete",
+                        {"path": screenshot_path},
+                        30,
+                    )
 
     data = await get_gui_manager().frame(window_id)
     screenshot_path = str(data.get("screenshot_path") or "")

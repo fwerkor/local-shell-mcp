@@ -360,6 +360,33 @@ describe("Native WebUI desktop Wayland capture", () => {
     expect(controller.captureRequiresFocus).toBe(true)
     expect(frames).toBe(0)
   })
+
+  test("expires a focus-sensitive frame before its observation token becomes stale", () => {
+    const context: NativePageContext = {
+      api: {
+        get: async () => undefined as never,
+        send: async () => undefined as never,
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller: any = new DesktopController(context)
+    controller.root = { querySelector: () => null }
+    controller.captureRequiresFocus = true
+    controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
+    controller.frameObservationId = "obs-1"
+    controller.frameExpiresAt = 10_000
+
+    expect(controller.expireFocusSensitiveFrame(9_999)).toBe(false)
+    expect(controller.frameObservationId).toBe("obs-1")
+    expect(controller.expireFocusSensitiveFrame(10_000)).toBe(true)
+    expect(controller.frameBounds).toBeNull()
+    expect(controller.frameObservationId).toBe("")
+    expect(controller.frameExpiresAt).toBe(0)
+  })
 })
 
 describe("Native WebUI desktop queued input", () => {
@@ -611,6 +638,7 @@ describe("Native WebUI desktop frame replacement", () => {
         "X-LSM-GUI-Window-Width": "200",
         "X-LSM-GUI-Window-Height": "150",
         "X-LSM-GUI-Observation-ID": "obs-new",
+        "X-LSM-GUI-Observation-TTL-S": "30",
       },
     })) as unknown as typeof fetch
     URL.createObjectURL = () => "blob:new"

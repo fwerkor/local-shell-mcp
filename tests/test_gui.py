@@ -1285,6 +1285,73 @@ async def test_gui_frame_data_rejects_invalid_sources(tmp_path, monkeypatch):
     ]
 
 
+@pytest.mark.asyncio
+async def test_gui_frame_keepalive_failure_does_not_skip_remote_cleanup(
+    tmp_path,
+    monkeypatch,
+):
+    import local_shell_mcp.tools as tools
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "true")
+    monkeypatch.setattr(tools, "_REMOTE_GUI_STATE_REFRESH_INTERVAL_S", 0.001)
+    tools.get_settings.cache_clear()
+    refresh_calls = 0
+    cleanup_calls = []
+
+    async def remote_worker(_machine, tool, _args, timeout_s=None):
+        nonlocal refresh_calls
+        del timeout_s
+        if tool == "gui_frame":
+            return {
+                "backend": "remote",
+                "window": {
+                    "id": "w",
+                    "bounds": {"x": 0, "y": 0, "width": 4, "height": 4},
+                },
+                "observation_id": "obs-cleanup",
+                "screenshot_path": ".local-shell-mcp/tmp/frame.png",
+            }
+        if tool == "gui_frame_refresh":
+            refresh_calls += 1
+            if refresh_calls == 1:
+                raise RuntimeError("keepalive failed")
+            return {"observation_id": "obs-cleanup", "observation_ttl_s": 30}
+        raise AssertionError(f"unexpected worker tool: {tool}")
+
+    async def remote_transfer(machine, tool, args, timeout_s=None):
+        cleanup_calls.append((machine, tool, args, timeout_s))
+        return {"deleted": True}
+
+    async def slow_copy(_machine, _source, destination):
+        await asyncio.sleep(0.01)
+        Image.new("RGB", (4, 4)).save(destination, format="PNG")
+        return {"bytes": 5}
+
+    monkeypatch.setattr(tools, "_remote_worker_data", remote_worker)
+    monkeypatch.setattr(tools, "_remote_transfer_data", remote_transfer)
+    monkeypatch.setattr(tools, "_copy_remote_gui_temp_to_local", slow_copy)
+    monkeypatch.setattr(
+        tools,
+        "transfer_alloc_temp_path",
+        lambda suffix: {"path": str(tools.temp_dir() / f"cleanup-relay{suffix}")},
+    )
+
+    data, image = await tools._gui_frame_data("w", "node")
+
+    assert data["observation_ttl_s"] == 30
+    assert image.format == "png"
+    assert refresh_calls >= 2
+    assert cleanup_calls == [
+        (
+            "node",
+            "transfer_gui_temp_delete",
+            {"path": ".local-shell-mcp/tmp/frame.png"},
+            30,
+        )
+    ]
+
+
 def test_native_gui_optional_dependency_guards_are_platform_safe():
     import sys
 
@@ -5193,6 +5260,52 @@ def test_macos_ax_window_matching_rejects_sole_unrelated_window(monkeypatch):
             {
                 "pid": 1,
                 "title": "Closed document",
+                "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+            }
+        )
+        is None
+    )
+
+
+def test_macos_ax_window_matching_rejects_title_only_match(monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    remaining = object()
+
+    class AX:
+        kAXWindowsAttribute = "windows"
+        kAXTitleAttribute = "title"
+
+        @staticmethod
+        def AXIsProcessTrusted():
+            return True
+
+        @staticmethod
+        def AXUIElementCreateApplication(_pid):
+            return "app"
+
+    monkeypatch.setattr(macos, "_native", lambda: (AX, object()))
+    monkeypatch.setattr(
+        macos,
+        "_ax_copy",
+        lambda _ax, obj, attr, default=None: (
+            [remaining]
+            if attr == AX.kAXWindowsAttribute
+            else ("Document" if obj is remaining else default)
+        ),
+    )
+    monkeypatch.setattr(
+        macos,
+        "_ax_bounds",
+        lambda _ax, _window: {"x": 500, "y": 500, "width": 80, "height": 80},
+    )
+
+    backend = MacOSGuiBackend()
+    assert (
+        backend._find_ax_window(
+            {
+                "pid": 1,
+                "title": "Document",
                 "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
             }
         )

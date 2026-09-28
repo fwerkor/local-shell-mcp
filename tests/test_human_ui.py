@@ -1226,6 +1226,7 @@ def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
             {
                 "backend": "fake-native",
                 "observation_id": "obs-1",
+                "observation_ttl_s": 30,
                 "window": {
                     "id": "window:1",
                     "title": "Demo",
@@ -1257,6 +1258,7 @@ def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
     assert frame.headers["x-lsm-gui-window-width"] == "320"
     assert frame.headers["x-lsm-gui-window-height"] == "180"
     assert frame.headers["x-lsm-gui-observation-id"] == "obs-1"
+    assert frame.headers["x-lsm-gui-observation-ttl-s"] == "30"
     assert (
         "/api/ui/gui/frame",
         ("shell:read", "shell:execute"),

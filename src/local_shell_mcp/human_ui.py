@@ -1195,6 +1195,9 @@ async def api_gui_frame(request: Request) -> Response:
             "X-LSM-GUI-Window-Height": str(bounds.get("height") or 0),
             "X-LSM-GUI-Backend": str(data.get("backend") or ""),
             "X-LSM-GUI-Observation-ID": str(data.get("observation_id") or ""),
+            "X-LSM-GUI-Observation-TTL-S": str(
+                data.get("observation_ttl_s") or 0
+            ),
         }
         return Response(
             image.data,
