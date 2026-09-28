@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import errno
+import getpass
 import hashlib
 import json
 import os
@@ -254,6 +255,55 @@ def _systemd_user_available() -> bool:
         return False
     result = _run(["systemctl", "--user", "show-environment"], check=False)
     return result.returncode == 0
+
+
+def _systemd_linger_enabled(user: str | None = None) -> bool | None:
+    loginctl = shutil.which("loginctl")
+    if not loginctl:
+        return None
+    user = user or os.getenv("USER") or os.getenv("LOGNAME") or getpass.getuser()
+    result = _run(
+        [loginctl, "show-user", user, "--property=Linger", "--value"],
+        check=False,
+    )
+    if result.returncode:
+        return None
+    value = result.stdout.strip().lower()
+    if value == "yes":
+        return True
+    if value == "no":
+        return False
+    return None
+
+
+def _ensure_systemd_linger() -> tuple[bool | None, str | None]:
+    user = os.getenv("USER") or os.getenv("LOGNAME") or getpass.getuser()
+    enabled = _systemd_linger_enabled(user)
+    if enabled is not False:
+        return enabled, None
+
+    loginctl = shutil.which("loginctl")
+    if not loginctl:
+        return None, None
+
+    attempts = [[loginctl, "--no-ask-password", "enable-linger", user]]
+    sudo = shutil.which("sudo")
+    if sudo:
+        attempts.append([sudo, "-n", loginctl, "enable-linger", user])
+    last_error = ""
+    for command in attempts:
+        result = _run(command, check=False)
+        if result.returncode == 0:
+            return True, None
+        last_error = result.stderr.strip() or result.stdout.strip()
+
+    message = (
+        "systemd user service is enabled, but login lingering is disabled; "
+        f"run 'sudo loginctl enable-linger {user}' for boot-time startup without login"
+    )
+    if last_error:
+        message += f" ({last_error})"
+    return False, message
 
 
 def service_kind() -> str:
@@ -707,6 +757,8 @@ def install_service(*, start: bool = True) -> dict[str, Any]:
     changed_path_files = ensure_user_bin_on_path()
     worker_state_dir().mkdir(parents=True, exist_ok=True)
     kind = service_kind()
+    linger_enabled: bool | None = None
+    warning: str | None = None
     if kind == "systemd":
         _stop_process()
         service_file = _write_systemd_unit()
@@ -716,6 +768,7 @@ def install_service(*, start: bool = True) -> dict[str, Any]:
             command.append("--now")
         command.append(f"{_SERVICE_NAME}.service")
         _run(command)
+        linger_enabled, warning = _ensure_systemd_linger()
     elif kind == "launchd":
         _stop_process()
         service_file = _write_launchd_plist(launcher)
@@ -735,13 +788,19 @@ def install_service(*, start: bool = True) -> dict[str, Any]:
         service_file = None
         if start:
             _start_process()
-    return {
+    result = {
         "kind": kind,
         "launcher": str(launcher),
         "service_file": str(service_file) if service_file else None,
         "path_files": [str(path) for path in changed_path_files],
         "started": start,
     }
+    if kind == "systemd":
+        result["linger_enabled"] = linger_enabled
+        result["boot_persistent"] = linger_enabled is True
+        if warning:
+            result["warning"] = warning
+    return result
 
 
 def uninstall_service() -> dict[str, Any]:

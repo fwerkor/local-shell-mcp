@@ -48,6 +48,60 @@ def test_install_and_manage_systemd_service(tmp_path, monkeypatch):
     assert not service._systemd_unit_path().exists()  # noqa: SLF001
 
 
+def test_systemd_install_enables_linger_noninteractively(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("USER", "alice")
+    monkeypatch.setattr(service, "service_kind", lambda: "systemd")
+    monkeypatch.setattr(
+        service.shutil,
+        "which",
+        lambda name: f"/usr/bin/{name}" if name in {"loginctl", "sudo"} else None,
+    )
+    calls = []
+
+    def fake_run(command, *, check=True):
+        calls.append((command, check))
+        if "show-user" in command:
+            return subprocess.CompletedProcess(command, 0, stdout="no\n", stderr="")
+        if "enable-linger" in command and command[0].endswith("loginctl"):
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr="authentication required")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(service, "_run", fake_run)
+    result = service.install_service(start=False)
+    assert result["linger_enabled"] is True
+    assert result["boot_persistent"] is True
+    assert any(
+        command[:3] == ["/usr/bin/sudo", "-n", "/usr/bin/loginctl"]
+        and command[-2:] == ["enable-linger", "alice"]
+        for command, _ in calls
+    )
+
+
+def test_systemd_install_reports_disabled_linger(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("USER", "alice")
+    monkeypatch.setattr(service, "service_kind", lambda: "systemd")
+    monkeypatch.setattr(
+        service.shutil,
+        "which",
+        lambda name: "/usr/bin/loginctl" if name == "loginctl" else None,
+    )
+
+    def fake_run(command, *, check=True):
+        if "show-user" in command:
+            return subprocess.CompletedProcess(command, 0, stdout="no\n", stderr="")
+        if "enable-linger" in command:
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr="access denied")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(service, "_run", fake_run)
+    result = service.install_service(start=False)
+    assert result["linger_enabled"] is False
+    assert result["boot_persistent"] is False
+    assert "sudo loginctl enable-linger alice" in result["warning"]
+
+
 def test_systemd_detection_requires_a_working_user_manager(monkeypatch):
     monkeypatch.setattr(service.platform, "system", lambda: "Linux")
     monkeypatch.setattr(service.shutil, "which", lambda name: "/usr/bin/systemctl")
