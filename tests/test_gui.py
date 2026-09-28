@@ -3195,11 +3195,18 @@ async def test_gui_frame_capacity_preserves_unexpired_observation_ttl(
             await manager.frame("window:1")
         assert first["observation_id"] in manager._frame_observations
         assert second["observation_id"] in manager._frame_observations
+        original_created_at = manager._frame_observations[
+            first["observation_id"]
+        ].created_at
         refreshed = await manager.refresh_frame_observation(
             "window:1",
             first["observation_id"],
         )
-        assert 0 < refreshed["observation_ttl_s"] < base.GUI_STATE_TTL_S
+        assert 0 < refreshed["observation_ttl_s"] <= base.GUI_STATE_TTL_S
+        assert (
+            manager._frame_observations[first["observation_id"]].created_at
+            == original_created_at
+        )
     finally:
         first_path.unlink(missing_ok=True)
         second_path.unlink(missing_ok=True)
