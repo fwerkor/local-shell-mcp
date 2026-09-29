@@ -2820,16 +2820,14 @@ async def test_windows_native_traversal_uses_one_initialized_uia_thread(monkeypa
 
 @pytest.mark.asyncio
 async def test_macos_native_traversal_is_offloaded(monkeypatch):
-    import local_shell_mcp.gui.macos as macos
-
     backend = MacOSGuiBackend()
     calls = []
 
-    async def fake_to_thread(func, *args, **kwargs):
+    async def fake_run_ax(func, *args, **kwargs):
         calls.append(func.__name__)
         return func(*args, **kwargs)
 
-    monkeypatch.setattr(macos.asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(backend, "_run_ax", fake_run_ax)
     monkeypatch.setattr(backend, "_list_windows_sync", lambda: {"windows": []})
     monkeypatch.setattr(
         backend,
@@ -8640,3 +8638,28 @@ async def test_windows_uia_timeout_rotates_worker_and_allows_followup(monkeypatc
     finally:
         release.set()
         backend._executor.shutdown(wait=True)
+
+
+
+@pytest.mark.asyncio
+async def test_macos_ax_timeout_resets_worker_and_allows_followup(monkeypatch):
+    import local_shell_mcp.gui.macos as macos
+
+    backend = MacOSGuiBackend()
+    started = threading.Event()
+    release = threading.Event()
+    monkeypatch.setattr(macos, "_AX_OPERATION_TIMEOUT_S", 0.01)
+
+    def blocked_provider():
+        started.set()
+        release.wait(1)
+        return "late"
+
+    try:
+        with pytest.raises(GuiUnavailableError, match="Accessibility provider timed out"):
+            await backend._run_ax(blocked_provider)
+        assert started.is_set()
+        assert await backend._run_ax(lambda: "ok") == "ok"
+    finally:
+        release.set()
+        backend._executor.shutdown(wait=False, cancel_futures=True)

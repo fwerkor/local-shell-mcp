@@ -5,6 +5,8 @@ import contextlib
 import hashlib
 import json
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +27,8 @@ from .base import (
     display_screenshot_path,
     quantize_scroll_amount,
 )
+
+_AX_OPERATION_TIMEOUT_S = 30.0
 
 
 def _native():  # noqa: ANN202
@@ -237,6 +241,49 @@ def _key_parts(keys: Any) -> list[str]:
 class MacOSGuiBackend:
     name = "macos-ax"
 
+    def __init__(self) -> None:
+        self._executor = self._new_executor()
+        self._executor_lock = asyncio.Lock()
+
+    @staticmethod
+    def _new_executor() -> ThreadPoolExecutor:
+        return ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="lsm-macos-ax",
+        )
+
+    async def _run_ax(self, func: Any, /, *args: Any, **kwargs: Any) -> Any:
+        async with self._executor_lock:
+            loop = asyncio.get_running_loop()
+            executor = self._executor
+            future = loop.run_in_executor(
+                executor,
+                partial(func, *args, **kwargs),
+            )
+
+            async def wait_for_native_call() -> Any:
+                try:
+                    return await asyncio.wait_for(
+                        asyncio.shield(future),
+                        timeout=_AX_OPERATION_TIMEOUT_S,
+                    )
+                except TimeoutError as exc:
+                    if self._executor is executor:
+                        self._executor = self._new_executor()
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    raise GuiUnavailableError(
+                        "macOS Accessibility provider timed out; "
+                        "the native AX worker was reset"
+                    ) from exc
+
+            waiter = asyncio.create_task(wait_for_native_call())
+            try:
+                return await asyncio.shield(waiter)
+            except BaseException:
+                with contextlib.suppress(BaseException):
+                    await asyncio.shield(waiter)
+                raise
+
     def _windows(self) -> list[dict[str, Any]]:
         _AX, Quartz = _native()
         options = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
@@ -414,7 +461,7 @@ class MacOSGuiBackend:
         }
 
     async def list_windows(self) -> dict[str, Any]:
-        return await asyncio.to_thread(self._list_windows_sync)
+        return await self._run_ax(self._list_windows_sync)
 
     def _snapshot_accessibility_sync(
         self,
@@ -506,7 +553,7 @@ class MacOSGuiBackend:
         max_elements: int,
         max_depth: int,
     ) -> GuiSnapshot:
-        record, trusted, elements, locators = await asyncio.to_thread(
+        record, trusted, elements, locators = await self._run_ax(
             self._snapshot_accessibility_sync,
             window_id,
             include_elements=include_elements,
@@ -532,7 +579,7 @@ class MacOSGuiBackend:
                     "macOS window capture failed; grant Screen Recording permission"
                     + (f": {detail}" if detail else "")
                 )
-            current = await asyncio.to_thread(self._current_record, record)
+            current = await self._run_ax(self._current_record, record)
             if not _same_bounds(current.get("bounds", {}), record.get("bounds", {})):
                 raise LookupError(
                     f"Window moved or resized during capture: {window_id}"
@@ -572,7 +619,7 @@ class MacOSGuiBackend:
             if int(error) != 0:
                 raise RuntimeError(f"AX focus action failed with error {error}")
 
-        await asyncio.to_thread(focus)
+        await self._run_ax(focus)
 
     async def perform_action(
         self,
@@ -585,7 +632,7 @@ class MacOSGuiBackend:
             seconds = max(0.0, min(float(action.get("seconds", 1.0)), 30.0))
             await asyncio.sleep(seconds)
             return {"waited_s": seconds}
-        return await asyncio.to_thread(self._perform_action_sync, window, locator, action)
+        return await self._run_ax(self._perform_action_sync, window, locator, action)
 
     def _perform_action_sync(
         self,
