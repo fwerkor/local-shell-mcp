@@ -1462,6 +1462,18 @@ class LinuxGuiBackend:
         if self._portal is None:
             self._portal = PortalDesktop(env)
         portal = self._portal
+        if action["type"] in {
+            "click",
+            "double_click",
+            "right_click",
+            "move",
+            "scroll",
+            "drag",
+        }:
+            set_monitor_layout = getattr(portal, "set_monitor_layout", None)
+            if callable(set_monitor_layout):
+                list_data = await asyncio.to_thread(self._list_data, env)
+                set_monitor_layout(list_data.get("monitors", []))
         kind = action["type"]
         deadline = action.get("_observation_deadline")
         session = await portal.ensure_session()

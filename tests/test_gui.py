@@ -5961,6 +5961,123 @@ async def test_portal_session_setup_resets_when_closed_observation_fails(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_portal_remote_desktop_reuses_and_rotates_restore_token(monkeypatch):
+    import local_shell_mcp.gui.linux_portal as portal_module
+
+    portal = PortalDesktop({})
+    device_options = []
+    source_options = []
+    saved_tokens = []
+
+    class Variant:
+        def __init__(self, signature, value):
+            self.signature = signature
+            self.value = value
+
+    class Remote:
+        def call_create_session(self, options):
+            return ("create", options)
+
+        def call_select_devices(self, _session, options):
+            device_options.append(options)
+            return ("devices", options)
+
+        def call_start(self, *_args):
+            return ("start", None)
+
+    class Screen:
+        def call_select_sources(self, _session, options):
+            source_options.append(options)
+            return ("sources", options)
+
+    async def connect():
+        portal._remote = Remote()
+        portal._screen = Screen()
+
+    async def request(awaitable, **_kwargs):
+        kind = awaitable[0]
+        if kind == "create":
+            return {"session_handle": "/session/1"}
+        if kind in {"sources", "devices"}:
+            return {}
+        if kind == "start":
+            return {"streams": [], "restore_token": "rotated-token"}
+        raise AssertionError(kind)
+
+    async def observe(_session):
+        return None
+
+    monkeypatch.setattr(portal, "_connect", connect)
+    monkeypatch.setattr(portal, "_request", request)
+    monkeypatch.setattr(portal, "_observe_session_closed", observe)
+    monkeypatch.setattr(portal_module, "_portal_modules", lambda: (object, Variant))
+    monkeypatch.setattr(
+        portal_module,
+        "_load_portal_restore_token",
+        lambda: "previous-token",
+    )
+    monkeypatch.setattr(
+        portal_module,
+        "_save_portal_restore_token",
+        saved_tokens.append,
+    )
+
+    assert await portal.ensure_session() == "/session/1"
+
+    assert len(device_options) == 1
+    options = device_options[0]
+    assert options["persist_mode"].signature == "u"
+    assert options["persist_mode"].value == 2
+    assert options["restore_token"].signature == "s"
+    assert options["restore_token"].value == "previous-token"
+    assert "persist_mode" not in source_options[0]
+    assert "restore_token" not in source_options[0]
+    assert saved_tokens == ["rotated-token"]
+
+
+def test_portal_stream_mapping_uses_unique_monitor_size_when_kde_omits_position():
+    portal = PortalDesktop({})
+    portal.set_monitor_layout(
+        [
+            {"x": 0, "y": 0, "width": 2293, "height": 960},
+            {"x": 2293, "y": 80, "width": 1280, "height": 800},
+        ]
+    )
+    portal._streams = [
+        {
+            "node_id": 109,
+            "properties": {"size": [1280, 800], "source_type": 1},
+        },
+        {
+            "node_id": 96,
+            "properties": {"size": [2293, 960], "source_type": 1},
+        },
+    ]
+
+    assert portal._stream_point(20, 20) == (96, 20.0, 20.0)
+    assert portal._stream_point(2300, 100) == (109, 7.0, 20.0)
+
+
+def test_portal_stream_mapping_stays_fail_closed_for_ambiguous_monitor_sizes():
+    portal = PortalDesktop({})
+    portal.set_monitor_layout(
+        [
+            {"x": 0, "y": 0, "width": 1920, "height": 1080},
+            {"x": 1920, "y": 0, "width": 1920, "height": 1080},
+        ]
+    )
+    portal._streams = [
+        {
+            "node_id": 7,
+            "properties": {"size": [1920, 1080], "source_type": 1},
+        }
+    ]
+
+    with pytest.raises(GuiUnavailableError, match="outside"):
+        portal._stream_point(100, 100)
+
+
+@pytest.mark.asyncio
 async def test_portal_click_releases_pressed_button_after_release_failure(monkeypatch):
     portal = PortalDesktop({})
     calls = []

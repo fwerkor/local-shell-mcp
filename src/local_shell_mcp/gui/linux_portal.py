@@ -10,10 +10,13 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
+from ..state_store import get_state_store
 from .base import GuiUnavailableError
 
 _PORTAL_INPUT_TIMEOUT_S = 15.0
 _PORTAL_LIFECYCLE_TIMEOUT_S = 15.0
+_PORTAL_RESTORE_TOKEN_KEY = "gui/remote-desktop-restore-token"
+_PORTAL_RESTORE_TOKEN_MAX_BYTES = 4096
 
 
 async def _portal_lifecycle_wait(awaitable: Any, operation: str) -> Any:
@@ -37,6 +40,30 @@ def _portal_modules():  # noqa: ANN202
             "Wayland GUI control requires the dbus-next package"
         ) from exc
     return MessageBus, Variant
+
+
+def _load_portal_restore_token() -> str | None:
+    raw = get_state_store().read_bytes(_PORTAL_RESTORE_TOKEN_KEY)
+    if not raw or len(raw) > _PORTAL_RESTORE_TOKEN_MAX_BYTES:
+        return None
+    try:
+        token = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if not token or "\x00" in token:
+        return None
+    return token
+
+
+def _save_portal_restore_token(token: str) -> None:
+    encoded = token.encode("utf-8")
+    if not encoded or len(encoded) > _PORTAL_RESTORE_TOKEN_MAX_BYTES:
+        return
+    get_state_store().write_bytes(_PORTAL_RESTORE_TOKEN_KEY, encoded)
+
+
+def _clear_portal_restore_token() -> None:
+    get_state_store().delete(_PORTAL_RESTORE_TOKEN_KEY)
 
 
 def _unwrap(value: Any) -> Any:
@@ -238,6 +265,7 @@ class PortalDesktop:
         self._session = None
         self._session_iface = None
         self._streams: list[dict[str, Any]] = []
+        self._monitors: list[dict[str, int]] = []
         self._lock = asyncio.Lock()
 
     async def _connect(self) -> None:
@@ -414,15 +442,17 @@ class PortalDesktop:
                     ),
                     handle_token=source_token,
                 )
+                restore_token = await asyncio.to_thread(_load_portal_restore_token)
                 device_token = f"lsm_req_{uuid.uuid4().hex}"
+                device_options = {
+                    "handle_token": Variant("s", device_token),
+                    "types": Variant("u", 3),
+                    "persist_mode": Variant("u", 2),
+                }
+                if restore_token is not None:
+                    device_options["restore_token"] = Variant("s", restore_token)
                 await self._request(
-                    self._remote.call_select_devices(
-                        session,
-                        {
-                            "handle_token": Variant("s", device_token),
-                            "types": Variant("u", 3),
-                        },
-                    ),
+                    self._remote.call_select_devices(session, device_options),
                     handle_token=device_token,
                 )
                 start_token = f"lsm_req_{uuid.uuid4().hex}"
@@ -434,7 +464,18 @@ class PortalDesktop:
                     ),
                     handle_token=start_token,
                 )
+                new_restore_token = str(started.get("restore_token") or "")
+                if new_restore_token:
+                    await asyncio.to_thread(
+                        _save_portal_restore_token,
+                        new_restore_token,
+                    )
+                elif restore_token is not None:
+                    await asyncio.to_thread(_clear_portal_restore_token)
             except BaseException:
+                if "restore_token" in locals() and restore_token is not None:
+                    with contextlib.suppress(Exception):
+                        await asyncio.to_thread(_clear_portal_restore_token)
                 with contextlib.suppress(BaseException):
                     await asyncio.shield(self._close_session(session))
                 self._invalidate_transport()
@@ -473,25 +514,73 @@ class PortalDesktop:
         self._require_session(session)
         return session
 
+    def set_monitor_layout(self, monitors: list[dict[str, Any]]) -> None:
+        normalized: list[dict[str, int]] = []
+        for monitor in monitors:
+            if not isinstance(monitor, dict):
+                continue
+            try:
+                x = int(monitor["x"])
+                y = int(monitor["y"])
+                width = int(monitor["width"])
+                height = int(monitor["height"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if width <= 0 or height <= 0:
+                continue
+            normalized.append(
+                {"x": x, "y": y, "width": width, "height": height}
+            )
+        self._monitors = normalized
+
+    def _stream_geometry(
+        self,
+        stream: dict[str, Any],
+    ) -> tuple[int, int, int, int] | None:
+        props = stream.get("properties")
+        if not isinstance(props, dict):
+            return None
+        size = props.get("size")
+        if not isinstance(size, list) or len(size) < 2:
+            return None
+        try:
+            width, height = int(size[0]), int(size[1])
+        except (TypeError, ValueError):
+            return None
+        if width <= 0 or height <= 0:
+            return None
+
+        position = props.get("position")
+        if isinstance(position, list) and len(position) >= 2:
+            try:
+                return int(position[0]), int(position[1]), width, height
+            except (TypeError, ValueError):
+                return None
+
+        if int(props.get("source_type") or 0) != 1:
+            return None
+        matches = [
+            monitor
+            for monitor in self._monitors
+            if monitor["width"] == width and monitor["height"] == height
+        ]
+        if len(matches) != 1:
+            return None
+        monitor = matches[0]
+        return monitor["x"], monitor["y"], width, height
+
     def _stream_point(self, x: int, y: int) -> tuple[int, float, float]:
         if not self._streams:
             raise GuiUnavailableError(
                 "Wayland portal did not provide a ScreenCast stream for absolute pointer input"
             )
         for stream in self._streams:
-            props = stream["properties"]
-            position = props.get("position")
-            size = props.get("size")
-            if (
-                isinstance(position, list)
-                and len(position) >= 2
-                and isinstance(size, list)
-                and len(size) >= 2
-            ):
-                px, py = int(position[0]), int(position[1])
-                width, height = int(size[0]), int(size[1])
-                if px <= x < px + width and py <= y < py + height:
-                    return stream["node_id"], float(x - px), float(y - py)
+            geometry = self._stream_geometry(stream)
+            if geometry is None:
+                continue
+            px, py, width, height = geometry
+            if px <= x < px + width and py <= y < py + height:
+                return stream["node_id"], float(x - px), float(y - py)
         raise GuiUnavailableError(
             "Target point is outside the ScreenCast streams granted by the desktop portal"
         )
