@@ -630,6 +630,8 @@ def _safe_audit_call_arguments(tool_name: str, arguments: dict[str, Any]) -> dic
                     continue
                 if "text" in item:
                     item["text"] = "<redacted>"
+                if "keys" in item:
+                    item["keys"] = "<redacted>"
                 sanitized_actions.append(item)
             safe["actions"] = sanitized_actions
         return safe

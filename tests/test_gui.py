@@ -8489,3 +8489,154 @@ async def test_linux_snapshot_keeps_discovered_environment_for_all_helper_calls(
     assert all(env is old_env for env in seen_envs)
     assert backend._env is replacement_env
     get_settings.cache_clear()
+
+
+
+@pytest.mark.asyncio
+async def test_gui_snapshot_ttl_starts_when_native_capture_completes(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.base as base
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    monkeypatch.setattr(base, "GUI_STATE_TTL_S", 0.01)
+
+    original_normalize = base._normalize_screenshot_coordinates
+
+    def slow_normalize(path, window):
+        time.sleep(0.03)
+        return original_normalize(path, window)
+
+    monkeypatch.setattr(base, "_normalize_screenshot_coordinates", slow_normalize)
+    manager = GuiManager(FakeBackend())
+
+    with pytest.raises(GuiStaleStateError, match="expired while preparing the captured state"):
+        await manager.snapshot("window:1", screenshot=True)
+    assert manager._states == {}
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_gui_frame_ttl_starts_when_native_capture_completes(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.base as base
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+    monkeypatch.setattr(base, "GUI_STATE_TTL_S", 0.01)
+
+    original_normalize = base._normalize_screenshot_coordinates
+
+    def slow_normalize(path, window):
+        time.sleep(0.03)
+        return original_normalize(path, window)
+
+    monkeypatch.setattr(base, "_normalize_screenshot_coordinates", slow_normalize)
+    manager = GuiManager(FakeBackend())
+
+    with pytest.raises(GuiStaleStateError, match="expired while preparing the captured image"):
+        await manager.frame("window:1")
+    assert manager._frame_observations == {}
+    get_settings.cache_clear()
+
+
+def test_windows_runtime_id_rejects_oversized_component_array_before_rendering():
+    import local_shell_mcp.gui.windows as windows
+
+    class Bomb:
+        def __int__(self):
+            raise AssertionError("oversized runtime ID must be rejected before components are read")
+
+    class Control:
+        def GetRuntimeId(self):
+            return [Bomb()] * (windows.GUI_MAX_ELEMENT_TEXT_BYTES // 2 + 1)
+
+    with pytest.raises(ValueError, match="runtime ID exceeds"):
+        windows._control_runtime_id(Control())
+
+
+def test_wayland_equal_size_full_desktop_does_not_bypass_geometry_validation(
+    tmp_path,
+):
+    import local_shell_mcp.gui.linux as linux
+
+    path = tmp_path / "desktop.png"
+    Image.new("RGB", (100, 100)).save(path, format="PNG")
+    monitors = [{"x": 0, "y": 0, "width": 100, "height": 100, "scale": 1}]
+    bounds = {"x": 10, "y": 0, "width": 100, "height": 100}
+
+    with pytest.raises(GuiUnavailableError, match="does not match the monitor layout"):
+        linux._crop_desktop_capture(path, bounds, monitors)
+
+
+def test_atspi_semantic_click_does_not_query_provider_after_activation(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    activated = False
+
+    class ActionIface:
+        def get_n_actions(self):
+            return 1
+
+        def get_action_name(self, index):
+            assert index == 0
+            if activated:
+                raise AssertionError("provider must not be queried after activation")
+            return "press"
+
+        def do_action(self, index):
+            nonlocal activated
+            assert index == 0
+            activated = True
+            return True
+
+    class Element:
+        def get_action_iface(self):
+            return ActionIface()
+
+    element = Element()
+    monkeypatch.setattr(helper, "_resolve_window", lambda _window_id: (None, object(), 0))
+    monkeypatch.setattr(helper, "_resolve_path", lambda _window, _path: element)
+    monkeypatch.setattr(helper, "_accessible_id", lambda _obj: "button-id")
+    monkeypatch.setattr(helper, "_element_signature", lambda _obj: "button-fp")
+
+    result = helper._semantic_action(
+        {
+            "window_id": "atspi:1:sig",
+            "locator": {
+                "path": [0],
+                "accessible_id": "button-id",
+                "fingerprint": "button-fp",
+            },
+            "action": {"type": "click"},
+        }
+    )
+    assert result == {"semantic": True, "method": "press"}
+
+
+
+@pytest.mark.asyncio
+async def test_windows_uia_timeout_rotates_worker_and_allows_followup(monkeypatch):
+    import local_shell_mcp.gui.windows as windows
+
+    monkeypatch.setattr(windows, "_initialize_uia_thread", lambda: None)
+    monkeypatch.setattr(windows, "_UIA_OPERATION_TIMEOUT_S", 0.02)
+    backend = WindowsGuiBackend()
+    release = threading.Event()
+    started = threading.Event()
+    original_executor = backend._executor
+
+    def blocked():
+        started.set()
+        release.wait(1.0)
+        return "late"
+
+    try:
+        with pytest.raises(GuiUnavailableError, match="provider timed out"):
+            await backend._run_uia(blocked)
+        assert started.is_set()
+        assert backend._executor is not original_executor
+        assert await backend._run_uia(lambda: "ok") == "ok"
+    finally:
+        release.set()
+        backend._executor.shutdown(wait=True)

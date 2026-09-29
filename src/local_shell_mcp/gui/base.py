@@ -490,7 +490,10 @@ class GuiManager:
                 )
             )
 
-        async def publish_snapshot(snapshot: GuiSnapshot) -> dict[str, Any]:
+        async def publish_snapshot(
+            snapshot: GuiSnapshot,
+            captured_at: float,
+        ) -> dict[str, Any]:
             if screenshot_path is not None:
                 if snapshot.screenshot_path is None:
                     _cleanup_gui_screenshot(screenshot_path)
@@ -529,6 +532,12 @@ class GuiManager:
 
             state_id = uuid.uuid4().hex
             now = time.monotonic()
+            remaining_ttl = max(0.0, GUI_STATE_TTL_S - (now - captured_at))
+            if remaining_ttl <= 0:
+                raise GuiStaleStateError(
+                    "GUI observation expired while preparing the captured state; "
+                    "capture a fresh state and try again"
+                )
             async with self._lock:
                 self._prune_locked(now)
                 if len(self._states) >= GUI_STATE_CACHE_LIMIT:
@@ -540,13 +549,13 @@ class GuiManager:
                     state_id=state_id,
                     window=dict(snapshot.window),
                     locators=bounded_locators,
-                    created_at=now,
+                    created_at=captured_at,
                 )
 
             return {
                 "backend": self._backend.name,
                 "state_id": state_id,
-                "state_ttl_s": GUI_STATE_TTL_S,
+                "state_ttl_s": remaining_ttl,
                 "window": bounded_window,
                 "elements": _window_relative_elements(bounded_elements, bounded_window),
                 "capabilities": snapshot.capabilities,
@@ -556,7 +565,8 @@ class GuiManager:
         try:
             async with self._execution_lock:
                 snapshot = await capture_snapshot()
-                return await publish_snapshot(snapshot)
+                captured_at = time.monotonic()
+                return await publish_snapshot(snapshot, captured_at)
         except BaseException:
             if screenshot_path is not None:
                 _cleanup_gui_screenshot(screenshot_path)
@@ -577,6 +587,7 @@ class GuiManager:
                         max_depth=1,
                     )
                 )
+                captured_at = time.monotonic()
                 if (
                     snapshot.screenshot_path is None
                     or not screenshot_path.is_file()
@@ -604,6 +615,12 @@ class GuiManager:
                     raise GuiUnavailableError("GUI backend returned unsafe window metadata")
                 observation_id = uuid.uuid4().hex
                 now = time.monotonic()
+                remaining_ttl = max(0.0, GUI_STATE_TTL_S - (now - captured_at))
+                if remaining_ttl <= 0:
+                    raise GuiStaleStateError(
+                        "GUI frame expired while preparing the captured image; "
+                        "capture a fresh frame and try again"
+                    )
                 async with self._lock:
                     self._prune_locked(now)
                     if len(self._frame_observations) >= GUI_STATE_CACHE_LIMIT:
@@ -615,7 +632,7 @@ class GuiManager:
                         state_id=observation_id,
                         window=dict(snapshot.window),
                         locators={},
-                        created_at=now,
+                        created_at=captured_at,
                     )
                 keep_file = True
                 return {
@@ -623,7 +640,7 @@ class GuiManager:
                     "window": bounded_window,
                     "capabilities": snapshot.capabilities,
                     "observation_id": observation_id,
-                    "observation_ttl_s": GUI_STATE_TTL_S,
+                    "observation_ttl_s": remaining_ttl,
                     "screenshot_path": snapshot.screenshot_path,
                 }
         finally:

@@ -143,6 +143,13 @@ export class DesktopController extends BaseController {
   private frameUrl = ""
   private frameBounds: GuiBounds | null = null
   private frameObservationId = ""
+  private frameMachine = ""
+  private frameWindowId = ""
+  private pendingObservationDiscards = new Map<string, {
+    machine: string
+    windowId: string
+    observationId: string
+  }>()
   private frameExpiresAt = 0
   private frameInputEnabled = false
   private frameEpoch = 0
@@ -246,11 +253,8 @@ export class DesktopController extends BaseController {
 
   override destroy(): void {
     this.invalidateActionTarget()
-    this.frameEpoch += 1
-    this.frameAbort?.abort()
-    this.frameAbort = null
-    this.cancelPendingPointerInput()
-    this.revokeFrame()
+    this.clearFrame()
+    this.flushObservationDiscards()
     super.destroy()
   }
 
@@ -455,12 +459,16 @@ export class DesktopController extends BaseController {
         || epoch !== this.frameEpoch
         || requestedMachine !== this.machine
         || windowId !== this.selectedWindowId
-      ) return
+      ) {
+        this.queueObservationDiscard(requestedMachine, windowId, observationId)
+        return
+      }
       const nextUrl = URL.createObjectURL(blob)
       try {
         await this.decodeFrame(nextUrl)
       } catch (error) {
         URL.revokeObjectURL(nextUrl)
+        this.queueObservationDiscard(requestedMachine, windowId, observationId)
         throw error
       }
       if (
@@ -472,17 +480,24 @@ export class DesktopController extends BaseController {
         || windowId !== this.selectedWindowId
       ) {
         URL.revokeObjectURL(nextUrl)
+        this.queueObservationDiscard(requestedMachine, windowId, observationId)
         return
       }
       const frameExpiresAt = observationReceivedAt + Math.max(0, observationTtlS * 1000 - 1000)
       if (frameExpiresAt <= Date.now()) {
         URL.revokeObjectURL(nextUrl)
+        this.queueObservationDiscard(requestedMachine, windowId, observationId)
         throw new Error("GUI frame observation expired during transfer; refresh the frame")
       }
       const previousUrl = this.frameUrl
+      const previousMachine = this.frameMachine
+      const previousWindowId = this.frameWindowId
+      const previousObservationId = this.frameObservationId
       this.frameUrl = nextUrl
       this.frameBounds = bounds
       this.frameObservationId = observationId
+      this.frameMachine = requestedMachine
+      this.frameWindowId = windowId
       this.frameExpiresAt = frameExpiresAt
       this.frameInputEnabled = coordinateInput
       const image = this.root.querySelector<HTMLImageElement>("[data-role=desktop-frame]")
@@ -493,6 +508,13 @@ export class DesktopController extends BaseController {
       }
       if (placeholder) placeholder.hidden = true
       if (previousUrl) URL.revokeObjectURL(previousUrl)
+      if (previousObservationId && previousObservationId !== observationId) {
+        this.queueObservationDiscard(
+          previousMachine,
+          previousWindowId,
+          previousObservationId,
+        )
+      }
       this.renderStatus()
     } catch (error) {
       if (
@@ -515,6 +537,9 @@ export class DesktopController extends BaseController {
   }
 
   private clearFrame(): void {
+    const previousMachine = this.frameMachine
+    const previousWindowId = this.frameWindowId
+    const previousObservationId = this.frameObservationId
     this.frameEpoch += 1
     this.cancelPendingPointerInput()
     this.frameAbort?.abort()
@@ -522,6 +547,8 @@ export class DesktopController extends BaseController {
     this.frameRequestKey = ""
     this.frameBounds = null
     this.frameObservationId = ""
+    this.frameMachine = ""
+    this.frameWindowId = ""
     this.frameExpiresAt = 0
     this.frameInputEnabled = false
     this.revokeFrame()
@@ -532,6 +559,11 @@ export class DesktopController extends BaseController {
       image.removeAttribute("src")
     }
     if (placeholder) placeholder.hidden = false
+    this.queueObservationDiscard(
+      previousMachine,
+      previousWindowId,
+      previousObservationId,
+    )
   }
 
   private expireFocusSensitiveFrame(now = Date.now()): boolean {
@@ -552,6 +584,45 @@ export class DesktopController extends BaseController {
     if (!this.frameUrl) return
     URL.revokeObjectURL(this.frameUrl)
     this.frameUrl = ""
+  }
+
+  private observationDiscardKey(
+    machine: string,
+    windowId: string,
+    observationId: string,
+  ): string {
+    return [machine, windowId, observationId].join("\0")
+  }
+
+  private queueObservationDiscard(
+    machine: string,
+    windowId: string,
+    observationId: string,
+  ): void {
+    if (!machine || !windowId || !observationId) return
+    this.pendingObservationDiscards.set(
+      this.observationDiscardKey(machine, windowId, observationId),
+      { machine, windowId, observationId },
+    )
+    this.flushObservationDiscards()
+  }
+
+  private flushObservationDiscards(): void {
+    if (
+      this.pendingActions !== 0
+      || this.clickTimer !== null
+      || this.wheelTimer !== null
+      || this.pointerStart !== null
+    ) return
+    const pending = [...this.pendingObservationDiscards.values()]
+    this.pendingObservationDiscards.clear()
+    for (const item of pending) {
+      void this.context.api.send("/gui/frame/discard", "POST", {
+        machine: item.machine,
+        window_id: item.windowId,
+        observation_id: item.observationId,
+      }).catch(() => undefined)
+    }
   }
 
   private pointForEvent(event: MouseEvent): Point | null {
@@ -615,6 +686,7 @@ export class DesktopController extends BaseController {
       } finally {
         this.pendingActions = Math.max(0, this.pendingActions - 1)
         this.renderInputPulse()
+        this.flushObservationDiscards()
         if (
           this.pendingActions === 0
           && this.frameDirty
@@ -712,6 +784,7 @@ export class DesktopController extends BaseController {
         observedBounds,
         observedObservationId,
       )
+      this.flushObservationDiscards()
     }, SINGLE_CLICK_DELAY_MS)
   }
 
@@ -738,7 +811,10 @@ export class DesktopController extends BaseController {
     const start = this.pointerStart
     if (!start || start.pointerId !== event.pointerId) return
     this.pointerStart = null
-    if (this.frameObservationId !== start.observationId) return
+    if (this.frameObservationId !== start.observationId) {
+      this.flushObservationDiscards()
+      return
+    }
     const end = this.pointForEvent(event)
     if (!end) return
     const distance = Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY)
@@ -795,7 +871,10 @@ export class DesktopController extends BaseController {
       this.wheelPoint = null
       this.wheelBounds = null
       this.wheelObservationId = ""
-      if (!target || !observedBounds || !observedObservationId || !delta) return
+      if (!target || !observedBounds || !observedObservationId || !delta) {
+        this.flushObservationDiscards()
+        return
+      }
       const amount = wheelScrollAmount(delta)
       if (amount) {
         this.queueAction(
@@ -804,6 +883,7 @@ export class DesktopController extends BaseController {
           observedObservationId,
         )
       }
+      this.flushObservationDiscards()
     }, 55)
   }
 

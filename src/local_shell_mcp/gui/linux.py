@@ -322,7 +322,14 @@ def _desktop_crop_box(
     if image_size == logical_size:
         left = x - origin_x
         top = y - origin_y
-        return left, top, left + width, top + height
+        right = left + width
+        bottom = top + height
+        if 0 <= left < right <= image_size[0] and 0 <= top < bottom <= image_size[1]:
+            return left, top, right, bottom
+        raise GuiUnavailableError(
+            "Captured desktop geometry does not match the monitor layout; "
+            "cannot crop the target window safely"
+        )
 
     if _monitor_for_window(bounds, monitors) is None:
         raise GuiUnavailableError("Could not map the target window to a captured monitor")
@@ -393,8 +400,18 @@ def _crop_desktop_capture(
     _validate_capture_image_header(path)
     with Image.open(path) as image:
         image.load()
-        if image.size == (int(bounds["width"]), int(bounds["height"])):
-            return
+        if image.size == (int(bounds["width"]), int(bounds["height"])) and monitors:
+            origin_x = min(int(item["x"]) for item in monitors)
+            origin_y = min(int(item["y"]) for item in monitors)
+            right = max(int(item["x"]) + int(item["width"]) for item in monitors)
+            bottom = max(int(item["y"]) + int(item["height"]) for item in monitors)
+            if (
+                int(bounds["x"]) == origin_x
+                and int(bounds["y"]) == origin_y
+                and int(bounds["width"]) == right - origin_x
+                and int(bounds["height"]) == bottom - origin_y
+            ):
+                return
         cropped = image.crop(_desktop_crop_box(bounds, monitors, image.size))
         cropped.save(path, format="PNG")
 

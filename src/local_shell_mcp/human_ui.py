@@ -1216,6 +1216,47 @@ async def api_gui_frame(request: Request) -> Response:
         return _json_error(exc)
 
 
+async def api_gui_frame_discard(request: Request) -> Response:
+    try:
+        body = await request.json()
+        machine = str(body.get("machine") or "local")
+        window_id = str(body.get("window_id") or "")
+        observation_id = str(body.get("observation_id") or "")
+        _require_ui_scopes(
+            request,
+            "shell:read",
+            "shell:execute",
+            machine=machine,
+        )
+        if machine == "local" and get_settings().disable_local:
+            raise RuntimeError("Local access is disabled; select a remote machine")
+        if not window_id:
+            raise ValueError("window_id is required")
+        if not observation_id:
+            raise ValueError("observation_id is required")
+
+        if machine == "local":
+            from .gui import get_gui_manager
+
+            result = await get_gui_manager().discard_frame_observation(
+                window_id,
+                observation_id,
+            )
+        else:
+            result = await _remote_call(
+                machine,
+                "gui_frame_discard",
+                {
+                    "window_id": window_id,
+                    "observation_id": observation_id,
+                },
+                30,
+            )
+        return _json_ok(result)
+    except Exception as exc:
+        return _json_error(exc)
+
+
 async def api_gui_action(request: Request) -> Response:
     try:
         body = await request.json()
@@ -2893,6 +2934,11 @@ def ui_routes() -> list[Any]:
         Route(UI_API_PREFIX + "/files/{action}", api_file_action, methods=["POST"]),
         Route(UI_API_PREFIX + "/gui/windows", api_gui_windows, methods=["GET"]),
         Route(UI_API_PREFIX + "/gui/frame", api_gui_frame, methods=["GET"]),
+        Route(
+            UI_API_PREFIX + "/gui/frame/discard",
+            api_gui_frame_discard,
+            methods=["POST"],
+        ),
         Route(UI_API_PREFIX + "/gui/action", api_gui_action, methods=["POST"]),
         Route(UI_API_PREFIX + "/terminals", api_terminals, methods=["GET"]),
         Route(UI_API_PREFIX + "/terminals/read", api_terminal_read, methods=["GET"]),

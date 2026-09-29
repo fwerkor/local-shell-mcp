@@ -1183,6 +1183,7 @@ def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
 
     _configure(tmp_path, monkeypatch)
     calls = []
+    discard_calls = []
     scope_calls = []
 
     def require_scopes(request, *scopes, machine=None):
@@ -1205,6 +1206,10 @@ def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
                 ],
                 "capabilities": {"coordinate_input": True},
             }
+
+        async def discard_frame_observation(self, window_id, observation_id):
+            discard_calls.append((window_id, observation_id))
+            return {"observation_id": observation_id, "discarded": True}
 
         async def human_act(self, window_id, observation_id, bounds, actions):
             calls.append((window_id, observation_id, bounds, actions))
@@ -1262,6 +1267,23 @@ def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
     assert frame.headers["x-lsm-gui-coordinate-input"] == "1"
     assert (
         "/api/ui/gui/frame",
+        ("shell:read", "shell:execute"),
+        "local",
+    ) in scope_calls
+
+    discarded = client.post(
+        "/api/ui/gui/frame/discard",
+        json={
+            "machine": "local",
+            "window_id": "window:1",
+            "observation_id": "obs-1",
+        },
+    )
+    assert discarded.status_code == 200
+    assert discarded.json()["data"]["discarded"] is True
+    assert discard_calls == [("window:1", "obs-1")]
+    assert (
+        "/api/ui/gui/frame/discard",
         ("shell:read", "shell:execute"),
         "local",
     ) in scope_calls
@@ -1475,6 +1497,16 @@ def test_webui_gui_remote_human_action_dispatch(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["data"]["human_control"] is True
+
+    discarded = client.post(
+        "/api/ui/gui/frame/discard",
+        json={
+            "machine": "desktop-node",
+            "window_id": "window:1",
+            "observation_id": "remote-obs",
+        },
+    )
+    assert discarded.status_code == 200
     assert calls == [
         (
             "desktop-node",
@@ -1486,5 +1518,14 @@ def test_webui_gui_remote_human_action_dispatch(tmp_path, monkeypatch):
                 "actions": [{"type": "click", "x": 10, "y": 11}],
             },
             210,
-        )
+        ),
+        (
+            "desktop-node",
+            "gui_frame_discard",
+            {
+                "window_id": "window:1",
+                "observation_id": "remote-obs",
+            },
+            30,
+        ),
     ]

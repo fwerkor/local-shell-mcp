@@ -553,8 +553,8 @@ def test_tool_helpers_audit_serialization_timeout_and_tail(tmp_path, monkeypatch
     )
     assert gui_call["actions"][0] == {"type": "type", "text": "<redacted>"}
     assert gui_call["actions"][1]["text"] == "<redacted>"
+    assert gui_call["actions"][2]["keys"] == "<redacted>"
     assert gui_call["actions"][1]["element_id"] == "e1"
-    assert gui_call["actions"][2]["keys"] == ["CTRL", "A"]
 
     gui_state_result = tools.CallToolResult(
         content=[

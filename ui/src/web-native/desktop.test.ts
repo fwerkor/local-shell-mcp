@@ -610,10 +610,14 @@ describe("Native WebUI desktop queued input", () => {
 
 describe("Native WebUI desktop frame replacement", () => {
   test("publishes new geometry only after the replacement image decodes", async () => {
+    const sends: Array<{ url: string; method: string; body: unknown }> = []
     const context: NativePageContext = {
       api: {
         get: async () => undefined as never,
-        send: async () => undefined as never,
+        send: async (url: string, method: "POST" | "PUT", body: Record<string, unknown>) => {
+          sends.push({ url, method, body })
+          return {} as never
+        },
       },
       uiPath: "/ui",
       accessToken: () => null,
@@ -632,6 +636,8 @@ describe("Native WebUI desktop frame replacement", () => {
     controller.selectedWindowId = "window:1"
     controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
     controller.frameObservationId = "obs-old"
+    controller.frameMachine = "local"
+    controller.frameWindowId = "window:1"
     controller.frameInputEnabled = true
     controller.frameUrl = "blob:old"
     controller.frameRequestKey = "local\0window:1"
@@ -672,6 +678,15 @@ describe("Native WebUI desktop frame replacement", () => {
       expect(controller.frameBounds).toEqual({ x: 0, y: 0, width: 200, height: 150 })
       expect(controller.frameObservationId).toBe("obs-new")
       expect(visibleImage.src).toBe("blob:new")
+      expect(sends).toEqual([{
+        url: "/gui/frame/discard",
+        method: "POST",
+        body: {
+          machine: "local",
+          window_id: "window:1",
+          observation_id: "obs-old",
+        },
+      }])
     } finally {
       globalThis.fetch = originalFetch
       URL.createObjectURL = originalCreateObjectURL
@@ -797,6 +812,76 @@ describe("Native WebUI desktop frame replacement", () => {
       URL.createObjectURL = originalCreateObjectURL
       URL.revokeObjectURL = originalRevokeObjectURL
     }
+  })
+  test("discards the displayed observation when the controller is destroyed", async () => {
+    const sends: unknown[] = []
+    const context: NativePageContext = {
+      api: {
+        get: async () => undefined as never,
+        send: async (url: string, _method: string, body?: unknown) => {
+          sends.push({ url, body })
+          return {} as never
+        },
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller: any = new DesktopController(context)
+    controller.root = { querySelector: () => null }
+    controller.frameObservationId = "obs-current"
+    controller.frameMachine = "node"
+    controller.frameWindowId = "window:9"
+    controller.frameBounds = { x: 0, y: 0, width: 10, height: 10 }
+
+    controller.destroy()
+    await Promise.resolve()
+
+    expect(sends).toEqual([{
+      url: "/gui/frame/discard",
+      body: {
+        machine: "node",
+        window_id: "window:9",
+        observation_id: "obs-current",
+      },
+    }])
+  })
+
+  test("defers observation disposal while input is still using old tokens", async () => {
+    const sends: unknown[] = []
+    const context: NativePageContext = {
+      api: {
+        get: async () => undefined as never,
+        send: async (url: string, _method: string, body?: unknown) => {
+          sends.push({ url, body })
+          return {} as never
+        },
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller: any = new DesktopController(context)
+    controller.pendingActions = 1
+    controller.queueObservationDiscard("node", "window:1", "obs-old")
+    await Promise.resolve()
+    expect(sends).toEqual([])
+
+    controller.pendingActions = 0
+    controller.flushObservationDiscards()
+    await Promise.resolve()
+    expect(sends).toEqual([{
+      url: "/gui/frame/discard",
+      body: {
+        machine: "node",
+        window_id: "window:1",
+        observation_id: "obs-old",
+      },
+    }])
   })
 })
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import ctypes
 import hashlib
 import json
@@ -44,6 +45,7 @@ def _automation():  # noqa: ANN202
 
 
 _UIA_THREAD_STATE = threading.local()
+_UIA_OPERATION_TIMEOUT_S = 30.0
 
 
 def _initialize_uia_thread() -> None:
@@ -318,8 +320,22 @@ def _control_runtime_id(control: Any) -> str:
     except Exception:  # noqa: BLE001 - third-party UIA providers can reject runtime IDs.
         value = None
     if isinstance(value, (list, tuple)):
-        return ",".join(str(int(part)) for part in value)
-    return str(value or "")
+        max_parts = max(1, GUI_MAX_ELEMENT_TEXT_BYTES // 2)
+        if len(value) > max_parts:
+            raise ValueError("UIA runtime ID exceeds the safe identity budget")
+        rendered: list[str] = []
+        used_bytes = 0
+        for part in value:
+            item = str(int(part))
+            used_bytes += len(item.encode("utf-8")) + (1 if rendered else 0)
+            if used_bytes > GUI_MAX_ELEMENT_TEXT_BYTES:
+                raise ValueError("UIA runtime ID exceeds the safe identity budget")
+            rendered.append(item)
+        return ",".join(rendered)
+    rendered = str(value or "")
+    if len(rendered.encode("utf-8")) > GUI_MAX_ELEMENT_TEXT_BYTES:
+        raise ValueError("UIA runtime ID exceeds the safe identity budget")
+    return rendered
 
 
 def _window_fingerprint(control: Any) -> str:
@@ -503,18 +519,48 @@ class WindowsGuiBackend:
     name = "windows-uia"
 
     def __init__(self) -> None:
-        self._executor = ThreadPoolExecutor(
+        self._executor = self._new_executor()
+        self._executor_lock = asyncio.Lock()
+
+    @staticmethod
+    def _new_executor() -> ThreadPoolExecutor:
+        return ThreadPoolExecutor(
             max_workers=1,
             thread_name_prefix="lsm-windows-uia",
             initializer=_initialize_uia_thread,
         )
 
     async def _run_uia(self, func: Any, /, *args: Any, **kwargs: Any) -> Any:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            self._executor,
-            partial(func, *args, **kwargs),
-        )
+        async with self._executor_lock:
+            loop = asyncio.get_running_loop()
+            executor = self._executor
+            future = loop.run_in_executor(
+                executor,
+                partial(func, *args, **kwargs),
+            )
+
+            async def wait_for_native_call() -> Any:
+                try:
+                    return await asyncio.wait_for(
+                        asyncio.shield(future),
+                        timeout=_UIA_OPERATION_TIMEOUT_S,
+                    )
+                except TimeoutError as exc:
+                    if self._executor is executor:
+                        self._executor = self._new_executor()
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    raise GuiUnavailableError(
+                        "Windows UI Automation provider timed out; "
+                        "the native UIA worker was reset"
+                    ) from exc
+
+            waiter = asyncio.create_task(wait_for_native_call())
+            try:
+                return await asyncio.shield(waiter)
+            except BaseException:
+                with contextlib.suppress(BaseException):
+                    await asyncio.shield(waiter)
+                raise
 
     def _find_window(
         self,
@@ -711,11 +757,16 @@ class WindowsGuiBackend:
                     break
                 elements.append(element)
                 used_bytes += extra
-                locators[element_id] = {
-                    "path": list(path),
-                    "fingerprint": _element_fingerprint(control),
-                    "_uia_control": control,
-                }
+                try:
+                    fingerprint = _element_fingerprint(control)
+                except (TypeError, ValueError):
+                    fingerprint = ""
+                if fingerprint:
+                    locators[element_id] = {
+                        "path": list(path),
+                        "fingerprint": fingerprint,
+                        "_uia_control": control,
+                    }
                 remaining = max_elements - len(elements) - len(queue)
                 if depth >= max_depth or remaining <= 0:
                     continue
