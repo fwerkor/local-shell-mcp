@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import shutil
 import uuid
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -46,6 +47,58 @@ def _unwrap(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_unwrap(item) for item in value]
     return value
+
+
+async def _portal_introspect(
+    bus: Any,
+    bus_name: str,
+    path: str,
+    *,
+    interfaces: set[str],
+    operation: str,
+) -> Any:
+    from dbus_next import Message, MessageType
+    from dbus_next.errors import InvalidMemberNameError
+    from dbus_next.introspection import Node
+
+    try:
+        return await _portal_lifecycle_wait(
+            bus.introspect(bus_name, path),
+            operation,
+        )
+    except InvalidMemberNameError:
+        pass
+
+    reply = await _portal_lifecycle_wait(
+        bus.call(
+            Message(
+                destination=bus_name,
+                path=path,
+                interface="org.freedesktop.DBus.Introspectable",
+                member="Introspect",
+            )
+        ),
+        operation,
+    )
+    if reply is None or reply.message_type == MessageType.ERROR:
+        detail = ""
+        if reply is not None:
+            detail = str(getattr(reply, "error_name", "") or "")
+        raise GuiUnavailableError(
+            f"Desktop portal introspection failed{f': {detail}' if detail else ''}"
+        )
+    body = list(getattr(reply, "body", []) or [])
+    if not body or not isinstance(body[0], str):
+        raise GuiUnavailableError("Desktop portal returned invalid introspection data")
+
+    try:
+        root = ET.fromstring(body[0])
+    except ET.ParseError as parse_exc:
+        raise GuiUnavailableError("Desktop portal returned invalid introspection XML") from parse_exc
+    for child in list(root):
+        if child.tag == "interface" and child.attrib.get("name") not in interfaces:
+            root.remove(child)
+    return Node.parse(ET.tostring(root, encoding="unicode"))
 
 
 _KEYSYMS = {
@@ -195,12 +248,15 @@ class PortalDesktop:
                 candidate.connect(),
                 "connecting to D-Bus",
             )
-            intro = await _portal_lifecycle_wait(
-                connected.introspect(
-                    "org.freedesktop.portal.Desktop",
-                    "/org/freedesktop/portal/desktop",
-                ),
-                "introspecting the desktop portal",
+            intro = await _portal_introspect(
+                connected,
+                "org.freedesktop.portal.Desktop",
+                "/org/freedesktop/portal/desktop",
+                interfaces={
+                    "org.freedesktop.portal.RemoteDesktop",
+                    "org.freedesktop.portal.ScreenCast",
+                },
+                operation="introspecting the desktop portal",
             )
             obj = connected.get_proxy_object(
                 "org.freedesktop.portal.Desktop",
@@ -270,12 +326,12 @@ class PortalDesktop:
     async def _observe_session_closed(self, session: str) -> None:
         if self._bus is None:
             return
-        intro = await _portal_lifecycle_wait(
-            self._bus.introspect(
-                "org.freedesktop.portal.Desktop",
-                session,
-            ),
-            "introspecting the portal session",
+        intro = await _portal_introspect(
+            self._bus,
+            "org.freedesktop.portal.Desktop",
+            session,
+            interfaces={"org.freedesktop.portal.Session"},
+            operation="introspecting the portal session",
         )
         obj = self._bus.get_proxy_object(
             "org.freedesktop.portal.Desktop",
@@ -295,12 +351,12 @@ class PortalDesktop:
     async def _close_session(self, session: str) -> None:
         if self._bus is None:
             return
-        intro = await _portal_lifecycle_wait(
-            self._bus.introspect(
-                "org.freedesktop.portal.Desktop",
-                session,
-            ),
-            "introspecting the portal session",
+        intro = await _portal_introspect(
+            self._bus,
+            "org.freedesktop.portal.Desktop",
+            session,
+            interfaces={"org.freedesktop.portal.Session"},
+            operation="introspecting the portal session",
         )
         obj = self._bus.get_proxy_object(
             "org.freedesktop.portal.Desktop",
@@ -619,12 +675,12 @@ async def portal_screenshot(destination: Path, env: dict[str, str]) -> None:
             candidate.disconnect()
         raise
     try:
-        intro = await _portal_lifecycle_wait(
-            bus.introspect(
-                "org.freedesktop.portal.Desktop",
-                "/org/freedesktop/portal/desktop",
-            ),
-            "introspecting the screenshot portal",
+        intro = await _portal_introspect(
+            bus,
+            "org.freedesktop.portal.Desktop",
+            "/org/freedesktop/portal/desktop",
+            interfaces={"org.freedesktop.portal.Screenshot"},
+            operation="introspecting the screenshot portal",
         )
         obj = bus.get_proxy_object(
             "org.freedesktop.portal.Desktop",

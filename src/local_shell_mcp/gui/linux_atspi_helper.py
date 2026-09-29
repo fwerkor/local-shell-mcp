@@ -633,6 +633,10 @@ def _semantic_action(payload: dict[str, Any]) -> dict[str, Any]:
     kind = str(action["type"])
 
     if kind == "focus":
+        active_state = getattr(Atspi.StateType, "ACTIVE", None)
+        if obj is window and active_state is not None and _state(window, active_state):
+            _assert_fresh(payload)
+            return {"semantic": True, "already_active": True}
         component = obj.get_component_iface()
         if component is None:
             raise RuntimeError("AT-SPI target cannot be focused")

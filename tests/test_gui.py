@@ -4145,6 +4145,34 @@ def test_linux_locator_center_must_be_usable_and_inside_window(monkeypatch):
         )
 
 
+def test_atspi_window_focus_accepts_already_active_nonfocusable_window(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    class StateSet:
+        def contains(self, state):
+            return state == "active"
+
+    class Window:
+        def get_state_set(self):
+            return StateSet()
+
+        def get_component_iface(self):
+            pytest.fail("already-active top-level window must not require grab_focus")
+
+    window = Window()
+    monkeypatch.setattr(helper, "_resolve_window", lambda _window_id: (object(), window, 0))
+    helper.Atspi = SimpleNamespace(StateType=SimpleNamespace(ACTIVE="active"))
+
+    result = helper._semantic_action(
+        {
+            "window_id": "atspi:1:sig",
+            "locator": [],
+            "action": {"type": "focus"},
+        }
+    )
+    assert result == {"semantic": True, "already_active": True}
+
+
 def test_atspi_raw_keyboard_focuses_and_revalidates_before_injection(monkeypatch):
     from local_shell_mcp.gui import linux_atspi_helper as helper
 
@@ -5611,6 +5639,52 @@ async def test_portal_input_timeout_invalidates_cached_connection(monkeypatch):
     assert portal._session is None
     assert portal._session_iface is None
     assert portal._streams == []
+
+
+@pytest.mark.asyncio
+async def test_portal_introspection_filters_unrelated_invalid_member_names():
+    from dbus_next import MessageType
+    from dbus_next.errors import InvalidMemberNameError
+
+    import local_shell_mcp.gui.linux_portal as portal_module
+
+    xml = """<node>
+      <interface name="org.freedesktop.portal.PowerProfileMonitor">
+        <property name="power-saver-enabled" type="b" access="read"/>
+      </interface>
+      <interface name="org.freedesktop.portal.Screenshot">
+        <method name="Screenshot">
+          <arg type="s" direction="in"/>
+          <arg type="a{sv}" direction="in"/>
+          <arg type="o" direction="out"/>
+        </method>
+      </interface>
+    </node>"""
+
+    class Reply:
+        message_type = MessageType.METHOD_RETURN
+        body = [xml]
+        error_name = None
+
+    class Bus:
+        async def introspect(self, _bus_name, _path):
+            raise InvalidMemberNameError("power-saver-enabled")
+
+        async def call(self, message):
+            assert message.interface == "org.freedesktop.DBus.Introspectable"
+            assert message.member == "Introspect"
+            return Reply()
+
+    node = await portal_module._portal_introspect(
+        Bus(),
+        "org.freedesktop.portal.Desktop",
+        "/org/freedesktop/portal/desktop",
+        interfaces={"org.freedesktop.portal.Screenshot"},
+        operation="introspecting the screenshot portal",
+    )
+    assert [interface.name for interface in node.interfaces] == [
+        "org.freedesktop.portal.Screenshot"
+    ]
 
 
 @pytest.mark.asyncio
