@@ -199,6 +199,7 @@ The public MCP surface includes:
 - Transfer: `remote_transfer` for files or directories across controller and worker endpoints.
 - Dynamic MCP: `mcp_manage`, `mcp_tool_search`, `mcp_tool_inspect`, and `mcp_tool_call`. External tools are discovered progressively and never expand LSM's own `tools/list` surface.
 - Browser: persistent high-level `browser_session`, `browser_snapshot`, and `browser_act`; `browser_run_script` is the low-level Playwright escape hatch.
+- Optional ChatGPT Web dispatch: `chat_dispatch` durably queues idempotent prompts through a configured [LocalShell Web Supervisor](https://github.com/DongYaoZe/localshell-web-supervisor) checkout, supervises a bounded page pool, and never closes borrowed user pages.
 - File links: `link_create`, `link_list`, `link_revoke`.
 - Remote workers: `remote_manage` with `invite`, `list`, `rename`, and `revoke` actions; normal execution tools accept optional `machine`.
 - Agent Skills: `skill_list`, `skill_load`, `skill_read`.
@@ -226,6 +227,7 @@ Default protections include:
 - Default command/path denylists for host-control fragments.
 - Shell subprocess environment filtering for service-side secrets.
 - Dynamic stdio MCP servers inherit only a minimal OS environment plus explicitly configured per-server variables; configured environment/header values are stored in a mode-`0600` state file and redacted from tool results and Audit arguments.
+- Chat dispatch prompts are redacted from Audit arguments but are stored in the configured LWS durable queue; protect that local state directory as sensitive.
 - Audit logs at `/workspace/.local-shell-mcp/audit.jsonl`.
 - Secret scanning helpers before commits and pushes.
 - Tokenized file links with TTL/download limits and revocation.
@@ -257,6 +259,11 @@ Important options:
 | `LOCAL_SHELL_MCP_UI_ENABLED` | Mount or disable the shared OpenTUI/WebUI human interface. |
 | `LOCAL_SHELL_MCP_UI_PATH` | WebUI mount path on the same service; default `/ui`. |
 | `LOCAL_SHELL_MCP_UI_WALLPAPER` | Select `bing`, `aurora`, or `none` for the OpenTUI browser console background. |
+| `LOCAL_SHELL_MCP_CHAT_DISPATCH_LWS_REPO` | Optional local LWS checkout used by the open-world `chat_dispatch` tool. Enqueues require an idempotency key; new conversations also require a stable conversation key. |
+| `LOCAL_SHELL_MCP_CHAT_DISPATCH_MAX_WINDOWS` | Maximum dispatcher-owned ChatGPT windows, from 1 to 16; default `4`. |
+| `LOCAL_SHELL_MCP_CHAT_DISPATCH_IDLE_CLOSE_S` | Idle grace before an exact dispatcher-owned page is closed; default `90` seconds. |
+| `LOCAL_SHELL_MCP_CHAT_DISPATCH_WATCHDOG_ENABLED` | Start a hidden detached recovery watchdog after an enqueue; default `true`. |
+| `LOCAL_SHELL_MCP_CHAT_DISPATCH_WATCHDOG_INTERVAL_S` | Resident watchdog reconciliation interval; default `15` seconds. |
 | `LOCAL_SHELL_MCP_SHELL_ENV_BLOCKLIST` | Environment variables removed from spawned shell processes. |
 | `LOCAL_SHELL_MCP_FILE_DOWNLOAD_ENABLED` | Enable tokenized file download links. |
 
