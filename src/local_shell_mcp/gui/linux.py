@@ -7,7 +7,9 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -241,6 +243,139 @@ def _window_center(bounds: dict[str, Any]) -> tuple[int, int]:
         int(bounds["x"]) + int(bounds["width"]) // 2,
         int(bounds["y"]) + int(bounds["height"]) // 2,
     )
+
+
+def _is_kde_wayland(env: dict[str, str]) -> bool:
+    desktop = str(env.get("XDG_CURRENT_DESKTOP") or "").upper()
+    return _session_type(env) == "wayland" and "KDE" in desktop
+
+
+def _focus_kde_wayland_window_sync(
+    window: dict[str, Any],
+    env: dict[str, str],
+) -> None:
+    qdbus = shutil.which("qdbus6") or shutil.which("qdbus")
+    if not qdbus:
+        raise GuiUnavailableError(
+            "KDE Wayland window activation requires qdbus6 or qdbus"
+        )
+
+    bounds = window.get("bounds")
+    normalized_bounds = _bounds_tuple(bounds)
+    if normalized_bounds is None:
+        raise GuiUnavailableError("KDE Wayland target window has invalid bounds")
+    expected_x, expected_y, expected_width, expected_height = normalized_bounds
+    expected_pid = int(window.get("pid") or 0)
+    if expected_pid <= 0:
+        raise GuiUnavailableError("KDE Wayland target window has no process identity")
+
+    script_name = f"lsm-focus-{uuid.uuid4().hex}"
+    script = f"""var expectedPid = {expected_pid};
+var expected = {{
+    x: {expected_x},
+    y: {expected_y},
+    width: {expected_width},
+    height: {expected_height}
+}};
+var candidates = [];
+var windows = workspace.windowList();
+for (var i = 0; i < windows.length; ++i) {{
+    var w = windows[i];
+    var g = w.frameGeometry;
+    if (Number(w.pid) !== expectedPid) {{
+        continue;
+    }}
+    if (
+        Math.abs(g.x - expected.x) <= 3 &&
+        Math.abs(g.y - expected.y) <= 3 &&
+        Math.abs(g.width - expected.width) <= 3 &&
+        Math.abs(g.height - expected.height) <= 3
+    ) {{
+        candidates.push(w);
+    }}
+}}
+if (candidates.length === 1) {{
+    workspace.activeWindow = candidates[0];
+}}
+"""
+    fd, raw_path = tempfile.mkstemp(prefix="lsm-kwin-focus-", suffix=".js")
+    path = Path(raw_path)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(script)
+        fd = -1
+
+        load = subprocess.run(
+            [
+                qdbus,
+                "org.kde.KWin",
+                "/Scripting",
+                "org.kde.kwin.Scripting.loadScript",
+                str(path),
+                script_name,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            env=env,
+        )
+        if load.returncode != 0:
+            detail = (load.stderr or load.stdout or "").strip()
+            raise GuiUnavailableError(
+                f"KDE Wayland window activation could not load KWin script: "
+                f"{detail or load.returncode}"
+            )
+        try:
+            script_id = int(load.stdout.strip())
+        except ValueError:
+            script_id = -1
+        if script_id < 0:
+            raise GuiUnavailableError("KDE Wayland window activation script was rejected")
+
+        started = subprocess.run(
+            [
+                qdbus,
+                "org.kde.KWin",
+                "/Scripting",
+                "org.kde.kwin.Scripting.start",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            env=env,
+        )
+        if started.returncode != 0:
+            detail = (started.stderr or started.stdout or "").strip()
+            raise GuiUnavailableError(
+                f"KDE Wayland window activation failed to start KWin script: "
+                f"{detail or started.returncode}"
+            )
+        time.sleep(0.1)
+    except subprocess.TimeoutExpired as exc:
+        raise GuiUnavailableError("KDE Wayland window activation timed out") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            subprocess.run(
+                [
+                    qdbus,
+                    "org.kde.KWin",
+                    "/Scripting",
+                    "org.kde.kwin.Scripting.unloadScript",
+                    script_name,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+                env=env,
+            )
+        with contextlib.suppress(OSError):
+            path.unlink(missing_ok=True)
 
 
 def _monitor_for_window(
@@ -1021,16 +1156,35 @@ class LinuxGuiBackend:
         focus_action: dict[str, Any] = {"type": "focus"}
         if deadline is not None:
             focus_action["_observation_deadline"] = deadline
-        await asyncio.to_thread(
-            self._helper,
-            {
-                "command": "semantic_action",
-                "window_id": window["id"],
-                "locator": [],
-                "action": focus_action,
-            },
-            env,
-        )
+        payload = {
+            "command": "semantic_action",
+            "window_id": window["id"],
+            "locator": [],
+            "action": focus_action,
+        }
+        try:
+            await asyncio.to_thread(self._helper, payload, env)
+            return
+        except GuiUnavailableError as exc:
+            if (
+                "AT-SPI target cannot be focused" not in str(exc)
+                or not _is_kde_wayland(env)
+            ):
+                raise
+
+        _assert_action_fresh(focus_action, stale_hint="call gui_state again")
+        await asyncio.to_thread(_focus_kde_wayland_window_sync, window, env)
+        _assert_action_fresh(focus_action, stale_hint="call gui_state again")
+        try:
+            verified = await asyncio.to_thread(self._helper, payload, env)
+        except GuiUnavailableError as exc:
+            raise GuiUnavailableError(
+                "KDE Wayland window activation did not make the AT-SPI target active"
+            ) from exc
+        if not bool(verified.get("already_active")):
+            raise GuiUnavailableError(
+                "KDE Wayland window activation could not verify the target window"
+            )
 
     async def focus_window(self, window: dict[str, Any]) -> None:
         env = await self._ensure_env()

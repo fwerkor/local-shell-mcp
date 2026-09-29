@@ -2998,6 +2998,30 @@ def _delete_gui_temp_file(path: str) -> None:
         release_temp_file_lease(candidate)
 
 
+def _remote_inline_gui_image(data: dict[str, Any], screenshot_path: str) -> ImageFile | None:
+    encoded = data.pop("screenshot_inline_b64", None)
+    raw_size = data.pop("screenshot_inline_size", None)
+    if encoded is None:
+        return None
+    if not isinstance(encoded, str):
+        raise RuntimeError("Remote GUI screenshot inline payload is invalid")
+    try:
+        payload = base64.b64decode(encoded, validate=True)
+    except Exception as exc:
+        raise RuntimeError("Remote GUI screenshot inline payload is invalid") from exc
+    assert_view_image_size(len(payload))
+    if raw_size is not None and int(raw_size) != len(payload):
+        raise RuntimeError("Remote GUI screenshot inline size does not match payload")
+    image_format, mime_type = detect_image_type(payload[:16])
+    return ImageFile(
+        path=screenshot_path,
+        data=payload,
+        format=image_format,
+        mime_type=mime_type,
+        size=len(payload),
+    )
+
+
 async def _gui_frame_data(
     window_id: str,
     machine: str | None,
@@ -3048,15 +3072,17 @@ async def _gui_frame_data(
                     observation_id,
                 )
             )
-            local_path = await asyncio.to_thread(_controller_gui_staging_path)
-            try:
-                await _copy_remote_gui_temp_to_local(
-                    machine, screenshot_path, local_path
-                )
-                image = await asyncio.to_thread(read_image, local_path)
-            finally:
-                with suppress(Exception):
-                    await asyncio.to_thread(delete_path, local_path, False)
+            image = _remote_inline_gui_image(data, screenshot_path)
+            if image is None:
+                local_path = await asyncio.to_thread(_controller_gui_staging_path)
+                try:
+                    await _copy_remote_gui_temp_to_local(
+                        machine, screenshot_path, local_path
+                    )
+                    image = await asyncio.to_thread(read_image, local_path)
+                finally:
+                    with suppress(Exception):
+                        await asyncio.to_thread(delete_path, local_path, False)
             refreshed = await _refresh_remote_gui_frame_once(
                 machine,
                 window_id,
@@ -3276,15 +3302,17 @@ async def _gui_state_result(
                 keepalive = asyncio.create_task(
                     _refresh_remote_gui_state_lease(machine, window_id, state_id)
                 )
-                local_path = await asyncio.to_thread(_controller_gui_staging_path)
-                try:
-                    await _copy_remote_gui_temp_to_local(
-                        machine, screenshot_path, local_path
-                    )
-                    image = await asyncio.to_thread(read_image, local_path)
-                finally:
-                    with suppress(Exception):
-                        await asyncio.to_thread(delete_path, local_path, False)
+                image = _remote_inline_gui_image(data, screenshot_path)
+                if image is None:
+                    local_path = await asyncio.to_thread(_controller_gui_staging_path)
+                    try:
+                        await _copy_remote_gui_temp_to_local(
+                            machine, screenshot_path, local_path
+                        )
+                        image = await asyncio.to_thread(read_image, local_path)
+                    finally:
+                        with suppress(Exception):
+                            await asyncio.to_thread(delete_path, local_path, False)
                 try:
                     await _remote_transfer_data(
                         machine,
@@ -3319,6 +3347,8 @@ async def _gui_state_result(
 
         result_data = dict(data)
         result_data.pop("screenshot_path", None)
+        result_data.pop("screenshot_inline_b64", None)
+        result_data.pop("screenshot_inline_size", None)
         result = _gui_state_call_result(result_data, machine, image)
         delivered = True
         return result

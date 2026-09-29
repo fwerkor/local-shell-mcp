@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import contextlib
 import hashlib
 import importlib.metadata as importlib_metadata
@@ -1622,6 +1623,68 @@ def _worker_gui_temp_stat(path: str, sha256: bool = False) -> dict[str, Any]:
     return result
 
 
+def _optimize_gui_temp_for_relay(path: str) -> dict[str, Any]:
+    """Lossily compress a remote GUI screenshot in-place for low-latency relay."""
+    try:
+        source = _worker_gui_temp_path(path, must_exist=True)
+        original_size = int(source.stat().st_size)
+    except Exception:
+        return {"optimized": False, "bytes": 0, "format": "original"}
+    if original_size < 128 * 1024:
+        return {"optimized": False, "bytes": original_size, "format": "original"}
+
+    temporary = source.with_name(f".{source.name}.{uuid.uuid4().hex}.relay")
+    try:
+        from PIL import Image, features
+
+        with Image.open(source) as opened:
+            opened.load()
+            frame = opened.convert("RGB")
+            if features.check("webp"):
+                image_format = "webp"
+                frame.save(temporary, format="WEBP", quality=78, method=4)
+            else:
+                image_format = "jpeg"
+                frame.save(temporary, format="JPEG", quality=78, optimize=True)
+        temporary.chmod(0o600)
+        optimized_size = int(temporary.stat().st_size)
+        if optimized_size <= 0 or optimized_size >= original_size:
+            return {"optimized": False, "bytes": original_size, "format": "original"}
+        os.replace(temporary, source)
+        return {
+            "optimized": True,
+            "bytes": optimized_size,
+            "original_bytes": original_size,
+            "format": image_format,
+        }
+    except Exception:
+        return {"optimized": False, "bytes": original_size, "format": "original"}
+    finally:
+        with contextlib.suppress(OSError):
+            temporary.unlink(missing_ok=True)
+
+
+_GUI_INLINE_RELAY_MAX_BYTES = 256 * 1024
+
+
+def _inline_gui_temp_for_relay(path: str) -> dict[str, Any] | None:
+    """Return a bounded compressed GUI screenshot inline for low-latency relay."""
+    try:
+        source = _worker_gui_temp_path(path, must_exist=True)
+        size = int(source.stat().st_size)
+    except Exception:
+        return None
+    if size <= 0 or size > _GUI_INLINE_RELAY_MAX_BYTES:
+        return None
+    payload = source.read_bytes()
+    if len(payload) != size:
+        return None
+    return {
+        "screenshot_inline_b64": base64.b64encode(payload).decode("ascii"),
+        "screenshot_inline_size": size,
+    }
+
+
 def _worker_gui_temp_delete(path: str) -> dict[str, Any]:
     source = _worker_gui_temp_path(path, must_exist=False)
     try:
@@ -2582,15 +2645,29 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "gui_list":
         return await manager.list_windows()
     if tool == "gui_state":
-        return await manager.snapshot(
+        result = await manager.snapshot(
             args["window_id"],
             screenshot=args.get("screenshot", True),
             include_elements=args.get("include_elements", True),
             max_elements=args.get("max_elements", 300),
             max_depth=args.get("max_depth", 12),
         )
+        screenshot_path = str(result.get("screenshot_path") or "")
+        if screenshot_path:
+            await asyncio.to_thread(_optimize_gui_temp_for_relay, screenshot_path)
+            inline = await asyncio.to_thread(_inline_gui_temp_for_relay, screenshot_path)
+            if inline is not None:
+                result.update(inline)
+        return result
     if tool == "gui_frame":
-        return await manager.frame(args["window_id"])
+        result = await manager.frame(args["window_id"])
+        screenshot_path = str(result.get("screenshot_path") or "")
+        if screenshot_path:
+            await asyncio.to_thread(_optimize_gui_temp_for_relay, screenshot_path)
+            inline = await asyncio.to_thread(_inline_gui_temp_for_relay, screenshot_path)
+            if inline is not None:
+                result.update(inline)
+        return result
     if tool == "gui_human_action":
         return await manager.human_act(
             args["window_id"],

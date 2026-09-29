@@ -1049,6 +1049,68 @@ async def test_gui_state_remote_cleanup_failure_is_retried(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_gui_state_remote_inline_screenshot_skips_secondary_transfer(tmp_path, monkeypatch):
+    import base64
+
+    import local_shell_mcp.tools as tools
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "true")
+    tools.get_settings.cache_clear()
+
+    image_path = tmp_path / "inline.webp"
+    Image.new("RGB", (8, 6), "white").save(image_path, "WEBP", quality=75)
+    payload = image_path.read_bytes()
+    calls = []
+
+    async def remote_worker(_machine, tool, _args, timeout_s=None):
+        del timeout_s
+        calls.append(tool)
+        if tool == "gui_state":
+            return {
+                "backend": "remote",
+                "state_id": "inline-state",
+                "state_ttl_s": 30,
+                "window": {"id": "w", "bounds": {"x": 0, "y": 0, "width": 8, "height": 6}},
+                "elements": [],
+                "capabilities": {},
+                "screenshot_path": ".local-shell-mcp/tmp/gui-" + "d" * 32 + ".png",
+                "screenshot_inline_b64": base64.b64encode(payload).decode("ascii"),
+                "screenshot_inline_size": len(payload),
+            }
+        if tool == "gui_state_refresh":
+            return {"state_id": "inline-state", "state_ttl_s": 29}
+        raise AssertionError(f"unexpected worker tool: {tool}")
+
+    async def remote_transfer(_machine, tool, _args, timeout_s=None):
+        del timeout_s
+        assert tool == "transfer_gui_temp_delete"
+        return {"deleted": True}
+
+    async def should_not_copy(*_args, **_kwargs):
+        raise AssertionError("inline GUI image must not use secondary file transfer")
+
+    monkeypatch.setattr(tools, "_remote_worker_data", remote_worker)
+    monkeypatch.setattr(tools, "_remote_transfer_data", remote_transfer)
+    monkeypatch.setattr(tools, "_copy_remote_gui_temp_to_local", should_not_copy)
+
+    result = await tools._gui_state_result(
+        "w",
+        screenshot=True,
+        include_elements=False,
+        max_elements=1,
+        max_depth=1,
+        machine="node",
+    )
+
+    assert result.isError is False
+    assert result.structuredContent["screenshot"] is True
+    assert result.structuredContent["mime_type"] == "image/webp"
+    assert "screenshot_inline_b64" not in result.structuredContent
+    assert calls == ["gui_state", "gui_state_refresh", "gui_state_refresh"]
+
+
+@pytest.mark.asyncio
 async def test_gui_state_transient_keepalive_failure_uses_final_refresh(
     tmp_path,
     monkeypatch,
@@ -1517,6 +1579,68 @@ async def test_gui_frame_keepalive_failure_does_not_skip_remote_cleanup(
             30,
         )
     ]
+
+
+def test_remote_gui_relay_optimizes_large_screenshot_in_place(tmp_path, monkeypatch):
+    from PIL import Image
+
+    import local_shell_mcp.remote as remote
+
+    shot = tmp_path / ("gui-" + "a" * 32 + ".png")
+    Image.effect_noise((1800, 900), 40).convert("RGB").save(shot, "PNG")
+    original_size = shot.stat().st_size
+    assert original_size > 128 * 1024
+    monkeypatch.setattr(remote, "_worker_gui_temp_path", lambda _path, must_exist=True: shot)
+
+    result = remote._optimize_gui_temp_for_relay(str(shot))
+
+    assert result["optimized"] is True
+    assert result["bytes"] < original_size
+    assert shot.name.endswith(".png")
+    with shot.open("rb") as handle:
+        header = handle.read(16)
+    assert (
+        header.startswith(b"RIFF") and header[8:12] == b"WEBP"
+    ) or header.startswith(b"\xff\xd8\xff")
+
+
+def test_remote_gui_relay_inlines_bounded_compressed_screenshot(tmp_path, monkeypatch):
+    import base64
+
+    from PIL import Image
+
+    import local_shell_mcp.remote as remote
+    from local_shell_mcp.image_ops import detect_image_type
+
+    shot = tmp_path / ("gui-" + "c" * 32 + ".png")
+    Image.effect_noise((1200, 700), 35).convert("RGB").save(shot, "PNG")
+    monkeypatch.setattr(remote, "_worker_gui_temp_path", lambda _path, must_exist=True: shot)
+    monkeypatch.setattr(remote, "_GUI_INLINE_RELAY_MAX_BYTES", 2 * 1024 * 1024)
+
+    remote._optimize_gui_temp_for_relay(str(shot))
+    result = remote._inline_gui_temp_for_relay(str(shot))
+
+    assert result is not None
+    decoded = base64.b64decode(result["screenshot_inline_b64"], validate=True)
+    assert len(decoded) == result["screenshot_inline_size"] == shot.stat().st_size
+    image_format, _mime = detect_image_type(decoded[:16])
+    assert image_format in {"webp", "jpeg"}
+
+
+def test_remote_gui_relay_keeps_small_png_untouched(tmp_path, monkeypatch):
+    from PIL import Image
+
+    import local_shell_mcp.remote as remote
+
+    shot = tmp_path / ("gui-" + "b" * 32 + ".png")
+    Image.new("RGB", (16, 16), "white").save(shot, "PNG")
+    before = shot.read_bytes()
+    monkeypatch.setattr(remote, "_worker_gui_temp_path", lambda _path, must_exist=True: shot)
+
+    result = remote._optimize_gui_temp_for_relay(str(shot))
+
+    assert result == {"optimized": False, "bytes": len(before), "format": "original"}
+    assert shot.read_bytes() == before
 
 
 def test_native_gui_optional_dependency_guards_are_platform_safe():
@@ -4143,6 +4267,48 @@ def test_linux_locator_center_must_be_usable_and_inside_window(monkeypatch):
             {"type": "drag"},
             {"bounds": {"x": 400, "y": 130, "width": 20, "height": 10}},
         )
+
+
+@pytest.mark.asyncio
+async def test_linux_focus_falls_back_to_kwin_and_reverifies_active(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    import local_shell_mcp.gui.linux as linux
+
+    backend = linux.LinuxGuiBackend()
+    env = {"XDG_CURRENT_DESKTOP": "KDE", "XDG_SESSION_TYPE": "wayland"}
+    monkeypatch.setattr(backend, "_ensure_env", AsyncMock(return_value=env))
+    helper_results = [
+        GuiUnavailableError("RuntimeError: AT-SPI target cannot be focused"),
+        {"semantic": True, "already_active": True},
+    ]
+    calls = []
+
+    def helper(payload, selected_env=None):
+        calls.append((payload, selected_env))
+        result = helper_results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    activated = []
+    monkeypatch.setattr(backend, "_helper", helper)
+    monkeypatch.setattr(
+        linux,
+        "_focus_kde_wayland_window_sync",
+        lambda window, selected_env: activated.append((window, selected_env)),
+    )
+
+    window = {
+        "id": "atspi:42:sig",
+        "pid": 42,
+        "bounds": {"x": 10, "y": 20, "width": 300, "height": 200},
+    }
+    await backend._focus_window(window, env)
+
+    assert activated == [(window, env)]
+    assert len(calls) == 2
+    assert calls[1][0]["command"] == "semantic_action"
 
 
 def test_atspi_window_focus_accepts_already_active_nonfocusable_window(monkeypatch):
