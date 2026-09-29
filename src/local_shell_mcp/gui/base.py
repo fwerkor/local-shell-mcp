@@ -470,13 +470,7 @@ class GuiManager:
                 )
             )
 
-        try:
-            if screenshot_path is not None:
-                async with self._execution_lock:
-                    snapshot = await capture_snapshot()
-            else:
-                snapshot = await capture_snapshot()
-
+        async def publish_snapshot(snapshot: GuiSnapshot) -> dict[str, Any]:
             if screenshot_path is not None:
                 if snapshot.screenshot_path is None:
                     _cleanup_gui_screenshot(screenshot_path)
@@ -502,48 +496,55 @@ class GuiManager:
                         with contextlib.suppress(BaseException):
                             await asyncio.shield(normalize)
                         raise
+
+            bounded_elements, kept_ids = _bounded_elements(snapshot.elements)
+            bounded_locators = {
+                element_id: locator
+                for element_id, locator in snapshot.locators.items()
+                if element_id in kept_ids
+            }
+            bounded_window = _bounded_window_record(snapshot.window)
+            if bounded_window is None:
+                raise GuiUnavailableError("GUI backend returned unsafe window metadata")
+
+            state_id = uuid.uuid4().hex
+            now = time.monotonic()
+            async with self._lock:
+                self._prune_locked(now)
+                if len(self._states) >= GUI_STATE_CACHE_LIMIT:
+                    raise GuiUnavailableError(
+                        "Too many active GUI states; "
+                        "retry after an existing state expires or is consumed"
+                    )
+                self._states[state_id] = _StateRecord(
+                    state_id=state_id,
+                    window=dict(snapshot.window),
+                    locators=bounded_locators,
+                    created_at=now,
+                )
+
+            return {
+                "backend": self._backend.name,
+                "state_id": state_id,
+                "state_ttl_s": GUI_STATE_TTL_S,
+                "window": bounded_window,
+                "elements": _window_relative_elements(bounded_elements, bounded_window),
+                "capabilities": snapshot.capabilities,
+                "screenshot_path": snapshot.screenshot_path,
+            }
+
+        try:
+            if screenshot_path is not None:
+                async with self._execution_lock:
+                    snapshot = await capture_snapshot()
+                    return await publish_snapshot(snapshot)
+            snapshot = await capture_snapshot()
+            return await publish_snapshot(snapshot)
         except BaseException:
             if screenshot_path is not None:
                 _cleanup_gui_screenshot(screenshot_path)
             raise
 
-        bounded_elements, kept_ids = _bounded_elements(snapshot.elements)
-        bounded_locators = {
-            element_id: locator
-            for element_id, locator in snapshot.locators.items()
-            if element_id in kept_ids
-        }
-        bounded_window = _bounded_window_record(snapshot.window)
-        if bounded_window is None:
-            raise GuiUnavailableError("GUI backend returned unsafe window metadata")
-
-        state_id = uuid.uuid4().hex
-        now = time.monotonic()
-        async with self._lock:
-            self._prune_locked(now)
-            if len(self._states) >= GUI_STATE_CACHE_LIMIT:
-                if screenshot_path is not None:
-                    _cleanup_gui_screenshot(screenshot_path)
-                raise GuiUnavailableError(
-                    "Too many active GUI states; "
-                    "retry after an existing state expires or is consumed"
-                )
-            self._states[state_id] = _StateRecord(
-                state_id=state_id,
-                window=dict(snapshot.window),
-                locators=bounded_locators,
-                created_at=now,
-            )
-
-        return {
-            "backend": self._backend.name,
-            "state_id": state_id,
-            "state_ttl_s": GUI_STATE_TTL_S,
-            "window": bounded_window,
-            "elements": _window_relative_elements(bounded_elements, bounded_window),
-            "capabilities": snapshot.capabilities,
-            "screenshot_path": snapshot.screenshot_path,
-        }
 
     async def frame(self, window_id: str) -> dict[str, Any]:
         screenshot_path = _prepare_gui_screenshot_path("gui-frame")
@@ -559,56 +560,59 @@ class GuiManager:
                         max_depth=1,
                     )
                 )
-            if (
-                snapshot.screenshot_path is None
-                or not screenshot_path.is_file()
-                or screenshot_path.stat().st_size <= 0
-            ):
-                raise GuiUnavailableError("GUI backend did not produce the requested screenshot")
-            _secure_gui_screenshot_file(screenshot_path)
-            normalize = asyncio.create_task(
-                asyncio.to_thread(
-                    _normalize_screenshot_coordinates,
-                    screenshot_path,
-                    snapshot.window,
-                )
-            )
-            try:
-                await asyncio.shield(normalize)
-            except BaseException:
-                with contextlib.suppress(BaseException):
-                    await asyncio.shield(normalize)
-                raise
-            bounded_window = _bounded_window_record(snapshot.window)
-            if bounded_window is None:
-                raise GuiUnavailableError("GUI backend returned unsafe window metadata")
-            observation_id = uuid.uuid4().hex
-            now = time.monotonic()
-            async with self._lock:
-                self._prune_locked(now)
-                if len(self._frame_observations) >= GUI_STATE_CACHE_LIMIT:
+                if (
+                    snapshot.screenshot_path is None
+                    or not screenshot_path.is_file()
+                    or screenshot_path.stat().st_size <= 0
+                ):
                     raise GuiUnavailableError(
-                        "Too many active GUI frame observations; "
-                        "retry after an existing observation expires"
+                        "GUI backend did not produce the requested screenshot"
                     )
-                self._frame_observations[observation_id] = _StateRecord(
-                    state_id=observation_id,
-                    window=dict(snapshot.window),
-                    locators={},
-                    created_at=now,
+                _secure_gui_screenshot_file(screenshot_path)
+                normalize = asyncio.create_task(
+                    asyncio.to_thread(
+                        _normalize_screenshot_coordinates,
+                        screenshot_path,
+                        snapshot.window,
+                    )
                 )
-            keep_file = True
-            return {
-                "backend": self._backend.name,
-                "window": bounded_window,
-                "capabilities": snapshot.capabilities,
-                "observation_id": observation_id,
-                "observation_ttl_s": GUI_STATE_TTL_S,
-                "screenshot_path": snapshot.screenshot_path,
-            }
+                try:
+                    await asyncio.shield(normalize)
+                except BaseException:
+                    with contextlib.suppress(BaseException):
+                        await asyncio.shield(normalize)
+                    raise
+                bounded_window = _bounded_window_record(snapshot.window)
+                if bounded_window is None:
+                    raise GuiUnavailableError("GUI backend returned unsafe window metadata")
+                observation_id = uuid.uuid4().hex
+                now = time.monotonic()
+                async with self._lock:
+                    self._prune_locked(now)
+                    if len(self._frame_observations) >= GUI_STATE_CACHE_LIMIT:
+                        raise GuiUnavailableError(
+                            "Too many active GUI frame observations; "
+                            "retry after an existing observation expires"
+                        )
+                    self._frame_observations[observation_id] = _StateRecord(
+                        state_id=observation_id,
+                        window=dict(snapshot.window),
+                        locators={},
+                        created_at=now,
+                    )
+                keep_file = True
+                return {
+                    "backend": self._backend.name,
+                    "window": bounded_window,
+                    "capabilities": snapshot.capabilities,
+                    "observation_id": observation_id,
+                    "observation_ttl_s": GUI_STATE_TTL_S,
+                    "screenshot_path": snapshot.screenshot_path,
+                }
         finally:
             if not keep_file:
                 _cleanup_gui_screenshot(screenshot_path)
+
 
     async def act(
         self,
@@ -889,6 +893,18 @@ class GuiManager:
             remaining_ttl = max(0.0, GUI_STATE_TTL_S - (now - record.created_at))
         return {"state_id": state_id, "state_ttl_s": remaining_ttl}
 
+    async def discard_state(self, window_id: str, state_id: str) -> dict[str, Any]:
+        async with self._lock:
+            record = self._states.get(str(state_id))
+            if record is None:
+                return {"state_id": str(state_id), "discarded": False}
+            if str(record.window.get("id")) != str(window_id):
+                raise GuiStaleStateError(
+                    "GUI state belongs to a different window; call gui_state again"
+                )
+            self._states.pop(str(state_id), None)
+        return {"state_id": str(state_id), "discarded": True}
+
     async def refresh_frame_observation(
         self,
         window_id: str,
@@ -910,6 +926,29 @@ class GuiManager:
         return {
             "observation_id": str(observation_id),
             "observation_ttl_s": remaining_ttl,
+        }
+
+    async def discard_frame_observation(
+        self,
+        window_id: str,
+        observation_id: str,
+    ) -> dict[str, Any]:
+        async with self._lock:
+            record = self._frame_observations.get(str(observation_id))
+            if record is None:
+                return {
+                    "observation_id": str(observation_id),
+                    "discarded": False,
+                }
+            if str(record.window.get("id")) != str(window_id):
+                raise GuiStaleStateError(
+                    "Displayed GUI frame belongs to a different window; "
+                    "refresh it and try again"
+                )
+            self._frame_observations.pop(str(observation_id), None)
+        return {
+            "observation_id": str(observation_id),
+            "discarded": True,
         }
 
     async def _assert_window_geometry_unchanged(

@@ -16,6 +16,7 @@ from PIL import Image
 from .base import (
     GUI_MAX_CAPTURE_DIMENSION,
     GUI_MAX_CAPTURE_PIXELS,
+    GUI_MAX_WINDOWS,
     GuiSnapshot,
     GuiStaleStateError,
     GuiUnavailableError,
@@ -434,9 +435,15 @@ def _x11_match_window(connection: Any, record: dict[str, Any]) -> Any:
         atom = connection.intern_atom(prop_name, only_if_exists=True)
         if not atom:
             continue
-        prop = root.get_full_property(atom, Xatom.WINDOW)
+        prop = root.get_property(
+            atom,
+            Xatom.WINDOW,
+            0,
+            GUI_MAX_WINDOWS,
+            False,
+        )
         if prop is not None:
-            ids = [int(value) for value in prop.value]
+            ids = [int(value) for value in prop.value[:GUI_MAX_WINDOWS]]
             if ids:
                 break
     if not ids:
@@ -842,6 +849,27 @@ class LinuxGuiBackend:
                     record,
                     env,
                 )
+                post_capture = await asyncio.to_thread(
+                    self._helper,
+                    {
+                        "command": "snapshot",
+                        "window_id": window_id,
+                        "include_elements": False,
+                        "max_elements": 1,
+                        "max_depth": 1,
+                    },
+                )
+                post_capture_record = post_capture.get("window")
+                if (
+                    not isinstance(post_capture_record, dict)
+                    or str(post_capture_record.get("id") or "") != str(record.get("id") or "")
+                    or _bounds_tuple(post_capture_record.get("bounds"))
+                    != _bounds_tuple(record.get("bounds"))
+                ):
+                    raise GuiStaleStateError(
+                        "Target window identity or geometry changed during the X11 capture; "
+                        "call gui_state again"
+                    )
             else:
                 raise GuiUnavailableError(
                     "No graphical Linux session was found; DISPLAY/WAYLAND_DISPLAY are unavailable"

@@ -647,6 +647,16 @@ class MacOSGuiBackend:
                 window_error = AX.AXUIElementPerformAction(ax_window, AX.kAXRaiseAction)
             if int(window_error) != 0:
                 raise RuntimeError(f"AX target window focus/raise failed with error {window_error}")
+        if requires_native_focus:
+            current_window = self._current_record(window)
+            if not _same_bounds(
+                current_window.get("bounds", {}),
+                window.get("bounds", {}),
+            ):
+                raise LookupError(
+                    "Window moved or resized immediately before pointer input; "
+                    "call gui_state again"
+                )
 
         if kind == "type":
             text = str(action.get("text", ""))
@@ -683,7 +693,7 @@ class MacOSGuiBackend:
             return {"keys": action.get("keys")}
 
         if kind in {"click", "double_click", "right_click", "move", "scroll"}:
-            x, y = self._screen_point(AX, window, action, locator)
+            x, y = self._screen_point(AX, current_window, action, locator)
             if kind == "move":
                 self._mouse(Quartz, Quartz.kCGEventMouseMoved, x, y, Quartz.kCGMouseButtonLeft)
             elif kind == "scroll":
@@ -740,10 +750,16 @@ class MacOSGuiBackend:
 
         if kind == "drag":
             start_x, start_y = self._screen_point(
-                AX, window, {"x": action.get("x"), "y": action.get("y")}, locator
+                AX,
+                current_window,
+                {"x": action.get("x"), "y": action.get("y")},
+                locator,
             )
             end_x, end_y = self._screen_point(
-                AX, window, {"x": action.get("to_x"), "y": action.get("to_y")}, None
+                AX,
+                current_window,
+                {"x": action.get("to_x"), "y": action.get("to_y")},
+                None,
             )
             pressed = False
             release_x, release_y = start_x, start_y

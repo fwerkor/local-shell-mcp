@@ -101,6 +101,29 @@ def _handled_error_data(result: CallToolResult) -> dict:
 
 
 @pytest.mark.asyncio
+async def test_gui_list_explicitly_requires_execute_scope(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    required = []
+
+    monkeypatch.setattr(
+        tools,
+        "require_current_scopes",
+        lambda scopes: required.append(tuple(scopes)),
+    )
+
+    class Manager:
+        async def list_windows(self):
+            return {"windows": []}
+
+    monkeypatch.setattr(tools, "get_gui_manager", lambda: Manager())
+    mcp = tools.build_mcp()
+    result = await _raw_tool(mcp, "gui_list")()
+
+    assert result["ok"] is True
+    assert ("shell:read", "shell:execute") in required
+
+
+@pytest.mark.asyncio
 async def test_gui_state_explicitly_requires_execute_scope(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     required = []

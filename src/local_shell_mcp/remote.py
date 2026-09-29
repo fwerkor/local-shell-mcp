@@ -1563,8 +1563,10 @@ WORKER_GUI_TOOLS = frozenset(
         "gui_list",
         "gui_state",
         "gui_state_refresh",
+        "gui_state_discard",
         "gui_frame",
         "gui_frame_refresh",
+        "gui_frame_discard",
         "gui_human_action",
         "gui_action",
     }
@@ -2515,8 +2517,15 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     manager = get_gui_manager()
     if tool == "gui_state_refresh":
         return await manager.refresh_state(args["window_id"], args["state_id"])
+    if tool == "gui_state_discard":
+        return await manager.discard_state(args["window_id"], args["state_id"])
     if tool == "gui_frame_refresh":
         return await manager.refresh_frame_observation(
+            args["window_id"],
+            args["observation_id"],
+        )
+    if tool == "gui_frame_discard":
+        return await manager.discard_frame_observation(
             args["window_id"],
             args["observation_id"],
         )
@@ -2532,8 +2541,12 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     allow_dependency_install = bool(args.pop("_allow_dependency_install", False))
     if tool in {"gui_state", "gui_frame", "gui_human_action", "gui_action"}:
         allow_dependency_install = True
-
-    dependency_check_required = tool not in {"gui_state_refresh", "gui_frame_refresh"}
+    dependency_check_required = tool not in {
+        "gui_state_refresh",
+        "gui_state_discard",
+        "gui_frame_refresh",
+        "gui_frame_discard",
+    }
     if sys.platform == "linux" and (
         tool == "gui_list"
         or (tool == "gui_state" and not bool(args.get("screenshot", True)))

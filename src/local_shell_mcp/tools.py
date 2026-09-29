@@ -2986,6 +2986,9 @@ async def _gui_frame_data(
     machine: str | None,
 ) -> tuple[dict[str, Any], ImageFile]:
     screenshot_path: str | None = None
+    observation_id = ""
+    delivered = False
+
     if machine:
         if not get_settings().remote_enabled:
             raise RuntimeError("Remote workers are disabled")
@@ -3000,19 +3003,34 @@ async def _gui_frame_data(
         screenshot_path = (
             str(data.get("screenshot_path")) if data.get("screenshot_path") else None
         )
-        if not screenshot_path:
-            raise RuntimeError("Remote gui_frame returned no screenshot")
         observation_id = str(data.get("observation_id") or "")
+        if not screenshot_path:
+            if observation_id:
+                with suppress(Exception):
+                    await _discard_remote_gui_frame_once(
+                        machine,
+                        window_id,
+                        observation_id,
+                    )
+            raise RuntimeError("Remote gui_frame returned no screenshot")
         if not observation_id:
+            with suppress(Exception):
+                await _remote_transfer_data(
+                    machine,
+                    "transfer_gui_temp_delete",
+                    {"path": screenshot_path},
+                    30,
+                )
             raise RuntimeError("Remote gui_frame returned no observation_id")
-        keepalive = asyncio.create_task(
-            _refresh_remote_gui_frame_lease(
-                machine,
-                window_id,
-                observation_id,
-            )
-        )
+        keepalive: asyncio.Task[None] | None = None
         try:
+            keepalive = asyncio.create_task(
+                _refresh_remote_gui_frame_lease(
+                    machine,
+                    window_id,
+                    observation_id,
+                )
+            )
             local_path = await asyncio.to_thread(_controller_gui_staging_path)
             try:
                 await _copy_remote_gui_temp_to_local(
@@ -3027,18 +3045,19 @@ async def _gui_frame_data(
                 window_id,
                 observation_id,
             )
-            data = dict(data)
-            data["observation_ttl_s"] = float(
+            result = dict(data)
+            result["observation_ttl_s"] = float(
                 refreshed.get("observation_ttl_s") or 0
             )
-            data.pop("screenshot_path", None)
-            return data, image
+            result.pop("screenshot_path", None)
+            delivered = True
+            return result, image
         finally:
-            try:
+            if keepalive is not None:
                 keepalive.cancel()
                 with suppress(BaseException):
                     await keepalive
-            finally:
+            if screenshot_path:
                 with suppress(Exception):
                     await _remote_transfer_data(
                         machine,
@@ -3046,27 +3065,53 @@ async def _gui_frame_data(
                         {"path": screenshot_path},
                         30,
                     )
+            if not delivered and observation_id:
+                with suppress(Exception):
+                    await _discard_remote_gui_frame_once(
+                        machine,
+                        window_id,
+                        observation_id,
+                    )
 
     manager = get_gui_manager()
     data = await manager.frame(window_id)
     screenshot_path = str(data.get("screenshot_path") or "")
-    if not screenshot_path:
-        raise RuntimeError("Local gui_frame returned no screenshot")
     observation_id = str(data.get("observation_id") or "")
+    if not screenshot_path:
+        if observation_id:
+            with suppress(Exception):
+                await manager.discard_frame_observation(
+                    window_id,
+                    observation_id,
+                )
+        raise RuntimeError("Local gui_frame returned no screenshot")
     if not observation_id:
+        with suppress(Exception):
+            await asyncio.to_thread(_delete_gui_temp_file, screenshot_path)
         raise RuntimeError("Local gui_frame returned no observation_id")
     try:
         image = await asyncio.to_thread(_read_gui_temp_image, screenshot_path)
+        refreshed = await manager.refresh_frame_observation(
+            window_id,
+            observation_id,
+        )
+        result = dict(data)
+        result["observation_ttl_s"] = float(
+            refreshed.get("observation_ttl_s") or 0
+        )
+        result.pop("screenshot_path", None)
+        delivered = True
+        return result, image
     finally:
-        with suppress(Exception):
-            await asyncio.to_thread(_delete_gui_temp_file, screenshot_path)
-    refreshed = await manager.refresh_frame_observation(window_id, observation_id)
-    data = dict(data)
-    data["observation_ttl_s"] = float(
-        refreshed.get("observation_ttl_s") or 0
-    )
-    data.pop("screenshot_path", None)
-    return data, image
+        if screenshot_path:
+            with suppress(Exception):
+                await asyncio.to_thread(_delete_gui_temp_file, screenshot_path)
+        if not delivered and observation_id:
+            with suppress(Exception):
+                await manager.discard_frame_observation(
+                    window_id,
+                    observation_id,
+                )
 
 
 _REMOTE_GUI_STATE_REFRESH_INTERVAL_S = 10.0
@@ -3138,6 +3183,36 @@ async def _refresh_remote_gui_state_once(
     return refreshed
 
 
+async def _discard_remote_gui_state_once(
+    machine: str,
+    window_id: str,
+    state_id: str,
+) -> None:
+    discarded = await _remote_worker_data(
+        machine,
+        "gui_state_discard",
+        {"window_id": window_id, "state_id": state_id},
+        30,
+    )
+    if not isinstance(discarded, dict):
+        raise RuntimeError("Remote gui_state_discard returned invalid data")
+
+
+async def _discard_remote_gui_frame_once(
+    machine: str,
+    window_id: str,
+    observation_id: str,
+) -> None:
+    discarded = await _remote_worker_data(
+        machine,
+        "gui_frame_discard",
+        {"window_id": window_id, "observation_id": observation_id},
+        30,
+    )
+    if not isinstance(discarded, dict):
+        raise RuntimeError("Remote gui_frame_discard returned invalid data")
+
+
 async def _gui_state_result(
     window_id: str,
     *,
@@ -3149,6 +3224,10 @@ async def _gui_state_result(
 ) -> CallToolResult:
     image: ImageFile | None = None
     screenshot_path: str | None = None
+    state_id = ""
+    delivered = False
+    manager = None
+    keepalive: asyncio.Task[None] | None = None
     try:
         args = {
             "window_id": window_id,
@@ -3166,6 +3245,9 @@ async def _gui_state_result(
             state_id = str(data.get("state_id") or "")
             if not state_id:
                 raise RuntimeError("Remote gui_state returned no state_id")
+            screenshot_path = (
+                str(data.get("screenshot_path")) if data.get("screenshot_path") else None
+            )
             refreshed = await _refresh_remote_gui_state_once(
                 machine,
                 window_id,
@@ -3173,40 +3255,30 @@ async def _gui_state_result(
             )
             data["state_ttl_s"] = float(refreshed.get("state_ttl_s") or 0)
 
-            screenshot_path = (
-                str(data.get("screenshot_path")) if data.get("screenshot_path") else None
-            )
-            keepalive: asyncio.Task[None] | None = None
             if screenshot_path:
                 keepalive = asyncio.create_task(
                     _refresh_remote_gui_state_lease(machine, window_id, state_id)
                 )
+                local_path = await asyncio.to_thread(_controller_gui_staging_path)
                 try:
-                    local_path = await asyncio.to_thread(_controller_gui_staging_path)
-                    try:
-                        await _copy_remote_gui_temp_to_local(
-                            machine, screenshot_path, local_path
-                        )
-                        image = await asyncio.to_thread(read_image, local_path)
-                    finally:
-                        with suppress(Exception):
-                            await asyncio.to_thread(delete_path, local_path, False)
-                    try:
-                        await _remote_transfer_data(
-                            machine,
-                            "transfer_gui_temp_delete",
-                            {"path": screenshot_path},
-                            30,
-                        )
-                    except Exception:
-                        pass
-                    else:
-                        screenshot_path = None
+                    await _copy_remote_gui_temp_to_local(
+                        machine, screenshot_path, local_path
+                    )
+                    image = await asyncio.to_thread(read_image, local_path)
                 finally:
-                    if keepalive is not None:
-                        keepalive.cancel()
-                        with suppress(BaseException):
-                            await keepalive
+                    with suppress(Exception):
+                        await asyncio.to_thread(delete_path, local_path, False)
+                try:
+                    await _remote_transfer_data(
+                        machine,
+                        "transfer_gui_temp_delete",
+                        {"path": screenshot_path},
+                        30,
+                    )
+                except Exception:
+                    pass
+                else:
+                    screenshot_path = None
 
             refreshed = await _refresh_remote_gui_state_once(
                 machine,
@@ -3215,22 +3287,31 @@ async def _gui_state_result(
             )
             data["state_ttl_s"] = float(refreshed.get("state_ttl_s") or 0)
         else:
-            data = await get_gui_manager().snapshot(**args)
+            manager = get_gui_manager()
+            data = await manager.snapshot(**args)
+            state_id = str(data.get("state_id") or "")
+            if not state_id:
+                raise RuntimeError("Local gui_state returned no state_id")
             screenshot_path = (
                 str(data.get("screenshot_path")) if data.get("screenshot_path") else None
             )
             if screenshot_path:
-                try:
-                    image = await asyncio.to_thread(_read_gui_temp_image, screenshot_path)
-                finally:
-                    with suppress(Exception):
-                        await asyncio.to_thread(_delete_gui_temp_file, screenshot_path)
-        data = dict(data)
-        data.pop("screenshot_path", None)
-        return _gui_state_call_result(data, machine, image)
+                image = await asyncio.to_thread(_read_gui_temp_image, screenshot_path)
+            refreshed = await manager.refresh_state(window_id, state_id)
+            data["state_ttl_s"] = float(refreshed.get("state_ttl_s") or 0)
+
+        result_data = dict(data)
+        result_data.pop("screenshot_path", None)
+        result = _gui_state_call_result(result_data, machine, image)
+        delivered = True
+        return result
     except Exception as exc:
         return _gui_state_error_result(machine, exc)
     finally:
+        if keepalive is not None:
+            keepalive.cancel()
+            with suppress(BaseException):
+                await keepalive
         if machine and screenshot_path:
             with suppress(Exception):
                 await _remote_transfer_data(
@@ -3239,6 +3320,20 @@ async def _gui_state_result(
                     {"path": screenshot_path},
                     30,
                 )
+        elif not machine and screenshot_path:
+            with suppress(Exception):
+                await asyncio.to_thread(_delete_gui_temp_file, screenshot_path)
+        if not delivered and state_id:
+            if machine:
+                with suppress(Exception):
+                    await _discard_remote_gui_state_once(
+                        machine,
+                        window_id,
+                        state_id,
+                    )
+            elif manager is not None:
+                with suppress(Exception):
+                    await manager.discard_state(window_id, state_id)
 
 
 def _read_audit_tail_entries(lines: int = 100) -> dict:
@@ -3725,24 +3820,19 @@ def _register_workspace_read_tools(
 def _register_gui_tools(
     mcp: FastMCP,
     settings: Any,
-    read_only_tool: ToolAnnotations,
 ) -> None:
-    shell_read_meta = _oauth_meta(["shell:read"])
     shell_execute_meta = _oauth_meta(["shell:read", "shell:execute"])
 
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
+    @mcp.tool(structured_output=True, meta=shell_execute_meta)
     async def gui_list(machine: str | None = None) -> ToolResult:
         """List visible desktop application windows and GUI backend capabilities locally or remotely."""
+        require_current_scopes(("shell:read", "shell:execute"))
         if machine:
             return await _remote_call(
                 settings,
                 machine,
                 "gui_list",
-                {
-                    "_allow_dependency_install": _current_principal_allows(
-                        "shell:execute"
-                    )
-                },
+                {"_allow_dependency_install": True},
                 210,
             )
         return await _tool_call(get_gui_manager().list_windows)
@@ -4474,7 +4564,7 @@ def build_mcp() -> FastMCP:
     _register_shell_tools(mcp, settings, read_only_tool)
     _register_job_tools(mcp, settings, read_only_tool)
     _register_workspace_read_tools(mcp, settings, read_only_tool)
-    _register_gui_tools(mcp, settings, read_only_tool)
+    _register_gui_tools(mcp, settings)
     _register_download_tools(mcp, read_only_tool)
     _register_workspace_write_tools(mcp, settings)
     _register_maintenance_tools(mcp, read_only_tool)

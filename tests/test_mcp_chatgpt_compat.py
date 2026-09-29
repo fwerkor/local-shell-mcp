@@ -247,6 +247,9 @@ async def test_tool_annotations_are_conservative_and_mode_independent(tmp_path, 
     assert tools["file_read"].annotations.openWorldHint is True
     assert tools["image_view"].annotations.readOnlyHint is True
     assert tools["image_view"].annotations.openWorldHint is True
+    assert tools["gui_list"].annotations.readOnlyHint is False
+    assert tools["gui_list"].annotations.destructiveHint is True
+    assert tools["gui_list"].annotations.idempotentHint is False
     assert "logical_session_id" in tools["run_shell"].inputSchema["properties"]
     assert "logical_session_id" in tools["run_shell"].inputSchema["required"]
     assert "session_run_id" not in tools["run_shell"].inputSchema["properties"]

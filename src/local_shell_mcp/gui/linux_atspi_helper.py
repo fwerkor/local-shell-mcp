@@ -3,6 +3,9 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import re
+import shutil
+import subprocess
 import sys
 from typing import Any
 
@@ -164,6 +167,60 @@ def _apps() -> list[Any]:
     return apps
 
 
+def _kscreen_monitors() -> list[dict[str, Any]]:
+    doctor = shutil.which("kscreen-doctor")
+    if not doctor:
+        return []
+    try:
+        result = subprocess.run(
+            [doctor, "-o"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except Exception:
+        return []
+    if result.returncode != 0:
+        return []
+
+    monitors: list[dict[str, Any]] = []
+    blocks = re.split(r"(?=^Output:)", result.stdout, flags=re.MULTILINE)
+    for block in blocks:
+        if not block.startswith("Output:"):
+            continue
+        if len(monitors) >= GUI_MAX_WINDOWS:
+            break
+        if not re.search(r"\benabled\b", block) or not re.search(
+            r"\bconnected\b", block
+        ):
+            continue
+        geometry = re.search(
+            r"Geometry:\s*(-?\d+),(-?\d+)\s+(\d+)x(\d+)",
+            block,
+        )
+        if geometry is None:
+            continue
+        width = int(geometry.group(3))
+        height = int(geometry.group(4))
+        if width <= 0 or height <= 0:
+            continue
+        scale_match = re.search(r"Scale:\s*([0-9]+(?:\.[0-9]+)?)", block)
+        output_match = re.match(r"Output:\s*(\d+)", block)
+        monitors.append(
+            {
+                "index": int(output_match.group(1)) if output_match else len(monitors),
+                "x": int(geometry.group(1)),
+                "y": int(geometry.group(2)),
+                "width": width,
+                "height": height,
+                "scale": float(scale_match.group(1)) if scale_match else 1.0,
+                "primary": bool(re.search(r"\bprimary\b", block)),
+            }
+        )
+    return monitors
+
+
 def _monitors() -> list[dict[str, Any]]:
     try:
         import gi
@@ -172,26 +229,27 @@ def _monitors() -> list[dict[str, Any]]:
         from gi.repository import Gdk
 
         display = Gdk.Display.get_default()
-        if display is None:
-            return []
-        monitors = []
-        for index in range(display.get_n_monitors()):
-            monitor = display.get_monitor(index)
-            geometry = monitor.get_geometry()
-            monitors.append(
-                {
-                    "index": index,
-                    "x": int(geometry.x),
-                    "y": int(geometry.y),
-                    "width": int(geometry.width),
-                    "height": int(geometry.height),
-                    "scale": int(monitor.get_scale_factor()),
-                    "primary": bool(monitor.is_primary()),
-                }
-            )
-        return monitors
+        if display is not None:
+            monitors = []
+            for index in range(min(display.get_n_monitors(), GUI_MAX_WINDOWS)):
+                monitor = display.get_monitor(index)
+                geometry = monitor.get_geometry()
+                monitors.append(
+                    {
+                        "index": index,
+                        "x": int(geometry.x),
+                        "y": int(geometry.y),
+                        "width": int(geometry.width),
+                        "height": int(geometry.height),
+                        "scale": int(monitor.get_scale_factor()),
+                        "primary": bool(monitor.is_primary()),
+                    }
+                )
+            if monitors:
+                return monitors
     except Exception:
-        return []
+        pass
+    return _kscreen_monitors()
 
 
 def _windows() -> list[tuple[Any, Any, int]]:
@@ -352,6 +410,7 @@ def _resolve_window(window_id: str) -> tuple[Any, Any, int]:
     else:
         preferred_index = None
         signature = parts[2]
+    scanned = 0
     for app in _apps():
         try:
             if int(app.get_process_id()) != pid:
@@ -362,6 +421,9 @@ def _resolve_window(window_id: str) -> tuple[Any, Any, int]:
 
         candidates = []
         for index in range(count):
+            if scanned >= GUI_MAX_ATSPI_SCAN:
+                break
+            scanned += 1
             try:
                 window = app.get_child_at_index(index)
             except Exception:
@@ -536,7 +598,10 @@ def _semantic_action(payload: dict[str, Any]) -> dict[str, Any]:
         iface = obj.get_action_iface()
         if iface is None:
             raise ValueError("Target element has no AT-SPI action interface")
-        count = iface.get_n_actions()
+        count = min(
+            max(0, int(iface.get_n_actions())),
+            GUI_MAX_ELEMENT_ACTIONS,
+        )
         if count <= 0:
             raise ValueError("Target element has no AT-SPI actions")
         preferred = {"click", "press", "activate", "jump", "open"}

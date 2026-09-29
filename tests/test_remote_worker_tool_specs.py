@@ -30,8 +30,10 @@ def test_remote_worker_allowlist_covers_core_capabilities():
         "gui_list",
         "gui_state",
         "gui_state_refresh",
+        "gui_state_discard",
         "gui_frame",
         "gui_frame_refresh",
+        "gui_frame_discard",
         "gui_human_action",
         "gui_action",
     } <= REMOTE_WORKER_TOOL_NAMES
@@ -94,6 +96,10 @@ async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
             calls.append(("refresh", window_id, state_id))
             return {"state_id": state_id, "state_ttl_s": 30}
 
+        async def discard_state(self, window_id, state_id):
+            calls.append(("discard", window_id, state_id))
+            return {"state_id": state_id, "discarded": True}
+
         async def frame(self, window_id):
             calls.append(("frame", window_id))
             return {
@@ -105,6 +111,10 @@ async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
         async def refresh_frame_observation(self, window_id, observation_id):
             calls.append(("refresh_frame", window_id, observation_id))
             return {"observation_id": observation_id, "observation_ttl_s": 30}
+
+        async def discard_frame_observation(self, window_id, observation_id):
+            calls.append(("discard_frame", window_id, observation_id))
+            return {"observation_id": observation_id, "discarded": True}
 
         async def human_act(self, window_id, observation_id, bounds, actions):
             calls.append(("human_act", window_id, observation_id, bounds, actions))
@@ -155,6 +165,13 @@ async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
     assert refreshed["state_ttl_s"] == 30
     assert dependency_calls == []
 
+    discarded = await remote._execute_gui_worker_tool(
+        "gui_state_discard",
+        {"window_id": "w", "state_id": "s"},
+    )
+    assert discarded["discarded"] is True
+    assert dependency_calls == []
+
     frame = await remote._execute_gui_worker_tool(
         "gui_frame",
         {"window_id": "w"},
@@ -167,6 +184,13 @@ async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
         {"window_id": "w", "observation_id": "obs-remote"},
     )
     assert refreshed_frame["observation_ttl_s"] == 30
+    assert dependency_calls == [("x11", True)]
+
+    discarded_frame = await remote._execute_gui_worker_tool(
+        "gui_frame_discard",
+        {"window_id": "w", "observation_id": "obs-remote"},
+    )
+    assert discarded_frame["discarded"] is True
     assert dependency_calls == [("x11", True)]
 
     human = await remote._execute_gui_worker_tool(
@@ -254,17 +278,27 @@ async def test_remote_gui_worker_dependency_failure_is_scoped_to_gui(monkeypatch
     import local_shell_mcp.remote_worker_installer as installer
 
     monkeypatch.setattr(remote.sys, "platform", "win32")
-    monkeypatch.setattr(
-        installer,
-        "ensure_gui_dependencies",
-        lambda _session_type=None, **_kwargs: {
+    install_flags = []
+
+    def unavailable(_session_type=None, *, install_missing=True):
+        install_flags.append(install_missing)
+        return {
             "available": False,
             "missing": ["uiautomation"],
             "error": "offline",
-        },
+        }
+
+    monkeypatch.setattr(
+        installer,
+        "ensure_gui_dependencies",
+        unavailable,
     )
     with pytest.raises(RuntimeError, match="uiautomation unavailable"):
-        await remote._execute_gui_worker_tool("gui_list", {})
+        await remote._execute_gui_worker_tool(
+            "gui_list",
+            {"_allow_dependency_install": True},
+        )
+    assert install_flags == [True]
 
 
 

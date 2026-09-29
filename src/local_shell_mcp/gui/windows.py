@@ -97,6 +97,24 @@ class _WinRect(ctypes.Structure):
     ]
 
 
+def _native_window_bounds(hwnd: int) -> dict[str, int]:
+    windll = getattr(ctypes, "windll", None)
+    if windll is None:  # pragma: no cover - Windows-only runtime guard.
+        raise GuiUnavailableError("Win32 window geometry is unavailable on this platform")
+    user32 = windll.user32
+    user32.GetWindowRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(_WinRect)]
+    user32.GetWindowRect.restype = ctypes.c_int
+    rect = _WinRect()
+    if not user32.GetWindowRect(ctypes.c_void_p(hwnd), ctypes.byref(rect)):
+        raise GuiUnavailableError("Win32 could not read the target window bounds")
+    return {
+        "x": int(rect.left),
+        "y": int(rect.top),
+        "width": int(rect.right - rect.left),
+        "height": int(rect.bottom - rect.top),
+    }
+
+
 class _BitmapInfoHeader(ctypes.Structure):
     _fields_ = [
         ("biSize", ctypes.c_uint32),
@@ -522,6 +540,25 @@ class WindowsGuiBackend:
             return control
         raise LookupError(f"Window is no longer available: {window_id}")
 
+    @staticmethod
+    def _assert_observed_window_bounds(
+        observed_window: dict[str, Any],
+    ) -> None:
+        parts = str(observed_window.get("id") or "").split(":")
+        if len(parts) != 3 or parts[0] != "hwnd":
+            raise LookupError("Windows window identity is invalid; call gui_state again")
+        try:
+            current_bounds = _native_window_bounds(int(parts[1]))
+        except (TypeError, ValueError) as exc:
+            raise LookupError(
+                "Windows window identity is invalid; call gui_state again"
+            ) from exc
+        if current_bounds != observed_window.get("bounds"):
+            raise LookupError(
+                "Window moved or resized immediately before pointer input; "
+                "call gui_state again"
+            )
+
     def _resolve_element_locator(
         self,
         window_id: str,
@@ -794,6 +831,7 @@ class WindowsGuiBackend:
                     return {"semantic": True, "method": "invoke"}
             target_window = self._find_window(str(window["id"]), window)
             target_window.SetFocus()
+            self._assert_observed_window_bounds(window)
             self._screen_point(window, {}, locator)
             if kind == "click":
                 locator.Click(waitTime=0)
@@ -809,6 +847,8 @@ class WindowsGuiBackend:
             or not action.get("_focus_prepared")
         ):
             target_window.SetFocus()
+        if kind in {"click", "double_click", "right_click", "move", "scroll", "drag"}:
+            self._assert_observed_window_bounds(window)
 
         if kind == "type":
             text = str(action.get("text", ""))
