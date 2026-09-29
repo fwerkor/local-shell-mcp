@@ -396,9 +396,13 @@ async def test_gui_manager_list_snapshot_errors_and_cache(tmp_path, monkeypatch)
     assert not list((tmp_path / ".state").rglob("gui-*.png"))
 
     monkeypatch.setattr(base, "GUI_STATE_CACHE_LIMIT", 2)
-    for _ in range(4):
+    first = await manager.snapshot("window:1", screenshot=False)
+    second = await manager.snapshot("window:1", screenshot=False)
+    with pytest.raises(GuiUnavailableError, match="Too many active GUI states"):
         await manager.snapshot("window:1", screenshot=False)
     assert len(manager._states) == 2
+    assert first["state_id"] in manager._states
+    assert second["state_id"] in manager._states
 
 
 @pytest.mark.asyncio
@@ -854,8 +858,10 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
     monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "true")
     tools.get_settings.cache_clear()
     calls = []
+    refresh_count = 0
 
     async def remote_worker(machine, tool, args, timeout_s=None):
+        nonlocal refresh_count
         calls.append((machine, tool, args, timeout_s))
         if tool == "gui_state":
             return {
@@ -868,7 +874,8 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
                 "screenshot_path": ".local-shell-mcp/tmp/remote.png",
             }
         if tool == "gui_state_refresh":
-            return {"state_id": "s", "state_ttl_s": 30}
+            refresh_count += 1
+            return {"state_id": "s", "state_ttl_s": max(1, 30 - refresh_count)}
         return {"deleted": True}
 
     transfer_calls = []
@@ -904,6 +911,7 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
     assert result.isError is False
     assert result.structuredContent["machine"] == "node"
     assert result.structuredContent["screenshot"] is True
+    assert 0 < result.structuredContent["state_ttl_s"] < 30
     assert [call[1] for call in calls] == [
         "gui_state",
         "gui_state_refresh",
@@ -930,6 +938,7 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
         machine="node",
     )
     assert kept_alive.isError is False
+    assert 0 < kept_alive.structuredContent["state_ttl_s"] < 30
     refresh_calls = [call for call in calls if call[1] == "gui_state_refresh"]
     assert len(refresh_calls) >= 3
 
@@ -1662,7 +1671,7 @@ async def test_gui_manager_rejects_points_outside_selected_window(
 
 
 @pytest.mark.asyncio
-async def test_gui_manager_refreshes_remote_state_ttl(tmp_path, monkeypatch):
+async def test_gui_manager_refresh_reports_remaining_state_ttl(tmp_path, monkeypatch):
     import local_shell_mcp.gui.base as base
 
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -1670,16 +1679,37 @@ async def test_gui_manager_refreshes_remote_state_ttl(tmp_path, monkeypatch):
     state = await manager.snapshot("window:1", screenshot=False)
     record = manager._states[state["state_id"]]
     record.created_at -= base.GUI_STATE_TTL_S - 1
+    original_created_at = record.created_at
 
     refreshed = await manager.refresh_state("window:1", state["state_id"])
-    assert refreshed["state_ttl_s"] == base.GUI_STATE_TTL_S
-    assert record.created_at > 0
+    assert 0 < refreshed["state_ttl_s"] <= 1
+    assert record.created_at == original_created_at
     result = await manager.act(
         "window:1",
         state["state_id"],
         [{"type": "wait", "seconds": 0}],
     )
     assert result["state_consumed"] is True
+
+
+@pytest.mark.asyncio
+async def test_gui_state_capacity_preserves_unexpired_tokens(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.base as base
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(base, "GUI_STATE_CACHE_LIMIT", 2)
+    manager = GuiManager(FakeBackend())
+
+    first = await manager.snapshot("window:1", screenshot=False)
+    second = await manager.snapshot("window:1", screenshot=False)
+
+    with pytest.raises(GuiUnavailableError, match="Too many active GUI states"):
+        await manager.snapshot("window:1", screenshot=False)
+
+    assert first["state_id"] in manager._states
+    assert second["state_id"] in manager._states
+    refreshed = await manager.refresh_state("window:1", first["state_id"])
+    assert 0 < refreshed["state_ttl_s"] <= base.GUI_STATE_TTL_S
 
 
 def test_scroll_quantization_and_platform_key_edge_cases():
@@ -4667,6 +4697,88 @@ async def test_wayland_refocuses_target_after_portal_bootstrap(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_wayland_rejects_observation_expired_during_portal_bootstrap(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    backend = linux.LinuxGuiBackend()
+    backend._env = {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-0"}
+
+    class Portal:
+        async def ensure_session(self):
+            return "session-1"
+
+        async def click(self, *_args, **_kwargs):
+            pytest.fail("expired observation must not inject pointer input")
+
+    backend._portal = Portal()
+    monkeypatch.setattr(linux.time, "monotonic", lambda: 20.0)
+
+    with pytest.raises(GuiStaleStateError, match="expired while preparing Wayland input"):
+        await backend._perform_wayland(
+            {
+                "id": "atspi:1:sig",
+                "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+            },
+            None,
+            {
+                "type": "click",
+                "x": 5,
+                "y": 6,
+                "_observation_deadline": 10.0,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_wayland_reresolves_element_bounds_after_portal_bootstrap(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    backend = linux.LinuxGuiBackend()
+    backend._env = {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-0"}
+    clicks = []
+
+    class Portal:
+        async def ensure_session(self):
+            return "session-1"
+
+        async def click(self, x, y, **_kwargs):
+            clicks.append((x, y))
+
+    backend._portal = Portal()
+
+    async def focus(_window):
+        return None
+
+    def helper(payload):
+        assert payload["command"] == "resolve_locator"
+        return {"bounds": {"x": 40, "y": 50, "width": 20, "height": 10}}
+
+    monkeypatch.setattr(backend, "focus_window", focus)
+    monkeypatch.setattr(backend, "_helper", helper)
+    monkeypatch.setattr(linux.time, "monotonic", lambda: 5.0)
+
+    result = await backend._perform_wayland(
+        {
+            "id": "atspi:1:sig",
+            "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+        },
+        {
+            "semantic": {
+                "path": [0],
+                "accessible_id": "button",
+                "fingerprint": "fp",
+            },
+            "bounds": {"x": 10, "y": 10, "width": 10, "height": 10},
+        },
+        {"type": "click", "_observation_deadline": 10.0},
+    )
+
+    assert clicks == [(50, 55)]
+    assert result["screen_x"] == 50
+    assert result["screen_y"] == 55
+
+
+@pytest.mark.asyncio
 async def test_wayland_prepared_pointer_revalidates_after_portal_bootstrap(monkeypatch):
     import local_shell_mcp.gui.linux as linux
 
@@ -6001,6 +6113,32 @@ def test_atspi_apps_skip_defunct_desktop_children(monkeypatch):
     assert helper._apps() == [good]
 
 
+def test_atspi_apps_stop_at_explicit_scan_budget(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    calls = []
+
+    class Desktop:
+        def get_child_count(self):
+            return 1000
+
+        def get_child_at_index(self, index):
+            calls.append(index)
+            return None
+
+    monkeypatch.setattr(helper, "GUI_MAX_ATSPI_SCAN", 3)
+    monkeypatch.setattr(
+        helper,
+        "Atspi",
+        SimpleNamespace(
+            get_desktop_count=lambda: 1,
+            get_desktop=lambda _index: Desktop(),
+        ),
+    )
+    assert helper._apps() == []
+    assert calls == [0, 1, 2]
+
+
 def test_atspi_listing_skips_defunct_children(monkeypatch):
     from local_shell_mcp.gui import linux_atspi_helper as helper
 
@@ -6031,6 +6169,45 @@ def test_atspi_listing_skips_defunct_children(monkeypatch):
     windows = helper._windows()
     assert len(windows) == 1
     assert windows[0][1] is good
+
+
+def test_atspi_windows_stop_at_explicit_scan_budget(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    calls = []
+
+    class App:
+        def get_process_id(self):
+            return 42
+
+        def get_child_count(self):
+            return 1000
+
+        def get_child_at_index(self, index):
+            calls.append(index)
+            return object()
+
+    monkeypatch.setattr(helper, "GUI_MAX_ATSPI_SCAN", 3)
+    monkeypatch.setattr(helper, "_apps", lambda: [App()])
+    monkeypatch.setattr(
+        helper,
+        "_bounds",
+        lambda _window: {"x": 0, "y": 0, "width": 0, "height": 0},
+    )
+    assert helper._windows() == []
+    assert calls == [0, 1, 2]
+
+
+def test_atspi_rejects_oversized_element_accessible_id():
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    class Element:
+        def get_accessible_id(self):
+            return "x" * (helper.GUI_MAX_ELEMENT_TEXT_BYTES + 1)
+
+    element = Element()
+    assert helper._accessible_id(element) is None
+    assert helper._element_signature(element) is None
 
 
 def test_atspi_listing_skips_iconified_and_nonshowing_windows(monkeypatch):
@@ -6183,6 +6360,23 @@ def test_macos_key_table_includes_physical_backquote():
     assert macos._MAC_KEY_CODES["`"] == 50
 
 
+def test_macos_ax_copy_values_uses_bounded_native_range():
+    import local_shell_mcp.gui.macos as macos
+
+    calls = []
+
+    class AX:
+        @staticmethod
+        def AXUIElementCopyAttributeValues(element, attribute, index, max_values, _out):
+            calls.append((element, attribute, index, max_values))
+            return 0, [f"value-{index + offset}" for offset in range(max_values)]
+
+    result = macos._ax_copy_values(AX, "element", "children", 7, 2)
+
+    assert result == ["value-7", "value-8"]
+    assert calls == [("element", "children", 7, 2)]
+
+
 def test_macos_accessibility_traversal_does_not_fetch_children_after_budget(monkeypatch):
     import local_shell_mcp.gui.macos as macos
 
@@ -6221,6 +6415,11 @@ def test_macos_accessibility_traversal_does_not_fetch_children_after_budget(monk
             return [object() for _ in range(10000)]
         return default
     monkeypatch.setattr(macos, "_ax_copy", ax_copy)
+    monkeypatch.setattr(
+        macos,
+        "_ax_copy_values",
+        lambda *_args, **_kwargs: child_queries.append(True) or [object()],
+    )
 
     _record, _trusted, elements, _locators = backend._snapshot_accessibility_sync(
         "cg:1",
@@ -6282,6 +6481,13 @@ def test_macos_accessibility_traversal_bounds_provider_strings_and_total_bytes(m
         return default
 
     monkeypatch.setattr(macos, "_ax_copy", ax_copy)
+    monkeypatch.setattr(
+        macos,
+        "_ax_copy_values",
+        lambda _ax, element, _attr, index, max_values: (
+            children[index : index + max_values] if element is root else []
+        ),
+    )
 
     _record, _trusted, elements, locators = backend._snapshot_accessibility_sync(
         "cg:1",
@@ -6356,6 +6562,13 @@ def test_macos_semantic_action_rejects_recycled_ax_element(monkeypatch):
         return default
 
     monkeypatch.setattr(macos, "_ax_copy", ax_copy)
+    monkeypatch.setattr(
+        macos,
+        "_ax_copy_values",
+        lambda _ax, element, _attr, index, max_values: (
+            ([child][index : index + max_values]) if element is root else []
+        ),
+    )
 
     _record, _trusted, elements, locators = backend._snapshot_accessibility_sync(
         "cg:1",
@@ -6418,6 +6631,15 @@ def test_macos_locator_rejects_identical_replacement_ax_element(monkeypatch):
         return default
 
     monkeypatch.setattr(macos, "_ax_copy", ax_copy)
+    monkeypatch.setattr(
+        macos,
+        "_ax_copy_values",
+        lambda _ax, element, _attr, index, max_values: (
+            [current_child["value"]][index : index + max_values]
+            if element is root
+            else []
+        ),
+    )
     locator = {
         "path": [0],
         "fingerprint": macos._ax_element_fingerprint(AX, observed_child),
@@ -6594,6 +6816,11 @@ def test_macos_ax_window_matching_rejects_ambiguous_weaker_matches(monkeypatch):
     monkeypatch.setattr(macos, "_native", lambda: (AX, object()))
     monkeypatch.setattr(
         macos,
+        "_ax_copy_values",
+        lambda _ax, _element, _attr, index, max_values: [first, second][index : index + max_values],
+    )
+    monkeypatch.setattr(
+        macos,
         "_ax_copy",
         lambda _ax, obj, attr, default=None: (
             [first, second]
@@ -6640,6 +6867,11 @@ def test_macos_ax_window_matching_rejects_sole_unrelated_window(monkeypatch):
     monkeypatch.setattr(macos, "_native", lambda: (AX, object()))
     monkeypatch.setattr(
         macos,
+        "_ax_copy_values",
+        lambda _ax, _element, _attr, index, max_values: [remaining][index : index + max_values],
+    )
+    monkeypatch.setattr(
+        macos,
         "_ax_copy",
         lambda _ax, obj, attr, default=None: (
             [remaining]
@@ -6684,6 +6916,11 @@ def test_macos_ax_window_matching_rejects_title_only_match(monkeypatch):
             return "app"
 
     monkeypatch.setattr(macos, "_native", lambda: (AX, object()))
+    monkeypatch.setattr(
+        macos,
+        "_ax_copy_values",
+        lambda _ax, _element, _attr, index, max_values: [remaining][index : index + max_values],
+    )
     monkeypatch.setattr(
         macos,
         "_ax_copy",

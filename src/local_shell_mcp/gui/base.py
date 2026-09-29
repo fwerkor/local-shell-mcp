@@ -521,15 +521,19 @@ class GuiManager:
         now = time.monotonic()
         async with self._lock:
             self._prune_locked(now)
+            if len(self._states) >= GUI_STATE_CACHE_LIMIT:
+                if screenshot_path is not None:
+                    _cleanup_gui_screenshot(screenshot_path)
+                raise GuiUnavailableError(
+                    "Too many active GUI states; "
+                    "retry after an existing state expires or is consumed"
+                )
             self._states[state_id] = _StateRecord(
                 state_id=state_id,
                 window=dict(snapshot.window),
                 locators=bounded_locators,
                 created_at=now,
             )
-            while len(self._states) > GUI_STATE_CACHE_LIMIT:
-                oldest = min(self._states.values(), key=lambda item: item.created_at)
-                self._states.pop(oldest.state_id, None)
 
         return {
             "backend": self._backend.name,
@@ -654,6 +658,9 @@ class GuiManager:
                     raise GuiStaleStateError(
                         "GUI state expired during action batch; call gui_state again"
                     )
+                action["_observation_deadline"] = (
+                    record.created_at + GUI_STATE_TTL_S
+                )
                 if action["type"] in _COORDINATE_ACTIONS:
                     await self._assert_window_geometry_unchanged(record.window)
                     await _await_native_operation(
@@ -728,6 +735,9 @@ class GuiManager:
                     raise GuiStaleStateError(
                         "Displayed GUI frame expired during input; refresh it and try again"
                     )
+                action["_observation_deadline"] = (
+                    observation.created_at + GUI_STATE_TTL_S
+                )
                 await self._assert_window_geometry_unchanged(
                     observed_window,
                     stale_hint="refresh the displayed frame and try again",
@@ -876,8 +886,8 @@ class GuiManager:
                 raise GuiStaleStateError(
                     "GUI state belongs to a different window; call gui_state again"
                 )
-            record.created_at = now
-        return {"state_id": state_id, "state_ttl_s": GUI_STATE_TTL_S}
+            remaining_ttl = max(0.0, GUI_STATE_TTL_S - (now - record.created_at))
+        return {"state_id": state_id, "state_ttl_s": remaining_ttl}
 
     async def refresh_frame_observation(
         self,

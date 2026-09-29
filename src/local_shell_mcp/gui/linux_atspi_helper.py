@@ -11,6 +11,7 @@ Atspi: Any | None = None
 GUI_MAX_ELEMENTS = 1000
 GUI_MAX_DEPTH = 20
 GUI_MAX_WINDOWS = 256
+GUI_MAX_ATSPI_SCAN = GUI_MAX_WINDOWS * 4
 GUI_MAX_WINDOW_TEXT_BYTES = 1024
 GUI_MAX_WINDOWS_TOTAL_BYTES = 128 * 1024
 GUI_MAX_ELEMENT_TEXT_BYTES = 1024
@@ -139,17 +140,21 @@ def _state(obj: Any, state: Any) -> bool:
 
 def _apps() -> list[Any]:
     apps = []
+    scanned = 0
     try:
         desktop_count = Atspi.get_desktop_count()
     except Exception:
         return apps
-    for desktop_index in range(desktop_count):
+    for desktop_index in range(min(max(0, int(desktop_count)), GUI_MAX_WINDOWS)):
         try:
             desktop = Atspi.get_desktop(desktop_index)
             child_count = desktop.get_child_count()
         except Exception:
             continue
         for index in range(child_count):
+            if scanned >= GUI_MAX_ATSPI_SCAN:
+                return apps
+            scanned += 1
             try:
                 app = desktop.get_child_at_index(index)
             except Exception:
@@ -191,6 +196,7 @@ def _monitors() -> list[dict[str, Any]]:
 
 def _windows() -> list[tuple[Any, Any, int]]:
     result = []
+    scanned = 0
     for app in _apps():
         try:
             app.get_process_id()
@@ -198,6 +204,9 @@ def _windows() -> list[tuple[Any, Any, int]]:
         except Exception:
             continue
         for index in range(count):
+            if scanned >= GUI_MAX_ATSPI_SCAN:
+                return result
+            scanned += 1
             try:
                 window = app.get_child_at_index(index)
                 if window is None:
@@ -269,13 +278,21 @@ def _window_signature(window: Any) -> str | None:
 
 def _accessible_id(obj: Any) -> str | None:
     try:
-        accessible_id = _truncate_text(
-            obj.get_accessible_id(),
-            GUI_MAX_ELEMENT_TEXT_BYTES,
-        )
+        raw_accessible_id = obj.get_accessible_id()
     except Exception:
-        accessible_id = ""
-    return accessible_id or None
+        raw_accessible_id = ""
+    accessible_id = (
+        raw_accessible_id
+        if isinstance(raw_accessible_id, str)
+        else str(raw_accessible_id or "")
+    )
+    if (
+        not accessible_id
+        or len(accessible_id) > GUI_MAX_ELEMENT_TEXT_BYTES
+        or len(accessible_id.encode("utf-8")) > GUI_MAX_ELEMENT_TEXT_BYTES
+    ):
+        return None
+    return accessible_id
 
 
 def _element_signature(obj: Any) -> str | None:

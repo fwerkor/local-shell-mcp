@@ -13,6 +13,7 @@ from .base import (
     GUI_MAX_CAPTURE_PIXELS,
     GUI_MAX_ELEMENT_TEXT_BYTES,
     GUI_MAX_ELEMENT_VALUE_BYTES,
+    GUI_MAX_ELEMENTS,
     GUI_MAX_ELEMENTS_TOTAL_BYTES,
     GUI_MAX_WINDOW_TEXT_BYTES,
     GUI_MAX_WINDOWS,
@@ -57,6 +58,33 @@ def _ax_copy(AX: Any, element: Any, attribute: str, default: Any = None) -> Any:
         error, value = result
         return value if int(error) == 0 else default
     return result if result is not None else default
+
+
+def _ax_copy_values(
+    AX: Any,
+    element: Any,
+    attribute: str,
+    index: int,
+    max_values: int,
+) -> list[Any]:
+    if index < 0 or max_values <= 0:
+        return []
+    copier = getattr(AX, "AXUIElementCopyAttributeValues", None)
+    if not callable(copier):
+        return []
+    try:
+        result = copier(element, attribute, index, max_values, None)
+    except Exception:  # noqa: BLE001 - accessibility providers may reject ranges.
+        return []
+    if isinstance(result, tuple) and len(result) == 2:
+        error, values = result
+        if int(error) != 0:
+            return []
+    else:
+        values = result
+    if not isinstance(values, (list, tuple)):
+        return []
+    return list(values[:max_values])
 
 
 def _ax_value(AX: Any, value: Any, kind: int) -> Any:
@@ -296,7 +324,13 @@ class MacOSGuiBackend:
         if not bool(AX.AXIsProcessTrusted()):
             return None
         app = AX.AXUIElementCreateApplication(int(record["pid"]))
-        windows = _ax_copy(AX, app, AX.kAXWindowsAttribute, []) or []
+        windows = _ax_copy_values(
+            AX,
+            app,
+            AX.kAXWindowsAttribute,
+            0,
+            GUI_MAX_WINDOWS * 4,
+        )
         title = str(record.get("title") or "")
 
         exact: list[Any] = []
@@ -337,8 +371,16 @@ class MacOSGuiBackend:
         for raw_index in path:
             try:
                 index = int(raw_index)
-                children = _ax_copy(AX, element, AX.kAXChildrenAttribute, []) or []
-                element = children[index]
+                if index < 0 or index >= GUI_MAX_ELEMENTS:
+                    raise ValueError
+                children = _ax_copy_values(
+                    AX,
+                    element,
+                    AX.kAXChildrenAttribute,
+                    index,
+                    1,
+                )
+                element = children[0]
             except (IndexError, TypeError, ValueError) as exc:
                 raise LookupError(
                     "Target AX element is no longer available; call gui_state again"
@@ -439,10 +481,17 @@ class MacOSGuiBackend:
                 remaining = max_elements - len(elements) - len(queue)
                 if depth >= max_depth or remaining <= 0:
                     continue
-                children = _ax_copy(AX, element, AX.kAXChildrenAttribute, []) or []
                 queue.extend(
                     (child, depth + 1, [*path, index])
-                    for index, child in enumerate(children[:remaining])
+                    for index, child in enumerate(
+                        _ax_copy_values(
+                            AX,
+                            element,
+                            AX.kAXChildrenAttribute,
+                            0,
+                            remaining,
+                        )
+                    )
                 )
 
         return record, trusted, elements, locators

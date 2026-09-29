@@ -1113,6 +1113,24 @@ class LinuxGuiBackend:
         portal = self._portal
         kind = action["type"]
         session = await portal.ensure_session()
+
+        def assert_observation_fresh() -> None:
+            raw_deadline = action.get("_observation_deadline")
+            if raw_deadline is None:
+                return
+            try:
+                deadline = float(raw_deadline)
+            except (TypeError, ValueError):
+                raise GuiStaleStateError(
+                    "GUI observation deadline is invalid; refresh the observation and try again"
+                ) from None
+            if time.monotonic() > deadline:
+                raise GuiStaleStateError(
+                    "GUI observation expired while preparing Wayland input; "
+                    "refresh the observation and try again"
+                )
+
+        assert_observation_fresh()
         if action.get("_focus_prepared"):
             await self.focus_window(window)
             refreshed = await asyncio.to_thread(
@@ -1135,6 +1153,27 @@ class LinuxGuiBackend:
                     "Target window moved or resized while preparing Wayland input; "
                     "refresh the displayed frame and try again"
                 )
+            assert_observation_fresh()
+        if (
+            locator is not None
+            and kind in {"click", "double_click", "right_click", "move", "scroll", "drag"}
+        ):
+            resolved = await asyncio.to_thread(
+                self._helper,
+                {
+                    "command": "resolve_locator",
+                    "window_id": window["id"],
+                    "locator": locator["semantic"],
+                },
+            )
+            bounds = resolved.get("bounds") if isinstance(resolved, dict) else None
+            if _bounds_tuple(bounds) is None:
+                raise GuiStaleStateError(
+                    "Target element is no longer available after preparing Wayland input; "
+                    "refresh the observation and try again"
+                )
+            locator = {**locator, "bounds": dict(bounds)}
+            assert_observation_fresh()
         if kind in {"type", "key"} and locator is not None:
             await asyncio.to_thread(
                 self._helper,
@@ -1145,8 +1184,10 @@ class LinuxGuiBackend:
                     "action": {"type": "focus"},
                 },
             )
+            assert_observation_fresh()
         elif not action.get("_focus_prepared"):
             await self.focus_window(window)
+            assert_observation_fresh()
         if kind == "type":
             text = str(action.get("text", ""))
             await portal.type_text(text, session=session)
