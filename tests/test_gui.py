@@ -5643,8 +5643,10 @@ async def test_portal_input_timeout_invalidates_cached_connection(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_portal_introspection_filters_unrelated_invalid_member_names():
-    from dbus_next import MessageType
-    from dbus_next.errors import InvalidMemberNameError
+    dbus_next = pytest.importorskip("dbus_next")
+    dbus_errors = pytest.importorskip("dbus_next.errors")
+    MessageType = dbus_next.MessageType
+    InvalidMemberNameError = dbus_errors.InvalidMemberNameError
 
     import local_shell_mcp.gui.linux_portal as portal_module
 

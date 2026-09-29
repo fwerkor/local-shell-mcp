@@ -57,17 +57,24 @@ async def _portal_introspect(
     interfaces: set[str],
     operation: str,
 ) -> Any:
-    from dbus_next import Message, MessageType
-    from dbus_next.errors import InvalidMemberNameError
-    from dbus_next.introspection import Node
-
     try:
         return await _portal_lifecycle_wait(
             bus.introspect(bus_name, path),
             operation,
         )
-    except InvalidMemberNameError:
-        pass
+    except Exception as exc:
+        # dbus-next rejects KDE portal introspection XML when an unrelated
+        # interface contains a non-member-safe property name (for example,
+        # power-saver-enabled). Keep dbus-next optional on all normal paths
+        # and only load the raw-introspection fallback for that exact failure.
+        if (
+            type(exc).__name__ != "InvalidMemberNameError"
+            or not type(exc).__module__.startswith("dbus_next")
+        ):
+            raise
+
+    from dbus_next import Message, MessageType
+    from dbus_next.introspection import Node
 
     reply = await _portal_lifecycle_wait(
         bus.call(
