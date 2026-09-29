@@ -534,12 +534,9 @@ class GuiManager:
             }
 
         try:
-            if screenshot_path is not None:
-                async with self._execution_lock:
-                    snapshot = await capture_snapshot()
-                    return await publish_snapshot(snapshot)
-            snapshot = await capture_snapshot()
-            return await publish_snapshot(snapshot)
+            async with self._execution_lock:
+                snapshot = await capture_snapshot()
+                return await publish_snapshot(snapshot)
         except BaseException:
             if screenshot_path is not None:
                 _cleanup_gui_screenshot(screenshot_path)

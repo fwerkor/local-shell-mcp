@@ -16,6 +16,7 @@ from PIL import Image
 from .base import (
     GUI_MAX_CAPTURE_DIMENSION,
     GUI_MAX_CAPTURE_PIXELS,
+    GUI_MAX_WINDOW_TEXT_BYTES,
     GUI_MAX_WINDOWS,
     GuiSnapshot,
     GuiStaleStateError,
@@ -122,15 +123,34 @@ class _SemanticActionUnavailableError(GuiUnavailableError):
 
 
 def _run_helper(payload: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
-    result = subprocess.run(
-        [_helper_python(env), str(_helper_path())],
-        input=json.dumps(payload, ensure_ascii=False),
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-        env=env,
-    )
+    argv = [_helper_python(env), str(_helper_path())]
+    try:
+        result = subprocess.run(
+            argv,
+            input=json.dumps(payload, ensure_ascii=False),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+            env=env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        if payload.get("command") == "raw":
+            cleanup = {
+                "command": "release_inputs",
+                "input": payload,
+            }
+            with contextlib.suppress(OSError, subprocess.SubprocessError):
+                subprocess.run(
+                    argv,
+                    input=json.dumps(cleanup, ensure_ascii=False),
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                    env=env,
+                )
+        raise GuiUnavailableError("AT-SPI helper timed out") from exc
     stdout = result.stdout.strip().splitlines()
     response = None
     if stdout:
@@ -403,13 +423,19 @@ def _x11_text_property(window: Any, connection: Any, name: str) -> str:
         atom = connection.intern_atom(name, only_if_exists=True)
         if not atom:
             return ""
-        prop = window.get_full_property(atom, 0)
+        max_longs = max(1, (GUI_MAX_WINDOW_TEXT_BYTES + 3) // 4)
+        prop = window.get_property(atom, 0, 0, max_longs, False)
         if prop is None:
             return ""
         value = prop.value
         if isinstance(value, bytes):
-            return value.decode("utf-8", errors="replace").rstrip("\0")
-        return str(value or "")
+            raw = value[:GUI_MAX_WINDOW_TEXT_BYTES]
+        else:
+            try:
+                raw = bytes(value)[:GUI_MAX_WINDOW_TEXT_BYTES]
+            except (TypeError, ValueError):
+                return str(value or "")[:GUI_MAX_WINDOW_TEXT_BYTES]
+        return raw.decode("utf-8", errors="replace").rstrip("\0")
     except Exception:
         return ""
 
@@ -457,16 +483,24 @@ def _x11_match_window(connection: Any, record: dict[str, Any]) -> Any:
         try:
             window = connection.create_resource_object("window", xid)
             if pid_atom:
-                pid_prop = window.get_full_property(pid_atom, Xatom.CARDINAL)
+                pid_prop = window.get_property(
+                    pid_atom,
+                    Xatom.CARDINAL,
+                    0,
+                    1,
+                    False,
+                )
                 pid = int(pid_prop.value[0]) if pid_prop is not None and len(pid_prop.value) else 0
             else:
                 pid = 0
             if expected_pid and pid != expected_pid:
                 continue
             geometry = _x11_window_geometry(window, root)
-            title = _x11_text_property(window, connection, "_NET_WM_NAME") or str(
-                window.get_wm_name() or ""
-            )
+            title = _x11_text_property(
+                window,
+                connection,
+                "_NET_WM_NAME",
+            ) or _x11_text_property(window, connection, "WM_NAME")
             geometry_deltas = [
                 abs(int(geometry.get(key, 0)) - int(expected_bounds.get(key, 0)))
                 for key in ("x", "y", "width", "height")

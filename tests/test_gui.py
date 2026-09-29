@@ -3603,15 +3603,12 @@ def test_x11_window_matching_and_pixmap_decode(monkeypatch):
             self.title = title
             self.bounds = bounds
 
-        def get_full_property(self, atom, _kind):
+        def get_property(self, atom, _kind, _offset, _length, _delete):
             if atom == "_NET_WM_PID":
                 return SimpleNamespace(value=[self.pid])
-            if atom == "_NET_WM_NAME":
+            if atom in {"_NET_WM_NAME", "WM_NAME"}:
                 return SimpleNamespace(value=self.title.encode())
             return None
-
-        def get_wm_name(self):
-            return self.title
 
         def get_geometry(self):
             return SimpleNamespace(
@@ -3696,11 +3693,12 @@ def test_x11_match_rejects_sole_same_process_window_without_title_or_geometry_ma
     monkeypatch.setitem(sys.modules, "Xlib", xlib)
 
     class Window:
-        def get_full_property(self, _atom, _kind):
-            return SimpleNamespace(value=[42])
-
-        def get_wm_name(self):
-            return "Other"
+        def get_property(self, atom, _kind, _offset, _length, _delete):
+            if atom == "_NET_WM_PID":
+                return SimpleNamespace(value=[42])
+            if atom in {"_NET_WM_NAME", "WM_NAME"}:
+                return SimpleNamespace(value=b"Other")
+            return None
 
         def get_geometry(self):
             return SimpleNamespace(width=50, height=40)
@@ -3746,11 +3744,12 @@ def test_x11_match_rejects_same_title_with_different_geometry(monkeypatch):
     monkeypatch.setitem(sys.modules, "Xlib", xlib)
 
     class Window:
-        def get_full_property(self, _atom, _kind):
-            return SimpleNamespace(value=[42])
-
-        def get_wm_name(self):
-            return "Untitled"
+        def get_property(self, atom, _kind, _offset, _length, _delete):
+            if atom == "_NET_WM_PID":
+                return SimpleNamespace(value=[42])
+            if atom in {"_NET_WM_NAME", "WM_NAME"}:
+                return SimpleNamespace(value=b"Untitled")
+            return None
 
         def get_geometry(self):
             return SimpleNamespace(width=80, height=60)
@@ -8061,3 +8060,173 @@ async def test_gui_state_rejects_missing_state_ids(tmp_path, monkeypatch):
     assert local_result.isError is True
     assert "no state_id" in local_result.structuredContent["message"]
     tools.get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_gui_state_without_screenshot_holds_execution_lock_through_publication(
+    tmp_path, monkeypatch
+):
+    import local_shell_mcp.gui.base as base
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    backend = FakeBackend()
+    manager = GuiManager(backend)
+    original_bounded_elements = base._bounded_elements
+    lock_states = []
+
+    def bounded_elements(elements):
+        lock_states.append(manager._execution_lock.locked())
+        return original_bounded_elements(elements)
+
+    monkeypatch.setattr(base, "_bounded_elements", bounded_elements)
+
+    result = await manager.snapshot("window:1", screenshot=False)
+
+    assert result["state_id"]
+    assert lock_states == [True]
+
+
+def test_x11_match_bounds_per_window_property_reads(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    xlib = ModuleType("Xlib")
+    xlib.Xatom = SimpleNamespace(WINDOW=1, CARDINAL=2)
+    monkeypatch.setitem(sys.modules, "Xlib", xlib)
+
+    reads = []
+
+    class Window:
+        def get_property(self, atom, kind, offset, length, delete):
+            reads.append((atom, kind, offset, length, delete))
+            if atom == "_NET_WM_PID":
+                return SimpleNamespace(value=[42])
+            if atom == "_NET_WM_NAME":
+                return SimpleNamespace(value=b"Target")
+            return None
+
+        def get_geometry(self):
+            return SimpleNamespace(width=300, height=200)
+
+        def translate_coords(self, _root, _x, _y):
+            return SimpleNamespace(x=10, y=20)
+
+    window = Window()
+
+    class Root:
+        def get_property(self, atom, _kind, _offset, _length, _delete):
+            if atom == "_NET_CLIENT_LIST_STACKING":
+                return SimpleNamespace(value=[1])
+            return None
+
+    class Connection:
+        def screen(self):
+            return SimpleNamespace(root=Root())
+
+        def intern_atom(self, name, only_if_exists=True):
+            del only_if_exists
+            return name
+
+        def create_resource_object(self, _kind, _xid):
+            return window
+
+    assert (
+        linux._x11_match_window(
+            Connection(),
+            {
+                "pid": 42,
+                "title": "Target",
+                "bounds": {"x": 10, "y": 20, "width": 300, "height": 200},
+            },
+        )
+        is window
+    )
+    assert ("_NET_WM_PID", 2, 0, 1, False) in reads
+    assert (
+        "_NET_WM_NAME",
+        0,
+        0,
+        max(1, (linux.GUI_MAX_WINDOW_TEXT_BYTES + 3) // 4),
+        False,
+    ) in reads
+
+
+def test_linux_helper_timeout_runs_compensating_release(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    payloads = []
+
+    monkeypatch.setattr(linux, "_helper_python", lambda _env: "/usr/bin/python3")
+    monkeypatch.setattr(linux, "_helper_path", lambda: Path("/tmp/helper.py"))
+
+    def run(_argv, **kwargs):
+        payloads.append(json.loads(kwargs["input"]))
+        if len(payloads) == 1:
+            raise linux.subprocess.TimeoutExpired(cmd="helper", timeout=30)
+        return SimpleNamespace(stdout='{"ok": true}\n', stderr="", returncode=0)
+
+    monkeypatch.setattr(linux.subprocess, "run", run)
+
+    raw = {
+        "command": "raw",
+        "kind": "key_chord",
+        "keys": ["CTRL", "A"],
+    }
+    with pytest.raises(GuiUnavailableError, match="helper timed out"):
+        linux._run_helper(raw, {})
+
+    assert payloads == [
+        raw,
+        {
+            "command": "release_inputs",
+            "input": raw,
+        },
+    ]
+
+
+def test_atspi_timeout_cleanup_releases_possible_pressed_inputs(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    events = []
+
+    def mouse(x, y, event):
+        events.append(("mouse", x, y, event))
+        return True
+
+    def key(symbol, text, synth_type):
+        events.append(("key", symbol, text, synth_type))
+        return True
+
+    helper.Atspi = SimpleNamespace(
+        KeySynthType=SimpleNamespace(RELEASE="release"),
+        generate_mouse_event=mouse,
+        generate_keyboard_event=key,
+    )
+
+    pointer = helper._release_inputs(
+        {
+            "input": {
+                "kind": "bound_pointer",
+                "events": [
+                    {"x": 10, "y": 20, "event": "b1p"},
+                    {"x": 50, "y": 60, "event": "abs"},
+                    {"x": 50, "y": 60, "event": "b1r"},
+                ],
+            }
+        }
+    )
+    keyboard = helper._release_inputs(
+        {
+            "input": {
+                "kind": "key_chord",
+                "keys": ["CTRL", "A"],
+            }
+        }
+    )
+
+    assert pointer == {"released": 1}
+    assert keyboard == {"released": 2}
+    assert events == [
+        ("mouse", 10, 20, "b1r"),
+        ("key", ord("a"), None, "release"),
+        ("key", helper._MODIFIERS["CTRL"], None, "release"),
+    ]

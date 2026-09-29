@@ -706,6 +706,66 @@ def _prepare_pointer_target(payload: dict[str, Any]) -> dict[str, int]:
     return current_bounds
 
 
+def _release_inputs(payload: dict[str, Any]) -> dict[str, Any]:
+    original = payload.get("input")
+    if not isinstance(original, dict):
+        return {"released": 0}
+
+    kind = str(original.get("kind") or "")
+    released = 0
+    if kind in {"bound_pointer", "mouse_sequence", "mouse"}:
+        raw_events = (
+            original.get("events")
+            if kind != "mouse"
+            else [
+                {
+                    "x": original.get("x", 0),
+                    "y": original.get("y", 0),
+                    "event": original.get("event", ""),
+                }
+            ]
+        )
+        if isinstance(raw_events, list):
+            pressed: dict[int, tuple[int, int]] = {}
+            for event in raw_events[:200]:
+                if not isinstance(event, dict):
+                    continue
+                name = str(event.get("event") or "")
+                if len(name) < 3 or name[0] != "b" or name[-1] != "p":
+                    continue
+                try:
+                    button = int(name[1:-1])
+                    point = (int(event.get("x", 0)), int(event.get("y", 0)))
+                except (TypeError, ValueError):
+                    continue
+                if button > 0:
+                    pressed.setdefault(button, point)
+            for button, (x, y) in reversed(list(pressed.items())):
+                with contextlib.suppress(Exception):
+                    if Atspi.generate_mouse_event(x, y, f"b{button}r"):
+                        released += 1
+
+    if kind == "key_chord":
+        with contextlib.suppress(Exception):
+            parts = _key_parts(original.get("keys"))
+            symbols = []
+            for part in parts:
+                symbol = _MODIFIERS.get(part.upper())
+                if symbol is None:
+                    key = part.lower() if len(part) == 1 and part.isalpha() else part
+                    symbol = _keysym(key)
+                symbols.append(symbol)
+            for symbol in reversed(symbols):
+                with contextlib.suppress(Exception):
+                    if Atspi.generate_keyboard_event(
+                        symbol,
+                        None,
+                        Atspi.KeySynthType.RELEASE,
+                    ):
+                        released += 1
+    return {"released": released}
+
+
 def _raw(payload: dict[str, Any]) -> dict[str, Any]:
     kind = str(payload["kind"])
     if kind == "bound_pointer":
@@ -873,6 +933,8 @@ def _main(payload: dict[str, Any]) -> dict[str, Any]:
         return _resolve_locator(payload)
     if command == "raw":
         return _raw(payload)
+    if command == "release_inputs":
+        return _release_inputs(payload)
     raise ValueError(f"Unknown helper command: {command}")
 
 
