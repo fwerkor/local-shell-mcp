@@ -227,6 +227,7 @@ export class DesktopController extends BaseController {
     this.listen(this.root, "click", (event) => this.onClick(event))
     this.listen(this.root, "pointerdown", (event) => this.onPointerDown(event as PointerEvent))
     this.listen(this.root, "pointerup", (event) => this.onPointerUp(event as PointerEvent))
+    this.listen(this.root, "pointercancel", (event) => this.onPointerCancel(event as PointerEvent))
     this.listen(this.root, "contextmenu", (event) => this.onContextMenu(event as MouseEvent))
     this.listen(this.root, "wheel", (event) => this.onWheel(event as WheelEvent), { passive: false })
     this.listen(this.root, "keydown", (event) => this.onKeyDown(event as KeyboardEvent))
@@ -828,6 +829,13 @@ export class DesktopController extends BaseController {
       to_x: end.x,
       to_y: end.y,
     }, start.bounds, start.observationId)
+  }
+
+  private onPointerCancel(event: PointerEvent): void {
+    const start = this.pointerStart
+    if (!start || start.pointerId !== event.pointerId) return
+    this.pointerStart = null
+    this.flushObservationDiscards()
   }
 
   private onContextMenu(event: MouseEvent): void {

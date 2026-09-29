@@ -579,6 +579,21 @@ def _safe_audit_result(tool_name: str, value: Any) -> Any:
                     and str(item.get("type") or "").lower() == "image"
                 )
             ]
+        structured = sanitized.get("structuredContent")
+        if isinstance(structured, dict):
+            safe_structured = dict(structured)
+            elements = safe_structured.get("elements")
+            if isinstance(elements, list):
+                safe_structured["elements"] = [
+                    {
+                        **item,
+                        **({"value": "<redacted>"} if "value" in item else {}),
+                    }
+                    if isinstance(item, dict)
+                    else item
+                    for item in elements
+                ]
+            sanitized["structuredContent"] = safe_structured
         return sanitized
     if tool_name not in {
         "workspace_open",

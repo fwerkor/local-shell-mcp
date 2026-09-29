@@ -289,6 +289,72 @@ describe("Native WebUI desktop click handling", () => {
 
     expect(sends).toHaveLength(0)
   })
+
+  test("clears canceled pointer gestures and releases deferred observations", async () => {
+    const sends: unknown[] = []
+    const context: NativePageContext = {
+      api: {
+        get: async () => undefined as never,
+        send: async (url: string, _method: string, body?: unknown) => {
+          sends.push({ url, body })
+          return {} as never
+        },
+      },
+      uiPath: "/ui",
+      accessToken: () => null,
+      machines: () => [],
+      notify: () => undefined,
+      refreshChrome: async () => undefined,
+    }
+    const controller: any = new DesktopController(context)
+    const image: any = {
+      hidden: false,
+      setPointerCapture: () => undefined,
+      getBoundingClientRect: () => ({
+        left: 0,
+        top: 0,
+        width: 100,
+        height: 100,
+      }),
+    }
+    controller.root = {
+      querySelector: (selector: string) => (
+        selector === "[data-role=desktop-frame]" ? image : null
+      ),
+    }
+    controller.frameBounds = { x: 0, y: 0, width: 100, height: 100 }
+    controller.frameObservationId = "obs-active"
+    controller.frameInputEnabled = true
+    const target = {
+      closest: (selector: string) => (
+        selector === "[data-role=desktop-frame]" ? image : null
+      ),
+    }
+
+    controller.onPointerDown({
+      target,
+      button: 0,
+      pointerId: 7,
+      clientX: 10,
+      clientY: 10,
+    })
+    controller.queueObservationDiscard("node", "window:1", "obs-old")
+    await Promise.resolve()
+    expect(sends).toEqual([])
+
+    controller.onPointerCancel({ pointerId: 7 })
+    await Promise.resolve()
+
+    expect(controller.pointerStart).toBeNull()
+    expect(sends).toEqual([{
+      url: "/gui/frame/discard",
+      body: {
+        machine: "node",
+        window_id: "window:1",
+        observation_id: "obs-old",
+      },
+    }])
+  })
 })
 
 describe("Native WebUI desktop window refresh", () => {

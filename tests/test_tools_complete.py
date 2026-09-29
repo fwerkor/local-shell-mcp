@@ -561,11 +561,30 @@ def test_tool_helpers_audit_serialization_timeout_and_tail(tmp_path, monkeypatch
             tools.ImageContent(type="image", data="AAAA", mimeType="image/png"),
             tools.TextContent(type="text", text="state"),
         ],
-        structuredContent={"ok": True, "screenshot": True, "bytes": 4},
+        structuredContent={
+            "ok": True,
+            "screenshot": True,
+            "bytes": 4,
+            "elements": [
+                {
+                    "element_id": "e1",
+                    "role": "text",
+                    "value": "api-key-secret",
+                },
+                {
+                    "element_id": "e2",
+                    "role": "button",
+                    "name": "Submit",
+                },
+            ],
+        },
     )
     audited_gui_state = tools._safe_audit_result("gui_state", gui_state_result)
     assert audited_gui_state["structuredContent"]["screenshot"] is True
     assert audited_gui_state["structuredContent"]["bytes"] == 4
+    assert audited_gui_state["structuredContent"]["elements"][0]["value"] == "<redacted>"
+    assert audited_gui_state["structuredContent"]["elements"][0]["element_id"] == "e1"
+    assert audited_gui_state["structuredContent"]["elements"][1]["name"] == "Submit"
     assert len(audited_gui_state["content"]) == 1
     assert audited_gui_state["content"][0]["type"] == "text"
     assert audited_gui_state["content"][0]["text"] == "state"
