@@ -309,21 +309,41 @@ def _window_is_visible(window: Any) -> bool:
     return True
 
 
-def _window_signature(window: Any) -> str | None:
-    try:
-        raw_accessible_id = window.get_accessible_id()
-    except Exception:
-        raw_accessible_id = ""
-    accessible_id = (
-        raw_accessible_id
-        if isinstance(raw_accessible_id, str)
-        else str(raw_accessible_id or "")
-    )
+def _bounded_window_identity_text(value: Any) -> str | None:
+    text = value if isinstance(value, str) else str(value or "")
     if (
-        not accessible_id
-        or len(accessible_id) > GUI_MAX_WINDOW_TEXT_BYTES
-        or len(accessible_id.encode("utf-8")) > GUI_MAX_WINDOW_TEXT_BYTES
+        not text
+        or len(text) > GUI_MAX_WINDOW_TEXT_BYTES
+        or len(text.encode("utf-8")) > GUI_MAX_WINDOW_TEXT_BYTES
     ):
+        return None
+    return text
+
+
+def _window_provider_identity(window: Any) -> str | None:
+    try:
+        accessible_id = _bounded_window_identity_text(window.get_accessible_id())
+    except Exception:
+        accessible_id = None
+    if accessible_id is not None:
+        return f"id\0{accessible_id}"
+
+    try:
+        application = getattr(window, "app", None)
+        bus_name = _bounded_window_identity_text(
+            getattr(application, "bus_name", "") if application is not None else ""
+        )
+        object_path = _bounded_window_identity_text(getattr(window, "path", ""))
+    except Exception:
+        return None
+    if bus_name is None or object_path is None:
+        return None
+    return f"object\0{bus_name}\0{object_path}"
+
+
+def _window_signature(window: Any) -> str | None:
+    identity = _window_provider_identity(window)
+    if identity is None:
         return None
     try:
         role = _truncate_text(
@@ -332,7 +352,7 @@ def _window_signature(window: Any) -> str | None:
         )
     except Exception:
         role = ""
-    fingerprint = f"id\0{role}\0{accessible_id}"
+    fingerprint = f"{identity}\0{role}"
     return hashlib.sha256(fingerprint.encode()).hexdigest()[:12]
 
 
@@ -386,7 +406,7 @@ def _record(app: Any, window: Any, index: int) -> dict[str, Any]:
     pid = int(app.get_process_id())
     signature = _window_signature(window)
     if not signature:
-        raise LookupError("AT-SPI window does not expose a stable accessible id")
+        raise LookupError("AT-SPI window does not expose a stable provider identity")
     return {
         "id": f"atspi:{pid}:{signature}",
         "title": _truncate_text(window.get_name(), GUI_MAX_WINDOW_TEXT_BYTES),
