@@ -2501,7 +2501,7 @@ def test_windows_semantic_action_rejects_identical_replacement_uia_element(monke
         )
 
 
-def test_atspi_window_without_stable_accessible_id_is_not_exposed():
+def test_atspi_window_without_stable_provider_identity_is_not_exposed():
     import local_shell_mcp.gui.linux_atspi_helper as helper
 
     class Window:
@@ -2523,8 +2523,72 @@ def test_atspi_window_without_stable_accessible_id_is_not_exposed():
 
     window = Window()
     assert helper._window_signature(window) is None
-    with pytest.raises(LookupError, match="stable accessible id"):
+    with pytest.raises(LookupError, match="stable provider identity"):
         helper._record(App(), window, 0)
+
+
+def test_atspi_window_uses_stable_bus_object_identity_without_accessible_id(monkeypatch):
+    import local_shell_mcp.gui.linux_atspi_helper as helper
+
+    class Provider:
+        bus_name = ":1.42"
+
+    class Window:
+        app = Provider()
+
+        def __init__(self, title, path):
+            self.title = title
+            self.path = path
+
+        def get_accessible_id(self):
+            return ""
+
+        def get_role_name(self):
+            return "frame"
+
+        def get_name(self):
+            return self.title
+
+    class App:
+        def __init__(self, children):
+            self.children = children
+
+        def get_process_id(self):
+            return 42
+
+        def get_name(self):
+            return "App"
+
+        def get_child_count(self):
+            return len(self.children)
+
+        def get_child_at_index(self, index):
+            return self.children[index]
+
+    target = Window("Target", "/org/a11y/atspi/accessible/1")
+    other = Window("Other", "/org/a11y/atspi/accessible/2")
+    app = App([target, other])
+    monkeypatch.setattr(helper, "_apps", lambda: [app])
+
+    bounds = {
+        target: {"x": 10, "y": 20, "width": 300, "height": 200},
+        other: {"x": 400, "y": 20, "width": 300, "height": 200},
+    }
+    monkeypatch.setattr(helper, "_bounds", lambda window: dict(bounds[window]))
+
+    first_id = helper._record(app, target, 0)["id"]
+    first_signature = helper._window_signature(target)
+    assert first_signature is not None
+
+    target.title = "Target — changed"
+    bounds[target] = {"x": 50, "y": 60, "width": 500, "height": 400}
+    app.children = [other, target]
+
+    assert helper._record(app, target, 1)["id"] == first_id
+    assert helper._window_signature(target) == first_signature
+    _resolved_app, resolved, index = helper._resolve_window(first_id)
+    assert resolved is target
+    assert index == 1
 
 
 def test_atspi_window_rejects_oversized_accessible_id_before_fingerprinting():
@@ -2549,7 +2613,7 @@ def test_atspi_window_rejects_oversized_accessible_id_before_fingerprinting():
 
     window = Window()
     assert helper._window_signature(window) is None
-    with pytest.raises(LookupError, match="stable accessible id"):
+    with pytest.raises(LookupError, match="stable provider identity"):
         helper._record(App(), window, 0)
 
 
@@ -4081,6 +4145,34 @@ def test_linux_locator_center_must_be_usable_and_inside_window(monkeypatch):
         )
 
 
+def test_atspi_window_focus_accepts_already_active_nonfocusable_window(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    class StateSet:
+        def contains(self, state):
+            return state == "active"
+
+    class Window:
+        def get_state_set(self):
+            return StateSet()
+
+        def get_component_iface(self):
+            pytest.fail("already-active top-level window must not require grab_focus")
+
+    window = Window()
+    monkeypatch.setattr(helper, "_resolve_window", lambda _window_id: (object(), window, 0))
+    helper.Atspi = SimpleNamespace(StateType=SimpleNamespace(ACTIVE="active"))
+
+    result = helper._semantic_action(
+        {
+            "window_id": "atspi:1:sig",
+            "locator": [],
+            "action": {"type": "focus"},
+        }
+    )
+    assert result == {"semantic": True, "already_active": True}
+
+
 def test_atspi_raw_keyboard_focuses_and_revalidates_before_injection(monkeypatch):
     from local_shell_mcp.gui import linux_atspi_helper as helper
 
@@ -5547,6 +5639,54 @@ async def test_portal_input_timeout_invalidates_cached_connection(monkeypatch):
     assert portal._session is None
     assert portal._session_iface is None
     assert portal._streams == []
+
+
+@pytest.mark.asyncio
+async def test_portal_introspection_filters_unrelated_invalid_member_names():
+    dbus_next = pytest.importorskip("dbus_next")
+    dbus_errors = pytest.importorskip("dbus_next.errors")
+    MessageType = dbus_next.MessageType
+    InvalidMemberNameError = dbus_errors.InvalidMemberNameError
+
+    import local_shell_mcp.gui.linux_portal as portal_module
+
+    xml = """<node>
+      <interface name="org.freedesktop.portal.PowerProfileMonitor">
+        <property name="power-saver-enabled" type="b" access="read"/>
+      </interface>
+      <interface name="org.freedesktop.portal.Screenshot">
+        <method name="Screenshot">
+          <arg type="s" direction="in"/>
+          <arg type="a{sv}" direction="in"/>
+          <arg type="o" direction="out"/>
+        </method>
+      </interface>
+    </node>"""
+
+    class Reply:
+        message_type = MessageType.METHOD_RETURN
+        body = [xml]
+        error_name = None
+
+    class Bus:
+        async def introspect(self, _bus_name, _path):
+            raise InvalidMemberNameError("power-saver-enabled")
+
+        async def call(self, message):
+            assert message.interface == "org.freedesktop.DBus.Introspectable"
+            assert message.member == "Introspect"
+            return Reply()
+
+    node = await portal_module._portal_introspect(
+        Bus(),
+        "org.freedesktop.portal.Desktop",
+        "/org/freedesktop/portal/desktop",
+        interfaces={"org.freedesktop.portal.Screenshot"},
+        operation="introspecting the screenshot portal",
+    )
+    assert [interface.name for interface in node.interfaces] == [
+        "org.freedesktop.portal.Screenshot"
+    ]
 
 
 @pytest.mark.asyncio
