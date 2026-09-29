@@ -60,6 +60,26 @@ class GuiStaleStateError(RuntimeError):
     """Raised when an action references an expired or changed GUI state."""
 
 
+def _assert_action_fresh(
+    action: dict[str, Any],
+    *,
+    stale_hint: str = "refresh the GUI observation and try again",
+) -> None:
+    raw_deadline = action.get("_observation_deadline")
+    if raw_deadline is None:
+        return
+    try:
+        deadline = float(raw_deadline)
+    except (TypeError, ValueError):
+        raise GuiStaleStateError(
+            f"GUI observation deadline is invalid; {stale_hint}"
+        ) from None
+    if time.monotonic() > deadline:
+        raise GuiStaleStateError(
+            f"GUI observation expired while preparing input; {stale_hint}"
+        )
+
+
 @dataclass(slots=True)
 class GuiSnapshot:
     window: dict[str, Any]
@@ -669,6 +689,7 @@ class GuiManager:
                     )
                     await self._assert_window_geometry_unchanged(record.window)
                     action["_focus_prepared"] = True
+                _assert_action_fresh(action, stale_hint="call gui_state again")
                 result = await _await_native_operation(
                     self._backend.perform_action(record.window, locator, action)
                 )
@@ -761,6 +782,10 @@ class GuiManager:
                     await _await_native_operation(
                         self._backend.focus_window(observed_window)
                     )
+                _assert_action_fresh(
+                    action,
+                    stale_hint="refresh the displayed frame and try again",
+                )
                 result = await _await_native_operation(
                     self._backend.perform_action(observed_window, None, action)
                 )

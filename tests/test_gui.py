@@ -4031,14 +4031,14 @@ async def test_linux_raw_keyboard_focuses_selected_window(monkeypatch):
     backend = linux.LinuxGuiBackend()
     calls = []
 
-    async def focus(window):
+    async def focus(window, _env=None, **_kwargs):
         calls.append(("focus", window["id"]))
 
-    async def raw(window, locator, action):
+    async def raw(window, locator, action, _env=None):
         calls.append(("raw", action["type"]))
         return {"ok": True}
 
-    monkeypatch.setattr(backend, "focus_window", focus)
+    monkeypatch.setattr(backend, "_focus_window", focus)
     monkeypatch.setattr(backend, "_perform_x11", raw)
 
     window = {"id": "window:1", "bounds": {"x": 0, "y": 0, "width": 10, "height": 10}}
@@ -4176,7 +4176,7 @@ async def test_x11_keyboard_payload_carries_target_identity(monkeypatch):
     backend = linux.LinuxGuiBackend()
     payloads = []
 
-    def helper(payload):
+    def helper(payload, _env=None):
         payloads.append(payload)
         return {"generated": True}
 
@@ -4218,7 +4218,7 @@ async def test_linux_snapshot_preserves_accessible_id_in_semantic_locator(monkey
     backend = linux.LinuxGuiBackend()
     backend._env = {"XDG_SESSION_TYPE": "x11", "DISPLAY": ":0"}
 
-    def helper(payload):
+    def helper(payload, _env=None):
         assert payload["command"] == "snapshot"
         return {
             "window": {
@@ -4443,7 +4443,7 @@ async def test_wayland_snapshot_focuses_target_before_visible_region_capture(tmp
     backend._env = {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-0"}
     calls = []
 
-    def helper(payload):
+    def helper(payload, _env=None):
         if payload["command"] == "snapshot":
             return {
                 "window": {
@@ -4460,7 +4460,7 @@ async def test_wayland_snapshot_focuses_target_before_visible_region_capture(tmp
             return {"windows": [], "monitors": []}
         raise AssertionError(payload)
 
-    async def focus(_window):
+    async def focus(_window, _env=None, **_kwargs):
         calls.append("focus")
 
     async def capture(path, bounds, monitors, env):
@@ -4470,7 +4470,7 @@ async def test_wayland_snapshot_focuses_target_before_visible_region_capture(tmp
         return "test-wayland"
 
     monkeypatch.setattr(backend, "_helper", helper)
-    monkeypatch.setattr(backend, "focus_window", focus)
+    monkeypatch.setattr(backend, "_focus_window", focus)
     monkeypatch.setattr(linux, "_capture_wayland", capture)
 
     result = await backend.snapshot(
@@ -4492,7 +4492,7 @@ async def test_wayland_snapshot_rejects_bounds_change_after_focus(tmp_path, monk
     backend._env = {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-0"}
     snapshot_calls = 0
 
-    def helper(payload):
+    def helper(payload, _env=None):
         nonlocal snapshot_calls
         if payload["command"] == "snapshot":
             snapshot_calls += 1
@@ -4512,14 +4512,14 @@ async def test_wayland_snapshot_rejects_bounds_change_after_focus(tmp_path, monk
             return {"windows": [], "monitors": []}
         raise AssertionError(payload)
 
-    async def focus(_window):
+    async def focus(_window, _env=None, **_kwargs):
         return None
 
     async def capture(*_args, **_kwargs):
         pytest.fail("capture must not run with stale Wayland bounds")
 
     monkeypatch.setattr(backend, "_helper", helper)
-    monkeypatch.setattr(backend, "focus_window", focus)
+    monkeypatch.setattr(backend, "_focus_window", focus)
     monkeypatch.setattr(linux, "_capture_wayland", capture)
 
     with pytest.raises(GuiStaleStateError, match="moved or resized"):
@@ -4541,7 +4541,7 @@ async def test_wayland_snapshot_rejects_bounds_change_during_capture(tmp_path, m
     backend._env = {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-0"}
     snapshot_calls = 0
 
-    def helper(payload):
+    def helper(payload, _env=None):
         nonlocal snapshot_calls
         if payload["command"] == "snapshot":
             snapshot_calls += 1
@@ -4561,7 +4561,7 @@ async def test_wayland_snapshot_rejects_bounds_change_during_capture(tmp_path, m
             return {"windows": [], "monitors": []}
         raise AssertionError(payload)
 
-    async def focus(_window):
+    async def focus(_window, _env=None, **_kwargs):
         return None
 
     async def capture(path, *_args, **_kwargs):
@@ -4569,7 +4569,7 @@ async def test_wayland_snapshot_rejects_bounds_change_during_capture(tmp_path, m
         return "grim-region"
 
     monkeypatch.setattr(backend, "_helper", helper)
-    monkeypatch.setattr(backend, "focus_window", focus)
+    monkeypatch.setattr(backend, "_focus_window", focus)
     monkeypatch.setattr(linux, "_capture_wayland", capture)
 
     with pytest.raises(GuiStaleStateError, match="during the Wayland capture"):
@@ -4703,20 +4703,20 @@ async def test_linux_raw_element_action_reresolves_locator_bounds(monkeypatch):
     helper_calls = []
     received = []
 
-    def helper(payload):
+    def helper(payload, _env=None):
         helper_calls.append(payload)
         assert payload["command"] == "resolve_locator"
         return {"bounds": {"x": 40, "y": 50, "width": 20, "height": 10}}
 
-    async def focus(_window):
+    async def focus(_window, _env=None, **_kwargs):
         return None
 
-    async def raw(_window, locator, _action):
+    async def raw(_window, locator, _action, _env=None):
         received.append(locator)
         return {"performed": True}
 
     monkeypatch.setattr(backend, "_helper", helper)
-    monkeypatch.setattr(backend, "focus_window", focus)
+    monkeypatch.setattr(backend, "_focus_window", focus)
     monkeypatch.setattr(backend, "_perform_x11", raw)
 
     locator = {
@@ -4751,10 +4751,10 @@ async def test_wayland_refocuses_target_after_portal_bootstrap(monkeypatch):
 
     backend._portal = Portal()
 
-    async def focus(_window):
+    async def focus(_window, _env=None, **_kwargs):
         calls.append("focus")
 
-    monkeypatch.setattr(backend, "focus_window", focus)
+    monkeypatch.setattr(backend, "_focus_window", focus)
     result = await backend._perform_wayland(
         {"id": "atspi:1:sig", "bounds": {"x": 0, "y": 0, "width": 100, "height": 100}},
         None,
@@ -4781,7 +4781,7 @@ async def test_wayland_rejects_observation_expired_during_portal_bootstrap(monke
     backend._portal = Portal()
     monkeypatch.setattr(linux.time, "monotonic", lambda: 20.0)
 
-    with pytest.raises(GuiStaleStateError, match="expired while preparing Wayland input"):
+    with pytest.raises(GuiStaleStateError, match="expired while preparing input"):
         await backend._perform_wayland(
             {
                 "id": "atspi:1:sig",
@@ -4814,14 +4814,14 @@ async def test_wayland_reresolves_element_bounds_after_portal_bootstrap(monkeypa
 
     backend._portal = Portal()
 
-    async def focus(_window):
+    async def focus(_window, _env=None, **_kwargs):
         return None
 
-    def helper(payload):
+    def helper(payload, _env=None):
         assert payload["command"] == "resolve_locator"
         return {"bounds": {"x": 40, "y": 50, "width": 20, "height": 10}}
 
-    monkeypatch.setattr(backend, "focus_window", focus)
+    monkeypatch.setattr(backend, "_focus_window", focus)
     monkeypatch.setattr(backend, "_helper", helper)
     monkeypatch.setattr(linux.time, "monotonic", lambda: 5.0)
 
@@ -4864,10 +4864,10 @@ async def test_wayland_prepared_pointer_revalidates_after_portal_bootstrap(monke
 
     backend._portal = Portal()
 
-    async def focus(_window):
+    async def focus(_window, _env=None, **_kwargs):
         calls.append("focus")
 
-    def helper(payload):
+    def helper(payload, _env=None):
         assert payload["command"] == "snapshot"
         calls.append("snapshot")
         return {
@@ -4877,7 +4877,7 @@ async def test_wayland_prepared_pointer_revalidates_after_portal_bootstrap(monke
             }
         }
 
-    monkeypatch.setattr(backend, "focus_window", focus)
+    monkeypatch.setattr(backend, "_focus_window", focus)
     monkeypatch.setattr(backend, "_helper", helper)
 
     with pytest.raises(GuiStaleStateError, match="preparing Wayland input"):
@@ -4901,14 +4901,14 @@ async def test_linux_raw_pointer_focuses_target_before_injection(monkeypatch):
     backend._env = {"XDG_SESSION_TYPE": "x11", "DISPLAY": ":0"}
     calls = []
 
-    async def focus(_window):
+    async def focus(_window, _env=None, **_kwargs):
         calls.append("focus")
 
-    async def raw(_window, _locator, _action):
+    async def raw(_window, _locator, _action, _env=None):
         calls.append("raw")
         return {"performed": True}
 
-    monkeypatch.setattr(backend, "focus_window", focus)
+    monkeypatch.setattr(backend, "_focus_window", focus)
     monkeypatch.setattr(backend, "_perform_x11", raw)
     result = await backend.perform_action(
         {"id": "w", "bounds": {"x": 0, "y": 0, "width": 100, "height": 100}},
@@ -4926,7 +4926,7 @@ async def test_x11_compound_pointer_actions_use_one_helper_invocation(monkeypatc
     backend = linux.LinuxGuiBackend()
     calls = []
 
-    def helper(payload):
+    def helper(payload, _env=None):
         calls.append(payload)
         return {"generated": True}
 
@@ -6134,7 +6134,7 @@ async def test_linux_stale_semantic_click_never_falls_back(monkeypatch):
     backend = linux.LinuxGuiBackend()
     calls = []
 
-    def stale(_payload):
+    def stale(_payload, _env=None):
         raise GuiStaleStateError("AT-SPI target element changed since observation")
 
     async def raw(*_args, **_kwargs):
@@ -7762,7 +7762,7 @@ async def test_x11_snapshot_rejects_atspi_identity_change_during_capture(
     snapshot_calls = 0
     observed_bounds = {"x": 0, "y": 0, "width": 20, "height": 10}
 
-    def helper(payload):
+    def helper(payload, _env=None):
         nonlocal snapshot_calls
         if payload["command"] == "snapshot":
             snapshot_calls += 1
@@ -8150,7 +8150,7 @@ def test_x11_match_bounds_per_window_property_reads(monkeypatch):
     ) in reads
 
 
-def test_linux_helper_timeout_runs_compensating_release(monkeypatch):
+def test_linux_helper_timeout_before_synthesis_does_not_release_inputs(monkeypatch):
     import local_shell_mcp.gui.linux as linux
 
     payloads = []
@@ -8160,7 +8160,45 @@ def test_linux_helper_timeout_runs_compensating_release(monkeypatch):
 
     def run(_argv, **kwargs):
         payloads.append(json.loads(kwargs["input"]))
+        raise linux.subprocess.TimeoutExpired(cmd="helper", timeout=30)
+
+    monkeypatch.setattr(linux.subprocess, "run", run)
+
+    raw = {
+        "command": "raw",
+        "kind": "key_chord",
+        "keys": ["CTRL", "A"],
+    }
+    with pytest.raises(GuiUnavailableError, match="helper timed out"):
+        linux._run_helper(raw, {})
+
+    assert len(payloads) == 1
+    assert payloads[0]["command"] == "raw"
+    assert payloads[0]["keys"] == ["CTRL", "A"]
+    assert isinstance(payloads[0]["_progress_fd"], int)
+
+
+def test_linux_helper_timeout_releases_only_confirmed_held_inputs(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    payloads = []
+
+    monkeypatch.setattr(linux, "_helper_python", lambda _env: "/usr/bin/python3")
+    monkeypatch.setattr(linux, "_helper_path", lambda: Path("/tmp/helper.py"))
+
+    def run(_argv, **kwargs):
+        payload = json.loads(kwargs["input"])
+        payloads.append(payload)
         if len(payloads) == 1:
+            progress_fd = kwargs["pass_fds"][0]
+            linux.os.write(
+                progress_fd,
+                (
+                    b'{"kind":"key","symbol":1001,"state":"press"}\n'
+                    b'{"kind":"key","symbol":1002,"state":"press"}\n'
+                    b'{"kind":"key","symbol":1002,"state":"release"}\n'
+                ),
+            )
             raise linux.subprocess.TimeoutExpired(cmd="helper", timeout=30)
         return SimpleNamespace(stdout='{"ok": true}\n', stderr="", returncode=0)
 
@@ -8174,16 +8212,13 @@ def test_linux_helper_timeout_runs_compensating_release(monkeypatch):
     with pytest.raises(GuiUnavailableError, match="helper timed out"):
         linux._run_helper(raw, {})
 
-    assert payloads == [
-        raw,
-        {
-            "command": "release_inputs",
-            "input": raw,
-        },
-    ]
+    assert payloads[1] == {
+        "command": "release_inputs",
+        "pressed": [{"kind": "key", "symbol": 1001}],
+    }
 
 
-def test_atspi_timeout_cleanup_releases_possible_pressed_inputs(monkeypatch):
+def test_atspi_timeout_cleanup_releases_confirmed_pressed_inputs(monkeypatch):
     from local_shell_mcp.gui import linux_atspi_helper as helper
 
     events = []
@@ -8204,29 +8239,248 @@ def test_atspi_timeout_cleanup_releases_possible_pressed_inputs(monkeypatch):
 
     pointer = helper._release_inputs(
         {
-            "input": {
-                "kind": "bound_pointer",
-                "events": [
-                    {"x": 10, "y": 20, "event": "b1p"},
-                    {"x": 50, "y": 60, "event": "abs"},
-                    {"x": 50, "y": 60, "event": "b1r"},
-                ],
-            }
+            "pressed": [
+                {"kind": "mouse", "button": 1, "x": 50, "y": 60},
+            ]
         }
     )
     keyboard = helper._release_inputs(
         {
-            "input": {
-                "kind": "key_chord",
-                "keys": ["CTRL", "A"],
-            }
+            "pressed": [
+                {"kind": "key", "symbol": helper._MODIFIERS["CTRL"]},
+                {"kind": "key", "symbol": ord("a")},
+            ]
         }
     )
 
     assert pointer == {"released": 1}
     assert keyboard == {"released": 2}
     assert events == [
-        ("mouse", 10, 20, "b1r"),
+        ("mouse", 50, 60, "b1r"),
         ("key", ord("a"), None, "release"),
         ("key", helper._MODIFIERS["CTRL"], None, "release"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_gui_action_rejects_expiry_during_native_preparation(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.base as base
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(base, "GUI_STATE_TTL_S", 0.02)
+
+    class SlowPreparationBackend(FakeBackend):
+        def __init__(self):
+            super().__init__()
+            self.injected = False
+
+        async def focus_window(self, window):
+            del window
+            await asyncio.sleep(0.03)
+
+        async def perform_action(self, window, locator, action):
+            del window, locator, action
+            self.injected = True
+            return {"performed": True}
+
+    backend = SlowPreparationBackend()
+    manager = GuiManager(backend)
+    state = await manager.snapshot("window:1", screenshot=False)
+
+    with pytest.raises(GuiStaleStateError, match="expired while preparing input"):
+        await manager.act(
+            "window:1",
+            state["state_id"],
+            [{"type": "click", "x": 1, "y": 1}],
+        )
+    assert backend.injected is False
+
+
+def test_windows_rejects_expiry_after_final_native_preparation(monkeypatch):
+    import local_shell_mcp.gui.base as base
+    import local_shell_mcp.gui.windows as windows
+
+    pointer_calls = []
+    clock = iter((5.0, 20.0))
+
+    class Target:
+        def SetFocus(self):
+            return None
+
+    class Auto:
+        @staticmethod
+        def Click(*_args, **_kwargs):
+            pointer_calls.append("click")
+
+    observed = {
+        "id": "hwnd:1:fingerprint",
+        "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+    }
+    backend = WindowsGuiBackend()
+    monkeypatch.setattr(base.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(windows, "_automation", lambda: Auto())
+    monkeypatch.setattr(
+        backend,
+        "_find_window",
+        lambda _window_id, _observed_window=None: Target(),
+    )
+    monkeypatch.setattr(
+        windows,
+        "_native_window_bounds",
+        lambda _hwnd: dict(observed["bounds"]),
+    )
+
+    with pytest.raises(GuiStaleStateError, match="expired while preparing input"):
+        backend._perform_action_sync(
+            observed,
+            None,
+            {
+                "type": "click",
+                "x": 5,
+                "y": 6,
+                "_focus_prepared": True,
+                "_observation_deadline": 10.0,
+            },
+        )
+    assert pointer_calls == []
+
+
+def test_macos_rejects_expiry_after_final_native_preparation(monkeypatch):
+    import local_shell_mcp.gui.base as base
+    import local_shell_mcp.gui.macos as macos
+
+    clock = iter((5.0, 20.0))
+
+    class AX:
+        kAXFocusedAttribute = "focused"
+        kAXRaiseAction = "raise"
+
+        @staticmethod
+        def AXIsProcessTrusted():
+            return True
+
+        @staticmethod
+        def AXUIElementSetAttributeValue(*_args):
+            return 0
+
+        @staticmethod
+        def AXUIElementPerformAction(*_args):
+            return 0
+
+    class Quartz:
+        pass
+
+    observed = {
+        "id": "cg:1",
+        "pid": 1,
+        "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+    }
+    backend = MacOSGuiBackend()
+    monkeypatch.setattr(base.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(macos, "_native", lambda: (AX, Quartz))
+    monkeypatch.setattr(backend, "_current_record", lambda _window: observed)
+    monkeypatch.setattr(backend, "_find_ax_window", lambda _record: object())
+    monkeypatch.setattr(
+        backend,
+        "_mouse",
+        lambda *_args: pytest.fail("expired macOS pointer input must not be injected"),
+    )
+
+    with pytest.raises(GuiStaleStateError, match="expired while preparing input"):
+        backend._perform_action_sync(
+            observed,
+            None,
+            {
+                "type": "move",
+                "x": 1,
+                "y": 2,
+                "_focus_prepared": True,
+                "_observation_deadline": 10.0,
+            },
+        )
+
+
+def test_atspi_key_chord_rechecks_deadline_after_focus(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    now = {"value": 5.0}
+    generated = []
+
+    def focus(_payload):
+        now["value"] = 20.0
+
+    helper.Atspi = SimpleNamespace(
+        KeySynthType=SimpleNamespace(PRESS="press", RELEASE="release"),
+        generate_keyboard_event=lambda *args: generated.append(args) or True,
+    )
+    monkeypatch.setattr(helper, "_focus_keyboard_target", focus)
+    monkeypatch.setattr(helper.time, "monotonic", lambda: now["value"])
+
+    with pytest.raises(LookupError, match="expired before native input"):
+        helper._raw(
+            {
+                "kind": "key_chord",
+                "keys": ["CTRL", "A"],
+                "_observation_deadline": 10.0,
+            }
+        )
+    assert generated == []
+
+
+@pytest.mark.asyncio
+async def test_linux_snapshot_keeps_discovered_environment_for_all_helper_calls(
+    tmp_path, monkeypatch
+):
+    import local_shell_mcp.gui.linux as linux
+
+    old_env = {"XDG_SESSION_TYPE": "x11", "DISPLAY": ":1"}
+    replacement_env = {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-1"}
+    backend = linux.LinuxGuiBackend()
+    backend._env = old_env
+    backend._env_refreshed_at = time.monotonic()
+    seen_envs = []
+    snapshot_calls = 0
+
+    def helper(payload, env=None):
+        nonlocal snapshot_calls
+        seen_envs.append(env)
+        if payload["command"] == "list":
+            return {"windows": [], "monitors": []}
+        if payload["command"] == "snapshot":
+            snapshot_calls += 1
+            if snapshot_calls == 1:
+                backend._env = replacement_env
+            return {
+                "window": {
+                    "id": "atspi:1:stable",
+                    "title": "Target",
+                    "app": "App",
+                    "pid": 1,
+                    "bounds": {"x": 0, "y": 0, "width": 20, "height": 10},
+                },
+                "elements": [],
+                "locators": {},
+            }
+        raise AssertionError(payload)
+
+    async def capture(path, _record, env):
+        seen_envs.append(env)
+        Image.new("RGB", (20, 10)).save(path, format="PNG")
+        return "xcomposite"
+
+    monkeypatch.setattr(backend, "_helper", helper)
+    monkeypatch.setattr(linux, "_capture_x11", capture)
+
+    result = await backend.snapshot(
+        "atspi:1:stable",
+        screenshot_path=tmp_path / "bound-env.png",
+        include_elements=False,
+        max_elements=1,
+        max_depth=1,
+    )
+
+    assert result.capabilities["session_type"] == "x11"
+    assert snapshot_calls == 2
+    assert seen_envs
+    assert all(env is old_env for env in seen_envs)
+    assert backend._env is replacement_env

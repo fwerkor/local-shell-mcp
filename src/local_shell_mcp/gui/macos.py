@@ -20,6 +20,7 @@ from .base import (
     GUI_MAX_WINDOWS_TOTAL_BYTES,
     GuiSnapshot,
     GuiUnavailableError,
+    _assert_action_fresh,
     _truncate_gui_text,
     display_screenshot_path,
     quantize_scroll_amount,
@@ -602,10 +603,12 @@ class MacOSGuiBackend:
                 raise LookupError("macOS AX locator is invalid; call gui_state again")
             locator = self._resolve_ax_locator(current_window, locator)
         kind = action["type"]
+        _assert_action_fresh(action)
         if kind == "focus":
             target = locator or self._find_ax_window(current_window)
             if target is None:
                 raise RuntimeError("Could not resolve the target AX element")
+            _assert_action_fresh(action)
             error = AX.AXUIElementSetAttributeValue(target, AX.kAXFocusedAttribute, True)
             if int(error) != 0 and locator is None:
                 error = AX.AXUIElementPerformAction(target, AX.kAXRaiseAction)
@@ -616,6 +619,7 @@ class MacOSGuiBackend:
         if kind == "set_value":
             if locator is None:
                 raise ValueError("set_value requires element_id")
+            _assert_action_fresh(action)
             error = AX.AXUIElementSetAttributeValue(
                 locator, AX.kAXValueAttribute, str(action.get("text", ""))
             )
@@ -624,6 +628,7 @@ class MacOSGuiBackend:
             return {"semantic": True}
 
         if kind == "click" and locator is not None:
+            _assert_action_fresh(action)
             error = AX.AXUIElementPerformAction(locator, AX.kAXPressAction)
             if int(error) == 0:
                 return {"semantic": True, "method": "AXPress"}
@@ -668,6 +673,7 @@ class MacOSGuiBackend:
                     raise RuntimeError(
                         f"Target AX element could not be focused: {error}"
                     )
+            _assert_action_fresh(action)
             for chunk in _unicode_chunks(text):
                 event = Quartz.CGEventCreateKeyboardEvent(None, 0, True)
                 Quartz.CGEventKeyboardSetUnicodeString(
@@ -689,11 +695,13 @@ class MacOSGuiBackend:
                     raise RuntimeError(
                         f"Target AX element could not be focused: {error}"
                     )
+            _assert_action_fresh(action)
             self._send_key_chord(Quartz, action.get("keys"))
             return {"keys": action.get("keys")}
 
         if kind in {"click", "double_click", "right_click", "move", "scroll"}:
             x, y = self._screen_point(AX, current_window, action, locator)
+            _assert_action_fresh(action)
             if kind == "move":
                 self._mouse(Quartz, Quartz.kCGEventMouseMoved, x, y, Quartz.kCGMouseButtonLeft)
             elif kind == "scroll":
@@ -761,6 +769,7 @@ class MacOSGuiBackend:
                 {"x": action.get("to_x"), "y": action.get("to_y")},
                 None,
             )
+            _assert_action_fresh(action)
             pressed = False
             release_x, release_y = start_x, start_y
             try:

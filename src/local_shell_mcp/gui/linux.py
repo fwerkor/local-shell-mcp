@@ -21,6 +21,7 @@ from .base import (
     GuiSnapshot,
     GuiStaleStateError,
     GuiUnavailableError,
+    _assert_action_fresh,
     _bounds_tuple,
     display_screenshot_path,
     quantize_scroll_amount,
@@ -122,23 +123,74 @@ class _SemanticActionUnavailableError(GuiUnavailableError):
     """Raised only when an AT-SPI element lacks a semantic click action."""
 
 
+def _pressed_inputs_from_progress(raw: bytes) -> list[dict[str, Any]]:
+    active: dict[tuple[str, int], dict[str, Any]] = {}
+    for line in raw.splitlines()[:512]:
+        try:
+            event = json.loads(line)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if not isinstance(event, dict):
+            continue
+        kind = str(event.get("kind") or "")
+        state = str(event.get("state") or "")
+        try:
+            if kind == "mouse":
+                identity = ("mouse", int(event["button"]))
+                record = {
+                    "kind": "mouse",
+                    "button": int(event["button"]),
+                    "x": int(event["x"]),
+                    "y": int(event["y"]),
+                }
+            elif kind == "key":
+                identity = ("key", int(event["symbol"]))
+                record = {"kind": "key", "symbol": int(event["symbol"])}
+            else:
+                continue
+        except (KeyError, TypeError, ValueError):
+            continue
+        if state in {"press", "move"}:
+            active[identity] = record
+        elif state == "release":
+            active.pop(identity, None)
+    return list(active.values())
+
+
 def _run_helper(payload: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
     argv = [_helper_python(env), str(_helper_path())]
+    run_payload = dict(payload)
+    progress_read = -1
+    progress_write = -1
+    run_kwargs: dict[str, Any] = {}
+    if payload.get("command") == "raw":
+        progress_read, progress_write = os.pipe()
+        run_payload["_progress_fd"] = progress_write
+        run_kwargs["pass_fds"] = (progress_write,)
+
     try:
         result = subprocess.run(
             argv,
-            input=json.dumps(payload, ensure_ascii=False),
+            input=json.dumps(run_payload, ensure_ascii=False),
             capture_output=True,
             text=True,
             timeout=30,
             check=False,
             env=env,
+            **run_kwargs,
         )
     except subprocess.TimeoutExpired as exc:
-        if payload.get("command") == "raw":
+        if progress_write >= 0:
+            os.close(progress_write)
+            progress_write = -1
+        pressed: list[dict[str, Any]] = []
+        if progress_read >= 0:
+            with contextlib.suppress(OSError):
+                pressed = _pressed_inputs_from_progress(os.read(progress_read, 64 * 1024))
+        if pressed:
             cleanup = {
                 "command": "release_inputs",
-                "input": payload,
+                "pressed": pressed,
             }
             with contextlib.suppress(OSError, subprocess.SubprocessError):
                 subprocess.run(
@@ -151,6 +203,14 @@ def _run_helper(payload: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
                     env=env,
                 )
         raise GuiUnavailableError("AT-SPI helper timed out") from exc
+    finally:
+        if progress_write >= 0:
+            with contextlib.suppress(OSError):
+                os.close(progress_write)
+        if progress_read >= 0:
+            with contextlib.suppress(OSError):
+                os.close(progress_read)
+
     stdout = result.stdout.strip().splitlines()
     response = None
     if stdout:
@@ -175,7 +235,6 @@ def _run_helper(payload: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
         raise GuiUnavailableError(message)
     data = response.get("data")
     return data if isinstance(data, dict) else {}
-
 
 def _window_center(bounds: dict[str, Any]) -> tuple[int, int]:
     return (
@@ -750,13 +809,18 @@ class LinuxGuiBackend:
                 self._env_refreshed_at = now
             return self._env
 
-    def _helper(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if self._env is None:
+    def _helper(
+        self,
+        payload: dict[str, Any],
+        env: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        selected_env = env if env is not None else self._env
+        if selected_env is None:
             raise GuiUnavailableError("Linux desktop environment has not been initialized")
-        return _run_helper(payload, self._env)
+        return _run_helper(payload, selected_env)
 
-    def _list_data(self) -> dict[str, Any]:
-        return self._helper({"command": "list"})
+    def _list_data(self, env: dict[str, str] | None = None) -> dict[str, Any]:
+        return self._helper({"command": "list"}, env)
 
     async def list_windows(self) -> dict[str, Any]:
         env = await self._ensure_env()
@@ -765,7 +829,7 @@ class LinuxGuiBackend:
             raise GuiUnavailableError(
                 "No graphical Linux session was found; DISPLAY/WAYLAND_DISPLAY are unavailable"
             )
-        data = await asyncio.to_thread(self._list_data)
+        data = await asyncio.to_thread(self._list_data, env)
         return {
             "backend": self.name,
             "platform": "linux",
@@ -801,6 +865,7 @@ class LinuxGuiBackend:
                 "max_elements": max_elements,
                 "max_depth": max_depth,
             },
+            env,
         )
         record = data["window"]
         locators: dict[str, Any] = {}
@@ -827,10 +892,10 @@ class LinuxGuiBackend:
         capture_backend = None
         session_type = _session_type(env)
         if screenshot_path is not None:
-            list_data = await asyncio.to_thread(self._list_data)
+            list_data = await asyncio.to_thread(self._list_data, env)
             monitors = list_data.get("monitors", [])
             if session_type == "wayland":
-                await self.focus_window(record)
+                await self._focus_window(record, env)
                 refreshed = await asyncio.to_thread(
                     self._helper,
                     {
@@ -840,6 +905,7 @@ class LinuxGuiBackend:
                         "max_elements": 1,
                         "max_depth": 1,
                     },
+                    env,
                 )
                 refreshed_record = refreshed.get("window")
                 if (
@@ -866,6 +932,7 @@ class LinuxGuiBackend:
                         "max_elements": 1,
                         "max_depth": 1,
                     },
+                    env,
                 )
                 post_capture_record = post_capture.get("window")
                 if (
@@ -892,6 +959,7 @@ class LinuxGuiBackend:
                         "max_elements": 1,
                         "max_depth": 1,
                     },
+                    env,
                 )
                 post_capture_record = post_capture.get("window")
                 if (
@@ -926,17 +994,30 @@ class LinuxGuiBackend:
             },
         )
 
-    async def focus_window(self, window: dict[str, Any]) -> None:
-        await self._ensure_env()
+    async def _focus_window(
+        self,
+        window: dict[str, Any],
+        env: dict[str, str],
+        *,
+        deadline: Any | None = None,
+    ) -> None:
+        focus_action: dict[str, Any] = {"type": "focus"}
+        if deadline is not None:
+            focus_action["_observation_deadline"] = deadline
         await asyncio.to_thread(
             self._helper,
             {
                 "command": "semantic_action",
                 "window_id": window["id"],
                 "locator": [],
-                "action": {"type": "focus"},
+                "action": focus_action,
             },
+            env,
         )
+
+    async def focus_window(self, window: dict[str, Any]) -> None:
+        env = await self._ensure_env()
+        await self._focus_window(window, env)
 
     async def perform_action(
         self,
@@ -950,9 +1031,12 @@ class LinuxGuiBackend:
             await asyncio.sleep(seconds)
             return {"waited_s": seconds}
 
+        env = await self._ensure_env()
+        deadline = action.get("_observation_deadline")
+
         if kind == "focus":
             if locator is None:
-                await self.focus_window(window)
+                await self._focus_window(window, env, deadline=deadline)
                 return {"semantic": True, "method": "window"}
             return await asyncio.to_thread(
                 self._helper,
@@ -962,6 +1046,7 @@ class LinuxGuiBackend:
                     "locator": locator["semantic"],
                     "action": action,
                 },
+                env,
             )
 
         if kind == "set_value":
@@ -975,6 +1060,7 @@ class LinuxGuiBackend:
                     "locator": locator["semantic"],
                     "action": action,
                 },
+                env,
             )
 
         if kind == "click" and locator is not None:
@@ -987,6 +1073,7 @@ class LinuxGuiBackend:
                         "locator": locator["semantic"],
                         "action": action,
                     },
+                    env,
                 )
             except _SemanticActionUnavailableError:
                 pass
@@ -1002,6 +1089,7 @@ class LinuxGuiBackend:
                     "window_id": window["id"],
                     "locator": locator["semantic"],
                 },
+                env,
             )
             bounds = resolved.get("bounds")
             if not isinstance(bounds, dict):
@@ -1018,24 +1106,28 @@ class LinuxGuiBackend:
                         "command": "semantic_action",
                         "window_id": window["id"],
                         "locator": locator["semantic"],
-                        "action": {"type": "focus"},
+                        "action": {
+                            "type": "focus",
+                            "_observation_deadline": deadline,
+                        },
                     },
+                    env,
                 )
             else:
-                await self.focus_window(window)
+                await self._focus_window(window, env, deadline=deadline)
 
         if (
             kind in {"click", "double_click", "right_click", "move", "scroll", "drag"}
             and not action.get("_focus_prepared")
         ):
-            await self.focus_window(window)
+            await self._focus_window(window, env, deadline=deadline)
 
-        env = await self._ensure_env()
+        _assert_action_fresh(action)
         session_type = _session_type(env)
         if session_type == "wayland":
-            return await self._perform_wayland(window, locator, action)
+            return await self._perform_wayland(window, locator, action, env)
         if session_type == "x11":
-            return await self._perform_x11(window, locator, action)
+            return await self._perform_x11(window, locator, action, env)
         raise GuiUnavailableError("No active X11 or Wayland desktop session is available")
 
     def _screen_point(
@@ -1070,10 +1162,16 @@ class LinuxGuiBackend:
         window: dict[str, Any],
         locator: Any | None,
         action: dict[str, Any],
+        env: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        if env is None:
+            env = await self._ensure_env()
         kind = action["type"]
+        deadline = action.get("_observation_deadline")
+
         if kind == "type":
             text = str(action.get("text", ""))
+            _assert_action_fresh(action)
             result = await asyncio.to_thread(
                 self._helper,
                 {
@@ -1082,10 +1180,14 @@ class LinuxGuiBackend:
                     "window_id": window["id"],
                     "locator": locator["semantic"] if locator is not None else None,
                     "text": text,
+                    "_observation_deadline": deadline,
                 },
+                env,
             )
             return {**result, "characters": len(text)}
+
         if kind == "key":
+            _assert_action_fresh(action)
             return await asyncio.to_thread(
                 self._helper,
                 {
@@ -1094,7 +1196,9 @@ class LinuxGuiBackend:
                     "window_id": window["id"],
                     "locator": locator["semantic"] if locator is not None else None,
                     "keys": action.get("keys"),
+                    "_observation_deadline": deadline,
                 },
+                env,
             )
 
         if kind in {"click", "double_click", "right_click", "move", "scroll"}:
@@ -1125,6 +1229,7 @@ class LinuxGuiBackend:
                     for _ in range(count)
                 ]
             if events:
+                _assert_action_fresh(action)
                 await asyncio.to_thread(
                     self._helper,
                     {
@@ -1134,7 +1239,9 @@ class LinuxGuiBackend:
                         "window_bounds": window["bounds"],
                         "locator": locator["semantic"] if locator is not None else None,
                         "events": events,
+                        "_observation_deadline": deadline,
                     },
+                    env,
                 )
             return {"screen_x": x, "screen_y": y}
 
@@ -1145,6 +1252,7 @@ class LinuxGuiBackend:
             to_x, to_y = self._screen_point(
                 window, {"x": action.get("to_x"), "y": action.get("to_y")}, None
             )
+            _assert_action_fresh(action)
             await asyncio.to_thread(
                 self._helper,
                 {
@@ -1158,7 +1266,9 @@ class LinuxGuiBackend:
                         {"x": to_x, "y": to_y, "event": "abs"},
                         {"x": to_x, "y": to_y, "event": "b1r"},
                     ],
+                    "_observation_deadline": deadline,
                 },
+                env,
             )
             return {"from": {"x": x, "y": y}, "to": {"x": to_x, "y": to_y}}
 
@@ -1169,32 +1279,37 @@ class LinuxGuiBackend:
         window: dict[str, Any],
         locator: Any | None,
         action: dict[str, Any],
+        env: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        if env is None:
+            env = await self._ensure_env()
+        if env != self._env:
+            raise GuiStaleStateError(
+                "Linux desktop session changed while preparing input; "
+                "refresh the observation and try again"
+            )
         if self._portal is None:
-            self._portal = PortalDesktop(await self._ensure_env())
+            self._portal = PortalDesktop(env)
         portal = self._portal
         kind = action["type"]
+        deadline = action.get("_observation_deadline")
         session = await portal.ensure_session()
 
         def assert_observation_fresh() -> None:
-            raw_deadline = action.get("_observation_deadline")
-            if raw_deadline is None:
-                return
-            try:
-                deadline = float(raw_deadline)
-            except (TypeError, ValueError):
+            if env != self._env:
                 raise GuiStaleStateError(
-                    "GUI observation deadline is invalid; refresh the observation and try again"
-                ) from None
-            if time.monotonic() > deadline:
-                raise GuiStaleStateError(
-                    "GUI observation expired while preparing Wayland input; "
+                    "Linux desktop session changed while preparing input; "
                     "refresh the observation and try again"
                 )
+            _assert_action_fresh(
+                action,
+                stale_hint="refresh the observation and try again",
+            )
 
         assert_observation_fresh()
+
         if action.get("_focus_prepared"):
-            await self.focus_window(window)
+            await self._focus_window(window, env, deadline=deadline)
             refreshed = await asyncio.to_thread(
                 self._helper,
                 {
@@ -1204,6 +1319,7 @@ class LinuxGuiBackend:
                     "max_elements": 1,
                     "max_depth": 1,
                 },
+                env,
             )
             refreshed_window = refreshed.get("window")
             if (
@@ -1216,6 +1332,7 @@ class LinuxGuiBackend:
                     "refresh the displayed frame and try again"
                 )
             assert_observation_fresh()
+
         if (
             locator is not None
             and kind in {"click", "double_click", "right_click", "move", "scroll", "drag"}
@@ -1227,6 +1344,7 @@ class LinuxGuiBackend:
                     "window_id": window["id"],
                     "locator": locator["semantic"],
                 },
+                env,
             )
             bounds = resolved.get("bounds") if isinstance(resolved, dict) else None
             if _bounds_tuple(bounds) is None:
@@ -1236,6 +1354,7 @@ class LinuxGuiBackend:
                 )
             locator = {**locator, "bounds": dict(bounds)}
             assert_observation_fresh()
+
         if kind in {"type", "key"} and locator is not None:
             await asyncio.to_thread(
                 self._helper,
@@ -1243,23 +1362,32 @@ class LinuxGuiBackend:
                     "command": "semantic_action",
                     "window_id": window["id"],
                     "locator": locator["semantic"],
-                    "action": {"type": "focus"},
+                    "action": {
+                        "type": "focus",
+                        "_observation_deadline": deadline,
+                    },
                 },
+                env,
             )
             assert_observation_fresh()
         elif not action.get("_focus_prepared"):
-            await self.focus_window(window)
+            await self._focus_window(window, env, deadline=deadline)
             assert_observation_fresh()
+
         if kind == "type":
             text = str(action.get("text", ""))
+            assert_observation_fresh()
             await portal.type_text(text, session=session)
             return {"characters": len(text), "method": "xdg-desktop-portal"}
+
         if kind == "key":
+            assert_observation_fresh()
             await portal.key_chord(action.get("keys"), session=session)
             return {"keys": action.get("keys"), "method": "xdg-desktop-portal"}
 
         if kind in {"click", "double_click", "right_click", "move", "scroll"}:
             x, y = self._screen_point(window, action, locator)
+            assert_observation_fresh()
             if kind == "move":
                 await portal.move(x, y, session=session)
             elif kind == "scroll":
@@ -1295,6 +1423,7 @@ class LinuxGuiBackend:
             to_x, to_y = self._screen_point(
                 window, {"x": action.get("to_x"), "y": action.get("to_y")}, None
             )
+            assert_observation_fresh()
             await portal.drag(x, y, to_x, to_y, session=session)
             return {
                 "from": {"x": x, "y": y},

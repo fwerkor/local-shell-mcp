@@ -26,6 +26,7 @@ from .base import (
     GUI_MAX_WINDOWS_TOTAL_BYTES,
     GuiSnapshot,
     GuiUnavailableError,
+    _assert_action_fresh,
     _truncate_gui_text,
     display_screenshot_path,
     quantize_scroll_amount,
@@ -808,8 +809,10 @@ class WindowsGuiBackend:
                 raise LookupError("Windows UIA locator is invalid; call gui_state again")
             locator = self._resolve_element_locator(str(window["id"]), locator, window)
 
+        _assert_action_fresh(action)
         if kind == "focus":
             target = locator or self._find_window(str(window["id"]), window)
+            _assert_action_fresh(action)
             target.SetFocus()
             return {"semantic": True}
 
@@ -820,6 +823,7 @@ class WindowsGuiBackend:
             pattern = locator.GetValuePattern()
             if pattern is None:
                 raise ValueError("Target element does not support the UIA Value pattern")
+            _assert_action_fresh(action)
             pattern.SetValue(value)
             return {"semantic": True}
 
@@ -827,12 +831,14 @@ class WindowsGuiBackend:
             if kind == "click":
                 pattern = locator.GetInvokePattern()
                 if pattern is not None:
+                    _assert_action_fresh(action)
                     pattern.Invoke()
                     return {"semantic": True, "method": "invoke"}
             target_window = self._find_window(str(window["id"]), window)
             target_window.SetFocus()
             self._assert_observed_window_bounds(window)
             self._screen_point(window, {}, locator)
+            _assert_action_fresh(action)
             if kind == "click":
                 locator.Click(waitTime=0)
             elif kind == "double_click":
@@ -854,6 +860,7 @@ class WindowsGuiBackend:
             text = str(action.get("text", ""))
             if locator is not None:
                 locator.SetFocus()
+            _assert_action_fresh(action)
             auto.SendKeys(text, interval=0.0, waitTime=0, charMode=True)
             return {"characters": len(text)}
 
@@ -861,11 +868,13 @@ class WindowsGuiBackend:
             if locator is not None:
                 locator.SetFocus()
             sequence = _key_sequence(action.get("keys"))
+            _assert_action_fresh(action)
             auto.SendKeys(sequence, interval=0.0, waitTime=0, charMode=False)
             return {"keys": action.get("keys")}
 
         if kind in {"click", "double_click", "right_click", "move", "scroll"}:
             x, y = self._screen_point(window, action, locator)
+            _assert_action_fresh(action)
             if kind == "click":
                 auto.Click(x, y, waitTime=0)
             elif kind == "double_click":
@@ -899,6 +908,7 @@ class WindowsGuiBackend:
                 {"x": action.get("to_x"), "y": action.get("to_y")},
                 None,
             )
+            _assert_action_fresh(action)
             auto.DragDrop(start_x, start_y, end_x, end_y, moveSpeed=0, waitTime=0)
             return {
                 "from": {"x": start_x, "y": start_y},

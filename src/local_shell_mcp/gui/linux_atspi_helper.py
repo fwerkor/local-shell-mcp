@@ -3,10 +3,12 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import time
 from typing import Any
 
 Atspi: Any | None = None
@@ -556,6 +558,36 @@ def _resolve_locator(payload: dict[str, Any]) -> dict[str, Any]:
     return {"bounds": _bounds(obj)}
 
 
+def _assert_fresh(payload: dict[str, Any]) -> None:
+    raw_deadline = payload.get("_observation_deadline")
+    if raw_deadline is None:
+        action = payload.get("action")
+        if isinstance(action, dict):
+            raw_deadline = action.get("_observation_deadline")
+    if raw_deadline is None:
+        return
+    try:
+        deadline = float(raw_deadline)
+    except (TypeError, ValueError):
+        raise LookupError("GUI observation deadline is invalid") from None
+    if time.monotonic() > deadline:
+        raise LookupError("GUI observation expired before native input")
+
+
+def _report_input_progress(payload: dict[str, Any], event: dict[str, Any]) -> None:
+    raw_fd = payload.get("_progress_fd")
+    if raw_fd is None:
+        return
+    try:
+        fd = int(raw_fd)
+    except (TypeError, ValueError):
+        return
+    encoded = (
+        json.dumps(event, separators=(",", ":"), ensure_ascii=True) + "\n"
+    ).encode("ascii")
+    os.write(fd, encoded)
+
+
 def _semantic_action(payload: dict[str, Any]) -> dict[str, Any]:
     _app, window, _window_index = _resolve_window(str(payload["window_id"]))
     raw_locator = payload.get("locator", {})
@@ -582,7 +614,10 @@ def _semantic_action(payload: dict[str, Any]) -> dict[str, Any]:
 
     if kind == "focus":
         component = obj.get_component_iface()
-        if component is None or not component.grab_focus():
+        if component is None:
+            raise RuntimeError("AT-SPI target cannot be focused")
+        _assert_fresh(payload)
+        if not component.grab_focus():
             raise RuntimeError("AT-SPI target cannot be focused")
         return {"semantic": True}
 
@@ -590,6 +625,7 @@ def _semantic_action(payload: dict[str, Any]) -> dict[str, Any]:
         editable = obj.get_editable_text_iface()
         if editable is None:
             raise ValueError("Target element does not support AT-SPI EditableText")
+        _assert_fresh(payload)
         if not editable.set_text_contents(str(action.get("text", ""))):
             raise RuntimeError("AT-SPI EditableText rejected the new value")
         return {"semantic": True}
@@ -613,9 +649,13 @@ def _semantic_action(payload: dict[str, Any]) -> dict[str, Any]:
                 break
         if chosen is None:
             raise ValueError("Target element has no preferred AT-SPI activation action")
+        _assert_fresh(payload)
         if not iface.do_action(chosen):
             raise RuntimeError("AT-SPI action failed")
-        return {"semantic": True, "method": str(iface.get_action_name(chosen) or "action")}
+        return {
+            "semantic": True,
+            "method": str(iface.get_action_name(chosen) or "action"),
+        }
 
     raise ValueError(f"Unsupported semantic AT-SPI action: {kind}")
 
@@ -629,7 +669,10 @@ def _focus_keyboard_target(payload: dict[str, Any]) -> None:
         {
             "window_id": window_id,
             "locator": raw_locator if raw_locator is not None else [],
-            "action": {"type": "focus"},
+            "action": {
+                "type": "focus",
+                "_observation_deadline": payload.get("_observation_deadline"),
+            },
         }
     )
 
@@ -655,6 +698,7 @@ def _focus_keyboard_target(payload: dict[str, Any]) -> None:
 
     if not _state(obj, Atspi.StateType.FOCUSED):
         raise RuntimeError("AT-SPI keyboard target did not remain focused")
+    _assert_fresh(payload)
 
 
 def _bounds_tuple(bounds: Any) -> tuple[int, int, int, int]:
@@ -678,7 +722,10 @@ def _prepare_pointer_target(payload: dict[str, Any]) -> dict[str, int]:
     if _bounds_tuple(_bounds(window)) != _bounds_tuple(expected_bounds):
         raise LookupError("AT-SPI target window changed since observation")
     component = window.get_component_iface()
-    if component is None or not component.grab_focus():
+    if component is None:
+        raise RuntimeError("AT-SPI target window cannot be focused")
+    _assert_fresh(payload)
+    if not component.grab_focus():
         raise RuntimeError("AT-SPI target window cannot be focused")
 
     _app, window, _window_index = _resolve_window(window_id)
@@ -703,71 +750,59 @@ def _prepare_pointer_target(payload: dict[str, Any]) -> dict[str, int]:
             )
         ):
             raise LookupError("AT-SPI target element changed since observation")
+    _assert_fresh(payload)
     return current_bounds
 
 
 def _release_inputs(payload: dict[str, Any]) -> dict[str, Any]:
-    original = payload.get("input")
-    if not isinstance(original, dict):
+    pressed = payload.get("pressed")
+    if not isinstance(pressed, list):
         return {"released": 0}
-
-    kind = str(original.get("kind") or "")
     released = 0
-    if kind in {"bound_pointer", "mouse_sequence", "mouse"}:
-        raw_events = (
-            original.get("events")
-            if kind != "mouse"
-            else [
-                {
-                    "x": original.get("x", 0),
-                    "y": original.get("y", 0),
-                    "event": original.get("event", ""),
-                }
-            ]
-        )
-        if isinstance(raw_events, list):
-            pressed: dict[int, tuple[int, int]] = {}
-            for event in raw_events[:200]:
-                if not isinstance(event, dict):
-                    continue
-                name = str(event.get("event") or "")
-                if len(name) < 3 or name[0] != "b" or name[-1] != "p":
-                    continue
-                try:
-                    button = int(name[1:-1])
-                    point = (int(event.get("x", 0)), int(event.get("y", 0)))
-                except (TypeError, ValueError):
-                    continue
-                if button > 0:
-                    pressed.setdefault(button, point)
-            for button, (x, y) in reversed(list(pressed.items())):
-                with contextlib.suppress(Exception):
-                    if Atspi.generate_mouse_event(x, y, f"b{button}r"):
-                        released += 1
-
-    if kind == "key_chord":
-        with contextlib.suppress(Exception):
-            parts = _key_parts(original.get("keys"))
-            symbols = []
-            for part in parts:
-                symbol = _MODIFIERS.get(part.upper())
-                if symbol is None:
-                    key = part.lower() if len(part) == 1 and part.isalpha() else part
-                    symbol = _keysym(key)
-                symbols.append(symbol)
-            for symbol in reversed(symbols):
-                with contextlib.suppress(Exception):
-                    if Atspi.generate_keyboard_event(
-                        symbol,
-                        None,
-                        Atspi.KeySynthType.RELEASE,
-                    ):
-                        released += 1
+    for item in reversed(pressed[:200]):
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "")
+        if kind == "mouse":
+            try:
+                button = int(item["button"])
+                x = int(item["x"])
+                y = int(item["y"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            with contextlib.suppress(Exception):
+                if Atspi.generate_mouse_event(x, y, f"b{button}r"):
+                    released += 1
+        elif kind == "key":
+            try:
+                symbol = int(item["symbol"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            with contextlib.suppress(Exception):
+                if Atspi.generate_keyboard_event(
+                    symbol,
+                    None,
+                    Atspi.KeySynthType.RELEASE,
+                ):
+                    released += 1
     return {"released": released}
+
+
+def _mouse_transition(name: str) -> tuple[int, str] | None:
+    if len(name) < 3 or name[0] != "b" or name[-1] not in {"p", "r"}:
+        return None
+    try:
+        button = int(name[1:-1])
+    except ValueError:
+        return None
+    if button <= 0:
+        return None
+    return button, "press" if name[-1] == "p" else "release"
 
 
 def _raw(payload: dict[str, Any]) -> dict[str, Any]:
     kind = str(payload["kind"])
+
     if kind == "bound_pointer":
         window_bounds = _prepare_pointer_target(payload)
         events = payload.get("events")
@@ -777,7 +812,7 @@ def _raw(payload: dict[str, Any]) -> dict[str, Any]:
         top = int(window_bounds["y"])
         right = left + int(window_bounds["width"])
         bottom = top + int(window_bounds["height"])
-        pressed_buttons: list[int] = []
+        pressed_buttons: dict[int, tuple[int, int]] = {}
         last_x, last_y = left, top
         generated = 0
         try:
@@ -791,60 +826,172 @@ def _raw(payload: dict[str, Any]) -> dict[str, Any]:
                     raise LookupError(
                         "Pointer target moved outside the selected window"
                     )
+                _assert_fresh(payload)
                 if not Atspi.generate_mouse_event(x, y, name):
                     raise RuntimeError("AT-SPI mouse synthesis failed")
                 generated += 1
                 last_x, last_y = x, y
-                if len(name) >= 3 and name[0] == "b" and name[-1] in {"p", "r"}:
-                    try:
-                        button = int(name[1:-1])
-                    except ValueError:
-                        button = 0
-                    if button > 0:
-                        if name[-1] == "p":
-                            pressed_buttons.append(button)
-                        elif button in pressed_buttons:
-                            pressed_buttons.remove(button)
+
+                transition = _mouse_transition(name)
+                if transition is not None:
+                    button, state = transition
+                    if state == "press":
+                        pressed_buttons[button] = (x, y)
+                        _report_input_progress(
+                            payload,
+                            {
+                                "kind": "mouse",
+                                "button": button,
+                                "x": x,
+                                "y": y,
+                                "state": "press",
+                            },
+                        )
+                    else:
+                        _report_input_progress(
+                            payload,
+                            {
+                                "kind": "mouse",
+                                "button": button,
+                                "x": x,
+                                "y": y,
+                                "state": "release",
+                            },
+                        )
+                        pressed_buttons.pop(button, None)
+                elif name == "abs" and pressed_buttons:
+                    for button in list(pressed_buttons):
+                        pressed_buttons[button] = (x, y)
+                        _report_input_progress(
+                            payload,
+                            {
+                                "kind": "mouse",
+                                "button": button,
+                                "x": x,
+                                "y": y,
+                                "state": "move",
+                            },
+                        )
         finally:
-            for button in reversed(pressed_buttons):
+            for button, _point in reversed(list(pressed_buttons.items())):
                 with contextlib.suppress(Exception):
-                    Atspi.generate_mouse_event(
+                    if Atspi.generate_mouse_event(
                         last_x,
                         last_y,
                         f"b{button}r",
-                    )
+                    ):
+                        _report_input_progress(
+                            payload,
+                            {
+                                "kind": "mouse",
+                                "button": button,
+                                "x": last_x,
+                                "y": last_y,
+                                "state": "release",
+                            },
+                        )
         return {"generated": True, "events": generated}
+
     if kind == "mouse":
-        ok = Atspi.generate_mouse_event(
-            int(payload["x"]),
-            int(payload["y"]),
-            str(payload["event"]),
-        )
+        x = int(payload["x"])
+        y = int(payload["y"])
+        name = str(payload["event"])
+        _assert_fresh(payload)
+        ok = Atspi.generate_mouse_event(x, y, name)
         if not ok:
             raise RuntimeError("AT-SPI mouse synthesis failed")
+        transition = _mouse_transition(name)
+        if transition is not None:
+            button, state = transition
+            _report_input_progress(
+                payload,
+                {
+                    "kind": "mouse",
+                    "button": button,
+                    "x": x,
+                    "y": y,
+                    "state": state,
+                },
+            )
         return {"generated": True}
+
     if kind == "mouse_sequence":
         events = payload.get("events")
         if not isinstance(events, list) or not events or len(events) > 200:
             raise ValueError("mouse_sequence requires 1..200 events")
-        for event in events:
-            if not isinstance(event, dict):
-                raise ValueError("mouse_sequence events must be objects")
-            ok = Atspi.generate_mouse_event(
-                int(event["x"]),
-                int(event["y"]),
-                str(event["event"]),
-            )
-            if not ok:
-                raise RuntimeError("AT-SPI mouse synthesis failed")
+        pressed_buttons: dict[int, tuple[int, int]] = {}
+        last_x = 0
+        last_y = 0
+        try:
+            for event in events:
+                if not isinstance(event, dict):
+                    raise ValueError("mouse_sequence events must be objects")
+                x = int(event["x"])
+                y = int(event["y"])
+                name = str(event["event"])
+                _assert_fresh(payload)
+                if not Atspi.generate_mouse_event(x, y, name):
+                    raise RuntimeError("AT-SPI mouse synthesis failed")
+                last_x, last_y = x, y
+                transition = _mouse_transition(name)
+                if transition is not None:
+                    button, state = transition
+                    if state == "press":
+                        pressed_buttons[button] = (x, y)
+                    else:
+                        pressed_buttons.pop(button, None)
+                    _report_input_progress(
+                        payload,
+                        {
+                            "kind": "mouse",
+                            "button": button,
+                            "x": x,
+                            "y": y,
+                            "state": state,
+                        },
+                    )
+                elif name == "abs" and pressed_buttons:
+                    for button in list(pressed_buttons):
+                        pressed_buttons[button] = (x, y)
+                        _report_input_progress(
+                            payload,
+                            {
+                                "kind": "mouse",
+                                "button": button,
+                                "x": x,
+                                "y": y,
+                                "state": "move",
+                            },
+                        )
+        finally:
+            for button in reversed(list(pressed_buttons)):
+                with contextlib.suppress(Exception):
+                    if Atspi.generate_mouse_event(
+                        last_x,
+                        last_y,
+                        f"b{button}r",
+                    ):
+                        _report_input_progress(
+                            payload,
+                            {
+                                "kind": "mouse",
+                                "button": button,
+                                "x": last_x,
+                                "y": last_y,
+                                "state": "release",
+                            },
+                        )
         return {"generated": True, "events": len(events)}
+
     if kind == "text":
         _focus_keyboard_target(payload)
         text = str(payload.get("text", ""))
+        _assert_fresh(payload)
         ok = Atspi.generate_keyboard_event(0, text, Atspi.KeySynthType.STRING)
         if not ok:
             raise RuntimeError("AT-SPI text synthesis failed")
         return {"generated": True, "characters": len(text)}
+
     if kind == "key_chord":
         _focus_keyboard_target(payload)
         parts = _key_parts(payload.get("keys"))
@@ -863,6 +1010,7 @@ def _raw(payload: dict[str, Any]) -> dict[str, Any]:
         pressed: list[int] = []
         try:
             for symbol in modifiers:
+                _assert_fresh(payload)
                 if not Atspi.generate_keyboard_event(
                     symbol,
                     None,
@@ -870,7 +1018,13 @@ def _raw(payload: dict[str, Any]) -> dict[str, Any]:
                 ):
                     raise RuntimeError("AT-SPI key press synthesis failed")
                 pressed.append(symbol)
+                _report_input_progress(
+                    payload,
+                    {"kind": "key", "symbol": symbol, "state": "press"},
+                )
+
             ordinary_symbol = ordinary[0]
+            _assert_fresh(payload)
             if not Atspi.generate_keyboard_event(
                 ordinary_symbol,
                 None,
@@ -878,23 +1032,39 @@ def _raw(payload: dict[str, Any]) -> dict[str, Any]:
             ):
                 raise RuntimeError("AT-SPI key press synthesis failed")
             pressed.append(ordinary_symbol)
+            _report_input_progress(
+                payload,
+                {"kind": "key", "symbol": ordinary_symbol, "state": "press"},
+            )
+
+            _assert_fresh(payload)
             if not Atspi.generate_keyboard_event(
                 ordinary_symbol,
                 None,
                 Atspi.KeySynthType.RELEASE,
             ):
                 raise RuntimeError("AT-SPI key release synthesis failed")
+            _report_input_progress(
+                payload,
+                {"kind": "key", "symbol": ordinary_symbol, "state": "release"},
+            )
             pressed.pop()
         finally:
             for symbol in reversed(pressed):
                 with contextlib.suppress(Exception):
-                    Atspi.generate_keyboard_event(
+                    if Atspi.generate_keyboard_event(
                         symbol,
                         None,
                         Atspi.KeySynthType.RELEASE,
-                    )
+                    ):
+                        _report_input_progress(
+                            payload,
+                            {"kind": "key", "symbol": symbol, "state": "release"},
+                        )
         return {"generated": True, "keys": parts}
+
     if kind == "keysym":
+        _assert_fresh(payload)
         ok = Atspi.generate_keyboard_event(
             int(payload["keysym"]),
             None,
@@ -903,6 +1073,7 @@ def _raw(payload: dict[str, Any]) -> dict[str, Any]:
         if not ok:
             raise RuntimeError("AT-SPI key synthesis failed")
         return {"generated": True}
+
     raise ValueError(f"Unsupported raw AT-SPI action: {kind}")
 
 
