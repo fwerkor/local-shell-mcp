@@ -8432,6 +8432,10 @@ async def test_linux_snapshot_keeps_discovered_environment_for_all_helper_calls(
     tmp_path, monkeypatch
 ):
     import local_shell_mcp.gui.linux as linux
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
 
     old_env = {"XDG_SESSION_TYPE": "x11", "DISPLAY": ":1"}
     replacement_env = {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-1"}
@@ -8484,3 +8488,4 @@ async def test_linux_snapshot_keeps_discovered_environment_for_all_helper_calls(
     assert seen_envs
     assert all(env is old_env for env in seen_envs)
     assert backend._env is replacement_env
+    get_settings.cache_clear()
