@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 63f9fb40c4fd1c085e87c30ed221598cccacef1a6fb4aeb2bb4f1db520590ada -->
+<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
 # Referencia de herramientas
 
 Esta página se construye a partir de los schemas reales de las tools MCP. Ejecute `python scripts/generate-tools-reference.py` después de cambiar la superficie pública de tools para actualizar la referencia English.
@@ -18,6 +18,7 @@ La mayoría de las herramientas devuelve un `ToolResult` estructurado con `ok`, 
 | Descubrir una capability MCP externa | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Interactuar con una página | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Ejecutar lógica browser personalizada | `browser_run_script` |
+| Controlar una aplicación de escritorio nativa | `gui_list`, `gui_state`, then `gui_action` |
 | Trabajar en una máquina remota | use la misma tool con `machine`; use `remote_*` solo para administración de workers |
 
 ## Workspace interactivo
@@ -445,6 +446,7 @@ Escribe un archivo de texto UTF-8 localmente o en una máquina remota.
 | `path` | `string` | required |  |
 | `content` | `string` | required |  |
 | `overwrite` | `boolean` | `true` |  |
+| `encoding` | `string` | `"utf-8"` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
@@ -703,6 +705,55 @@ Ejecuta un script Python Playwright completo localmente o en una máquina remota
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 Cuando se proporciona `machine`, la llamada también requiere `remote:use` y se ejecuta mediante el protocolo de remote worker.
+
+## Automatización de la GUI de escritorio
+
+### `gui_list`
+
+Enumere las ventanas de aplicaciones de escritorio visibles y las capacidades de backend de la GUI de forma local o remota.
+
+| Parámetro | Tipo | Requerido/predeterminado | Descripción |
+|---|---|---|---|
+| `machine` | `cadena\| nulo` | `null` |  |
+| `logical_session_id` | `cadena\| nulo` | requerido | Sesión lógica para esta llamada a herramienta. Pase el session_id devuelto por session_manage mientras trabaja en esa tarea. Utilice nulo solo cuando no haya ninguna sesión lógica activa. Este es el mismo session_id duradero utilizado por session_manage. |
+
+Ámbitos de OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Cuando se proporciona `machine`, la llamada requiere adicionalmente `remote:use` y se ejecuta a través del protocolo de trabajador remoto.
+
+### `gui_state`
+
+Observe una ventana del escritorio antes de actuar. Devuelve sus elementos de accesibilidad más una captura de pantalla MCP nativa opcional y un state_id de corta duración. Prefiere acciones element_id; Las acciones de coordenadas son relativas a la ventana observada y se rechazan si la ventana se mueve o cambia de tamaño.
+
+| Parámetro | Tipo | Requerido/predeterminado | Descripción |
+|---|---|---|---|
+| `window_id` | `string` | requerido |  |
+| `screenshot` | `boolean` | `true` |  |
+| `include_elements` | `boolean` | `true` |  |
+| `max_elements` | `integer` | `300` |  |
+| `max_depth` | `integer` | `12` |  |
+| `machine` | `cadena\| nulo` | `null` |  |
+| `logical_session_id` | `cadena\| nulo` | requerido | Sesión lógica para esta llamada a herramienta. Pase el session_id devuelto por session_manage mientras trabaja en esa tarea. Utilice nulo solo cuando no haya ninguna sesión lógica activa. Este es el mismo session_id duradero utilizado por session_manage. |
+
+Ámbitos de OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Cuando se proporciona `machine`, la llamada requiere adicionalmente `remote:use` y se ejecuta a través del protocolo de trabajador remoto.
+
+### `gui_action`
+
+Ejecute acciones de GUI contra una observación gui_state nueva de forma local o remota. El state_id es de un solo uso. Prefiere la orientación semántica element_id; Las coordenadas x/y sin procesar son relativas a la ventana. Las acciones admitidas son hacer clic, hacer doble clic, hacer clic con el botón derecho, mover, desplazarse, arrastrar, escribir, escribir, establecer valor, enfocar y esperar.
+
+| Parámetro | Tipo | Requerido/predeterminado | Descripción |
+|---|---|---|---|
+| `window_id` | `string` | requerido |  |
+| `state_id` | `string` | requerido |  |
+| `actions` | `array[GuiAction]` | requerido |  |
+| `machine` | `cadena\| nulo` | `null` |  |
+| `logical_session_id` | `cadena\| nulo` | requerido | Sesión lógica para esta llamada a herramienta. Pase el session_id devuelto por session_manage mientras trabaja en esa tarea. Utilice nulo solo cuando no haya ninguna sesión lógica activa. Este es el mismo session_id duradero utilizado por session_manage. |
+
+Ámbitos de OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Cuando se proporciona `machine`, la llamada requiere adicionalmente `remote:use` y se ejecuta a través del protocolo de trabajador remoto.
 
 ## Administración de remote workers
 

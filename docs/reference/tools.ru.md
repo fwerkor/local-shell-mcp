@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 63f9fb40c4fd1c085e87c30ed221598cccacef1a6fb4aeb2bb4f1db520590ada -->
+<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
 # Справочник tools
 
 Эта страница строится из фактических MCP tool schemas. После изменения public tool surface запустите `python scripts/generate-tools-reference.py`, чтобы обновить English reference.
@@ -18,6 +18,7 @@
 | Обнаружить external MCP capability | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Взаимодействовать с page | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Запустить custom browser logic | `browser_run_script` |
+| Управлять нативным desktop-приложением | `gui_list`, `gui_state`, затем `gui_action` |
 | Работать на remote machine | используйте тот же tool с `machine`; `remote_*` только для worker administration |
 
 ## Interactive workspace
@@ -445,6 +446,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `path` | `string` | required |  |
 | `content` | `string` | required |  |
 | `overwrite` | `boolean` | `true` |  |
+| `encoding` | `string` | `"utf-8"` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
@@ -704,6 +706,54 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 Если указан `machine`, вызов дополнительно требует `remote:use` и выполняется через протокол remote worker.
 
+## Автоматизация GUI рабочего стола
+
+### `gui_list`
+
+Локально или удалённо перечисляет видимые окна desktop-приложений и возможности GUI-backend.
+
+| Параметр | Тип | Обязателен/по умолчанию | Описание |
+|---|---|---|---|
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | обязателен | Logical Session для этого вызова. Во время работы над задачей передайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
+
+OAuth scope: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Если задан `machine`, вызову также требуется `remote:use`, и он выполняется через протокол удалённого worker.
+
+### `gui_state`
+
+Наблюдает одно окно перед действием. Возвращает элементы доступности, необязательный нативный MCP-снимок и краткоживущий state_id. Предпочитайте element_id; координаты относятся к наблюдаемому окну и отклоняются, если окно перемещено или изменено в размере.
+
+| Параметр | Тип | Обязателен/по умолчанию | Описание |
+|---|---|---|---|
+| `window_id` | `string` | обязателен |  |
+| `screenshot` | `boolean` | `true` |  |
+| `include_elements` | `boolean` | `true` |  |
+| `max_elements` | `integer` | `300` |  |
+| `max_depth` | `integer` | `12` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | обязателен | Logical Session для этого вызова. Во время работы над задачей передайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
+
+OAuth scope: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Если задан `machine`, вызову также требуется `remote:use`, и он выполняется через протокол удалённого worker.
+
+### `gui_action`
+
+Локально или удалённо выполняет GUI-действия над свежим наблюдением gui_state. state_id одноразовый. Предпочитайте семантический element_id; сырые x/y относятся к окну. Поддерживаются click, double_click, right_click, move, scroll, drag, type, key, set_value, focus и wait.
+
+| Параметр | Тип | Обязателен/по умолчанию | Описание |
+|---|---|---|---|
+| `window_id` | `string` | обязателен |  |
+| `state_id` | `string` | обязателен |  |
+| `actions` | `array[GuiAction]` | обязателен |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | обязателен | Logical Session для этого вызова. Во время работы над задачей передайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |
+
+OAuth scope: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Если задан `machine`, вызову также требуется `remote:use`, и он выполняется через протокол удалённого worker.
 ## Remote worker administration
 
 ### `remote_manage`

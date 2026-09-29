@@ -6,6 +6,7 @@ describe("WebUI mode routing", () => {
     expect(viewFromHash("#/overview")).toBe("overview")
     expect(viewFromHash("#/files")).toBe("files")
     expect(viewFromHash("#/terminals")).toBe("terminals")
+    expect(viewFromHash("#/desktop")).toBe("desktop")
     expect(viewFromHash("#/sessions")).toBe("sessions")
     expect(viewFromHash("#/remotes")).toBe("remotes")
     expect(viewFromHash("#/audit")).toBe("audit")

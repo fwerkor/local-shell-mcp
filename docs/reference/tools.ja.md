@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 63f9fb40c4fd1c085e87c30ed221598cccacef1a6fb4aeb2bb4f1db520590ada -->
+<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
 # Tools reference
 
 このページは実際の MCP tool schema から構成されます。Public tool surface を変更した後は `python scripts/generate-tools-reference.py` を実行して English reference を更新します。
@@ -18,6 +18,7 @@
 | External MCP capability を発見 | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Page と interaction | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Custom browser logic を実行 | `browser_run_script` |
+| ネイティブデスクトップアプリを操作 | `gui_list`、`gui_state`、その後 `gui_action` |
 | Remote machine で作業 | 同じ tool に `machine` を指定し、worker administration のみ `remote_*` を使う |
 
 ## Interactive workspace
@@ -445,6 +446,7 @@ Local または remote machine に UTF-8 text file を書き込みます。
 | `path` | `string` | required |  |
 | `content` | `string` | required |  |
 | `overwrite` | `boolean` | `true` |  |
+| `encoding` | `string` | `"utf-8"` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
@@ -704,6 +706,54 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 `machine` を指定した場合、この call は追加で `remote:use` を必要とし、remote worker protocol 経由で実行されます。
 
+## デスクトップ GUI 自動化
+
+### `gui_list`
+
+ローカルまたはリモートで、表示中のデスクトップアプリケーションウィンドウと GUI バックエンド機能を一覧表示します。
+
+| パラメーター | 型 | 必須/既定値 | 説明 |
+|---|---|---|---|
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | 必須 | このツール呼び出しの Logical Session。作業中のタスクでは session_manage が返した session_id を渡します。Logical Session がない場合のみ null を使用します。 |
+
+OAuth スコープ: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`。
+
+`machine` を指定した場合、この呼び出しには `remote:use` も必要で、リモート worker プロトコルを経由します。
+
+### `gui_state`
+
+操作前に 1 つのデスクトップウィンドウを観察します。アクセシビリティ要素、任意のネイティブ MCP スクリーンショット、短時間有効な state_id を返します。element_id による操作を優先してください。座標は観察ウィンドウ相対で、ウィンドウが移動またはサイズ変更されていると拒否されます。
+
+| パラメーター | 型 | 必須/既定値 | 説明 |
+|---|---|---|---|
+| `window_id` | `string` | 必須 |  |
+| `screenshot` | `boolean` | `true` |  |
+| `include_elements` | `boolean` | `true` |  |
+| `max_elements` | `integer` | `300` |  |
+| `max_depth` | `integer` | `12` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | 必須 | このツール呼び出しの Logical Session。作業中のタスクでは session_manage が返した session_id を渡します。Logical Session がない場合のみ null を使用します。 |
+
+OAuth スコープ: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`。
+
+`machine` を指定した場合、この呼び出しには `remote:use` も必要で、リモート worker プロトコルを経由します。
+
+### `gui_action`
+
+ローカルまたはリモートで、新しい gui_state 観察に対して GUI 操作を実行します。state_id は 1 回だけ使用できます。element_id によるセマンティック指定を優先し、生の x/y はウィンドウ相対です。click、double_click、right_click、move、scroll、drag、type、key、set_value、focus、wait を使用できます。
+
+| パラメーター | 型 | 必須/既定値 | 説明 |
+|---|---|---|---|
+| `window_id` | `string` | 必須 |  |
+| `state_id` | `string` | 必須 |  |
+| `actions` | `array[GuiAction]` | 必須 |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | 必須 | このツール呼び出しの Logical Session。作業中のタスクでは session_manage が返した session_id を渡します。Logical Session がない場合のみ null を使用します。 |
+
+OAuth スコープ: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`。
+
+`machine` を指定した場合、この呼び出しには `remote:use` も必要で、リモート worker プロトコルを経由します。
 ## Remote worker administration
 
 ### `remote_manage`

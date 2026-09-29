@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from local_shell_mcp.remote import (
@@ -25,6 +27,15 @@ def test_remote_worker_allowlist_covers_core_capabilities():
         "transfer_read_chunk",
         "transfer_write_chunk",
         "browser_run_script",
+        "gui_list",
+        "gui_state",
+        "gui_state_refresh",
+        "gui_state_discard",
+        "gui_frame",
+        "gui_frame_refresh",
+        "gui_frame_discard",
+        "gui_human_action",
+        "gui_action",
     } <= REMOTE_WORKER_TOOL_NAMES
 
 
@@ -40,7 +51,7 @@ def test_remote_worker_allowlist_covers_core_capabilities():
     }.isdisjoint(REMOTE_WORKER_TOOL_NAMES)
 
     capabilities = set(worker_capabilities())
-    assert {"shell", "jobs", "files", "file_transfer", "python", "playwright"} <= capabilities
+    assert {"shell", "jobs", "files", "file_transfer", "python", "playwright", "gui"} <= capabilities
 
 
 @pytest.mark.asyncio
@@ -63,3 +74,462 @@ async def test_remote_worker_apply_patch_respects_local_size_limit(tmp_path, mon
 
     with pytest.raises(ValueError, match="Refusing patch"):
         await execute_worker_tool("apply_patch", {"patch": "x" * 17})
+
+
+@pytest.mark.asyncio
+async def test_remote_gui_worker_dispatch_and_lazy_dependencies(monkeypatch):
+    import local_shell_mcp.remote as remote
+    import local_shell_mcp.remote_worker_installer as installer
+
+    calls = []
+
+    class FakeGuiManager:
+        async def list_windows(self):
+            calls.append(("list",))
+            return {"windows": [{"id": "w"}]}
+
+        async def snapshot(self, window_id, **kwargs):
+            calls.append(("snapshot", window_id, kwargs))
+            return {"window": {"id": window_id}, "state_id": "s"}
+
+        async def refresh_state(self, window_id, state_id):
+            calls.append(("refresh", window_id, state_id))
+            return {"state_id": state_id, "state_ttl_s": 30}
+
+        async def discard_state(self, window_id, state_id):
+            calls.append(("discard", window_id, state_id))
+            return {"state_id": state_id, "discarded": True}
+
+        async def frame(self, window_id):
+            calls.append(("frame", window_id))
+            return {
+                "window": {"id": window_id},
+                "observation_id": "obs-remote",
+                "screenshot_path": "/tmp/frame.png",
+            }
+
+        async def refresh_frame_observation(self, window_id, observation_id):
+            calls.append(("refresh_frame", window_id, observation_id))
+            return {"observation_id": observation_id, "observation_ttl_s": 30}
+
+        async def discard_frame_observation(self, window_id, observation_id):
+            calls.append(("discard_frame", window_id, observation_id))
+            return {"observation_id": observation_id, "discarded": True}
+
+        async def human_act(self, window_id, observation_id, bounds, actions):
+            calls.append(("human_act", window_id, observation_id, bounds, actions))
+            return {"human_control": True}
+
+        async def act(self, window_id, state_id, actions):
+            calls.append(("act", window_id, state_id, actions))
+            return {"state_consumed": True}
+
+    manager = FakeGuiManager()
+    import local_shell_mcp.gui as gui
+
+    monkeypatch.setattr(gui, "get_gui_manager", lambda: manager)
+    monkeypatch.setattr(remote.sys, "platform", "linux")
+    import local_shell_mcp.gui.linux as linux
+
+    monkeypatch.setattr(linux, "_desktop_environment", lambda: {"DISPLAY": ":0"})
+    monkeypatch.setattr(linux, "_session_type", lambda _env: "x11")
+    dependency_calls = []
+
+    def dependencies(session_type=None, *, install_missing=True):
+        dependency_calls.append((session_type, install_missing))
+        return {"available": True, "missing": []}
+
+    monkeypatch.setattr(installer, "ensure_gui_dependencies", dependencies)
+
+    listed = await remote._execute_gui_worker_tool("gui_list", {})
+    assert listed["windows"][0]["id"] == "w"
+    assert dependency_calls == []
+
+    state = await remote._execute_gui_worker_tool(
+        "gui_state",
+        {
+            "window_id": "w",
+            "screenshot": False,
+            "include_elements": False,
+            "max_elements": 9,
+            "max_depth": 3,
+        },
+    )
+    assert state["state_id"] == "s"
+    assert dependency_calls == []
+
+    refreshed = await remote._execute_gui_worker_tool(
+        "gui_state_refresh",
+        {"window_id": "w", "state_id": "s"},
+    )
+    assert refreshed["state_ttl_s"] == 30
+    assert dependency_calls == []
+
+    discarded = await remote._execute_gui_worker_tool(
+        "gui_state_discard",
+        {"window_id": "w", "state_id": "s"},
+    )
+    assert discarded["discarded"] is True
+    assert dependency_calls == []
+
+    frame = await remote._execute_gui_worker_tool(
+        "gui_frame",
+        {"window_id": "w"},
+    )
+    assert frame["screenshot_path"] == "/tmp/frame.png"
+    assert dependency_calls == [("x11", True)]
+
+    refreshed_frame = await remote._execute_gui_worker_tool(
+        "gui_frame_refresh",
+        {"window_id": "w", "observation_id": "obs-remote"},
+    )
+    assert refreshed_frame["observation_ttl_s"] == 30
+    assert dependency_calls == [("x11", True)]
+
+    discarded_frame = await remote._execute_gui_worker_tool(
+        "gui_frame_discard",
+        {"window_id": "w", "observation_id": "obs-remote"},
+    )
+    assert discarded_frame["discarded"] is True
+    assert dependency_calls == [("x11", True)]
+
+    human = await remote._execute_gui_worker_tool(
+        "gui_human_action",
+        {
+            "window_id": "w",
+            "observation_id": "obs-remote",
+            "bounds": {"x": 0, "y": 0, "width": 10, "height": 10},
+            "actions": [{"type": "click", "x": 1, "y": 1}],
+        },
+    )
+    assert human["human_control"] is True
+    assert dependency_calls == [("x11", True)]
+
+    acted = await remote._execute_gui_worker_tool(
+        "gui_action",
+        {"window_id": "w", "state_id": "s", "actions": [{"type": "wait"}]},
+    )
+    assert acted["state_consumed"] is True
+    assert dependency_calls == [("x11", True)]
+    assert calls[-1][0] == "act"
+
+    with pytest.raises(ValueError, match="unsupported remote GUI worker tool"):
+        await remote._execute_gui_worker_tool("gui_unknown", {})
+
+    monkeypatch.setattr(linux, "_session_type", lambda _env: "wayland")
+    dependency_calls.clear()
+    semantic = await remote._execute_gui_worker_tool(
+        "gui_action",
+        {
+            "window_id": "w",
+            "state_id": "s",
+            "actions": [
+                {"type": "focus", "element_id": "e1"},
+                {"type": "set_value", "element_id": "e1", "text": "x"},
+                {"type": "wait", "seconds": 0},
+            ],
+        },
+    )
+    assert semantic["state_consumed"] is True
+    assert dependency_calls == []
+
+
+@pytest.mark.asyncio
+async def test_remote_gui_cache_refresh_skips_linux_session_preflight(monkeypatch):
+    import local_shell_mcp.gui as gui
+    import local_shell_mcp.remote as remote
+
+    calls = []
+
+    class Manager:
+        async def refresh_state(self, window_id, state_id):
+            calls.append(("state", window_id, state_id))
+            return {"state_id": state_id, "state_ttl_s": 30}
+
+        async def refresh_frame_observation(self, window_id, observation_id):
+            calls.append(("frame", window_id, observation_id))
+            return {"observation_id": observation_id, "observation_ttl_s": 30}
+
+    monkeypatch.setattr(gui, "get_gui_manager", lambda: Manager())
+    monkeypatch.setattr(remote.sys, "platform", "linux")
+    monkeypatch.setattr(
+        remote,
+        "_linux_gui_preflight_session_type",
+        lambda: pytest.fail("cache refresh must not inspect the live display"),
+    )
+
+    state = await remote._execute_gui_worker_tool(
+        "gui_state_refresh",
+        {"window_id": "w", "state_id": "s"},
+    )
+    frame = await remote._execute_gui_worker_tool(
+        "gui_frame_refresh",
+        {"window_id": "w", "observation_id": "obs"},
+    )
+
+    assert state["state_ttl_s"] == 30
+    assert frame["observation_ttl_s"] == 30
+    assert calls == [("state", "w", "s"), ("frame", "w", "obs")]
+
+
+@pytest.mark.asyncio
+async def test_remote_gui_worker_dependency_failure_is_scoped_to_gui(monkeypatch):
+    import local_shell_mcp.remote as remote
+    import local_shell_mcp.remote_worker_installer as installer
+
+    monkeypatch.setattr(remote.sys, "platform", "win32")
+    install_flags = []
+
+    def unavailable(_session_type=None, *, install_missing=True):
+        install_flags.append(install_missing)
+        return {
+            "available": False,
+            "missing": ["uiautomation"],
+            "error": "offline",
+        }
+
+    monkeypatch.setattr(
+        installer,
+        "ensure_gui_dependencies",
+        unavailable,
+    )
+    with pytest.raises(RuntimeError, match="uiautomation unavailable"):
+        await remote._execute_gui_worker_tool(
+            "gui_list",
+            {"_allow_dependency_install": True},
+        )
+    assert install_flags == [True]
+
+
+
+def test_gui_temp_worker_path_allows_external_state_dir_only(tmp_path, monkeypatch):
+    import local_shell_mcp.remote as remote
+
+    workspace = tmp_path / "workspace"
+    temp = tmp_path / "state" / "tmp"
+    workspace.mkdir()
+    temp.mkdir(parents=True)
+    monkeypatch.setattr(
+        remote,
+        "get_settings",
+        lambda: type("Settings", (), {"workspace_root": workspace})(),
+    )
+    monkeypatch.setattr(remote, "temp_dir", lambda: temp)
+
+    shot = temp / ("gui-frame-" + "a" * 32 + ".png")
+    shot.write_bytes(b"png")
+    stat = remote._worker_gui_temp_stat(str(shot), sha256=True)
+    assert stat["type"] == "file"
+    assert stat["size"] == 3
+    assert stat["sha256"]
+
+    uploads = []
+    monkeypatch.setattr(remote, "_worker_validate_external_transfer_url", lambda _url: None)
+    monkeypatch.setattr(
+        remote,
+        "_worker_put_stream_url",
+        lambda source, display_path, url, total, timeout_s: uploads.append(
+            (source, display_path, url, total, timeout_s)
+        )
+        or {"bytes": total, "sha256": "digest"},
+    )
+    uploaded = remote._worker_gui_temp_put_url(
+        str(shot),
+        "https://controller.invalid/remote/transfer/token",
+        3,
+        12,
+    )
+    assert uploaded["bytes"] == 3
+    assert uploads[0][0] == shot
+    assert uploads[0][3:] == (3, 12)
+
+    released = []
+    monkeypatch.setattr(remote, "release_temp_file_lease", released.append)
+    deleted = remote._worker_gui_temp_delete(str(shot))
+    assert deleted["deleted"] is True
+    assert not shot.exists()
+    assert released == [shot]
+
+    outside = workspace / ("gui-frame-" + "b" * 32 + ".png")
+    outside.write_bytes(b"png")
+    with pytest.raises(ValueError, match="outside"):
+        remote._worker_gui_temp_stat(str(outside))
+
+    with pytest.raises(ValueError, match="invalid filename"):
+        remote._worker_gui_temp_stat(str(temp / "arbitrary.png"))
+
+
+@pytest.mark.asyncio
+async def test_gui_temp_transfer_worker_dispatch(tmp_path, monkeypatch):
+    import local_shell_mcp.remote as remote
+
+    calls = []
+    monkeypatch.setattr(
+        remote,
+        "_worker_gui_temp_stat",
+        lambda path, sha256=False: calls.append(("stat", path, sha256))
+        or {"type": "file", "size": 1},
+    )
+    monkeypatch.setattr(
+        remote,
+        "_worker_gui_temp_delete",
+        lambda path: calls.append(("delete", path)) or {"deleted": True},
+    )
+    monkeypatch.setattr(
+        remote,
+        "_worker_gui_temp_put_url",
+        lambda path, url, expected_bytes, timeout_s=None: calls.append(
+            ("put", path, url, expected_bytes, timeout_s)
+        )
+        or {"bytes": expected_bytes},
+    )
+
+    assert (
+        await remote._execute_transfer_worker_tool(
+            "transfer_gui_temp_stat",
+            {"path": "p", "sha256": True},
+        )
+    )["size"] == 1
+    assert (
+        await remote._execute_transfer_worker_tool(
+            "transfer_gui_temp_delete",
+            {"path": "p"},
+        )
+    )["deleted"] is True
+    assert (
+        await remote._execute_transfer_worker_tool(
+            "transfer_gui_temp_put_url",
+            {"path": "p", "url": "u", "expected_bytes": 4, "timeout_s": 9},
+        )
+    )["bytes"] == 4
+    assert calls == [
+        ("stat", "p", True),
+        ("delete", "p"),
+        ("put", "p", "u", 4, 9),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gui_temp_transfer_tools_are_registered_with_worker_dispatch(monkeypatch):
+    import local_shell_mcp.remote as remote
+
+    calls = []
+
+    async def execute(tool, args):
+        calls.append((tool, args))
+        return {"ok": tool}
+
+    monkeypatch.setattr(remote, "_execute_transfer_worker_tool", execute)
+    for tool in (
+        "transfer_gui_temp_stat",
+        "transfer_gui_temp_put_url",
+        "transfer_gui_temp_delete",
+    ):
+        assert tool in remote.WORKER_TRANSFER_TOOLS
+        assert tool in remote.REMOTE_WORKER_TOOL_NAMES
+        result = await remote._execute_worker_tool_inner(tool, {"path": "p"})
+        assert result == {"ok": tool}
+
+    assert [tool for tool, _args in calls] == [
+        "transfer_gui_temp_stat",
+        "transfer_gui_temp_put_url",
+        "transfer_gui_temp_delete",
+    ]
+
+
+def test_linux_gui_preflight_caches_positive_session(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+    import local_shell_mcp.remote as remote
+
+    calls = []
+
+    def discover():
+        calls.append("discover")
+        return {"DISPLAY": ":0"}
+
+    monkeypatch.setattr(linux, "_desktop_environment", discover)
+    monkeypatch.setattr(linux, "_session_type", lambda _env: "x11")
+    monkeypatch.setattr(remote, "_GUI_LINUX_PREFLIGHT_SESSION_TYPE", None)
+    monkeypatch.setattr(remote, "_GUI_LINUX_PREFLIGHT_ENV_SIGNATURE", None)
+    monkeypatch.setattr(remote, "_GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN", None)
+
+    assert remote._linux_gui_preflight_session_type() == "x11"
+    assert remote._linux_gui_preflight_session_type() == "x11"
+    assert calls == ["discover"]
+
+    monkeypatch.setattr(remote, "_GUI_LINUX_PREFLIGHT_EXPIRES_AT", 0.0)
+    assert remote._linux_gui_preflight_session_type() == "x11"
+    assert calls == ["discover", "discover"]
+
+
+def test_linux_gui_preflight_briefly_caches_unknown_session(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+    import local_shell_mcp.remote as remote
+
+    calls = []
+
+    def discover():
+        calls.append("discover")
+        return {}
+
+    monkeypatch.setattr(linux, "_desktop_environment", discover)
+    monkeypatch.setattr(linux, "_session_type", lambda _env: "unknown")
+    monkeypatch.setattr(remote, "_GUI_LINUX_PREFLIGHT_SESSION_TYPE", None)
+    monkeypatch.setattr(remote, "_GUI_LINUX_PREFLIGHT_ENV_SIGNATURE", None)
+    monkeypatch.setattr(remote, "_GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN", None)
+    monkeypatch.setattr(remote, "_GUI_LINUX_PREFLIGHT_EXPIRES_AT", 0.0)
+
+    assert remote._linux_gui_preflight_session_type() == "unknown"
+    assert remote._linux_gui_preflight_session_type() == "unknown"
+    assert calls == ["discover"]
+
+    monkeypatch.setattr(remote, "_GUI_LINUX_PREFLIGHT_EXPIRES_AT", 0.0)
+    assert remote._linux_gui_preflight_session_type() == "unknown"
+    assert calls == ["discover", "discover"]
+
+
+@pytest.mark.asyncio
+async def test_remote_gui_worker_headless_linux_never_bootstraps_gui_dependencies(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+    import local_shell_mcp.remote as remote
+    import local_shell_mcp.remote_worker_installer as installer
+
+    monkeypatch.setattr(remote.sys, "platform", "linux")
+    monkeypatch.setattr(linux, "_desktop_environment", lambda: {})
+    monkeypatch.setattr(linux, "_session_type", lambda _env: "unknown")
+    monkeypatch.setattr(
+        installer,
+        "ensure_gui_dependencies",
+        lambda *_args, **_kwargs: pytest.fail(
+            "headless GUI dispatch must not invoke dependency installation"
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="No graphical Linux session"):
+        await remote._execute_gui_worker_tool("gui_list", {})
+
+
+
+
+def test_remote_module_does_not_import_gui_before_dispatch(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import local_shell_mcp.remote; "
+                "assert 'local_shell_mcp.gui' not in sys.modules"
+            ),
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr

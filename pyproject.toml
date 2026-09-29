@@ -45,6 +45,13 @@ dev = [
   "pytest-asyncio>=0.23.0",
   "ruff>=0.5.0",
 ]
+gui = [
+  "uiautomation>=2.0.29,<3; platform_system == \"Windows\"",
+  "pyobjc-framework-ApplicationServices>=11.1,<13; platform_system == \"Darwin\"",
+  "pyobjc-framework-Quartz>=11.1,<13; platform_system == \"Darwin\"",
+  "dbus-next>=0.2.3,<1; platform_system == \"Linux\"",
+  "python-xlib>=0.33,<1; platform_system == \"Linux\"",
+]
 redis = [
   "redis>=5.0.0,<7",
 ]
@@ -87,6 +94,16 @@ branch = true
 parallel = true
 sigterm = true
 source = ["local_shell_mcp"]
+# Native desktop adapters are validated on the Linux/macOS/Windows CI matrix.
+# The Ubuntu coverage job keeps enforcing shared GUI/tool logic rather than
+# counting unreachable platform APIs and live desktop-session branches.
+omit = [
+  "*/local_shell_mcp/gui/linux.py",
+  "*/local_shell_mcp/gui/linux_atspi_helper.py",
+  "*/local_shell_mcp/gui/linux_portal.py",
+  "*/local_shell_mcp/gui/macos.py",
+  "*/local_shell_mcp/gui/windows.py",
+]
 
 [tool.coverage.report]
 fail_under = 93

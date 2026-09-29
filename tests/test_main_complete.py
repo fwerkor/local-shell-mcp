@@ -273,6 +273,24 @@ def test_main_subcommands_and_version(monkeypatch, capsys):
     ]
 
 
+def test_main_internal_gui_capture_helper(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.windows as windows
+
+    calls = []
+    destination = tmp_path / "capture.png"
+    monkeypatch.setattr(
+        windows,
+        "_capture_window_image_native",
+        lambda hwnd, path: calls.append((hwnd, path)),
+    )
+
+    main_module.main(["_gui-capture-window", "123", str(destination)])
+
+    assert calls == [(123, destination)]
+    with pytest.raises(SystemExit, match="requires HWND and destination"):
+        main_module.main(["_gui-capture-window", "123"])
+
+
 def test_main_modes_config_and_errors(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(main_module, "run_http", lambda: calls.append("http"))

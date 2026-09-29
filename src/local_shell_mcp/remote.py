@@ -46,6 +46,7 @@ from .fs_ops import (
     read_texts,
     refresh_temp_file_lease,
     relative_display,
+    release_temp_file_lease,
     resolve_path,
     temp_dir,
     write_content,
@@ -121,6 +122,8 @@ REMOTE_NON_CANCELLABLE_WORKER_TOOLS = frozenset(
         "write_file",
         "edit_file",
         "delete_file_or_dir",
+        "gui_action",
+        "gui_human_action",
         "human_file_action",
         "transfer_begin_write",
         "transfer_write_chunk",
@@ -129,6 +132,9 @@ REMOTE_NON_CANCELLABLE_WORKER_TOOLS = frozenset(
         "transfer_upload_url",
         "transfer_open_receiver",
         "transfer_close_receiver",
+        "transfer_gui_temp_stat",
+        "transfer_gui_temp_put_url",
+        "transfer_gui_temp_delete",
     }
 )
 REMOTE_RESET_PRESERVED_WORKER_TOOLS = REMOTE_NON_CANCELLABLE_WORKER_TOOLS | frozenset(
@@ -1539,6 +1545,9 @@ WORKER_TRANSFER_TOOLS = frozenset(
         "transfer_put_url",
         "transfer_get_url",
         "transfer_close_receiver",
+        "transfer_gui_temp_stat",
+        "transfer_gui_temp_put_url",
+        "transfer_gui_temp_delete",
     }
 )
 WORKER_BROWSER_TOOLS = frozenset(
@@ -1549,6 +1558,19 @@ WORKER_BROWSER_TOOLS = frozenset(
         "browser_run_script",
     }
 )
+WORKER_GUI_TOOLS = frozenset(
+    {
+        "gui_list",
+        "gui_state",
+        "gui_state_refresh",
+        "gui_state_discard",
+        "gui_frame",
+        "gui_frame_refresh",
+        "gui_frame_discard",
+        "gui_human_action",
+        "gui_action",
+    }
+)
 REMOTE_WORKER_TOOL_NAMES = frozenset().union(
     WORKER_ENVIRONMENT_TOOLS,
     WORKER_COMMAND_TOOLS,
@@ -1557,7 +1579,78 @@ REMOTE_WORKER_TOOL_NAMES = frozenset().union(
     WORKER_FILE_TOOLS,
     WORKER_TRANSFER_TOOLS,
     WORKER_BROWSER_TOOLS,
+    WORKER_GUI_TOOLS,
 )
+
+
+_GUI_TEMP_NAME_RE = re.compile(r"^gui(?:-frame)?-[0-9a-f]{32}\.png$")
+
+
+def _worker_gui_temp_path(path: str, *, must_exist: bool = True) -> Path:
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = get_settings().workspace_root / candidate
+    root = temp_dir().resolve(strict=False)
+    parent = candidate.parent.resolve(strict=False)
+    if parent != root:
+        raise ValueError("GUI temp path is outside the internal temp directory")
+    if not _GUI_TEMP_NAME_RE.fullmatch(candidate.name):
+        raise ValueError("GUI temp path has an invalid filename")
+    resolved = candidate.resolve(strict=must_exist)
+    if resolved.parent != root:
+        raise ValueError("GUI temp path escapes the internal temp directory")
+    return resolved
+
+
+def _worker_gui_temp_stat(path: str, sha256: bool = False) -> dict[str, Any]:
+    source = _worker_gui_temp_path(path, must_exist=True)
+    if not source.is_file():
+        raise IsADirectoryError(str(source))
+    stat = source.stat()
+    result: dict[str, Any] = {
+        "path": relative_display(source),
+        "type": "file",
+        "size": stat.st_size,
+        "mtime": stat.st_mtime,
+    }
+    if sha256:
+        digest = hashlib.sha256()
+        with source.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        result["sha256"] = digest.hexdigest()
+    return result
+
+
+def _worker_gui_temp_delete(path: str) -> dict[str, Any]:
+    source = _worker_gui_temp_path(path, must_exist=False)
+    try:
+        source.unlink(missing_ok=True)
+    finally:
+        release_temp_file_lease(source)
+    return {"path": relative_display(source), "deleted": True}
+
+
+def _worker_gui_temp_put_url(
+    path: str,
+    url: str,
+    expected_bytes: int,
+    timeout_s: int | None = None,
+) -> dict[str, Any]:
+    _worker_validate_external_transfer_url(url)
+    source = _worker_gui_temp_path(path, must_exist=True)
+    if not source.is_file():
+        raise IsADirectoryError(str(source))
+    total = int(expected_bytes)
+    if source.stat().st_size != total:
+        raise ValueError(f"size mismatch: expected {total}, got {source.stat().st_size}")
+    return _worker_put_stream_url(
+        source,
+        relative_display(source),
+        url,
+        total,
+        timeout_s,
+    )
 
 
 def _worker_validate_transfer_url(url: str) -> None:
@@ -2287,6 +2380,25 @@ async def _execute_transfer_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "transfer_close_receiver":
         return await asyncio.to_thread(close_peer_receiver, args["receiver_id"])
 
+    if tool == "transfer_gui_temp_stat":
+        return await asyncio.to_thread(
+            _worker_gui_temp_stat,
+            args["path"],
+            args.get("sha256", False),
+        )
+
+    if tool == "transfer_gui_temp_delete":
+        return await asyncio.to_thread(_worker_gui_temp_delete, args["path"])
+
+    if tool == "transfer_gui_temp_put_url":
+        return await asyncio.to_thread(
+            _worker_gui_temp_put_url,
+            args["path"],
+            args["url"],
+            args["expected_bytes"],
+            args.get("timeout_s"),
+        )
+
     if tool == "transfer_put_url":
         return await _worker_put_url_cancellable(
             args["path"],
@@ -2352,6 +2464,149 @@ async def _execute_browser_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     raise ValueError(f"unsupported remote worker tool: {tool}")
 
 
+_GUI_LINUX_PREFLIGHT_LOCK = threading.Lock()
+_GUI_LINUX_PREFLIGHT_SESSION_TYPE: str | None = None
+_GUI_LINUX_PREFLIGHT_ENV_SIGNATURE: tuple[str, str, str, str] | None = None
+_GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN: tuple[int, int] | None = None
+_GUI_LINUX_PREFLIGHT_EXPIRES_AT = 0.0
+_GUI_LINUX_NEGATIVE_CACHE_S = 30.0
+_GUI_LINUX_POSITIVE_CACHE_S = 30.0
+
+
+def _linux_gui_preflight_session_type() -> str:
+    from .gui.linux import _desktop_environment, _session_type
+
+    global _GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN
+    global _GUI_LINUX_PREFLIGHT_ENV_SIGNATURE
+    global _GUI_LINUX_PREFLIGHT_EXPIRES_AT
+    global _GUI_LINUX_PREFLIGHT_SESSION_TYPE
+
+    discovery_token = (id(_desktop_environment), id(_session_type))
+    signature = (
+        os.environ.get("DISPLAY", ""),
+        os.environ.get("WAYLAND_DISPLAY", ""),
+        os.environ.get("XDG_SESSION_TYPE", ""),
+        os.environ.get("DBUS_SESSION_BUS_ADDRESS", ""),
+    )
+    with _GUI_LINUX_PREFLIGHT_LOCK:
+        now = time.monotonic()
+        if (
+            _GUI_LINUX_PREFLIGHT_SESSION_TYPE is not None
+            and signature == _GUI_LINUX_PREFLIGHT_ENV_SIGNATURE
+            and discovery_token == _GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN
+            and now < _GUI_LINUX_PREFLIGHT_EXPIRES_AT
+        ):
+            return _GUI_LINUX_PREFLIGHT_SESSION_TYPE
+        desktop_env = _desktop_environment()
+        session_type = _session_type(desktop_env)
+        _GUI_LINUX_PREFLIGHT_ENV_SIGNATURE = signature
+        _GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN = discovery_token
+        _GUI_LINUX_PREFLIGHT_SESSION_TYPE = session_type
+        _GUI_LINUX_PREFLIGHT_EXPIRES_AT = now + (
+            _GUI_LINUX_NEGATIVE_CACHE_S
+            if session_type == "unknown"
+            else _GUI_LINUX_POSITIVE_CACHE_S
+        )
+        return session_type
+
+
+async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
+    from .gui import GuiUnavailableError, get_gui_manager
+    from .remote_worker_installer import ensure_gui_dependencies
+
+    manager = get_gui_manager()
+    if tool == "gui_state_refresh":
+        return await manager.refresh_state(args["window_id"], args["state_id"])
+    if tool == "gui_state_discard":
+        return await manager.discard_state(args["window_id"], args["state_id"])
+    if tool == "gui_frame_refresh":
+        return await manager.refresh_frame_observation(
+            args["window_id"],
+            args["observation_id"],
+        )
+    if tool == "gui_frame_discard":
+        return await manager.discard_frame_observation(
+            args["window_id"],
+            args["observation_id"],
+        )
+
+    session_type: str | None = None
+    if sys.platform == "linux":
+        session_type = await asyncio.to_thread(_linux_gui_preflight_session_type)
+        if session_type == "unknown":
+            raise GuiUnavailableError(
+                "No graphical Linux session was found; GUI dependencies were not installed"
+            )
+
+    allow_dependency_install = bool(args.pop("_allow_dependency_install", False))
+    if tool in {"gui_state", "gui_frame", "gui_human_action", "gui_action"}:
+        allow_dependency_install = True
+    dependency_check_required = tool not in {
+        "gui_state_refresh",
+        "gui_state_discard",
+        "gui_frame_refresh",
+        "gui_frame_discard",
+    }
+    if sys.platform == "linux" and (
+        tool == "gui_list"
+        or (tool == "gui_state" and not bool(args.get("screenshot", True)))
+        or (
+            session_type == "x11"
+            and tool in {"gui_action", "gui_human_action"}
+        )
+        or (
+            tool == "gui_action"
+            and all(
+                str(action.get("type") or "").strip().lower()
+                in {"focus", "set_value", "wait"}
+                for action in (args.get("actions") or [])
+                if isinstance(action, dict)
+            )
+        )
+    ):
+        dependency_check_required = False
+
+    if dependency_check_required:
+        dependency_status = await asyncio.to_thread(
+            ensure_gui_dependencies,
+            session_type,
+            install_missing=allow_dependency_install,
+        )
+        if not dependency_status.get("available"):
+            missing = ", ".join(dependency_status.get("missing") or []) or "GUI dependencies"
+            raise GuiUnavailableError(
+                f"{missing} unavailable for native GUI automation: "
+                f"{dependency_status.get('error') or 'installation failed'}"
+            )
+
+    if tool == "gui_list":
+        return await manager.list_windows()
+    if tool == "gui_state":
+        return await manager.snapshot(
+            args["window_id"],
+            screenshot=args.get("screenshot", True),
+            include_elements=args.get("include_elements", True),
+            max_elements=args.get("max_elements", 300),
+            max_depth=args.get("max_depth", 12),
+        )
+    if tool == "gui_frame":
+        return await manager.frame(args["window_id"])
+    if tool == "gui_human_action":
+        return await manager.human_act(
+            args["window_id"],
+            args["observation_id"],
+            args["bounds"],
+            args["actions"],
+        )
+    if tool == "gui_action":
+        return await manager.act(
+            args["window_id"],
+            args["state_id"],
+            args["actions"],
+        )
+    raise ValueError(f"unsupported remote GUI worker tool: {tool}")
+
+
 async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
     if tool in WORKER_ENVIRONMENT_TOOLS:
         return await _execute_environment_worker_tool(tool, args)
@@ -2367,6 +2622,8 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
         return await _execute_transfer_worker_tool(tool, args)
     if tool in WORKER_BROWSER_TOOLS:
         return await _execute_browser_worker_tool(tool, args)
+    if tool in WORKER_GUI_TOOLS:
+        return await _execute_gui_worker_tool(tool, args)
     raise ValueError(f"unsupported remote worker tool: {tool}")
 
 
@@ -2381,6 +2638,7 @@ def worker_capabilities() -> list[str]:
         "python",
         "playwright",
         "browser_sessions",
+        "gui",
     ]
 
 

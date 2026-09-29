@@ -83,6 +83,14 @@ GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "browser_run_script",
         ),
     ),
+    (
+        "Desktop GUI automation",
+        (
+            "gui_list",
+            "gui_state",
+            "gui_action",
+        ),
+    ),
     ("Remote worker administration", ("remote_manage",)),
 )
 
@@ -149,6 +157,7 @@ async def generate() -> str:
         "| Discover an external MCP capability | `mcp_tool_search`, then `mcp_tool_inspect` |",
         "| Interact with a page | `browser_session`, `browser_snapshot`, then `browser_act` |",
         "| Run custom browser logic | `browser_run_script` |",
+        "| Control a native desktop app | `gui_list`, `gui_state`, then `gui_action` |",
         "| Work on a remote machine | use the same tool with `machine`; use `remote_*` only for worker administration |",
         "",
     ]

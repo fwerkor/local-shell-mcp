@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 63f9fb40c4fd1c085e87c30ed221598cccacef1a6fb4aeb2bb4f1db520590ada -->
+<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
 # Référence des outils
 
 Cette page est construite à partir des schémas MCP réels. Exécutez `python scripts/generate-tools-reference.py` après toute modification de la surface publique des tools pour mettre à jour la référence English.
@@ -18,6 +18,7 @@ La plupart des outils renvoient un `ToolResult` structuré contenant `ok`, `mess
 | Découvrir une capability MCP externe | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Interagir avec une page | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Exécuter une logique browser personnalisée | `browser_run_script` |
+| Contrôler une application de bureau native | `gui_list`, `gui_state`, then `gui_action` |
 | Travailler sur une machine distante | utilisez la même tool avec `machine` ; utilisez `remote_*` seulement pour administrer les workers |
 
 ## Workspace interactif
@@ -445,6 +446,7 @@ Lorsque `machine` est fourni, l’appel requiert aussi `remote:use` et s’exéc
 | `path` | `string` | required |  |
 | `content` | `string` | required |  |
 | `overwrite` | `boolean` | `true` |  |
+| `encoding` | `string` | `"utf-8"` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
@@ -703,6 +705,55 @@ Exécute un script Python Playwright complet localement ou sur une machine dista
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
 
 Lorsque `machine` est fourni, l’appel requiert aussi `remote:use` et s’exécute via le protocole remote worker.
+
+## Automatisation de l'interface graphique du bureau
+
+### `gui_list`
+
+Répertoriez les fenêtres d'application de bureau visibles et les fonctionnalités du backend de l'interface graphique localement ou à distance.
+
+| Paramètre | Taper | Obligatoire/par défaut | Description |
+|---|---|---|---|
+| `machine` | `chaîne \| nul` | `null` |  |
+| `logical_session_id` | `chaîne \| nul` | requis | Session logique pour cet appel d'outil. Transmettez le session_id renvoyé par session_manage lorsque vous travaillez sur cette tâche. Utilisez null uniquement lorsqu'aucune session logique n'est active. Il s'agit du même session_id durable utilisé par session_manage. |
+
+Portées OAuth : `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Lorsque `machine` est fourni, l'appel nécessite en outre `remote:use` et s'exécute via le protocole de travail à distance.
+
+### `gui_state`
+
+Observez une fenêtre du bureau avant d’agir. Renvoie ses éléments d'accessibilité plus une capture d'écran MCP native facultative et un state_id de courte durée. Préférez les actions element_id ; les actions de coordonnées sont relatives à la fenêtre observée et sont rejetées si la fenêtre est déplacée ou redimensionnée.
+
+| Paramètre | Taper | Obligatoire/par défaut | Description |
+|---|---|---|---|
+| `window_id` | `string` | requis |  |
+| `screenshot` | `boolean` | `true` |  |
+| `include_elements` | `boolean` | `true` |  |
+| `max_elements` | `integer` | `300` |  |
+| `max_depth` | `integer` | `12` |  |
+| `machine` | `chaîne \| nul` | `null` |  |
+| `logical_session_id` | `chaîne \| nul` | requis | Session logique pour cet appel d'outil. Transmettez le session_id renvoyé par session_manage lorsque vous travaillez sur cette tâche. Utilisez null uniquement lorsqu'aucune session logique n'est active. Il s'agit du même session_id durable utilisé par session_manage. |
+
+Portées OAuth : `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Lorsque `machine` est fourni, l'appel nécessite en outre `remote:use` et s'exécute via le protocole de travail à distance.
+
+### `gui_action`
+
+Exécutez des actions GUI sur une nouvelle observation gui_state localement ou à distance. Le state_id est à usage unique. Préférer le ciblage sémantique element_id ; les coordonnées brutes x/y sont relatives à la fenêtre. Les actions prises en charge sont cliquer, double-cliquer, cliquer avec le bouton droit, déplacer, faire défiler, faire glisser, saisir, saisir, définir la valeur, se concentrer et attendre.
+
+| Paramètre | Taper | Obligatoire/par défaut | Description |
+|---|---|---|---|
+| `window_id` | `string` | requis |  |
+| `state_id` | `string` | requis |  |
+| `actions` | `array[GuiAction]` | requis |  |
+| `machine` | `chaîne \| nul` | `null` |  |
+| `logical_session_id` | `chaîne \| nul` | requis | Session logique pour cet appel d'outil. Transmettez le session_id renvoyé par session_manage lorsque vous travaillez sur cette tâche. Utilisez null uniquement lorsqu'aucune session logique n'est active. Il s'agit du même session_id durable utilisé par session_manage. |
+
+Portées OAuth : `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Lorsque `machine` est fourni, l'appel nécessite en outre `remote:use` et s'exécute via le protocole de travail à distance.
 
 ## Administration des remote workers
 

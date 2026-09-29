@@ -28,7 +28,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from . import __version__
 from .audit import get_audit_entry, query_audit, suppress_audit
-from .auth import Principal, require_scopes, verify_request
+from .auth import Principal, principal_scopes, require_scopes, verify_request
 from .fs_ops import (
     FileConflictError,
     delete_path,
@@ -349,6 +349,13 @@ def _require_ui_scopes(
     require_scopes(_request_principal(request), required)
 
 
+def _ui_principal_allows(request: Request, scope: str) -> bool:
+    principal = _request_principal(request)
+    if principal.claims.get("auth") in {"none", "native-tui", "localhost-bypass"}:
+        return True
+    return scope in principal_scopes(principal)
+
+
 def _live_channel_id(request: Request) -> str | None:
     principal = _request_principal(request)
     if principal.claims.get("auth") != "live-channel":
@@ -647,7 +654,7 @@ def _machine_rows() -> dict[str, Any]:
                 "workdir": str(settings.workspace_root),
                 "last_seen": time.time(),
                 "last_seen_age_s": 0,
-                "capabilities": ["files", "terminals"],
+                "capabilities": ["files", "terminals", "gui"],
                 "info": {
                     "platform": sys.platform,
                     "local": True,
@@ -660,12 +667,22 @@ def _machine_rows() -> dict[str, Any]:
     return {"machines": rows, "counts": counts}
 
 
-async def _remote_call(machine: str, tool: str, args: dict[str, Any]) -> Any:
+async def _remote_call(
+    machine: str,
+    tool: str,
+    args: dict[str, Any],
+    timeout_s: int | None = None,
+) -> Any:
+    effective_timeout = (
+        max(1, int(timeout_s))
+        if timeout_s is not None
+        else max(1, get_settings().ui_remote_request_timeout_s)
+    )
     result = await remote_manager().call(
         machine,
         tool,
         {**args, "_human": True},
-        timeout_s=max(1, get_settings().ui_remote_request_timeout_s),
+        timeout_s=effective_timeout,
     )
     if not result.get("ok", False):
         raise RuntimeError(result.get("message") or f"Remote operation failed: {tool}")
@@ -680,6 +697,7 @@ async def _machine_dispatch(
     local_call: Callable[[], Any | Awaitable[Any]],
     remote_tool: str,
     remote_args: dict[str, Any],
+    remote_timeout_s: int | None = None,
 ) -> Any:
     if machine == "local":
         if get_settings().disable_local:
@@ -689,7 +707,7 @@ async def _machine_dispatch(
             if asyncio.iscoroutine(result):
                 return await result
             return result
-    return await _remote_call(machine, remote_tool, remote_args)
+    return await _remote_call(machine, remote_tool, remote_args, remote_timeout_s)
 
 
 def _machine_uses_windows_paths(machine: str) -> bool:
@@ -1112,6 +1130,192 @@ async def api_file_action(request: Request) -> Response:
         return _json_ok(result)
     except FileConflictError as exc:
         return _json_error(exc, status_code=409)
+    except Exception as exc:
+        return _json_error(exc)
+
+
+async def api_gui_windows(request: Request) -> Response:
+    machine = str(request.query_params.get("machine") or "local")
+    try:
+        _require_ui_scopes(request, "shell:read", machine=machine)
+        from .gui import get_gui_manager
+
+        remote_args = (
+            {
+                "_allow_dependency_install": _ui_principal_allows(
+                    request,
+                    "shell:execute",
+                )
+            }
+            if machine != "local"
+            else {}
+        )
+        payload = await _machine_dispatch(
+            machine,
+            get_gui_manager().list_windows,
+            "gui_list",
+            remote_args,
+            210,
+        )
+        if not isinstance(payload, dict):
+            raise TypeError("GUI window listing returned an invalid payload")
+        return _json_ok({"machine": machine, **payload})
+    except Exception as exc:
+        return _json_error(exc)
+
+
+async def api_gui_frame(request: Request) -> Response:
+    machine = str(request.query_params.get("machine") or "local")
+    window_id = str(request.query_params.get("window_id") or "")
+    try:
+        _require_ui_scopes(
+            request,
+            "shell:read",
+            "shell:execute",
+            machine=machine,
+        )
+        if machine == "local" and get_settings().disable_local:
+            raise RuntimeError("Local access is disabled; select a remote machine")
+        if not window_id:
+            raise ValueError("window_id is required")
+
+        from .tools import _gui_frame_data
+
+        data, image = await _gui_frame_data(
+            window_id,
+            None if machine == "local" else machine,
+        )
+        window = data.get("window") if isinstance(data.get("window"), dict) else {}
+        bounds = window.get("bounds") if isinstance(window.get("bounds"), dict) else {}
+        capabilities = (
+            data.get("capabilities")
+            if isinstance(data.get("capabilities"), dict)
+            else {}
+        )
+        headers = {
+            "Cache-Control": "no-store",
+            "X-LSM-GUI-Window-X": str(bounds.get("x") or 0),
+            "X-LSM-GUI-Window-Y": str(bounds.get("y") or 0),
+            "X-LSM-GUI-Window-Width": str(bounds.get("width") or 0),
+            "X-LSM-GUI-Window-Height": str(bounds.get("height") or 0),
+            "X-LSM-GUI-Backend": str(data.get("backend") or ""),
+            "X-LSM-GUI-Observation-ID": str(data.get("observation_id") or ""),
+            "X-LSM-GUI-Observation-TTL-S": str(
+                data.get("observation_ttl_s") or 0
+            ),
+            "X-LSM-GUI-Coordinate-Input": (
+                "1" if capabilities.get("coordinate_input") is True else "0"
+            ),
+        }
+        return Response(
+            image.data,
+            media_type=str(image.mime_type or "image/png"),
+            headers=headers,
+        )
+    except Exception as exc:
+        return _json_error(exc)
+
+
+async def api_gui_frame_discard(request: Request) -> Response:
+    try:
+        body = await request.json()
+        machine = str(body.get("machine") or "local")
+        window_id = str(body.get("window_id") or "")
+        observation_id = str(body.get("observation_id") or "")
+        _require_ui_scopes(
+            request,
+            "shell:read",
+            "shell:execute",
+            machine=machine,
+        )
+        if machine == "local" and get_settings().disable_local:
+            raise RuntimeError("Local access is disabled; select a remote machine")
+        if not window_id:
+            raise ValueError("window_id is required")
+        if not observation_id:
+            raise ValueError("observation_id is required")
+
+        if machine == "local":
+            from .gui import get_gui_manager
+
+            result = await get_gui_manager().discard_frame_observation(
+                window_id,
+                observation_id,
+            )
+        else:
+            result = await _remote_call(
+                machine,
+                "gui_frame_discard",
+                {
+                    "window_id": window_id,
+                    "observation_id": observation_id,
+                },
+                30,
+            )
+        return _json_ok(result)
+    except Exception as exc:
+        return _json_error(exc)
+
+
+async def api_gui_action(request: Request) -> Response:
+    try:
+        body = await request.json()
+        machine = str(body.get("machine") or "local")
+        window_id = str(body.get("window_id") or "")
+        observation_id = str(body.get("observation_id") or "")
+        observed_bounds = body.get("bounds")
+        raw_actions = body.get("actions")
+        _require_ui_scopes(request, "shell:read", "shell:execute", machine=machine)
+        if machine == "local" and get_settings().disable_local:
+            raise RuntimeError("Local access is disabled; select a remote machine")
+        live_id = _require_live_human_mutation(request)
+
+        if not window_id:
+            raise ValueError("window_id is required")
+        if not observation_id:
+            raise ValueError("observation_id is required")
+        if not isinstance(observed_bounds, dict):
+            raise ValueError("bounds is required")
+        if not isinstance(raw_actions, list) or not raw_actions:
+            raise ValueError("actions must be a non-empty list")
+        if len(raw_actions) > 8:
+            raise ValueError("At most 8 GUI actions may be sent at once")
+
+        from .tools import GuiAction
+
+        actions = [
+            GuiAction.model_validate(item).model_dump(exclude_none=True)
+            for item in raw_actions
+        ]
+        if machine == "local":
+            from .gui import get_gui_manager
+
+            result = await get_gui_manager().human_act(
+                window_id,
+                observation_id,
+                observed_bounds,
+                actions,
+            )
+        else:
+            result = await _remote_call(
+                machine,
+                "gui_human_action",
+                {
+                    "window_id": window_id,
+                    "observation_id": observation_id,
+                    "bounds": observed_bounds,
+                    "actions": actions,
+                },
+                210,
+            )
+        _record_live_human_action(
+            live_id,
+            "gui.action",
+            machine=machine,
+            window_id=window_id,
+            actions=[str(action.get("type") or "") for action in actions],
+        )
+        return _json_ok(result)
     except Exception as exc:
         return _json_error(exc)
 
@@ -2728,6 +2932,14 @@ def ui_routes() -> list[Any]:
         Route(UI_API_PREFIX + "/files/preview", api_file_preview, methods=["GET"]),
         Route(UI_API_PREFIX + "/files/content", api_file_content, methods=["GET"]),
         Route(UI_API_PREFIX + "/files/{action}", api_file_action, methods=["POST"]),
+        Route(UI_API_PREFIX + "/gui/windows", api_gui_windows, methods=["GET"]),
+        Route(UI_API_PREFIX + "/gui/frame", api_gui_frame, methods=["GET"]),
+        Route(
+            UI_API_PREFIX + "/gui/frame/discard",
+            api_gui_frame_discard,
+            methods=["POST"],
+        ),
+        Route(UI_API_PREFIX + "/gui/action", api_gui_action, methods=["POST"]),
         Route(UI_API_PREFIX + "/terminals", api_terminals, methods=["GET"]),
         Route(UI_API_PREFIX + "/terminals/read", api_terminal_read, methods=["GET"]),
         Route(UI_API_PREFIX + "/terminals/{action}", api_terminal_action, methods=["POST"]),

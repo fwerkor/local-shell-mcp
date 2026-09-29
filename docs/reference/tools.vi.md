@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 63f9fb40c4fd1c085e87c30ed221598cccacef1a6fb4aeb2bb4f1db520590ada -->
+<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
 # Tham chiếu tools
 
 Page này được xây từ MCP tool schemas thực tế. Chạy `python scripts/generate-tools-reference.py` sau khi thay đổi public tool surface để cập nhật English reference.
@@ -18,6 +18,7 @@ Phần lớn tool trả về `ToolResult` có cấu trúc gồm `ok`, `message` 
 | Discover external MCP capability | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Tương tác với page | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Chạy custom browser logic | `browser_run_script` |
+| Điều khiển ứng dụng desktop gốc | `gui_list`, `gui_state`, sau đó `gui_action` |
 | Làm việc trên remote machine | dùng cùng tool với `machine`; chỉ dùng `remote_*` cho worker administration |
 
 ## Interactive workspace
@@ -445,6 +446,7 @@ Ghi UTF-8 text file local hoặc trên remote machine.
 | `path` | `string` | required |  |
 | `content` | `string` | required |  |
 | `overwrite` | `boolean` | `true` |  |
+| `encoding` | `string` | `"utf-8"` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
@@ -704,6 +706,54 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao thức remote worker.
 
+## Tự động hóa GUI máy tính
+
+### `gui_list`
+
+Liệt kê cục bộ hoặc từ xa các cửa sổ ứng dụng desktop đang hiển thị và khả năng của backend GUI.
+
+| Tham số | Kiểu | Bắt buộc/mặc định | Mô tả |
+|---|---|---|---|
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | bắt buộc | Logical Session cho lời gọi công cụ này. Khi làm việc trong tác vụ, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session đang hoạt động. |
+
+Phạm vi OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Khi cung cấp `machine`, lời gọi cũng yêu cầu `remote:use` và chạy qua giao thức worker từ xa.
+
+### `gui_state`
+
+Quan sát một cửa sổ desktop trước khi hành động. Trả về các phần tử accessibility, ảnh chụp MCP gốc tùy chọn và state_id ngắn hạn. Ưu tiên hành động bằng element_id; tọa độ tương đối với cửa sổ đã quan sát và sẽ bị từ chối nếu cửa sổ đã di chuyển hoặc đổi kích thước.
+
+| Tham số | Kiểu | Bắt buộc/mặc định | Mô tả |
+|---|---|---|---|
+| `window_id` | `string` | bắt buộc |  |
+| `screenshot` | `boolean` | `true` |  |
+| `include_elements` | `boolean` | `true` |  |
+| `max_elements` | `integer` | `300` |  |
+| `max_depth` | `integer` | `12` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | bắt buộc | Logical Session cho lời gọi công cụ này. Khi làm việc trong tác vụ, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session đang hoạt động. |
+
+Phạm vi OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Khi cung cấp `machine`, lời gọi cũng yêu cầu `remote:use` và chạy qua giao thức worker từ xa.
+
+### `gui_action`
+
+Thực thi hành động GUI cục bộ hoặc từ xa trên một quan sát gui_state mới. state_id chỉ dùng một lần. Ưu tiên định vị ngữ nghĩa bằng element_id; tọa độ x/y thô tương đối với cửa sổ. Hỗ trợ click, double_click, right_click, move, scroll, drag, type, key, set_value, focus và wait.
+
+| Tham số | Kiểu | Bắt buộc/mặc định | Mô tả |
+|---|---|---|---|
+| `window_id` | `string` | bắt buộc |  |
+| `state_id` | `string` | bắt buộc |  |
+| `actions` | `array[GuiAction]` | bắt buộc |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | bắt buộc | Logical Session cho lời gọi công cụ này. Khi làm việc trong tác vụ, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session đang hoạt động. |
+
+Phạm vi OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Khi cung cấp `machine`, lời gọi cũng yêu cầu `remote:use` và chạy qua giao thức worker từ xa.
 ## Remote worker administration
 
 ### `remote_manage`

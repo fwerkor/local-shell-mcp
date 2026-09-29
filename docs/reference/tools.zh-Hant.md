@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 63f9fb40c4fd1c085e87c30ed221598cccacef1a6fb4aeb2bb4f1db520590ada -->
+<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
 # 工具參考
 
 本頁由實際 MCP tool schema 產生。公開工具介面變更後，執行 `python scripts/generate-tools-reference.py` 更新 English 參考頁。
@@ -18,6 +18,7 @@
 | 探索外部 MCP capability | `mcp_tool_search`, then `mcp_tool_inspect` |
 | 與頁面互動 | `browser_session`, `browser_snapshot`, then `browser_act` |
 | 執行自訂 browser 邏輯 | `browser_run_script` |
+| 控制原生桌面應用程式 | `gui_list`、`gui_state`，接著 `gui_action` |
 | 在遠端機器工作 | 使用相同工具並提供 `machine`；僅 worker 管理使用 `remote_*` |
 
 ## 互動式 workspace
@@ -445,6 +446,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `path` | `string` | required |  |
 | `content` | `string` | required |  |
 | `overwrite` | `boolean` | `true` |  |
+| `encoding` | `string` | `"utf-8"` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
@@ -704,6 +706,54 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 指定 `machine` 時，呼叫還需要 `remote:use`，並透過遠端 worker 協定執行。
 
+## 桌面 GUI 自動化
+
+### `gui_list`
+
+在本機或遠端列出可見的桌面應用程式視窗及 GUI 後端能力。
+
+| 參數 | 類型 | 必填/預設值 | 說明 |
+|---|---|---|---|
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | 必填 | 本次工具呼叫對應的 Logical Session。在該工作中操作時，請傳入 session_manage 回傳的 session_id。只有目前沒有 Logical Session 時才使用 null。 |
+
+OAuth scope：`shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`。
+
+指定 `machine` 時，本次呼叫還需要 `remote:use`，並透過遠端 worker 協定執行。
+
+### `gui_state`
+
+操作前觀察一個桌面視窗。回傳其無障礙元素、可選的原生 MCP 截圖以及短期有效的 state_id。優先使用 element_id 動作；座標相對於觀察視窗，若視窗已移動或改變大小則會被拒絕。
+
+| 參數 | 類型 | 必填/預設值 | 說明 |
+|---|---|---|---|
+| `window_id` | `string` | 必填 |  |
+| `screenshot` | `boolean` | `true` |  |
+| `include_elements` | `boolean` | `true` |  |
+| `max_elements` | `integer` | `300` |  |
+| `max_depth` | `integer` | `12` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | 必填 | 本次工具呼叫對應的 Logical Session。在該工作中操作時，請傳入 session_manage 回傳的 session_id。只有目前沒有 Logical Session 時才使用 null。 |
+
+OAuth scope：`shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`。
+
+指定 `machine` 時，本次呼叫還需要 `remote:use`，並透過遠端 worker 協定執行。
+
+### `gui_action`
+
+在本機或遠端針對最新的 gui_state 觀察執行 GUI 動作。state_id 只能使用一次。優先使用語意 element_id 定位；原始 x/y 座標相對於視窗。支援 click、double_click、right_click、move、scroll、drag、type、key、set_value、focus 與 wait。
+
+| 參數 | 類型 | 必填/預設值 | 說明 |
+|---|---|---|---|
+| `window_id` | `string` | 必填 |  |
+| `state_id` | `string` | 必填 |  |
+| `actions` | `array[GuiAction]` | 必填 |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | 必填 | 本次工具呼叫對應的 Logical Session。在該工作中操作時，請傳入 session_manage 回傳的 session_id。只有目前沒有 Logical Session 時才使用 null。 |
+
+OAuth scope：`shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`。
+
+指定 `machine` 時，本次呼叫還需要 `remote:use`，並透過遠端 worker 協定執行。
 ## 遠端 worker 管理
 
 ### `remote_manage`

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 63f9fb40c4fd1c085e87c30ed221598cccacef1a6fb4aeb2bb4f1db520590ada -->
+<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
 # مرجع الأدوات
 
 تُبنى هذه الصفحة من MCP tool schemas الفعلية. شغّل `python scripts/generate-tools-reference.py` بعد تغيير public tool surface لتحديث English reference.
@@ -18,6 +18,7 @@
 | اكتشاف capability MCP خارجية | `mcp_tool_search`, then `mcp_tool_inspect` |
 | التفاعل مع صفحة | `browser_session`, `browser_snapshot`, then `browser_act` |
 | تشغيل browser logic مخصصة | `browser_run_script` |
+| التحكم في تطبيق سطح مكتب أصلي | `gui_list` ثم `gui_state` ثم `gui_action` |
 | العمل على machine بعيدة | استخدم الأداة نفسها مع `machine`؛ استخدم `remote_*` فقط لإدارة workers |
 
 ## Workspace تفاعلي
@@ -445,6 +446,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `path` | `string` | required |  |
 | `content` | `string` | required |  |
 | `overwrite` | `boolean` | `true` |  |
+| `encoding` | `string` | `"utf-8"` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
@@ -704,6 +706,54 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 عند تحديد `machine`، يتطلب الاستدعاء أيضًا `remote:use` ويعمل عبر بروتوكول remote worker.
 
+## أتمتة واجهة سطح المكتب
+
+### `gui_list`
+
+يسرد محلياً أو عن بعد نوافذ تطبيقات سطح المكتب المرئية وإمكانات backend الخاصة بـ GUI.
+
+| المعامل | النوع | مطلوب/افتراضي | الوصف |
+|---|---|---|---|
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | مطلوب | Logical Session لهذا الاستدعاء. أثناء العمل في المهمة مرّر session_id الذي يعيده session_manage. استخدم null فقط إذا لم تكن هناك Logical Session نشطة. |
+
+نطاقات OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+عند توفير `machine` يحتاج الاستدعاء أيضاً إلى `remote:use` ويعمل عبر بروتوكول worker البعيد.
+
+### `gui_state`
+
+يراقب نافذة سطح مكتب قبل تنفيذ أي إجراء. يعيد عناصر إمكانية الوصول ولقطة MCP أصلية اختيارية وstate_id قصير العمر. فضّل الإجراءات عبر element_id؛ الإحداثيات نسبية للنافذة المراقبة وتُرفض إذا تحركت النافذة أو تغير حجمها.
+
+| المعامل | النوع | مطلوب/افتراضي | الوصف |
+|---|---|---|---|
+| `window_id` | `string` | مطلوب |  |
+| `screenshot` | `boolean` | `true` |  |
+| `include_elements` | `boolean` | `true` |  |
+| `max_elements` | `integer` | `300` |  |
+| `max_depth` | `integer` | `12` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | مطلوب | Logical Session لهذا الاستدعاء. أثناء العمل في المهمة مرّر session_id الذي يعيده session_manage. استخدم null فقط إذا لم تكن هناك Logical Session نشطة. |
+
+نطاقات OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+عند توفير `machine` يحتاج الاستدعاء أيضاً إلى `remote:use` ويعمل عبر بروتوكول worker البعيد.
+
+### `gui_action`
+
+ينفذ إجراءات GUI محلياً أو عن بعد على ملاحظة gui_state حديثة. state_id أحادي الاستخدام. فضّل الاستهداف الدلالي عبر element_id؛ إحداثيات x/y الخام نسبية للنافذة. الإجراءات المدعومة هي click وdouble_click وright_click وmove وscroll وdrag وtype وkey وset_value وfocus وwait.
+
+| المعامل | النوع | مطلوب/افتراضي | الوصف |
+|---|---|---|---|
+| `window_id` | `string` | مطلوب |  |
+| `state_id` | `string` | مطلوب |  |
+| `actions` | `array[GuiAction]` | مطلوب |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | مطلوب | Logical Session لهذا الاستدعاء. أثناء العمل في المهمة مرّر session_id الذي يعيده session_manage. استخدم null فقط إذا لم تكن هناك Logical Session نشطة. |
+
+نطاقات OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+عند توفير `machine` يحتاج الاستدعاء أيضاً إلى `remote:use` ويعمل عبر بروتوكول worker البعيد.
 ## إدارة remote workers
 
 ### `remote_manage`

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 63f9fb40c4fd1c085e87c30ed221598cccacef1a6fb4aeb2bb4f1db520590ada -->
+<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
 # Tools referansı
 
 Bu page gerçek MCP tool schemas üzerinden oluşturulur. Public tool surface değiştiğinde English reference güncellemek için `python scripts/generate-tools-reference.py` çalıştırın.
@@ -18,6 +18,7 @@ Bu page gerçek MCP tool schemas üzerinden oluşturulur. Public tool surface de
 | External MCP capability discover etmek | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Page ile interact etmek | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Custom browser logic çalıştırmak | `browser_run_script` |
+| Yerel masaüstü uygulamasını kontrol et | `gui_list`, `gui_state`, ardından `gui_action` |
 | Remote machine üzerinde çalışmak | aynı tool ile `machine` kullanın; yalnız worker administration için `remote_*` |
 
 ## Interactive workspace
@@ -445,6 +446,7 @@ Local veya remote machine üzerinde UTF-8 text file yazar.
 | `path` | `string` | required |  |
 | `content` | `string` | required |  |
 | `overwrite` | `boolean` | `true` |  |
+| `encoding` | `string` | `"utf-8"` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
@@ -704,6 +706,54 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 `machine` sağlandığında çağrı ayrıca `remote:use` gerektirir ve remote worker protocol üzerinden çalışır.
 
+## Masaüstü GUI otomasyonu
+
+### `gui_list`
+
+Görünür masaüstü uygulama pencerelerini ve GUI backend yeteneklerini yerel veya uzak olarak listeler.
+
+| Parametre | Tür | Zorunlu/varsayılan | Açıklama |
+|---|---|---|---|
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | zorunlu | Bu araç çağrısının Logical Session kimliği. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id'yi geçirin. Etkin Logical Session yoksa null kullanın. |
+
+OAuth kapsamları: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+`machine` verildiğinde çağrı ayrıca `remote:use` gerektirir ve uzak worker protokolü üzerinden çalışır.
+
+### `gui_state`
+
+Eylemden önce bir masaüstü penceresini gözlemler. Erişilebilirlik öğelerini, isteğe bağlı yerel MCP ekran görüntüsünü ve kısa ömürlü state_id'yi döndürür. element_id eylemlerini tercih edin; koordinatlar gözlenen pencereye göredir ve pencere taşınmış veya yeniden boyutlandırılmışsa reddedilir.
+
+| Parametre | Tür | Zorunlu/varsayılan | Açıklama |
+|---|---|---|---|
+| `window_id` | `string` | zorunlu |  |
+| `screenshot` | `boolean` | `true` |  |
+| `include_elements` | `boolean` | `true` |  |
+| `max_elements` | `integer` | `300` |  |
+| `max_depth` | `integer` | `12` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | zorunlu | Bu araç çağrısının Logical Session kimliği. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id'yi geçirin. Etkin Logical Session yoksa null kullanın. |
+
+OAuth kapsamları: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+`machine` verildiğinde çağrı ayrıca `remote:use` gerektirir ve uzak worker protokolü üzerinden çalışır.
+
+### `gui_action`
+
+Yeni bir gui_state gözlemine karşı yerel veya uzak GUI eylemleri yürütür. state_id tek kullanımlıktır. Semantik element_id hedeflemeyi tercih edin; ham x/y koordinatları pencereye göredir. click, double_click, right_click, move, scroll, drag, type, key, set_value, focus ve wait desteklenir.
+
+| Parametre | Tür | Zorunlu/varsayılan | Açıklama |
+|---|---|---|---|
+| `window_id` | `string` | zorunlu |  |
+| `state_id` | `string` | zorunlu |  |
+| `actions` | `array[GuiAction]` | zorunlu |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | zorunlu | Bu araç çağrısının Logical Session kimliği. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id'yi geçirin. Etkin Logical Session yoksa null kullanın. |
+
+OAuth kapsamları: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+`machine` verildiğinde çağrı ayrıca `remote:use` gerektirir ve uzak worker protokolü üzerinden çalışır.
 ## Remote worker administration
 
 ### `remote_manage`

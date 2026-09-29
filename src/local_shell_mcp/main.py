@@ -197,6 +197,15 @@ def run_http() -> None:
 def main(argv: list[str] | None = None) -> None:
     _configure_logging()
     argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == "_gui-capture-window":
+        if len(argv) != 3:
+            raise SystemExit("_gui-capture-window requires HWND and destination")
+        from pathlib import Path
+
+        from .gui.windows import _capture_window_image_native
+
+        _capture_window_image_native(int(argv[1]), Path(argv[2]))
+        return
     if argv and argv[0] == "job-runner":
         from .jobs import run_job_runner_cli
 
