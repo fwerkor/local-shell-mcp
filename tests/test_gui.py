@@ -436,12 +436,10 @@ async def test_gui_manager_bounds_window_list_metadata(monkeypatch):
     windows = listed["windows"]
     assert len(windows) <= base.GUI_MAX_WINDOWS
     assert all(
-        len(item["title"].encode("utf-8")) <= base.GUI_MAX_WINDOW_TEXT_BYTES
-        for item in windows
+        len(item["title"].encode("utf-8")) <= base.GUI_MAX_WINDOW_TEXT_BYTES for item in windows
     )
     assert all(
-        len(item["app"].encode("utf-8")) <= base.GUI_MAX_WINDOW_TEXT_BYTES
-        for item in windows
+        len(item["app"].encode("utf-8")) <= base.GUI_MAX_WINDOW_TEXT_BYTES for item in windows
     )
     assert all(len(item["id"].encode("utf-8")) <= base.GUI_MAX_WINDOW_ID_BYTES for item in windows)
     assert all("unknown" not in item for item in windows)
@@ -497,14 +495,11 @@ async def test_gui_snapshot_bounds_element_metadata_before_return(tmp_path, monk
 
     manager = GuiManager(LargeMetadataBackend())
     state = await manager.snapshot("window:1", screenshot=False)
-    encoded = json.dumps(
-        state["elements"], ensure_ascii=False, separators=(",", ":")
-    ).encode()
+    encoded = json.dumps(state["elements"], ensure_ascii=False, separators=(",", ":")).encode()
     assert len(encoded) <= base.GUI_MAX_ELEMENTS_TOTAL_BYTES
     assert state["elements"]
     assert all(
-        len(item["name"].encode()) <= base.GUI_MAX_ELEMENT_TEXT_BYTES
-        for item in state["elements"]
+        len(item["name"].encode()) <= base.GUI_MAX_ELEMENT_TEXT_BYTES for item in state["elements"]
     )
     assert all(
         len(item["automation_id"].encode()) <= base.GUI_MAX_ELEMENT_TEXT_BYTES
@@ -770,9 +765,7 @@ async def test_gui_state_result_local_screenshot(tmp_path, monkeypatch):
             return {"state_id": state_id, "state_ttl_s": 29}
 
         async def discard_state(self, window_id, state_id):
-            raise AssertionError(
-                f"successful delivery must not discard {(window_id, state_id)}"
-            )
+            raise AssertionError(f"successful delivery must not discard {(window_id, state_id)}")
 
     monkeypatch.setattr(tools, "get_gui_manager", lambda: Manager())
     result = await tools._gui_state_result(
@@ -905,9 +898,7 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
     monkeypatch.setattr(
         tools,
         "transfer_alloc_temp_path",
-        lambda suffix: {
-            "path": str(tools.temp_dir() / f"temporary{suffix}")
-        },
+        lambda suffix: {"path": str(tools.temp_dir() / f"temporary{suffix}")},
     )
 
     result = await tools._gui_state_result(
@@ -1105,7 +1096,7 @@ async def test_gui_state_remote_inline_screenshot_skips_secondary_transfer(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_gui_state_remote_handoff_does_not_refresh_state(tmp_path, monkeypatch):
+async def test_gui_state_remote_handoff_avoids_extra_refresh_roundtrip(tmp_path, monkeypatch):
     import local_shell_mcp.tools as tools
 
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -1129,6 +1120,8 @@ async def test_gui_state_remote_handoff_does_not_refresh_state(tmp_path, monkeyp
                 "capabilities": {},
                 "screenshot_path": None,
             }
+        if tool == "gui_state_refresh":
+            return {"state_id": "s", "state_ttl_s": 17}
         raise AssertionError(f"unexpected worker tool: {tool}")
 
     monkeypatch.setattr(tools, "_remote_worker_data", remote_worker)
@@ -1145,7 +1138,6 @@ async def test_gui_state_remote_handoff_does_not_refresh_state(tmp_path, monkeyp
     assert result.isError is False
     assert result.structuredContent["state_ttl_s"] == 30
     assert calls == ["gui_state"]
-
 
 
 def test_controller_gui_staging_stays_inside_workspace_with_external_state_dir(
@@ -1269,6 +1261,7 @@ async def test_copy_remote_gui_temp_to_local_uses_internal_transfer_tools(tmp_pa
 @pytest.mark.asyncio
 async def test_gui_frame_data_local_and_remote_paths(tmp_path, monkeypatch):
     import local_shell_mcp.tools as tools
+
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "true")
     tools.get_settings.cache_clear()
@@ -1572,9 +1565,9 @@ def test_remote_gui_relay_optimizes_large_screenshot_in_place(tmp_path, monkeypa
     assert shot.name.endswith(".png")
     with shot.open("rb") as handle:
         header = handle.read(16)
-    assert (
-        header.startswith(b"RIFF") and header[8:12] == b"WEBP"
-    ) or header.startswith(b"\xff\xd8\xff")
+    assert (header.startswith(b"RIFF") and header[8:12] == b"WEBP") or header.startswith(
+        b"\xff\xd8\xff"
+    )
 
 
 def test_remote_gui_relay_inlines_bounded_compressed_screenshot(tmp_path, monkeypatch):
@@ -1598,6 +1591,112 @@ def test_remote_gui_relay_inlines_bounded_compressed_screenshot(tmp_path, monkey
     assert len(decoded) == result["screenshot_inline_size"] == shot.stat().st_size
     image_format, _mime = detect_image_type(decoded[:16])
     assert image_format in {"webp", "jpeg"}
+
+
+def test_remote_gui_relay_skips_decode_above_pixel_budget(tmp_path, monkeypatch):
+    import local_shell_mcp.remote as remote
+
+    shot = tmp_path / ("gui-" + "e" * 32 + ".png")
+    shot.write_bytes(b"x" * (128 * 1024))
+
+    class LargeImage:
+        size = (8000, 4000)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def load(self):
+            pytest.fail("oversized relay image must not be decoded")
+
+    monkeypatch.setattr(remote, "_worker_gui_temp_path", lambda _path, must_exist=True: shot)
+    monkeypatch.setattr(
+        remote.Image if hasattr(remote, "Image") else Image,
+        "open",
+        lambda _path: LargeImage(),
+        raising=False,
+    )
+
+    from PIL import Image as PillowImage
+
+    monkeypatch.setattr(PillowImage, "open", lambda _path: LargeImage())
+    result = remote._optimize_gui_temp_for_relay(str(shot))
+
+    assert result == {
+        "optimized": False,
+        "bytes": shot.stat().st_size,
+        "format": "original",
+    }
+
+
+def test_remote_gui_inline_respects_http_body_budget(tmp_path, monkeypatch):
+    import local_shell_mcp.remote as remote
+
+    shot = tmp_path / ("gui-" + "f" * 32 + ".png")
+    shot.write_bytes(b"x" * (96 * 1024))
+    monkeypatch.setattr(remote, "_worker_gui_temp_path", lambda _path, must_exist=True: shot)
+    monkeypatch.setattr(
+        remote,
+        "get_settings",
+        lambda: SimpleNamespace(max_http_request_bytes=120 * 1024),
+    )
+
+    assert (
+        remote._inline_gui_temp_for_relay(
+            str(shot),
+            metadata_bytes=24 * 1024,
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_worker_gui_relay_cancellation_discards_published_state(tmp_path, monkeypatch):
+    import local_shell_mcp.remote as remote
+
+    shot = tmp_path / ("gui-" + "1" * 32 + ".png")
+    shot.write_bytes(b"png")
+    started = asyncio.Event()
+    release = asyncio.Event()
+    discarded = []
+    deleted = []
+
+    async def postprocess(_path, _result):
+        started.set()
+        await release.wait()
+        return None
+
+    class Manager:
+        async def discard_state(self, window_id, state_id):
+            discarded.append((window_id, state_id))
+            return {"discarded": True}
+
+    monkeypatch.setattr(remote, "_prepare_worker_gui_relay", postprocess)
+    monkeypatch.setattr(
+        remote,
+        "_worker_gui_temp_delete",
+        lambda path: deleted.append(path) or {"deleted": True},
+    )
+
+    task = asyncio.create_task(
+        remote._finish_worker_gui_relay(
+            Manager(),
+            {"state_id": "state", "screenshot_path": str(shot)},
+            window_id="w",
+            record_id="state",
+            discard=Manager().discard_state,
+        )
+    )
+    await started.wait()
+    task.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert discarded == [("w", "state")]
+    assert deleted == [str(shot)]
 
 
 def test_remote_gui_relay_keeps_small_png_untouched(tmp_path, monkeypatch):
@@ -1768,9 +1867,7 @@ async def test_gui_manager_checks_element_actions_that_can_fall_back_to_coordina
         {"type": "drag", "x": 1, "y": 1, "to_x": 300, "to_y": 10},
     ],
 )
-async def test_gui_manager_rejects_points_outside_selected_window(
-    tmp_path, monkeypatch, action
-):
+async def test_gui_manager_rejects_points_outside_selected_window(tmp_path, monkeypatch, action):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     backend = FakeBackend()
     manager = GuiManager(backend)
@@ -1986,9 +2083,7 @@ def test_windows_capture_rejects_oversized_rect_before_gdi_allocation(tmp_path, 
             return self.callback(*args)
 
     def get_window_rect(_hwnd, rect_ptr):
-        rect = windows.ctypes.cast(
-            rect_ptr, windows.ctypes.POINTER(windows._WinRect)
-        ).contents
+        rect = windows.ctypes.cast(rect_ptr, windows.ctypes.POINTER(windows._WinRect)).contents
         rect.left = 0
         rect.top = 0
         rect.right = windows.GUI_MAX_CAPTURE_DIMENSION + 1
@@ -1999,9 +2094,7 @@ def test_windows_capture_rejects_oversized_rect_before_gdi_allocation(tmp_path, 
         GetWindowRect = Fn(get_window_rect)
         IsIconic = Fn(lambda _hwnd: 0)
         GetWindowDC = Fn(
-            lambda _hwnd: pytest.fail(
-                "GetWindowDC must not run for oversized windows"
-            )
+            lambda _hwnd: pytest.fail("GetWindowDC must not run for oversized windows")
         )
         ReleaseDC = Fn(lambda *_args: 1)
         PrintWindow = Fn(lambda *_args: 1)
@@ -2040,9 +2133,7 @@ def test_windows_capture_unselects_bitmap_before_getdibits(tmp_path, monkeypatch
     select_calls = 0
 
     def get_window_rect(_hwnd, rect_ptr):
-        rect = windows.ctypes.cast(
-            rect_ptr, windows.ctypes.POINTER(windows._WinRect)
-        ).contents
+        rect = windows.ctypes.cast(rect_ptr, windows.ctypes.POINTER(windows._WinRect)).contents
         rect.left = 0
         rect.top = 0
         rect.right = 2
@@ -2401,8 +2492,7 @@ def test_windows_window_listing_bounds_provider_metadata_during_enumeration(
     assert len(listed) <= windows.GUI_MAX_WINDOWS
     assert len(listed) < len(controls)
     public = [
-        {key: value for key, value in item.items() if not key.startswith("_")}
-        for item in listed
+        {key: value for key, value in item.items() if not key.startswith("_")} for item in listed
     ]
     assert len(json.dumps(public, ensure_ascii=False).encode()) <= (
         windows.GUI_MAX_WINDOWS_TOTAL_BYTES
@@ -2490,9 +2580,7 @@ def test_windows_semantic_action_rejects_recycled_uia_element(monkeypatch):
         max_elements=10,
         max_depth=2,
     )
-    child_id = next(
-        item["id"] for item in snapshot.elements if item["automation_id"] == "save"
-    )
+    child_id = next(item["id"] for item in snapshot.elements if item["automation_id"] == "save")
     locator = snapshot.locators[child_id]
     child.Name = "Delete"
 
@@ -2584,9 +2672,7 @@ def test_windows_semantic_action_rejects_identical_replacement_uia_element(monke
         max_elements=10,
         max_depth=2,
     )
-    child_id = next(
-        item["id"] for item in snapshot.elements if item["automation_id"] == "save"
-    )
+    child_id = next(item["id"] for item in snapshot.elements if item["automation_id"] == "save")
     locator = snapshot.locators[child_id]
     root.child = replacement_child
 
@@ -2969,9 +3055,7 @@ async def test_windows_native_traversal_uses_one_initialized_uia_thread(monkeypa
     assert result == {"performed": True}
     init_threads = [thread_id for kind, thread_id in calls if kind == "init"]
     operation_threads = [
-        thread_id
-        for kind, thread_id in calls
-        if kind in {"list", "snapshot", "action"}
+        thread_id for kind, thread_id in calls if kind in {"list", "snapshot", "action"}
     ]
     assert len(init_threads) == 1
     assert len(set(operation_threads)) == 1
@@ -3100,7 +3184,9 @@ def test_screenshot_normalization_rejects_oversized_actual_image_before_decode(
         )
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits are not enforced on Windows")
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="POSIX permission bits are not enforced on Windows"
+)
 @pytest.mark.asyncio
 async def test_gui_screenshots_use_private_permissions(tmp_path, monkeypatch):
     import local_shell_mcp.gui.base as base
@@ -3364,9 +3450,7 @@ async def test_gui_manager_human_actions_reject_unscoped_targets(tmp_path, monke
             [{"type": "wait", "seconds": 1}],
         )
     with pytest.raises(ValueError, match="Observed window bounds"):
-        await manager.human_act(
-            "window:1", observation_id, {}, [{"type": "type", "text": "x"}]
-        )
+        await manager.human_act("window:1", observation_id, {}, [{"type": "type", "text": "x"}])
     missing_observation = _install_frame_observation(
         manager, backend, observation_id="missing-frame", window_id="missing"
     )
@@ -3405,18 +3489,13 @@ async def test_gui_frame_does_not_allocate_model_state(tmp_path, monkeypatch):
         frame["observation_id"],
     )
     assert second_refresh["observation_ttl_s"] <= refreshed["observation_ttl_s"]
-    assert (
-        manager._frame_observations[frame["observation_id"]].created_at
-        == original_created_at
-    )
+    assert manager._frame_observations[frame["observation_id"]].created_at == original_created_at
     with pytest.raises(GuiStaleStateError, match="different window"):
         await manager.refresh_frame_observation(
             "window:2",
             frame["observation_id"],
         )
-    manager._frame_observations[frame["observation_id"]].created_at -= (
-        base.GUI_STATE_TTL_S + 1
-    )
+    manager._frame_observations[frame["observation_id"]].created_at -= base.GUI_STATE_TTL_S + 1
     with pytest.raises(GuiStaleStateError, match="stale or unknown"):
         await manager.refresh_frame_observation(
             "window:1",
@@ -3447,17 +3526,14 @@ async def test_gui_frame_capacity_preserves_unexpired_observation_ttl(
             await manager.frame("window:1")
         assert first["observation_id"] in manager._frame_observations
         assert second["observation_id"] in manager._frame_observations
-        original_created_at = manager._frame_observations[
-            first["observation_id"]
-        ].created_at
+        original_created_at = manager._frame_observations[first["observation_id"]].created_at
         refreshed = await manager.refresh_frame_observation(
             "window:1",
             first["observation_id"],
         )
         assert 0 < refreshed["observation_ttl_s"] <= base.GUI_STATE_TTL_S
         assert (
-            manager._frame_observations[first["observation_id"]].created_at
-            == original_created_at
+            manager._frame_observations[first["observation_id"]].created_at == original_created_at
         )
     finally:
         first_path.unlink(missing_ok=True)
@@ -3673,9 +3749,7 @@ async def test_cancelled_gui_capture_holds_execution_lock_until_backend_settles(
             self.capture_started.set()
             await self.release_capture.wait()
             if screenshot_path is not None:
-                Image.new("RGB", (300, 200), (1, 2, 3)).save(
-                    screenshot_path, format="PNG"
-                )
+                Image.new("RGB", (300, 200), (1, 2, 3)).save(screenshot_path, format="PNG")
             return GuiSnapshot(
                 window={
                     "id": window_id,
@@ -3798,9 +3872,7 @@ def test_x11_window_matching_and_pixmap_decode(monkeypatch):
         blue_mask=0x000000FF,
     )
     info = SimpleNamespace(
-        pixmap_formats=[
-            SimpleNamespace(depth=24, bits_per_pixel=32, scanline_pad=32)
-        ],
+        pixmap_formats=[SimpleNamespace(depth=24, bits_per_pixel=32, scanline_pad=32)],
         image_byte_order=X.LSBFirst,
         roots=[SimpleNamespace(allowed_depths=[SimpleNamespace(visuals=[visual])])],
     )
@@ -3828,9 +3900,7 @@ def test_x11_window_matching_and_pixmap_decode(monkeypatch):
         },
     )
     assert matched is target
-    assert property_reads == [
-        ("_NET_CLIENT_LIST_STACKING", 0, linux.GUI_MAX_WINDOWS, False)
-    ]
+    assert property_reads == [("_NET_CLIENT_LIST_STACKING", 0, linux.GUI_MAX_WINDOWS, False)]
 
     image = linux._x11_pixmap_to_image(
         connection,
@@ -4277,7 +4347,83 @@ def test_kde_wayland_focus_script_prefers_unique_pid_title_before_geometry(
     assert "String(pidCandidates[j].caption) === expectedTitle" in script
     assert "candidate.clientGeometry" in script
     assert "candidate.frameGeometry" in script
-    assert "workspace.raiseWindow(candidates[0]);" in script
+    assert 'typeof workspace.windowList === "function"' in script
+    assert 'typeof workspace.clientList === "function"' in script
+    assert "workspace.raiseWindow(selected);" in script
+    assert "workspace.raiseClient(selected);" in script
+    assert "workspace.activeClient = selected;" in script
+
+
+def test_kde_wayland_authoritative_list_uses_kwin_top_levels():
+    import local_shell_mcp.gui.linux as linux
+
+    env = {"XDG_SESSION_TYPE": "wayland", "XDG_CURRENT_DESKTOP": "KDE"}
+    data = {
+        "windows": [
+            {
+                "id": "atspi:10:main",
+                "title": "QQ",
+                "app": "qq",
+                "pid": 10,
+                "bounds": {"x": 1, "y": 1, "width": 1001, "height": 720},
+            },
+            {
+                "id": "atspi:10:popup",
+                "title": "QQ",
+                "app": "qq",
+                "pid": 10,
+                "bounds": {"x": 2, "y": 2, "width": 720, "height": 640},
+            },
+        ],
+        "monitors": [{"index": 0, "x": 0, "y": 0, "width": 1920, "height": 1080}],
+    }
+    kwin = [
+        {
+            "pid": 10,
+            "title": "QQ",
+            "internal_id": "{11111111-1111-1111-1111-111111111111}",
+            "app": "qq",
+            "bounds": {"x": 100, "y": 120, "width": 1001, "height": 720},
+            "minimized": False,
+            "active": True,
+        },
+        {
+            "pid": 20,
+            "title": "ics2026 — Dolphin",
+            "internal_id": "{22222222-2222-2222-2222-222222222222}",
+            "app": "org.kde.dolphin",
+            "bounds": {"x": 300, "y": 200, "width": 900, "height": 600},
+            "minimized": False,
+            "active": False,
+        },
+    ]
+
+    result = linux._kde_wayland_authoritative_data(
+        data,
+        env,
+        kwin_windows=kwin,
+    )
+
+    assert result["windows"] == [
+        {
+            "id": "atspi:10:main",
+            "title": "QQ",
+            "app": "qq",
+            "pid": 10,
+            "bounds": {"x": 100, "y": 120, "width": 1001, "height": 720},
+            "minimized": False,
+            "active": True,
+        },
+        {
+            "id": "kwin:22222222-2222-2222-2222-222222222222",
+            "title": "ics2026 — Dolphin",
+            "app": "org.kde.dolphin",
+            "pid": 20,
+            "bounds": {"x": 300, "y": 200, "width": 900, "height": 600},
+            "minimized": False,
+            "active": False,
+        },
+    ]
 
 
 @pytest.mark.asyncio
@@ -4320,6 +4466,50 @@ async def test_linux_focus_falls_back_to_kwin_and_reverifies_active(monkeypatch)
     assert activated == [(window, env)]
     assert len(calls) == 2
     assert calls[1][0]["command"] == "semantic_action"
+
+
+@pytest.mark.asyncio
+async def test_linux_focus_polls_until_kwin_activation_reaches_atspi(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    backend = linux.LinuxGuiBackend()
+    env = {"XDG_CURRENT_DESKTOP": "KDE", "XDG_SESSION_TYPE": "wayland"}
+    results = [
+        {"semantic": True},
+        GuiUnavailableError("AT-SPI target cannot be focused"),
+        GuiUnavailableError("AT-SPI target cannot be focused"),
+        {"semantic": True},
+    ]
+    calls = []
+
+    def helper(payload, selected_env=None):
+        calls.append((payload, selected_env))
+        result = results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    async def no_wait(_seconds):
+        return None
+
+    monkeypatch.setattr(backend, "_helper", helper)
+    monkeypatch.setattr(linux.asyncio, "sleep", no_wait)
+    monkeypatch.setattr(
+        linux,
+        "_focus_kde_wayland_window_sync",
+        lambda *_args, **_kwargs: None,
+    )
+
+    await backend._focus_window(
+        {
+            "id": "atspi:42:sig",
+            "pid": 42,
+            "bounds": {"x": 10, "y": 20, "width": 300, "height": 200},
+        },
+        env,
+    )
+
+    assert len(calls) == 4
 
 
 @pytest.mark.asyncio
@@ -4683,10 +4873,12 @@ async def test_linux_desktop_environment_refreshes_and_resets_portal(monkeypatch
 
     backend = linux.LinuxGuiBackend()
     times = iter([100.0, 100.0, 131.0, 131.0])
-    environments = iter([
-        {"XDG_SESSION_TYPE": "x11", "DISPLAY": ":0"},
-        {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-1"},
-    ])
+    environments = iter(
+        [
+            {"XDG_SESSION_TYPE": "x11", "DISPLAY": ":0"},
+            {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-1"},
+        ]
+    )
     monkeypatch.setattr(
         linux,
         "time",
@@ -4709,9 +4901,7 @@ async def test_linux_desktop_environment_refreshes_and_resets_portal(monkeypatch
     assert closed == [True]
 
 
-def test_wayland_desktop_crop_rejects_oversized_header_before_decode(
-    tmp_path, monkeypatch
-):
+def test_wayland_desktop_crop_rejects_oversized_header_before_decode(tmp_path, monkeypatch):
     import local_shell_mcp.gui.linux as linux
 
     class OversizedImage:
@@ -5031,15 +5221,17 @@ async def test_portal_pipewire_capture_passes_and_closes_remote_fd(tmp_path, mon
     def run(argv, **kwargs):
         run_calls.append((argv, kwargs))
         destination = next(
-            item.removeprefix("location=")
-            for item in argv
-            if item.startswith("location=")
+            item.removeprefix("location=") for item in argv if item.startswith("location=")
         )
         Image.new("RGB", (500, 400)).save(destination, format="PNG")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(portal, "ensure_session", ready)
-    monkeypatch.setattr(portal_module.shutil, "which", lambda name: "/usr/bin/gst-launch-1.0" if name == "gst-launch-1.0" else None)
+    monkeypatch.setattr(
+        portal_module.shutil,
+        "which",
+        lambda name: "/usr/bin/gst-launch-1.0" if name == "gst-launch-1.0" else None,
+    )
     monkeypatch.setattr(portal_module.subprocess, "run", run)
 
     path = tmp_path / "pipewire.png"
@@ -5538,9 +5730,7 @@ def test_atspi_snapshot_bounds_direct_child_provider_calls(monkeypatch):
     monkeypatch.setattr(
         helper,
         "Atspi",
-        SimpleNamespace(
-            StateType=SimpleNamespace(ENABLED=1, FOCUSED=2, EDITABLE=3)
-        ),
+        SimpleNamespace(StateType=SimpleNamespace(ENABLED=1, FOCUSED=2, EDITABLE=3)),
     )
 
     result = helper._snapshot(
@@ -5981,6 +6171,7 @@ async def test_portal_closed_signal_clears_cached_session(monkeypatch):
     class Bus:
         async def introspect(self, *_args):
             return object()
+
         def get_proxy_object(self, *_args):
             return Obj()
 
@@ -6322,6 +6513,24 @@ def test_portal_stream_mapping_uses_unique_monitor_size_when_kde_omits_position(
     assert portal._stream_point(2300, 100) == (109, 7.0, 20.0)
 
 
+def test_portal_stream_mapping_scales_hidpi_native_stream_coordinates():
+    portal = PortalDesktop({})
+    portal.set_monitor_layout(
+        [
+            {"x": 100, "y": 50, "width": 800, "height": 600, "scale": 2},
+        ]
+    )
+    portal._streams = [
+        {
+            "node_id": 42,
+            "properties": {"size": [1600, 1200], "source_type": 1},
+        }
+    ]
+
+    assert portal._stream_geometry(portal._streams[0]) == (100, 50, 800, 600)
+    assert portal._stream_point(300, 200) == (42, 400.0, 300.0)
+
+
 def test_portal_stream_mapping_stays_fail_closed_for_ambiguous_monitor_sizes():
     portal = PortalDesktop({})
     portal.set_monitor_layout(
@@ -6386,9 +6595,7 @@ async def test_portal_scroll_translates_to_positive_down_axis():
         async def call_notify_pointer_motion_absolute(self, *_args):
             pass
 
-        async def call_notify_pointer_axis(
-            self, session, _options, delta_x, delta_y
-        ):
+        async def call_notify_pointer_axis(self, session, _options, delta_x, delta_y):
             axes.append((session, delta_x, delta_y))
 
     portal._remote = Remote()
@@ -6403,9 +6610,7 @@ async def test_portal_type_text_maps_tabs_and_line_endings_to_keysyms():
     events = []
 
     class Remote:
-        async def call_notify_keyboard_keysym(
-            self, session, _options, keysym, pressed
-        ):
+        async def call_notify_keyboard_keysym(self, session, _options, keysym, pressed):
             events.append((session, keysym, pressed))
 
     portal._remote = Remote()
@@ -6440,9 +6645,7 @@ async def test_portal_click_does_not_reopen_session_mid_gesture(monkeypatch):
         return "session-2"
 
     class Remote:
-        async def call_notify_pointer_motion_absolute(
-            self, session, _options, _stream, _x, _y
-        ):
+        async def call_notify_pointer_motion_absolute(self, session, _options, _stream, _x, _y):
             assert session == "session-1"
             portal._on_session_closed()
 
@@ -6778,27 +6981,25 @@ async def test_gui_payload_limits_precede_state_consumption(tmp_path, monkeypatc
 
     with pytest.raises(ValueError, match="text may not exceed"):
         tools.GuiAction.model_validate({"type": "type", "text": "x" * 4097})
-    assert tools.GuiAction.model_validate(
-        {"type": "key", "keys": "CTRL+A"}
-    ).keys == "CTRL+A"
-    assert tools.GuiAction.model_validate(
-        {"type": "key", "keys": ["CTRL", "A"]}
-    ).keys == ["CTRL", "A"]
+    assert tools.GuiAction.model_validate({"type": "key", "keys": "CTRL+A"}).keys == "CTRL+A"
+    assert tools.GuiAction.model_validate({"type": "key", "keys": ["CTRL", "A"]}).keys == [
+        "CTRL",
+        "A",
+    ]
     with pytest.raises(ValueError, match="keys may not exceed"):
         tools.GuiAction.model_validate({"type": "key", "keys": "X" * 257})
     with pytest.raises(ValueError, match="keys may contain at most"):
-        tools.GuiAction.model_validate(
-            {"type": "key", "keys": [str(index) for index in range(17)]}
-        )
+        tools.GuiAction.model_validate({"type": "key", "keys": [str(index) for index in range(17)]})
     with pytest.raises(ValueError, match="key requires keys"):
         tools.GuiAction.model_validate({"type": "key"})
     with pytest.raises(ValueError, match="set_value requires element_id"):
         tools.GuiAction.model_validate({"type": "set_value", "text": "secret"})
     with pytest.raises(ValueError, match="set_value requires text"):
         tools.GuiAction.model_validate({"type": "set_value", "element_id": "e1"})
-    assert tools.GuiAction.model_validate(
-        {"type": "set_value", "element_id": "e1", "text": ""}
-    ).text == ""
+    assert (
+        tools.GuiAction.model_validate({"type": "set_value", "element_id": "e1", "text": ""}).text
+        == ""
+    )
     with pytest.raises(ValueError, match="element_id must not be empty"):
         tools.GuiAction.model_validate({"type": "focus", "element_id": " "})
     with pytest.raises(ValueError, match="requires x and y"):
@@ -7000,9 +7201,7 @@ def test_atspi_listing_skips_iconified_and_nonshowing_windows(monkeypatch):
     monkeypatch.setattr(
         helper,
         "Atspi",
-        SimpleNamespace(
-            StateType=SimpleNamespace(ICONIFIED="iconified", SHOWING="showing")
-        ),
+        SimpleNamespace(StateType=SimpleNamespace(ICONIFIED="iconified", SHOWING="showing")),
     )
     monkeypatch.setattr(helper, "_apps", lambda: [App()])
     monkeypatch.setattr(
@@ -7162,11 +7361,13 @@ def test_macos_accessibility_traversal_does_not_fetch_children_after_budget(monk
     )
     monkeypatch.setattr(backend, "_find_ax_window", lambda _record: root)
     monkeypatch.setattr(macos, "_ax_bounds", lambda _ax, _element: {})
+
     def ax_copy(_ax, _element, attr, default=None):
         if attr == AX.kAXChildrenAttribute:
             child_queries.append(True)
             return [object() for _ in range(10000)]
         return default
+
     monkeypatch.setattr(macos, "_ax_copy", ax_copy)
     monkeypatch.setattr(
         macos,
@@ -7388,9 +7589,7 @@ def test_macos_locator_rejects_identical_replacement_ax_element(monkeypatch):
         macos,
         "_ax_copy_values",
         lambda _ax, element, _attr, index, max_values: (
-            [current_child["value"]][index : index + max_values]
-            if element is root
-            else []
+            [current_child["value"]][index : index + max_values] if element is root else []
         ),
     )
     locator = {
@@ -7999,9 +8198,7 @@ def test_macos_window_enumeration_bounds_provider_metadata(monkeypatch):
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode()
-    ) <= (
-        macos.GUI_MAX_WINDOWS_TOTAL_BYTES
-    )
+    ) <= (macos.GUI_MAX_WINDOWS_TOTAL_BYTES)
     for record in windows:
         assert len(record["title"].encode()) <= macos.GUI_MAX_WINDOW_TEXT_BYTES
         assert len(record["app"].encode()) <= macos.GUI_MAX_WINDOW_TEXT_BYTES
@@ -8391,9 +8588,7 @@ async def test_gui_screenshot_publication_holds_execution_lock_through_normalize
 
     monkeypatch.setattr(base, "_normalize_screenshot_coordinates", blocked)
     if capture_kind == "snapshot":
-        task = asyncio.create_task(
-            manager.snapshot("window:1", screenshot=True)
-        )
+        task = asyncio.create_task(manager.snapshot("window:1", screenshot=True))
     else:
         task = asyncio.create_task(manager.frame("window:1"))
 
@@ -8429,9 +8624,9 @@ async def test_gui_manager_discard_state_and_frame_observation(tmp_path, monkeyp
     )
     assert discarded_frame["discarded"] is True
     assert observation_id not in manager._frame_observations
-    assert (
-        await manager.discard_frame_observation("window:1", observation_id)
-    )["discarded"] is False
+    assert (await manager.discard_frame_observation("window:1", observation_id))[
+        "discarded"
+    ] is False
     Path(frame["screenshot_path"]).unlink(missing_ok=True)
 
 
@@ -8453,11 +8648,7 @@ async def test_x11_snapshot_rejects_atspi_identity_change_during_capture(
             snapshot_calls += 1
             return {
                 "window": {
-                    "id": (
-                        "atspi:1:observed"
-                        if snapshot_calls == 1
-                        else "atspi:1:replacement"
-                    ),
+                    "id": ("atspi:1:observed" if snapshot_calls == 1 else "atspi:1:replacement"),
                     "title": "Window",
                     "app": "App",
                     "pid": 1,
@@ -9176,7 +9367,6 @@ async def test_linux_snapshot_keeps_discovered_environment_for_all_helper_calls(
     get_settings.cache_clear()
 
 
-
 @pytest.mark.asyncio
 async def test_gui_snapshot_ttl_starts_when_native_capture_completes(tmp_path, monkeypatch):
     import local_shell_mcp.gui.base as base
@@ -9299,7 +9489,6 @@ def test_atspi_semantic_click_does_not_query_provider_after_activation(monkeypat
     assert result == {"semantic": True, "method": "press"}
 
 
-
 @pytest.mark.asyncio
 async def test_windows_uia_timeout_rotates_worker_and_allows_followup(monkeypatch):
     import local_shell_mcp.gui.windows as windows
@@ -9325,7 +9514,6 @@ async def test_windows_uia_timeout_rotates_worker_and_allows_followup(monkeypatc
     finally:
         release.set()
         backend._executor.shutdown(wait=True)
-
 
 
 @pytest.mark.asyncio

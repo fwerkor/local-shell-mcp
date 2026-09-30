@@ -238,6 +238,7 @@ def _run_helper(payload: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
     data = response.get("data")
     return data if isinstance(data, dict) else {}
 
+
 def _window_center(bounds: dict[str, Any]) -> tuple[int, int]:
     return (
         int(bounds["x"]) + int(bounds["width"]) // 2,
@@ -261,9 +262,12 @@ def _kde_wayland_window_geometries_sync(
     marker = f"LSM_KWIN_GEOMETRY_{uuid.uuid4().hex}:"
     script_name = f"lsm-geometry-{uuid.uuid4().hex}"
     script = f"""var marker = {json.dumps(marker)};
-var windows = workspace.windowList();
-for (var i = 0; i < windows.length; ++i) {{
+var windows = workspace.stackingOrder;
+for (var i = windows.length - 1; i >= 0; --i) {{
     var w = windows[i];
+    if (!w.normalWindow) {{
+        continue;
+    }}
     var g = w.clientGeometry;
     if (!g) {{
         continue;
@@ -271,6 +275,10 @@ for (var i = 0; i < windows.length; ++i) {{
     console.info(marker + JSON.stringify({{
         pid: Number(w.pid),
         title: String(w.caption || ""),
+        internal_id: String(w.internalId || ""),
+        app: String(w.desktopFileName || w.resourceClass || w.resourceName || ""),
+        minimized: Boolean(w.minimized),
+        active: w === workspace.activeWindow,
         x: Math.round(g.x),
         y: Math.round(g.y),
         width: Math.round(g.width),
@@ -281,7 +289,9 @@ for (var i = 0; i < windows.length; ++i) {{
     fd, raw_path = tempfile.mkstemp(prefix="lsm-kwin-geometry-", suffix=".js")
     path = Path(raw_path)
     try:
-        os.fchmod(fd, 0o600)
+        fchmod = getattr(os, "fchmod", None)
+        if callable(fchmod):
+            fchmod(fd, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(script)
         fd = -1
@@ -342,10 +352,7 @@ for (var i = 0; i < windows.length; ++i) {{
             try:
                 item = json.loads(payload)
                 pid = int(item.get("pid") or 0)
-                bounds = {
-                    key: int(item.get(key) or 0)
-                    for key in ("x", "y", "width", "height")
-                }
+                bounds = {key: int(item.get(key) or 0) for key in ("x", "y", "width", "height")}
             except (TypeError, ValueError, json.JSONDecodeError):
                 continue
             if (
@@ -359,9 +366,11 @@ for (var i = 0; i < windows.length; ++i) {{
             records.append(
                 {
                     "pid": pid,
-                    "title": str(item.get("title") or "")[
-                        :GUI_MAX_WINDOW_TEXT_BYTES
-                    ],
+                    "title": str(item.get("title") or "")[:GUI_MAX_WINDOW_TEXT_BYTES],
+                    "internal_id": str(item.get("internal_id") or "")[:GUI_MAX_WINDOW_TEXT_BYTES],
+                    "app": str(item.get("app") or "")[:GUI_MAX_WINDOW_TEXT_BYTES],
+                    "minimized": bool(item.get("minimized")),
+                    "active": bool(item.get("active")),
                     "bounds": bounds,
                 }
             )
@@ -440,6 +449,93 @@ def _match_kde_wayland_geometry(
     return {key: int(matched[key]) for key in ("x", "y", "width", "height")}
 
 
+def _kwin_public_id(internal_id: str) -> str | None:
+    value = internal_id.strip().strip("{}")
+    if (
+        len(value) != 36
+        or any(ch not in "0123456789abcdefABCDEF-" for ch in value)
+        or value.count("-") != 4
+    ):
+        return None
+    return f"kwin:{value.lower()}"
+
+
+def _match_atspi_window_for_kwin(
+    kwin: dict[str, Any],
+    atspi_windows: list[dict[str, Any]],
+    used_ids: set[str],
+) -> dict[str, Any] | None:
+    pid = int(kwin.get("pid") or 0)
+    bounds = _bounds_tuple(kwin.get("bounds"))
+    if pid <= 0 or bounds is None:
+        return None
+    width, height = bounds[2], bounds[3]
+    candidates = [
+        item
+        for item in atspi_windows
+        if str(item.get("id") or "") not in used_ids and int(item.get("pid") or 0) == pid
+    ]
+    title = str(kwin.get("title") or "")
+    if title:
+        titled = [item for item in candidates if str(item.get("title") or "") == title]
+        if titled:
+            candidates = titled
+    sized = []
+    for item in candidates:
+        current = _bounds_tuple(item.get("bounds"))
+        if current is not None and abs(current[2] - width) <= 8 and abs(current[3] - height) <= 8:
+            sized.append(item)
+    if len(sized) == 1:
+        return sized[0]
+    if not sized and len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
+def _kde_wayland_authoritative_data(
+    data: dict[str, Any],
+    env: dict[str, str],
+    *,
+    kwin_windows: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    if not _is_kde_wayland(env):
+        return data
+    available = (
+        kwin_windows if kwin_windows is not None else _kde_wayland_window_geometries_sync(env)
+    )
+    if not available:
+        return data
+    raw_windows = [dict(item) for item in data.get("windows", []) if isinstance(item, dict)]
+    used_ids: set[str] = set()
+    windows: list[dict[str, Any]] = []
+    for kwin in available:
+        match = _match_atspi_window_for_kwin(kwin, raw_windows, used_ids)
+        fallback_id = _kwin_public_id(str(kwin.get("internal_id") or ""))
+        if match is not None:
+            record = dict(match)
+            used_ids.add(str(match.get("id") or ""))
+        elif fallback_id is not None:
+            record = {"id": fallback_id}
+        else:
+            continue
+        record.update(
+            {
+                "title": str(kwin.get("title") or "")[:GUI_MAX_WINDOW_TEXT_BYTES],
+                "app": str(kwin.get("app") or record.get("app") or "")[:GUI_MAX_WINDOW_TEXT_BYTES],
+                "pid": int(kwin.get("pid") or 0),
+                "bounds": dict(kwin["bounds"]),
+                "minimized": bool(kwin.get("minimized")),
+                "active": bool(kwin.get("active")),
+            }
+        )
+        windows.append(record)
+        if len(windows) >= GUI_MAX_WINDOWS:
+            break
+    corrected = dict(data)
+    corrected["windows"] = windows
+    return corrected
+
+
 def _correct_kde_wayland_data_geometry(
     data: dict[str, Any],
     env: dict[str, str],
@@ -448,11 +544,7 @@ def _correct_kde_wayland_data_geometry(
 ) -> dict[str, Any]:
     if not _is_kde_wayland(env):
         return data
-    available = (
-        geometries
-        if geometries is not None
-        else _kde_wayland_window_geometries_sync(env)
-    )
+    available = geometries if geometries is not None else _kde_wayland_window_geometries_sync(env)
     if not available:
         return data
 
@@ -504,9 +596,7 @@ def _focus_kde_wayland_window_sync(
 ) -> None:
     qdbus = shutil.which("qdbus6") or shutil.which("qdbus")
     if not qdbus:
-        raise GuiUnavailableError(
-            "KDE Wayland window activation requires qdbus6 or qdbus"
-        )
+        raise GuiUnavailableError("KDE Wayland window activation requires qdbus6 or qdbus")
 
     bounds = window.get("bounds")
     normalized_bounds = _bounds_tuple(bounds)
@@ -539,7 +629,12 @@ function geometryMatches(g) {{
     );
 }}
 var pidCandidates = [];
-var windows = workspace.windowList();
+var windows = [];
+if (typeof workspace.windowList === "function") {{
+    windows = workspace.windowList();
+}} else if (typeof workspace.clientList === "function") {{
+    windows = workspace.clientList();
+}}
 for (var i = 0; i < windows.length; ++i) {{
     var w = windows[i];
     if (Number(w.pid) === expectedPid) {{
@@ -573,14 +668,25 @@ if (candidates.length > 1) {{
     }}
 }}
 if (candidates.length === 1) {{
-    workspace.raiseWindow(candidates[0]);
-    workspace.activeWindow = candidates[0];
+    var selected = candidates[0];
+    if (typeof workspace.raiseWindow === "function") {{
+        workspace.raiseWindow(selected);
+    }} else if (typeof workspace.raiseClient === "function") {{
+        workspace.raiseClient(selected);
+    }}
+    if ("activeWindow" in workspace) {{
+        workspace.activeWindow = selected;
+    }} else {{
+        workspace.activeClient = selected;
+    }}
 }}
 """
     fd, raw_path = tempfile.mkstemp(prefix="lsm-kwin-focus-", suffix=".js")
     path = Path(raw_path)
     try:
-        os.fchmod(fd, 0o600)
+        fchmod = getattr(os, "fchmod", None)
+        if callable(fchmod):
+            fchmod(fd, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(script)
         fd = -1
@@ -632,7 +738,6 @@ if (candidates.length === 1) {{
                 f"KDE Wayland window activation failed to start KWin script: "
                 f"{detail or started.returncode}"
             )
-        time.sleep(0.1)
     except subprocess.TimeoutExpired as exc:
         raise GuiUnavailableError("KDE Wayland window activation timed out") from exc
     finally:
@@ -663,10 +768,9 @@ def _monitor_for_window(
 ) -> dict[str, Any] | None:
     cx, cy = _window_center(bounds)
     for monitor in monitors:
-        if (
-            int(monitor["x"]) <= cx < int(monitor["x"]) + int(monitor["width"])
-            and int(monitor["y"]) <= cy < int(monitor["y"]) + int(monitor["height"])
-        ):
+        if int(monitor["x"]) <= cx < int(monitor["x"]) + int(monitor["width"]) and int(
+            monitor["y"]
+        ) <= cy < int(monitor["y"]) + int(monitor["height"]):
             return monitor
     return None
 
@@ -755,12 +859,7 @@ def _desktop_crop_box(
     reported_scales = {float(item.get("scale", 1) or 1) for item in monitors}
     ratio_x = image_size[0] / logical_size[0] if logical_size[0] > 0 else 0.0
     ratio_y = image_size[1] / logical_size[1] if logical_size[1] > 0 else 0.0
-    if (
-        len(reported_scales) == 1
-        and ratio_x > 0
-        and ratio_y > 0
-        and abs(ratio_x - ratio_y) <= 0.02
-    ):
+    if len(reported_scales) == 1 and ratio_x > 0 and ratio_y > 0 and abs(ratio_x - ratio_y) <= 0.02:
         ratio = (ratio_x + ratio_y) / 2.0
         left = int(round((x - origin_x) * ratio))
         top = int(round((y - origin_y) * ratio))
@@ -843,9 +942,7 @@ def _validate_capture_image_header(path: Path) -> None:
         or height > GUI_MAX_CAPTURE_DIMENSION
         or width * height > GUI_MAX_CAPTURE_PIXELS
     ):
-        raise GuiUnavailableError(
-            "Captured Wayland image exceeds GUI screenshot safety limits"
-        )
+        raise GuiUnavailableError("Captured Wayland image exceeds GUI screenshot safety limits")
 
 
 async def _capture_wayland(
@@ -879,8 +976,7 @@ async def _capture_wayland(
     grim = shutil.which("grim")
     if grim:
         geometry = (
-            f"{int(bounds['x'])},{int(bounds['y'])} "
-            f"{int(bounds['width'])}x{int(bounds['height'])}"
+            f"{int(bounds['x'])},{int(bounds['y'])} {int(bounds['width'])}x{int(bounds['height'])}"
         )
         result = await asyncio.to_thread(
             subprocess.run,
@@ -898,14 +994,10 @@ async def _capture_wayland(
     full_capture_commands: list[tuple[str, list[str]]] = []
     spectacle = shutil.which("spectacle")
     if spectacle:
-        full_capture_commands.append(
-            ("spectacle", [spectacle, "-b", "-n", "-f", "-o", str(path)])
-        )
+        full_capture_commands.append(("spectacle", [spectacle, "-b", "-n", "-f", "-o", str(path)]))
     gnome_screenshot = shutil.which("gnome-screenshot")
     if gnome_screenshot:
-        full_capture_commands.append(
-            ("gnome-screenshot", [gnome_screenshot, "-f", str(path)])
-        )
+        full_capture_commands.append(("gnome-screenshot", [gnome_screenshot, "-f", str(path)]))
 
     for name, command in full_capture_commands:
         path.unlink(missing_ok=True)
@@ -1025,9 +1117,7 @@ def _x11_match_window(connection: Any, record: dict[str, Any]) -> Any:
                 for key in ("x", "y", "width", "height")
             ]
             geometry_delta = sum(geometry_deltas)
-            geometry_match = bool(expected_bounds) and all(
-                delta <= 3 for delta in geometry_deltas
-            )
+            geometry_match = bool(expected_bounds) and all(delta <= 3 for delta in geometry_deltas)
             title_match = bool(expected_title) and title == expected_title
             if not geometry_match:
                 continue
@@ -1148,11 +1238,7 @@ def _capture_x11_window_sync(
             f"_NET_WM_CM_S{screen_number}",
             only_if_exists=True,
         )
-        compositor = (
-            connection.get_selection_owner(compositor_atom)
-            if compositor_atom
-            else None
-        )
+        compositor = connection.get_selection_owner(compositor_atom) if compositor_atom else None
         if compositor is None or not int(getattr(compositor, "id", 0) or 0):
             raise GuiUnavailableError(
                 "An X11 compositing manager is required for safe per-window capture"
@@ -1190,31 +1276,18 @@ def _capture_x11_window_sync(
             visual_id=visual_id,
         )
         current_window = _x11_match_window(connection, record)
-        if int(getattr(current_window, "id", 0) or 0) != int(
-            getattr(window, "id", 0) or 0
-        ):
-            raise GuiUnavailableError(
-                "X11 target window identity changed during capture"
-            )
+        if int(getattr(current_window, "id", 0) or 0) != int(getattr(window, "id", 0) or 0):
+            raise GuiUnavailableError("X11 target window identity changed during capture")
         current_bounds = _x11_window_geometry(
             current_window,
             connection.screen().root,
         )
         expected_bounds = record.get("bounds")
-        if (
-            not isinstance(expected_bounds, dict)
-            or any(
-                abs(
-                    int(current_bounds.get(key, 0))
-                    - int(expected_bounds.get(key, 0))
-                )
-                > 3
-                for key in ("x", "y", "width", "height")
-            )
+        if not isinstance(expected_bounds, dict) or any(
+            abs(int(current_bounds.get(key, 0)) - int(expected_bounds.get(key, 0))) > 3
+            for key in ("x", "y", "width", "height")
         ):
-            raise GuiUnavailableError(
-                "X11 target window moved or resized during capture"
-            )
+            raise GuiUnavailableError("X11 target window moved or resized during capture")
         image.save(path, "PNG")
     except GuiUnavailableError:
         raise
@@ -1236,7 +1309,6 @@ async def _capture_x11(
 ) -> str:
     await asyncio.to_thread(_capture_x11_window_sync, path, record, env)
     return "x11-composite"
-
 
 
 class LinuxGuiBackend:
@@ -1283,8 +1355,19 @@ class LinuxGuiBackend:
         selected_env = env if env is not None else self._env
         data = self._helper({"command": "list"}, selected_env)
         if selected_env is not None and _is_kde_wayland(selected_env):
-            return _correct_kde_wayland_data_geometry(data, selected_env)
+            return _kde_wayland_authoritative_data(data, selected_env)
         return data
+
+    def _listed_window(
+        self,
+        window_id: str,
+        env: dict[str, str],
+    ) -> dict[str, Any] | None:
+        data = self._list_data(env)
+        for item in data.get("windows", []):
+            if isinstance(item, dict) and str(item.get("id") or "") == window_id:
+                return dict(item)
+        return None
 
     async def list_windows(self) -> dict[str, Any]:
         env = await self._ensure_env()
@@ -1320,23 +1403,35 @@ class LinuxGuiBackend:
         max_depth: int,
     ) -> GuiSnapshot:
         env = await self._ensure_env()
-        data = await asyncio.to_thread(
-            self._helper,
-            {
-                "command": "snapshot",
-                "window_id": window_id,
-                "include_elements": include_elements,
-                "max_elements": max_elements,
-                "max_depth": max_depth,
-            },
-            env,
-        )
-        if _is_kde_wayland(env):
+        if _is_kde_wayland(env) and window_id.startswith("kwin:"):
+            record = await asyncio.to_thread(self._listed_window, window_id, env)
+            if record is None:
+                raise GuiStaleStateError(
+                    "KDE Wayland target window is no longer available; call gui_state again"
+                )
+            data = {"window": record, "elements": [], "locators": {}}
+        else:
             data = await asyncio.to_thread(
-                _correct_kde_wayland_data_geometry,
-                data,
+                self._helper,
+                {
+                    "command": "snapshot",
+                    "window_id": window_id,
+                    "include_elements": include_elements,
+                    "max_elements": max_elements,
+                    "max_depth": max_depth,
+                },
                 env,
             )
+            if _is_kde_wayland(env):
+                data = await asyncio.to_thread(
+                    _correct_kde_wayland_data_geometry,
+                    data,
+                    env,
+                )
+        if _is_kde_wayland(env):
+            authoritative = await asyncio.to_thread(self._listed_window, window_id, env)
+            if authoritative is not None:
+                data = {**data, "window": authoritative}
         record = data["window"]
         locators: dict[str, Any] = {}
         paths = data.get("locators", {})
@@ -1369,29 +1464,32 @@ class LinuxGuiBackend:
             monitors = list_data.get("monitors", [])
             if session_type == "wayland":
                 await self._focus_window(record, env)
-                refreshed = await asyncio.to_thread(
-                    self._helper,
-                    {
-                        "command": "snapshot",
-                        "window_id": window_id,
-                        "include_elements": False,
-                        "max_elements": 1,
-                        "max_depth": 1,
-                    },
-                    env,
-                )
-                if _is_kde_wayland(env):
+                if _is_kde_wayland(env) and window_id.startswith("kwin:"):
+                    refreshed = {
+                        "window": await asyncio.to_thread(self._listed_window, window_id, env)
+                    }
+                else:
                     refreshed = await asyncio.to_thread(
-                        _correct_kde_wayland_data_geometry,
-                        refreshed,
+                        self._helper,
+                        {
+                            "command": "snapshot",
+                            "window_id": window_id,
+                            "include_elements": False,
+                            "max_elements": 1,
+                            "max_depth": 1,
+                        },
                         env,
                     )
+                    if _is_kde_wayland(env):
+                        refreshed = await asyncio.to_thread(
+                            _correct_kde_wayland_data_geometry,
+                            refreshed,
+                            env,
+                        )
                 refreshed_record = refreshed.get("window")
-                if (
-                    not isinstance(refreshed_record, dict)
-                    or _bounds_tuple(refreshed_record.get("bounds"))
-                    != _bounds_tuple(record.get("bounds"))
-                ):
+                if not isinstance(refreshed_record, dict) or _bounds_tuple(
+                    refreshed_record.get("bounds")
+                ) != _bounds_tuple(record.get("bounds")):
                     raise GuiStaleStateError(
                         "Target window moved or resized while preparing the Wayland capture; "
                         "call gui_state again"
@@ -1406,29 +1504,32 @@ class LinuxGuiBackend:
                     env,
                     portal=self._portal,
                 )
-                post_capture = await asyncio.to_thread(
-                    self._helper,
-                    {
-                        "command": "snapshot",
-                        "window_id": window_id,
-                        "include_elements": False,
-                        "max_elements": 1,
-                        "max_depth": 1,
-                    },
-                    env,
-                )
-                if _is_kde_wayland(env):
+                if _is_kde_wayland(env) and window_id.startswith("kwin:"):
+                    post_capture = {
+                        "window": await asyncio.to_thread(self._listed_window, window_id, env)
+                    }
+                else:
                     post_capture = await asyncio.to_thread(
-                        _correct_kde_wayland_data_geometry,
-                        post_capture,
+                        self._helper,
+                        {
+                            "command": "snapshot",
+                            "window_id": window_id,
+                            "include_elements": False,
+                            "max_elements": 1,
+                            "max_depth": 1,
+                        },
                         env,
                     )
+                    if _is_kde_wayland(env):
+                        post_capture = await asyncio.to_thread(
+                            _correct_kde_wayland_data_geometry,
+                            post_capture,
+                            env,
+                        )
                 post_capture_record = post_capture.get("window")
-                if (
-                    not isinstance(post_capture_record, dict)
-                    or _bounds_tuple(post_capture_record.get("bounds"))
-                    != _bounds_tuple(record.get("bounds"))
-                ):
+                if not isinstance(post_capture_record, dict) or _bounds_tuple(
+                    post_capture_record.get("bounds")
+                ) != _bounds_tuple(record.get("bounds")):
                     raise GuiStaleStateError(
                         "Target window moved or resized during the Wayland capture; "
                         "call gui_state again"
@@ -1493,6 +1594,10 @@ class LinuxGuiBackend:
         focus_action: dict[str, Any] = {"type": "focus"}
         if deadline is not None:
             focus_action["_observation_deadline"] = deadline
+        if _is_kde_wayland(env) and str(window.get("id") or "").startswith("kwin:"):
+            _assert_action_fresh(focus_action, stale_hint="call gui_state again")
+            await asyncio.to_thread(_focus_kde_wayland_window_sync, window, env)
+            return
         payload = {
             "command": "semantic_action",
             "window_id": window["id"],
@@ -1502,10 +1607,7 @@ class LinuxGuiBackend:
         try:
             await asyncio.to_thread(self._helper, payload, env)
         except GuiUnavailableError as exc:
-            if (
-                "AT-SPI target cannot be focused" not in str(exc)
-                or not _is_kde_wayland(env)
-            ):
+            if "AT-SPI target cannot be focused" not in str(exc) or not _is_kde_wayland(env):
                 raise
         else:
             if not _is_kde_wayland(env):
@@ -1517,13 +1619,30 @@ class LinuxGuiBackend:
         # window through KWin before coordinate/raw input.
         _assert_action_fresh(focus_action, stale_hint="call gui_state again")
         await asyncio.to_thread(_focus_kde_wayland_window_sync, window, env)
-        _assert_action_fresh(focus_action, stale_hint="call gui_state again")
-        try:
-            await asyncio.to_thread(self._helper, payload, env)
-        except GuiUnavailableError as exc:
-            raise GuiUnavailableError(
-                "KDE Wayland window activation did not make the AT-SPI target focusable"
-            ) from exc
+        verify_deadline = time.monotonic() + 1.5
+        if deadline is not None:
+            try:
+                verify_deadline = min(verify_deadline, float(deadline))
+            except (TypeError, ValueError):
+                _assert_action_fresh(
+                    focus_action,
+                    stale_hint="call gui_state again",
+                )
+        last_error: GuiUnavailableError | None = None
+        while True:
+            _assert_action_fresh(focus_action, stale_hint="call gui_state again")
+            try:
+                await asyncio.to_thread(self._helper, payload, env)
+                return
+            except GuiUnavailableError as exc:
+                last_error = exc
+            remaining = verify_deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(0.05, remaining))
+        raise GuiUnavailableError(
+            "KDE Wayland window activation did not make the AT-SPI target focusable"
+        ) from last_error
 
     async def focus_window(self, window: dict[str, Any]) -> None:
         env = await self._ensure_env()
@@ -1595,10 +1714,14 @@ class LinuxGuiBackend:
             except _SemanticActionUnavailableError:
                 pass
 
-        if (
-            locator is not None
-            and kind in {"click", "double_click", "right_click", "move", "scroll", "drag"}
-        ):
+        if locator is not None and kind in {
+            "click",
+            "double_click",
+            "right_click",
+            "move",
+            "scroll",
+            "drag",
+        }:
             resolved = await asyncio.to_thread(
                 self._helper,
                 {
@@ -1610,9 +1733,7 @@ class LinuxGuiBackend:
             )
             bounds = resolved.get("bounds")
             if not isinstance(bounds, dict):
-                raise GuiStaleStateError(
-                    "AT-SPI target element no longer has usable bounds"
-                )
+                raise GuiStaleStateError("AT-SPI target element no longer has usable bounds")
             locator = {**locator, "bounds": bounds}
 
         if kind in {"type", "key"} and locator is not None:
@@ -1630,10 +1751,14 @@ class LinuxGuiBackend:
                 env,
             )
 
-        if (
-            kind in {"click", "double_click", "right_click", "move", "scroll", "drag"}
-            and not action.get("_focus_prepared")
-        ):
+        if kind in {
+            "click",
+            "double_click",
+            "right_click",
+            "move",
+            "scroll",
+            "drag",
+        } and not action.get("_focus_prepared"):
             await self._focus_window(window, env, deadline=deadline)
 
         _assert_action_fresh(action)
@@ -1732,16 +1857,12 @@ class LinuxGuiBackend:
                         continue
                     button = negative_button if amount < 0 else positive_button
                     events.extend(
-                        {"x": x, "y": y, "event": f"b{button}c"}
-                        for _ in range(abs(amount))
+                        {"x": x, "y": y, "event": f"b{button}c"} for _ in range(abs(amount))
                     )
             else:
                 button = 3 if kind == "right_click" else 1
                 count = 2 if kind == "double_click" else 1
-                events = [
-                    {"x": x, "y": y, "event": f"b{button}c"}
-                    for _ in range(count)
-                ]
+                events = [{"x": x, "y": y, "event": f"b{button}c"} for _ in range(count)]
             if events:
                 _assert_action_fresh(action)
                 await asyncio.to_thread(
@@ -1760,9 +1881,7 @@ class LinuxGuiBackend:
             return {"screen_x": x, "screen_y": y}
 
         if kind == "drag":
-            x, y = self._screen_point(
-                window, {"x": action.get("x"), "y": action.get("y")}, locator
-            )
+            x, y = self._screen_point(window, {"x": action.get("x"), "y": action.get("y")}, locator)
             to_x, to_y = self._screen_point(
                 window, {"x": action.get("to_x"), "y": action.get("to_y")}, None
             )
@@ -1837,25 +1956,32 @@ class LinuxGuiBackend:
         wayland_offset = (0, 0)
         if action.get("_focus_prepared"):
             await self._focus_window(window, env, deadline=deadline)
-            refreshed = await asyncio.to_thread(
-                self._helper,
-                {
-                    "command": "snapshot",
-                    "window_id": window["id"],
-                    "include_elements": False,
-                    "max_elements": 1,
-                    "max_depth": 1,
-                },
-                env,
-            )
-            raw_refreshed_window = refreshed.get("window")
-            if _is_kde_wayland(env):
+            if _is_kde_wayland(env) and str(window.get("id") or "").startswith("kwin:"):
+                refreshed_window = await asyncio.to_thread(
+                    self._listed_window, str(window["id"]), env
+                )
+                raw_refreshed_window = refreshed_window
+                refreshed = {"window": refreshed_window}
+            else:
                 refreshed = await asyncio.to_thread(
-                    _correct_kde_wayland_data_geometry,
-                    refreshed,
+                    self._helper,
+                    {
+                        "command": "snapshot",
+                        "window_id": window["id"],
+                        "include_elements": False,
+                        "max_elements": 1,
+                        "max_depth": 1,
+                    },
                     env,
                 )
-            refreshed_window = refreshed.get("window")
+                raw_refreshed_window = refreshed.get("window")
+                if _is_kde_wayland(env):
+                    refreshed = await asyncio.to_thread(
+                        _correct_kde_wayland_data_geometry,
+                        refreshed,
+                        env,
+                    )
+                refreshed_window = refreshed.get("window")
             if (
                 not isinstance(raw_refreshed_window, dict)
                 or not isinstance(refreshed_window, dict)
@@ -1875,10 +2001,14 @@ class LinuxGuiBackend:
                 )
             assert_observation_fresh()
 
-        if (
-            locator is not None
-            and kind in {"click", "double_click", "right_click", "move", "scroll", "drag"}
-        ):
+        if locator is not None and kind in {
+            "click",
+            "double_click",
+            "right_click",
+            "move",
+            "scroll",
+            "drag",
+        }:
             resolved = await asyncio.to_thread(
                 self._helper,
                 {
@@ -1964,9 +2094,7 @@ class LinuxGuiBackend:
             }
 
         if kind == "drag":
-            x, y = self._screen_point(
-                window, {"x": action.get("x"), "y": action.get("y")}, locator
-            )
+            x, y = self._screen_point(window, {"x": action.get("x"), "y": action.get("y")}, locator)
             to_x, to_y = self._screen_point(
                 window, {"x": action.get("to_x"), "y": action.get("to_y")}, None
             )
