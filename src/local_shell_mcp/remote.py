@@ -644,7 +644,8 @@ class RemoteManager:
             "ttl_s": ttl,
             "join_url": join_url,
             "command": command,
-            "persistent_command": command + ' --persist && export PATH="${LOCAL_SHELL_MCP_WORKER_BIN_DIR:-$HOME/.local/bin}:$PATH"',
+            "persistent_command": command
+            + ' --persist && export PATH="${LOCAL_SHELL_MCP_WORKER_BIN_DIR:-$HOME/.local/bin}:$PATH"',
             "powershell_join_url": powershell_join_url,
             "powershell_command": powershell_command,
             "powershell_persistent_command": powershell_command + " -Persist",
@@ -779,9 +780,7 @@ class RemoteManager:
             self._cancel_job_locked(job_id)
             return True
 
-    async def poll(
-        self, token: str, payload: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    async def poll(self, token: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         worker = self._worker_by_token(token)
         payload = payload or {}
         worker_version = str(payload.get("worker_version") or "")
@@ -889,25 +888,18 @@ class RemoteManager:
             self._prune_cancelled_jobs_locked()
             assigned_machine = self.pending_machines.get(job_id) if job_id else None
             cancelled = bool(
-                job_id
-                and (job_id in self.cancelled_jobs or assigned_machine != worker.name)
+                job_id and (job_id in self.cancelled_jobs or assigned_machine != worker.name)
             )
             reset_generation = worker.reset_generation
             start_preserved = False
             if starting and job_id:
                 tool = self.pending_tools.get(job_id)
                 already_started = job_id in self.started_jobs
-                start_preserved = (
-                    already_started and tool in REMOTE_RESET_PRESERVED_WORKER_TOOLS
-                )
+                start_preserved = already_started and tool in REMOTE_RESET_PRESERVED_WORKER_TOOLS
                 generation_changed = (
-                    requested_generation is not None
-                    and requested_generation != reset_generation
+                    requested_generation is not None and requested_generation != reset_generation
                 )
-                if (
-                    job_id not in self.claimed_jobs
-                    or (generation_changed and not start_preserved)
-                ):
+                if job_id not in self.claimed_jobs or (generation_changed and not start_preserved):
                     cancelled = True
                 elif not cancelled:
                     self.started_jobs.add(job_id)
@@ -1127,10 +1119,7 @@ class RemoteManager:
                 job_id
                 for job_id in pending_job_ids
                 if self.pending_tools.get(job_id) in REMOTE_RESET_PRESERVED_WORKER_TOOLS
-                and (
-                    job_id in self.started_jobs
-                    or (legacy_worker and job_id in self.claimed_jobs)
-                )
+                and (job_id in self.started_jobs or (legacy_worker and job_id in self.claimed_jobs))
             }
 
             previous_generation = worker.reset_generation
@@ -1623,6 +1612,9 @@ def _worker_gui_temp_stat(path: str, sha256: bool = False) -> dict[str, Any]:
     return result
 
 
+_GUI_RELAY_OPTIMIZE_MAX_PIXELS = 16_000_000
+
+
 def _optimize_gui_temp_for_relay(path: str) -> dict[str, Any]:
     """Lossily compress a remote GUI screenshot in-place for low-latency relay."""
     try:
@@ -1638,6 +1630,13 @@ def _optimize_gui_temp_for_relay(path: str) -> dict[str, Any]:
         from PIL import Image, features
 
         with Image.open(source) as opened:
+            width, height = opened.size
+            if width <= 0 or height <= 0 or width * height > _GUI_RELAY_OPTIMIZE_MAX_PIXELS:
+                return {
+                    "optimized": False,
+                    "bytes": original_size,
+                    "format": "original",
+                }
             opened.load()
             frame = opened.convert("RGB")
             if features.check("webp"):
@@ -1665,16 +1664,28 @@ def _optimize_gui_temp_for_relay(path: str) -> dict[str, Any]:
 
 
 _GUI_INLINE_RELAY_MAX_BYTES = 256 * 1024
+_GUI_INLINE_RELAY_BODY_RESERVE_BYTES = 8 * 1024
 
 
-def _inline_gui_temp_for_relay(path: str) -> dict[str, Any] | None:
+def _inline_gui_temp_for_relay(
+    path: str,
+    *,
+    metadata_bytes: int = 0,
+) -> dict[str, Any] | None:
     """Return a bounded compressed GUI screenshot inline for low-latency relay."""
     try:
         source = _worker_gui_temp_path(path, must_exist=True)
         size = int(source.stat().st_size)
+        request_limit = max(1, int(get_settings().max_http_request_bytes))
     except Exception:
         return None
-    if size <= 0 or size > _GUI_INLINE_RELAY_MAX_BYTES:
+    available_body = max(
+        0,
+        request_limit - max(0, int(metadata_bytes)) - _GUI_INLINE_RELAY_BODY_RESERVE_BYTES,
+    )
+    raw_body_budget = (available_body // 4) * 3
+    inline_limit = min(_GUI_INLINE_RELAY_MAX_BYTES, raw_body_budget)
+    if size <= 0 or size > inline_limit:
         return None
     payload = source.read_bytes()
     if len(payload) != size:
@@ -1683,6 +1694,57 @@ def _inline_gui_temp_for_relay(path: str) -> dict[str, Any] | None:
         "screenshot_inline_b64": base64.b64encode(payload).decode("ascii"),
         "screenshot_inline_size": size,
     }
+
+
+async def _prepare_worker_gui_relay(
+    path: str,
+    result: dict[str, Any],
+) -> dict[str, Any] | None:
+    await asyncio.to_thread(_optimize_gui_temp_for_relay, path)
+    try:
+        metadata_bytes = len(
+            json.dumps(
+                result,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        )
+    except Exception:
+        metadata_bytes = 0
+    return await asyncio.to_thread(
+        _inline_gui_temp_for_relay,
+        path,
+        metadata_bytes=metadata_bytes,
+    )
+
+
+async def _finish_worker_gui_relay(
+    manager: Any,
+    result: dict[str, Any],
+    *,
+    window_id: str,
+    record_id: str,
+    discard: Any,
+) -> dict[str, Any]:
+    screenshot_path = str(result.get("screenshot_path") or "")
+    if not screenshot_path:
+        return result
+    task = asyncio.create_task(_prepare_worker_gui_relay(screenshot_path, result))
+    try:
+        inline = await asyncio.shield(task)
+    except BaseException:
+        with contextlib.suppress(BaseException):
+            await task
+        if record_id:
+            with contextlib.suppress(BaseException):
+                await asyncio.shield(discard(window_id, record_id))
+        with contextlib.suppress(BaseException):
+            await asyncio.shield(asyncio.to_thread(_worker_gui_temp_delete, screenshot_path))
+        raise
+    if inline is not None:
+        result.update(inline)
+    return result
 
 
 def _worker_gui_temp_delete(path: str) -> dict[str, Any]:
@@ -1826,11 +1888,7 @@ def _worker_upload_url(
     raw_stdout = completed.stdout or b""
     raw_stderr = completed.stderr or b""
     stdout = raw_stdout.encode() if isinstance(raw_stdout, str) else raw_stdout
-    stderr = (
-        raw_stderr
-        if isinstance(raw_stderr, str)
-        else raw_stderr.decode(errors="replace")
-    )
+    stderr = raw_stderr if isinstance(raw_stderr, str) else raw_stderr.decode(errors="replace")
     raw_marker = marker.encode("ascii")
     body, separator, raw_status = stdout.rpartition(raw_marker)
     if completed.returncode != 0:
@@ -1912,11 +1970,21 @@ def _worker_put_stream_url(
                 raise RuntimeError("curl upload stdin is unavailable")
             while True:
                 current = os.fstat(handle.fileno())
-                if (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns) != identity:
+                if (
+                    current.st_dev,
+                    current.st_ino,
+                    current.st_size,
+                    current.st_mtime_ns,
+                ) != identity:
                     raise RuntimeError("source changed during stream upload")
                 chunk = handle.read(DEFAULT_TRANSFER_CHUNK_BYTES)
                 current = os.fstat(handle.fileno())
-                if (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns) != identity:
+                if (
+                    current.st_dev,
+                    current.st_ino,
+                    current.st_size,
+                    current.st_mtime_ns,
+                ) != identity:
                     raise RuntimeError("source changed during stream upload")
                 if not chunk:
                     break
@@ -1962,7 +2030,9 @@ def _worker_put_stream_url(
         )
     if not separator:
         if write_error is not None:
-            raise RuntimeError("stream upload ended before the source was fully sent") from write_error
+            raise RuntimeError(
+                "stream upload ended before the source was fully sent"
+            ) from write_error
         raise RuntimeError("stream upload returned an invalid response")
     try:
         status_code = int(raw_status.strip())
@@ -2613,15 +2683,11 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if sys.platform == "linux" and (
         tool == "gui_list"
         or (tool == "gui_state" and not bool(args.get("screenshot", True)))
-        or (
-            session_type == "x11"
-            and tool in {"gui_action", "gui_human_action"}
-        )
+        or (session_type == "x11" and tool in {"gui_action", "gui_human_action"})
         or (
             tool == "gui_action"
             and all(
-                str(action.get("type") or "").strip().lower()
-                in {"focus", "set_value", "wait"}
+                str(action.get("type") or "").strip().lower() in {"focus", "set_value", "wait"}
                 for action in (args.get("actions") or [])
                 if isinstance(action, dict)
             )
@@ -2652,22 +2718,22 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
             max_elements=args.get("max_elements", 300),
             max_depth=args.get("max_depth", 12),
         )
-        screenshot_path = str(result.get("screenshot_path") or "")
-        if screenshot_path:
-            await asyncio.to_thread(_optimize_gui_temp_for_relay, screenshot_path)
-            inline = await asyncio.to_thread(_inline_gui_temp_for_relay, screenshot_path)
-            if inline is not None:
-                result.update(inline)
-        return result
+        return await _finish_worker_gui_relay(
+            manager,
+            result,
+            window_id=args["window_id"],
+            record_id=str(result.get("state_id") or ""),
+            discard=manager.discard_state,
+        )
     if tool == "gui_frame":
         result = await manager.frame(args["window_id"])
-        screenshot_path = str(result.get("screenshot_path") or "")
-        if screenshot_path:
-            await asyncio.to_thread(_optimize_gui_temp_for_relay, screenshot_path)
-            inline = await asyncio.to_thread(_inline_gui_temp_for_relay, screenshot_path)
-            if inline is not None:
-                result.update(inline)
-        return result
+        return await _finish_worker_gui_relay(
+            manager,
+            result,
+            window_id=args["window_id"],
+            record_id=str(result.get("observation_id") or ""),
+            discard=manager.discard_frame_observation,
+        )
     if tool == "gui_human_action":
         return await manager.human_act(
             args["window_id"],
@@ -3067,9 +3133,7 @@ def _worker_post_json(
     body = json.dumps(payload).encode("utf-8")
     request_headers = headers or {}
     if shutil.which("curl"):
-        return _worker_post_json_with_curl(
-            url, body, request_headers, timeout, connect_timeout
-        )
+        return _worker_post_json_with_curl(url, body, request_headers, timeout, connect_timeout)
     if timeout is not None and parsed.path.endswith(f"{REMOTE_API_PREFIX}/poll"):
         raise RuntimeError("curl is required for bounded worker poll requests")
     return _worker_post_json_with_urllib(url, body, request_headers, timeout)

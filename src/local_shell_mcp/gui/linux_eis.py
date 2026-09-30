@@ -128,59 +128,76 @@ class EisSender:
             ctypes.c_void_p(0),
         )
 
-    def _discover_devices(self, timeout_s: float) -> None:
+    def _handle_event(self, event: int) -> None:
+        event_type = int(self._lib.ei_event_get_type(event))
+        if event_type == _EVENT_DISCONNECT:
+            raise GuiUnavailableError("EIS input session was disconnected")
+        if event_type == _EVENT_SEAT_ADDED:
+            seat = self._lib.ei_event_get_seat(event)
+            self._bind_seat_capabilities(seat)
+            return
+        if event_type == _EVENT_DEVICE_RESUMED:
+            device = self._lib.ei_event_get_device(event)
+            if not any(
+                bool(self._lib.ei_device_has_capability(device, capability))
+                for capability in (
+                    _CAP_POINTER_ABSOLUTE,
+                    _CAP_SCROLL,
+                    _CAP_BUTTON,
+                )
+            ):
+                return
+            ref = int(self._lib.ei_device_ref(device))
+            if ref not in self._devices:
+                self._devices.append(ref)
+            if ref not in self._started:
+                self._lib.ei_device_start_emulating(ref, self._sequence)
+                self._sequence = (self._sequence + 1) & 0xFFFFFFFF or 1
+                self._started.add(ref)
+            return
+        if event_type == _EVENT_DEVICE_REMOVED:
+            device = int(self._lib.ei_event_get_device(event) or 0)
+            if device in self._devices:
+                self._devices.remove(device)
+                self._started.discard(device)
+                self._lib.ei_device_unref(device)
+
+    def _dispatch_events(self, timeout_s: float = 0.0) -> bool:
         assert self._ei
         fd = int(self._lib.ei_get_fd(self._ei))
+        readable, _, _ = select.select([fd], [], [], max(0.0, timeout_s))
+        if not readable:
+            return False
+        self._lib.ei_dispatch(self._ei)
+        while True:
+            event = self._lib.ei_get_event(self._ei)
+            if not event:
+                break
+            try:
+                self._handle_event(int(event))
+            finally:
+                self._lib.ei_event_unref(event)
+        return True
+
+    def _discover_devices(self, timeout_s: float) -> None:
+        assert self._ei
         deadline = time.monotonic() + timeout_s
-        saw_connectable_device = False
         while time.monotonic() < deadline:
             wait_s = max(0.0, deadline - time.monotonic())
-            readable, _, _ = select.select([fd], [], [], wait_s)
-            if not readable:
-                break
-            self._lib.ei_dispatch(self._ei)
-            while True:
-                event = self._lib.ei_get_event(self._ei)
-                if not event:
-                    break
-                try:
-                    event_type = int(self._lib.ei_event_get_type(event))
-                    if event_type == _EVENT_DISCONNECT:
-                        raise GuiUnavailableError("EIS input session was disconnected")
-                    if event_type == _EVENT_SEAT_ADDED:
-                        seat = self._lib.ei_event_get_seat(event)
-                        self._bind_seat_capabilities(seat)
-                    elif event_type == _EVENT_DEVICE_RESUMED:
-                        device = self._lib.ei_event_get_device(event)
-                        if any(
-                            bool(self._lib.ei_device_has_capability(device, capability))
-                            for capability in (
-                                _CAP_POINTER_ABSOLUTE,
-                                _CAP_SCROLL,
-                                _CAP_BUTTON,
-                            )
-                        ):
-                            ref = int(self._lib.ei_device_ref(device))
-                            if ref not in self._devices:
-                                self._devices.append(ref)
-                            if ref not in self._started:
-                                self._lib.ei_device_start_emulating(ref, self._sequence)
-                                self._sequence = (self._sequence + 1) & 0xFFFFFFFF or 1
-                                self._started.add(ref)
-                            saw_connectable_device = True
-                    elif event_type == _EVENT_DEVICE_REMOVED:
-                        device = int(self._lib.ei_event_get_device(event) or 0)
-                        if device in self._devices:
-                            self._devices.remove(device)
-                            self._started.discard(device)
-                            self._lib.ei_device_unref(device)
-                finally:
-                    self._lib.ei_event_unref(event)
-            if saw_connectable_device and self._device_for(_CAP_POINTER_ABSOLUTE, optional=True):
+            self._dispatch_events(wait_s)
+            if self._device_for(_CAP_POINTER_ABSOLUTE, optional=True, drain=False):
                 return
         raise GuiUnavailableError("EIS did not provide an absolute pointer device")
 
-    def _device_for(self, capability: int, *, optional: bool = False) -> int | None:
+    def _device_for(
+        self,
+        capability: int,
+        *,
+        optional: bool = False,
+        drain: bool = True,
+    ) -> int | None:
+        if drain:
+            self._dispatch_events(0.0)
         for device in self._devices:
             if self._lib.ei_device_has_capability(device, capability):
                 return device
