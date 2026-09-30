@@ -5,6 +5,7 @@ import ctypes
 import ctypes.util
 import os
 import select
+import threading
 import time
 from typing import Any
 
@@ -18,6 +19,7 @@ _CAP_BUTTON = 1 << 5
 _EVENT_DISCONNECT = 2
 _EVENT_SEAT_ADDED = 3
 _EVENT_DEVICE_REMOVED = 6
+_EVENT_DEVICE_PAUSED = 7
 _EVENT_DEVICE_RESUMED = 8
 
 _BTN_LEFT = 0x110
@@ -31,6 +33,20 @@ class EisSender:
     @staticmethod
     def available() -> bool:
         return bool(ctypes.util.find_library("ei"))
+
+    def _operation_lock(self) -> threading.RLock:
+        lock = getattr(self, "_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._lock = lock
+        return lock
+
+    def _paused_devices(self) -> set[int]:
+        paused = getattr(self, "_paused", None)
+        if paused is None:
+            paused = set()
+            self._paused = paused
+        return paused
 
     def __init__(self, fd: int, *, timeout_s: float = 5.0) -> None:
         library_name = ctypes.util.find_library("ei")
@@ -46,6 +62,8 @@ class EisSender:
         self._ei = self._lib.ei_new_sender(None)
         self._devices: list[int] = []
         self._started: set[int] = set()
+        self._paused: set[int] = set()
+        self._lock = threading.RLock()
         self._sequence = 1
         if not self._ei:
             os.close(fd)
@@ -86,6 +104,20 @@ class EisSender:
         signature("ei_device_ref", [pointer], pointer)
         signature("ei_device_unref", [pointer], pointer)
         signature("ei_device_has_capability", [pointer, ctypes.c_int], ctypes.c_bool)
+        if hasattr(lib, "ei_device_get_region"):
+            signature("ei_device_get_region", [pointer, ctypes.c_size_t], pointer)
+        if hasattr(lib, "ei_device_get_region_at"):
+            signature(
+                "ei_device_get_region_at",
+                [pointer, ctypes.c_double, ctypes.c_double],
+                pointer,
+            )
+        if hasattr(lib, "ei_region_contains"):
+            signature(
+                "ei_region_contains",
+                [pointer, ctypes.c_double, ctypes.c_double],
+                ctypes.c_bool,
+            )
         signature("ei_device_start_emulating", [pointer, ctypes.c_uint32])
         signature("ei_device_stop_emulating", [pointer])
         signature(
@@ -158,16 +190,24 @@ class EisSender:
             else:
                 ref = int(self._lib.ei_device_ref(device))
                 self._devices.append(ref)
+            self._paused_devices().discard(ref)
             if ref not in self._started:
                 self._lib.ei_device_start_emulating(ref, self._sequence)
                 self._sequence = (self._sequence + 1) & 0xFFFFFFFF or 1
                 self._started.add(ref)
+            return
+        if event_type == _EVENT_DEVICE_PAUSED:
+            device = int(self._lib.ei_event_get_device(event) or 0)
+            if device in self._devices:
+                self._paused_devices().add(device)
+                self._started.discard(device)
             return
         if event_type == _EVENT_DEVICE_REMOVED:
             device = int(self._lib.ei_event_get_device(event) or 0)
             if device in self._devices:
                 self._devices.remove(device)
                 self._started.discard(device)
+                self._paused_devices().discard(device)
                 self._lib.ei_device_unref(device)
 
     def _dispatch_events(self, timeout_s: float = 0.0) -> bool:
@@ -201,14 +241,57 @@ class EisSender:
         self,
         capability: int,
         *,
+        point: tuple[float, float] | None = None,
         optional: bool = False,
         drain: bool = True,
     ) -> int | None:
         if drain:
             self._dispatch_events(0.0)
-        for device in self._devices:
-            if self._lib.ei_device_has_capability(device, capability):
-                return device
+        candidates = [
+            device
+            for device in self._devices
+            if device not in self._paused_devices()
+            and self._lib.ei_device_has_capability(device, capability)
+        ]
+        if point is not None and candidates:
+            x, y = point
+            get_region_at = getattr(self._lib, "ei_device_get_region_at", None)
+            if callable(get_region_at):
+                for device in candidates:
+                    if get_region_at(device, float(x), float(y)):
+                        return device
+                get_region = getattr(self._lib, "ei_device_get_region", None)
+                if callable(get_region) and any(get_region(device, 0) for device in candidates):
+                    if optional:
+                        return None
+                    raise GuiUnavailableError("Target point is outside all EIS device regions")
+            else:
+                get_region = getattr(self._lib, "ei_device_get_region", None)
+                region_contains = getattr(self._lib, "ei_region_contains", None)
+                if callable(get_region) and callable(region_contains):
+                    saw_region = False
+                    for device in candidates:
+                        index = 0
+                        while True:
+                            region = get_region(device, index)
+                            if not region:
+                                break
+                            saw_region = True
+                            if region_contains(region, float(x), float(y)):
+                                return device
+                            index += 1
+                    if saw_region:
+                        if optional:
+                            return None
+                        raise GuiUnavailableError("Target point is outside all EIS device regions")
+            if len(candidates) > 1:
+                if optional:
+                    return None
+                raise GuiUnavailableError(
+                    "EIS exposes multiple absolute devices but no usable region mapping"
+                )
+        if candidates:
+            return candidates[0]
         if optional:
             return None
         raise GuiUnavailableError("EIS device does not support the requested pointer action")
@@ -224,72 +307,87 @@ class EisSender:
         self._lib.ei_device_frame(device, self._lib.ei_now(self._ei))
 
     def nudge(self, dx: float, dy: float) -> None:
-        device = self._device_for(_CAP_POINTER)
-        assert device is not None
-        self._begin(device)
-        self._lib.ei_device_pointer_motion(device, float(dx), float(dy))
-        self._frame(device)
-        time.sleep(0.03)
-        self._lib.ei_device_pointer_motion(device, -float(dx), -float(dy))
-        self._frame(device)
+        with self._operation_lock():
+            device = self._device_for(_CAP_POINTER)
+            assert device is not None
+            self._begin(device)
+            self._lib.ei_device_pointer_motion(device, float(dx), float(dy))
+            self._frame(device)
+            time.sleep(0.03)
+            self._lib.ei_device_pointer_motion(device, -float(dx), -float(dy))
+            self._frame(device)
 
     def move(self, x: float, y: float) -> None:
-        device = self._device_for(_CAP_POINTER_ABSOLUTE)
-        assert device is not None
-        self._begin(device)
-        self._lib.ei_device_pointer_motion_absolute(device, float(x), float(y))
-        self._frame(device)
+        with self._operation_lock():
+            device = self._device_for(_CAP_POINTER_ABSOLUTE, point=(float(x), float(y)))
+            assert device is not None
+            self._begin(device)
+            self._lib.ei_device_pointer_motion_absolute(device, float(x), float(y))
+            self._frame(device)
 
-    def button(self, button: int, pressed: bool) -> None:
-        device = self._device_for(_CAP_BUTTON)
-        assert device is not None
+    def button(
+        self,
+        button: int,
+        pressed: bool,
+        *,
+        point: tuple[float, float] | None = None,
+    ) -> None:
         codes = {1: _BTN_LEFT, 2: _BTN_MIDDLE, 3: _BTN_RIGHT}
         try:
             code = codes[int(button)]
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError(f"Unsupported pointer button: {button}") from exc
-        self._begin(device)
-        self._lib.ei_device_button_button(device, code, bool(pressed))
-        self._frame(device)
+        with self._operation_lock():
+            device = self._device_for(_CAP_BUTTON, point=point)
+            assert device is not None
+            self._begin(device)
+            self._lib.ei_device_button_button(device, code, bool(pressed))
+            self._frame(device)
 
     def click(self, x: float, y: float, *, button: int, count: int) -> None:
-        self.move(x, y)
-        for _ in range(max(1, int(count))):
-            self.button(button, True)
-            time.sleep(0.015)
-            self.button(button, False)
-            time.sleep(0.035)
+        with self._operation_lock():
+            self.move(x, y)
+            point = (float(x), float(y))
+            for _ in range(max(1, int(count))):
+                self.button(button, True, point=point)
+                time.sleep(0.015)
+                self.button(button, False, point=point)
+                time.sleep(0.035)
 
     def scroll(self, x: float, y: float, delta_x: float, delta_y: float) -> None:
-        self.move(x, y)
-        device = self._device_for(_CAP_SCROLL)
-        assert device is not None
-        self._begin(device)
-        self._lib.ei_device_scroll_delta(device, float(delta_x), float(delta_y))
-        self._frame(device)
+        with self._operation_lock():
+            self.move(x, y)
+            device = self._device_for(_CAP_SCROLL, point=(float(x), float(y)))
+            assert device is not None
+            self._begin(device)
+            self._lib.ei_device_scroll_delta(device, float(delta_x), float(delta_y))
+            self._frame(device)
 
     def drag(self, x: float, y: float, to_x: float, to_y: float) -> None:
-        self.move(x, y)
-        self.button(1, True)
-        try:
-            time.sleep(0.02)
-            self.move(to_x, to_y)
-            time.sleep(0.02)
-        finally:
-            self.button(1, False)
+        with self._operation_lock():
+            self.move(x, y)
+            self.button(1, True, point=(float(x), float(y)))
+            try:
+                time.sleep(0.02)
+                self.move(to_x, to_y)
+                time.sleep(0.02)
+            finally:
+                self.button(1, False, point=(float(to_x), float(to_y)))
 
     def close(self) -> None:
-        if self._ei is None:
-            return
-        for device in list(self._devices):
-            if device in self._started:
+        with self._operation_lock():
+            if self._ei is None:
+                return
+            for device in list(self._devices):
+                if device in self._started:
+                    with contextlib.suppress(Exception):
+                        self._lib.ei_device_stop_emulating(device)
                 with contextlib.suppress(Exception):
-                    self._lib.ei_device_stop_emulating(device)
+                    self._lib.ei_device_unref(device)
+            self._devices.clear()
+            self._started.clear()
+            self._paused_devices().clear()
             with contextlib.suppress(Exception):
-                self._lib.ei_device_unref(device)
-        self._devices.clear()
-        self._started.clear()
-        with contextlib.suppress(Exception):
-            self._lib.ei_disconnect(self._ei)
-        self._lib.ei_unref(self._ei)
-        self._ei = None
+                self._lib.ei_disconnect(self._ei)
+            self._lib.ei_unref(self._ei)
+            self._ei = None

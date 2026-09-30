@@ -1726,21 +1726,35 @@ async def _finish_worker_gui_relay(
     window_id: str,
     record_id: str,
     discard: Any,
+    refresh: Any | None = None,
+    ttl_key: str | None = None,
 ) -> dict[str, Any]:
+    del manager
     screenshot_path = str(result.get("screenshot_path") or "")
-    if not screenshot_path:
-        return result
-    task = asyncio.create_task(_prepare_worker_gui_relay(screenshot_path, result))
+    task: asyncio.Task[dict[str, Any] | None] | None = None
+    if screenshot_path:
+        task = asyncio.create_task(_prepare_worker_gui_relay(screenshot_path, result))
     try:
-        inline = await asyncio.shield(task)
+        inline = await asyncio.shield(task) if task is not None else None
+        if refresh is not None and record_id:
+            refreshed = await refresh(window_id, record_id)
+            if ttl_key is not None:
+                remaining_ttl = float(refreshed.get(ttl_key) or 0)
+                if remaining_ttl <= 0:
+                    raise RuntimeError(
+                        "GUI observation expired during worker relay preparation"
+                    )
+                result[ttl_key] = remaining_ttl
     except BaseException:
-        with contextlib.suppress(BaseException):
-            await task
+        if task is not None:
+            with contextlib.suppress(BaseException):
+                await task
         if record_id:
             with contextlib.suppress(BaseException):
                 await asyncio.shield(discard(window_id, record_id))
-        with contextlib.suppress(BaseException):
-            await asyncio.shield(asyncio.to_thread(_worker_gui_temp_delete, screenshot_path))
+        if screenshot_path:
+            with contextlib.suppress(BaseException):
+                await asyncio.shield(asyncio.to_thread(_worker_gui_temp_delete, screenshot_path))
         raise
     if inline is not None:
         result.update(inline)
@@ -2724,6 +2738,8 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
             window_id=args["window_id"],
             record_id=str(result.get("state_id") or ""),
             discard=manager.discard_state,
+            refresh=manager.refresh_state,
+            ttl_key="state_ttl_s",
         )
     if tool == "gui_frame":
         result = await manager.frame(args["window_id"])
@@ -2733,6 +2749,8 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
             window_id=args["window_id"],
             record_id=str(result.get("observation_id") or ""),
             discard=manager.discard_frame_observation,
+            refresh=manager.refresh_frame_observation,
+            ttl_key="observation_ttl_s",
         )
     if tool == "gui_human_action":
         return await manager.human_act(

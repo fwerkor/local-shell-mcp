@@ -1750,6 +1750,44 @@ async def test_worker_gui_relay_cancellation_discards_published_state(tmp_path, 
     assert deleted == [str(shot)]
 
 
+@pytest.mark.asyncio
+async def test_worker_gui_relay_refreshes_ttl_after_postprocessing(tmp_path, monkeypatch):
+    import local_shell_mcp.remote as remote
+
+    shot = tmp_path / ("gui-" + "2" * 32 + ".png")
+    shot.write_bytes(b"png")
+    refreshes = []
+
+    async def postprocess(_path, _result):
+        return None
+
+    async def refresh(window_id, state_id):
+        refreshes.append((window_id, state_id))
+        return {"state_id": state_id, "state_ttl_s": 7}
+
+    async def discard(_window_id, _state_id):
+        pytest.fail("valid refreshed state must not be discarded")
+
+    monkeypatch.setattr(remote, "_prepare_worker_gui_relay", postprocess)
+
+    result = await remote._finish_worker_gui_relay(
+        object(),
+        {
+            "state_id": "state",
+            "state_ttl_s": 30,
+            "screenshot_path": str(shot),
+        },
+        window_id="w",
+        record_id="state",
+        discard=discard,
+        refresh=refresh,
+        ttl_key="state_ttl_s",
+    )
+
+    assert result["state_ttl_s"] == 7
+    assert refreshes == [("w", "state")]
+
+
 def test_remote_gui_relay_keeps_small_png_untouched(tmp_path, monkeypatch):
     from PIL import Image
 
@@ -4536,6 +4574,39 @@ def test_kde_wayland_authoritative_list_uses_kwin_top_levels():
     ]
 
 
+def test_kde_wayland_does_not_pair_unrelated_same_pid_top_levels():
+    import local_shell_mcp.gui.linux as linux
+
+    env = {"XDG_SESSION_TYPE": "wayland", "XDG_CURRENT_DESKTOP": "KDE"}
+    data = {
+        "windows": [
+            {
+                "id": "atspi:10:main",
+                "title": "Main",
+                "app": "app",
+                "pid": 10,
+                "bounds": {"x": 0, "y": 0, "width": 900, "height": 700},
+            }
+        ],
+        "monitors": [],
+    }
+    kwin = [
+        {
+            "pid": 10,
+            "title": "Dialog",
+            "internal_id": "{22222222-2222-2222-2222-222222222222}",
+            "app": "app",
+            "bounds": {"x": 200, "y": 150, "width": 400, "height": 300},
+            "minimized": False,
+            "active": True,
+        }
+    ]
+
+    result = linux._kde_wayland_authoritative_data(data, env, kwin_windows=kwin)
+
+    assert result["windows"][0]["id"] == "kwin:22222222-2222-2222-2222-222222222222"
+
+
 @pytest.mark.asyncio
 async def test_linux_focus_falls_back_to_kwin_and_reverifies_active(monkeypatch):
     from unittest.mock import AsyncMock
@@ -4620,6 +4691,41 @@ async def test_linux_focus_polls_until_kwin_activation_reaches_atspi(monkeypatch
     )
 
     assert len(calls) == 4
+
+
+@pytest.mark.asyncio
+async def test_linux_focus_kwin_only_waits_until_target_is_active(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    backend = linux.LinuxGuiBackend()
+    env = {"XDG_CURRENT_DESKTOP": "KDE", "XDG_SESSION_TYPE": "wayland"}
+    active = iter((False, False, True))
+    listed_calls = []
+
+    monkeypatch.setattr(
+        linux,
+        "_focus_kde_wayland_window_sync",
+        lambda *_args, **_kwargs: None,
+    )
+
+    def listed(window_id, selected_env):
+        listed_calls.append((window_id, selected_env))
+        return {"id": window_id, "active": next(active)}
+
+    async def no_wait(_seconds):
+        return None
+
+    monkeypatch.setattr(backend, "_listed_window", listed)
+    monkeypatch.setattr(linux.asyncio, "sleep", no_wait)
+
+    window = {
+        "id": "kwin:22222222-2222-2222-2222-222222222222",
+        "pid": 42,
+        "bounds": {"x": 10, "y": 20, "width": 300, "height": 200},
+    }
+    await backend._focus_window(window, env)
+
+    assert len(listed_calls) == 3
 
 
 @pytest.mark.asyncio
@@ -5353,6 +5459,39 @@ async def test_kde_wayland_screenshot_portal_failure_falls_back_to_pipewire(
     assert calls[0] == "screenshot"
     assert calls[1] == ("layout", monitors)
     assert calls[2][0] == "capture"
+
+
+@pytest.mark.asyncio
+async def test_kde_pipewire_composes_spanning_window_from_all_monitors(tmp_path):
+    import local_shell_mcp.gui.linux as linux
+
+    path = tmp_path / "spanning.png"
+    monitors = [
+        {"x": 0, "y": 0, "width": 100, "height": 100, "scale": 1},
+        {"x": 100, "y": 0, "width": 100, "height": 100, "scale": 1},
+    ]
+    bounds = {"x": 80, "y": 10, "width": 40, "height": 20}
+    captures = []
+
+    class Portal:
+        def set_monitor_layout(self, received):
+            assert received == monitors
+
+        async def capture_monitor_frame(self, destination, monitor, **_kwargs):
+            captures.append(monitor)
+            value = 0 if monitor["x"] == 0 else 255
+            Image.new("L", (monitor["width"], monitor["height"]), value).convert("RGB").save(
+                destination,
+                format="PNG",
+            )
+
+    await linux._capture_kde_pipewire_window(path, bounds, monitors, Portal())
+
+    assert captures == monitors
+    with Image.open(path) as image:
+        assert image.size == (40, 20)
+        assert image.getpixel((5, 5)) == (0, 0, 0)
+        assert image.getpixel((35, 5)) == (255, 255, 255)
 
 
 
@@ -6664,6 +6803,40 @@ async def test_portal_remote_desktop_reuses_and_rotates_restore_token(monkeypatc
     assert saved_tokens == ["rotated-token"]
 
 
+@pytest.mark.asyncio
+async def test_portal_remote_desktop_retries_rejected_restore_token(monkeypatch):
+    import local_shell_mcp.gui.linux_portal as portal_module
+
+    portal = PortalDesktop({})
+    attempts = []
+    cleared = []
+
+    async def create(restore_token):
+        attempts.append(restore_token)
+        if restore_token is not None:
+            raise portal_module._RestoreTokenRejected(
+                "Desktop portal request was denied or cancelled (2)"
+            )
+        portal._session = "/session/recovered"
+        return portal._session
+
+    monkeypatch.setattr(portal, "_create_session", create)
+    monkeypatch.setattr(
+        portal_module,
+        "_load_portal_restore_token",
+        lambda: "stale-token",
+    )
+    monkeypatch.setattr(
+        portal_module,
+        "_clear_portal_restore_token",
+        lambda: cleared.append(True),
+    )
+
+    assert await portal.ensure_session() == "/session/recovered"
+    assert attempts == ["stale-token", None]
+    assert cleared == [True]
+
+
 def test_portal_stream_mapping_uses_unique_monitor_size_when_kde_omits_position():
     portal = PortalDesktop({})
     portal.set_monitor_layout(
@@ -6751,6 +6924,35 @@ async def test_portal_click_releases_pressed_button_after_release_failure(monkey
     with pytest.raises(RuntimeError, match="release failed"):
         await portal.click(1, 2)
     assert calls == [True, False, False]
+
+
+@pytest.mark.asyncio
+async def test_portal_eis_failure_after_sender_creation_is_not_replayed(monkeypatch):
+    portal = PortalDesktop({})
+    portal._session = "session"
+    portal._remote = object()
+    closed = []
+
+    class Sender:
+        def click(self, *_args, **_kwargs):
+            raise GuiUnavailableError("EIS input session was disconnected")
+
+        def close(self):
+            closed.append(True)
+
+    sender = Sender()
+    portal._eis_sender = sender
+
+    async def ensure(_session):
+        return sender
+
+    monkeypatch.setattr(portal, "_ensure_eis", ensure)
+
+    with pytest.raises(GuiUnavailableError, match="disconnected"):
+        await portal._eis_gesture("session", "click", 10.0, 20.0, button=1, count=2)
+
+    assert portal._eis_sender is None
+    assert closed == [True]
 
 
 @pytest.mark.asyncio

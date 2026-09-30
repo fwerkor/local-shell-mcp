@@ -352,6 +352,66 @@ def test_eis_lifecycle_ignores_unsupported_duplicate_and_unknown_events(monkeypa
     assert sender._dispatch_events(0.0) is False
 
 
+def test_eis_paused_device_is_unavailable_until_resumed():
+    sender = object.__new__(linux_eis.EisSender)
+    sender._lib = _EventLib()
+    sender._ei = 99
+    sender._devices = [55]
+    sender._started = {55}
+    sender._paused = set()
+    sender._sequence = 2
+
+    sender._lib.types = {
+        1: linux_eis._EVENT_DEVICE_PAUSED,
+        2: linux_eis._EVENT_DEVICE_RESUMED,
+    }
+    sender._lib.device_for_event = {1: 55, 2: 55}
+
+    sender._handle_event(1)
+    assert sender._paused == {55}
+    assert sender._started == set()
+    assert (
+        sender._device_for(
+            linux_eis._CAP_POINTER_ABSOLUTE,
+            optional=True,
+            drain=False,
+        )
+        is None
+    )
+
+    sender._handle_event(2)
+    assert sender._paused == set()
+    assert sender._started == {55}
+    assert ("start", 55, 2) in sender._lib.calls
+
+
+def test_eis_absolute_pointer_selects_region_containing_target(monkeypatch):
+    class RegionLib(_GestureLib):
+        def ei_device_get_region_at(self, device, x, _y):
+            if device == 55 and x < 100:
+                return 1001
+            if device == 66 and x >= 100:
+                return 1002
+            return 0
+
+        def ei_device_get_region(self, device, index):
+            return device if index == 0 else 0
+
+    sender = object.__new__(linux_eis.EisSender)
+    sender._lib = RegionLib()
+    sender._ei = 77
+    sender._devices = [55, 66]
+    sender._started = set()
+    sender._paused = set()
+    sender._sequence = 1
+    monkeypatch.setattr(sender, "_dispatch_events", lambda _timeout=0.0: False)
+
+    sender.move(150, 25)
+
+    assert ("move", 66, 150.0, 25.0) in sender._lib.calls
+    assert ("move", 55, 150.0, 25.0) not in sender._lib.calls
+
+
 def test_eis_close_handles_started_and_unstarted_devices():
     sender = object.__new__(linux_eis.EisSender)
     sender._lib = _GestureLib()

@@ -22,6 +22,10 @@ _PORTAL_RESTORE_TOKEN_KEY = "gui/remote-desktop-restore-token"
 _PORTAL_RESTORE_TOKEN_MAX_BYTES = 4096
 
 
+class _RestoreTokenRejected(GuiUnavailableError):
+    pass
+
+
 async def _portal_lifecycle_wait(awaitable: Any, operation: str) -> Any:
     try:
         return await asyncio.wait_for(
@@ -419,59 +423,62 @@ class PortalDesktop:
             "closing the portal session",
         )
 
-    async def ensure_session(self) -> str:
-        async with self._lock:
-            if self._session is not None:
-                return self._session
-            await self._connect()
-            assert self._remote is not None and self._screen is not None
-            _MessageBus, Variant = _portal_modules()
-            token = f"lsm_req_{uuid.uuid4().hex}"
+    @staticmethod
+    def _restore_token_rejected(exc: BaseException) -> bool:
+        return isinstance(exc, GuiUnavailableError) and str(exc).endswith("(2)")
+
+    async def _create_session(self, restore_token: str | None) -> str:
+        await self._connect()
+        assert self._remote is not None and self._screen is not None
+        _MessageBus, Variant = _portal_modules()
+        token = f"lsm_req_{uuid.uuid4().hex}"
+        try:
+            created = await self._request(
+                self._remote.call_create_session(
+                    {
+                        "handle_token": Variant("s", token),
+                        "session_handle_token": Variant("s", f"lsm_session_{uuid.uuid4().hex}"),
+                    }
+                ),
+                handle_token=token,
+            )
+        except BaseException:
+            self._invalidate_transport()
+            raise
+        session = str(created["session_handle"])
+        try:
+            source_token = f"lsm_req_{uuid.uuid4().hex}"
+            await self._request(
+                self._screen.call_select_sources(
+                    session,
+                    {
+                        "handle_token": Variant("s", source_token),
+                        "types": Variant("u", 1),
+                        "multiple": Variant("b", True),
+                        "cursor_mode": Variant("u", 2),
+                    },
+                ),
+                handle_token=source_token,
+            )
+            device_token = f"lsm_req_{uuid.uuid4().hex}"
+            device_options = {
+                "handle_token": Variant("s", device_token),
+                "types": Variant("u", 3),
+                "persist_mode": Variant("u", 2),
+            }
+            if restore_token is not None:
+                device_options["restore_token"] = Variant("s", restore_token)
             try:
-                created = await self._request(
-                    self._remote.call_create_session(
-                        {
-                            "handle_token": Variant("s", token),
-                            "session_handle_token": Variant("s", f"lsm_session_{uuid.uuid4().hex}"),
-                        }
-                    ),
-                    handle_token=token,
-                )
-            except BaseException:
-                self._invalidate_transport()
-                raise
-            session = str(created["session_handle"])
-            try:
-                source_token = f"lsm_req_{uuid.uuid4().hex}"
-                await self._request(
-                    self._screen.call_select_sources(
-                        session,
-                        {
-                            "handle_token": Variant("s", source_token),
-                            "types": Variant("u", 1),
-                            "multiple": Variant("b", True),
-                            "cursor_mode": Variant("u", 2),
-                        },
-                    ),
-                    handle_token=source_token,
-                )
-                try:
-                    restore_token = await asyncio.to_thread(_load_portal_restore_token)
-                except Exception:
-                    restore_token = None
-                device_token = f"lsm_req_{uuid.uuid4().hex}"
-                device_options = {
-                    "handle_token": Variant("s", device_token),
-                    "types": Variant("u", 3),
-                    "persist_mode": Variant("u", 2),
-                }
-                if restore_token is not None:
-                    device_options["restore_token"] = Variant("s", restore_token)
                 await self._request(
                     self._remote.call_select_devices(session, device_options),
                     handle_token=device_token,
                 )
-                start_token = f"lsm_req_{uuid.uuid4().hex}"
+            except BaseException as exc:
+                if restore_token is not None and self._restore_token_rejected(exc):
+                    raise _RestoreTokenRejected(str(exc)) from exc
+                raise
+            start_token = f"lsm_req_{uuid.uuid4().hex}"
+            try:
                 started = await self._request(
                     self._remote.call_start(
                         session,
@@ -480,40 +487,61 @@ class PortalDesktop:
                     ),
                     handle_token=start_token,
                 )
-                new_restore_token = str(started.get("restore_token") or "")
-                if new_restore_token:
-                    with contextlib.suppress(Exception):
-                        await asyncio.to_thread(
-                            _save_portal_restore_token,
-                            new_restore_token,
-                        )
-            except BaseException:
-                with contextlib.suppress(BaseException):
-                    await asyncio.shield(self._close_session(session))
-                self._invalidate_transport()
+            except BaseException as exc:
+                if restore_token is not None and self._restore_token_rejected(exc):
+                    raise _RestoreTokenRejected(str(exc)) from exc
                 raise
-            self._session = session
-            self._session_iface = None
-            self._streams = []
-            for stream in started.get("streams", []):
-                if not isinstance(stream, list) or not stream:
-                    continue
-                node_id = int(stream[0])
-                props = stream[1] if len(stream) > 1 and isinstance(stream[1], dict) else {}
-                self._streams.append({"node_id": node_id, "properties": props})
+            new_restore_token = str(started.get("restore_token") or "")
+            if new_restore_token:
+                with contextlib.suppress(Exception):
+                    await asyncio.to_thread(
+                        _save_portal_restore_token,
+                        new_restore_token,
+                    )
+        except BaseException:
+            with contextlib.suppress(BaseException):
+                await asyncio.shield(self._close_session(session))
+            self._invalidate_transport()
+            raise
+        self._session = session
+        self._session_iface = None
+        self._streams = []
+        for stream in started.get("streams", []):
+            if not isinstance(stream, list) or not stream:
+                continue
+            node_id = int(stream[0])
+            props = stream[1] if len(stream) > 1 and isinstance(stream[1], dict) else {}
+            self._streams.append({"node_id": node_id, "properties": props})
+        try:
+            await self._observe_session_closed(session)
+        except Exception as exc:
+            with contextlib.suppress(BaseException):
+                await asyncio.shield(self._close_session(session))
+            self._invalidate_transport()
+            raise GuiUnavailableError(
+                "Wayland portal session closure observation could not be installed"
+            ) from exc
+        if self._session != session:
+            self._invalidate_transport()
+            raise GuiUnavailableError("Wayland portal session closed during setup")
+        return session
+
+    async def ensure_session(self) -> str:
+        async with self._lock:
+            if self._session is not None:
+                return self._session
             try:
-                await self._observe_session_closed(session)
-            except Exception as exc:
-                with contextlib.suppress(BaseException):
-                    await asyncio.shield(self._close_session(session))
-                self._invalidate_transport()
-                raise GuiUnavailableError(
-                    "Wayland portal session closure observation could not be installed"
-                ) from exc
-            if self._session != session:
-                self._invalidate_transport()
-                raise GuiUnavailableError("Wayland portal session closed during setup")
-            return session
+                restore_token = await asyncio.to_thread(_load_portal_restore_token)
+            except Exception:
+                restore_token = None
+            try:
+                return await self._create_session(restore_token)
+            except _RestoreTokenRejected:
+                if restore_token is None:
+                    raise
+                with contextlib.suppress(Exception):
+                    await asyncio.to_thread(_clear_portal_restore_token)
+                return await self._create_session(None)
 
     def _require_session(self, session: str) -> Any:
         if not session or self._session != session or self._remote is None:
@@ -773,6 +801,7 @@ class PortalDesktop:
                     "!",
                     "multifilesink",
                     f"location={frame_pattern}",
+                    "max-files=6",
                 ],
                 pass_fds=(fd,),
                 stdout=subprocess.DEVNULL,
@@ -792,9 +821,8 @@ class PortalDesktop:
             if not first_frame.is_file() or first_frame.stat().st_size <= 0:
                 raise GuiUnavailableError("PipeWire did not provide an initial screenshot frame")
 
-            baseline_count = len(
-                list(path.parent.glob(f".{path.name}.frame-*.png"))
-            )
+            baseline_frames = sorted(path.parent.glob(f".{path.name}.frame-*.png"))
+            baseline_latest = baseline_frames[-1].name
             await refresh_after_first_frame()
 
             # KWin/PipeWire can queue a stale compositor buffer immediately
@@ -802,19 +830,19 @@ class PortalDesktop:
             # cursor nudge, then use the newest fully written frame.
             await asyncio.sleep(0.35)
             frames = sorted(path.parent.glob(f".{path.name}.frame-*.png"))
-            if len(frames) <= baseline_count:
+            if not frames or frames[-1].name <= baseline_latest:
                 deadline = asyncio.get_running_loop().time() + 2.65
                 while asyncio.get_running_loop().time() < deadline:
                     if process.poll() is not None:
                         break
                     await asyncio.sleep(0.02)
                     frames = sorted(path.parent.glob(f".{path.name}.frame-*.png"))
-                    if len(frames) > baseline_count:
+                    if frames and frames[-1].name > baseline_latest:
                         await asyncio.sleep(0.10)
                         frames = sorted(path.parent.glob(f".{path.name}.frame-*.png"))
                         break
 
-            if len(frames) <= baseline_count:
+            if not frames or frames[-1].name <= baseline_latest:
                 raise GuiUnavailableError(
                     "PipeWire did not provide a refreshed screenshot frame"
                 )
@@ -898,7 +926,12 @@ class PortalDesktop:
                 self._eis_sender = None
             with contextlib.suppress(Exception):
                 await asyncio.to_thread(sender.close)
-            return False
+            # Once an EIS sender exists, a composite gesture may already have
+            # emitted motion/button frames before a lifecycle failure becomes
+            # visible. Replaying the whole gesture through the D-Bus fallback
+            # can double-click or repeat a destructive drag, so surface the
+            # failure instead of retrying after emission may have started.
+            raise
         return True
 
     async def nudge(

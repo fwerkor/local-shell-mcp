@@ -482,10 +482,12 @@ def _match_atspi_window_for_kwin(
         if str(item.get("id") or "") not in used_ids and int(item.get("pid") or 0) == pid
     ]
     title = str(kwin.get("title") or "")
+    title_evidence = False
     if title:
         titled = [item for item in candidates if str(item.get("title") or "") == title]
         if titled:
             candidates = titled
+            title_evidence = True
     sized = []
     for item in candidates:
         current = _bounds_tuple(item.get("bounds"))
@@ -493,7 +495,7 @@ def _match_atspi_window_for_kwin(
             sized.append(item)
     if len(sized) == 1:
         return sized[0]
-    if not sized and len(candidates) == 1:
+    if not sized and title_evidence and len(candidates) == 1:
         return candidates[0]
     return None
 
@@ -812,6 +814,118 @@ def _monitor_for_window(
     return None
 
 
+def _intersecting_monitors(
+    bounds: dict[str, Any],
+    monitors: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    left = int(bounds["x"])
+    top = int(bounds["y"])
+    right = left + max(1, int(bounds["width"]))
+    bottom = top + max(1, int(bounds["height"]))
+    matches = []
+    for monitor in monitors:
+        mx = int(monitor["x"])
+        my = int(monitor["y"])
+        mr = mx + int(monitor["width"])
+        mb = my + int(monitor["height"])
+        if max(left, mx) < min(right, mr) and max(top, my) < min(bottom, mb):
+            matches.append(monitor)
+    return matches
+
+
+async def _capture_kde_pipewire_window(
+    path: Path,
+    bounds: dict[str, Any],
+    monitors: list[dict[str, Any]],
+    portal: PortalDesktop,
+    *,
+    refresh_after_first_frame: Any | None = None,
+) -> None:
+    intersecting = _intersecting_monitors(bounds, monitors)
+    if not intersecting:
+        raise GuiUnavailableError("Could not map the target window to a ScreenCast monitor")
+    portal.set_monitor_layout(monitors)
+    if len(intersecting) == 1:
+        monitor = intersecting[0]
+        if refresh_after_first_frame is None:
+            await portal.capture_monitor_frame(path, monitor)
+        else:
+            await portal.capture_monitor_frame(
+                path,
+                monitor,
+                refresh_after_first_frame=refresh_after_first_frame,
+            )
+        await asyncio.to_thread(
+            _crop_desktop_capture,
+            path,
+            bounds,
+            [monitor],
+        )
+        return
+
+    width = max(1, int(bounds["width"]))
+    height = max(1, int(bounds["height"]))
+    if (
+        width > GUI_MAX_CAPTURE_DIMENSION
+        or height > GUI_MAX_CAPTURE_DIMENSION
+        or width * height > GUI_MAX_CAPTURE_PIXELS
+    ):
+        raise GuiUnavailableError("Target window exceeds GUI screenshot safety limits")
+
+    x = int(bounds["x"])
+    y = int(bounds["y"])
+    part_paths: list[Path] = []
+    try:
+        canvas = Image.new("RGB", (width, height))
+        coverage = Image.new("1", (width, height), 0)
+        for index, monitor in enumerate(intersecting):
+            part = path.with_name(f".{path.name}.monitor-{index}-{uuid.uuid4().hex}.png")
+            part_paths.append(part)
+            if refresh_after_first_frame is None:
+                await portal.capture_monitor_frame(part, monitor)
+            else:
+                await portal.capture_monitor_frame(
+                    part,
+                    monitor,
+                    refresh_after_first_frame=refresh_after_first_frame,
+                )
+            _validate_capture_image_header(part)
+            mx = int(monitor["x"])
+            my = int(monitor["y"])
+            mw = int(monitor["width"])
+            mh = int(monitor["height"])
+            ix0 = max(x, mx)
+            iy0 = max(y, my)
+            ix1 = min(x + width, mx + mw)
+            iy1 = min(y + height, my + mh)
+            with Image.open(part) as opened:
+                opened.load()
+                frame = opened.convert("RGB")
+                if frame.size != (mw, mh):
+                    frame = frame.resize((mw, mh), Image.Resampling.LANCZOS)
+                region = frame.crop((ix0 - mx, iy0 - my, ix1 - mx, iy1 - my))
+            destination = (ix0 - x, iy0 - y)
+            canvas.paste(region, destination)
+            coverage.paste(
+                1,
+                (
+                    destination[0],
+                    destination[1],
+                    destination[0] + region.width,
+                    destination[1] + region.height,
+                ),
+            )
+        if coverage.getextrema() != (1, 1):
+            raise GuiUnavailableError(
+                "Target window is not fully covered by the granted ScreenCast monitors"
+            )
+        canvas.save(path, format="PNG")
+    finally:
+        for part in part_paths:
+            with contextlib.suppress(OSError):
+                part.unlink(missing_ok=True)
+
+
 def _scaled_axis_offset(
     coordinate: int,
     origin: int,
@@ -1017,28 +1131,18 @@ async def _capture_wayland(
             path.unlink(missing_ok=True)
 
     if kde and portal is not None:
-        monitor = _monitor_for_window(bounds, monitors)
-        if monitor is not None:
-            portal.set_monitor_layout(monitors)
-            try:
-                if refresh_after_first_frame is None:
-                    await portal.capture_monitor_frame(path, monitor)
-                else:
-                    await portal.capture_monitor_frame(
-                        path,
-                        monitor,
-                        refresh_after_first_frame=refresh_after_first_frame,
-                    )
-                await asyncio.to_thread(
-                    _crop_desktop_capture,
-                    path,
-                    bounds,
-                    [monitor],
-                )
-                return "xdg-desktop-portal-pipewire"
-            except GuiUnavailableError as exc:
-                pipewire_error = exc
-                path.unlink(missing_ok=True)
+        try:
+            await _capture_kde_pipewire_window(
+                path,
+                bounds,
+                monitors,
+                portal,
+                refresh_after_first_frame=refresh_after_first_frame,
+            )
+            return "xdg-desktop-portal-pipewire"
+        except GuiUnavailableError as exc:
+            pipewire_error = exc
+            path.unlink(missing_ok=True)
 
     grim = shutil.which("grim")
     if grim:
@@ -1692,7 +1796,31 @@ class LinuxGuiBackend:
         if _is_kde_wayland(env) and str(window.get("id") or "").startswith("kwin:"):
             _assert_action_fresh(focus_action, stale_hint="call gui_state again")
             await asyncio.to_thread(_focus_kde_wayland_window_sync, window, env)
-            return
+            verify_deadline = time.monotonic() + 1.5
+            if deadline is not None:
+                try:
+                    verify_deadline = min(verify_deadline, float(deadline))
+                except (TypeError, ValueError):
+                    _assert_action_fresh(
+                        focus_action,
+                        stale_hint="call gui_state again",
+                    )
+            while True:
+                _assert_action_fresh(focus_action, stale_hint="call gui_state again")
+                listed = await asyncio.to_thread(
+                    self._listed_window,
+                    str(window.get("id") or ""),
+                    env,
+                )
+                if listed is not None and bool(listed.get("active")):
+                    return
+                remaining = verify_deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(0.05, remaining))
+            raise GuiUnavailableError(
+                "KDE Wayland window activation did not make the KWin target active"
+            )
         payload = {
             "command": "semantic_action",
             "window_id": window["id"],
