@@ -1126,7 +1126,7 @@ async def _capture_wayland(
                 )
                 return "xdg-desktop-portal"
             raise GuiUnavailableError("Wayland screenshot portal did not return an image")
-        except GuiUnavailableError as exc:
+        except Exception as exc:
             screenshot_error = exc
             path.unlink(missing_ok=True)
 

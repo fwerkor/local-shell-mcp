@@ -365,14 +365,22 @@ class EisSender:
 
     def drag(self, x: float, y: float, to_x: float, to_y: float) -> None:
         with self._operation_lock():
+            start_point = (float(x), float(y))
+            end_point = (float(to_x), float(to_y))
+            start_button_device = self._device_for(_CAP_BUTTON, point=start_point)
+            end_button_device = self._device_for(_CAP_BUTTON, point=end_point)
+            if start_button_device != end_button_device:
+                raise GuiUnavailableError(
+                    "EIS drag crosses pointer-button device regions"
+                )
             self.move(x, y)
-            self.button(1, True, point=(float(x), float(y)))
+            self.button(1, True, point=start_point)
             try:
                 time.sleep(0.02)
                 self.move(to_x, to_y)
                 time.sleep(0.02)
             finally:
-                self.button(1, False, point=(float(to_x), float(to_y)))
+                self.button(1, False, point=start_point)
 
     def close(self) -> None:
         with self._operation_lock():

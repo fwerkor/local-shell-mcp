@@ -751,15 +751,18 @@ def _focus_keyboard_target(payload: dict[str, Any]) -> None:
     elif isinstance(raw_locator, dict):
         locator = [int(value) for value in raw_locator.get("path", [])]
         obj = _resolve_path(window, locator)
+        expected_identity = str(raw_locator.get("identity") or "")
         expected_accessible_id = str(raw_locator.get("accessible_id") or "")
         expected_fingerprint = str(raw_locator.get("fingerprint") or "")
-        if (
-            not expected_accessible_id
-            or _accessible_id(obj) != expected_accessible_id
-            or (
-                expected_fingerprint
-                and _element_signature(obj) != expected_fingerprint
+        if expected_identity:
+            identity_matches = _element_provider_identity(obj) == expected_identity
+        else:
+            identity_matches = bool(expected_accessible_id) and (
+                _accessible_id(obj) == expected_accessible_id
             )
+        if not identity_matches or (
+            expected_fingerprint
+            and _element_signature(obj) != expected_fingerprint
         ):
             raise LookupError("AT-SPI target element changed since observation")
     else:
@@ -808,15 +811,18 @@ def _prepare_pointer_target(payload: dict[str, Any]) -> dict[str, int]:
             raise LookupError("AT-SPI target locator is invalid")
         locator = [int(value) for value in raw_locator.get("path", [])]
         obj = _resolve_path(window, locator)
+        expected_identity = str(raw_locator.get("identity") or "")
         expected_accessible_id = str(raw_locator.get("accessible_id") or "")
         expected_fingerprint = str(raw_locator.get("fingerprint") or "")
-        if (
-            not expected_accessible_id
-            or _accessible_id(obj) != expected_accessible_id
-            or (
-                expected_fingerprint
-                and _element_signature(obj) != expected_fingerprint
+        if expected_identity:
+            identity_matches = _element_provider_identity(obj) == expected_identity
+        else:
+            identity_matches = bool(expected_accessible_id) and (
+                _accessible_id(obj) == expected_accessible_id
             )
+        if not identity_matches or (
+            expected_fingerprint
+            and _element_signature(obj) != expected_fingerprint
         ):
             raise LookupError("AT-SPI target element changed since observation")
     _assert_fresh(payload)

@@ -820,6 +820,7 @@ jobs:
           import os
           import sys
           import time
+          import urllib.error
           import urllib.request
 
           repository = os.environ["REPOSITORY"]
@@ -850,8 +851,21 @@ jobs:
                       f"{base_url}?per_page=100&page={page}",
                       headers=headers,
                   )
-                  with urllib.request.urlopen(request, timeout=30) as response:
-                      batch = json.load(response)["jobs"]
+                  for attempt in range(5):
+                      try:
+                          with urllib.request.urlopen(request, timeout=30) as response:
+                              batch = json.load(response)["jobs"]
+                          break
+                      except urllib.error.HTTPError as exc:
+                          if exc.code not in {500, 502, 503, 504} or attempt == 4:
+                              raise
+                          delay = min(2 ** attempt, 8)
+                          print(
+                              f"GitHub Jobs API returned HTTP {exc.code}; "
+                              f"retrying in {delay}s...",
+                              flush=True,
+                          )
+                          time.sleep(delay)
                   jobs.extend(batch)
                   if len(batch) < 100:
                       return jobs

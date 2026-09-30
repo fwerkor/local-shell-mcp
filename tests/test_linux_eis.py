@@ -576,6 +576,33 @@ def test_eis_multiple_regionless_absolute_devices_fail_closed(monkeypatch):
         )
 
 
+def test_eis_drag_rejects_cross_output_button_devices_before_press(monkeypatch):
+    class RegionLib(_GestureLib):
+        def ei_device_get_region_at(self, device, x, _y):
+            if device == 55 and x < 100:
+                return 1001
+            if device == 66 and x >= 100:
+                return 1002
+            return 0
+
+        def ei_device_get_region(self, device, index):
+            return device if index == 0 else 0
+
+    sender = object.__new__(linux_eis.EisSender)
+    sender._lib = RegionLib()
+    sender._ei = 77
+    sender._devices = [55, 66]
+    sender._started = set()
+    sender._paused = set()
+    sender._sequence = 1
+    monkeypatch.setattr(sender, "_dispatch_events", lambda _timeout=0.0: False)
+
+    with pytest.raises(GuiUnavailableError, match="crosses pointer-button device regions"):
+        sender.drag(50, 25, 150, 25)
+
+    assert not any(call[0] in {"move", "button"} for call in sender._lib.calls)
+
+
 def test_eis_close_handles_started_and_unstarted_devices():
     sender = object.__new__(linux_eis.EisSender)
     sender._lib = _GestureLib()

@@ -2965,6 +2965,60 @@ def test_atspi_window_uses_stable_bus_object_identity_without_accessible_id(monk
     assert index == 1
 
 
+def test_atspi_raw_validators_accept_provider_identity_without_accessible_id(monkeypatch):
+    import local_shell_mcp.gui.linux_atspi_helper as helper
+
+    identity = "bus\0:1.42\0path\0/org/a11y/atspi/accessible/7"
+
+    class Component:
+        def grab_focus(self):
+            return True
+
+    class Window:
+        def get_component_iface(self):
+            return Component()
+
+    window = Window()
+    element = object()
+    bounds = {"x": 10, "y": 20, "width": 100, "height": 80}
+
+    monkeypatch.setattr(helper, "_semantic_action", lambda _payload: {"semantic": True})
+    monkeypatch.setattr(helper, "_resolve_window", lambda _id: (object(), window, 0))
+    monkeypatch.setattr(helper, "_resolve_path", lambda _window, _path: element)
+    monkeypatch.setattr(helper, "_element_provider_identity", lambda obj: identity if obj is element else None)
+    monkeypatch.setattr(helper, "_element_signature", lambda _obj: "fingerprint")
+    monkeypatch.setattr(helper, "_bounds", lambda obj: dict(bounds) if obj is window else {})
+    monkeypatch.setattr(helper, "_state", lambda obj, _state: obj is element)
+    monkeypatch.setattr(
+        helper,
+        "Atspi",
+        SimpleNamespace(StateType=SimpleNamespace(FOCUSED="focused")),
+    )
+
+    locator = {
+        "path": [0],
+        "identity": identity,
+        "accessible_id": "",
+        "fingerprint": "fingerprint",
+    }
+    helper._focus_keyboard_target(
+        {
+            "window_id": "atspi:1:sig",
+            "locator": locator,
+        }
+    )
+    assert (
+        helper._prepare_pointer_target(
+            {
+                "window_id": "atspi:1:sig",
+                "window_bounds": bounds,
+                "locator": locator,
+            }
+        )
+        == bounds
+    )
+
+
 def test_atspi_window_rejects_oversized_accessible_id_before_fingerprinting():
     import local_shell_mcp.gui.linux_atspi_helper as helper
 
@@ -5561,6 +5615,42 @@ async def test_kde_wayland_screenshot_portal_failure_falls_back_to_pipewire(
     assert calls[0] == "screenshot"
     assert calls[1] == ("layout", monitors)
     assert calls[2][0] == "capture"
+
+
+@pytest.mark.asyncio
+async def test_kde_wayland_screenshot_transport_error_falls_back_to_grim(
+    tmp_path,
+    monkeypatch,
+):
+    import local_shell_mcp.gui.linux as linux
+
+    path = tmp_path / "grim.png"
+    bounds = {"x": 10, "y": 20, "width": 100, "height": 80}
+    monitors = [{"x": 0, "y": 0, "width": 500, "height": 400, "scale": 1}]
+
+    async def failed_screenshot(*_args, **_kwargs):
+        raise OSError("portal transport failed")
+
+    def run(argv, **_kwargs):
+        Image.new("RGB", (100, 80)).save(argv[-1], format="PNG")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(linux, "portal_screenshot", failed_screenshot)
+    monkeypatch.setattr(
+        linux.shutil,
+        "which",
+        lambda name: "/usr/bin/grim" if name == "grim" else None,
+    )
+    monkeypatch.setattr(linux.subprocess, "run", run)
+
+    method = await linux._capture_wayland(
+        path,
+        bounds,
+        monitors,
+        {"XDG_CURRENT_DESKTOP": "KDE"},
+    )
+
+    assert method == "grim-region"
 
 
 @pytest.mark.asyncio
