@@ -226,6 +226,7 @@ Default protections include:
 - Workspace scoping to `/workspace` unless full-container mode is explicitly enabled.
 - Command timeouts, output limits, and concurrency limits.
 - Default command/path denylists for host-control fragments.
+- Shell preflight is a best-effort efficiency guard for common recursive discovery forms (for example `Get-ChildItem -Recurse`, `find`, `rg`, and `grep -R`): it blocks recognized wide unbounded scans, bounds narrower expensive discovery, and redirects agents toward scoped file tools. It is not a shell security boundary.
 - Shell subprocess environment filtering for service-side secrets.
 - Dynamic stdio MCP servers inherit only a minimal OS environment plus explicitly configured per-server variables; configured environment/header values are stored in a mode-`0600` state file and redacted from tool results and Audit arguments.
 - Audit logs at `/workspace/.local-shell-mcp/audit.jsonl`.
