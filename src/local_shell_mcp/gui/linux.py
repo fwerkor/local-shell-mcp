@@ -969,7 +969,29 @@ async def _capture_wayland(
 ) -> str:
     desktop = str(env.get("XDG_CURRENT_DESKTOP") or "").upper()
     kde = "KDE" in desktop
+    screenshot_error: Exception | None = None
     pipewire_error: Exception | None = None
+
+    # On KDE Wayland, a newly attached ScreenCast consumer can receive an old
+    # cached compositor frame. The non-interactive Screenshot portal is a
+    # one-shot capture of the current desktop, so prefer it for window
+    # snapshots and crop by KWin's authoritative geometry.
+    if kde:
+        try:
+            await portal_screenshot(path, env)
+            if path.is_file():
+                await asyncio.to_thread(
+                    _crop_desktop_capture,
+                    path,
+                    bounds,
+                    monitors,
+                )
+                return "xdg-desktop-portal"
+            raise GuiUnavailableError("Wayland screenshot portal did not return an image")
+        except GuiUnavailableError as exc:
+            screenshot_error = exc
+            path.unlink(missing_ok=True)
+
     if kde and portal is not None:
         monitor = _monitor_for_window(bounds, monitors)
         if monitor is not None:
@@ -1015,10 +1037,14 @@ async def _capture_wayland(
     full_capture_commands: list[tuple[str, list[str]]] = []
     spectacle = shutil.which("spectacle")
     if spectacle:
-        full_capture_commands.append(("spectacle", [spectacle, "-b", "-n", "-f", "-o", str(path)]))
+        full_capture_commands.append(
+            ("spectacle", [spectacle, "-b", "-n", "-f", "-o", str(path)])
+        )
     gnome_screenshot = shutil.which("gnome-screenshot")
     if gnome_screenshot:
-        full_capture_commands.append(("gnome-screenshot", [gnome_screenshot, "-f", str(path)]))
+        full_capture_commands.append(
+            ("gnome-screenshot", [gnome_screenshot, "-f", str(path)])
+        )
 
     for name, command in full_capture_commands:
         path.unlink(missing_ok=True)
@@ -1037,11 +1063,13 @@ async def _capture_wayland(
             return name
 
     if kde:
-        detail = f": {pipewire_error}" if pipewire_error is not None else ""
-        raise GuiUnavailableError(
-            "KDE Wayland screenshot capture failed without using the interactive "
-            f"Screenshot portal{detail}"
-        )
+        details = []
+        if screenshot_error is not None:
+            details.append(f"Screenshot portal: {screenshot_error}")
+        if pipewire_error is not None:
+            details.append(f"PipeWire: {pipewire_error}")
+        suffix = f": {'; '.join(details)}" if details else ""
+        raise GuiUnavailableError(f"KDE Wayland screenshot capture failed{suffix}")
 
     await portal_screenshot(path, env)
     if not path.is_file():
@@ -1486,6 +1514,7 @@ class LinuxGuiBackend:
             if session_type == "wayland":
                 refresh_after_first_frame = None
                 if _is_kde_wayland(env):
+                    await self._focus_window(record, env)
 
                     async def refresh_after_first_frame() -> None:
                         assert self._portal is not None

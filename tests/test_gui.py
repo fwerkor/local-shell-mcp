@@ -5027,6 +5027,62 @@ async def test_wayland_snapshot_focuses_target_before_visible_region_capture(tmp
 
 
 @pytest.mark.asyncio
+async def test_kde_wayland_snapshot_focuses_before_fresh_capture(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    backend = linux.LinuxGuiBackend()
+    backend._env = {
+        "XDG_SESSION_TYPE": "wayland",
+        "WAYLAND_DISPLAY": "wayland-0",
+        "XDG_CURRENT_DESKTOP": "KDE",
+    }
+    calls = []
+    window = {
+        "id": "kwin:11111111-1111-1111-1111-111111111111",
+        "title": "Target",
+        "app": "app",
+        "pid": 1,
+        "bounds": {"x": 10, "y": 20, "width": 100, "height": 80},
+        "minimized": False,
+        "active": False,
+    }
+
+    monkeypatch.setattr(backend, "_listed_window", lambda *_args: dict(window))
+    monkeypatch.setattr(
+        backend,
+        "_list_data",
+        lambda _env=None: {
+            "windows": [dict(window)],
+            "monitors": [
+                {"index": 0, "x": 0, "y": 0, "width": 500, "height": 400, "scale": 1}
+            ],
+        },
+    )
+
+    async def focus(_window, _env=None, **_kwargs):
+        calls.append("focus")
+
+    async def capture(path, *_args, **_kwargs):
+        calls.append("capture")
+        Image.new("RGB", (100, 80)).save(path, format="PNG")
+        return "xdg-desktop-portal"
+
+    monkeypatch.setattr(backend, "_focus_window", focus)
+    monkeypatch.setattr(linux, "_capture_wayland", capture)
+
+    result = await backend.snapshot(
+        window["id"],
+        screenshot_path=tmp_path / "kde.png",
+        include_elements=False,
+        max_elements=1,
+        max_depth=1,
+    )
+
+    assert result.capabilities["capture_backend"] == "xdg-desktop-portal"
+    assert calls == ["focus", "capture"]
+
+
+@pytest.mark.asyncio
 async def test_wayland_snapshot_rejects_bounds_change_after_focus(tmp_path, monkeypatch):
     import local_shell_mcp.gui.linux as linux
 
@@ -5165,13 +5221,55 @@ async def test_wayland_grim_rejects_oversized_output_before_decode(tmp_path, mon
 
 
 @pytest.mark.asyncio
-async def test_kde_wayland_prefers_persistent_pipewire_capture(tmp_path, monkeypatch):
+async def test_kde_wayland_prefers_fresh_screenshot_portal(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    path = tmp_path / "portal.png"
+    bounds = {"x": 10, "y": 20, "width": 100, "height": 80}
+    monitors = [{"x": 0, "y": 0, "width": 500, "height": 400, "scale": 1}]
+    calls = []
+
+    async def screenshot(destination, _env):
+        calls.append("screenshot")
+        Image.new("RGB", (500, 400)).save(destination, format="PNG")
+
+    class Portal:
+        def set_monitor_layout(self, _received):
+            pytest.fail("PipeWire must not be used when fresh Screenshot capture succeeds")
+
+        async def capture_monitor_frame(self, *_args, **_kwargs):
+            pytest.fail("PipeWire must not be used when fresh Screenshot capture succeeds")
+
+    monkeypatch.setattr(linux, "portal_screenshot", screenshot)
+    monkeypatch.setattr(linux, "_crop_desktop_capture", lambda *_args: None)
+
+    method = await linux._capture_wayland(
+        path,
+        bounds,
+        monitors,
+        {"XDG_CURRENT_DESKTOP": "KDE"},
+        portal=Portal(),
+    )
+
+    assert method == "xdg-desktop-portal"
+    assert calls == ["screenshot"]
+
+
+@pytest.mark.asyncio
+async def test_kde_wayland_screenshot_portal_failure_falls_back_to_pipewire(
+    tmp_path,
+    monkeypatch,
+):
     import local_shell_mcp.gui.linux as linux
 
     path = tmp_path / "pipewire.png"
     bounds = {"x": 10, "y": 20, "width": 100, "height": 80}
     monitors = [{"x": 0, "y": 0, "width": 500, "height": 400, "scale": 1}]
     calls = []
+
+    async def failed_screenshot(*_args, **_kwargs):
+        calls.append("screenshot")
+        raise GuiUnavailableError("screenshot unavailable")
 
     class Portal:
         def set_monitor_layout(self, received):
@@ -5181,10 +5279,7 @@ async def test_kde_wayland_prefers_persistent_pipewire_capture(tmp_path, monkeyp
             calls.append(("capture", destination, monitor))
             Image.new("RGB", (500, 400)).save(destination, format="PNG")
 
-    async def forbidden_portal(*_args, **_kwargs):
-        pytest.fail("interactive Screenshot portal must not be used on KDE")
-
-    monkeypatch.setattr(linux, "portal_screenshot", forbidden_portal)
+    monkeypatch.setattr(linux, "portal_screenshot", failed_screenshot)
     monkeypatch.setattr(linux, "_crop_desktop_capture", lambda *_args: None)
 
     method = await linux._capture_wayland(
@@ -5196,42 +5291,11 @@ async def test_kde_wayland_prefers_persistent_pipewire_capture(tmp_path, monkeyp
     )
 
     assert method == "xdg-desktop-portal-pipewire"
-    assert calls[0] == ("layout", monitors)
-    assert calls[1][0] == "capture"
+    assert calls[0] == "screenshot"
+    assert calls[1] == ("layout", monitors)
+    assert calls[2][0] == "capture"
 
 
-@pytest.mark.asyncio
-async def test_kde_wayland_pipewire_failure_does_not_open_interactive_screenshot_portal(
-    tmp_path,
-    monkeypatch,
-):
-    import local_shell_mcp.gui.linux as linux
-
-    path = tmp_path / "failed.png"
-    bounds = {"x": 10, "y": 20, "width": 100, "height": 80}
-    monitors = [{"x": 0, "y": 0, "width": 500, "height": 400, "scale": 1}]
-
-    class Portal:
-        def set_monitor_layout(self, _received):
-            return None
-
-        async def capture_monitor_frame(self, _destination, _monitor):
-            raise GuiUnavailableError("pipewire unavailable")
-
-    async def forbidden_portal(*_args, **_kwargs):
-        pytest.fail("interactive Screenshot portal must not be used on KDE")
-
-    monkeypatch.setattr(linux, "portal_screenshot", forbidden_portal)
-    monkeypatch.setattr(linux.shutil, "which", lambda _name: None)
-
-    with pytest.raises(GuiUnavailableError, match="without using the interactive"):
-        await linux._capture_wayland(
-            path,
-            bounds,
-            monitors,
-            {"XDG_CURRENT_DESKTOP": "KDE"},
-            portal=Portal(),
-        )
 
 
 @pytest.mark.asyncio
