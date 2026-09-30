@@ -3238,6 +3238,10 @@ async def _discard_remote_gui_frame_once(
         raise RuntimeError("Remote gui_frame_discard returned invalid data")
 
 
+def _gui_handoff_now() -> float:
+    return time.monotonic()
+
+
 async def _gui_state_result(
     window_id: str,
     *,
@@ -3252,6 +3256,8 @@ async def _gui_state_result(
     state_id = ""
     delivered = False
     manager = None
+    remote_handoff_started: float | None = None
+    remote_initial_ttl_s = 0.0
     try:
         args = {
             "window_id": window_id,
@@ -3269,6 +3275,17 @@ async def _gui_state_result(
             state_id = str(data.get("state_id") or "")
             if not state_id:
                 raise RuntimeError("Remote gui_state returned no state_id")
+            raw_state_ttl = data.get("state_ttl_s")
+            if raw_state_ttl is not None:
+                try:
+                    remote_initial_ttl_s = float(raw_state_ttl)
+                except (TypeError, ValueError) as exc:
+                    raise RuntimeError("Remote gui_state returned invalid state_ttl_s") from exc
+                if remote_initial_ttl_s <= 0:
+                    raise RuntimeError(
+                        "Remote GUI state expired before controller handoff; call gui_state again"
+                    )
+                remote_handoff_started = _gui_handoff_now()
             screenshot_path = (
                 str(data.get("screenshot_path")) if data.get("screenshot_path") else None
             )
@@ -3293,6 +3310,14 @@ async def _gui_state_result(
                     pass
                 else:
                     screenshot_path = None
+            if remote_handoff_started is not None:
+                handoff_elapsed_s = max(0.0, _gui_handoff_now() - remote_handoff_started)
+                remaining_ttl_s = remote_initial_ttl_s - handoff_elapsed_s
+                if remaining_ttl_s <= 0:
+                    raise RuntimeError(
+                        "Remote GUI state expired during controller handoff; call gui_state again"
+                    )
+                data["state_ttl_s"] = remaining_ttl_s
         else:
             manager = get_gui_manager()
             data = await manager.snapshot(**args)

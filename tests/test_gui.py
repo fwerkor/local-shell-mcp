@@ -912,7 +912,7 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
     assert result.isError is False
     assert result.structuredContent["machine"] == "node"
     assert result.structuredContent["screenshot"] is True
-    assert result.structuredContent["state_ttl_s"] == 30
+    assert 29 < result.structuredContent["state_ttl_s"] <= 30
     assert [call[1] for call in calls] == ["gui_state"]
     assert [call[1] for call in transfer_calls] == ["transfer_gui_temp_delete"]
 
@@ -934,7 +934,7 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
         machine="node",
     )
     assert handed_off.isError is False
-    assert handed_off.structuredContent["state_ttl_s"] == 30
+    assert 29 < handed_off.structuredContent["state_ttl_s"] <= 30
     assert [call[1] for call in calls] == ["gui_state"]
 
     async def invalid_refresh(*_args, **_kwargs):
@@ -1093,6 +1093,7 @@ async def test_gui_state_remote_inline_screenshot_skips_secondary_transfer(tmp_p
     assert result.structuredContent["mime_type"] == "image/webp"
     assert "screenshot_inline_b64" not in result.structuredContent
     assert calls == ["gui_state"]
+    assert 29 < result.structuredContent["state_ttl_s"] <= 30
 
 
 @pytest.mark.asyncio
@@ -1136,8 +1137,58 @@ async def test_gui_state_remote_handoff_avoids_extra_refresh_roundtrip(tmp_path,
     )
 
     assert result.isError is False
-    assert result.structuredContent["state_ttl_s"] == 30
+    assert 29 < result.structuredContent["state_ttl_s"] <= 30
     assert calls == ["gui_state"]
+
+
+@pytest.mark.asyncio
+async def test_gui_state_remote_handoff_rejects_expired_state(tmp_path, monkeypatch):
+    import local_shell_mcp.tools as tools
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "true")
+    tools.get_settings.cache_clear()
+    calls = []
+    discarded = []
+
+    async def remote_worker(_machine, tool, _args, timeout_s=None):
+        del timeout_s
+        calls.append(tool)
+        if tool == "gui_state":
+            return {
+                "backend": "remote",
+                "state_id": "expiring",
+                "state_ttl_s": 2,
+                "window": {
+                    "id": "w",
+                    "bounds": {"x": 0, "y": 0, "width": 4, "height": 4},
+                },
+                "elements": [],
+                "capabilities": {},
+                "screenshot_path": None,
+            }
+        if tool == "gui_state_discard":
+            discarded.append(True)
+            return {"discarded": True}
+        raise AssertionError(f"unexpected worker tool: {tool}")
+
+    ticks = iter((100.0, 103.0))
+    monkeypatch.setattr(tools, "_remote_worker_data", remote_worker)
+    monkeypatch.setattr(tools, "_gui_handoff_now", lambda: next(ticks))
+
+    result = await tools._gui_state_result(
+        "w",
+        screenshot=False,
+        include_elements=False,
+        max_elements=1,
+        max_depth=1,
+        machine="node",
+    )
+
+    assert result.isError is True
+    assert "expired during controller handoff" in result.structuredContent["message"]
+    assert calls == ["gui_state", "gui_state_discard"]
+    assert discarded == [True]
 
 
 def test_controller_gui_staging_stays_inside_workspace_with_external_state_dir(
