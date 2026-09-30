@@ -262,10 +262,16 @@ def _kde_wayland_window_geometries_sync(
     marker = f"LSM_KWIN_GEOMETRY_{uuid.uuid4().hex}:"
     script_name = f"lsm-geometry-{uuid.uuid4().hex}"
     script = f"""var marker = {json.dumps(marker)};
-var windows = workspace.stackingOrder;
+var windows = [];
+if ("stackingOrder" in workspace && workspace.stackingOrder) {{
+    windows = workspace.stackingOrder;
+}} else if (typeof workspace.clientList === "function") {{
+    windows = workspace.clientList();
+}}
+var active = ("activeWindow" in workspace) ? workspace.activeWindow : workspace.activeClient;
 for (var i = windows.length - 1; i >= 0; --i) {{
     var w = windows[i];
-    if (!w.normalWindow) {{
+    if (!(w.normalWindow || w.dialog || w.utility)) {{
         continue;
     }}
     var g = w.clientGeometry;
@@ -278,7 +284,7 @@ for (var i = windows.length - 1; i >= 0; --i) {{
         internal_id: String(w.internalId || ""),
         app: String(w.desktopFileName || w.resourceClass || w.resourceName || ""),
         minimized: Boolean(w.minimized),
-        active: w === workspace.activeWindow,
+        active: w === active,
         x: Math.round(g.x),
         y: Math.round(g.y),
         width: Math.round(g.width),
@@ -607,10 +613,17 @@ def _focus_kde_wayland_window_sync(
     if expected_pid <= 0:
         raise GuiUnavailableError("KDE Wayland target window has no process identity")
     expected_title = str(window.get("title") or "")
+    public_id = str(window.get("id") or "")
+    expected_internal_id = (
+        public_id.removeprefix("kwin:").lower()
+        if public_id.startswith("kwin:")
+        else ""
+    )
 
     script_name = f"lsm-focus-{uuid.uuid4().hex}"
     script = f"""var expectedPid = {expected_pid};
 var expectedTitle = {json.dumps(expected_title, ensure_ascii=True)};
+var expectedInternalId = {json.dumps(expected_internal_id, ensure_ascii=True)};
 var expected = {{
     x: {expected_x},
     y: {expected_y},
@@ -635,22 +648,33 @@ if (typeof workspace.windowList === "function") {{
 }} else if (typeof workspace.clientList === "function") {{
     windows = workspace.clientList();
 }}
-for (var i = 0; i < windows.length; ++i) {{
-    var w = windows[i];
-    if (Number(w.pid) === expectedPid) {{
-        pidCandidates.push(w);
-    }}
-}}
 var candidates = [];
-if (expectedTitle.length > 0) {{
-    for (var j = 0; j < pidCandidates.length; ++j) {{
-        if (String(pidCandidates[j].caption) === expectedTitle) {{
-            candidates.push(pidCandidates[j]);
+if (expectedInternalId.length > 0) {{
+    for (var i = 0; i < windows.length; ++i) {{
+        var internalId = String(windows[i].internalId || "")
+            .replace(/[{{}}]/g, "")
+            .toLowerCase();
+        if (internalId === expectedInternalId) {{
+            candidates.push(windows[i]);
         }}
     }}
-}}
-if (candidates.length === 0) {{
-    candidates = pidCandidates;
+}} else {{
+    for (var i = 0; i < windows.length; ++i) {{
+        var w = windows[i];
+        if (Number(w.pid) === expectedPid) {{
+            pidCandidates.push(w);
+        }}
+    }}
+    if (expectedTitle.length > 0) {{
+        for (var j = 0; j < pidCandidates.length; ++j) {{
+            if (String(pidCandidates[j].caption) === expectedTitle) {{
+                candidates.push(pidCandidates[j]);
+            }}
+        }}
+    }}
+    if (candidates.length === 0) {{
+        candidates = pidCandidates;
+    }}
 }}
 if (candidates.length > 1) {{
     var geometryCandidates = [];

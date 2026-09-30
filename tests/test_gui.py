@@ -4395,7 +4395,9 @@ def test_kde_wayland_focus_script_prefers_unique_pid_title_before_geometry(
     assert len(scripts) == 1
     script = scripts[0]
     assert r'var expectedTitle = "LSM \"GUI\" Test";' in script
+    assert 'var expectedInternalId = "";' in script
     assert "String(pidCandidates[j].caption) === expectedTitle" in script
+    assert "internalId === expectedInternalId" in script
     assert "candidate.clientGeometry" in script
     assert "candidate.frameGeometry" in script
     assert 'typeof workspace.windowList === "function"' in script
@@ -4403,6 +4405,63 @@ def test_kde_wayland_focus_script_prefers_unique_pid_title_before_geometry(
     assert "workspace.raiseWindow(selected);" in script
     assert "workspace.raiseClient(selected);" in script
     assert "workspace.activeClient = selected;" in script
+
+
+def test_kde_wayland_focus_script_requires_stable_kwin_id(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    scripts = []
+    monkeypatch.setattr(linux.shutil, "which", lambda name: "/usr/bin/qdbus6")
+    monkeypatch.setattr(linux.time, "sleep", lambda _seconds: None)
+
+    def run(command, **_kwargs):
+        if "org.kde.kwin.Scripting.loadScript" in command:
+            scripts.append(Path(command[-2]).read_text())
+            return SimpleNamespace(returncode=0, stdout="0\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(linux.subprocess, "run", run)
+    linux._focus_kde_wayland_window_sync(
+        {
+            "id": "kwin:22222222-2222-2222-2222-222222222222",
+            "pid": 42,
+            "title": "Target",
+            "bounds": {"x": 0, "y": 0, "width": 700, "height": 520},
+        },
+        {},
+    )
+
+    script = scripts[0]
+    assert 'var expectedInternalId = "22222222-2222-2222-2222-222222222222";' in script
+    assert "internalId === expectedInternalId" in script
+    assert "if (expectedInternalId.length > 0)" in script
+
+
+def test_kde_wayland_geometry_script_supports_plasma5_and_dialogs(monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    scripts = []
+    monkeypatch.setattr(
+        linux.shutil,
+        "which",
+        lambda name: "/usr/bin/qdbus6" if name.startswith("qdbus") else "/usr/bin/journalctl",
+    )
+    monkeypatch.setattr(linux.time, "sleep", lambda _seconds: None)
+
+    def run(command, **_kwargs):
+        if "org.kde.kwin.Scripting.loadScript" in command:
+            scripts.append(Path(command[-2]).read_text())
+            return SimpleNamespace(returncode=0, stdout="0\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(linux.subprocess, "run", run)
+    linux._kde_wayland_window_geometries_sync({})
+
+    script = scripts[0]
+    assert 'typeof workspace.clientList === "function"' in script
+    assert '"activeWindow" in workspace' in script
+    assert "workspace.activeClient" in script
+    assert "w.normalWindow || w.dialog || w.utility" in script
 
 
 def test_kde_wayland_authoritative_list_uses_kwin_top_levels():
