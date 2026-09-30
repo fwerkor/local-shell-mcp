@@ -921,16 +921,11 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
     assert result.isError is False
     assert result.structuredContent["machine"] == "node"
     assert result.structuredContent["screenshot"] is True
-    assert 0 < result.structuredContent["state_ttl_s"] < 30
-    assert [call[1] for call in calls] == [
-        "gui_state",
-        "gui_state_refresh",
-        "gui_state_refresh",
-    ]
+    assert result.structuredContent["state_ttl_s"] == 30
+    assert [call[1] for call in calls] == ["gui_state"]
     assert [call[1] for call in transfer_calls] == ["transfer_gui_temp_delete"]
 
     calls.clear()
-    monkeypatch.setattr(tools, "_REMOTE_GUI_STATE_REFRESH_INTERVAL_S", 0.001)
 
     async def slow_copy(machine, source, destination):
         del machine, source
@@ -939,7 +934,7 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
         return {"bytes": 7}
 
     monkeypatch.setattr(tools, "_copy_remote_gui_temp_to_local", slow_copy)
-    kept_alive = await tools._gui_state_result(
+    handed_off = await tools._gui_state_result(
         "w",
         screenshot=True,
         include_elements=False,
@@ -947,10 +942,9 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
         max_depth=1,
         machine="node",
     )
-    assert kept_alive.isError is False
-    assert 0 < kept_alive.structuredContent["state_ttl_s"] < 30
-    refresh_calls = [call for call in calls if call[1] == "gui_state_refresh"]
-    assert len(refresh_calls) >= 3
+    assert handed_off.isError is False
+    assert handed_off.structuredContent["state_ttl_s"] == 30
+    assert [call[1] for call in calls] == ["gui_state"]
 
     async def invalid_refresh(*_args, **_kwargs):
         return "bad"
@@ -1107,64 +1101,41 @@ async def test_gui_state_remote_inline_screenshot_skips_secondary_transfer(tmp_p
     assert result.structuredContent["screenshot"] is True
     assert result.structuredContent["mime_type"] == "image/webp"
     assert "screenshot_inline_b64" not in result.structuredContent
-    assert calls == ["gui_state", "gui_state_refresh", "gui_state_refresh"]
+    assert calls == ["gui_state"]
 
 
 @pytest.mark.asyncio
-async def test_gui_state_transient_keepalive_failure_uses_final_refresh(
-    tmp_path,
-    monkeypatch,
-):
+async def test_gui_state_remote_handoff_does_not_refresh_state(tmp_path, monkeypatch):
     import local_shell_mcp.tools as tools
 
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "true")
-    monkeypatch.setattr(tools, "_REMOTE_GUI_STATE_REFRESH_INTERVAL_S", 0.001)
     tools.get_settings.cache_clear()
-    refresh_calls = 0
+    calls = []
 
     async def remote_worker(_machine, tool, _args, timeout_s=None):
-        nonlocal refresh_calls
         del timeout_s
+        calls.append(tool)
         if tool == "gui_state":
             return {
                 "backend": "remote",
                 "state_id": "s",
+                "state_ttl_s": 30,
                 "window": {
                     "id": "w",
                     "bounds": {"x": 0, "y": 0, "width": 4, "height": 4},
                 },
                 "elements": [],
                 "capabilities": {},
-                "screenshot_path": ".local-shell-mcp/tmp/state.png",
+                "screenshot_path": None,
             }
-        if tool == "gui_state_refresh":
-            refresh_calls += 1
-            if refresh_calls == 2:
-                raise RuntimeError("transient keepalive failure")
-            return {"state_id": "s", "state_ttl_s": 30}
         raise AssertionError(f"unexpected worker tool: {tool}")
 
-    async def remote_transfer(*_args, **_kwargs):
-        return {"deleted": True}
-
-    async def slow_copy(_machine, _source, destination):
-        await asyncio.sleep(0.01)
-        Image.new("RGB", (4, 4)).save(destination, format="PNG")
-        return {"bytes": 7}
-
     monkeypatch.setattr(tools, "_remote_worker_data", remote_worker)
-    monkeypatch.setattr(tools, "_remote_transfer_data", remote_transfer)
-    monkeypatch.setattr(tools, "_copy_remote_gui_temp_to_local", slow_copy)
-    monkeypatch.setattr(
-        tools,
-        "transfer_alloc_temp_path",
-        lambda suffix: {"path": str(tools.temp_dir() / f"state{suffix}")},
-    )
 
     result = await tools._gui_state_result(
         "w",
-        screenshot=True,
+        screenshot=False,
         include_elements=False,
         max_elements=1,
         max_depth=1,
@@ -1172,7 +1143,9 @@ async def test_gui_state_transient_keepalive_failure_uses_final_refresh(
     )
 
     assert result.isError is False
-    assert refresh_calls >= 3
+    assert result.structuredContent["state_ttl_s"] == 30
+    assert calls == ["gui_state"]
+
 
 
 def test_controller_gui_staging_stays_inside_workspace_with_external_state_dir(
@@ -4269,6 +4242,44 @@ def test_linux_locator_center_must_be_usable_and_inside_window(monkeypatch):
         )
 
 
+def test_kde_wayland_focus_script_prefers_unique_pid_title_before_geometry(
+    tmp_path,
+    monkeypatch,
+):
+    import local_shell_mcp.gui.linux as linux
+
+    scripts = []
+
+    monkeypatch.setattr(linux.shutil, "which", lambda name: "/usr/bin/qdbus6")
+    monkeypatch.setattr(linux.time, "sleep", lambda _seconds: None)
+
+    def run(command, **_kwargs):
+        if "org.kde.kwin.Scripting.loadScript" in command:
+            script_path = Path(command[-2])
+            scripts.append(script_path.read_text())
+            return SimpleNamespace(returncode=0, stdout="0\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(linux.subprocess, "run", run)
+
+    linux._focus_kde_wayland_window_sync(
+        {
+            "pid": 42,
+            "title": 'LSM "GUI" Test',
+            "bounds": {"x": 0, "y": 0, "width": 700, "height": 520},
+        },
+        {},
+    )
+
+    assert len(scripts) == 1
+    script = scripts[0]
+    assert r'var expectedTitle = "LSM \"GUI\" Test";' in script
+    assert "String(pidCandidates[j].caption) === expectedTitle" in script
+    assert "candidate.clientGeometry" in script
+    assert "candidate.frameGeometry" in script
+    assert "workspace.raiseWindow(candidates[0]);" in script
+
+
 @pytest.mark.asyncio
 async def test_linux_focus_falls_back_to_kwin_and_reverifies_active(monkeypatch):
     from unittest.mock import AsyncMock
@@ -4279,8 +4290,8 @@ async def test_linux_focus_falls_back_to_kwin_and_reverifies_active(monkeypatch)
     env = {"XDG_CURRENT_DESKTOP": "KDE", "XDG_SESSION_TYPE": "wayland"}
     monkeypatch.setattr(backend, "_ensure_env", AsyncMock(return_value=env))
     helper_results = [
-        GuiUnavailableError("RuntimeError: AT-SPI target cannot be focused"),
-        {"semantic": True, "already_active": True},
+        {"semantic": True},
+        {"semantic": True},
     ]
     calls = []
 
@@ -4309,6 +4320,40 @@ async def test_linux_focus_falls_back_to_kwin_and_reverifies_active(monkeypatch)
     assert activated == [(window, env)]
     assert len(calls) == 2
     assert calls[1][0]["command"] == "semantic_action"
+
+
+@pytest.mark.asyncio
+async def test_linux_focus_verifies_with_kwin_even_when_atspi_reports_active(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    import local_shell_mcp.gui.linux as linux
+
+    backend = linux.LinuxGuiBackend()
+    env = {"XDG_CURRENT_DESKTOP": "KDE", "XDG_SESSION_TYPE": "wayland"}
+    monkeypatch.setattr(backend, "_ensure_env", AsyncMock(return_value=env))
+    helper_calls = []
+
+    def helper(payload, _env=None):
+        helper_calls.append(payload)
+        return {"semantic": True, "already_active": True}
+
+    monkeypatch.setattr(backend, "_helper", helper)
+    activated = []
+    monkeypatch.setattr(
+        linux,
+        "_focus_kde_wayland_window_sync",
+        lambda window, selected_env: activated.append((window, selected_env)),
+    )
+
+    window = {
+        "id": "atspi:42:sig",
+        "pid": 42,
+        "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+    }
+    await backend._focus_window(window, env)
+
+    assert activated == [(window, env)]
+    assert len(helper_calls) == 2
 
 
 def test_atspi_window_focus_accepts_already_active_nonfocusable_window(monkeypatch):
@@ -4719,8 +4764,8 @@ async def test_wayland_snapshot_focuses_target_before_visible_region_capture(tmp
     async def focus(_window, _env=None, **_kwargs):
         calls.append("focus")
 
-    async def capture(path, bounds, monitors, env):
-        del bounds, monitors, env
+    async def capture(path, bounds, monitors, env, *, portal=None):
+        del bounds, monitors, env, portal
         calls.append("capture")
         Image.new("RGB", (10, 10)).save(path)
         return "test-wayland"
@@ -4876,6 +4921,142 @@ async def test_wayland_grim_rejects_oversized_output_before_decode(tmp_path, mon
             [],
             {},
         )
+
+
+@pytest.mark.asyncio
+async def test_kde_wayland_prefers_persistent_pipewire_capture(tmp_path, monkeypatch):
+    import local_shell_mcp.gui.linux as linux
+
+    path = tmp_path / "pipewire.png"
+    bounds = {"x": 10, "y": 20, "width": 100, "height": 80}
+    monitors = [{"x": 0, "y": 0, "width": 500, "height": 400, "scale": 1}]
+    calls = []
+
+    class Portal:
+        def set_monitor_layout(self, received):
+            calls.append(("layout", received))
+
+        async def capture_monitor_frame(self, destination, monitor):
+            calls.append(("capture", destination, monitor))
+            Image.new("RGB", (500, 400)).save(destination, format="PNG")
+
+    async def forbidden_portal(*_args, **_kwargs):
+        pytest.fail("interactive Screenshot portal must not be used on KDE")
+
+    monkeypatch.setattr(linux, "portal_screenshot", forbidden_portal)
+    monkeypatch.setattr(linux, "_crop_desktop_capture", lambda *_args: None)
+
+    method = await linux._capture_wayland(
+        path,
+        bounds,
+        monitors,
+        {"XDG_CURRENT_DESKTOP": "KDE"},
+        portal=Portal(),
+    )
+
+    assert method == "xdg-desktop-portal-pipewire"
+    assert calls[0] == ("layout", monitors)
+    assert calls[1][0] == "capture"
+
+
+@pytest.mark.asyncio
+async def test_kde_wayland_pipewire_failure_does_not_open_interactive_screenshot_portal(
+    tmp_path,
+    monkeypatch,
+):
+    import local_shell_mcp.gui.linux as linux
+
+    path = tmp_path / "failed.png"
+    bounds = {"x": 10, "y": 20, "width": 100, "height": 80}
+    monitors = [{"x": 0, "y": 0, "width": 500, "height": 400, "scale": 1}]
+
+    class Portal:
+        def set_monitor_layout(self, _received):
+            return None
+
+        async def capture_monitor_frame(self, _destination, _monitor):
+            raise GuiUnavailableError("pipewire unavailable")
+
+    async def forbidden_portal(*_args, **_kwargs):
+        pytest.fail("interactive Screenshot portal must not be used on KDE")
+
+    monkeypatch.setattr(linux, "portal_screenshot", forbidden_portal)
+    monkeypatch.setattr(linux.shutil, "which", lambda _name: None)
+
+    with pytest.raises(GuiUnavailableError, match="without using the interactive"):
+        await linux._capture_wayland(
+            path,
+            bounds,
+            monitors,
+            {"XDG_CURRENT_DESKTOP": "KDE"},
+            portal=Portal(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_portal_pipewire_capture_passes_and_closes_remote_fd(tmp_path, monkeypatch):
+    import os
+
+    import local_shell_mcp.gui.linux_portal as portal_module
+
+    portal = PortalDesktop({})
+    portal._session = "/session/1"
+    portal._remote = object()
+    portal._monitors = [{"x": 0, "y": 0, "width": 500, "height": 400}]
+    portal._streams = [
+        {
+            "node_id": 77,
+            "properties": {
+                "position": [0, 0],
+                "size": [500, 400],
+                "source_type": 1,
+            },
+        }
+    ]
+    read_fd, write_fd = os.pipe()
+    os.close(write_fd)
+    run_calls = []
+
+    class Screen:
+        async def call_open_pipe_wire_remote(self, session, options):
+            assert session == "/session/1"
+            assert options == {}
+            return read_fd
+
+    portal._screen = Screen()
+
+    async def ready():
+        return "/session/1"
+
+    def run(argv, **kwargs):
+        run_calls.append((argv, kwargs))
+        destination = next(
+            item.removeprefix("location=")
+            for item in argv
+            if item.startswith("location=")
+        )
+        Image.new("RGB", (500, 400)).save(destination, format="PNG")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(portal, "ensure_session", ready)
+    monkeypatch.setattr(portal_module.shutil, "which", lambda name: "/usr/bin/gst-launch-1.0" if name == "gst-launch-1.0" else None)
+    monkeypatch.setattr(portal_module.subprocess, "run", run)
+
+    path = tmp_path / "pipewire.png"
+    await portal.capture_monitor_frame(
+        path,
+        {"x": 0, "y": 0, "width": 500, "height": 400},
+    )
+
+    assert path.is_file()
+    assert len(run_calls) == 1
+    argv, kwargs = run_calls[0]
+    assert "pipewiresrc" in argv
+    assert "path=77" in argv
+    assert f"fd={read_fd}" in argv
+    assert kwargs["pass_fds"] == (read_fd,)
+    with pytest.raises(OSError):
+        os.fstat(read_fd)
 
 
 @pytest.mark.asyncio
@@ -5408,6 +5589,89 @@ def test_atspi_element_signature_bounds_provider_role_and_name(monkeypatch):
     assert helper._element_signature(Node()) == "a" * 16
     assert len(hashed) == 1
     assert len(hashed[0]) <= helper.GUI_MAX_ELEMENT_TEXT_BYTES * 3 + 128
+
+
+def test_atspi_element_signature_uses_provider_object_identity_without_accessible_id(
+    monkeypatch,
+):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    class Provider:
+        bus_name = ":1.42"
+
+    class Node:
+        app = Provider()
+        path = "/org/a11y/atspi/accessible/7"
+
+        def get_accessible_id(self):
+            return ""
+
+        def get_role_name(self):
+            return "text"
+
+        def get_name(self):
+            return "LSM Input"
+
+    node = Node()
+    monkeypatch.setattr(
+        helper,
+        "_bounds",
+        lambda _obj: {"x": 1, "y": 2, "width": 300, "height": 40},
+    )
+
+    identity = helper._element_provider_identity(node)
+    assert identity == "object\0:1.42\0/org/a11y/atspi/accessible/7"
+    assert helper._element_signature(node) is not None
+
+
+def test_atspi_semantic_action_accepts_provider_object_identity(monkeypatch):
+    from local_shell_mcp.gui import linux_atspi_helper as helper
+
+    class Component:
+        def grab_focus(self):
+            return True
+
+    class Provider:
+        bus_name = ":1.42"
+
+    class Element:
+        app = Provider()
+        path = "/org/a11y/atspi/accessible/7"
+
+        def get_accessible_id(self):
+            return ""
+
+        def get_component_iface(self):
+            return Component()
+
+    element = Element()
+    identity = "object\0:1.42\0/org/a11y/atspi/accessible/7"
+    monkeypatch.setattr(
+        helper,
+        "_resolve_window",
+        lambda _window_id: (None, object(), 0),
+    )
+    monkeypatch.setattr(helper, "_resolve_path", lambda _window, _path: element)
+    monkeypatch.setattr(helper, "_element_signature", lambda _obj: "observed-fp")
+    monkeypatch.setattr(
+        helper,
+        "Atspi",
+        SimpleNamespace(StateType=SimpleNamespace(ACTIVE=object())),
+    )
+
+    result = helper._semantic_action(
+        {
+            "window_id": "atspi:1:sig",
+            "locator": {
+                "path": [2],
+                "identity": identity,
+                "accessible_id": "",
+                "fingerprint": "observed-fp",
+            },
+            "action": {"type": "focus"},
+        }
+    )
+    assert result == {"semantic": True}
 
 
 def test_atspi_element_locator_requires_stable_accessible_identity(monkeypatch):

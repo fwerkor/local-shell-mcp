@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import shutil
+import subprocess
 import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -12,6 +14,7 @@ from urllib.request import url2pathname
 
 from ..state_store import get_state_store
 from .base import GuiUnavailableError
+from .linux_eis import EisSender
 
 _PORTAL_INPUT_TIMEOUT_S = 15.0
 _PORTAL_LIFECYCLE_TIMEOUT_S = 15.0
@@ -266,6 +269,8 @@ class PortalDesktop:
         self._session_iface = None
         self._streams: list[dict[str, Any]] = []
         self._monitors: list[dict[str, int]] = []
+        self._eis_sender: EisSender | None = None
+        self._eis_unavailable = False
         self._lock = asyncio.Lock()
 
     async def _connect(self) -> None:
@@ -276,7 +281,11 @@ class PortalDesktop:
         self._screen = None
         MessageBus, _Variant = _portal_modules()
         address = self._env.get("DBUS_SESSION_BUS_ADDRESS")
-        candidate = MessageBus(bus_address=address) if address else MessageBus()
+        candidate = (
+            MessageBus(bus_address=address, negotiate_unix_fd=True)
+            if address
+            else MessageBus(negotiate_unix_fd=True)
+        )
         connected = None
         try:
             connected = await _portal_lifecycle_wait(
@@ -324,12 +333,20 @@ class PortalDesktop:
         )
 
     def _on_session_closed(self, *_args: Any) -> None:
+        if self._eis_sender is not None:
+            self._eis_sender.close()
+        self._eis_sender = None
+        self._eis_unavailable = False
         self._session = None
         self._session_iface = None
         self._streams = []
 
     def _invalidate_transport(self) -> None:
         bus = self._bus
+        if self._eis_sender is not None:
+            self._eis_sender.close()
+        self._eis_sender = None
+        self._eis_unavailable = False
         self._bus = None
         self._remote = None
         self._screen = None
@@ -585,8 +602,148 @@ class PortalDesktop:
             "Target point is outside the ScreenCast streams granted by the desktop portal"
         )
 
+    async def capture_monitor_frame(
+        self,
+        path: Path,
+        monitor: dict[str, Any],
+    ) -> None:
+        session = await self.ensure_session()
+        if self._screen is None:
+            raise GuiUnavailableError("Wayland ScreenCast portal is unavailable")
+        gst_launch = shutil.which("gst-launch-1.0")
+        if gst_launch is None:
+            raise GuiUnavailableError(
+                "KDE Wayland PipeWire capture requires gst-launch-1.0 and pipewiresrc"
+            )
+
+        try:
+            target = (
+                int(monitor["x"]),
+                int(monitor["y"]),
+                int(monitor["width"]),
+                int(monitor["height"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise GuiUnavailableError("Target monitor geometry is invalid") from exc
+
+        matches = [
+            stream
+            for stream in self._streams
+            if self._stream_geometry(stream) == target
+        ]
+        if len(matches) != 1:
+            raise GuiUnavailableError(
+                "Could not uniquely map the target monitor to a ScreenCast stream"
+            )
+        node_id = int(matches[0]["node_id"])
+
+        fd_value: Any = None
+        try:
+            fd_value = await _portal_lifecycle_wait(
+                self._screen.call_open_pipe_wire_remote(session, {}),
+                "opening the ScreenCast PipeWire remote",
+            )
+            fd = int(fd_value)
+        except Exception as exc:
+            raise GuiUnavailableError(
+                "Could not open the ScreenCast PipeWire remote"
+            ) from exc
+
+        path.unlink(missing_ok=True)
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run,
+                [
+                    gst_launch,
+                    "-q",
+                    "pipewiresrc",
+                    f"fd={fd}",
+                    f"path={node_id}",
+                    "num-buffers=1",
+                    "do-timestamp=true",
+                    "!",
+                    "videoconvert",
+                    "!",
+                    "pngenc",
+                    "!",
+                    "filesink",
+                    f"location={path}",
+                ],
+                pass_fds=(fd,),
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+                umask=0o077,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise GuiUnavailableError("PipeWire screenshot capture timed out") from exc
+        finally:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+
+        if result.returncode != 0 or not path.is_file() or path.stat().st_size <= 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise GuiUnavailableError(
+                "PipeWire screenshot capture failed"
+                + (f": {detail[-1000:]}" if detail else "")
+            )
+
+
+    async def _ensure_eis(self, session: str) -> EisSender | None:
+        self._require_session(session)
+        if self._eis_sender is not None:
+            return self._eis_sender
+        if self._eis_unavailable or not EisSender.available():
+            self._eis_unavailable = True
+            return None
+
+        remote = self._require_session(session)
+        connect = getattr(remote, "call_connect_to_eis", None)
+        if not callable(connect):
+            self._eis_unavailable = True
+            return None
+        try:
+            raw_fd = int(
+                await asyncio.wait_for(
+                    connect(session, {}),
+                    timeout=_PORTAL_INPUT_TIMEOUT_S,
+                )
+            )
+            fd = os.dup(raw_fd)
+            with contextlib.suppress(OSError):
+                os.close(raw_fd)
+            sender = EisSender(fd)
+        except (
+            AttributeError,
+            GuiUnavailableError,
+            OSError,
+            TimeoutError,
+            TypeError,
+            ValueError,
+        ):
+            self._eis_unavailable = True
+            return None
+        self._eis_sender = sender
+        return sender
+
+    async def _eis_gesture(
+        self,
+        session: str,
+        method: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> bool:
+        sender = await self._ensure_eis(session)
+        if sender is None:
+            return False
+        getattr(sender, method)(*args, **kwargs)
+        return True
+
     async def move(self, x: int, y: int, *, session: str | None = None) -> None:
         session = await self._bind_session(session)
+        if await self._eis_gesture(session, "move", float(x), float(y)):
+            return
         remote = self._require_session(session)
         stream, local_x, local_y = self._stream_point(x, y)
         await self._call_remote(
@@ -630,6 +787,15 @@ class PortalDesktop:
         session: str | None = None,
     ) -> None:
         session = await self._bind_session(session)
+        if await self._eis_gesture(
+            session,
+            "click",
+            float(x),
+            float(y),
+            button=int(button),
+            count=int(count),
+        ):
+            return
         await self.move(x, y, session=session)
         for _ in range(max(1, count)):
             pressed = False
@@ -655,6 +821,15 @@ class PortalDesktop:
         session: str | None = None,
     ) -> None:
         session = await self._bind_session(session)
+        if await self._eis_gesture(
+            session,
+            "drag",
+            float(x),
+            float(y),
+            float(to_x),
+            float(to_y),
+        ):
+            return
         await self.move(x, y, session=session)
         pressed = False
         try:
@@ -678,6 +853,15 @@ class PortalDesktop:
         session: str | None = None,
     ) -> None:
         session = await self._bind_session(session)
+        if await self._eis_gesture(
+            session,
+            "scroll",
+            float(x),
+            float(y),
+            -float(delta_x),
+            -float(delta_y),
+        ):
+            return
         await self.move(x, y, session=session)
         remote = self._require_session(session)
         await self._call_remote(

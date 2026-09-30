@@ -3270,7 +3270,6 @@ async def _gui_state_result(
     state_id = ""
     delivered = False
     manager = None
-    keepalive: asyncio.Task[None] | None = None
     try:
         args = {
             "window_id": window_id,
@@ -3291,17 +3290,7 @@ async def _gui_state_result(
             screenshot_path = (
                 str(data.get("screenshot_path")) if data.get("screenshot_path") else None
             )
-            refreshed = await _refresh_remote_gui_state_once(
-                machine,
-                window_id,
-                state_id,
-            )
-            data["state_ttl_s"] = float(refreshed.get("state_ttl_s") or 0)
-
             if screenshot_path:
-                keepalive = asyncio.create_task(
-                    _refresh_remote_gui_state_lease(machine, window_id, state_id)
-                )
                 image = _remote_inline_gui_image(data, screenshot_path)
                 if image is None:
                     local_path = await asyncio.to_thread(_controller_gui_staging_path)
@@ -3325,12 +3314,6 @@ async def _gui_state_result(
                 else:
                     screenshot_path = None
 
-            refreshed = await _refresh_remote_gui_state_once(
-                machine,
-                window_id,
-                state_id,
-            )
-            data["state_ttl_s"] = float(refreshed.get("state_ttl_s") or 0)
         else:
             manager = get_gui_manager()
             data = await manager.snapshot(**args)
@@ -3355,10 +3338,6 @@ async def _gui_state_result(
     except Exception as exc:
         return _gui_state_error_result(machine, exc)
     finally:
-        if keepalive is not None:
-            keepalive.cancel()
-            with suppress(BaseException):
-                await keepalive
         if machine and screenshot_path:
             with suppress(Exception):
                 await _remote_transfer_data(
