@@ -38,6 +38,7 @@ def _signature_library():
         "ei_device_has_capability",
         "ei_device_start_emulating",
         "ei_device_stop_emulating",
+        "ei_device_pointer_motion",
         "ei_device_pointer_motion_absolute",
         "ei_device_button_button",
         "ei_device_scroll_delta",
@@ -104,6 +105,9 @@ class _GestureLib:
     def ei_device_stop_emulating(self, device):
         self.calls.append(("stop", device))
 
+    def ei_device_pointer_motion(self, device, dx, dy):
+        self.calls.append(("nudge", device, dx, dy))
+
     def ei_device_pointer_motion_absolute(self, device, x, y):
         self.calls.append(("move", device, x, y))
 
@@ -139,6 +143,7 @@ def test_eis_gestures_drain_lifecycle_and_close(monkeypatch):
     monkeypatch.setattr(sender, "_dispatch_events", lambda _timeout=0.0: False)
     monkeypatch.setattr(linux_eis.time, "sleep", lambda _seconds: None)
 
+    sender.nudge(1, -2)
     sender.move(10, 20)
     sender.button(1, True)
     sender.button(1, False)
@@ -150,6 +155,8 @@ def test_eis_gestures_drain_lifecycle_and_close(monkeypatch):
         sender.button(9, True)
 
     assert ("start", 55, 1) in sender._lib.calls
+    assert ("nudge", 55, 1.0, -2.0) in sender._lib.calls
+    assert ("nudge", 55, -1.0, 2.0) in sender._lib.calls
     assert ("move", 55, 10.0, 20.0) in sender._lib.calls
     assert any(call[0] == "scroll" for call in sender._lib.calls)
 
@@ -269,3 +276,96 @@ def test_eis_discovery_success_timeout_and_missing_capability(monkeypatch):
     with pytest.raises(GuiUnavailableError, match="requested pointer action"):
         sender._device_for(linux_eis._CAP_SCROLL, drain=False)
     assert sender._device_for(linux_eis._CAP_SCROLL, optional=True, drain=False) is None
+
+
+def test_eis_init_library_sender_and_discovery_failures_cleanup(monkeypatch):
+    closed = []
+    monkeypatch.setattr(linux_eis.os, "close", closed.append)
+    monkeypatch.setattr(linux_eis.ctypes.util, "find_library", lambda _name: "libei.so")
+
+    def broken_cdll(_name):
+        raise OSError("load failed")
+
+    monkeypatch.setattr(linux_eis.ctypes, "CDLL", broken_cdll)
+    with pytest.raises(GuiUnavailableError, match="requires libei"):
+        linux_eis.EisSender(21)
+    assert closed == [21]
+
+    lib = _signature_library()
+    monkeypatch.setattr(linux_eis.ctypes, "CDLL", lambda _name: lib)
+    monkeypatch.setattr(linux_eis.EisSender, "_configure_api", lambda self: None)
+    lib.ei_new_sender.result = 0
+    with pytest.raises(GuiUnavailableError, match="Could not create"):
+        linux_eis.EisSender(22)
+    assert closed[-1] == 22
+
+    lib.ei_new_sender.result = 101
+    lib.ei_setup_backend_fd.result = 0
+
+    def fail_discovery(_self, _timeout):
+        raise GuiUnavailableError("discovery failed")
+
+    monkeypatch.setattr(linux_eis.EisSender, "_discover_devices", fail_discovery)
+    with pytest.raises(GuiUnavailableError, match="discovery failed"):
+        linux_eis.EisSender(23)
+    assert lib.ei_disconnect.calls[-1] == (101,)
+    assert lib.ei_unref.calls[-1] == (101,)
+
+
+def test_eis_lifecycle_ignores_unsupported_duplicate_and_unknown_events(monkeypatch):
+    sender = object.__new__(linux_eis.EisSender)
+    sender._lib = _EventLib()
+    sender._ei = 99
+    sender._devices = []
+    sender._started = set()
+    sender._sequence = 1
+
+    sender._lib.types = {
+        1: linux_eis._EVENT_DEVICE_RESUMED,
+        2: linux_eis._EVENT_DEVICE_RESUMED,
+        3: linux_eis._EVENT_DEVICE_REMOVED,
+    }
+    sender._lib.device_for_event = {1: 55, 2: 55, 3: 999}
+
+    sender._lib.ei_device_has_capability = lambda _device, _capability: False
+    sender._handle_event(1)
+    assert sender._devices == []
+
+    sender._lib.ei_device_has_capability = (
+        lambda _device, capability: capability == linux_eis._CAP_POINTER_ABSOLUTE
+    )
+    sender._handle_event(2)
+    sender._handle_event(2)
+    assert sender._devices == [55]
+    assert sender._started == {55}
+    assert sender._lib.calls.count(("ref", 55)) == 1
+    assert sender._lib.calls.count(("start", 55, 1)) == 1
+
+    sender._handle_event(3)
+    assert sender._devices == [55]
+
+    monkeypatch.setattr(
+        linux_eis.select,
+        "select",
+        lambda *_args, **_kwargs: ([], [], []),
+    )
+    assert sender._dispatch_events(0.0) is False
+
+
+def test_eis_close_handles_started_and_unstarted_devices():
+    sender = object.__new__(linux_eis.EisSender)
+    sender._lib = _GestureLib()
+    sender._ei = 77
+    sender._devices = [55, 66]
+    sender._started = {55}
+    sender._sequence = 1
+
+    sender.close()
+
+    assert ("stop", 55) in sender._lib.calls
+    assert ("stop", 66) not in sender._lib.calls
+    assert ("unref", 55) in sender._lib.calls
+    assert ("unref", 66) in sender._lib.calls
+    assert sender._devices == []
+    assert sender._started == set()
+    assert sender._ei is None

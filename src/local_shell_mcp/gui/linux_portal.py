@@ -450,7 +450,7 @@ class PortalDesktop:
                             "handle_token": Variant("s", source_token),
                             "types": Variant("u", 1),
                             "multiple": Variant("b", True),
-                            "cursor_mode": Variant("u", 1),
+                            "cursor_mode": Variant("u", 2),
                         },
                     ),
                     handle_token=source_token,
@@ -671,6 +671,8 @@ class PortalDesktop:
         self,
         path: Path,
         monitor: dict[str, Any],
+        *,
+        refresh_after_first_frame: Any | None = None,
     ) -> None:
         session = await self.ensure_session()
         if self._screen is None:
@@ -709,43 +711,131 @@ class PortalDesktop:
             raise GuiUnavailableError("Could not open the ScreenCast PipeWire remote") from exc
 
         path.unlink(missing_ok=True)
+        frame_pattern = path.with_name(f".{path.name}.frame-%05d.png")
+        for stale in path.parent.glob(f".{path.name}.frame-*.png"):
+            stale.unlink(missing_ok=True)
+
+        if refresh_after_first_frame is None:
+            try:
+                result = await asyncio.to_thread(
+                    subprocess.run,
+                    [
+                        gst_launch,
+                        "-q",
+                        "pipewiresrc",
+                        f"fd={fd}",
+                        f"path={node_id}",
+                        "num-buffers=1",
+                        "do-timestamp=true",
+                        "!",
+                        "videoconvert",
+                        "!",
+                        "pngenc",
+                        "!",
+                        "filesink",
+                        f"location={path}",
+                    ],
+                    pass_fds=(fd,),
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                    umask=0o077,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise GuiUnavailableError("PipeWire screenshot capture timed out") from exc
+            finally:
+                with contextlib.suppress(OSError):
+                    os.close(fd)
+
+            if result.returncode != 0 or not path.is_file() or path.stat().st_size <= 0:
+                detail = (result.stderr or result.stdout or "").strip()
+                raise GuiUnavailableError(
+                    "PipeWire screenshot capture failed"
+                    + (f": {detail[-1000:]}" if detail else "")
+                )
+            return
+
+        process: subprocess.Popen[str] | None = None
         try:
-            result = await asyncio.to_thread(
-                subprocess.run,
+            process = subprocess.Popen(
                 [
                     gst_launch,
                     "-q",
                     "pipewiresrc",
                     f"fd={fd}",
                     f"path={node_id}",
-                    "num-buffers=1",
                     "do-timestamp=true",
                     "!",
                     "videoconvert",
                     "!",
                     "pngenc",
                     "!",
-                    "filesink",
-                    f"location={path}",
+                    "multifilesink",
+                    f"location={frame_pattern}",
                 ],
                 pass_fds=(fd,),
-                capture_output=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=10,
-                check=False,
                 umask=0o077,
             )
-        except subprocess.TimeoutExpired as exc:
-            raise GuiUnavailableError("PipeWire screenshot capture timed out") from exc
+            first_frame = path.with_name(f".{path.name}.frame-00000.png")
+            deadline = asyncio.get_running_loop().time() + 4.0
+            while (
+                asyncio.get_running_loop().time() < deadline
+                and not (first_frame.is_file() and first_frame.stat().st_size > 0)
+            ):
+                if process.poll() is not None:
+                    break
+                await asyncio.sleep(0.02)
+            if not first_frame.is_file() or first_frame.stat().st_size <= 0:
+                raise GuiUnavailableError("PipeWire did not provide an initial screenshot frame")
+
+            baseline_count = len(
+                list(path.parent.glob(f".{path.name}.frame-*.png"))
+            )
+            await refresh_after_first_frame()
+
+            # KWin/PipeWire can queue a stale compositor buffer immediately
+            # after focus changes. Let the stream settle after the reversible
+            # cursor nudge, then use the newest fully written frame.
+            await asyncio.sleep(0.35)
+            frames = sorted(path.parent.glob(f".{path.name}.frame-*.png"))
+            if len(frames) <= baseline_count:
+                deadline = asyncio.get_running_loop().time() + 2.65
+                while asyncio.get_running_loop().time() < deadline:
+                    if process.poll() is not None:
+                        break
+                    await asyncio.sleep(0.02)
+                    frames = sorted(path.parent.glob(f".{path.name}.frame-*.png"))
+                    if len(frames) > baseline_count:
+                        await asyncio.sleep(0.10)
+                        frames = sorted(path.parent.glob(f".{path.name}.frame-*.png"))
+                        break
+
+            if len(frames) <= baseline_count:
+                raise GuiUnavailableError(
+                    "PipeWire did not provide a refreshed screenshot frame"
+                )
+
+            process.terminate()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(asyncio.to_thread(process.wait), timeout=1.0)
+            await asyncio.sleep(0.03)
+            frames = sorted(path.parent.glob(f".{path.name}.frame-*.png"))
+            frames[-1].replace(path)
+            for stale in frames[:-1]:
+                stale.unlink(missing_ok=True)
         finally:
+            if process is not None and process.poll() is None:
+                process.terminate()
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(asyncio.to_thread(process.wait), timeout=1.0)
             with contextlib.suppress(OSError):
                 os.close(fd)
-
-        if result.returncode != 0 or not path.is_file() or path.stat().st_size <= 0:
-            detail = (result.stderr or result.stdout or "").strip()
-            raise GuiUnavailableError(
-                "PipeWire screenshot capture failed" + (f": {detail[-1000:]}" if detail else "")
-            )
+            for stale in path.parent.glob(f".{path.name}.frame-*.png"):
+                stale.unlink(missing_ok=True)
 
     async def _ensure_eis(self, session: str) -> EisSender | None:
         self._require_session(session)
@@ -810,6 +900,33 @@ class PortalDesktop:
                 await asyncio.to_thread(sender.close)
             return False
         return True
+
+    async def nudge(
+        self,
+        dx: float = 1.0,
+        dy: float = 0.0,
+        *,
+        session: str | None = None,
+    ) -> None:
+        session = await self._bind_session(session)
+        if await self._eis_gesture(session, "nudge", float(dx), float(dy)):
+            return
+        remote = self._require_session(session)
+        await self._call_remote(
+            remote.call_notify_pointer_motion,
+            session,
+            {},
+            float(dx),
+            float(dy),
+        )
+        await asyncio.sleep(0.03)
+        await self._call_remote(
+            remote.call_notify_pointer_motion,
+            session,
+            {},
+            -float(dx),
+            -float(dy),
+        )
 
     async def move(self, x: int, y: int, *, session: str | None = None) -> None:
         session = await self._bind_session(session)

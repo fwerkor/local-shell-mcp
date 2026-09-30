@@ -762,6 +762,19 @@ if (candidates.length === 1) {{
             path.unlink(missing_ok=True)
 
 
+async def _kde_wayland_refresh_capture(
+    target: dict[str, Any],
+    env: dict[str, str],
+    portal: PortalDesktop,
+) -> None:
+    await asyncio.to_thread(_focus_kde_wayland_window_sync, target, env)
+    # Give KWin a compositor turn before forcing a ScreenCast buffer. The
+    # embedded cursor nudge is immediately reversed, so the pointer finishes
+    # exactly where it started while still generating a fresh video frame.
+    await asyncio.sleep(0.08)
+    await portal.nudge(1.0, 0.0)
+
+
 def _monitor_for_window(
     bounds: dict[str, Any],
     monitors: list[dict[str, Any]],
@@ -952,6 +965,7 @@ async def _capture_wayland(
     env: dict[str, str],
     *,
     portal: PortalDesktop | None = None,
+    refresh_after_first_frame: Any | None = None,
 ) -> str:
     desktop = str(env.get("XDG_CURRENT_DESKTOP") or "").upper()
     kde = "KDE" in desktop
@@ -961,7 +975,14 @@ async def _capture_wayland(
         if monitor is not None:
             portal.set_monitor_layout(monitors)
             try:
-                await portal.capture_monitor_frame(path, monitor)
+                if refresh_after_first_frame is None:
+                    await portal.capture_monitor_frame(path, monitor)
+                else:
+                    await portal.capture_monitor_frame(
+                        path,
+                        monitor,
+                        refresh_after_first_frame=refresh_after_first_frame,
+                    )
                 await asyncio.to_thread(
                     _crop_desktop_capture,
                     path,
@@ -1463,7 +1484,18 @@ class LinuxGuiBackend:
             list_data = await asyncio.to_thread(self._list_data, env)
             monitors = list_data.get("monitors", [])
             if session_type == "wayland":
-                await self._focus_window(record, env)
+                refresh_after_first_frame = None
+                if _is_kde_wayland(env):
+
+                    async def refresh_after_first_frame() -> None:
+                        assert self._portal is not None
+                        await _kde_wayland_refresh_capture(
+                            record,
+                            env,
+                            self._portal,
+                        )
+                else:
+                    await self._focus_window(record, env)
                 if _is_kde_wayland(env) and window_id.startswith("kwin:"):
                     refreshed = {
                         "window": await asyncio.to_thread(self._listed_window, window_id, env)
@@ -1497,13 +1529,23 @@ class LinuxGuiBackend:
                 if self._portal is None:
                     self._portal = PortalDesktop(env)
                 self._portal.set_monitor_layout(monitors)
-                capture_backend = await _capture_wayland(
-                    screenshot_path,
-                    record["bounds"],
-                    monitors,
-                    env,
-                    portal=self._portal,
-                )
+                if refresh_after_first_frame is None:
+                    capture_backend = await _capture_wayland(
+                        screenshot_path,
+                        record["bounds"],
+                        monitors,
+                        env,
+                        portal=self._portal,
+                    )
+                else:
+                    capture_backend = await _capture_wayland(
+                        screenshot_path,
+                        record["bounds"],
+                        monitors,
+                        env,
+                        portal=self._portal,
+                        refresh_after_first_frame=refresh_after_first_frame,
+                    )
                 if _is_kde_wayland(env) and window_id.startswith("kwin:"):
                     post_capture = {
                         "window": await asyncio.to_thread(self._listed_window, window_id, env)

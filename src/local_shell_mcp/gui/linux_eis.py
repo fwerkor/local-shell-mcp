@@ -89,6 +89,10 @@ class EisSender:
         signature("ei_device_start_emulating", [pointer, ctypes.c_uint32])
         signature("ei_device_stop_emulating", [pointer])
         signature(
+            "ei_device_pointer_motion",
+            [pointer, ctypes.c_double, ctypes.c_double],
+        )
+        signature(
             "ei_device_pointer_motion_absolute",
             [pointer, ctypes.c_double, ctypes.c_double],
         )
@@ -141,14 +145,18 @@ class EisSender:
             if not any(
                 bool(self._lib.ei_device_has_capability(device, capability))
                 for capability in (
+                    _CAP_POINTER,
                     _CAP_POINTER_ABSOLUTE,
                     _CAP_SCROLL,
                     _CAP_BUTTON,
                 )
             ):
                 return
-            ref = int(self._lib.ei_device_ref(device))
-            if ref not in self._devices:
+            device_id = int(device or 0)
+            if device_id in self._devices:
+                ref = device_id
+            else:
+                ref = int(self._lib.ei_device_ref(device))
                 self._devices.append(ref)
             if ref not in self._started:
                 self._lib.ei_device_start_emulating(ref, self._sequence)
@@ -214,6 +222,16 @@ class EisSender:
     def _frame(self, device: int) -> None:
         assert self._ei
         self._lib.ei_device_frame(device, self._lib.ei_now(self._ei))
+
+    def nudge(self, dx: float, dy: float) -> None:
+        device = self._device_for(_CAP_POINTER)
+        assert device is not None
+        self._begin(device)
+        self._lib.ei_device_pointer_motion(device, float(dx), float(dy))
+        self._frame(device)
+        time.sleep(0.03)
+        self._lib.ei_device_pointer_motion(device, -float(dx), -float(dy))
+        self._frame(device)
 
     def move(self, x: float, y: float) -> None:
         device = self._device_for(_CAP_POINTER_ABSOLUTE)
