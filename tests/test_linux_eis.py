@@ -62,6 +62,20 @@ def test_eis_configures_ctypes_api_signatures():
     assert sender._lib.ei_seat_bind_capabilities.argtypes is not None
 
 
+def test_eis_configures_optional_region_api_signatures():
+    sender = object.__new__(linux_eis.EisSender)
+    sender._lib = _signature_library()
+    sender._lib.ei_device_get_region = _Fn()
+    sender._lib.ei_device_get_region_at = _Fn()
+    sender._lib.ei_region_contains = _Fn()
+
+    sender._configure_api()
+
+    assert sender._lib.ei_device_get_region.argtypes is not None
+    assert sender._lib.ei_device_get_region_at.argtypes is not None
+    assert sender._lib.ei_region_contains.argtypes is not None
+
+
 def test_eis_init_available_and_backend_failure(monkeypatch):
     lib = _signature_library()
     lib.ei_new_sender.result = 101
@@ -278,6 +292,30 @@ def test_eis_discovery_success_timeout_and_missing_capability(monkeypatch):
     assert sender._device_for(linux_eis._CAP_SCROLL, optional=True, drain=False) is None
 
 
+def test_eis_discovery_retries_until_absolute_device_appears(monkeypatch):
+    sender = object.__new__(linux_eis.EisSender)
+    sender._lib = _EventLib()
+    sender._ei = 1
+    sender._devices = []
+    sender._started = set()
+    sender._sequence = 1
+    calls = []
+
+    def dispatch(_timeout=0.0):
+        calls.append(True)
+        if len(calls) == 2:
+            sender._devices[:] = [22]
+        return True
+
+    ticks = iter((0.0, 0.0, 0.01, 0.01, 0.02, 0.02))
+    monkeypatch.setattr(sender, "_dispatch_events", dispatch)
+    monkeypatch.setattr(linux_eis.time, "monotonic", lambda: next(ticks))
+
+    sender._discover_devices(1.0)
+
+    assert len(calls) == 2
+
+
 def test_eis_init_library_sender_and_discovery_failures_cleanup(monkeypatch):
     closed = []
     monkeypatch.setattr(linux_eis.os, "close", closed.append)
@@ -385,6 +423,28 @@ def test_eis_paused_device_is_unavailable_until_resumed():
     assert ("start", 55, 2) in sender._lib.calls
 
 
+def test_eis_paused_and_removed_unknown_devices_are_ignored():
+    sender = object.__new__(linux_eis.EisSender)
+    sender._lib = _EventLib()
+    sender._ei = 99
+    sender._devices = [55]
+    sender._started = {55}
+    sender._paused = set()
+    sender._sequence = 2
+    sender._lib.types = {
+        1: linux_eis._EVENT_DEVICE_PAUSED,
+        2: linux_eis._EVENT_DEVICE_REMOVED,
+    }
+    sender._lib.device_for_event = {1: 999, 2: 999}
+
+    sender._handle_event(1)
+    sender._handle_event(2)
+
+    assert sender._devices == [55]
+    assert sender._started == {55}
+    assert sender._paused == set()
+
+
 def test_eis_absolute_pointer_selects_region_containing_target(monkeypatch):
     class RegionLib(_GestureLib):
         def ei_device_get_region_at(self, device, x, _y):
@@ -410,6 +470,110 @@ def test_eis_absolute_pointer_selects_region_containing_target(monkeypatch):
 
     assert ("move", 66, 150.0, 25.0) in sender._lib.calls
     assert ("move", 55, 150.0, 25.0) not in sender._lib.calls
+
+
+def test_eis_region_at_rejects_points_outside_all_regions(monkeypatch):
+    class RegionLib(_GestureLib):
+        def ei_device_get_region_at(self, _device, _x, _y):
+            return 0
+
+        def ei_device_get_region(self, device, index):
+            return device if index == 0 else 0
+
+    sender = object.__new__(linux_eis.EisSender)
+    sender._lib = RegionLib()
+    sender._ei = 77
+    sender._devices = [55, 66]
+    sender._started = set()
+    sender._paused = set()
+    sender._sequence = 1
+    monkeypatch.setattr(sender, "_dispatch_events", lambda _timeout=0.0: False)
+
+    assert (
+        sender._device_for(
+            linux_eis._CAP_POINTER_ABSOLUTE,
+            point=(150.0, 25.0),
+            optional=True,
+        )
+        is None
+    )
+    with pytest.raises(GuiUnavailableError, match="outside all EIS device regions"):
+        sender._device_for(
+            linux_eis._CAP_POINTER_ABSOLUTE,
+            point=(150.0, 25.0),
+        )
+
+
+def test_eis_legacy_region_lookup_selects_and_rejects(monkeypatch):
+    class RegionLib(_GestureLib):
+        def ei_device_get_region(self, device, index):
+            if index > 0:
+                return 0
+            return {55: 1001, 66: 1002}[device]
+
+        def ei_region_contains(self, region, x, _y):
+            return (region == 1001 and x < 100) or (region == 1002 and x >= 100)
+
+    sender = object.__new__(linux_eis.EisSender)
+    sender._lib = RegionLib()
+    sender._ei = 77
+    sender._devices = [55, 66]
+    sender._started = set()
+    sender._paused = set()
+    sender._sequence = 1
+    monkeypatch.setattr(sender, "_dispatch_events", lambda _timeout=0.0: False)
+
+    assert (
+        sender._device_for(
+            linux_eis._CAP_POINTER_ABSOLUTE,
+            point=(150.0, 25.0),
+        )
+        == 66
+    )
+
+    sender._lib.ei_region_contains = lambda _region, _x, _y: False
+    assert (
+        sender._device_for(
+            linux_eis._CAP_POINTER_ABSOLUTE,
+            point=(150.0, 25.0),
+            optional=True,
+        )
+        is None
+    )
+    with pytest.raises(GuiUnavailableError, match="outside all EIS device regions"):
+        sender._device_for(
+            linux_eis._CAP_POINTER_ABSOLUTE,
+            point=(150.0, 25.0),
+        )
+
+
+def test_eis_multiple_regionless_absolute_devices_fail_closed(monkeypatch):
+    class RegionlessLib(_GestureLib):
+        def ei_device_get_region(self, _device, _index):
+            return 0
+
+    sender = object.__new__(linux_eis.EisSender)
+    sender._lib = RegionlessLib()
+    sender._ei = 77
+    sender._devices = [55, 66]
+    sender._started = set()
+    sender._paused = set()
+    sender._sequence = 1
+    monkeypatch.setattr(sender, "_dispatch_events", lambda _timeout=0.0: False)
+
+    assert (
+        sender._device_for(
+            linux_eis._CAP_POINTER_ABSOLUTE,
+            point=(150.0, 25.0),
+            optional=True,
+        )
+        is None
+    )
+    with pytest.raises(GuiUnavailableError, match="multiple absolute devices"):
+        sender._device_for(
+            linux_eis._CAP_POINTER_ABSOLUTE,
+            point=(150.0, 25.0),
+        )
 
 
 def test_eis_close_handles_started_and_unstarted_devices():

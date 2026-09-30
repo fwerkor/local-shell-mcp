@@ -1191,6 +1191,63 @@ async def test_gui_state_remote_handoff_rejects_expired_state(tmp_path, monkeypa
     assert discarded == [True]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("ttl", "message"),
+    [
+        ("not-a-number", "invalid state_ttl_s"),
+        (0, "expired before controller handoff"),
+    ],
+)
+async def test_gui_state_remote_handoff_rejects_invalid_initial_ttl(
+    tmp_path,
+    monkeypatch,
+    ttl,
+    message,
+):
+    import local_shell_mcp.tools as tools
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "true")
+    tools.get_settings.cache_clear()
+    calls = []
+
+    async def remote_worker(_machine, tool, _args, timeout_s=None):
+        del timeout_s
+        calls.append(tool)
+        if tool == "gui_state":
+            return {
+                "backend": "remote",
+                "state_id": "bad-ttl",
+                "state_ttl_s": ttl,
+                "window": {
+                    "id": "w",
+                    "bounds": {"x": 0, "y": 0, "width": 4, "height": 4},
+                },
+                "elements": [],
+                "capabilities": {},
+                "screenshot_path": None,
+            }
+        if tool == "gui_state_discard":
+            return {"discarded": True}
+        raise AssertionError(f"unexpected worker tool: {tool}")
+
+    monkeypatch.setattr(tools, "_remote_worker_data", remote_worker)
+
+    result = await tools._gui_state_result(
+        "w",
+        screenshot=False,
+        include_elements=False,
+        max_elements=1,
+        max_depth=1,
+        machine="node",
+    )
+
+    assert result.isError is True
+    assert message in result.structuredContent["message"]
+    assert calls == ["gui_state", "gui_state_discard"]
+
+
 def test_controller_gui_staging_stays_inside_workspace_with_external_state_dir(
     tmp_path, monkeypatch
 ):
@@ -1786,6 +1843,51 @@ async def test_worker_gui_relay_refreshes_ttl_after_postprocessing(tmp_path, mon
 
     assert result["state_ttl_s"] == 7
     assert refreshes == [("w", "state")]
+
+
+@pytest.mark.asyncio
+async def test_worker_gui_relay_discards_state_when_refresh_expires(tmp_path, monkeypatch):
+    import local_shell_mcp.remote as remote
+
+    shot = tmp_path / ("gui-" + "3" * 32 + ".png")
+    shot.write_bytes(b"png")
+    discarded = []
+    deleted = []
+
+    async def postprocess(_path, _result):
+        return None
+
+    async def refresh(_window_id, state_id):
+        return {"state_id": state_id, "state_ttl_s": 0}
+
+    async def discard(window_id, state_id):
+        discarded.append((window_id, state_id))
+        return {"discarded": True}
+
+    monkeypatch.setattr(remote, "_prepare_worker_gui_relay", postprocess)
+    monkeypatch.setattr(
+        remote,
+        "_worker_gui_temp_delete",
+        lambda path: deleted.append(path) or {"deleted": True},
+    )
+
+    with pytest.raises(RuntimeError, match="expired during worker relay"):
+        await remote._finish_worker_gui_relay(
+            object(),
+            {
+                "state_id": "state",
+                "state_ttl_s": 30,
+                "screenshot_path": str(shot),
+            },
+            window_id="w",
+            record_id="state",
+            discard=discard,
+            refresh=refresh,
+            ttl_key="state_ttl_s",
+        )
+
+    assert discarded == [("w", "state")]
+    assert deleted == [str(shot)]
 
 
 def test_remote_gui_relay_keeps_small_png_untouched(tmp_path, monkeypatch):
