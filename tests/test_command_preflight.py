@@ -115,6 +115,161 @@ def test_ripgrep_wide_scan_with_explicit_depth_bound_is_allowed():
     assert "unbounded_depth" not in decision.signals
 
 
+def test_bounded_posix_find_is_allowed_without_unbounded_signal():
+    decision = preflight_command(
+        "find /workspace/project -maxdepth 2 -type f",
+        cwd="/workspace/project",
+        requested_timeout_s=60,
+        settings=SettingsStub(),
+    )
+    assert decision.action == "allow"
+    assert "unbounded_depth" not in decision.signals
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "HOME=/tmp command find / -type f -name '*.db'",
+        "nohup find / -type f -name '*.db'",
+        "env -i FOO=1 find / -type f -name '*.db'",
+        "sudo -- find / -type f -name '*.db'",
+        "sudo -n find / -type f -name '*.db'",
+    ],
+)
+def test_command_wrappers_do_not_hide_wide_find(command):
+    decision = preflight_command(
+        command,
+        cwd="/workspace/project",
+        machine="linux-worker",
+        requested_timeout_s=60,
+        settings=SettingsStub(),
+    )
+    assert decision.action == "block"
+    assert decision.reason_code == "wide_recursive_scan"
+
+
+def test_incomplete_sudo_option_is_allowed_without_crashing():
+    decision = preflight_command(
+        "sudo -u",
+        cwd="/workspace/project",
+        requested_timeout_s=60,
+        settings=SettingsStub(),
+    )
+    assert decision.action == "allow"
+
+
+def test_non_recursive_powershell_listing_is_not_a_recursive_scan():
+    decision = preflight_command(
+        r"Get-ChildItem C:\ -File",
+        cwd=r"C:\Users\alice",
+        requested_timeout_s=60,
+        settings=SettingsStub(),
+    )
+    assert decision.action == "allow"
+    assert "powershell_recursive_scan" not in decision.signals
+
+
+@pytest.mark.parametrize(
+    "command,cwd",
+    [
+        (r"Get-ChildItem C:\Users\alice -Recurse", r"C:\src\project"),
+        ("Get-ChildItem -Recurse", r"C:\Users\alice"),
+    ],
+)
+def test_powershell_positional_and_default_roots_are_detected(command, cwd):
+    decision = preflight_command(
+        command,
+        cwd=cwd,
+        requested_timeout_s=60,
+        settings=SettingsStub(),
+    )
+    assert decision.action == "block"
+    assert decision.reason_code == "wide_recursive_scan"
+
+
+def test_find_parser_handles_d_option_separator_and_implicit_root():
+    explicit = preflight_command(
+        "find -d ignored -- / -type f",
+        cwd="/workspace/project",
+        requested_timeout_s=60,
+        settings=SettingsStub(),
+    )
+    implicit = preflight_command(
+        "find -type f -name '*.db'",
+        cwd="/home/alice",
+        requested_timeout_s=60,
+        settings=SettingsStub(),
+    )
+    assert explicit.action == "block"
+    assert explicit.reason_code == "wide_recursive_scan"
+    assert implicit.action == "block"
+    assert implicit.reason_code == "wide_recursive_scan"
+
+
+def test_recursive_search_parsing_handles_option_patterns_and_default_roots():
+    rg_option = preflight_command(
+        "rg -e needle /",
+        cwd="/workspace/project",
+        requested_timeout_s=60,
+        settings=SettingsStub(),
+    )
+    rg_default = preflight_command(
+        "rg needle",
+        cwd="/home/alice",
+        requested_timeout_s=60,
+        settings=SettingsStub(),
+    )
+    grep_default = preflight_command(
+        "grep -R needle",
+        cwd="/home/alice",
+        requested_timeout_s=60,
+        settings=SettingsStub(),
+    )
+    grep_non_recursive = preflight_command(
+        "grep needle /workspace/project/file.txt",
+        cwd="/workspace/project",
+        requested_timeout_s=60,
+        settings=SettingsStub(),
+    )
+    assert rg_option.reason_code == "wide_recursive_scan"
+    assert rg_default.reason_code == "wide_recursive_scan"
+    assert grep_default.reason_code == "wide_recursive_scan"
+    assert grep_non_recursive.action == "allow"
+    assert "grep_recursive_scan" not in grep_non_recursive.signals
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        r"dir C:\ /s",
+        r"where /r C:\Users\alice *.db",
+    ],
+)
+def test_windows_recursive_commands_from_wide_roots_are_blocked(command):
+    decision = preflight_command(
+        command,
+        cwd=r"C:\src\project",
+        requested_timeout_s=60,
+        settings=SettingsStub(),
+    )
+    assert decision.action == "block"
+    assert decision.reason_code == "wide_recursive_scan"
+    assert "windows_recursive_scan" in decision.signals
+    assert "wide_root" in decision.signals
+
+
+def test_windows_recursive_command_without_explicit_wide_root_is_limited():
+    decision = preflight_command(
+        "dir /s",
+        cwd=r"C:\src\project",
+        requested_timeout_s=60,
+        settings=SettingsStub(),
+    )
+    assert decision.action == "limit"
+    assert decision.reason_code == "expensive_filesystem_discovery"
+    assert "wide_root" not in decision.signals
+
+
 def test_bounded_find_does_not_mask_separate_wide_unbounded_find():
     decision = preflight_command(
         "find /workspace/project -maxdepth 2 -type f; find / -type f -name '*.db'",
@@ -285,6 +440,38 @@ def test_repeat_normal_command_is_not_blocked():
         now=1000.0,
     )
     assert decision.action == "allow"
+
+
+def test_malformed_and_irrelevant_failure_events_are_ignored():
+    command = "find /workspace/project -type f -name '*.db'"
+    activity = [
+        None,
+        {"type": "tool.started", "ts": 990.0},
+        {"type": "tool.failed", "ts": "not-a-number", "data": {}},
+        {"type": "tool.failed", "ts": 0.0, "data": {}},
+        {"type": "tool.failed", "ts": 1010.0, "data": {}},
+        {"type": "tool.failed", "ts": 990.0, "data": "invalid"},
+        {
+            "type": "tool.failed",
+            "ts": 990.0,
+            "data": {
+                "machine": "linux-worker",
+                "cwd": "/workspace/project",
+                "command": "find /workspace/other -type f",
+            },
+        },
+    ]
+    decision = preflight_command(
+        command,
+        cwd="/workspace/project",
+        machine="linux-worker",
+        requested_timeout_s=60,
+        settings=SettingsStub(),
+        recent_activity=activity,
+        now=1000.0,
+    )
+    assert decision.action == "limit"
+    assert decision.reason_code == "expensive_filesystem_discovery"
 
 
 def test_aliases_share_fingerprint():
