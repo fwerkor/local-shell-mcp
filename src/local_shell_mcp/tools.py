@@ -195,8 +195,10 @@ class GuiAction(BaseModel):
             "scroll",
             "drag",
         }
-        if self.type in coordinate_actions and self.element_id is None and (
-            self.x is None or self.y is None
+        if (
+            self.type in coordinate_actions
+            and self.element_id is None
+            and (self.x is None or self.y is None)
         ):
             raise ValueError(f"{self.type} requires x and y, or an element_id")
         if self.type == "drag" and (self.to_x is None or self.to_y is None):
@@ -212,15 +214,11 @@ class GuiAction(BaseModel):
                 raise ValueError("set_value requires text")
 
         if self.text is not None and len(self.text.encode("utf-8")) > GUI_MAX_TEXT_BYTES:
-            raise ValueError(
-                f"text may not exceed {GUI_MAX_TEXT_BYTES} UTF-8 bytes"
-            )
+            raise ValueError(f"text may not exceed {GUI_MAX_TEXT_BYTES} UTF-8 bytes")
         if self.keys is not None:
             if isinstance(self.keys, str):
                 parts = [
-                    part.strip()
-                    for part in self.keys.replace("+", " ").split()
-                    if part.strip()
+                    part.strip() for part in self.keys.replace("+", " ").split() if part.strip()
                 ]
                 byte_count = len(self.keys.encode("utf-8"))
             else:
@@ -229,13 +227,9 @@ class GuiAction(BaseModel):
             if not parts:
                 raise ValueError("keys must contain at least one key")
             if len(parts) > GUI_MAX_KEY_PARTS:
-                raise ValueError(
-                    f"keys may contain at most {GUI_MAX_KEY_PARTS} parts"
-                )
+                raise ValueError(f"keys may contain at most {GUI_MAX_KEY_PARTS} parts")
             if byte_count > GUI_MAX_KEYS_BYTES:
-                raise ValueError(
-                    f"keys may not exceed {GUI_MAX_KEYS_BYTES} UTF-8 bytes"
-                )
+                raise ValueError(f"keys may not exceed {GUI_MAX_KEYS_BYTES} UTF-8 bytes")
         return self
 
 
@@ -574,10 +568,7 @@ def _safe_audit_result(tool_name: str, value: Any) -> Any:
             sanitized["content"] = [
                 item
                 for item in content
-                if not (
-                    isinstance(item, dict)
-                    and str(item.get("type") or "").lower() == "image"
-                )
+                if not (isinstance(item, dict) and str(item.get("type") or "").lower() == "image")
             ]
         structured = sanitized.get("structuredContent")
         if isinstance(structured, dict):
@@ -618,7 +609,9 @@ def _safe_audit_call_arguments(tool_name: str, arguments: dict[str, Any]) -> dic
         dynamic_arguments = arguments.get("arguments")
         return {
             "name": arguments.get("name"),
-            "argument_keys": sorted(dynamic_arguments) if isinstance(dynamic_arguments, dict) else [],
+            "argument_keys": sorted(dynamic_arguments)
+            if isinstance(dynamic_arguments, dict)
+            else [],
             "timeout_s": arguments.get("timeout_s"),
         }
     if tool_name == "mcp_manage":
@@ -1157,9 +1150,7 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                     if local_access_error is not None:
                         result = _handled_error(RuntimeError(local_access_error))
                     elif __tool_name in NON_CANCELLABLE_TOOL_NAMES:
-                        result = await _await_non_cancellable(
-                            __original(*args, **invoke_kwargs)
-                        )
+                        result = await _await_non_cancellable(__original(*args, **invoke_kwargs))
                     else:
                         result = await asyncio.wait_for(
                             __original(*args, **invoke_kwargs), timeout=PUBLIC_TOOL_TIMEOUT_S
@@ -1493,7 +1484,12 @@ def _secret_scan_candidates(base: Any, glob: str | None = None) -> list[Any]:
         args.extend(["--glob", glob])
     try:
         result = subprocess.run(
-            args, cwd=str(base), text=True, capture_output=True, timeout=30, check=False,
+            args,
+            cwd=str(base),
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
             **managed_process_kwargs(),
         )
     except Exception:
@@ -1617,9 +1613,7 @@ async def _remote_worker_data(
 _REMOTE_STAGED_LEASE_REFRESH_INTERVAL_S = 60.0
 
 
-async def _refresh_remote_staged_write_lease(
-    machine: str, path: str, transfer_id: str
-) -> None:
+async def _refresh_remote_staged_write_lease(machine: str, path: str, transfer_id: str) -> None:
     while True:
         await asyncio.sleep(_REMOTE_STAGED_LEASE_REFRESH_INTERVAL_S)
         result = await remote_manager().call(
@@ -2801,9 +2795,7 @@ def _bounded_gui_window(window: dict[str, Any]) -> dict[str, Any]:
     bounds = window.get("bounds")
     if isinstance(bounds, dict):
         bounded["bounds"] = {
-            key: bounds.get(key)
-            for key in ("x", "y", "width", "height")
-            if key in bounds
+            key: bounds.get(key) for key in ("x", "y", "width", "height") if key in bounds
         }
     return bounded
 
@@ -2824,9 +2816,7 @@ def _bounded_gui_element(element: dict[str, Any]) -> dict[str, Any]:
     bounds = element.get("bounds")
     if isinstance(bounds, dict):
         bounded["bounds"] = {
-            key: bounds.get(key)
-            for key in ("x", "y", "width", "height")
-            if key in bounds
+            key: bounds.get(key) for key in ("x", "y", "width", "height") if key in bounds
         }
     for key in ("enabled", "offscreen", "focused", "editable"):
         if key in element:
@@ -2998,6 +2988,30 @@ def _delete_gui_temp_file(path: str) -> None:
         release_temp_file_lease(candidate)
 
 
+def _remote_inline_gui_image(data: dict[str, Any], screenshot_path: str) -> ImageFile | None:
+    encoded = data.pop("screenshot_inline_b64", None)
+    raw_size = data.pop("screenshot_inline_size", None)
+    if encoded is None:
+        return None
+    if not isinstance(encoded, str):
+        raise RuntimeError("Remote GUI screenshot inline payload is invalid")
+    try:
+        payload = base64.b64decode(encoded, validate=True)
+    except Exception as exc:
+        raise RuntimeError("Remote GUI screenshot inline payload is invalid") from exc
+    assert_view_image_size(len(payload))
+    if raw_size is not None and int(raw_size) != len(payload):
+        raise RuntimeError("Remote GUI screenshot inline size does not match payload")
+    image_format, mime_type = detect_image_type(payload[:16])
+    return ImageFile(
+        path=screenshot_path,
+        data=payload,
+        format=image_format,
+        mime_type=mime_type,
+        size=len(payload),
+    )
+
+
 async def _gui_frame_data(
     window_id: str,
     machine: str | None,
@@ -3017,9 +3031,7 @@ async def _gui_frame_data(
         )
         if not isinstance(data, dict):
             raise RuntimeError("Remote gui_frame returned invalid data")
-        screenshot_path = (
-            str(data.get("screenshot_path")) if data.get("screenshot_path") else None
-        )
+        screenshot_path = str(data.get("screenshot_path")) if data.get("screenshot_path") else None
         observation_id = str(data.get("observation_id") or "")
         if not screenshot_path:
             if observation_id:
@@ -3048,24 +3060,22 @@ async def _gui_frame_data(
                     observation_id,
                 )
             )
-            local_path = await asyncio.to_thread(_controller_gui_staging_path)
-            try:
-                await _copy_remote_gui_temp_to_local(
-                    machine, screenshot_path, local_path
-                )
-                image = await asyncio.to_thread(read_image, local_path)
-            finally:
-                with suppress(Exception):
-                    await asyncio.to_thread(delete_path, local_path, False)
+            image = _remote_inline_gui_image(data, screenshot_path)
+            if image is None:
+                local_path = await asyncio.to_thread(_controller_gui_staging_path)
+                try:
+                    await _copy_remote_gui_temp_to_local(machine, screenshot_path, local_path)
+                    image = await asyncio.to_thread(read_image, local_path)
+                finally:
+                    with suppress(Exception):
+                        await asyncio.to_thread(delete_path, local_path, False)
             refreshed = await _refresh_remote_gui_frame_once(
                 machine,
                 window_id,
                 observation_id,
             )
             result = dict(data)
-            result["observation_ttl_s"] = float(
-                refreshed.get("observation_ttl_s") or 0
-            )
+            result["observation_ttl_s"] = float(refreshed.get("observation_ttl_s") or 0)
             result.pop("screenshot_path", None)
             delivered = True
             return result, image
@@ -3113,9 +3123,7 @@ async def _gui_frame_data(
             observation_id,
         )
         result = dict(data)
-        result["observation_ttl_s"] = float(
-            refreshed.get("observation_ttl_s") or 0
-        )
+        result["observation_ttl_s"] = float(refreshed.get("observation_ttl_s") or 0)
         result.pop("screenshot_path", None)
         delivered = True
         return result, image
@@ -3230,6 +3238,10 @@ async def _discard_remote_gui_frame_once(
         raise RuntimeError("Remote gui_frame_discard returned invalid data")
 
 
+def _gui_handoff_now() -> float:
+    return time.monotonic()
+
+
 async def _gui_state_result(
     window_id: str,
     *,
@@ -3244,7 +3256,8 @@ async def _gui_state_result(
     state_id = ""
     delivered = False
     manager = None
-    keepalive: asyncio.Task[None] | None = None
+    remote_handoff_started: float | None = None
+    remote_initial_ttl_s = 0.0
     try:
         args = {
             "window_id": window_id,
@@ -3262,29 +3275,30 @@ async def _gui_state_result(
             state_id = str(data.get("state_id") or "")
             if not state_id:
                 raise RuntimeError("Remote gui_state returned no state_id")
+            raw_state_ttl = data.get("state_ttl_s")
+            if raw_state_ttl is not None:
+                try:
+                    remote_initial_ttl_s = float(raw_state_ttl)
+                except (TypeError, ValueError) as exc:
+                    raise RuntimeError("Remote gui_state returned invalid state_ttl_s") from exc
+                if remote_initial_ttl_s <= 0:
+                    raise RuntimeError(
+                        "Remote GUI state expired before controller handoff; call gui_state again"
+                    )
+                remote_handoff_started = _gui_handoff_now()
             screenshot_path = (
                 str(data.get("screenshot_path")) if data.get("screenshot_path") else None
             )
-            refreshed = await _refresh_remote_gui_state_once(
-                machine,
-                window_id,
-                state_id,
-            )
-            data["state_ttl_s"] = float(refreshed.get("state_ttl_s") or 0)
-
             if screenshot_path:
-                keepalive = asyncio.create_task(
-                    _refresh_remote_gui_state_lease(machine, window_id, state_id)
-                )
-                local_path = await asyncio.to_thread(_controller_gui_staging_path)
-                try:
-                    await _copy_remote_gui_temp_to_local(
-                        machine, screenshot_path, local_path
-                    )
-                    image = await asyncio.to_thread(read_image, local_path)
-                finally:
-                    with suppress(Exception):
-                        await asyncio.to_thread(delete_path, local_path, False)
+                image = _remote_inline_gui_image(data, screenshot_path)
+                if image is None:
+                    local_path = await asyncio.to_thread(_controller_gui_staging_path)
+                    try:
+                        await _copy_remote_gui_temp_to_local(machine, screenshot_path, local_path)
+                        image = await asyncio.to_thread(read_image, local_path)
+                    finally:
+                        with suppress(Exception):
+                            await asyncio.to_thread(delete_path, local_path, False)
                 try:
                     await _remote_transfer_data(
                         machine,
@@ -3296,13 +3310,14 @@ async def _gui_state_result(
                     pass
                 else:
                     screenshot_path = None
-
-            refreshed = await _refresh_remote_gui_state_once(
-                machine,
-                window_id,
-                state_id,
-            )
-            data["state_ttl_s"] = float(refreshed.get("state_ttl_s") or 0)
+            if remote_handoff_started is not None:
+                handoff_elapsed_s = max(0.0, _gui_handoff_now() - remote_handoff_started)
+                remaining_ttl_s = remote_initial_ttl_s - handoff_elapsed_s
+                if remaining_ttl_s <= 0:
+                    raise RuntimeError(
+                        "Remote GUI state expired during controller handoff; call gui_state again"
+                    )
+                data["state_ttl_s"] = remaining_ttl_s
         else:
             manager = get_gui_manager()
             data = await manager.snapshot(**args)
@@ -3319,16 +3334,14 @@ async def _gui_state_result(
 
         result_data = dict(data)
         result_data.pop("screenshot_path", None)
+        result_data.pop("screenshot_inline_b64", None)
+        result_data.pop("screenshot_inline_size", None)
         result = _gui_state_call_result(result_data, machine, image)
         delivered = True
         return result
     except Exception as exc:
         return _gui_state_error_result(machine, exc)
     finally:
-        if keepalive is not None:
-            keepalive.cancel()
-            with suppress(BaseException):
-                await keepalive
         if machine and screenshot_path:
             with suppress(Exception):
                 await _remote_transfer_data(
@@ -3425,10 +3438,11 @@ async def _remote_call(
             raise RuntimeError("Remote workers are disabled")
         result = await remote_manager().call(machine, tool, args, timeout_s)
         data = result.get("data") if isinstance(result, dict) else None
-        failed_status = (
-            isinstance(data, dict)
-            and data.get("status") in {"error", "not_found", "executable_not_found"}
-        )
+        failed_status = isinstance(data, dict) and data.get("status") in {
+            "error",
+            "not_found",
+            "executable_not_found",
+        }
         if not result.get("ok", False) or failed_status:
             if not isinstance(data, dict):
                 data = {

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import shutil
+import subprocess
 import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -10,10 +12,18 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
+from ..state_store import get_state_store
 from .base import GuiUnavailableError
+from .linux_eis import EisSender
 
 _PORTAL_INPUT_TIMEOUT_S = 15.0
 _PORTAL_LIFECYCLE_TIMEOUT_S = 15.0
+_PORTAL_RESTORE_TOKEN_KEY = "gui/remote-desktop-restore-token"
+_PORTAL_RESTORE_TOKEN_MAX_BYTES = 4096
+
+
+class _RestoreTokenRejected(GuiUnavailableError):
+    pass
 
 
 async def _portal_lifecycle_wait(awaitable: Any, operation: str) -> Any:
@@ -23,9 +33,7 @@ async def _portal_lifecycle_wait(awaitable: Any, operation: str) -> Any:
             timeout=_PORTAL_LIFECYCLE_TIMEOUT_S,
         )
     except TimeoutError as exc:
-        raise GuiUnavailableError(
-            f"Timed out while {operation} on the desktop portal"
-        ) from exc
+        raise GuiUnavailableError(f"Timed out while {operation} on the desktop portal") from exc
 
 
 def _portal_modules():  # noqa: ANN202
@@ -33,10 +41,32 @@ def _portal_modules():  # noqa: ANN202
         from dbus_next import Variant
         from dbus_next.aio import MessageBus
     except ImportError as exc:  # pragma: no cover - Linux dependency guard
-        raise GuiUnavailableError(
-            "Wayland GUI control requires the dbus-next package"
-        ) from exc
+        raise GuiUnavailableError("Wayland GUI control requires the dbus-next package") from exc
     return MessageBus, Variant
+
+
+def _load_portal_restore_token() -> str | None:
+    raw = get_state_store().read_bytes(_PORTAL_RESTORE_TOKEN_KEY)
+    if not raw or len(raw) > _PORTAL_RESTORE_TOKEN_MAX_BYTES:
+        return None
+    try:
+        token = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if not token or "\x00" in token:
+        return None
+    return token
+
+
+def _save_portal_restore_token(token: str) -> None:
+    encoded = token.encode("utf-8")
+    if not encoded or len(encoded) > _PORTAL_RESTORE_TOKEN_MAX_BYTES:
+        return
+    get_state_store().write_bytes(_PORTAL_RESTORE_TOKEN_KEY, encoded)
+
+
+def _clear_portal_restore_token() -> None:
+    get_state_store().delete(_PORTAL_RESTORE_TOKEN_KEY)
 
 
 def _unwrap(value: Any) -> Any:
@@ -67,9 +97,8 @@ async def _portal_introspect(
         # interface contains a non-member-safe property name (for example,
         # power-saver-enabled). Keep dbus-next optional on all normal paths
         # and only load the raw-introspection fallback for that exact failure.
-        if (
-            type(exc).__name__ != "InvalidMemberNameError"
-            or not type(exc).__module__.startswith("dbus_next")
+        if type(exc).__name__ != "InvalidMemberNameError" or not type(exc).__module__.startswith(
+            "dbus_next"
         ):
             raise
 
@@ -101,7 +130,9 @@ async def _portal_introspect(
     try:
         root = ET.fromstring(body[0])
     except ET.ParseError as parse_exc:
-        raise GuiUnavailableError("Desktop portal returned invalid introspection XML") from parse_exc
+        raise GuiUnavailableError(
+            "Desktop portal returned invalid introspection XML"
+        ) from parse_exc
     for child in list(root):
         if child.tag == "interface" and child.attrib.get("name") not in interfaces:
             root.remove(child)
@@ -205,6 +236,7 @@ async def _portal_request(
     bus._add_match_rule(match_rule)
     bus.add_message_handler(handler)
     try:
+
         async def request_and_wait() -> tuple[int, dict[str, Any]]:
             path = str(await awaitable)
             if path != expected_path:
@@ -238,6 +270,9 @@ class PortalDesktop:
         self._session = None
         self._session_iface = None
         self._streams: list[dict[str, Any]] = []
+        self._monitors: list[dict[str, Any]] = []
+        self._eis_sender: EisSender | None = None
+        self._eis_unavailable = False
         self._lock = asyncio.Lock()
 
     async def _connect(self) -> None:
@@ -248,7 +283,11 @@ class PortalDesktop:
         self._screen = None
         MessageBus, _Variant = _portal_modules()
         address = self._env.get("DBUS_SESSION_BUS_ADDRESS")
-        candidate = MessageBus(bus_address=address) if address else MessageBus()
+        candidate = (
+            MessageBus(bus_address=address, negotiate_unix_fd=True)
+            if address
+            else MessageBus(negotiate_unix_fd=True)
+        )
         connected = None
         try:
             connected = await _portal_lifecycle_wait(
@@ -296,12 +335,20 @@ class PortalDesktop:
         )
 
     def _on_session_closed(self, *_args: Any) -> None:
+        if self._eis_sender is not None:
+            self._eis_sender.close()
+        self._eis_sender = None
+        self._eis_unavailable = False
         self._session = None
         self._session_iface = None
         self._streams = []
 
     def _invalidate_transport(self) -> None:
         bus = self._bus
+        if self._eis_sender is not None:
+            self._eis_sender.close()
+        self._eis_sender = None
+        self._eis_unavailable = False
         self._bus = None
         self._remote = None
         self._screen = None
@@ -376,56 +423,62 @@ class PortalDesktop:
             "closing the portal session",
         )
 
-    async def ensure_session(self) -> str:
-        async with self._lock:
-            if self._session is not None:
-                return self._session
-            await self._connect()
-            assert self._remote is not None and self._screen is not None
-            _MessageBus, Variant = _portal_modules()
-            token = f"lsm_req_{uuid.uuid4().hex}"
+    @staticmethod
+    def _restore_token_rejected(exc: BaseException) -> bool:
+        return isinstance(exc, GuiUnavailableError) and str(exc).endswith("(2)")
+
+    async def _create_session(self, restore_token: str | None) -> str:
+        await self._connect()
+        assert self._remote is not None and self._screen is not None
+        _MessageBus, Variant = _portal_modules()
+        token = f"lsm_req_{uuid.uuid4().hex}"
+        try:
+            created = await self._request(
+                self._remote.call_create_session(
+                    {
+                        "handle_token": Variant("s", token),
+                        "session_handle_token": Variant("s", f"lsm_session_{uuid.uuid4().hex}"),
+                    }
+                ),
+                handle_token=token,
+            )
+        except BaseException:
+            self._invalidate_transport()
+            raise
+        session = str(created["session_handle"])
+        try:
+            source_token = f"lsm_req_{uuid.uuid4().hex}"
+            await self._request(
+                self._screen.call_select_sources(
+                    session,
+                    {
+                        "handle_token": Variant("s", source_token),
+                        "types": Variant("u", 1),
+                        "multiple": Variant("b", True),
+                        "cursor_mode": Variant("u", 2),
+                    },
+                ),
+                handle_token=source_token,
+            )
+            device_token = f"lsm_req_{uuid.uuid4().hex}"
+            device_options = {
+                "handle_token": Variant("s", device_token),
+                "types": Variant("u", 3),
+                "persist_mode": Variant("u", 2),
+            }
+            if restore_token is not None:
+                device_options["restore_token"] = Variant("s", restore_token)
             try:
-                created = await self._request(
-                    self._remote.call_create_session(
-                        {
-                            "handle_token": Variant("s", token),
-                            "session_handle_token": Variant(
-                                "s", f"lsm_session_{uuid.uuid4().hex}"
-                            ),
-                        }
-                    ),
-                    handle_token=token,
-                )
-            except BaseException:
-                self._invalidate_transport()
-                raise
-            session = str(created["session_handle"])
-            try:
-                source_token = f"lsm_req_{uuid.uuid4().hex}"
                 await self._request(
-                    self._screen.call_select_sources(
-                        session,
-                        {
-                            "handle_token": Variant("s", source_token),
-                            "types": Variant("u", 1),
-                            "multiple": Variant("b", True),
-                            "cursor_mode": Variant("u", 1),
-                        },
-                    ),
-                    handle_token=source_token,
-                )
-                device_token = f"lsm_req_{uuid.uuid4().hex}"
-                await self._request(
-                    self._remote.call_select_devices(
-                        session,
-                        {
-                            "handle_token": Variant("s", device_token),
-                            "types": Variant("u", 3),
-                        },
-                    ),
+                    self._remote.call_select_devices(session, device_options),
                     handle_token=device_token,
                 )
-                start_token = f"lsm_req_{uuid.uuid4().hex}"
+            except BaseException as exc:
+                if restore_token is not None and self._restore_token_rejected(exc):
+                    raise _RestoreTokenRejected(str(exc)) from exc
+                raise
+            start_token = f"lsm_req_{uuid.uuid4().hex}"
+            try:
                 started = await self._request(
                     self._remote.call_start(
                         session,
@@ -434,33 +487,61 @@ class PortalDesktop:
                     ),
                     handle_token=start_token,
                 )
-            except BaseException:
-                with contextlib.suppress(BaseException):
-                    await asyncio.shield(self._close_session(session))
-                self._invalidate_transport()
+            except BaseException as exc:
+                if restore_token is not None and self._restore_token_rejected(exc):
+                    raise _RestoreTokenRejected(str(exc)) from exc
                 raise
-            self._session = session
-            self._session_iface = None
-            self._streams = []
-            for stream in started.get("streams", []):
-                if not isinstance(stream, list) or not stream:
-                    continue
-                node_id = int(stream[0])
-                props = stream[1] if len(stream) > 1 and isinstance(stream[1], dict) else {}
-                self._streams.append({"node_id": node_id, "properties": props})
+            new_restore_token = str(started.get("restore_token") or "")
+            if new_restore_token:
+                with contextlib.suppress(Exception):
+                    await asyncio.to_thread(
+                        _save_portal_restore_token,
+                        new_restore_token,
+                    )
+        except BaseException:
+            with contextlib.suppress(BaseException):
+                await asyncio.shield(self._close_session(session))
+            self._invalidate_transport()
+            raise
+        self._session = session
+        self._session_iface = None
+        self._streams = []
+        for stream in started.get("streams", []):
+            if not isinstance(stream, list) or not stream:
+                continue
+            node_id = int(stream[0])
+            props = stream[1] if len(stream) > 1 and isinstance(stream[1], dict) else {}
+            self._streams.append({"node_id": node_id, "properties": props})
+        try:
+            await self._observe_session_closed(session)
+        except Exception as exc:
+            with contextlib.suppress(BaseException):
+                await asyncio.shield(self._close_session(session))
+            self._invalidate_transport()
+            raise GuiUnavailableError(
+                "Wayland portal session closure observation could not be installed"
+            ) from exc
+        if self._session != session:
+            self._invalidate_transport()
+            raise GuiUnavailableError("Wayland portal session closed during setup")
+        return session
+
+    async def ensure_session(self) -> str:
+        async with self._lock:
+            if self._session is not None:
+                return self._session
             try:
-                await self._observe_session_closed(session)
-            except Exception as exc:
-                with contextlib.suppress(BaseException):
-                    await asyncio.shield(self._close_session(session))
-                self._invalidate_transport()
-                raise GuiUnavailableError(
-                    "Wayland portal session closure observation could not be installed"
-                ) from exc
-            if self._session != session:
-                self._invalidate_transport()
-                raise GuiUnavailableError("Wayland portal session closed during setup")
-            return session
+                restore_token = await asyncio.to_thread(_load_portal_restore_token)
+            except Exception:
+                restore_token = None
+            try:
+                return await self._create_session(restore_token)
+            except _RestoreTokenRejected:
+                if restore_token is None:
+                    raise
+                with contextlib.suppress(Exception):
+                    await asyncio.to_thread(_clear_portal_restore_token)
+                return await self._create_session(None)
 
     def _require_session(self, session: str) -> Any:
         if not session or self._session != session or self._remote is None:
@@ -473,31 +554,417 @@ class PortalDesktop:
         self._require_session(session)
         return session
 
+    def set_monitor_layout(self, monitors: list[dict[str, Any]]) -> None:
+        normalized: list[dict[str, Any]] = []
+        for monitor in monitors:
+            if not isinstance(monitor, dict):
+                continue
+            try:
+                x = int(monitor["x"])
+                y = int(monitor["y"])
+                width = int(monitor["width"])
+                height = int(monitor["height"])
+                scale = float(monitor.get("scale", 1) or 1)
+            except (KeyError, TypeError, ValueError):
+                continue
+            if width <= 0 or height <= 0 or scale <= 0:
+                continue
+            normalized.append(
+                {
+                    "x": x,
+                    "y": y,
+                    "width": width,
+                    "height": height,
+                    "scale": scale,
+                }
+            )
+        self._monitors = normalized
+
+    @staticmethod
+    def _stream_size_matches_monitor(
+        stream_width: int,
+        stream_height: int,
+        monitor: dict[str, Any],
+    ) -> bool:
+        logical_width = int(monitor["width"])
+        logical_height = int(monitor["height"])
+        scale = float(monitor.get("scale", 1) or 1)
+        candidates = {
+            (logical_width, logical_height),
+            (
+                max(1, int(round(logical_width * scale))),
+                max(1, int(round(logical_height * scale))),
+            ),
+        }
+        return (stream_width, stream_height) in candidates
+
+    def _stream_mapping(
+        self,
+        stream: dict[str, Any],
+    ) -> tuple[int, int, int, int, int, int] | None:
+        props = stream.get("properties")
+        if not isinstance(props, dict):
+            return None
+        size = props.get("size")
+        if not isinstance(size, list) or len(size) < 2:
+            return None
+        try:
+            stream_width, stream_height = int(size[0]), int(size[1])
+        except (TypeError, ValueError):
+            return None
+        if stream_width <= 0 or stream_height <= 0:
+            return None
+
+        position = props.get("position")
+        if isinstance(position, list) and len(position) >= 2:
+            try:
+                px, py = int(position[0]), int(position[1])
+            except (TypeError, ValueError):
+                return None
+            matches = [
+                monitor
+                for monitor in self._monitors
+                if int(monitor["x"]) == px
+                and int(monitor["y"]) == py
+                and self._stream_size_matches_monitor(
+                    stream_width,
+                    stream_height,
+                    monitor,
+                )
+            ]
+            if len(matches) == 1:
+                monitor = matches[0]
+                return (
+                    int(monitor["x"]),
+                    int(monitor["y"]),
+                    int(monitor["width"]),
+                    int(monitor["height"]),
+                    stream_width,
+                    stream_height,
+                )
+            return px, py, stream_width, stream_height, stream_width, stream_height
+
+        if int(props.get("source_type") or 0) != 1:
+            return None
+        matches = [
+            monitor
+            for monitor in self._monitors
+            if self._stream_size_matches_monitor(
+                stream_width,
+                stream_height,
+                monitor,
+            )
+        ]
+        if len(matches) != 1:
+            return None
+        monitor = matches[0]
+        return (
+            int(monitor["x"]),
+            int(monitor["y"]),
+            int(monitor["width"]),
+            int(monitor["height"]),
+            stream_width,
+            stream_height,
+        )
+
+    def _stream_geometry(
+        self,
+        stream: dict[str, Any],
+    ) -> tuple[int, int, int, int] | None:
+        mapping = self._stream_mapping(stream)
+        if mapping is None:
+            return None
+        x, y, width, height, _stream_width, _stream_height = mapping
+        return x, y, width, height
+
     def _stream_point(self, x: int, y: int) -> tuple[int, float, float]:
         if not self._streams:
             raise GuiUnavailableError(
                 "Wayland portal did not provide a ScreenCast stream for absolute pointer input"
             )
         for stream in self._streams:
-            props = stream["properties"]
-            position = props.get("position")
-            size = props.get("size")
-            if (
-                isinstance(position, list)
-                and len(position) >= 2
-                and isinstance(size, list)
-                and len(size) >= 2
-            ):
-                px, py = int(position[0]), int(position[1])
-                width, height = int(size[0]), int(size[1])
-                if px <= x < px + width and py <= y < py + height:
-                    return stream["node_id"], float(x - px), float(y - py)
+            mapping = self._stream_mapping(stream)
+            if mapping is None:
+                continue
+            px, py, width, height, stream_width, stream_height = mapping
+            if px <= x < px + width and py <= y < py + height:
+                local_x = (x - px) * stream_width / width
+                local_y = (y - py) * stream_height / height
+                return stream["node_id"], float(local_x), float(local_y)
         raise GuiUnavailableError(
             "Target point is outside the ScreenCast streams granted by the desktop portal"
         )
 
+    async def capture_monitor_frame(
+        self,
+        path: Path,
+        monitor: dict[str, Any],
+        *,
+        refresh_after_first_frame: Any | None = None,
+    ) -> None:
+        session = await self.ensure_session()
+        if self._screen is None:
+            raise GuiUnavailableError("Wayland ScreenCast portal is unavailable")
+        gst_launch = shutil.which("gst-launch-1.0")
+        if gst_launch is None:
+            raise GuiUnavailableError(
+                "KDE Wayland PipeWire capture requires gst-launch-1.0 and pipewiresrc"
+            )
+
+        try:
+            target = (
+                int(monitor["x"]),
+                int(monitor["y"]),
+                int(monitor["width"]),
+                int(monitor["height"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise GuiUnavailableError("Target monitor geometry is invalid") from exc
+
+        matches = [stream for stream in self._streams if self._stream_geometry(stream) == target]
+        if len(matches) != 1:
+            raise GuiUnavailableError(
+                "Could not uniquely map the target monitor to a ScreenCast stream"
+            )
+        node_id = int(matches[0]["node_id"])
+
+        fd_value: Any = None
+        try:
+            fd_value = await _portal_lifecycle_wait(
+                self._screen.call_open_pipe_wire_remote(session, {}),
+                "opening the ScreenCast PipeWire remote",
+            )
+            fd = int(fd_value)
+        except Exception as exc:
+            raise GuiUnavailableError("Could not open the ScreenCast PipeWire remote") from exc
+
+        path.unlink(missing_ok=True)
+        frame_pattern = path.with_name(f".{path.name}.frame-%05d.png")
+        for stale in path.parent.glob(f".{path.name}.frame-*.png"):
+            stale.unlink(missing_ok=True)
+
+        if refresh_after_first_frame is None:
+            try:
+                result = await asyncio.to_thread(
+                    subprocess.run,
+                    [
+                        gst_launch,
+                        "-q",
+                        "pipewiresrc",
+                        f"fd={fd}",
+                        f"path={node_id}",
+                        "num-buffers=1",
+                        "do-timestamp=true",
+                        "!",
+                        "videoconvert",
+                        "!",
+                        "pngenc",
+                        "!",
+                        "filesink",
+                        f"location={path}",
+                    ],
+                    pass_fds=(fd,),
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                    umask=0o077,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise GuiUnavailableError("PipeWire screenshot capture timed out") from exc
+            finally:
+                with contextlib.suppress(OSError):
+                    os.close(fd)
+
+            if result.returncode != 0 or not path.is_file() or path.stat().st_size <= 0:
+                detail = (result.stderr or result.stdout or "").strip()
+                raise GuiUnavailableError(
+                    "PipeWire screenshot capture failed"
+                    + (f": {detail[-1000:]}" if detail else "")
+                )
+            return
+
+        process: subprocess.Popen[str] | None = None
+        try:
+            process = subprocess.Popen(
+                [
+                    gst_launch,
+                    "-q",
+                    "pipewiresrc",
+                    f"fd={fd}",
+                    f"path={node_id}",
+                    "do-timestamp=true",
+                    "!",
+                    "videoconvert",
+                    "!",
+                    "pngenc",
+                    "!",
+                    "multifilesink",
+                    f"location={frame_pattern}",
+                    "max-files=6",
+                ],
+                pass_fds=(fd,),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                umask=0o077,
+            )
+            first_frame = path.with_name(f".{path.name}.frame-00000.png")
+            deadline = asyncio.get_running_loop().time() + 4.0
+            while (
+                asyncio.get_running_loop().time() < deadline
+                and not (first_frame.is_file() and first_frame.stat().st_size > 0)
+            ):
+                if process.poll() is not None:
+                    break
+                await asyncio.sleep(0.02)
+            if not first_frame.is_file() or first_frame.stat().st_size <= 0:
+                raise GuiUnavailableError("PipeWire did not provide an initial screenshot frame")
+
+            baseline_frames = sorted(path.parent.glob(f".{path.name}.frame-*.png"))
+            baseline_latest = baseline_frames[-1].name
+            await refresh_after_first_frame()
+
+            # KWin/PipeWire can queue a stale compositor buffer immediately
+            # after focus changes. Let the stream settle after the reversible
+            # cursor nudge, then use the newest fully written frame.
+            await asyncio.sleep(0.35)
+            frames = sorted(path.parent.glob(f".{path.name}.frame-*.png"))
+            if not frames or frames[-1].name <= baseline_latest:
+                deadline = asyncio.get_running_loop().time() + 2.65
+                while asyncio.get_running_loop().time() < deadline:
+                    if process.poll() is not None:
+                        break
+                    await asyncio.sleep(0.02)
+                    frames = sorted(path.parent.glob(f".{path.name}.frame-*.png"))
+                    if frames and frames[-1].name > baseline_latest:
+                        await asyncio.sleep(0.10)
+                        frames = sorted(path.parent.glob(f".{path.name}.frame-*.png"))
+                        break
+
+            if not frames or frames[-1].name <= baseline_latest:
+                raise GuiUnavailableError(
+                    "PipeWire did not provide a refreshed screenshot frame"
+                )
+
+            process.terminate()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(asyncio.to_thread(process.wait), timeout=1.0)
+            await asyncio.sleep(0.03)
+            frames = sorted(path.parent.glob(f".{path.name}.frame-*.png"))
+            frames[-1].replace(path)
+            for stale in frames[:-1]:
+                stale.unlink(missing_ok=True)
+        finally:
+            if process is not None and process.poll() is None:
+                process.terminate()
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(asyncio.to_thread(process.wait), timeout=1.0)
+            with contextlib.suppress(OSError):
+                os.close(fd)
+            for stale in path.parent.glob(f".{path.name}.frame-*.png"):
+                stale.unlink(missing_ok=True)
+
+    async def _ensure_eis(self, session: str) -> EisSender | None:
+        self._require_session(session)
+        if self._eis_sender is not None:
+            return self._eis_sender
+        if self._eis_unavailable or not EisSender.available():
+            self._eis_unavailable = True
+            return None
+
+        remote = self._require_session(session)
+        connect = getattr(remote, "call_connect_to_eis", None)
+        if not callable(connect):
+            self._eis_unavailable = True
+            return None
+        try:
+            raw_fd = int(
+                await asyncio.wait_for(
+                    connect(session, {}),
+                    timeout=_PORTAL_INPUT_TIMEOUT_S,
+                )
+            )
+            fd = os.dup(raw_fd)
+            with contextlib.suppress(OSError):
+                os.close(raw_fd)
+            construct = asyncio.create_task(asyncio.to_thread(EisSender, fd))
+            try:
+                sender = await asyncio.shield(construct)
+            except asyncio.CancelledError:
+                with contextlib.suppress(Exception):
+                    late_sender = await construct
+                    await asyncio.to_thread(late_sender.close)
+                raise
+        except (
+            AttributeError,
+            GuiUnavailableError,
+            OSError,
+            TimeoutError,
+            TypeError,
+            ValueError,
+        ):
+            self._eis_unavailable = True
+            return None
+        self._eis_sender = sender
+        return sender
+
+    async def _eis_gesture(
+        self,
+        session: str,
+        method: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> bool:
+        sender = await self._ensure_eis(session)
+        if sender is None:
+            return False
+        try:
+            await asyncio.to_thread(getattr(sender, method), *args, **kwargs)
+        except GuiUnavailableError:
+            if self._eis_sender is sender:
+                self._eis_sender = None
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(sender.close)
+            # Once an EIS sender exists, a composite gesture may already have
+            # emitted motion/button frames before a lifecycle failure becomes
+            # visible. Replaying the whole gesture through the D-Bus fallback
+            # can double-click or repeat a destructive drag, so surface the
+            # failure instead of retrying after emission may have started.
+            raise
+        return True
+
+    async def nudge(
+        self,
+        dx: float = 1.0,
+        dy: float = 0.0,
+        *,
+        session: str | None = None,
+    ) -> None:
+        session = await self._bind_session(session)
+        if await self._eis_gesture(session, "nudge", float(dx), float(dy)):
+            return
+        remote = self._require_session(session)
+        await self._call_remote(
+            remote.call_notify_pointer_motion,
+            session,
+            {},
+            float(dx),
+            float(dy),
+        )
+        await asyncio.sleep(0.03)
+        await self._call_remote(
+            remote.call_notify_pointer_motion,
+            session,
+            {},
+            -float(dx),
+            -float(dy),
+        )
+
     async def move(self, x: int, y: int, *, session: str | None = None) -> None:
         session = await self._bind_session(session)
+        if await self._eis_gesture(session, "move", float(x), float(y)):
+            return
         remote = self._require_session(session)
         stream, local_x, local_y = self._stream_point(x, y)
         await self._call_remote(
@@ -541,6 +1008,15 @@ class PortalDesktop:
         session: str | None = None,
     ) -> None:
         session = await self._bind_session(session)
+        if await self._eis_gesture(
+            session,
+            "click",
+            float(x),
+            float(y),
+            button=int(button),
+            count=int(count),
+        ):
+            return
         await self.move(x, y, session=session)
         for _ in range(max(1, count)):
             pressed = False
@@ -552,9 +1028,7 @@ class PortalDesktop:
             finally:
                 if pressed:
                     with contextlib.suppress(BaseException):
-                        await asyncio.shield(
-                            self.button(button, False, session=session)
-                        )
+                        await asyncio.shield(self.button(button, False, session=session))
 
     async def drag(
         self,
@@ -566,6 +1040,15 @@ class PortalDesktop:
         session: str | None = None,
     ) -> None:
         session = await self._bind_session(session)
+        if await self._eis_gesture(
+            session,
+            "drag",
+            float(x),
+            float(y),
+            float(to_x),
+            float(to_y),
+        ):
+            return
         await self.move(x, y, session=session)
         pressed = False
         try:
@@ -589,6 +1072,15 @@ class PortalDesktop:
         session: str | None = None,
     ) -> None:
         session = await self._bind_session(session)
+        if await self._eis_gesture(
+            session,
+            "scroll",
+            float(x),
+            float(y),
+            -float(delta_x),
+            -float(delta_y),
+        ):
+            return
         await self.move(x, y, session=session)
         remote = self._require_session(session)
         await self._call_remote(
