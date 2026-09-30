@@ -22,6 +22,7 @@ from . import __version__
 from .audit import audit, audit_call_context, audit_result_ok
 from .auth import current_principal, principal_scopes, require_current_scopes
 from .browser_sessions import get_browser_session_manager
+from .command_preflight import CommandPreflightDecision, preflight_command
 from .deprecated_tools import DeprecatedToolFastMCP as FastMCP
 from .downloads import create_share_link, list_share_links, revoke_share_link
 from .dynamic_mcp import DynamicMCPManager
@@ -722,6 +723,79 @@ def _live_result_summary(result: Any) -> dict[str, Any]:
     return summary
 
 
+def _command_preflight_for_call(
+    tool_name: str,
+    call_arguments: dict[str, Any],
+    *,
+    settings: Any,
+    recent_activity: list[dict[str, Any]] | None,
+) -> CommandPreflightDecision | None:
+    if tool_name not in {"run_shell", "job_start", "shell_start"}:
+        return None
+    command = call_arguments.get("command")
+    if not isinstance(command, str) or not command.strip():
+        return None
+    decision = preflight_command(
+        command,
+        cwd=str(call_arguments.get("cwd") or "."),
+        machine=(str(call_arguments.get("machine")) if call_arguments.get("machine") else None),
+        requested_timeout_s=(
+            call_arguments.get("timeout_s") if tool_name == "run_shell" else None
+        ),
+        settings=settings,
+        recent_activity=recent_activity,
+    )
+    if tool_name in {"job_start", "shell_start"} and decision.action == "limit":
+        return CommandPreflightDecision(
+            action="block",
+            reason_code="expensive_discovery_requires_bounded_tool",
+            message=(
+                "Refusing unbounded recursive filesystem discovery in a long-running shell. "
+                "Use file_glob/file_grep/file_tree or add an explicit depth bound."
+            ),
+            cost_score=decision.cost_score,
+            recommended_tool=decision.recommended_tool or "file_glob",
+            fingerprint=decision.fingerprint,
+            signals=decision.signals,
+            do_not_repeat_same_command=True,
+        )
+    return decision
+
+
+def _command_preflight_error_result(decision: CommandPreflightDecision) -> CallToolResult:
+    payload = decision.error_payload()
+    return _error_call_result(payload, str(payload["message"]))
+
+
+def _command_preflight_recovery(decision: CommandPreflightDecision) -> dict[str, Any]:
+    return {
+        "reason_code": decision.reason_code,
+        "cost_score": decision.cost_score,
+        "effective_timeout_s": decision.effective_timeout_s,
+        "recommended_tool": decision.recommended_tool,
+        "command_fingerprint": decision.fingerprint,
+        "signals": list(decision.signals),
+        "do_not_repeat_same_command": decision.do_not_repeat_same_command,
+    }
+
+
+def _annotate_command_preflight_result(
+    result: Any, decision: CommandPreflightDecision | None
+) -> Any:
+    if decision is None or decision.action != "limit" or not isinstance(result, dict):
+        return result
+    updated = dict(result)
+    recovery = _command_preflight_recovery(decision)
+    data = updated.get("data")
+    if isinstance(data, dict):
+        data = dict(data)
+        data["preflight"] = recovery
+        updated["data"] = data
+    else:
+        updated["preflight"] = recovery
+    return updated
+
+
 def _audit_tool_purpose(
     tool_name: str, purpose: str | None = None, explanation: str | None = None
 ) -> dict[str, str]:
@@ -1072,6 +1146,7 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                 if logical_lease is not None
                 else None
             )
+            preflight_decision: CommandPreflightDecision | None = None
             try:
                 if logical_lease and logical_lease.get("persistence_error"):
                     audit(
@@ -1103,6 +1178,38 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                     arguments=arguments,
                     **audit_context,
                 )
+                if __tool_name in {"run_shell", "job_start", "shell_start"}:
+                    recent_activity = None
+                    if logical_session_id:
+                        with suppress(Exception):
+                            logical_state = await asyncio.to_thread(
+                                logical_manager.get,
+                                logical_session_id,
+                                subject=principal_subject,
+                            )
+                            activity = logical_state.get("recent_activity")
+                            if isinstance(activity, list):
+                                recent_activity = activity
+                    preflight_decision = _command_preflight_for_call(
+                        __tool_name,
+                        call_arguments,
+                        settings=get_settings(),
+                        recent_activity=recent_activity,
+                    )
+                    if preflight_decision is not None:
+                        audit(
+                            "command_preflight",
+                            call_id=call_id,
+                            tool=__tool_name,
+                            action=preflight_decision.action,
+                            reason_code=preflight_decision.reason_code,
+                            cost_score=preflight_decision.cost_score,
+                            effective_timeout_s=preflight_decision.effective_timeout_s,
+                            recommended_tool=preflight_decision.recommended_tool,
+                            command_fingerprint=preflight_decision.fingerprint,
+                            signals=list(preflight_decision.signals),
+                            **audit_context,
+                        )
             except BaseException as setup_exc:
                 if lease_heartbeat_task is not None:
                     lease_heartbeat_task.cancel()
@@ -1147,14 +1254,28 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                 raise
             try:
                 with audit_call_context(call_id) as call_state:
-                    if local_access_error is not None:
-                        result = _handled_error(RuntimeError(local_access_error))
-                    elif __tool_name in NON_CANCELLABLE_TOOL_NAMES:
-                        result = await _await_non_cancellable(__original(*args, **invoke_kwargs))
+                    if preflight_decision is not None and preflight_decision.action == "block":
+                        result = _command_preflight_error_result(preflight_decision)
                     else:
-                        result = await asyncio.wait_for(
-                            __original(*args, **invoke_kwargs), timeout=PUBLIC_TOOL_TIMEOUT_S
-                        )
+                        if (
+                            __tool_name == "run_shell"
+                            and preflight_decision is not None
+                            and preflight_decision.action == "limit"
+                            and preflight_decision.effective_timeout_s is not None
+                        ):
+                            invoke_kwargs["timeout_s"] = preflight_decision.effective_timeout_s
+                        if local_access_error is not None:
+                            result = _handled_error(RuntimeError(local_access_error))
+                        elif __tool_name in NON_CANCELLABLE_TOOL_NAMES:
+                            result = await _await_non_cancellable(
+                                __original(*args, **invoke_kwargs)
+                            )
+                        else:
+                            result = await asyncio.wait_for(
+                                __original(*args, **invoke_kwargs), timeout=PUBLIC_TOOL_TIMEOUT_S
+                            )
+                if __tool_name == "run_shell":
+                    result = _annotate_command_preflight_result(result, preflight_decision)
                 serialized_result = _safe_audit_result(__tool_name, result)
                 call_ok = audit_result_ok(result) and not bool(call_state["failed"])
                 failure_context = {}
