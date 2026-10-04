@@ -33,13 +33,13 @@ local-shell-mcp :8765
 local-shell-mcp --mode mcp
 ```
 
-ثم ثبّت repository في DSH Web profile:
+ثم ثبّت حزمة DSH المخصّصة من npm في DSH Web profile:
 
 ```bash
 dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
-في production ثبّت Git spec على release tag أو commit تمت مراجعته. للتطوير من checkout ثبّت المجلد الحالي:
+تستخدم حزمة DSH على npm إصدار release نفسه الخاص بـ LSM. وللتطوير من checkout، ثبّت المجلد الحالي:
 
 ```bash
 dsh plugin --profile web add .

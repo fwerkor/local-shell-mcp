@@ -33,13 +33,13 @@ Khởi động LSM trước:
 local-shell-mcp --mode mcp
 ```
 
-Sau đó cài repository này vào DSH Web profile:
+Sau đó cài gói npm DSH chuyên dụng vào DSH Web profile:
 
 ```bash
 dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
-Trong production, pin Git spec vào release tag hoặc commit đã review. Khi develop từ checkout, cài current directory:
+Gói npm DSH dùng cùng phiên bản release với LSM. Khi phát triển từ checkout, cài thư mục hiện tại:
 
 ```bash
 dsh plugin --profile web add .

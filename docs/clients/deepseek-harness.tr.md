@@ -33,13 +33,13 @@ LSM’yi çalıştıran machine LSM `local` target’tır. LSM container içinde
 local-shell-mcp --mode mcp
 ```
 
-Sonra bu repository’yi DSH Web profile’a kurun:
+Ardından özel DSH npm paketini DSH Web profile’a kurun:
 
 ```bash
 dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
-Production için Git spec’i reviewed release tag veya commit’e pin edin. Checkout development için current directory’yi kurun:
+DSH npm paketi LSM ile aynı release sürümünü kullanır. Checkout üzerinden geliştirme için mevcut dizini kurun:
 
 ```bash
 dsh plugin --profile web add .

@@ -33,13 +33,13 @@ local-shell-mcp :8765
 local-shell-mcp --mode mcp
 ```
 
-Затем установите repository в DSH Web profile:
+Затем установите отдельный npm-пакет DSH в DSH Web profile:
 
 ```bash
 dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
-Для production закрепите Git spec на проверенном release tag или commit. Для разработки из checkout установите текущий каталог:
+npm-пакет DSH использует ту же версию релиза, что и LSM. Для разработки из checkout установите текущий каталог:
 
 ```bash
 dsh plugin --profile web add .

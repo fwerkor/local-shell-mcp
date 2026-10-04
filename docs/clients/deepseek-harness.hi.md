@@ -33,13 +33,13 @@ LSM चलाने वाली machine LSM का `local` target है। य
 local-shell-mcp --mode mcp
 ```
 
-फिर इस repository को DSH Web profile में install करें:
+फिर dedicated DSH npm package को DSH Web profile में install करें:
 
 ```bash
 dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
-Production में Git spec को reviewed release tag/commit पर pin करें। Checkout development के लिए current directory install करें:
+DSH npm package, LSM के समान release version का उपयोग करता है। Checkout से development के लिए current directory install करें:
 
 ```bash
 dsh plugin --profile web add .

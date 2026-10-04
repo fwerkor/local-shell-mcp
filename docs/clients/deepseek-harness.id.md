@@ -33,13 +33,13 @@ Mulai LSM lebih dulu:
 local-shell-mcp --mode mcp
 ```
 
-Kemudian instal repository ini ke DSH Web profile:
+Kemudian instal paket npm DSH khusus ke DSH Web profile:
 
 ```bash
 dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
-Untuk production, pin Git spec ke release tag atau commit yang telah direview. Untuk development dari checkout, instal directory saat ini:
+Paket npm DSH menggunakan versi rilis yang sama dengan LSM. Untuk development dari checkout, instal directory saat ini:
 
 ```bash
 dsh plugin --profile web add .

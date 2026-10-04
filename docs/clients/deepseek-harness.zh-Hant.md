@@ -33,13 +33,13 @@ local-shell-mcp :8765
 local-shell-mcp --mode mcp
 ```
 
-接著把本 repository 安裝到 DSH Web profile：
+接著把獨立發布的 DSH npm package 安裝到 DSH Web profile：
 
 ```bash
 dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
-production 應將 Git spec 固定到已審核 release tag 或 commit；從 checkout 開發時可直接安裝目前目錄：
+DSH npm package 與 LSM 使用相同 release version；從 checkout 開發時仍可直接安裝目前目錄：
 
 ```bash
 dsh plugin --profile web add .

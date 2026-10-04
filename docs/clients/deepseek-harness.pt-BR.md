@@ -33,13 +33,13 @@ Inicie LSM primeiro:
 local-shell-mcp --mode mcp
 ```
 
-Depois instale este repository no perfil Web DSH:
+Depois instale o pacote npm dedicado do DSH no perfil Web DSH:
 
 ```bash
 dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
-Em production, fixe o Git spec em release tag ou commit revisado. Para desenvolvimento a partir de checkout, instale o diretório atual:
+O pacote npm do DSH usa a mesma versão de release do LSM. Para desenvolvimento a partir de um checkout, instale o diretório atual:
 
 ```bash
 dsh plugin --profile web add .

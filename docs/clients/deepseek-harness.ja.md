@@ -33,13 +33,13 @@ local-shell-mcp :8765
 local-shell-mcp --mode mcp
 ```
 
-次にこの repository を DSH Web profile に install します。
+次に専用の DSH npm package を DSH Web profile に install します。
 
 ```bash
 dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
-production では Git spec を review 済み release tag/commit に pin してください。checkout から開発する場合は current directory を install できます。
+DSH npm package は LSM と同じ release version を使用します。checkout から開発する場合は current directory を install できます。
 
 ```bash
 dsh plugin --profile web add .
