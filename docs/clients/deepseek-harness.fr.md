@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 6fa729155fcc9e524eb3f8081b80d40ceb72c59f5ece4b311809350005468851 -->
+<!-- i18n-source-sha256: 9deaf97f0af15e7af335b40fcf9fe8bc468623d1947e6f8c9afaf7dfaebcc036 -->
 # DeepSeek Harness (DSH)
 
 `local-shell-mcp` peut être installé directement dans un profil Web DeepSeek Harness. Le repository fournit un bridge DSH qui conserve toute la surface d’outils LSM, associe chaque DSH Session à une identité logical-session v4 stable et ajoute **Live Workspace** comme vue native de conversation DSH. LSM reste l’autorité de tout l’état d’exécution : machines local/remote, logical Sessions et Goal Plans, terminaux persistants, jobs, browser sessions, Dynamic MCP, file links, audit et timeline Live Workspace.

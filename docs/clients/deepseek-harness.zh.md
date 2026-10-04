@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 6fa729155fcc9e524eb3f8081b80d40ceb72c59f5ece4b311809350005468851 -->
+<!-- i18n-source-sha256: 9deaf97f0af15e7af335b40fcf9fe8bc468623d1947e6f8c9afaf7dfaebcc036 -->
 # DeepSeek Harness (DSH)
 
 `local-shell-mcp` 可以直接安装到 DeepSeek Harness Web profile。仓库自带 DSH-aware bridge：保留完整 LSM 工具面，把每个 DSH Session 映射到稳定的 v4 logical-session identity，并把 **Live Workspace** 作为原生 DSH conversation view 注入。执行状态仍由 LSM 统一管理，包括本地/远程机器、logical Session 与 Goal Plan、持久终端、job、浏览器 session、Dynamic MCP、文件链接、审计数据和 Live Workspace timeline。

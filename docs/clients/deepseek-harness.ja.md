@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 6fa729155fcc9e524eb3f8081b80d40ceb72c59f5ece4b311809350005468851 -->
+<!-- i18n-source-sha256: 9deaf97f0af15e7af335b40fcf9fe8bc468623d1947e6f8c9afaf7dfaebcc036 -->
 # DeepSeek Harness (DSH)
 
 `local-shell-mcp` は DeepSeek Harness Web profile に直接 install できます。repository には DSH-aware bridge が含まれ、完全な LSM tool surface を維持し、各 DSH Session を安定した v4 logical-session identity に mapping し、**Live Workspace** を native DSH conversation view として追加します。local/remote machine、logical Session/Goal Plan、persistent terminal、job、browser session、Dynamic MCP、file link、audit、Live Workspace timeline を含む execution state の authority は引き続き LSM controller です。
