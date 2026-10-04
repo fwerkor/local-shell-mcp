@@ -36,7 +36,7 @@ local-shell-mcp --mode mcp
 Kemudian instal repository ini ke DSH Web profile:
 
 ```bash
-dsh plugin --profile web add 'github:fwerkor/local-shell-mcp#main'
+dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
 Untuk production, pin Git spec ke release tag atau commit yang telah direview. Untuk development dari checkout, instal directory saat ini:

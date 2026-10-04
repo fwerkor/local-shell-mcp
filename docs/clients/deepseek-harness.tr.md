@@ -36,7 +36,7 @@ local-shell-mcp --mode mcp
 Sonra bu repository’yi DSH Web profile’a kurun:
 
 ```bash
-dsh plugin --profile web add 'github:fwerkor/local-shell-mcp#main'
+dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
 Production için Git spec’i reviewed release tag veya commit’e pin edin. Checkout development için current directory’yi kurun:

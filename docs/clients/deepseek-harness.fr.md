@@ -36,7 +36,7 @@ local-shell-mcp --mode mcp
 Installez ensuite ce repository dans le profil Web DSH :
 
 ```bash
-dsh plugin --profile web add 'github:fwerkor/local-shell-mcp#main'
+dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
 En production, épinglez le Git spec à un release tag ou commit revu. Pour développer depuis un checkout, installez le répertoire courant :

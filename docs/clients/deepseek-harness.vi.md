@@ -36,7 +36,7 @@ local-shell-mcp --mode mcp
 Sau đó cài repository này vào DSH Web profile:
 
 ```bash
-dsh plugin --profile web add 'github:fwerkor/local-shell-mcp#main'
+dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
 Trong production, pin Git spec vào release tag hoặc commit đã review. Khi develop từ checkout, cài current directory:

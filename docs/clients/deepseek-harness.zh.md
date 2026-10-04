@@ -33,13 +33,13 @@ local-shell-mcp :8765
 local-shell-mcp --mode mcp
 ```
 
-然后把本 repository 安装到 DSH Web profile：
+然后把独立发布的 DSH npm package 安装到 DSH Web profile：
 
 ```bash
-dsh plugin --profile web add 'github:fwerkor/local-shell-mcp#main'
+dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
-生产环境应把 Git spec 固定到已审核的 release tag 或 commit；从 checkout 开发时可直接安装当前目录：
+DSH npm package 与 LSM 使用相同 release version；从 checkout 开发时仍可直接安装当前目录：
 
 ```bash
 dsh plugin --profile web add .

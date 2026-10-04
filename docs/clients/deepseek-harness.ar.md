@@ -36,7 +36,7 @@ local-shell-mcp --mode mcp
 ثم ثبّت repository في DSH Web profile:
 
 ```bash
-dsh plugin --profile web add 'github:fwerkor/local-shell-mcp#main'
+dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
 في production ثبّت Git spec على release tag أو commit تمت مراجعته. للتطوير من checkout ثبّت المجلد الحالي:

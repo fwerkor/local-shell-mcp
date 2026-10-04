@@ -36,7 +36,7 @@ local-shell-mcp --mode mcp
 फिर इस repository को DSH Web profile में install करें:
 
 ```bash
-dsh plugin --profile web add 'github:fwerkor/local-shell-mcp#main'
+dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
 Production में Git spec को reviewed release tag/commit पर pin करें। Checkout development के लिए current directory install करें:

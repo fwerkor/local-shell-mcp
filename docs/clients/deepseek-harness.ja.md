@@ -36,7 +36,7 @@ local-shell-mcp --mode mcp
 次にこの repository を DSH Web profile に install します。
 
 ```bash
-dsh plugin --profile web add 'github:fwerkor/local-shell-mcp#main'
+dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
 production では Git spec を review 済み release tag/commit に pin してください。checkout から開発する場合は current directory を install できます。

@@ -740,6 +740,45 @@ jobs:
         working-directory: npm
         run: npm pack --dry-run
 
+  dsh-npm-plugin:
+    name: npm DSH plugin
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Check DSH plugin JavaScript
+        run: npm run check
+
+      - name: Inspect DSH plugin publish tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm pack --dry-run --json > /tmp/dsh-pack.json
+          node - <<'NODE'
+          const fs = require('node:fs')
+          const result = JSON.parse(fs.readFileSync('/tmp/dsh-pack.json', 'utf8'))[0]
+          if (result.name !== 'local-shell-mcp-dsh') throw new Error(`unexpected package name: ${result.name}`)
+          const files = new Set(result.files.map((item) => item.path))
+          for (const required of [
+            'package.json',
+            'cordis.patch.yml',
+            'dsh/index.js',
+            'dsh/client.js',
+            'src/local_shell_mcp/ui_static/live-workspace.html',
+            'src/local_shell_mcp/ui_static/live-workspace-aliases.json',
+            'LICENSE',
+          ]) {
+            if (!files.has(required)) throw new Error(`missing from npm tarball: ${required}`)
+          }
+          NODE
+
   ci-summary-result:
     name: CI / aggregate evaluation
     runs-on: ubuntu-24.04
@@ -760,6 +799,7 @@ jobs:
       - binary-release-matrix
       - vscode-extension
       - npm-launcher
+      - dsh-npm-plugin
     if: always()
     steps:
       - name: Evaluate aggregate result
