@@ -198,15 +198,50 @@ async def test_remote_copy_file_streams_between_workers(tmp_path, monkeypatch):
         "src", "src-machine/payload.bin", "dst", "dst-machine/payload.bin", True, 1024
     )
 
-    assert result["chunks"] == 1
-    assert result["chunk_size"] == len(data)
+    assert result["chunks"] == 6
+    assert result["chunk_size"] == 1024
     assert result["transport"] == "controller-http-relay"
     assert result["bytes"] == len(data)
-    assert calls == ["transfer_stat", "transfer_put_url", "transfer_download_url"]
+    assert calls == [
+        "transfer_stat",
+        *(["transfer_upload_url"] * 6),
+        "transfer_download_url",
+    ]
     assert "transfer_read_chunk" not in calls
     assert "transfer_write_chunk" not in calls
-    assert "transfer_upload_url" not in calls
+    assert "transfer_put_url" not in calls
     assert (root / "dst-machine" / "payload.bin").read_bytes() == data
+
+
+@pytest.mark.asyncio
+async def test_remote_copy_defaults_to_64_mib_http_chunks(tmp_path, monkeypatch):
+    root = _workspace(tmp_path, monkeypatch)
+    (root / "src-machine").mkdir()
+    (root / "dst-machine").mkdir()
+    payload = b"payload"
+    (root / "src-machine" / "payload.bin").write_bytes(payload)
+    upload_chunk_sizes: list[int] = []
+    transfer = tools._remote_transfer_data
+
+    async def record_transfer(machine, tool, args, timeout_s=None):
+        if tool == "transfer_upload_url":
+            upload_chunk_sizes.append(int(args["chunk_size"]))
+        return await transfer(machine, tool, args, timeout_s)
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", record_transfer)
+
+    result = await tools._copy_remote_file_to_remote(
+        "src",
+        "src-machine/payload.bin",
+        "dst",
+        "dst-machine/payload.bin",
+        True,
+    )
+
+    assert upload_chunk_sizes == [64 * 1024 * 1024]
+    assert result["chunks"] == 1
+    assert result["transport"] == "controller-http-relay"
+    assert (root / "dst-machine" / "payload.bin").read_bytes() == payload
 
 
 @pytest.mark.asyncio
@@ -312,9 +347,6 @@ def test_controller_relay_staging_rejects_symlink(tmp_path, monkeypatch):
         tools._controller_relay_staging_path()
 
     assert victim.read_bytes() == b"keep"
-
-
-
 
 
 @pytest.mark.asyncio
@@ -448,6 +480,7 @@ async def test_remote_stream_upload_preserves_worker_failure_when_poll_loses_tic
             hashlib.sha256(b"payload").hexdigest(),
             {"token": "removed", "url": "http://testserver/upload/removed"},
             None,
+            put_tool="transfer_gui_temp_put_url",
         )
 
 
@@ -466,7 +499,7 @@ async def test_remote_upload_recovers_lost_chunk_acknowledgement(tmp_path, monke
 
         async def call(self, machine, tool, args, timeout_s=None, *, lane=None):
             result = await super().call(machine, tool, args, timeout_s, lane=lane)
-            if tool == "transfer_put_url":
+            if tool == "transfer_upload_url":
                 self.upload_calls += 1
                 if self.drop_next_ack:
                     self.drop_next_ack = False
@@ -488,9 +521,10 @@ async def test_remote_upload_recovers_lost_chunk_acknowledgement(tmp_path, monke
         1024,
     )
 
-    assert result["transport"] == "http-stream"
-    assert result["chunks"] == 1
-    assert manager.upload_calls == 1
+    assert result["transport"] == "http-chunks"
+    assert result["chunks"] == 3
+    assert result["chunk_size"] == 1024
+    assert manager.upload_calls == 3
     assert (root / "copied.bin").read_bytes() == payload
 
 
@@ -685,7 +719,7 @@ async def test_transfer_path_starts_tracked_managed_job(tmp_path, monkeypatch):
 
     assert current["status"] == "succeeded"
     assert current["progress"]["phase"] == "completed"
-    assert current["result"]["transport"] == "http-stream"
+    assert current["result"]["transport"] == "http-chunks"
     assert (root / "copied.bin").read_bytes() == payload
     tail = await jobs_module.tail_job(job["job_id"])
     assert "transfer started" in tail["output"]

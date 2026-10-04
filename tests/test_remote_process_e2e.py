@@ -196,7 +196,7 @@ def test_real_controller_worker_tools_transfers_and_reconnect(tmp_path, monkeypa
                 "process-node", "pushed.bin", "roundtrip.bin", True, None
             )
         )
-        assert pulled["transport"] == "http-stream"
+        assert pulled["transport"] == "http-chunks"
         assert (controller_root / "roundtrip.bin").read_bytes() == local_file.read_bytes()
 
         local_dir = controller_root / "tree"
