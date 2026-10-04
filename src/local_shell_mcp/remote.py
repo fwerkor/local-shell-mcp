@@ -78,8 +78,9 @@ from .shell_ops import (
 from .state_store import get_state_store
 from .tmux_helper import persistent_shell_backend_info
 from .transfer_ops import (
+    DEFAULT_HTTP_TRANSFER_CHUNK_BYTES,
     DEFAULT_TRANSFER_CHUNK_BYTES,
-    normalize_chunk_size,
+    normalize_http_chunk_size,
     transfer_abort_write,
     transfer_alloc_temp_path,
     transfer_begin_write,
@@ -1835,6 +1836,7 @@ def _worker_upload_url(
     timeout_s: int | None = None,
     offset: int = 0,
     chunk_size: int | None = None,
+    verify_source_digest: bool = True,
 ) -> dict[str, Any]:
     _worker_validate_transfer_url(url)
     source = resolve_path(path, must_exist=True)
@@ -1847,13 +1849,12 @@ def _worker_upload_url(
     start = int(offset)
     if start < 0 or start > total:
         raise ValueError("offset is outside the source file")
-    if start == 0:
+    if start == 0 and expected_sha256 is not None and verify_source_digest:
         digest = transfer_stat(str(source), True).get("sha256")
         if str(digest or "").lower() != str(expected_sha256).lower():
             raise ValueError("file sha256 mismatch before upload")
-
-    effective_chunk_size = normalize_chunk_size(
-        DEFAULT_TRANSFER_CHUNK_BYTES if chunk_size is None else chunk_size
+    effective_chunk_size = normalize_http_chunk_size(
+        DEFAULT_HTTP_TRANSFER_CHUNK_BYTES if chunk_size is None else chunk_size
     )
     with source.open("rb") as handle:
         handle.seek(start)
@@ -2498,6 +2499,7 @@ async def _execute_transfer_worker_tool(tool: str, args: dict[str, Any]) -> Any:
             args.get("timeout_s"),
             args.get("offset", 0),
             args.get("chunk_size"),
+            args.get("verify_source_digest", True),
         )
 
     if tool == "transfer_download_url":
