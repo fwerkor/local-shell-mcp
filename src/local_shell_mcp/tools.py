@@ -1359,12 +1359,12 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                             result = _handled_error(RuntimeError(local_access_error))
                         else:
                             invocation = __original(*args, **invoke_kwargs)
-                            if __tool_name in NON_CANCELLABLE_TOOL_NAMES:
-                                invocation = _await_non_cancellable(invocation)
-                            result = await _await_tool_watchdog(
-                                invocation, __tool_name,
-                                tool_timeout_s or PUBLIC_TOOL_TIMEOUT_S,
-                            )
+                            if tool_timeout_s is None:
+                                result = await _await_non_cancellable(invocation)
+                            else:
+                                result = await _await_tool_watchdog(
+                                    invocation, __tool_name, tool_timeout_s,
+                                )
                 if __tool_name == "run_shell":
                     result = _annotate_command_preflight_result(result, preflight_decision)
                 serialized_result = _safe_audit_result(__tool_name, result)
