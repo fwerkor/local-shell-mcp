@@ -1147,6 +1147,119 @@ async def test_legacy_stream_finalizes_staged_status_after_worker_failure(monkey
 
 
 @pytest.mark.asyncio
+async def test_local_to_remote_aborts_staged_write_without_verified_digest(tmp_path, monkeypatch):
+    root = _workspace(tmp_path, monkeypatch)
+    (root / "payload.bin").write_bytes(b"content")
+    aborted: list[tuple[str, str]] = []
+
+    async def hold_lease(*args, **kwargs):
+        del args, kwargs
+        await asyncio.Event().wait()
+
+    async def transfer(machine, tool, args, timeout_s=None):
+        del machine, timeout_s
+        if tool == "transfer_download_url":
+            return {
+                "path": args["path"],
+                "transfer_id": "staged-transfer",
+                "bytes": 7,
+                "transport": "http-staged",
+            }
+        if tool == "transfer_abort_write":
+            aborted.append((args["path"], args["transfer_id"]))
+            return {"aborted": True}
+        raise AssertionError(f"unexpected tool: {tool}")
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", transfer)
+    monkeypatch.setattr(tools, "_refresh_controller_temp_lease", hold_lease)
+    monkeypatch.setattr(tools, "_refresh_remote_staged_write_lease", hold_lease)
+    monkeypatch.setattr(
+        tools,
+        "_wait_for_download_ticket_completion",
+        lambda token: asyncio.sleep(0, result={"completed": True, "sha256": None}),
+    )
+
+    with pytest.raises(
+        tools.RemoteTransferError,
+        match="source stream completed without a verified digest",
+    ):
+        await tools._copy_local_file_to_remote(
+            "payload.bin",
+            "destination-worker",
+            "copied.bin",
+            True,
+        )
+
+    assert aborted == [("copied.bin", "staged-transfer")]
+
+
+@pytest.mark.asyncio
+async def test_remote_gui_copy_rejects_non_file_source(monkeypatch):
+    async def transfer(*args, **kwargs):
+        del args, kwargs
+        return {"type": "directory", "path": "capture"}
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", transfer)
+
+    with pytest.raises(RuntimeError, match="Remote GUI temp source is not a file"):
+        await tools._copy_remote_gui_temp_to_local(
+            "source-worker",
+            "capture",
+            "capture.png",
+        )
+
+
+@pytest.mark.asyncio
+async def test_remote_file_to_local_rejects_non_file_source(monkeypatch):
+    async def transfer(*args, **kwargs):
+        del args, kwargs
+        return {"type": "directory", "path": "source"}
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", transfer)
+
+    with pytest.raises(ValueError, match="source is not a file"):
+        await tools._copy_remote_file_to_local(
+            "source-worker",
+            "source",
+            "destination.bin",
+        )
+
+
+@pytest.mark.asyncio
+async def test_controller_relay_rejects_non_file_source(monkeypatch):
+    async def transfer(*args, **kwargs):
+        del args, kwargs
+        return {"type": "directory", "path": "source"}
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", transfer)
+
+    with pytest.raises(ValueError, match="source is not a file"):
+        await tools._copy_remote_file_via_controller_relay(
+            "source-worker",
+            "source",
+            "destination-worker",
+            "destination.bin",
+        )
+
+
+@pytest.mark.asyncio
+async def test_direct_remote_copy_rejects_disabled_peer_transfer(tmp_path, monkeypatch):
+    _workspace(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_PEER_TRANSFER_ENABLED", "false")
+    get_settings.cache_clear()
+
+    with pytest.raises(RuntimeError, match="direct remote transfer is not enabled"):
+        await tools._copy_remote_file_direct(
+            "source-worker",
+            "source.bin",
+            "destination-worker",
+            "destination.bin",
+            True,
+            None,
+        )
+
+
+@pytest.mark.asyncio
 async def test_streaming_transfer_preserves_chunk_size_validation(tmp_path, monkeypatch):
     root = _workspace(tmp_path, monkeypatch)
     (root / "payload.bin").write_bytes(b"content")
