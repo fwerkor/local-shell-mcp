@@ -1156,7 +1156,7 @@ async def test_streamed_relay_cleans_staging_on_source_failure(tmp_path, monkeyp
         calls.append(tool)
         if tool == "transfer_stat":
             return {"type": "file", "path": "source.bin", "size": 4, "sha256": "a" * 64}
-        if tool == "transfer_put_url":
+        if tool == "transfer_upload_url":
             raise tools.RemoteTransferError("source upload failed")
         raise AssertionError(f"unexpected tool: {tool}")
 
@@ -1167,7 +1167,12 @@ async def test_streamed_relay_cleans_staging_on_source_failure(tmp_path, monkeyp
             "source-worker", "source.bin", "destination-worker", "destination.bin", True
         )
 
-    assert calls == ["transfer_stat", "transfer_put_url", "transfer_put_url", "transfer_put_url"]
+    assert calls == [
+        "transfer_stat",
+        "transfer_upload_url",
+        "transfer_upload_url",
+        "transfer_upload_url",
+    ]
     relay_dir = root / ".local-shell-mcp" / "transfer-relay"
     assert not relay_dir.exists() or not list(relay_dir.iterdir())
 

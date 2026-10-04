@@ -23,7 +23,7 @@ from .audit import audit
 from .fs_ops import relative_display, resolve_path
 from .settings import get_settings
 from .transfer_ops import (
-    MAX_TRANSFER_CHUNK_BYTES,
+    MAX_HTTP_TRANSFER_CHUNK_BYTES,
     transfer_abort_write,
     transfer_begin_write,
     transfer_finish_verified_write,
@@ -33,6 +33,11 @@ from .transfer_ops import (
     transfer_refresh_stream_write,
     transfer_write_bytes,
 )
+from .transfer_ops import (
+    MAX_TRANSFER_CHUNK_BYTES as _LEGACY_MAX_TRANSFER_CHUNK_BYTES,
+)
+
+MAX_TRANSFER_CHUNK_BYTES = _LEGACY_MAX_TRANSFER_CHUNK_BYTES
 
 REMOTE_TRANSFER_PREFIX = "/remote/transfer"
 REMOTE_TRANSFER_UPLOAD_PREFIX = f"{REMOTE_TRANSFER_PREFIX}/upload/"
@@ -763,10 +768,10 @@ async def upload_endpoint(request: Request) -> JSONResponse:
     try:
         start, end, legacy_full_upload = _upload_range(request, ticket)
         expected_chunk_bytes = end - start
-        if not legacy_full_upload and expected_chunk_bytes > MAX_TRANSFER_CHUNK_BYTES:
+        if not legacy_full_upload and expected_chunk_bytes > MAX_HTTP_TRANSFER_CHUNK_BYTES:
             raise ValueError(
                 "upload chunk exceeds the supported request size: "
-                f"maximum is {MAX_TRANSFER_CHUNK_BYTES} bytes"
+                f"maximum is {MAX_HTTP_TRANSFER_CHUNK_BYTES} bytes"
             )
         raw_length = request.headers.get("content-length")
         if raw_length:

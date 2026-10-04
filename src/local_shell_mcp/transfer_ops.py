@@ -33,6 +33,8 @@ from .settings import get_settings
 
 DEFAULT_TRANSFER_CHUNK_BYTES = 1024 * 1024
 MAX_TRANSFER_CHUNK_BYTES = 4 * 1024 * 1024
+DEFAULT_HTTP_TRANSFER_CHUNK_BYTES = 64 * 1024 * 1024
+MAX_HTTP_TRANSFER_CHUNK_BYTES = 64 * 1024 * 1024
 _TRANSFER_TMP_MARKER = "local-shell-mcp-transfer"
 _TEMP_LEASE_REFRESH_INTERVAL_S = 1.0
 
@@ -205,6 +207,13 @@ def normalize_chunk_size(chunk_size: int | None = None) -> int:
     if requested <= 0:
         raise ValueError("chunk_size must be greater than zero")
     return min(requested, MAX_TRANSFER_CHUNK_BYTES)
+
+
+def normalize_http_chunk_size(chunk_size: int | None = None) -> int:
+    requested = DEFAULT_HTTP_TRANSFER_CHUNK_BYTES if chunk_size is None else int(chunk_size)
+    if requested <= 0:
+        raise ValueError("chunk_size must be greater than zero")
+    return min(requested, MAX_HTTP_TRANSFER_CHUNK_BYTES)
 
 
 def _sha256_file(

@@ -151,6 +151,29 @@ def test_chunk_upload_rejects_bad_hash_and_oversized_legacy_request(tmp_path, mo
     revoke_transfer_ticket(ticket["token"])
 
 
+def test_chunk_upload_rejects_request_above_http_chunk_limit(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    total = remote_transfer.MAX_HTTP_TRANSFER_CHUNK_BYTES + 1
+    ticket = create_upload_ticket(
+        "too-large-chunk.bin",
+        total,
+        hashlib.sha256(b"").hexdigest(),
+    )
+
+    response = client.put(
+        ticket["url"],
+        content=b"",
+        headers={
+            "Content-Range": f"bytes 0-{total - 1}/{total}",
+            "Content-Length": "0",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "maximum is 67108864 bytes" in response.json()["message"]
+    revoke_transfer_ticket(ticket["token"])
+
+
 def test_upload_status_and_claim_conflicts(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     data = b"payload"

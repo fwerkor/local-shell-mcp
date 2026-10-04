@@ -306,8 +306,14 @@ def test_transfer_metadata_chunks_and_finish_edges(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     assert transfer.normalize_chunk_size(None) == transfer.DEFAULT_TRANSFER_CHUNK_BYTES
     assert transfer.normalize_chunk_size(10**9) == transfer.MAX_TRANSFER_CHUNK_BYTES
+    assert transfer.DEFAULT_HTTP_TRANSFER_CHUNK_BYTES == 64 * 1024 * 1024
+    assert transfer.MAX_HTTP_TRANSFER_CHUNK_BYTES == 64 * 1024 * 1024
+    assert transfer.normalize_http_chunk_size(None) == transfer.DEFAULT_HTTP_TRANSFER_CHUNK_BYTES
+    assert transfer.normalize_http_chunk_size(10**9) == transfer.MAX_HTTP_TRANSFER_CHUNK_BYTES
     with pytest.raises(ValueError):
         transfer.normalize_chunk_size(0)
+    with pytest.raises(ValueError):
+        transfer.normalize_http_chunk_size(0)
     with pytest.raises(ValueError, match="transfer_id"):
         transfer._transfer_temp_path(tmp_path / "x", "bad/id")
 
