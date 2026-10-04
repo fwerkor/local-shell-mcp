@@ -856,6 +856,297 @@ async def test_legacy_stream_exhausts_retries_for_incomplete_upload(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_legacy_stream_raises_missing_ticket_after_successful_worker(monkeypatch):
+    release_upload = asyncio.Event()
+
+    async def succeed_after_poll(*args, **kwargs):
+        del args, kwargs
+        await release_upload.wait()
+        return {"sha256": hashlib.sha256(b"payload").hexdigest()}
+
+    def missing_status(token):
+        del token
+        release_upload.set()
+        raise FileNotFoundError("ticket removed")
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", succeed_after_poll)
+    monkeypatch.setattr(tools, "get_upload_ticket_status", missing_status)
+
+    with pytest.raises(FileNotFoundError, match="ticket removed"):
+        await tools._stream_remote_file_to_upload_ticket(
+            "source-worker",
+            "source.bin",
+            7,
+            None,
+            {"token": "removed", "url": "http://testserver/upload/removed"},
+            put_tool="transfer_gui_temp_put_url",
+        )
+
+
+@pytest.mark.asyncio
+async def test_legacy_stream_reports_progress_while_worker_is_active(monkeypatch):
+    digest = hashlib.sha256(b"payload").hexdigest()
+    release_upload = asyncio.Event()
+    status_calls = 0
+    wait_calls = 0
+    progress_updates: list[int] = []
+    real_wait = asyncio.wait
+
+    async def upload(*args, **kwargs):
+        del args, kwargs
+        await release_upload.wait()
+        return {"sha256": digest}
+
+    async def fake_wait(tasks, timeout=None):
+        nonlocal wait_calls
+        wait_calls += 1
+        if wait_calls == 1:
+            return set(), set(tasks)
+        return await real_wait(tasks, timeout=timeout)
+
+    def status(token):
+        nonlocal status_calls
+        assert token == "ticket"
+        status_calls += 1
+        if status_calls == 1:
+            release_upload.set()
+            return {"received_bytes": 3, "completed": False, "staged": False}
+        return {"received_bytes": 7, "completed": True, "sha256": digest}
+
+    async def report(progress, **kwargs):
+        del progress
+        progress_updates.append(int(kwargs["bytes_transferred"]))
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", upload)
+    monkeypatch.setattr(tools, "get_upload_ticket_status", status)
+    monkeypatch.setattr(tools.asyncio, "wait", fake_wait)
+    monkeypatch.setattr(tools, "_report_transfer_progress", report)
+
+    result = await tools._stream_remote_file_to_upload_ticket(
+        "source-worker",
+        "source.bin",
+        7,
+        digest,
+        {"token": "ticket", "url": "http://testserver/upload/ticket"},
+        put_tool="transfer_gui_temp_put_url",
+    )
+
+    assert result["completed"] is True
+    assert 3 in progress_updates
+
+
+@pytest.mark.asyncio
+async def test_legacy_stream_retries_worker_failure_then_exhausts(monkeypatch):
+    attempts = 0
+
+    async def fail(*args, **kwargs):
+        nonlocal attempts
+        del args, kwargs
+        attempts += 1
+        raise RuntimeError("worker upload failed")
+
+    async def no_sleep(delay):
+        assert delay in {0.25, 0.5}
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", fail)
+    monkeypatch.setattr(
+        tools,
+        "get_upload_ticket_status",
+        lambda token: {
+            "received_bytes": 0,
+            "completed": False,
+            "staged": False,
+        },
+    )
+    monkeypatch.setattr(tools.asyncio, "sleep", no_sleep)
+
+    with pytest.raises(RuntimeError, match="worker upload failed"):
+        await tools._stream_remote_file_to_upload_ticket(
+            "source-worker",
+            "source.bin",
+            7,
+            "0" * 64,
+            {"token": "ticket", "url": "http://testserver/upload/ticket"},
+            put_tool="transfer_gui_temp_put_url",
+        )
+
+    assert attempts == 3
+
+
+@pytest.mark.asyncio
+async def test_legacy_stream_returns_completed_status_after_worker_success(monkeypatch):
+    digest = hashlib.sha256(b"payload").hexdigest()
+
+    async def upload(*args, **kwargs):
+        del args, kwargs
+        return {"sha256": digest}
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", upload)
+    monkeypatch.setattr(
+        tools,
+        "get_upload_ticket_status",
+        lambda token: {
+            "received_bytes": 7,
+            "completed": True,
+            "sha256": digest,
+        },
+    )
+
+    result = await tools._stream_remote_file_to_upload_ticket(
+        "source-worker",
+        "source.bin",
+        7,
+        digest,
+        {"token": "ticket", "url": "http://testserver/upload/ticket"},
+        put_tool="transfer_gui_temp_put_url",
+    )
+
+    assert result["completed"] is True
+
+
+@pytest.mark.asyncio
+async def test_legacy_stream_staged_incomplete_status_is_not_finalized(monkeypatch):
+    digest = hashlib.sha256(b"payload").hexdigest()
+    attempts = 0
+
+    async def upload(*args, **kwargs):
+        nonlocal attempts
+        del args, kwargs
+        attempts += 1
+        return {"sha256": digest}
+
+    async def no_sleep(delay):
+        assert delay in {0.25, 0.5}
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", upload)
+    monkeypatch.setattr(
+        tools,
+        "get_upload_ticket_status",
+        lambda token: {
+            "received_bytes": 6,
+            "completed": False,
+            "staged": True,
+            "sha256": digest,
+        },
+    )
+    monkeypatch.setattr(tools.asyncio, "sleep", no_sleep)
+
+    with pytest.raises(tools.RemoteTransferError, match="upload did not complete"):
+        await tools._stream_remote_file_to_upload_ticket(
+            "source-worker",
+            "source.bin",
+            7,
+            None,
+            {"token": "ticket", "url": "http://testserver/upload/ticket"},
+            put_tool="transfer_gui_temp_put_url",
+        )
+
+    assert attempts == 3
+
+
+@pytest.mark.asyncio
+async def test_wait_for_download_ticket_completion_times_out_after_poll(monkeypatch):
+    class FakeLoop:
+        def __init__(self):
+            self.values = iter((0.0, 1.0, 6.0))
+
+        def time(self):
+            return next(self.values)
+
+    loop = FakeLoop()
+    sleeps: list[float] = []
+
+    async def no_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(tools.asyncio, "get_running_loop", lambda: loop)
+    monkeypatch.setattr(tools.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(
+        tools,
+        "get_download_ticket_status",
+        lambda token: {"completed": False},
+    )
+
+    with pytest.raises(
+        tools.RemoteTransferError,
+        match="source stream ended before its digest was finalized",
+    ):
+        await tools._wait_for_download_ticket_completion("ticket")
+
+    assert sleeps == [0.01]
+
+
+@pytest.mark.asyncio
+async def test_legacy_stream_preserves_worker_failure_when_status_ticket_is_missing(monkeypatch):
+    async def fail(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError("worker failed")
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", fail)
+    monkeypatch.setattr(
+        tools,
+        "get_upload_ticket_status",
+        lambda token: (_ for _ in ()).throw(FileNotFoundError(token)),
+    )
+
+    with pytest.raises(RuntimeError, match="worker failed"):
+        await tools._stream_remote_file_to_upload_ticket(
+            "source-worker",
+            "source.bin",
+            7,
+            "0" * 64,
+            {"token": "missing", "url": "http://testserver/upload/missing"},
+            put_tool="transfer_gui_temp_put_url",
+        )
+
+
+@pytest.mark.asyncio
+async def test_legacy_stream_finalizes_staged_status_after_worker_failure(monkeypatch):
+    digest = hashlib.sha256(b"payload").hexdigest()
+
+    async def transfer(machine, tool, args, timeout_s=None):
+        del machine, args, timeout_s
+        if tool == "transfer_gui_temp_put_url":
+            raise RuntimeError("response lost after upload")
+        assert tool == "transfer_gui_temp_stat"
+        return {"size": 7, "sha256": digest}
+
+    monkeypatch.setattr(tools, "_remote_transfer_data", transfer)
+    monkeypatch.setattr(
+        tools,
+        "get_upload_ticket_status",
+        lambda token: {
+            "received_bytes": 7,
+            "completed": False,
+            "staged": True,
+            "sha256": digest,
+        },
+    )
+    monkeypatch.setattr(
+        tools,
+        "finalize_upload_ticket",
+        lambda token, expected_sha256: {
+            "completed": True,
+            "received_bytes": 7,
+            "sha256": expected_sha256,
+        },
+    )
+
+    result = await tools._stream_remote_file_to_upload_ticket(
+        "source-worker",
+        "source.bin",
+        7,
+        None,
+        {"token": "ticket", "url": "http://testserver/upload/ticket"},
+        put_tool="transfer_gui_temp_put_url",
+        stat_tool="transfer_gui_temp_stat",
+    )
+
+    assert result["completed"] is True
+    assert result["sha256"] == digest
+
+
+@pytest.mark.asyncio
 async def test_streaming_transfer_preserves_chunk_size_validation(tmp_path, monkeypatch):
     root = _workspace(tmp_path, monkeypatch)
     (root / "payload.bin").write_bytes(b"content")

@@ -729,6 +729,102 @@ def test_worker_upload_protocol_and_generated_execution_edges(tmp_path, monkeypa
     assert shell_error["data"]["command"] == "echo ok"
 
 
+def test_worker_chunk_upload_rejects_invalid_offset(tmp_path, monkeypatch):
+    _configure(
+        tmp_path,
+        monkeypatch,
+        LOCAL_SHELL_MCP_WORKER_STATE_DIR=tmp_path / "worker-state",
+    )
+    remote._write_worker_identity(
+        {"server": "https://control.test", "name": "node", "access": "token"}
+    )
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+
+    with pytest.raises(ValueError, match="offset is outside"):
+        remote._worker_upload_url(
+            "source.bin",
+            "https://control.test/remote/transfer/token",
+            7,
+            hashlib.sha256(b"payload").hexdigest(),
+            offset=8,
+        )
+
+
+def test_worker_chunk_upload_handles_zero_length_without_content_range(tmp_path, monkeypatch):
+    _configure(
+        tmp_path,
+        monkeypatch,
+        LOCAL_SHELL_MCP_WORKER_STATE_DIR=tmp_path / "worker-state",
+    )
+    remote._write_worker_identity(
+        {"server": "https://control.test", "name": "node", "access": "token"}
+    )
+    source = tmp_path / "empty.bin"
+    source.write_bytes(b"")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(remote.shutil, "which", lambda name: "/usr/bin/curl")
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["input"] = kwargs["input"]
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout='{"ok":true,"data":{"received_bytes":0,"completed":true}}'
+            "\n__LSM_HTTP_STATUS__:200",
+            stderr="",
+        )
+
+    monkeypatch.setattr(remote.subprocess, "run", fake_run)
+
+    result = remote._worker_upload_url(
+        "empty.bin",
+        "https://control.test/remote/transfer/token",
+        0,
+        hashlib.sha256(b"").hexdigest(),
+    )
+
+    assert result["chunk_bytes"] == 0
+    assert captured["input"] == b""
+    assert not any("Content-Range:" in str(part) for part in captured["command"])
+
+
+def test_worker_chunk_upload_rejects_malformed_http_status(tmp_path, monkeypatch):
+    _configure(
+        tmp_path,
+        monkeypatch,
+        LOCAL_SHELL_MCP_WORKER_STATE_DIR=tmp_path / "worker-state",
+    )
+    remote._write_worker_identity(
+        {"server": "https://control.test", "name": "node", "access": "token"}
+    )
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    digest = hashlib.sha256(b"payload").hexdigest()
+
+    monkeypatch.setattr(remote.shutil, "which", lambda name: "/usr/bin/curl")
+    monkeypatch.setattr(
+        remote.subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(
+            command,
+            0,
+            stdout='{}\n__LSM_HTTP_STATUS__:not-a-status',
+            stderr="",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="invalid response"):
+        remote._worker_upload_url(
+            "source.bin",
+            "https://control.test/remote/transfer/token",
+            7,
+            digest,
+        )
+
+
 @pytest.mark.asyncio
 async def test_worker_run_python_invokes_quoted_executable_in_powershell(
     tmp_path, monkeypatch
