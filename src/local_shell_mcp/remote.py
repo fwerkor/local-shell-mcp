@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import contextlib
 import hashlib
 import importlib.metadata as importlib_metadata
@@ -44,7 +45,9 @@ from .fs_ops import (
     perform_file_action,
     prune_temp_dir,
     read_texts,
+    refresh_temp_file_lease,
     relative_display,
+    release_temp_file_lease,
     resolve_path,
     temp_dir,
     write_content,
@@ -75,8 +78,9 @@ from .shell_ops import (
 from .state_store import get_state_store
 from .tmux_helper import persistent_shell_backend_info
 from .transfer_ops import (
+    DEFAULT_HTTP_TRANSFER_CHUNK_BYTES,
     DEFAULT_TRANSFER_CHUNK_BYTES,
-    normalize_chunk_size,
+    normalize_http_chunk_size,
     transfer_abort_write,
     transfer_alloc_temp_path,
     transfer_begin_write,
@@ -84,6 +88,7 @@ from .transfer_ops import (
     transfer_mark_complete_write,
     transfer_pack_dir_async,
     transfer_read_chunk,
+    transfer_refresh_stream_write,
     transfer_stat,
     transfer_unpack_archive_async,
     transfer_write_chunk,
@@ -94,10 +99,12 @@ REMOTE_JOIN_PATH = "/join"
 REMOTE_POWERSHELL_JOIN_PATH = REMOTE_JOIN_PATH + ".ps1"
 REMOTE_API_PREFIX = "/remote"
 REMOTE_WORKER_BUNDLE_PATH = "/remote/worker-bundle.tgz"
-REMOTE_WORKER_LANE_PROTOCOL_VERSION = 2
-REMOTE_WORKER_POLL_PROTOCOL_VERSION = REMOTE_WORKER_LANE_PROTOCOL_VERSION
+REMOTE_WORKER_LANE_PROTOCOL_VERSION = 3
+REMOTE_WORKER_RESET_PROTOCOL_VERSION = 4
+REMOTE_WORKER_POLL_PROTOCOL_VERSION = REMOTE_WORKER_RESET_PROTOCOL_VERSION
 _WORKER_CONNECT_TIMEOUT_S = 10.0
 _WORKER_POLL_TIMEOUT_GRACE_S = 10.0
+_WORKER_TRANSFER_LEASE_REFRESH_INTERVAL_S = 60.0
 # The remote worker is designed to start on machines that only have Python, curl,
 # and tar. Keep this empty unless a dependency is pure Python and imported on the
 # worker startup path. Tool-specific dependencies such as Playwright should be
@@ -143,16 +150,15 @@ REMOTE_NON_CANCELLABLE_WORKER_TOOLS = frozenset(
         "write_file",
         "edit_file",
         "delete_file_or_dir",
+        "gui_action",
+        "gui_human_action",
         "human_file_action",
         "transfer_begin_write",
         "transfer_write_chunk",
         "transfer_finish_write",
         "transfer_abort_write",
         "transfer_upload_url",
-        "transfer_download_url",
         "transfer_open_receiver",
-        "transfer_put_url",
-        "transfer_get_url",
         "transfer_close_receiver",
         "shell_start",
         "shell_send",
@@ -160,7 +166,13 @@ REMOTE_NON_CANCELLABLE_WORKER_TOOLS = frozenset(
         "job_start",
         "job_stop",
         "job_retry",
+        "transfer_gui_temp_stat",
+        "transfer_gui_temp_put_url",
+        "transfer_gui_temp_delete",
     }
+)
+REMOTE_RESET_PRESERVED_WORKER_TOOLS = REMOTE_NON_CANCELLABLE_WORKER_TOOLS | frozenset(
+    {"shell_start", "job_start", "job_retry"}
 )
 
 
@@ -353,6 +365,7 @@ class RemoteWorker:
     info: dict[str, Any] = field(default_factory=dict)
     queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
     transfer_queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
+    reset_generation: int = 0
 
 
 class RemoteManager:
@@ -364,8 +377,10 @@ class RemoteManager:
         self.pending_machines: dict[str, str] = {}
         self.claimed_waiters: dict[str, asyncio.Future[float]] = {}
         self.job_lifecycle: dict[str, dict[str, Any]] = {}
+        self.pending_tools: dict[str, str] = {}
         self.cancelled_jobs: dict[str, float] = {}
         self.claimed_jobs: set[str] = set()
+        self.started_jobs: set[str] = set()
         self._lock = asyncio.Lock()
         self._state_lock = threading.RLock()
         self._registry_loaded = False
@@ -507,6 +522,10 @@ class RemoteManager:
             worker.created_at = float(item.get("created_at") or _utc())
             worker.capabilities = list(item.get("capabilities") or [])
             worker.info = dict(item.get("info") or {})
+            try:
+                worker.reset_generation = max(0, int(item.get("reset_generation") or 0))
+            except (TypeError, ValueError):
+                worker.reset_generation = 0
             workers[name] = worker
             tokens[access] = name
         now = _utc()
@@ -550,6 +569,7 @@ class RemoteManager:
                     "created_at": worker.created_at,
                     "capabilities": worker.capabilities,
                     "info": worker.info,
+                    "reset_generation": worker.reset_generation,
                 }
                 for worker in sorted(self.workers.values(), key=lambda item: item.name)
             ],
@@ -659,7 +679,8 @@ class RemoteManager:
             "ttl_s": ttl,
             "join_url": join_url,
             "command": command,
-            "persistent_command": command + ' --persist && export PATH="${LOCAL_SHELL_MCP_WORKER_BIN_DIR:-$HOME/.local/bin}:$PATH"',
+            "persistent_command": command
+            + ' --persist && export PATH="${LOCAL_SHELL_MCP_WORKER_BIN_DIR:-$HOME/.local/bin}:$PATH"',
             "powershell_join_url": powershell_join_url,
             "powershell_command": powershell_command,
             "powershell_persistent_command": powershell_command + " -Persist",
@@ -713,6 +734,7 @@ class RemoteManager:
             "poll_timeout_s": get_settings().remote_poll_timeout_s,
             "heartbeat_interval_s": _remote_heartbeat_interval_s(),
             "poll_protocol_version": REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+            "reset_generation": worker.reset_generation,
         }
 
     async def resume_worker(self, access: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -742,6 +764,7 @@ class RemoteManager:
             "poll_timeout_s": get_settings().remote_poll_timeout_s,
             "heartbeat_interval_s": _remote_heartbeat_interval_s(),
             "poll_protocol_version": REMOTE_WORKER_POLL_PROTOCOL_VERSION,
+            "reset_generation": worker.reset_generation,
         }
 
     def _default_machine_name(self, payload: dict[str, Any]) -> str:
@@ -777,6 +800,8 @@ class RemoteManager:
         self.claimed_jobs.discard(job_id)
         if claimed is not None and not claimed.done():
             claimed.cancel()
+        self.pending_tools.pop(job_id, None)
+        self.started_jobs.discard(job_id)
         now = _utc()
         self.cancelled_jobs[job_id] = now
         self._prune_cancelled_jobs_locked(now)
@@ -794,9 +819,7 @@ class RemoteManager:
             self._cancel_job_locked(job_id)
             return True
 
-    async def poll(
-        self, token: str, payload: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    async def poll(self, token: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         worker = self._worker_by_token(token)
         payload = payload or {}
         worker_version = str(payload.get("worker_version") or "")
@@ -815,9 +838,23 @@ class RemoteManager:
         upgrade = None
         if protocol_version > 0:
             upgrade = {
-                "required": worker_version != __version__,
+                "required": (
+                    worker_version != __version__
+                    or protocol_version < REMOTE_WORKER_POLL_PROTOCOL_VERSION
+                ),
                 "version": __version__,
+                "protocol_version": REMOTE_WORKER_POLL_PROTOCOL_VERSION,
             }
+            if upgrade["required"] and protocol_version == 2:
+                from .remote_worker_routes import worker_bundle_manifest
+
+                manifest = worker_bundle_manifest()
+                upgrade.update(
+                    {
+                        "sha256": manifest["sha256"],
+                        "manifest_path": REMOTE_WORKER_BUNDLE_PATH + "?manifest=1",
+                    }
+                )
         with self._state_lock:
             worker.status = "online"
             worker.last_seen = _utc()
@@ -827,11 +864,13 @@ class RemoteManager:
                 worker.info["poll_protocol_version"] = protocol_version
             if protocol_version >= REMOTE_WORKER_LANE_PROTOCOL_VERSION:
                 _migrate_worker_lane_queues(worker)
+            reset_generation = worker.reset_generation
         if upgrade and upgrade["required"]:
             return {
                 "job": None,
                 "upgrade": upgrade,
                 "poll_timeout_s": configured_poll_timeout_s,
+                "reset_generation": reset_generation,
             }
         queue = (
             worker.transfer_queue
@@ -849,6 +888,7 @@ class RemoteManager:
                     "heartbeat": True,
                     "upgrade": upgrade,
                     "poll_timeout_s": configured_poll_timeout_s,
+                    "reset_generation": worker.reset_generation,
                 }
             try:
                 job = await _wait_for_remote_poll_item(queue, remaining)
@@ -858,6 +898,7 @@ class RemoteManager:
                     "heartbeat": True,
                     "upgrade": upgrade,
                     "poll_timeout_s": configured_poll_timeout_s,
+                    "reset_generation": worker.reset_generation,
                 }
             job_id = str(job.get("id") or "")
             with self._state_lock:
@@ -888,20 +929,46 @@ class RemoteManager:
                 "job": job,
                 "upgrade": upgrade,
                 "poll_timeout_s": configured_poll_timeout_s,
+                "reset_generation": worker.reset_generation,
             }
 
     async def heartbeat(self, token: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         worker = self._worker_by_token(token)
-        job_id = str((payload or {}).get("job_id") or "")
+        payload = payload or {}
+        job_id = str(payload.get("job_id") or "")
+        starting = bool(payload.get("starting"))
+        requested_generation = _worker_reset_generation(payload)
         with self._state_lock:
             worker.status = "online"
             worker.last_seen = _utc()
             name = worker.name
             self._prune_cancelled_jobs_locked()
-            cancelled = bool(job_id and job_id in self.cancelled_jobs)
-        result = {"accepted": not cancelled, "name": name}
+            assigned_machine = self.pending_machines.get(job_id) if job_id else None
+            cancelled = bool(
+                job_id and (job_id in self.cancelled_jobs or assigned_machine != worker.name)
+            )
+            reset_generation = worker.reset_generation
+            start_preserved = False
+            if starting and job_id:
+                tool = self.pending_tools.get(job_id)
+                already_started = job_id in self.started_jobs
+                start_preserved = already_started and tool in REMOTE_RESET_PRESERVED_WORKER_TOOLS
+                generation_changed = (
+                    requested_generation is not None and requested_generation != reset_generation
+                )
+                if job_id not in self.claimed_jobs or (generation_changed and not start_preserved):
+                    cancelled = True
+                elif not cancelled:
+                    self.started_jobs.add(job_id)
+        result = {
+            "accepted": not cancelled,
+            "name": name,
+            "reset_generation": reset_generation,
+        }
         if cancelled:
             result["cancelled"] = True
+        elif starting and start_preserved:
+            result["preserved"] = True
         return result
 
     async def submit_result(self, token: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -925,15 +992,19 @@ class RemoteManager:
                     f"remote job {job_id!r} belongs to machine {assigned_machine!r}"
                 )
             if assigned_machine is None:
+                self.pending_tools.pop(job_id, None)
                 self.cancelled_jobs.pop(job_id, None)
                 self.claimed_jobs.discard(job_id)
                 self.job_lifecycle.pop(job_id, None)
+                self.started_jobs.discard(job_id)
                 return {"accepted": False}
             self.pending_machines.pop(job_id, None)
+            self.pending_tools.pop(job_id, None)
             self.cancelled_jobs.pop(job_id, None)
             self.claimed_jobs.discard(job_id)
             self.claimed_waiters.pop(job_id, None)
             lifecycle = self.job_lifecycle.pop(job_id, None)
+            self.started_jobs.discard(job_id)
             future = self.pending.pop(job_id, None)
             if future and not future.done():
                 future.set_result(payload)
@@ -1038,6 +1109,7 @@ class RemoteManager:
             self.claimed_waiters[job_id] = claimed_waiter
             self.pending_machines[job_id] = machine
             self.job_lifecycle[job_id] = lifecycle
+            self.pending_tools[job_id] = tool
             protocol_version = _worker_poll_protocol_version(worker.info)
             job_lane = _worker_job_lane(tool, lane)
             lifecycle["lane"] = job_lane
@@ -1054,6 +1126,7 @@ class RemoteManager:
                     "args": args,
                     "lane": job_lane,
                     "expires_at": enqueued_at + total_budget,
+                    "reset_generation": worker.reset_generation,
                 }
             )
         audit(
@@ -1082,6 +1155,8 @@ class RemoteManager:
                     self.claimed_waiters.pop(job_id, None)
                     self.job_lifecycle.pop(job_id, None)
                     self.claimed_jobs.discard(job_id)
+                    self.pending_tools.pop(job_id, None)
+                    self.started_jobs.discard(job_id)
 
             future.add_done_callback(cleanup)
 
@@ -1109,11 +1184,12 @@ class RemoteManager:
                 self._cancel_job(job_id)
             raise TimeoutError(f"remote job timed out: {tool} on {machine}") from exc
         except asyncio.CancelledError:
-            with self._state_lock:
-                claimed = job_id in self.claimed_jobs
-            if tool in REMOTE_NON_CANCELLABLE_WORKER_TOOLS and claimed:
+            claimed_mutation = False
+            if tool in REMOTE_NON_CANCELLABLE_WORKER_TOOLS:
+                claimed_mutation = not self._cancel_job_if_unclaimed(job_id)
+            if claimed_mutation:
                 preserve_claimed_mutation()
-            else:
+            elif tool not in REMOTE_NON_CANCELLABLE_WORKER_TOOLS:
                 self._cancel_job(job_id)
             raise
         finally:
@@ -1123,7 +1199,9 @@ class RemoteManager:
                     self.pending_machines.pop(job_id, None)
                     self.claimed_waiters.pop(job_id, None)
                     self.job_lifecycle.pop(job_id, None)
+                    self.pending_tools.pop(job_id, None)
                     self.claimed_jobs.discard(job_id)
+                    self.started_jobs.discard(job_id)
         if not result.get("ok", False):
             data = result.get("data")
             if not isinstance(data, dict):
@@ -1166,6 +1244,7 @@ class RemoteManager:
                         "queue_depth": worker.queue.qsize() + worker.transfer_queue.qsize(),
                         "interactive_queue_depth": worker.queue.qsize(),
                         "transfer_queue_depth": worker.transfer_queue.qsize(),
+                        "reset_generation": worker.reset_generation,
                         "capabilities": list(worker.capabilities),
                         "info": dict(worker.info),
                     }
@@ -1174,6 +1253,80 @@ class RemoteManager:
         return {
             "machines": rows,
             "counts": {**counts, "total": len(rows)},
+        }
+
+    @staticmethod
+    def _drain_queue(queue: asyncio.Queue[dict[str, Any]]) -> int:
+        cleared = 0
+        while True:
+            try:
+                queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return cleared
+            queue.task_done()
+            cleared += 1
+
+    def reset(self, machine: str) -> dict[str, Any]:
+        with self._state_lock, self._registry_transaction_unlocked():
+            worker = self.workers.get(machine)
+            if not worker:
+                raise ValueError(f"unknown remote machine: {machine}")
+
+            pending_job_ids = [
+                job_id
+                for job_id, pending_machine in self.pending_machines.items()
+                if pending_machine == machine
+            ]
+            active_jobs = sum(job_id in self.claimed_jobs for job_id in pending_job_ids)
+            legacy_worker = (
+                _worker_poll_protocol_version(worker.info) < REMOTE_WORKER_RESET_PROTOCOL_VERSION
+            )
+            preserved_job_ids = {
+                job_id
+                for job_id in pending_job_ids
+                if self.pending_tools.get(job_id) in REMOTE_RESET_PRESERVED_WORKER_TOOLS
+                and (job_id in self.started_jobs or (legacy_worker and job_id in self.claimed_jobs))
+            }
+
+            previous_generation = worker.reset_generation
+            worker.reset_generation = previous_generation + 1
+            try:
+                self._save_registry_unlocked()
+            except BaseException:
+                worker.reset_generation = previous_generation
+                raise
+
+            cancelled_jobs = 0
+            for job_id in pending_job_ids:
+                if job_id in preserved_job_ids:
+                    continue
+                self._cancel_job_locked(job_id)
+                cancelled_jobs += 1
+
+            cleared_interactive = self._drain_queue(worker.queue)
+            cleared_transfer = self._drain_queue(worker.transfer_queue)
+            generation = worker.reset_generation
+
+        with contextlib.suppress(Exception):
+            audit(
+                "remote_worker_reset",
+                machine=machine,
+                reset_generation=generation,
+                cancelled_jobs=cancelled_jobs,
+                active_jobs=active_jobs,
+                preserved_jobs=len(preserved_job_ids),
+                cleared_interactive_queue=cleared_interactive,
+                cleared_transfer_queue=cleared_transfer,
+            )
+        return {
+            "machine": machine,
+            "reset": True,
+            "reset_generation": generation,
+            "cancelled_jobs": cancelled_jobs,
+            "active_jobs": active_jobs,
+            "preserved_jobs": len(preserved_job_ids),
+            "cleared_interactive_queue": cleared_interactive,
+            "cleared_transfer_queue": cleared_transfer,
         }
 
     def revoke(self, machine: str) -> dict[str, Any]:
@@ -1538,6 +1691,7 @@ WORKER_TRANSFER_TOOLS = frozenset(
         "transfer_write_chunk",
         "transfer_finish_write",
         "transfer_abort_write",
+        "transfer_refresh_stream_write",
         "transfer_alloc_temp_path",
         "transfer_pack_dir",
         "transfer_unpack_archive",
@@ -1547,6 +1701,9 @@ WORKER_TRANSFER_TOOLS = frozenset(
         "transfer_put_url",
         "transfer_get_url",
         "transfer_close_receiver",
+        "transfer_gui_temp_stat",
+        "transfer_gui_temp_put_url",
+        "transfer_gui_temp_delete",
     }
 )
 WORKER_BROWSER_TOOLS = frozenset(
@@ -1557,6 +1714,19 @@ WORKER_BROWSER_TOOLS = frozenset(
         "browser_run_script",
     }
 )
+WORKER_GUI_TOOLS = frozenset(
+    {
+        "gui_list",
+        "gui_state",
+        "gui_state_refresh",
+        "gui_state_discard",
+        "gui_frame",
+        "gui_frame_refresh",
+        "gui_frame_discard",
+        "gui_human_action",
+        "gui_action",
+    }
+)
 REMOTE_WORKER_TOOL_NAMES = frozenset().union(
     WORKER_ENVIRONMENT_TOOLS,
     WORKER_COMMAND_TOOLS,
@@ -1565,7 +1735,227 @@ REMOTE_WORKER_TOOL_NAMES = frozenset().union(
     WORKER_FILE_TOOLS,
     WORKER_TRANSFER_TOOLS,
     WORKER_BROWSER_TOOLS,
+    WORKER_GUI_TOOLS,
 )
+
+
+_GUI_TEMP_NAME_RE = re.compile(r"^gui(?:-frame)?-[0-9a-f]{32}\.png$")
+
+
+def _worker_gui_temp_path(path: str, *, must_exist: bool = True) -> Path:
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = get_settings().workspace_root / candidate
+    root = temp_dir().resolve(strict=False)
+    parent = candidate.parent.resolve(strict=False)
+    if parent != root:
+        raise ValueError("GUI temp path is outside the internal temp directory")
+    if not _GUI_TEMP_NAME_RE.fullmatch(candidate.name):
+        raise ValueError("GUI temp path has an invalid filename")
+    resolved = candidate.resolve(strict=must_exist)
+    if resolved.parent != root:
+        raise ValueError("GUI temp path escapes the internal temp directory")
+    return resolved
+
+
+def _worker_gui_temp_stat(path: str, sha256: bool = False) -> dict[str, Any]:
+    source = _worker_gui_temp_path(path, must_exist=True)
+    if not source.is_file():
+        raise IsADirectoryError(str(source))
+    stat = source.stat()
+    result: dict[str, Any] = {
+        "path": relative_display(source),
+        "type": "file",
+        "size": stat.st_size,
+        "mtime": stat.st_mtime,
+    }
+    if sha256:
+        digest = hashlib.sha256()
+        with source.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        result["sha256"] = digest.hexdigest()
+    return result
+
+
+_GUI_RELAY_OPTIMIZE_MAX_PIXELS = 16_000_000
+
+
+def _optimize_gui_temp_for_relay(path: str) -> dict[str, Any]:
+    """Lossily compress a remote GUI screenshot in-place for low-latency relay."""
+    try:
+        source = _worker_gui_temp_path(path, must_exist=True)
+        original_size = int(source.stat().st_size)
+    except Exception:
+        return {"optimized": False, "bytes": 0, "format": "original"}
+    if original_size < 128 * 1024:
+        return {"optimized": False, "bytes": original_size, "format": "original"}
+
+    temporary = source.with_name(f".{source.name}.{uuid.uuid4().hex}.relay")
+    try:
+        from PIL import Image, features
+
+        with Image.open(source) as opened:
+            width, height = opened.size
+            if width <= 0 or height <= 0 or width * height > _GUI_RELAY_OPTIMIZE_MAX_PIXELS:
+                return {
+                    "optimized": False,
+                    "bytes": original_size,
+                    "format": "original",
+                }
+            opened.load()
+            frame = opened.convert("RGB")
+            if features.check("webp"):
+                image_format = "webp"
+                frame.save(temporary, format="WEBP", quality=78, method=4)
+            else:
+                image_format = "jpeg"
+                frame.save(temporary, format="JPEG", quality=78, optimize=True)
+        temporary.chmod(0o600)
+        optimized_size = int(temporary.stat().st_size)
+        if optimized_size <= 0 or optimized_size >= original_size:
+            return {"optimized": False, "bytes": original_size, "format": "original"}
+        os.replace(temporary, source)
+        return {
+            "optimized": True,
+            "bytes": optimized_size,
+            "original_bytes": original_size,
+            "format": image_format,
+        }
+    except Exception:
+        return {"optimized": False, "bytes": original_size, "format": "original"}
+    finally:
+        with contextlib.suppress(OSError):
+            temporary.unlink(missing_ok=True)
+
+
+_GUI_INLINE_RELAY_MAX_BYTES = 256 * 1024
+_GUI_INLINE_RELAY_BODY_RESERVE_BYTES = 8 * 1024
+
+
+def _inline_gui_temp_for_relay(
+    path: str,
+    *,
+    metadata_bytes: int = 0,
+) -> dict[str, Any] | None:
+    """Return a bounded compressed GUI screenshot inline for low-latency relay."""
+    try:
+        source = _worker_gui_temp_path(path, must_exist=True)
+        size = int(source.stat().st_size)
+        request_limit = max(1, int(get_settings().max_http_request_bytes))
+    except Exception:
+        return None
+    available_body = max(
+        0,
+        request_limit - max(0, int(metadata_bytes)) - _GUI_INLINE_RELAY_BODY_RESERVE_BYTES,
+    )
+    raw_body_budget = (available_body // 4) * 3
+    inline_limit = min(_GUI_INLINE_RELAY_MAX_BYTES, raw_body_budget)
+    if size <= 0 or size > inline_limit:
+        return None
+    payload = source.read_bytes()
+    if len(payload) != size:
+        return None
+    return {
+        "screenshot_inline_b64": base64.b64encode(payload).decode("ascii"),
+        "screenshot_inline_size": size,
+    }
+
+
+async def _prepare_worker_gui_relay(
+    path: str,
+    result: dict[str, Any],
+) -> dict[str, Any] | None:
+    await asyncio.to_thread(_optimize_gui_temp_for_relay, path)
+    try:
+        metadata_bytes = len(
+            json.dumps(
+                result,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        )
+    except Exception:
+        metadata_bytes = 0
+    return await asyncio.to_thread(
+        _inline_gui_temp_for_relay,
+        path,
+        metadata_bytes=metadata_bytes,
+    )
+
+
+async def _finish_worker_gui_relay(
+    manager: Any,
+    result: dict[str, Any],
+    *,
+    window_id: str,
+    record_id: str,
+    discard: Any,
+    refresh: Any | None = None,
+    ttl_key: str | None = None,
+) -> dict[str, Any]:
+    del manager
+    screenshot_path = str(result.get("screenshot_path") or "")
+    task: asyncio.Task[dict[str, Any] | None] | None = None
+    if screenshot_path:
+        task = asyncio.create_task(_prepare_worker_gui_relay(screenshot_path, result))
+    try:
+        inline = await asyncio.shield(task) if task is not None else None
+        if refresh is not None and record_id:
+            refreshed = await refresh(window_id, record_id)
+            if ttl_key is not None:
+                remaining_ttl = float(refreshed.get(ttl_key) or 0)
+                if remaining_ttl <= 0:
+                    raise RuntimeError(
+                        "GUI observation expired during worker relay preparation"
+                    )
+                result[ttl_key] = remaining_ttl
+    except BaseException:
+        if task is not None:
+            with contextlib.suppress(BaseException):
+                await task
+        if record_id:
+            with contextlib.suppress(BaseException):
+                await asyncio.shield(discard(window_id, record_id))
+        if screenshot_path:
+            with contextlib.suppress(BaseException):
+                await asyncio.shield(asyncio.to_thread(_worker_gui_temp_delete, screenshot_path))
+        raise
+    if inline is not None:
+        result.update(inline)
+    return result
+
+
+def _worker_gui_temp_delete(path: str) -> dict[str, Any]:
+    source = _worker_gui_temp_path(path, must_exist=False)
+    try:
+        source.unlink(missing_ok=True)
+    finally:
+        release_temp_file_lease(source)
+    return {"path": relative_display(source), "deleted": True}
+
+
+def _worker_gui_temp_put_url(
+    path: str,
+    url: str,
+    expected_bytes: int,
+    timeout_s: int | None = None,
+) -> dict[str, Any]:
+    _worker_validate_external_transfer_url(url)
+    source = _worker_gui_temp_path(path, must_exist=True)
+    if not source.is_file():
+        raise IsADirectoryError(str(source))
+    total = int(expected_bytes)
+    if source.stat().st_size != total:
+        raise ValueError(f"size mismatch: expected {total}, got {source.stat().st_size}")
+    return _worker_put_stream_url(
+        source,
+        relative_display(source),
+        url,
+        total,
+        timeout_s,
+    )
 
 
 def _worker_validate_transfer_url(url: str) -> None:
@@ -1611,6 +2001,7 @@ def _worker_upload_url(
     timeout_s: int | None = None,
     offset: int = 0,
     chunk_size: int | None = None,
+    verify_source_digest: bool = True,
 ) -> dict[str, Any]:
     _worker_validate_transfer_url(url)
     source = resolve_path(path, must_exist=True)
@@ -1623,13 +2014,12 @@ def _worker_upload_url(
     start = int(offset)
     if start < 0 or start > total:
         raise ValueError("offset is outside the source file")
-    if start == 0:
+    if start == 0 and expected_sha256 is not None and verify_source_digest:
         digest = transfer_stat(str(source), True).get("sha256")
         if str(digest or "").lower() != str(expected_sha256).lower():
             raise ValueError("file sha256 mismatch before upload")
-
-    effective_chunk_size = normalize_chunk_size(
-        DEFAULT_TRANSFER_CHUNK_BYTES if chunk_size is None else chunk_size
+    effective_chunk_size = normalize_http_chunk_size(
+        DEFAULT_HTTP_TRANSFER_CHUNK_BYTES if chunk_size is None else chunk_size
     )
     with source.open("rb") as handle:
         handle.seek(start)
@@ -1678,11 +2068,7 @@ def _worker_upload_url(
     raw_stdout = completed.stdout or b""
     raw_stderr = completed.stderr or b""
     stdout = raw_stdout.encode() if isinstance(raw_stdout, str) else raw_stdout
-    stderr = (
-        raw_stderr
-        if isinstance(raw_stderr, str)
-        else raw_stderr.decode(errors="replace")
-    )
+    stderr = raw_stderr if isinstance(raw_stderr, str) else raw_stderr.decode(errors="replace")
     raw_marker = marker.encode("ascii")
     body, separator, raw_status = stdout.rpartition(raw_marker)
     if completed.returncode != 0:
@@ -1705,53 +2091,215 @@ def _worker_upload_url(
     return result
 
 
+def _worker_put_stream_url(
+    source: Path,
+    display_path: str,
+    url: str,
+    total: int,
+    timeout_s: int | None,
+) -> dict[str, Any]:
+    curl = shutil.which("curl")
+    if not curl:
+        raise FileNotFoundError("curl is required for remote file streaming")
+    marker = "\n__LSM_HTTP_STATUS__:"
+    command = [
+        curl,
+        "-sS",
+        "--http1.1",
+        "--connect-timeout",
+        "15",
+        "--max-time",
+        str(_worker_curl_timeout(timeout_s)),
+        "-X",
+        "PUT",
+        "-H",
+        "Expect:",
+        "-H",
+        "Content-Type: application/octet-stream",
+        "-H",
+        f"Content-Length: {total}",
+        # curl otherwise adds chunked transfer encoding for stdin uploads.
+        "-H",
+        "Transfer-Encoding:",
+        "--upload-file",
+        "-",
+        "--write-out",
+        marker + "%{http_code}",
+        url,
+    ]
+    cancellation = getattr(_worker_request_context, "cancellation", None)
+    digest = hashlib.sha256()
+    process = subprocess.Popen(  # noqa: S603
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        creationflags=_worker_subprocess_creationflags(),
+    )
+    if cancellation is not None:
+        cancellation.attach(process)
+
+    write_error: BaseException | None = None
+    try:
+        with source.open("rb") as handle:
+            before = os.fstat(handle.fileno())
+            identity = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+            if before.st_size != total:
+                raise ValueError(f"size mismatch: expected {total}, got {before.st_size}")
+            if process.stdin is None:
+                raise RuntimeError("curl upload stdin is unavailable")
+            while True:
+                current = os.fstat(handle.fileno())
+                if (
+                    current.st_dev,
+                    current.st_ino,
+                    current.st_size,
+                    current.st_mtime_ns,
+                ) != identity:
+                    raise RuntimeError("source changed during stream upload")
+                chunk = handle.read(DEFAULT_TRANSFER_CHUNK_BYTES)
+                current = os.fstat(handle.fileno())
+                if (
+                    current.st_dev,
+                    current.st_ino,
+                    current.st_size,
+                    current.st_mtime_ns,
+                ) != identity:
+                    raise RuntimeError("source changed during stream upload")
+                if not chunk:
+                    break
+                refresh_temp_file_lease(source, create=False)
+                digest.update(chunk)
+                try:
+                    written = process.stdin.write(chunk)
+                    process.stdin.flush()
+                    if written != len(chunk):
+                        raise RuntimeError(
+                            f"curl upload stdin accepted {written} of {len(chunk)} bytes"
+                        )
+                except BrokenPipeError as exc:
+                    write_error = exc
+                    break
+            with contextlib.suppress(BrokenPipeError):
+                process.stdin.close()
+            process.stdin = None
+            after = os.fstat(handle.fileno())
+            if (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns) != identity:
+                raise RuntimeError("source changed during stream upload")
+        stdout, stderr = process.communicate()
+    except BaseException:
+        with contextlib.suppress(OSError):
+            process.kill()
+        with contextlib.suppress(Exception):
+            process.communicate()
+        raise
+    finally:
+        if cancellation is not None:
+            cancellation.detach(process)
+
+    if cancellation is not None and cancellation.is_cancelled():
+        raise InterruptedError("remote transfer was cancelled")
+    raw_stdout = stdout or b""
+    raw_stderr = stderr or b""
+    stdout_bytes = raw_stdout.encode() if isinstance(raw_stdout, str) else raw_stdout
+    stderr_text = raw_stderr if isinstance(raw_stderr, str) else raw_stderr.decode(errors="replace")
+    _body, separator, raw_status = stdout_bytes.rpartition(marker.encode("ascii"))
+    if process.returncode != 0:
+        raise RuntimeError(
+            f"stream upload failed with curl exit {process.returncode}: {stderr_text.strip()}"
+        )
+    if not separator:
+        if write_error is not None:
+            raise RuntimeError(
+                "stream upload ended before the source was fully sent"
+            ) from write_error
+        raise RuntimeError("stream upload returned an invalid response")
+    try:
+        status_code = int(raw_status.strip())
+    except ValueError as exc:
+        raise RuntimeError("stream upload returned an invalid HTTP status") from exc
+    if not 200 <= status_code < 300:
+        raise RuntimeError(f"stream upload failed with HTTP {status_code}")
+    if write_error is not None:
+        raise RuntimeError("stream upload ended before the source was fully sent") from write_error
+    return {
+        "path": display_path,
+        "bytes": total,
+        "sha256": digest.hexdigest(),
+        "http_status": status_code,
+        "transport": "http-put",
+    }
+
+
 def _worker_put_url(
     path: str,
     url: str,
     expected_bytes: int,
-    expected_sha256: str,
+    expected_sha256: str | None,
     timeout_s: int | None = None,
 ) -> dict[str, Any]:
     _worker_validate_external_transfer_url(url)
     source = resolve_path(path, must_exist=True)
-    stat = transfer_stat(str(source), True)
+    stat = transfer_stat(str(source), False)
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {path}")
     total = int(expected_bytes)
     if int(stat["size"]) != total:
         raise ValueError(f"size mismatch: expected {total}, got {stat['size']}")
-    if str(stat.get("sha256") or "").lower() != str(expected_sha256).lower():
-        raise ValueError("file sha256 mismatch before upload")
+    if expected_sha256 is None:
+        return _worker_put_stream_url(
+            source,
+            str(stat["path"]),
+            url,
+            total,
+            timeout_s,
+        )
 
     curl = shutil.which("curl")
     if not curl:
         raise FileNotFoundError("curl is required for remote file streaming")
     marker = "\n__LSM_HTTP_STATUS__:"
-    completed = subprocess.run(  # noqa: S603
-        [
-            curl,
-            "-sS",
-            "--http1.1",
-            "--connect-timeout",
-            "15",
-            "--max-time",
-            str(_worker_curl_timeout(timeout_s)),
-            "-X",
-            "PUT",
-            "-H",
-            "Expect:",
-            "-H",
-            "Content-Type: application/octet-stream",
-            "--upload-file",
-            str(source),
-            "--write-out",
-            marker + "%{http_code}",
-            url,
-        ],
-        capture_output=True,
-        check=False,
-        creationflags=_worker_subprocess_creationflags(),
-    )
+    command = [
+        curl,
+        "-sS",
+        "--http1.1",
+        "--connect-timeout",
+        "15",
+        "--max-time",
+        str(_worker_curl_timeout(timeout_s)),
+        "-X",
+        "PUT",
+        "-H",
+        "Expect:",
+        "-H",
+        "Content-Type: application/octet-stream",
+        "--upload-file",
+        str(source),
+        "--write-out",
+        marker + "%{http_code}",
+        url,
+    ]
+    cancellation = getattr(_worker_request_context, "cancellation", None)
+    if cancellation is None:
+        completed = subprocess.run(  # noqa: S603
+            command,
+            capture_output=True,
+            check=False,
+            creationflags=_worker_subprocess_creationflags(),
+        )
+    else:
+        process = subprocess.Popen(  # noqa: S603
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            creationflags=_worker_subprocess_creationflags(),
+        )
+        cancellation.attach(process)
+        try:
+            stdout, stderr = process.communicate()
+        finally:
+            cancellation.detach(process)
+        completed = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
     raw_stdout = completed.stdout or b""
     raw_stderr = completed.stderr or b""
     stdout = raw_stdout.encode() if isinstance(raw_stdout, str) else raw_stdout
@@ -1772,7 +2320,7 @@ def _worker_put_url(
     return {
         "path": stat["path"],
         "bytes": total,
-        "sha256": stat["sha256"],
+        "sha256": str(expected_sha256).lower(),
         "http_status": status_code,
         "transport": "http-put",
     }
@@ -1783,9 +2331,10 @@ def _worker_download_url(
     path: str,
     overwrite: bool,
     expected_bytes: int,
-    expected_sha256: str,
+    expected_sha256: str | None,
     timeout_s: int | None = None,
     external: bool = False,
+    defer_commit: bool = False,
 ) -> dict[str, Any]:
     if external:
         _worker_validate_external_transfer_url(url)
@@ -1798,29 +2347,71 @@ def _worker_download_url(
         transfer_abort_write(path, begin["transfer_id"])
         raise FileNotFoundError("curl is required for remote file streaming")
     try:
-        completed = subprocess.run(  # noqa: S603
-            [
-                curl,
-                "-fsSL",
-                "--connect-timeout",
-                "15",
-                "--max-time",
-                str(_worker_curl_timeout(timeout_s)),
-                "-o",
-                str(temporary),
-                url,
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        command = [
+            curl,
+            "-fsSL",
+            "--connect-timeout",
+            "15",
+            "--max-time",
+            str(_worker_curl_timeout(timeout_s)),
+            "-o",
+            str(temporary),
+            url,
+        ]
+        cancellation = getattr(_worker_request_context, "cancellation", None)
+        process = subprocess.Popen(  # noqa: S603
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             creationflags=_worker_subprocess_creationflags(),
         )
-        if completed.returncode != 0:
-            detail = completed.stderr.strip() or completed.stdout.strip()
-            raise RuntimeError(
-                f"stream download failed with curl exit {completed.returncode}: {detail}"
+        if cancellation is not None:
+            cancellation.attach(process)
+        try:
+            while True:
+                try:
+                    stdout, stderr = process.communicate(
+                        timeout=_WORKER_TRANSFER_LEASE_REFRESH_INTERVAL_S
+                    )
+                    break
+                except subprocess.TimeoutExpired:
+                    transfer_refresh_stream_write(path, begin["transfer_id"])
+        except BaseException:
+            with contextlib.suppress(OSError):
+                process.kill()
+            with contextlib.suppress(Exception):
+                process.communicate()
+            raise
+        finally:
+            if cancellation is not None:
+                cancellation.detach(process)
+
+        if cancellation is not None and cancellation.is_cancelled():
+            raise InterruptedError("remote transfer was cancelled")
+        if process.returncode != 0:
+            raw_stderr = stderr or b""
+            raw_stdout = stdout or b""
+            detail = (
+                raw_stderr.decode(errors="replace").strip()
+                or raw_stdout.decode(errors="replace").strip()
             )
-        transfer_mark_complete_write(path, begin["transfer_id"])
+            raise RuntimeError(
+                f"stream download failed with curl exit {process.returncode}: {detail}"
+            )
+        marked = transfer_mark_complete_write(path, begin["transfer_id"])
+        if cancellation is not None and cancellation.is_cancelled():
+            raise InterruptedError("remote transfer was cancelled")
+        if defer_commit:
+            return {
+                "path": begin["path"],
+                "temp_path": marked["temp_path"],
+                "transfer_id": begin["transfer_id"],
+                "bytes": marked["bytes"],
+                "sha256": None,
+                "transport": "http-staged",
+            }
+        if expected_sha256 is None:
+            raise ValueError("expected_sha256 is required unless commit is deferred")
         finish = transfer_finish_write(
             path,
             begin["transfer_id"],
@@ -2051,6 +2642,10 @@ async def _execute_transfer_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "transfer_abort_write":
         return await asyncio.to_thread(transfer_abort_write, args["path"], args["transfer_id"])
 
+    if tool == "transfer_refresh_stream_write":
+        await asyncio.to_thread(transfer_refresh_stream_write, args["path"], args["transfer_id"])
+        return {"refreshed": True}
+
     if tool == "transfer_alloc_temp_path":
         return await asyncio.to_thread(transfer_alloc_temp_path, args.get("suffix", ".bin"))
 
@@ -2075,17 +2670,18 @@ async def _execute_transfer_worker_tool(tool: str, args: dict[str, Any]) -> Any:
             args.get("timeout_s"),
             args.get("offset", 0),
             args.get("chunk_size"),
+            args.get("verify_source_digest", True),
         )
 
     if tool == "transfer_download_url":
-        return await asyncio.to_thread(
-            _worker_download_url,
+        return await _worker_download_url_cancellable(
             args["url"],
             args["path"],
             args.get("overwrite", True),
             args["expected_bytes"],
-            args["expected_sha256"],
+            args.get("expected_sha256"),
             args.get("timeout_s"),
+            defer_commit=args.get("defer_commit", False),
         )
 
     if tool == "transfer_open_receiver":
@@ -2104,19 +2700,36 @@ async def _execute_transfer_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "transfer_close_receiver":
         return await asyncio.to_thread(close_peer_receiver, args["receiver_id"])
 
-    if tool == "transfer_put_url":
+    if tool == "transfer_gui_temp_stat":
         return await asyncio.to_thread(
-            _worker_put_url,
+            _worker_gui_temp_stat,
+            args["path"],
+            args.get("sha256", False),
+        )
+
+    if tool == "transfer_gui_temp_delete":
+        return await asyncio.to_thread(_worker_gui_temp_delete, args["path"])
+
+    if tool == "transfer_gui_temp_put_url":
+        return await asyncio.to_thread(
+            _worker_gui_temp_put_url,
             args["path"],
             args["url"],
             args["expected_bytes"],
-            args["expected_sha256"],
+            args.get("timeout_s"),
+        )
+
+    if tool == "transfer_put_url":
+        return await _worker_put_url_cancellable(
+            args["path"],
+            args["url"],
+            args["expected_bytes"],
+            args.get("expected_sha256"),
             args.get("timeout_s"),
         )
 
     if tool == "transfer_get_url":
-        return await asyncio.to_thread(
-            _worker_download_url,
+        return await _worker_download_url_cancellable(
             args["url"],
             args["path"],
             args.get("overwrite", True),
@@ -2171,6 +2784,163 @@ async def _execute_browser_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     raise ValueError(f"unsupported remote worker tool: {tool}")
 
 
+_GUI_LINUX_PREFLIGHT_LOCK = threading.Lock()
+_GUI_LINUX_PREFLIGHT_SESSION_TYPE: str | None = None
+_GUI_LINUX_PREFLIGHT_ENV_SIGNATURE: tuple[str, str, str, str] | None = None
+_GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN: tuple[int, int] | None = None
+_GUI_LINUX_PREFLIGHT_EXPIRES_AT = 0.0
+_GUI_LINUX_NEGATIVE_CACHE_S = 30.0
+_GUI_LINUX_POSITIVE_CACHE_S = 30.0
+
+
+def _linux_gui_preflight_session_type() -> str:
+    from .gui.linux import _desktop_environment, _session_type
+
+    global _GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN
+    global _GUI_LINUX_PREFLIGHT_ENV_SIGNATURE
+    global _GUI_LINUX_PREFLIGHT_EXPIRES_AT
+    global _GUI_LINUX_PREFLIGHT_SESSION_TYPE
+
+    discovery_token = (id(_desktop_environment), id(_session_type))
+    signature = (
+        os.environ.get("DISPLAY", ""),
+        os.environ.get("WAYLAND_DISPLAY", ""),
+        os.environ.get("XDG_SESSION_TYPE", ""),
+        os.environ.get("DBUS_SESSION_BUS_ADDRESS", ""),
+    )
+    with _GUI_LINUX_PREFLIGHT_LOCK:
+        now = time.monotonic()
+        if (
+            _GUI_LINUX_PREFLIGHT_SESSION_TYPE is not None
+            and signature == _GUI_LINUX_PREFLIGHT_ENV_SIGNATURE
+            and discovery_token == _GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN
+            and now < _GUI_LINUX_PREFLIGHT_EXPIRES_AT
+        ):
+            return _GUI_LINUX_PREFLIGHT_SESSION_TYPE
+        desktop_env = _desktop_environment()
+        session_type = _session_type(desktop_env)
+        _GUI_LINUX_PREFLIGHT_ENV_SIGNATURE = signature
+        _GUI_LINUX_PREFLIGHT_DISCOVERY_TOKEN = discovery_token
+        _GUI_LINUX_PREFLIGHT_SESSION_TYPE = session_type
+        _GUI_LINUX_PREFLIGHT_EXPIRES_AT = now + (
+            _GUI_LINUX_NEGATIVE_CACHE_S
+            if session_type == "unknown"
+            else _GUI_LINUX_POSITIVE_CACHE_S
+        )
+        return session_type
+
+
+async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
+    from .gui import GuiUnavailableError, get_gui_manager
+    from .remote_worker_installer import ensure_gui_dependencies
+
+    manager = get_gui_manager()
+    if tool == "gui_state_refresh":
+        return await manager.refresh_state(args["window_id"], args["state_id"])
+    if tool == "gui_state_discard":
+        return await manager.discard_state(args["window_id"], args["state_id"])
+    if tool == "gui_frame_refresh":
+        return await manager.refresh_frame_observation(
+            args["window_id"],
+            args["observation_id"],
+        )
+    if tool == "gui_frame_discard":
+        return await manager.discard_frame_observation(
+            args["window_id"],
+            args["observation_id"],
+        )
+
+    session_type: str | None = None
+    if sys.platform == "linux":
+        session_type = await asyncio.to_thread(_linux_gui_preflight_session_type)
+        if session_type == "unknown":
+            raise GuiUnavailableError(
+                "No graphical Linux session was found; GUI dependencies were not installed"
+            )
+
+    allow_dependency_install = bool(args.pop("_allow_dependency_install", False))
+    if tool in {"gui_state", "gui_frame", "gui_human_action", "gui_action"}:
+        allow_dependency_install = True
+    dependency_check_required = tool not in {
+        "gui_state_refresh",
+        "gui_state_discard",
+        "gui_frame_refresh",
+        "gui_frame_discard",
+    }
+    if sys.platform == "linux" and (
+        tool == "gui_list"
+        or (tool == "gui_state" and not bool(args.get("screenshot", True)))
+        or (session_type == "x11" and tool in {"gui_action", "gui_human_action"})
+        or (
+            tool == "gui_action"
+            and all(
+                str(action.get("type") or "").strip().lower() in {"focus", "set_value", "wait"}
+                for action in (args.get("actions") or [])
+                if isinstance(action, dict)
+            )
+        )
+    ):
+        dependency_check_required = False
+
+    if dependency_check_required:
+        dependency_status = await asyncio.to_thread(
+            ensure_gui_dependencies,
+            session_type,
+            install_missing=allow_dependency_install,
+        )
+        if not dependency_status.get("available"):
+            missing = ", ".join(dependency_status.get("missing") or []) or "GUI dependencies"
+            raise GuiUnavailableError(
+                f"{missing} unavailable for native GUI automation: "
+                f"{dependency_status.get('error') or 'installation failed'}"
+            )
+
+    if tool == "gui_list":
+        return await manager.list_windows()
+    if tool == "gui_state":
+        result = await manager.snapshot(
+            args["window_id"],
+            screenshot=args.get("screenshot", True),
+            include_elements=args.get("include_elements", True),
+            max_elements=args.get("max_elements", 300),
+            max_depth=args.get("max_depth", 12),
+        )
+        return await _finish_worker_gui_relay(
+            manager,
+            result,
+            window_id=args["window_id"],
+            record_id=str(result.get("state_id") or ""),
+            discard=manager.discard_state,
+            refresh=manager.refresh_state,
+            ttl_key="state_ttl_s",
+        )
+    if tool == "gui_frame":
+        result = await manager.frame(args["window_id"])
+        return await _finish_worker_gui_relay(
+            manager,
+            result,
+            window_id=args["window_id"],
+            record_id=str(result.get("observation_id") or ""),
+            discard=manager.discard_frame_observation,
+            refresh=manager.refresh_frame_observation,
+            ttl_key="observation_ttl_s",
+        )
+    if tool == "gui_human_action":
+        return await manager.human_act(
+            args["window_id"],
+            args["observation_id"],
+            args["bounds"],
+            args["actions"],
+        )
+    if tool == "gui_action":
+        return await manager.act(
+            args["window_id"],
+            args["state_id"],
+            args["actions"],
+        )
+    raise ValueError(f"unsupported remote GUI worker tool: {tool}")
+
+
 async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
     if tool in WORKER_ENVIRONMENT_TOOLS:
         return await _execute_environment_worker_tool(tool, args)
@@ -2186,6 +2956,8 @@ async def _execute_worker_tool_inner(tool: str, args: dict[str, Any]) -> Any:
         return await _execute_transfer_worker_tool(tool, args)
     if tool in WORKER_BROWSER_TOOLS:
         return await _execute_browser_worker_tool(tool, args)
+    if tool in WORKER_GUI_TOOLS:
+        return await _execute_gui_worker_tool(tool, args)
     raise ValueError(f"unsupported remote worker tool: {tool}")
 
 
@@ -2200,6 +2972,7 @@ def worker_capabilities() -> list[str]:
         "python",
         "playwright",
         "browser_sessions",
+        "gui",
     ]
 
 
@@ -2327,8 +3100,126 @@ class _WorkerRequestCancellation:
             with contextlib.suppress(OSError):
                 process.kill()
 
+    def is_cancelled(self) -> bool:
+        with self._lock:
+            return self._cancelled
+
 
 _worker_request_context = threading.local()
+
+
+def _worker_download_url_in_cancellable_thread(
+    url: str,
+    path: str,
+    overwrite: bool,
+    expected_bytes: int,
+    expected_sha256: str | None,
+    timeout_s: int | None,
+    external: bool,
+    defer_commit: bool,
+    cancellation: _WorkerRequestCancellation,
+) -> dict[str, Any]:
+    previous = getattr(_worker_request_context, "cancellation", None)
+    _worker_request_context.cancellation = cancellation
+    try:
+        return _worker_download_url(
+            url,
+            path,
+            overwrite,
+            expected_bytes,
+            expected_sha256,
+            timeout_s,
+            external,
+            defer_commit,
+        )
+    finally:
+        if previous is None:
+            with contextlib.suppress(AttributeError):
+                del _worker_request_context.cancellation
+        else:
+            _worker_request_context.cancellation = previous
+
+
+async def _worker_download_url_cancellable(
+    url: str,
+    path: str,
+    overwrite: bool,
+    expected_bytes: int,
+    expected_sha256: str | None,
+    timeout_s: int | None = None,
+    external: bool = False,
+    defer_commit: bool = False,
+) -> dict[str, Any]:
+    cancellation = _WorkerRequestCancellation()
+    request = asyncio.create_task(
+        asyncio.to_thread(
+            _worker_download_url_in_cancellable_thread,
+            url,
+            path,
+            overwrite,
+            expected_bytes,
+            expected_sha256,
+            timeout_s,
+            external,
+            defer_commit,
+            cancellation,
+        )
+    )
+    try:
+        return await asyncio.shield(request)
+    except asyncio.CancelledError:
+        cancellation.cancel()
+        with contextlib.suppress(Exception):
+            await asyncio.shield(request)
+        raise
+
+
+def _worker_put_url_in_cancellable_thread(
+    path: str,
+    url: str,
+    expected_bytes: int,
+    expected_sha256: str | None,
+    timeout_s: int | None,
+    cancellation: _WorkerRequestCancellation,
+) -> dict[str, Any]:
+    previous = getattr(_worker_request_context, "cancellation", None)
+    _worker_request_context.cancellation = cancellation
+    try:
+        return _worker_put_url(path, url, expected_bytes, expected_sha256, timeout_s)
+    finally:
+        if previous is None:
+            with contextlib.suppress(AttributeError):
+                del _worker_request_context.cancellation
+        else:
+            _worker_request_context.cancellation = previous
+
+
+async def _worker_put_url_cancellable(
+    path: str,
+    url: str,
+    expected_bytes: int,
+    expected_sha256: str | None,
+    timeout_s: int | None = None,
+) -> dict[str, Any]:
+    cancellation = _WorkerRequestCancellation()
+    request = asyncio.create_task(
+        asyncio.to_thread(
+            _worker_put_url_in_cancellable_thread,
+            path,
+            url,
+            expected_bytes,
+            expected_sha256,
+            timeout_s,
+            cancellation,
+        )
+    )
+    try:
+        return await asyncio.shield(request)
+    except asyncio.CancelledError:
+        cancellation.cancel()
+        with contextlib.suppress(Exception):
+            await asyncio.shield(request)
+        raise
 
 
 def _worker_post_json_with_curl(
@@ -2433,9 +3324,7 @@ def _worker_post_json(
     body = json.dumps(payload).encode("utf-8")
     request_headers = headers or {}
     if shutil.which("curl"):
-        return _worker_post_json_with_curl(
-            url, body, request_headers, timeout, connect_timeout
-        )
+        return _worker_post_json_with_curl(url, body, request_headers, timeout, connect_timeout)
     if timeout is not None and parsed.path.endswith(f"{REMOTE_API_PREFIX}/poll"):
         raise RuntimeError("curl is required for bounded worker poll requests")
     return _worker_post_json_with_urllib(url, body, request_headers, timeout)
@@ -2467,6 +3356,16 @@ def _worker_poll_request_timeout_s(data: dict[str, Any]) -> float | None:
     if not math.isfinite(poll_timeout_s) or poll_timeout_s <= 0:
         return None
     return poll_timeout_s + _WORKER_POLL_TIMEOUT_GRACE_S
+
+
+def _worker_reset_generation(data: dict[str, Any]) -> int | None:
+    if "reset_generation" not in data:
+        return None
+    try:
+        generation = int(data["reset_generation"])
+    except (TypeError, ValueError):
+        return None
+    return generation if generation >= 0 else None
 
 
 def _worker_retry_delay(attempt: int) -> float:
@@ -2680,8 +3579,34 @@ async def _execute_worker_job_with_heartbeat(
     headers: dict[str, str],
     heartbeat_interval_s: float,
 ) -> Any:
+    job_generation = _worker_reset_generation(job)
+    start_payload: dict[str, Any] = {"job_id": job.get("id"), "starting": True}
+    if job_generation is not None:
+        start_payload["reset_generation"] = job_generation
+    start_response = await _worker_post_json_forever(
+        f"{server}{REMOTE_API_PREFIX}/heartbeat",
+        start_payload,
+        headers,
+        30,
+        "start remote job",
+    )
+    start_data = start_response.get("data", {}) if isinstance(start_response, dict) else {}
+    start_generation = _worker_reset_generation(start_data)
+    if (
+        start_data.get("accepted") is False
+        or start_data.get("cancelled")
+        or (
+            not start_data.get("preserved")
+            and start_generation is not None
+            and job_generation is not None
+            and start_generation != job_generation
+        )
+    ):
+        raise RemoteJobCancelled("remote job was cancelled by the controller")
+
     task = asyncio.create_task(execute_worker_tool(job["tool"], dict(job.get("args") or {})))
     cancelled_by_controller = False
+    preserve_across_reset = str(job.get("tool") or "") in REMOTE_RESET_PRESERVED_WORKER_TOOLS
 
     async def heartbeat_loop() -> None:
         nonlocal cancelled_by_controller
@@ -2699,7 +3624,14 @@ async def _execute_worker_job_with_heartbeat(
                     30,
                 )
                 data = response.get("data", {}) if isinstance(response, dict) else {}
-                if data.get("cancelled"):
+                reset_generation = _worker_reset_generation(data)
+                job_generation = _worker_reset_generation(job)
+                if data.get("cancelled") or (
+                    not preserve_across_reset
+                    and reset_generation is not None
+                    and job_generation is not None
+                    and reset_generation != job_generation
+                ):
                     cancelled_by_controller = True
                     task.cancel()
                     return
@@ -2725,6 +3657,8 @@ async def _submit_worker_result_with_heartbeat(
     server: str,
     headers: dict[str, str],
     heartbeat_interval_s: float,
+    *,
+    preserve_across_reset: bool = False,
 ) -> dict[str, Any]:
     result_timeout_s = _worker_result_request_timeout_s(result)
     submission = asyncio.create_task(
@@ -2754,7 +3688,14 @@ async def _submit_worker_result_with_heartbeat(
                     30,
                 )
                 data = response.get("data", {}) if isinstance(response, dict) else {}
-                if data.get("cancelled"):
+                reset_generation = _worker_reset_generation(data)
+                result_generation = _worker_reset_generation(result)
+                if data.get("cancelled") or (
+                    not preserve_across_reset
+                    and reset_generation is not None
+                    and result_generation is not None
+                    and reset_generation != result_generation
+                ):
                     cancelled_by_controller = True
                     submission.cancel()
                     return
@@ -2810,6 +3751,10 @@ async def _run_worker_job(
         execution_finished_at = _utc()
     if "execution_s" not in locals():
         execution_s = 0.0
+    if "reset_generation" in job:
+        out["reset_generation"] = job["reset_generation"]
+    if str(job.get("tool") or "") in REMOTE_RESET_PRESERVED_WORKER_TOOLS:
+        out["preserve_across_reset"] = True
     result_spooled_at = _utc()
     out["lifecycle"] = {
         "execution_started_at": execution_started_at,
@@ -2826,7 +3771,10 @@ async def _run_worker_job(
         # If local spool storage is unavailable, keep the previous synchronous
         # delivery behavior rather than silently losing a completed result.
         out["lifecycle"]["result_submit_started_at"] = _utc()
-        await _submit_worker_result_with_heartbeat(out, server, headers, heartbeat_interval_s)
+        await _submit_worker_result_with_heartbeat(
+            out, server, headers, heartbeat_interval_s,
+            **({"preserve_across_reset": True} if out.get("preserve_across_reset") else {}),
+        )
 
 
 async def _worker_result_outbox_sender(
@@ -2861,7 +3809,8 @@ async def _worker_result_outbox_sender(
                 except Exception as exc:  # noqa: BLE001
                     _worker_log_retry("update result outbox timing", exc, 1.0)
             response = await _submit_worker_result_with_heartbeat(
-                result, server, headers, heartbeat_interval_s
+                result, server, headers, heartbeat_interval_s,
+                **({"preserve_across_reset": True} if result.get("preserve_across_reset") else {}),
             )
             data = response.get("data") if isinstance(response, dict) else None
             # accepted=false means the controller already timed out/cancelled it,
@@ -3017,7 +3966,11 @@ async def _run_worker_locked(
     access = ""
     if identity:
         access = str(identity["access"])
-        resume_payload = {**register_payload, "name": str(identity["name"])}
+        # The access token is the durable worker identity.  The controller may
+        # have renamed that identity since this worker last persisted its local
+        # name, so do not send a potentially stale name during resume.  The
+        # controller returns the current canonical name below.
+        resume_payload = {**register_payload, "name": None}
         resume_headers = {"Author" + "ization": "B" + "earer " + access}
         body = await _worker_resume_or_none(
             f"{server}{REMOTE_API_PREFIX}/res" + "ume", resume_payload, resume_headers, 30

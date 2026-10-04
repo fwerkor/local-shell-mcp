@@ -6,12 +6,17 @@ import json
 import pytest
 
 from local_shell_mcp import remote
+from local_shell_mcp.settings import get_settings
 
 
 @pytest.fixture
 def outbox(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKER_RESULT_OUTBOX_DIR", str(tmp_path))
-    return tmp_path
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    yield tmp_path
+    get_settings.cache_clear()
 
 
 @pytest.mark.parametrize("limit", ["items", "bytes"])
@@ -112,3 +117,53 @@ async def test_sender_discards_result_rejected_by_controller(outbox, monkeypatch
     assert discarded == [("remote_result_outbox_discarded", {"job_id": "expired"})]
     assert not path.exists()
     assert not in_progress
+
+
+@pytest.mark.parametrize("tool", ["shell_start", "run_shell_tool"])
+async def test_spooled_result_retains_reset_generation_and_mutation_preservation(
+    outbox, monkeypatch, tool
+):
+    async def execute(*args):
+        return {"done": True}
+
+    monkeypatch.setattr(remote, "_execute_worker_job_with_heartbeat", execute)
+    await remote._run_worker_job(
+        {"id": "reset-result", "tool": tool, "args": {}, "reset_generation": 3},
+        "https://controller.test",
+        {},
+        0.005,
+    )
+    path = next(outbox.glob("*.json"))
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    assert persisted["reset_generation"] == 3
+    assert bool(persisted.get("preserve_across_reset")) == (tool == "shell_start")
+    attempts = 0
+
+    def post(url, payload, headers=None, timeout=None):
+        nonlocal attempts
+        if url.endswith("/result"):
+            attempts += 1
+            if attempts < 3:
+                raise RuntimeError("temporary result upload failure")
+            return {"ok": True, "data": {"accepted": True}}
+        return {"ok": True, "data": {"accepted": True, "reset_generation": 4}}
+
+    monkeypatch.setattr(remote, "_worker_post_json", post)
+    monkeypatch.setattr(remote, "_WORKER_RETRY_INITIAL_DELAY_S", 0.02)
+    monkeypatch.setattr(remote, "_WORKER_RETRY_MAX_DELAY_S", 0.02)
+    in_progress = set()
+    sender = asyncio.create_task(
+        remote._worker_result_outbox_sender("https://controller.test", {}, 0.005, in_progress)
+    )
+
+    async def wait_until_drained():
+        while path.exists() or in_progress:
+            await asyncio.sleep(0.01)
+
+    try:
+        await asyncio.wait_for(wait_until_drained(), 3)
+    finally:
+        sender.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await sender
+    assert attempts == 3 if tool == "shell_start" else attempts < 3

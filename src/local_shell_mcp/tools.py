@@ -16,12 +16,13 @@ from urllib.parse import urlparse
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, Icon, ImageContent, TextContent, ToolAnnotations
 from pathspec.gitignore import GitIgnoreSpec
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 
 from . import __version__
 from .audit import audit, audit_call_context, audit_result_ok
 from .auth import current_principal, principal_scopes, require_current_scopes
 from .browser_sessions import get_browser_session_manager
+from .command_preflight import CommandPreflightDecision, preflight_command
 from .deprecated_tools import DeprecatedToolFastMCP as FastMCP
 from .downloads import create_share_link, list_share_links, revoke_share_link
 from .dynamic_mcp import DynamicMCPManager
@@ -39,13 +40,23 @@ from .fs_ops import (
     prune_temp_dir,
     read_text,
     read_texts,
+    refresh_temp_file_lease,
     relative_display,
+    release_temp_file_lease,
     resolve_path,
     temp_dir,
     write_content,
     write_text,
 )
-from .image_ops import ImageFile, assert_view_image_size, read_image
+from .gui import get_gui_manager
+from .gui.base import GUI_MAX_KEY_PARTS, GUI_MAX_KEYS_BYTES, GUI_MAX_TEXT_BYTES
+from .image_ops import (
+    MAX_VIEW_IMAGE_BYTES,
+    ImageFile,
+    assert_view_image_size,
+    detect_image_type,
+    read_image,
+)
 from .jobs import (
     JOB_LIST_DEFAULT_LIMIT,
     ManagedJobContext,
@@ -74,13 +85,16 @@ from .process_utils import managed_process_kwargs
 from .remote import (
     REMOTE_QUEUE_TIMEOUT_S,
     REMOTE_RESULT_GRACE_S,
+    REMOTE_WORKER_INTERACTIVE_LANE,
     REMOTE_WORKER_TRANSFER_LANE,
     remote_execution_rpc_timeout_s,
     remote_manager,
 )
 from .remote_transfer import (
-    create_download_ticket,
+    create_stream_download_ticket,
     create_upload_ticket,
+    finalize_upload_ticket,
+    get_download_ticket_status,
     get_upload_ticket_status,
     revoke_transfer_ticket,
 )
@@ -114,8 +128,8 @@ from .skill_ops import (
 from .state_store import get_state_store
 from .tmux_helper import persistent_shell_backend_info
 from .transfer_ops import (
-    DEFAULT_TRANSFER_CHUNK_BYTES,
-    normalize_chunk_size,
+    DEFAULT_HTTP_TRANSFER_CHUNK_BYTES,
+    normalize_http_chunk_size,
     transfer_alloc_temp_path,
     transfer_pack_dir_async,
     transfer_stat,
@@ -142,6 +156,106 @@ class ViewImageResult(BaseModel):
     ok: bool
     path: str
     machine: str | None = None
+    mime_type: str | None = None
+    bytes: int | None = None
+    message: str = ""
+    error_type: str | None = None
+
+
+class GuiAction(BaseModel):
+    """One action against a fresh gui_state observation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal[
+        "click",
+        "double_click",
+        "right_click",
+        "move",
+        "scroll",
+        "drag",
+        "type",
+        "key",
+        "set_value",
+        "focus",
+        "wait",
+    ]
+    element_id: str | None = None
+    x: int | None = None
+    y: int | None = None
+    to_x: int | None = None
+    to_y: int | None = None
+    delta_x: float | None = None
+    delta_y: float | None = None
+    amount: int | None = None
+    text: str | None = None
+    keys: str | list[str] | None = None
+    seconds: float | None = None
+
+    @model_validator(mode="after")
+    def validate_payload_size(self) -> GuiAction:
+        if self.element_id is not None and not self.element_id.strip():
+            raise ValueError("element_id must not be empty")
+        coordinate_actions = {
+            "click",
+            "double_click",
+            "right_click",
+            "move",
+            "scroll",
+            "drag",
+        }
+        if (
+            self.type in coordinate_actions
+            and self.element_id is None
+            and (self.x is None or self.y is None)
+        ):
+            raise ValueError(f"{self.type} requires x and y, or an element_id")
+        if self.type == "drag" and (self.to_x is None or self.to_y is None):
+            raise ValueError("drag requires to_x and to_y")
+        if self.type == "type" and self.text is None:
+            raise ValueError("type requires text")
+        if self.type == "key" and self.keys is None:
+            raise ValueError("key requires keys")
+        if self.type == "set_value":
+            if self.element_id is None:
+                raise ValueError("set_value requires element_id")
+            if self.text is None:
+                raise ValueError("set_value requires text")
+
+        if self.text is not None and len(self.text.encode("utf-8")) > GUI_MAX_TEXT_BYTES:
+            raise ValueError(f"text may not exceed {GUI_MAX_TEXT_BYTES} UTF-8 bytes")
+        if self.keys is not None:
+            if isinstance(self.keys, str):
+                parts = [
+                    part.strip() for part in self.keys.replace("+", " ").split() if part.strip()
+                ]
+                byte_count = len(self.keys.encode("utf-8"))
+            else:
+                parts = [str(part).strip() for part in self.keys if str(part).strip()]
+                byte_count = sum(len(part.encode("utf-8")) for part in parts)
+            if not parts:
+                raise ValueError("keys must contain at least one key")
+            if len(parts) > GUI_MAX_KEY_PARTS:
+                raise ValueError(f"keys may contain at most {GUI_MAX_KEY_PARTS} parts")
+            if byte_count > GUI_MAX_KEYS_BYTES:
+                raise ValueError(f"keys may not exceed {GUI_MAX_KEYS_BYTES} UTF-8 bytes")
+        return self
+
+
+class GuiStateResult(BaseModel):
+    """Structured GUI observation accompanying optional native image content."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ok: bool
+    machine: str | None = None
+    backend: str | None = None
+    state_id: str | None = None
+    state_ttl_s: float | None = None
+    window: dict[str, Any] | None = None
+    elements: list[dict[str, Any]] = Field(default_factory=list)
+    capabilities: dict[str, Any] = Field(default_factory=dict)
+    screenshot: bool = False
     mime_type: str | None = None
     bytes: int | None = None
     message: str = ""
@@ -302,29 +416,16 @@ def _oauth_security_scheme(scopes: list[str] | tuple[str, ...]) -> dict[str, Any
 NOAUTH_SECURITY_SCHEMES = [{"type": "noauth"}]
 PUBLIC_TOOL_TIMEOUT_S = PUBLIC_TOOL_WATCHDOG_TIMEOUT_S
 MCP_BASE_INSTRUCTIONS = (
-    "When a task may benefit from an installed Agent Skill, call skill_list first "
-    "to discover the exact Skill name and description. Before following a Skill's "
-    "workflow, call skill_load with that exact name. Call skill_read only when "
-    "a related file returned by skill_load is needed. Skills use this fixed tool "
-    "surface; do not expect per-Skill MCP tools. When a registered external MCP may "
-    "provide a capability, use mcp_tool_search, then mcp_tool_inspect, then mcp_tool_call; "
-    "dynamic MCP tools never appear directly in tools/list."
+    "Skills: skill_list -> skill_load -> skill_read as needed. External MCP: "
+    "mcp_tool_search -> mcp_tool_inspect -> mcp_tool_call."
 )
 LOGICAL_SESSION_MCP_INSTRUCTIONS = (
-    " For substantive tool-driven work, use exactly one durable Logical Session. "
-    "Start a new task with session_manage(action='start', ...). "
-    "Only continue an existing Session when its session_id is already present in this conversation or the "
-    "user explicitly provides that session_id; then call session_manage(action='resume', session_id=...). "
-    "Never discover, infer, or auto-select a Session from other conversations. After start or resume, clearly "
-    "tell the user the active session_id. Include it again at meaningful progress checkpoints and before ending "
-    "the turn so the user can hand it to another conversation. Ordinary tools expose a required nullable "
-    "logical_session_id; while working in a Session, pass the exact session_id returned by session_manage. "
-    "Use null only when no Logical Session is active. Keep progress current with session_manage(action='report', "
-    "session_id=...) at meaningful checkpoints. Logical Sessions are independent of MCP transports, machines, "
-    "and working directories. plan_manage and workspace_open take the same session_id explicitly and never infer it "
-    "from the transport. plan_manage is optional Goal mode owned by the Logical Session."
+    "For substantive tool work, use one durable Logical Session. Start with "
+    "session_manage(action='start'); resume only an id from this conversation or user; never infer elsewhere. "
+    "Ordinary tools use logical_session_id; explicit-session tools use session_id. State the id after start/resume, "
+    "at checkpoints, and before ending. Persist progress via session_manage(action='report'). "
 )
-MCP_INSTRUCTIONS = MCP_BASE_INSTRUCTIONS + LOGICAL_SESSION_MCP_INSTRUCTIONS
+MCP_INSTRUCTIONS = LOGICAL_SESSION_MCP_INSTRUCTIONS + MCP_BASE_INSTRUCTIONS
 
 LOGICAL_SESSION_ARGUMENT_DESCRIPTION = (
     "Logical Session for this tool call. Pass the session_id returned by session_manage while working in that "
@@ -342,6 +443,7 @@ NON_CANCELLABLE_TOOL_NAMES = frozenset(
         "link_create",
         "link_revoke",
         "image_view",
+        "gui_action",
         "file_write",
         "file_edit",
         "file_delete",
@@ -446,6 +548,15 @@ def _oauth_meta(scopes: list[str]) -> dict[str, Any]:
     return _security_meta([_oauth_security_scheme(scopes)])
 
 
+def _current_principal_allows(scope: str) -> bool:
+    principal = current_principal()
+    if principal is None:
+        return True
+    if principal.claims.get("auth") in {"none", "native-tui", "localhost-bypass"}:
+        return True
+    return scope in principal_scopes(principal)
+
+
 def _live_workspace_api_base() -> str:
     settings = get_settings()
     if settings.public_base_url:
@@ -541,6 +652,31 @@ def _serialize_audit_value(value: Any) -> Any:
 
 def _safe_audit_result(tool_name: str, value: Any) -> Any:
     serialized = _serialize_audit_value(value)
+    if tool_name == "gui_state" and isinstance(serialized, dict):
+        sanitized = dict(serialized)
+        content = sanitized.get("content")
+        if isinstance(content, list):
+            sanitized["content"] = [
+                item
+                for item in content
+                if not (isinstance(item, dict) and str(item.get("type") or "").lower() == "image")
+            ]
+        structured = sanitized.get("structuredContent")
+        if isinstance(structured, dict):
+            safe_structured = dict(structured)
+            elements = safe_structured.get("elements")
+            if isinstance(elements, list):
+                safe_structured["elements"] = [
+                    {
+                        **item,
+                        **({"value": "<redacted>"} if "value" in item else {}),
+                    }
+                    if isinstance(item, dict)
+                    else item
+                    for item in elements
+                ]
+            sanitized["structuredContent"] = safe_structured
+        return sanitized
     if tool_name not in {
         "workspace_open",
         "open_live_workspace",
@@ -564,7 +700,9 @@ def _safe_audit_call_arguments(tool_name: str, arguments: dict[str, Any]) -> dic
         dynamic_arguments = arguments.get("arguments")
         return {
             "name": arguments.get("name"),
-            "argument_keys": sorted(dynamic_arguments) if isinstance(dynamic_arguments, dict) else [],
+            "argument_keys": sorted(dynamic_arguments)
+            if isinstance(dynamic_arguments, dict)
+            else [],
             "timeout_s": arguments.get("timeout_s"),
         }
     if tool_name == "mcp_manage":
@@ -575,6 +713,26 @@ def _safe_audit_call_arguments(tool_name: str, arguments: dict[str, Any]) -> dic
                 safe[field_name] = {str(key): "<redacted>" for key in value}
         if str(safe.get("action") or "").lower() in {"env_set", "header_set"}:
             safe["value"] = "<redacted>"
+        return safe
+    if tool_name == "gui_action":
+        safe = dict(arguments)
+        actions = safe.get("actions")
+        if isinstance(actions, list):
+            sanitized_actions = []
+            for action in actions:
+                if isinstance(action, BaseModel):
+                    item: Any = action.model_dump(exclude_none=True)
+                elif isinstance(action, dict):
+                    item = dict(action)
+                else:
+                    sanitized_actions.append(action)
+                    continue
+                if "text" in item:
+                    item["text"] = "<redacted>"
+                if "keys" in item:
+                    item["keys"] = "<redacted>"
+                sanitized_actions.append(item)
+            safe["actions"] = sanitized_actions
         return safe
     if tool_name == "browser_act":
         safe = dict(arguments)
@@ -653,6 +811,79 @@ def _live_result_summary(result: Any) -> dict[str, Any]:
         if isinstance(item, (str, int, float, bool)):
             summary[key] = item
     return summary
+
+
+def _command_preflight_for_call(
+    tool_name: str,
+    call_arguments: dict[str, Any],
+    *,
+    settings: Any,
+    recent_activity: list[dict[str, Any]] | None,
+) -> CommandPreflightDecision | None:
+    if tool_name not in {"run_shell", "job_start", "shell_start"}:
+        return None
+    command = call_arguments.get("command")
+    if not isinstance(command, str) or not command.strip():
+        return None
+    decision = preflight_command(
+        command,
+        cwd=str(call_arguments.get("cwd") or "."),
+        machine=(str(call_arguments.get("machine")) if call_arguments.get("machine") else None),
+        requested_timeout_s=(
+            call_arguments.get("timeout_s") if tool_name == "run_shell" else None
+        ),
+        settings=settings,
+        recent_activity=recent_activity,
+    )
+    if tool_name in {"job_start", "shell_start"} and decision.action == "limit":
+        return CommandPreflightDecision(
+            action="block",
+            reason_code="expensive_discovery_requires_bounded_tool",
+            message=(
+                "Refusing unbounded recursive filesystem discovery in a long-running shell. "
+                "Use file_glob/file_grep/file_tree or add an explicit depth bound."
+            ),
+            cost_score=decision.cost_score,
+            recommended_tool=decision.recommended_tool or "file_glob",
+            fingerprint=decision.fingerprint,
+            signals=decision.signals,
+            do_not_repeat_same_command=True,
+        )
+    return decision
+
+
+def _command_preflight_error_result(decision: CommandPreflightDecision) -> CallToolResult:
+    payload = decision.error_payload()
+    return _error_call_result(payload, str(payload["message"]))
+
+
+def _command_preflight_recovery(decision: CommandPreflightDecision) -> dict[str, Any]:
+    return {
+        "reason_code": decision.reason_code,
+        "cost_score": decision.cost_score,
+        "effective_timeout_s": decision.effective_timeout_s,
+        "recommended_tool": decision.recommended_tool,
+        "command_fingerprint": decision.fingerprint,
+        "signals": list(decision.signals),
+        "do_not_repeat_same_command": decision.do_not_repeat_same_command,
+    }
+
+
+def _annotate_command_preflight_result(
+    result: Any, decision: CommandPreflightDecision | None
+) -> Any:
+    if decision is None or decision.action != "limit" or not isinstance(result, dict):
+        return result
+    updated = dict(result)
+    recovery = _command_preflight_recovery(decision)
+    data = updated.get("data")
+    if isinstance(data, dict):
+        data = dict(data)
+        data["preflight"] = recovery
+        updated["data"] = data
+    else:
+        updated["preflight"] = recovery
+    return updated
 
 
 def _audit_tool_purpose(
@@ -1006,6 +1237,7 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                 if logical_lease is not None
                 else None
             )
+            preflight_decision: CommandPreflightDecision | None = None
             try:
                 if logical_lease and logical_lease.get("persistence_error"):
                     audit(
@@ -1037,6 +1269,38 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                     arguments=arguments,
                     **audit_context,
                 )
+                if __tool_name in {"run_shell", "job_start", "shell_start"}:
+                    recent_activity = None
+                    if logical_session_id:
+                        with suppress(Exception):
+                            logical_state = await asyncio.to_thread(
+                                logical_manager.get,
+                                logical_session_id,
+                                subject=principal_subject,
+                            )
+                            activity = logical_state.get("recent_activity")
+                            if isinstance(activity, list):
+                                recent_activity = activity
+                    preflight_decision = _command_preflight_for_call(
+                        __tool_name,
+                        call_arguments,
+                        settings=get_settings(),
+                        recent_activity=recent_activity,
+                    )
+                    if preflight_decision is not None:
+                        audit(
+                            "command_preflight",
+                            call_id=call_id,
+                            tool=__tool_name,
+                            action=preflight_decision.action,
+                            reason_code=preflight_decision.reason_code,
+                            cost_score=preflight_decision.cost_score,
+                            effective_timeout_s=preflight_decision.effective_timeout_s,
+                            recommended_tool=preflight_decision.recommended_tool,
+                            command_fingerprint=preflight_decision.fingerprint,
+                            signals=list(preflight_decision.signals),
+                            **audit_context,
+                        )
             except BaseException as setup_exc:
                 if lease_heartbeat_task is not None:
                     lease_heartbeat_task.cancel()
@@ -1081,17 +1345,28 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                 raise
             try:
                 with audit_call_context(call_id) as call_state:
-                    if local_access_error is not None:
-                        result = _handled_error(RuntimeError(local_access_error))
-                    elif __tool_name in NON_CANCELLABLE_TOOL_NAMES:
-                        result = await _await_non_cancellable(
-                            __original(*args, **invoke_kwargs)
-                        )
+                    if preflight_decision is not None and preflight_decision.action == "block":
+                        result = _command_preflight_error_result(preflight_decision)
                     else:
-                        result = await _await_tool_watchdog(
-                            __original(*args, **invoke_kwargs), __tool_name,
-                            tool_timeout_s or PUBLIC_TOOL_TIMEOUT_S,
-                        )
+                        if (
+                            __tool_name == "run_shell"
+                            and preflight_decision is not None
+                            and preflight_decision.action == "limit"
+                            and preflight_decision.effective_timeout_s is not None
+                        ):
+                            invoke_kwargs["timeout_s"] = preflight_decision.effective_timeout_s
+                        if local_access_error is not None:
+                            result = _handled_error(RuntimeError(local_access_error))
+                        else:
+                            invocation = __original(*args, **invoke_kwargs)
+                            if __tool_name in NON_CANCELLABLE_TOOL_NAMES:
+                                invocation = _await_non_cancellable(invocation)
+                            result = await _await_tool_watchdog(
+                                invocation, __tool_name,
+                                tool_timeout_s or PUBLIC_TOOL_TIMEOUT_S,
+                            )
+                if __tool_name == "run_shell":
+                    result = _annotate_command_preflight_result(result, preflight_decision)
                 serialized_result = _safe_audit_result(__tool_name, result)
                 call_ok = audit_result_ok(result) and not bool(call_state["failed"])
                 failure_context = {}
@@ -1289,6 +1564,9 @@ MACHINE_CAPABLE_TOOL_NAMES = {
     "file_grep",
     "file_read",
     "image_view",
+    "gui_list",
+    "gui_state",
+    "gui_action",
     "file_write",
     "file_edit",
     "file_delete",
@@ -1415,7 +1693,12 @@ def _secret_scan_candidates(base: Any, glob: str | None = None) -> list[Any]:
         args.extend(["--glob", glob])
     try:
         result = subprocess.run(
-            args, cwd=str(base), text=True, capture_output=True, timeout=30, check=False,
+            args,
+            cwd=str(base),
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
             **managed_process_kwargs(),
         )
     except Exception:
@@ -1527,15 +1810,305 @@ async def _remote_transfer_data(
     return _unwrap_remote_transfer_result(result, machine=machine, tool=tool)
 
 
-def _revoke_cancelled_snapshot_ticket(task: asyncio.Task[dict[str, Any]]) -> None:
-    if task.cancelled():
-        return
+async def _remote_worker_data(
+    machine: str, tool: str, args: dict, timeout_s: int | None = None
+) -> Any:
+    result = await remote_manager().call(
+        machine, tool, args, timeout_s, lane=REMOTE_WORKER_INTERACTIVE_LANE
+    )
+    return _unwrap_remote_transfer_result(result, machine=machine, tool=tool)
+
+
+_REMOTE_STAGED_LEASE_REFRESH_INTERVAL_S = 60.0
+
+
+async def _refresh_remote_staged_write_lease(machine: str, path: str, transfer_id: str) -> None:
+    while True:
+        await asyncio.sleep(_REMOTE_STAGED_LEASE_REFRESH_INTERVAL_S)
+        result = await remote_manager().call(
+            machine,
+            "transfer_refresh_stream_write",
+            {"path": path, "transfer_id": transfer_id},
+            30,
+            lane=REMOTE_WORKER_INTERACTIVE_LANE,
+        )
+        _unwrap_remote_transfer_result(
+            result, machine=machine, tool="transfer_refresh_stream_write"
+        )
+
+
+def _controller_relay_staging_path() -> str:
+    settings = get_settings()
+    root = settings.workspace_root.resolve()
+    parent = (root / ".local-shell-mcp").resolve(strict=False)
     try:
-        ticket = task.result()
-    except Exception:
-        return
-    with suppress(Exception):
-        revoke_transfer_ticket(ticket["token"])
+        parent.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("relay staging parent escapes workspace") from exc
+
+    directory = parent / "transfer-relay"
+    if directory.is_symlink():
+        raise ValueError("relay staging directory must not be a symlink")
+    directory.mkdir(parents=True, exist_ok=True)
+    resolved_directory = directory.resolve(strict=True)
+    try:
+        resolved_directory.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("relay staging directory escapes workspace") from exc
+    if resolved_directory != directory:
+        raise ValueError("relay staging directory must not resolve through a symlink")
+    directory = resolved_directory
+
+    with suppress(OSError):
+        directory.chmod(0o700)
+    cutoff = time.time() - max(120, 2 * int(settings.remote_job_timeout_s))
+    with suppress(OSError):
+        for candidate in directory.iterdir():
+            if (
+                candidate.is_file()
+                and candidate.name.lstrip(".").startswith("relay-")
+                and candidate.stat().st_mtime < cutoff
+            ):
+                candidate.unlink(missing_ok=True)
+    return relative_display(directory / f"relay-{uuid.uuid4().hex}.bin")
+
+
+def _controller_gui_staging_path() -> str:
+    settings = get_settings()
+    root = settings.workspace_root.resolve()
+    parent = (root / ".local-shell-mcp").resolve(strict=False)
+    try:
+        parent.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("GUI staging parent escapes workspace") from exc
+
+    directory = parent / "gui-relay"
+    if directory.is_symlink():
+        raise ValueError("GUI staging directory must not be a symlink")
+    directory.mkdir(parents=True, exist_ok=True)
+    resolved_directory = directory.resolve(strict=True)
+    try:
+        resolved_directory.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("GUI staging directory escapes workspace") from exc
+    if resolved_directory != directory:
+        raise ValueError("GUI staging directory must not resolve through a symlink")
+    with suppress(OSError):
+        directory.chmod(0o700)
+    return str(directory / f"gui-{uuid.uuid4().hex}.png")
+
+
+async def _stream_remote_file_to_upload_ticket(
+    src_machine: str,
+    src_path: str,
+    total_bytes: int,
+    expected_sha256: str | None,
+    ticket: dict[str, Any],
+    progress: TransferProgress | None = None,
+    *,
+    chunk_size: int | None = None,
+    put_tool: str = "transfer_put_url",
+    stat_tool: str = "transfer_stat",
+) -> dict[str, Any]:
+    timeout_s = get_settings().remote_job_timeout_s
+    if put_tool == "transfer_put_url" and total_bytes > 0:
+        if expected_sha256 is None:
+            raise RemoteTransferError("chunked HTTP upload requires a verified source digest")
+        effective_chunk_size = normalize_http_chunk_size(
+            DEFAULT_HTTP_TRANSFER_CHUNK_BYTES if chunk_size is None else chunk_size
+        )
+        offset = 0
+        chunks = 0
+        await _report_transfer_progress(
+            progress,
+            phase="transferring",
+            bytes_transferred=offset,
+            total_bytes=total_bytes,
+            chunks=chunks,
+            chunk_size=min(effective_chunk_size, total_bytes),
+        )
+        while offset < total_bytes:
+            expected_end = min(total_bytes, offset + effective_chunk_size)
+            response: dict[str, Any] | None = None
+            for attempt in range(3):
+                try:
+                    response = await _remote_transfer_data(
+                        src_machine,
+                        "transfer_upload_url",
+                        {
+                            "path": src_path,
+                            "url": ticket["url"],
+                            "expected_bytes": total_bytes,
+                            "expected_sha256": expected_sha256,
+                            "timeout_s": timeout_s,
+                            "offset": offset,
+                            "chunk_size": effective_chunk_size,
+                            "verify_source_digest": False,
+                        },
+                        timeout_s,
+                    )
+                except Exception as exc:
+                    try:
+                        status = get_upload_ticket_status(ticket["token"])
+                    except FileNotFoundError:
+                        raise exc from None
+                    acknowledged = int(status.get("received_bytes") or 0)
+                    if acknowledged == expected_end:
+                        response = status
+                    elif acknowledged != offset or attempt == 2:
+                        raise
+                    else:
+                        await asyncio.sleep(0.25 * (2**attempt))
+                        continue
+                assert response is not None
+                acknowledged = int(response.get("received_bytes") or 0)
+                if acknowledged != expected_end:
+                    raise RemoteTransferError(
+                        f"upload acknowledged offset {acknowledged}, expected {expected_end}"
+                    )
+                offset = acknowledged
+                chunks += 1
+                await _report_transfer_progress(
+                    progress,
+                    phase="transferring",
+                    bytes_transferred=offset,
+                    total_bytes=total_bytes,
+                    chunks=chunks,
+                    chunk_size=min(effective_chunk_size, total_bytes),
+                )
+                break
+
+        finish = get_upload_ticket_status(ticket["token"])
+        if not finish.get("completed"):
+            raise RemoteTransferError(f"upload did not complete: {finish}")
+        return {
+            **finish,
+            "chunks": chunks,
+            "chunk_size": min(effective_chunk_size, total_bytes),
+            "transport": "http-chunks",
+        }
+    last_error: Exception | None = None
+    last_reported = -1
+
+    async def finalize_staged(
+        status: dict[str, Any], source_digest: str | None
+    ) -> dict[str, Any] | None:
+        if expected_sha256 is not None or not status.get("staged"):
+            return None
+        receiver_digest = str(status.get("sha256") or "")
+        if int(status.get("received_bytes") or 0) != total_bytes or not receiver_digest:
+            return None
+        digest = str(source_digest or "").lower()
+        if not digest:
+            source_stat = await _remote_transfer_data(
+                src_machine,
+                stat_tool,
+                {"path": src_path, "sha256": True},
+                timeout_s,
+            )
+            if int(source_stat.get("size") or -1) != total_bytes:
+                raise RemoteTransferError("source changed after an ambiguous upload")
+            digest = str(source_stat.get("sha256") or "").lower()
+        if digest != receiver_digest:
+            raise RemoteTransferError("source and receiver streamed checksums differ")
+        return finalize_upload_ticket(ticket["token"], digest)
+
+    for attempt in range(3):
+        task = asyncio.create_task(
+            _remote_transfer_data(
+                src_machine,
+                put_tool,
+                {
+                    "path": src_path,
+                    "url": ticket["url"],
+                    "expected_bytes": total_bytes,
+                    "expected_sha256": expected_sha256,
+                    "timeout_s": timeout_s,
+                },
+                timeout_s,
+            )
+        )
+        try:
+            while not task.done():
+                done, _ = await asyncio.wait({task}, timeout=1.0)
+                if task in done:
+                    break
+                try:
+                    status = get_upload_ticket_status(ticket["token"])
+                except FileNotFoundError as status_error:
+                    try:
+                        await task
+                    except Exception:
+                        raise
+                    raise status_error
+                received = int(status.get("received_bytes") or 0)
+                if received != last_reported:
+                    await _report_transfer_progress(
+                        progress,
+                        phase="transferring",
+                        bytes_transferred=received,
+                        total_bytes=total_bytes,
+                        chunks=0,
+                        chunk_size=total_bytes,
+                    )
+                    last_reported = received
+        except BaseException:
+            task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await task
+            raise
+
+        try:
+            worker_result = await task
+        except Exception as exc:
+            last_error = exc
+            try:
+                status = get_upload_ticket_status(ticket["token"])
+            except FileNotFoundError:
+                raise exc from None
+            if status.get("completed"):
+                return status
+            finalized = await finalize_staged(status, None)
+            if finalized is not None:
+                return finalized
+            if attempt == 2:
+                raise
+            await asyncio.sleep(0.25 * (2**attempt))
+            continue
+
+        status = get_upload_ticket_status(ticket["token"])
+        if status.get("completed"):
+            return status
+        finalized = await finalize_staged(
+            status,
+            str(worker_result.get("sha256") or "") if isinstance(worker_result, dict) else None,
+        )
+        if finalized is not None:
+            return finalized
+        last_error = RemoteTransferError(f"upload did not complete: {status}")
+        if attempt < 2:
+            await asyncio.sleep(0.25 * (2**attempt))
+
+    assert last_error is not None
+    raise last_error
+
+
+async def _refresh_controller_temp_lease(path: str) -> None:
+    source = resolve_path(path, must_exist=True)
+    while True:
+        await asyncio.to_thread(refresh_temp_file_lease, source, create=False)
+        await asyncio.sleep(60.0)
+
+
+async def _wait_for_download_ticket_completion(token: str) -> dict[str, Any]:
+    deadline = asyncio.get_running_loop().time() + 5.0
+    while True:
+        status = get_download_ticket_status(token)
+        if status.get("completed"):
+            return status
+        if asyncio.get_running_loop().time() >= deadline:
+            raise RemoteTransferError("source stream ended before its digest was finalized")
+        await asyncio.sleep(0.01)
 
 
 async def _copy_local_file_to_remote(
@@ -1546,54 +2119,125 @@ async def _copy_local_file_to_remote(
     chunk_size: int | None = None,
     progress: TransferProgress | None = None,
 ) -> dict:
-    stat = await asyncio.to_thread(transfer_stat, source_path, True)
-    if stat.get("type") != "file":
-        raise ValueError(f"source is not a file: {source_path}")
-    effective_chunk_size = stat["size"] if chunk_size is None else normalize_chunk_size(chunk_size)
-    ticket_task = asyncio.create_task(
-        asyncio.to_thread(
-            create_download_ticket,
-            source_path,
-            stat["size"],
-            stat["sha256"],
-        )
-    )
+    if chunk_size is not None:
+        normalize_http_chunk_size(chunk_size)
+    ticket = create_stream_download_ticket(source_path)
+    total_bytes = int(ticket["bytes"])
+    staged_transfer_id: str | None = None
+    staged_lease_task: asyncio.Task[None] | None = None
+    digest: str | None = None
+    finish: dict[str, Any] | None = None
+    lease_task = asyncio.create_task(_refresh_controller_temp_lease(source_path))
     try:
-        ticket = await asyncio.shield(ticket_task)
-    except asyncio.CancelledError:
-        ticket_task.add_done_callback(_revoke_cancelled_snapshot_ticket)
-        raise
-    try:
-        finish = await _remote_transfer_data(
+        staged = await _remote_transfer_data(
             dst_machine,
             "transfer_download_url",
             {
                 "url": ticket["url"],
                 "path": dst_path,
                 "overwrite": overwrite,
-                "expected_bytes": stat["size"],
-                "expected_sha256": stat["sha256"],
+                "expected_bytes": total_bytes,
                 "timeout_s": get_settings().remote_job_timeout_s,
+                "defer_commit": True,
             },
             get_settings().remote_job_timeout_s,
         )
+        staged_transfer_id = str(staged["transfer_id"])
+        staged_lease_task = asyncio.create_task(
+            _refresh_remote_staged_write_lease(dst_machine, dst_path, staged_transfer_id)
+        )
+        status = await _wait_for_download_ticket_completion(ticket["token"])
+        if not status.get("sha256"):
+            raise RemoteTransferError("source stream completed without a verified digest")
+        digest = str(status["sha256"])
+        finish = await _remote_transfer_data(
+            dst_machine,
+            "transfer_finish_write",
+            {
+                "path": dst_path,
+                "transfer_id": staged_transfer_id,
+                "expected_bytes": total_bytes,
+                "expected_sha256": digest,
+            },
+            get_settings().remote_job_timeout_s,
+        )
+        staged_transfer_id = None
     finally:
-        revoke_transfer_ticket(ticket["token"])
+        if staged_lease_task is not None:
+            staged_lease_task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await staged_lease_task
+        if staged_transfer_id is not None:
+            with suppress(asyncio.CancelledError, Exception):
+                await _remote_transfer_data(
+                    dst_machine,
+                    "transfer_abort_write",
+                    {"path": dst_path, "transfer_id": staged_transfer_id},
+                    30,
+                )
+        lease_task.cancel()
+        try:
+            with suppress(asyncio.CancelledError, FileNotFoundError):
+                await lease_task
+        finally:
+            revoke_transfer_ticket(ticket["token"])
+    assert finish is not None and digest is not None
     await _report_transfer_progress(
         progress,
         phase="transferring",
-        bytes_transferred=stat["size"],
-        total_bytes=stat["size"],
+        bytes_transferred=total_bytes,
+        total_bytes=total_bytes,
         chunks=1,
-        chunk_size=effective_chunk_size,
+        chunk_size=total_bytes,
     )
     return {
-        "source": {"machine": "controller", "path": stat["path"]},
+        "source": {"machine": "controller", "path": ticket["path"]},
         "destination": {"machine": dst_machine, "path": finish["path"]},
-        "bytes": stat["size"],
-        "sha256": stat.get("sha256"),
+        "bytes": total_bytes,
+        "sha256": digest,
         "chunks": 1,
-        "chunk_size": effective_chunk_size,
+        "chunk_size": total_bytes,
+        "transport": "http-stream",
+    }
+
+
+async def _copy_remote_gui_temp_to_local(
+    src_machine: str,
+    src_path: str,
+    destination_path: str,
+) -> dict[str, Any]:
+    stat = await _remote_transfer_data(
+        src_machine,
+        "transfer_gui_temp_stat",
+        {"path": src_path, "sha256": False},
+    )
+    if not isinstance(stat, dict) or stat.get("type") != "file":
+        raise RuntimeError(f"Remote GUI temp source is not a file: {src_path}")
+    total_bytes = int(stat["size"])
+    assert_view_image_size(total_bytes)
+    ticket = create_upload_ticket(
+        destination_path,
+        total_bytes,
+        None,
+        True,
+    )
+    try:
+        finish = await _stream_remote_file_to_upload_ticket(
+            src_machine,
+            src_path,
+            total_bytes,
+            None,
+            ticket,
+            put_tool="transfer_gui_temp_put_url",
+            stat_tool="transfer_gui_temp_stat",
+        )
+    finally:
+        revoke_transfer_ticket(ticket["token"])
+    return {
+        "source": {"machine": src_machine, "path": stat["path"]},
+        "destination": {"machine": "controller", "path": finish["path"]},
+        "bytes": total_bytes,
+        "sha256": finish.get("sha256"),
         "transport": "http-stream",
     }
 
@@ -1612,102 +2256,35 @@ async def _copy_remote_file_to_local(
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {src_path}")
     total_bytes = int(stat["size"])
-    effective_chunk_size = normalize_chunk_size(
-        DEFAULT_TRANSFER_CHUNK_BYTES if chunk_size is None else chunk_size
-    )
-    chunk_timeout_s = min(int(get_settings().remote_job_timeout_s), 300)
+    effective_chunk_size = normalize_http_chunk_size(chunk_size)
     ticket = create_upload_ticket(
         destination_path,
         total_bytes,
-        stat["sha256"],
+        str(stat["sha256"]),
         overwrite,
     )
-    chunks = 0
-    finish: dict[str, Any] | None = None
     try:
-        status = get_upload_ticket_status(ticket["token"])
-        offset = int(status["received_bytes"])
-        await _report_transfer_progress(
+        finish = await _stream_remote_file_to_upload_ticket(
+            src_machine,
+            src_path,
+            total_bytes,
+            str(stat["sha256"]),
+            ticket,
             progress,
-            phase="transferring",
-            bytes_transferred=offset,
-            total_bytes=total_bytes,
-            chunks=chunks,
             chunk_size=effective_chunk_size,
         )
-        while offset < total_bytes or (total_bytes == 0 and chunks == 0):
-            expected_end = min(total_bytes, offset + effective_chunk_size)
-            last_error: Exception | None = None
-            for attempt in range(3):
-                try:
-                    response = await _remote_transfer_data(
-                        src_machine,
-                        "transfer_upload_url",
-                        {
-                            "path": src_path,
-                            "url": ticket["url"],
-                            "expected_bytes": total_bytes,
-                            "expected_sha256": stat["sha256"],
-                            "timeout_s": chunk_timeout_s,
-                            "offset": offset,
-                            "chunk_size": effective_chunk_size,
-                        },
-                        chunk_timeout_s,
-                    )
-                except Exception as exc:
-                    last_error = exc
-                    status = get_upload_ticket_status(ticket["token"])
-                    acknowledged = int(status["received_bytes"])
-                    if acknowledged == expected_end or (
-                        total_bytes == 0 and status.get("completed")
-                    ):
-                        response = status
-                    elif acknowledged != offset or attempt == 2:
-                        raise
-                    else:
-                        await asyncio.sleep(1)
-                        continue
-
-                acknowledged = int(response.get("received_bytes", -1))
-                if total_bytes == 0:
-                    if not response.get("completed"):
-                        raise RemoteTransferError("empty upload was not completed")
-                elif acknowledged != expected_end:
-                    raise RemoteTransferError(
-                        f"upload acknowledged offset {acknowledged}, expected {expected_end}"
-                    )
-                offset = acknowledged
-                chunks += 1
-                finish = response
-                await _report_transfer_progress(
-                    progress,
-                    phase="transferring",
-                    bytes_transferred=offset,
-                    total_bytes=total_bytes,
-                    chunks=chunks,
-                    chunk_size=effective_chunk_size,
-                )
-                break
-            else:
-                assert last_error is not None
-                raise last_error
-            if finish.get("completed"):
-                break
-
-        if finish is None or not finish.get("completed"):
-            finish = get_upload_ticket_status(ticket["token"])
-        if not finish.get("completed"):
-            raise RemoteTransferError(f"upload did not complete: {finish}")
     finally:
         revoke_transfer_ticket(ticket["token"])
     return {
         "source": {"machine": src_machine, "path": stat["path"]},
         "destination": {"machine": "controller", "path": finish["path"]},
         "bytes": total_bytes,
-        "sha256": stat.get("sha256"),
-        "chunks": chunks,
-        "chunk_size": effective_chunk_size,
-        "transport": "http-chunks",
+        "sha256": finish.get("sha256"),
+        "chunks": int(finish.get("chunks") or 1),
+        "chunk_size": int(
+            finish.get("chunk_size") or min(effective_chunk_size, max(total_bytes, 1))
+        ),
+        "transport": str(finish.get("transport") or "http-stream"),
     }
 
 
@@ -1726,101 +2303,75 @@ async def _copy_remote_file_via_controller_relay(
     if stat.get("type") != "file":
         raise ValueError(f"source is not a file: {src_path}")
     total_bytes = int(stat["size"])
-    effective_chunk_size = normalize_chunk_size(
-        DEFAULT_TRANSFER_CHUNK_BYTES if chunk_size is None else chunk_size
-    )
-    begin = await _remote_transfer_data(
-        dst_machine,
-        "transfer_begin_write",
-        {
-            "path": dst_path,
-            "overwrite": overwrite,
-            "expected_bytes": total_bytes,
-        },
-    )
-    transfer_id = str(begin["transfer_id"])
-    offset = 0
-    chunks = 0
+    effective_chunk_size = normalize_http_chunk_size(chunk_size)
+    staging_path = _controller_relay_staging_path()
+    upload_ticket: dict[str, Any] | None = None
+    staged_ticket: dict[str, Any] | None = None
     try:
+        upload_ticket = create_upload_ticket(
+            staging_path,
+            total_bytes,
+            str(stat["sha256"]),
+            True,
+        )
+        upload_finish = await _stream_remote_file_to_upload_ticket(
+            src_machine,
+            src_path,
+            total_bytes,
+            str(stat["sha256"]),
+            upload_ticket,
+            progress,
+            chunk_size=effective_chunk_size,
+        )
+        digest = str(upload_finish["sha256"])
+        revoke_transfer_ticket(upload_ticket["token"])
+        staged_ticket = create_stream_download_ticket(
+            staging_path,
+            total_bytes,
+            digest,
+            cleanup_source=True,
+        )
+        finish = await _remote_transfer_data(
+            dst_machine,
+            "transfer_download_url",
+            {
+                "path": dst_path,
+                "url": staged_ticket["url"],
+                "overwrite": overwrite,
+                "expected_bytes": total_bytes,
+                "expected_sha256": digest,
+                "timeout_s": get_settings().remote_job_timeout_s,
+            },
+            get_settings().remote_job_timeout_s,
+        )
         await _report_transfer_progress(
             progress,
             phase="transferring",
-            bytes_transferred=0,
+            bytes_transferred=total_bytes,
             total_bytes=total_bytes,
-            chunks=0,
-            chunk_size=effective_chunk_size,
+            chunks=int(upload_finish.get("chunks") or 1),
+            chunk_size=int(
+                upload_finish.get("chunk_size") or min(effective_chunk_size, max(total_bytes, 1))
+            ),
         )
-        while offset < total_bytes:
-            chunk = await _remote_transfer_data(
-                src_machine,
-                "transfer_read_chunk",
-                {
-                    "path": src_path,
-                    "offset": offset,
-                    "chunk_size": effective_chunk_size,
-                },
-            )
-            chunk_bytes = int(chunk.get("bytes", 0))
-            if chunk_bytes <= 0:
-                raise RemoteTransferError(
-                    f"source returned an empty chunk at offset {offset} before EOF"
-                )
-            if int(chunk.get("offset", -1)) != offset:
-                raise RemoteTransferError(
-                    f"source returned offset {chunk.get('offset')}, expected {offset}"
-                )
-            written = await _remote_transfer_data(
-                dst_machine,
-                "transfer_write_chunk",
-                {
-                    "path": dst_path,
-                    "transfer_id": transfer_id,
-                    "offset": offset,
-                    "data_b64": chunk["data_b64"],
-                    "expected_sha256": chunk["sha256"],
-                },
-            )
-            if int(written.get("bytes", -1)) != chunk_bytes:
-                raise RemoteTransferError(
-                    f"destination wrote {written.get('bytes')} bytes, expected {chunk_bytes}"
-                )
-            offset += chunk_bytes
-            chunks += 1
-            await _report_transfer_progress(
-                progress,
-                phase="transferring",
-                bytes_transferred=offset,
-                total_bytes=total_bytes,
-                chunks=chunks,
-                chunk_size=effective_chunk_size,
-            )
-
-        finish = await _remote_transfer_data(
-            dst_machine,
-            "transfer_finish_write",
-            {
-                "path": dst_path,
-                "transfer_id": transfer_id,
-                "expected_bytes": total_bytes,
-                "expected_sha256": stat["sha256"],
-            },
-        )
-    except Exception:
-        with suppress(Exception):
-            await _remote_transfer_data(
-                dst_machine,
-                "transfer_abort_write",
-                {"path": dst_path, "transfer_id": transfer_id},
-            )
-        raise
+    finally:
+        if upload_ticket is not None:
+            revoke_transfer_ticket(upload_ticket["token"])
+        if staged_ticket is not None:
+            revoke_transfer_ticket(staged_ticket["token"])
+        else:
+            with suppress(Exception):
+                await asyncio.to_thread(delete_path, staging_path, False)
     return {
         "source": {"machine": src_machine, "path": stat["path"]},
         "destination": {"machine": dst_machine, "path": finish["path"]},
         "bytes": total_bytes,
-        "sha256": stat.get("sha256"),
-        "chunks": chunks,
-        "chunk_size": effective_chunk_size,
-        "transport": "controller-memory-relay",
+        "sha256": digest,
+        "chunks": int(upload_finish.get("chunks") or 1),
+        "chunk_size": int(
+            upload_finish.get("chunk_size") or min(effective_chunk_size, max(total_bytes, 1))
+        ),
+        "transport": "controller-http-relay",
     }
 
 
@@ -2362,7 +2913,7 @@ async def _start_transfer_job(
     if not source_machine and not destination_machine:
         raise ValueError("At least one transfer endpoint must be a remote machine")
     if chunk_size is not None:
-        normalize_chunk_size(chunk_size)
+        normalize_http_chunk_size(chunk_size)
     payload = {
         "source_path": source_path,
         "destination_path": destination_path,
@@ -2478,6 +3029,611 @@ async def _view_image_result(path: str, machine: str | None = None) -> CallToolR
         return _view_image_error_result(path, machine, exc)
 
 
+GUI_WINDOW_TEXT_FIELD_MAX_BYTES = 1024
+GUI_ELEMENT_TEXT_FIELD_MAX_BYTES = 1024
+GUI_ELEMENT_VALUE_FIELD_MAX_BYTES = 2048
+GUI_ELEMENT_ACTION_MAX_ITEMS = 32
+GUI_ELEMENT_ACTION_MAX_BYTES = 128
+GUI_ELEMENTS_TOTAL_BYTES = 64 * 1024
+
+
+def _truncate_gui_utf8(value: Any, limit: int) -> str:
+    text = str(value or "")
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text
+    suffix = "..."
+    budget = max(0, limit - len(suffix))
+    return encoded[:budget].decode("utf-8", errors="ignore") + suffix
+
+
+def _bounded_gui_window(window: dict[str, Any]) -> dict[str, Any]:
+    bounded: dict[str, Any] = {}
+    for key in ("id", "title", "app"):
+        if key in window:
+            bounded[key] = _truncate_gui_utf8(
+                window.get(key),
+                GUI_WINDOW_TEXT_FIELD_MAX_BYTES,
+            )
+    if "pid" in window:
+        try:
+            bounded["pid"] = int(window.get("pid"))
+        except (TypeError, ValueError):
+            bounded["pid"] = 0
+    bounds = window.get("bounds")
+    if isinstance(bounds, dict):
+        bounded["bounds"] = {
+            key: bounds.get(key) for key in ("x", "y", "width", "height") if key in bounds
+        }
+    return bounded
+
+
+def _bounded_gui_element(element: dict[str, Any]) -> dict[str, Any]:
+    bounded: dict[str, Any] = {}
+    for key in ("id", "role", "name", "automation_id"):
+        if key in element:
+            bounded[key] = _truncate_gui_utf8(
+                element.get(key),
+                GUI_ELEMENT_TEXT_FIELD_MAX_BYTES,
+            )
+    if "value" in element:
+        bounded["value"] = _truncate_gui_utf8(
+            element.get("value"),
+            GUI_ELEMENT_VALUE_FIELD_MAX_BYTES,
+        )
+    bounds = element.get("bounds")
+    if isinstance(bounds, dict):
+        bounded["bounds"] = {
+            key: bounds.get(key) for key in ("x", "y", "width", "height") if key in bounds
+        }
+    for key in ("enabled", "offscreen", "focused", "editable"):
+        if key in element:
+            bounded[key] = bool(element.get(key))
+    if "depth" in element:
+        try:
+            bounded["depth"] = int(element.get("depth"))
+        except (TypeError, ValueError):
+            bounded["depth"] = 0
+    actions = element.get("actions")
+    if isinstance(actions, list):
+        bounded["actions"] = [
+            _truncate_gui_utf8(action, GUI_ELEMENT_ACTION_MAX_BYTES)
+            for action in actions[:GUI_ELEMENT_ACTION_MAX_ITEMS]
+        ]
+    return bounded
+
+
+def _bounded_gui_elements(elements: list[Any]) -> list[dict[str, Any]]:
+    bounded: list[dict[str, Any]] = []
+    used = 2
+    for raw in elements:
+        if not isinstance(raw, dict):
+            continue
+        element = _bounded_gui_element(raw)
+        encoded_size = len(
+            json.dumps(
+                element,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        )
+        extra = encoded_size + (1 if bounded else 0)
+        if used + extra > GUI_ELEMENTS_TOTAL_BYTES:
+            break
+        bounded.append(element)
+        used += extra
+    return bounded
+
+
+def _format_gui_state_text(metadata: GuiStateResult) -> str:
+    if not metadata.ok:
+        return f"Unable to observe GUI state: {metadata.message}"
+    window = metadata.window or {}
+    bounds = window.get("bounds") or {}
+    lines = [
+        (
+            f"GUI state {metadata.state_id} on {metadata.backend}: "
+            f"{window.get('app', '')} — {window.get('title', '')}"
+        ),
+        (
+            "window bounds: "
+            f"x={bounds.get('x')} y={bounds.get('y')} "
+            f"width={bounds.get('width')} height={bounds.get('height')}"
+        ),
+        "Coordinates for gui_action are window-relative. Prefer element_id when available.",
+    ]
+    if metadata.elements:
+        lines.append("Accessibility elements:")
+        for element in metadata.elements:
+            eb = element.get("bounds") or {}
+            name = str(element.get("name") or "").replace("\n", " ")
+            if len(name) > 160:
+                name = name[:157] + "..."
+            lines.append(
+                f"[{element.get('id')}] {element.get('role', '')} {name!r} "
+                f"@({eb.get('x')},{eb.get('y')},{eb.get('width')},{eb.get('height')})"
+            )
+    return "\n".join(lines)
+
+
+def _gui_state_call_result(
+    data: dict[str, Any],
+    machine: str | None,
+    image: ImageFile | None,
+) -> CallToolResult:
+    metadata = GuiStateResult(
+        ok=True,
+        machine=machine,
+        backend=str(data.get("backend") or "") or None,
+        state_id=str(data.get("state_id") or "") or None,
+        state_ttl_s=float(data.get("state_ttl_s") or 0) or None,
+        window=_bounded_gui_window(data.get("window"))
+        if isinstance(data.get("window"), dict)
+        else None,
+        elements=_bounded_gui_elements(data.get("elements"))
+        if isinstance(data.get("elements"), list)
+        else [],
+        capabilities=(
+            data.get("capabilities") if isinstance(data.get("capabilities"), dict) else {}
+        ),
+        screenshot=image is not None,
+        mime_type=image.mime_type if image is not None else None,
+        bytes=image.size if image is not None else None,
+    )
+    content: list[ImageContent | TextContent] = [
+        TextContent(type="text", text=_format_gui_state_text(metadata))
+    ]
+    if image is not None:
+        content.insert(
+            0,
+            ImageContent(
+                type="image",
+                data=base64.b64encode(image.data).decode("ascii"),
+                mimeType=image.mime_type,
+            ),
+        )
+    return CallToolResult(
+        content=content,
+        structuredContent=metadata.model_dump(mode="json"),
+    )
+
+
+def _gui_state_error_result(machine: str | None, exc: Exception) -> CallToolResult:
+    audit("tool_error", error=repr(exc))
+    message = f"{type(exc).__name__}: {exc}"
+    metadata = GuiStateResult(
+        ok=False,
+        machine=machine,
+        message=message,
+        error_type=type(exc).__name__,
+    )
+    return CallToolResult(
+        content=[TextContent(type="text", text=f"Unable to observe GUI state: {message}")],
+        structuredContent=metadata.model_dump(mode="json"),
+        isError=True,
+    )
+
+
+def _gui_temp_path(path: str, *, must_exist: bool) -> Path:
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = get_settings().workspace_root / candidate
+    root = temp_dir().resolve(strict=False)
+    parent = candidate.parent.resolve(strict=False)
+    if parent != root:
+        raise ValueError("GUI screenshot path is outside the internal temp directory")
+    resolved = candidate.resolve(strict=must_exist)
+    if resolved.parent != root:
+        raise ValueError("GUI screenshot path escapes the internal temp directory")
+    return resolved
+
+
+def _read_gui_temp_image(path: str) -> ImageFile:
+    resolved = _gui_temp_path(path, must_exist=True)
+    if not resolved.is_file():
+        raise IsADirectoryError(str(resolved))
+    expected_size = resolved.stat().st_size
+    assert_view_image_size(expected_size)
+    with resolved.open("rb") as handle:
+        data = handle.read(MAX_VIEW_IMAGE_BYTES + 1)
+    assert_view_image_size(len(data))
+    image_format, mime_type = detect_image_type(data[:16])
+    return ImageFile(
+        path=relative_display(resolved),
+        data=data,
+        format=image_format,
+        mime_type=mime_type,
+        size=len(data),
+    )
+
+
+def _delete_gui_temp_file(path: str) -> None:
+    candidate = _gui_temp_path(path, must_exist=False)
+    try:
+        candidate.unlink(missing_ok=True)
+    finally:
+        release_temp_file_lease(candidate)
+
+
+def _remote_inline_gui_image(data: dict[str, Any], screenshot_path: str) -> ImageFile | None:
+    encoded = data.pop("screenshot_inline_b64", None)
+    raw_size = data.pop("screenshot_inline_size", None)
+    if encoded is None:
+        return None
+    if not isinstance(encoded, str):
+        raise RuntimeError("Remote GUI screenshot inline payload is invalid")
+    try:
+        payload = base64.b64decode(encoded, validate=True)
+    except Exception as exc:
+        raise RuntimeError("Remote GUI screenshot inline payload is invalid") from exc
+    assert_view_image_size(len(payload))
+    if raw_size is not None and int(raw_size) != len(payload):
+        raise RuntimeError("Remote GUI screenshot inline size does not match payload")
+    image_format, mime_type = detect_image_type(payload[:16])
+    return ImageFile(
+        path=screenshot_path,
+        data=payload,
+        format=image_format,
+        mime_type=mime_type,
+        size=len(payload),
+    )
+
+
+async def _gui_frame_data(
+    window_id: str,
+    machine: str | None,
+) -> tuple[dict[str, Any], ImageFile]:
+    screenshot_path: str | None = None
+    observation_id = ""
+    delivered = False
+
+    if machine:
+        if not get_settings().remote_enabled:
+            raise RuntimeError("Remote workers are disabled")
+        data = await _remote_worker_data(
+            machine,
+            "gui_frame",
+            {"window_id": window_id},
+            210,
+        )
+        if not isinstance(data, dict):
+            raise RuntimeError("Remote gui_frame returned invalid data")
+        screenshot_path = str(data.get("screenshot_path")) if data.get("screenshot_path") else None
+        observation_id = str(data.get("observation_id") or "")
+        if not screenshot_path:
+            if observation_id:
+                with suppress(Exception):
+                    await _discard_remote_gui_frame_once(
+                        machine,
+                        window_id,
+                        observation_id,
+                    )
+            raise RuntimeError("Remote gui_frame returned no screenshot")
+        if not observation_id:
+            with suppress(Exception):
+                await _remote_transfer_data(
+                    machine,
+                    "transfer_gui_temp_delete",
+                    {"path": screenshot_path},
+                    30,
+                )
+            raise RuntimeError("Remote gui_frame returned no observation_id")
+        keepalive: asyncio.Task[None] | None = None
+        try:
+            keepalive = asyncio.create_task(
+                _refresh_remote_gui_frame_lease(
+                    machine,
+                    window_id,
+                    observation_id,
+                )
+            )
+            image = _remote_inline_gui_image(data, screenshot_path)
+            if image is None:
+                local_path = await asyncio.to_thread(_controller_gui_staging_path)
+                try:
+                    await _copy_remote_gui_temp_to_local(machine, screenshot_path, local_path)
+                    image = await asyncio.to_thread(read_image, local_path)
+                finally:
+                    with suppress(Exception):
+                        await asyncio.to_thread(delete_path, local_path, False)
+            refreshed = await _refresh_remote_gui_frame_once(
+                machine,
+                window_id,
+                observation_id,
+            )
+            result = dict(data)
+            result["observation_ttl_s"] = float(refreshed.get("observation_ttl_s") or 0)
+            result.pop("screenshot_path", None)
+            delivered = True
+            return result, image
+        finally:
+            if keepalive is not None:
+                keepalive.cancel()
+                with suppress(BaseException):
+                    await keepalive
+            if screenshot_path:
+                with suppress(Exception):
+                    await _remote_transfer_data(
+                        machine,
+                        "transfer_gui_temp_delete",
+                        {"path": screenshot_path},
+                        30,
+                    )
+            if not delivered and observation_id:
+                with suppress(Exception):
+                    await _discard_remote_gui_frame_once(
+                        machine,
+                        window_id,
+                        observation_id,
+                    )
+
+    manager = get_gui_manager()
+    data = await manager.frame(window_id)
+    screenshot_path = str(data.get("screenshot_path") or "")
+    observation_id = str(data.get("observation_id") or "")
+    if not screenshot_path:
+        if observation_id:
+            with suppress(Exception):
+                await manager.discard_frame_observation(
+                    window_id,
+                    observation_id,
+                )
+        raise RuntimeError("Local gui_frame returned no screenshot")
+    if not observation_id:
+        with suppress(Exception):
+            await asyncio.to_thread(_delete_gui_temp_file, screenshot_path)
+        raise RuntimeError("Local gui_frame returned no observation_id")
+    try:
+        image = await asyncio.to_thread(_read_gui_temp_image, screenshot_path)
+        refreshed = await manager.refresh_frame_observation(
+            window_id,
+            observation_id,
+        )
+        result = dict(data)
+        result["observation_ttl_s"] = float(refreshed.get("observation_ttl_s") or 0)
+        result.pop("screenshot_path", None)
+        delivered = True
+        return result, image
+    finally:
+        if screenshot_path:
+            with suppress(Exception):
+                await asyncio.to_thread(_delete_gui_temp_file, screenshot_path)
+        if not delivered and observation_id:
+            with suppress(Exception):
+                await manager.discard_frame_observation(
+                    window_id,
+                    observation_id,
+                )
+
+
+_REMOTE_GUI_STATE_REFRESH_INTERVAL_S = 10.0
+
+
+async def _refresh_remote_gui_state_lease(
+    machine: str,
+    window_id: str,
+    state_id: str,
+) -> None:
+    while True:
+        await asyncio.sleep(_REMOTE_GUI_STATE_REFRESH_INTERVAL_S)
+        refreshed = await _remote_worker_data(
+            machine,
+            "gui_state_refresh",
+            {"window_id": window_id, "state_id": state_id},
+            30,
+        )
+        if not isinstance(refreshed, dict):
+            raise RuntimeError("Remote gui_state_refresh returned invalid data")
+
+
+async def _refresh_remote_gui_frame_lease(
+    machine: str,
+    window_id: str,
+    observation_id: str,
+) -> None:
+    while True:
+        await asyncio.sleep(_REMOTE_GUI_STATE_REFRESH_INTERVAL_S)
+        refreshed = await _remote_worker_data(
+            machine,
+            "gui_frame_refresh",
+            {"window_id": window_id, "observation_id": observation_id},
+            30,
+        )
+        if not isinstance(refreshed, dict):
+            raise RuntimeError("Remote gui_frame_refresh returned invalid data")
+
+
+async def _refresh_remote_gui_frame_once(
+    machine: str,
+    window_id: str,
+    observation_id: str,
+) -> dict[str, Any]:
+    refreshed = await _remote_worker_data(
+        machine,
+        "gui_frame_refresh",
+        {"window_id": window_id, "observation_id": observation_id},
+        30,
+    )
+    if not isinstance(refreshed, dict):
+        raise RuntimeError("Remote gui_frame_refresh returned invalid data")
+    return refreshed
+
+
+async def _refresh_remote_gui_state_once(
+    machine: str,
+    window_id: str,
+    state_id: str,
+) -> dict[str, Any]:
+    refreshed = await _remote_worker_data(
+        machine,
+        "gui_state_refresh",
+        {"window_id": window_id, "state_id": state_id},
+        30,
+    )
+    if not isinstance(refreshed, dict):
+        raise RuntimeError("Remote gui_state_refresh returned invalid data")
+    return refreshed
+
+
+async def _discard_remote_gui_state_once(
+    machine: str,
+    window_id: str,
+    state_id: str,
+) -> None:
+    discarded = await _remote_worker_data(
+        machine,
+        "gui_state_discard",
+        {"window_id": window_id, "state_id": state_id},
+        30,
+    )
+    if not isinstance(discarded, dict):
+        raise RuntimeError("Remote gui_state_discard returned invalid data")
+
+
+async def _discard_remote_gui_frame_once(
+    machine: str,
+    window_id: str,
+    observation_id: str,
+) -> None:
+    discarded = await _remote_worker_data(
+        machine,
+        "gui_frame_discard",
+        {"window_id": window_id, "observation_id": observation_id},
+        30,
+    )
+    if not isinstance(discarded, dict):
+        raise RuntimeError("Remote gui_frame_discard returned invalid data")
+
+
+def _gui_handoff_now() -> float:
+    return time.monotonic()
+
+
+async def _gui_state_result(
+    window_id: str,
+    *,
+    screenshot: bool,
+    include_elements: bool,
+    max_elements: int,
+    max_depth: int,
+    machine: str | None,
+) -> CallToolResult:
+    image: ImageFile | None = None
+    screenshot_path: str | None = None
+    state_id = ""
+    delivered = False
+    manager = None
+    remote_handoff_started: float | None = None
+    remote_initial_ttl_s = 0.0
+    try:
+        args = {
+            "window_id": window_id,
+            "screenshot": screenshot,
+            "include_elements": include_elements,
+            "max_elements": max_elements,
+            "max_depth": max_depth,
+        }
+        if machine:
+            if not get_settings().remote_enabled:
+                raise RuntimeError("Remote workers are disabled")
+            data = await _remote_worker_data(machine, "gui_state", args, 210)
+            if not isinstance(data, dict):
+                raise RuntimeError("Remote gui_state returned invalid data")
+            state_id = str(data.get("state_id") or "")
+            if not state_id:
+                raise RuntimeError("Remote gui_state returned no state_id")
+            raw_state_ttl = data.get("state_ttl_s")
+            if raw_state_ttl is not None:
+                try:
+                    remote_initial_ttl_s = float(raw_state_ttl)
+                except (TypeError, ValueError) as exc:
+                    raise RuntimeError("Remote gui_state returned invalid state_ttl_s") from exc
+                if remote_initial_ttl_s <= 0:
+                    raise RuntimeError(
+                        "Remote GUI state expired before controller handoff; call gui_state again"
+                    )
+                remote_handoff_started = _gui_handoff_now()
+            screenshot_path = (
+                str(data.get("screenshot_path")) if data.get("screenshot_path") else None
+            )
+            if screenshot_path:
+                image = _remote_inline_gui_image(data, screenshot_path)
+                if image is None:
+                    local_path = await asyncio.to_thread(_controller_gui_staging_path)
+                    try:
+                        await _copy_remote_gui_temp_to_local(machine, screenshot_path, local_path)
+                        image = await asyncio.to_thread(read_image, local_path)
+                    finally:
+                        with suppress(Exception):
+                            await asyncio.to_thread(delete_path, local_path, False)
+                try:
+                    await _remote_transfer_data(
+                        machine,
+                        "transfer_gui_temp_delete",
+                        {"path": screenshot_path},
+                        30,
+                    )
+                except Exception:
+                    pass
+                else:
+                    screenshot_path = None
+            if remote_handoff_started is not None:
+                handoff_elapsed_s = max(0.0, _gui_handoff_now() - remote_handoff_started)
+                remaining_ttl_s = remote_initial_ttl_s - handoff_elapsed_s
+                if remaining_ttl_s <= 0:
+                    raise RuntimeError(
+                        "Remote GUI state expired during controller handoff; call gui_state again"
+                    )
+                data["state_ttl_s"] = remaining_ttl_s
+        else:
+            manager = get_gui_manager()
+            data = await manager.snapshot(**args)
+            state_id = str(data.get("state_id") or "")
+            if not state_id:
+                raise RuntimeError("Local gui_state returned no state_id")
+            screenshot_path = (
+                str(data.get("screenshot_path")) if data.get("screenshot_path") else None
+            )
+            if screenshot_path:
+                image = await asyncio.to_thread(_read_gui_temp_image, screenshot_path)
+            refreshed = await manager.refresh_state(window_id, state_id)
+            data["state_ttl_s"] = float(refreshed.get("state_ttl_s") or 0)
+
+        result_data = dict(data)
+        result_data.pop("screenshot_path", None)
+        result_data.pop("screenshot_inline_b64", None)
+        result_data.pop("screenshot_inline_size", None)
+        result = _gui_state_call_result(result_data, machine, image)
+        delivered = True
+        return result
+    except Exception as exc:
+        return _gui_state_error_result(machine, exc)
+    finally:
+        if machine and screenshot_path:
+            with suppress(Exception):
+                await _remote_transfer_data(
+                    machine,
+                    "transfer_gui_temp_delete",
+                    {"path": screenshot_path},
+                    30,
+                )
+        elif not machine and screenshot_path:
+            with suppress(Exception):
+                await asyncio.to_thread(_delete_gui_temp_file, screenshot_path)
+        if not delivered and state_id:
+            if machine:
+                with suppress(Exception):
+                    await _discard_remote_gui_state_once(
+                        machine,
+                        window_id,
+                        state_id,
+                    )
+            elif manager is not None:
+                with suppress(Exception):
+                    await manager.discard_state(window_id, state_id)
+
+
 def _read_audit_tail_entries(lines: int = 100) -> dict:
     settings = get_settings()
     line_limit = max(1, min(lines, 1000))
@@ -2573,10 +3729,11 @@ async def _remote_call(
             rpc_timeout_s=rpc_timeout_s,
         )
         data = result.get("data") if isinstance(result, dict) else None
-        failed_status = (
-            isinstance(data, dict)
-            and data.get("status") in {"error", "not_found", "executable_not_found"}
-        )
+        failed_status = isinstance(data, dict) and data.get("status") in {
+            "error",
+            "not_found",
+            "executable_not_found",
+        }
         if not result.get("ok", False) or failed_status:
             if not isinstance(data, dict):
                 data = {
@@ -2991,6 +4148,64 @@ def _register_workspace_read_tools(
     ) -> ViewImageResult:
         """View a PNG, JPEG, GIF, or WebP file as native MCP image content locally or on a remote machine. Use this instead of file_read when visual inspection is needed. Remote images reuse the existing file-transfer protocol, so the worker does not need a new image-specific RPC."""
         return cast(ViewImageResult, await _view_image_result(path, machine))
+
+
+def _register_gui_tools(
+    mcp: FastMCP,
+    settings: Any,
+) -> None:
+    shell_execute_meta = _oauth_meta(["shell:read", "shell:execute"])
+
+    @mcp.tool(structured_output=True, meta=shell_execute_meta)
+    async def gui_list(machine: str | None = None) -> ToolResult:
+        """List visible desktop application windows and GUI backend capabilities locally or remotely."""
+        require_current_scopes(("shell:read", "shell:execute"))
+        if machine:
+            return await _remote_call(
+                settings,
+                machine,
+                "gui_list",
+                {"_allow_dependency_install": True},
+                210,
+            )
+        return await _tool_call(get_gui_manager().list_windows)
+
+    @mcp.tool(structured_output=True, meta=shell_execute_meta)
+    async def gui_state(
+        window_id: str,
+        screenshot: bool = True,
+        include_elements: bool = True,
+        max_elements: int = 300,
+        max_depth: int = 12,
+        machine: str | None = None,
+    ) -> GuiStateResult:
+        """Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized."""
+        require_current_scopes(("shell:read", "shell:execute"))
+        return cast(
+            GuiStateResult,
+            await _gui_state_result(
+                window_id,
+                screenshot=screenshot,
+                include_elements=include_elements,
+                max_elements=max_elements,
+                max_depth=max_depth,
+                machine=machine,
+            ),
+        )
+
+    @mcp.tool(structured_output=True, meta=shell_execute_meta)
+    async def gui_action(
+        window_id: str,
+        state_id: str,
+        actions: list[GuiAction],
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Execute GUI actions against a fresh gui_state observation locally or remotely. The state_id is single-use. Prefer semantic element_id targeting; raw x/y coordinates are window-relative. Supported actions are click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, and wait."""
+        payload = [action.model_dump(exclude_none=True) for action in actions]
+        args = {"window_id": window_id, "state_id": state_id, "actions": payload}
+        if machine:
+            return await _remote_call(settings, machine, "gui_action", args, 210)
+        return await _tool_call(get_gui_manager().act, window_id, state_id, payload)
 
 
 def _register_download_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -> None:
@@ -3431,7 +4646,7 @@ def _register_remote_admin_tools(mcp: FastMCP) -> None:
         machine: str | None = None,
         new_name: str | None = None,
     ) -> ToolResult:
-        """Manage remote workers with action=invite, list, revoke, or rename. invite accepts name/workdir/ttl_s; revoke requires machine; rename requires machine and new_name."""
+        """Manage remote workers with action=invite, list, reset, revoke, or rename. invite accepts name/workdir/ttl_s; reset/revoke require machine; rename requires machine and new_name. reset clears queued and safely cancellable active control-plane requests without disconnecting the worker; already-started protected mutations and persistent-process starts are preserved."""
 
         async def run() -> Any:
             manager = remote_manager()
@@ -3440,6 +4655,10 @@ def _register_remote_admin_tools(mcp: FastMCP) -> None:
                 return await manager.create_invite(name, workdir, ttl_s)
             if normalized == "list":
                 return manager.list_machines()
+            if normalized == "reset":
+                if not machine:
+                    raise ValueError("machine is required for action=reset")
+                return manager.reset(machine)
             if normalized == "revoke":
                 if not machine:
                     raise ValueError("machine is required for action=revoke")
@@ -3450,7 +4669,7 @@ def _register_remote_admin_tools(mcp: FastMCP) -> None:
                 if not new_name:
                     raise ValueError("new_name is required for action=rename")
                 return manager.rename(machine, new_name)
-            raise ValueError("action must be one of: invite, list, revoke, rename")
+            raise ValueError("action must be one of: invite, list, reset, revoke, rename")
 
         return await _tool_call(run)
 
@@ -3678,6 +4897,7 @@ def build_mcp() -> FastMCP:
     _register_shell_tools(mcp, settings, read_only_tool)
     _register_job_tools(mcp, settings, read_only_tool)
     _register_workspace_read_tools(mcp, settings, read_only_tool)
+    _register_gui_tools(mcp, settings)
     _register_download_tools(mcp, read_only_tool)
     _register_workspace_write_tools(mcp, settings)
     _register_maintenance_tools(mcp, read_only_tool)

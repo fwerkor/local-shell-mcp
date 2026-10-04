@@ -283,7 +283,7 @@ async def test_worker_cancels_cooperative_task_when_controller_rejects_heartbeat
 
     def cancelled_heartbeat(url, payload, headers=None, timeout=None):
         del url, headers, timeout
-        assert payload == {"job_id": "job-cancelled"}
+        assert payload == {"job_id": "job-cancelled", "starting": True}
         return {"ok": True, "data": {"accepted": False, "cancelled": True}}
 
     monkeypatch.setattr(remote_module, "execute_worker_tool", fake_execute)

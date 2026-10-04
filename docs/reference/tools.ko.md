@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 63f9fb40c4fd1c085e87c30ed221598cccacef1a6fb4aeb2bb4f1db520590ada -->
+<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
 # Tools reference
 
 이 페이지는 실제 MCP tool schema에서 구성됩니다. Public tool surface를 변경한 뒤 `python scripts/generate-tools-reference.py`를 실행해 English reference를 갱신하십시오.
@@ -18,6 +18,7 @@
 | External MCP capability 발견 | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Page와 interaction | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Custom browser logic 실행 | `browser_run_script` |
+| 네이티브 데스크톱 앱 제어 | `gui_list`, `gui_state`, 이후 `gui_action` |
 | Remote machine 작업 | 동일 tool에 `machine`을 지정하고 worker administration에만 `remote_*` 사용 |
 
 ## Interactive workspace
@@ -445,6 +446,7 @@ Local 또는 remote machine에 UTF-8 text file을 씁니다.
 | `path` | `string` | required |  |
 | `content` | `string` | required |  |
 | `overwrite` | `boolean` | `true` |  |
+| `encoding` | `string` | `"utf-8"` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
@@ -704,6 +706,54 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 `machine`을 지정하면 이 call에는 추가로 `remote:use`가 필요하며 remote worker protocol을 통해 실행됩니다.
 
+## 데스크톱 GUI 자동화
+
+### `gui_list`
+
+로컬 또는 원격에서 표시 중인 데스크톱 애플리케이션 창과 GUI 백엔드 기능을 나열합니다.
+
+| 매개변수 | 형식 | 필수/기본값 | 설명 |
+|---|---|---|---|
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | 필수 | 이 도구 호출의 Logical Session입니다. 해당 작업을 수행하는 동안 session_manage가 반환한 session_id를 전달하십시오. 활성 Logical Session이 없을 때만 null을 사용합니다. |
+
+OAuth 범위: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+`machine`을 지정하면 호출에 `remote:use` 권한도 필요하며 원격 worker 프로토콜을 통해 실행됩니다.
+
+### `gui_state`
+
+동작 전에 하나의 데스크톱 창을 관찰합니다. 접근성 요소, 선택적 네이티브 MCP 스크린샷, 짧은 수명의 state_id를 반환합니다. element_id 기반 동작을 우선 사용하십시오. 좌표는 관찰된 창에 상대적이며 창이 이동하거나 크기가 바뀌면 거부됩니다.
+
+| 매개변수 | 형식 | 필수/기본값 | 설명 |
+|---|---|---|---|
+| `window_id` | `string` | 필수 |  |
+| `screenshot` | `boolean` | `true` |  |
+| `include_elements` | `boolean` | `true` |  |
+| `max_elements` | `integer` | `300` |  |
+| `max_depth` | `integer` | `12` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | 필수 | 이 도구 호출의 Logical Session입니다. 해당 작업을 수행하는 동안 session_manage가 반환한 session_id를 전달하십시오. 활성 Logical Session이 없을 때만 null을 사용합니다. |
+
+OAuth 범위: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+`machine`을 지정하면 호출에 `remote:use` 권한도 필요하며 원격 worker 프로토콜을 통해 실행됩니다.
+
+### `gui_action`
+
+로컬 또는 원격에서 최신 gui_state 관찰을 대상으로 GUI 동작을 수행합니다. state_id는 한 번만 사용할 수 있습니다. 의미 기반 element_id 지정을 우선 사용하고, 원시 x/y 좌표는 창에 상대적입니다. click, double_click, right_click, move, scroll, drag, type, key, set_value, focus, wait를 지원합니다.
+
+| 매개변수 | 형식 | 필수/기본값 | 설명 |
+|---|---|---|---|
+| `window_id` | `string` | 필수 |  |
+| `state_id` | `string` | 필수 |  |
+| `actions` | `array[GuiAction]` | 필수 |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | 필수 | 이 도구 호출의 Logical Session입니다. 해당 작업을 수행하는 동안 session_manage가 반환한 session_id를 전달하십시오. 활성 Logical Session이 없을 때만 null을 사용합니다. |
+
+OAuth 범위: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+`machine`을 지정하면 호출에 `remote:use` 권한도 필요하며 원격 worker 프로토콜을 통해 실행됩니다.
 ## Remote worker administration
 
 ### `remote_manage`

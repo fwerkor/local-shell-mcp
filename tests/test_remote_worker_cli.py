@@ -108,6 +108,42 @@ async def test_run_worker_overrides_stale_scope(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_worker_resume_omits_stale_name_and_persists_canonical_name(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "true")
+    monkeypatch.setattr(cli.remote, "worker_capabilities", lambda: [])
+    monkeypatch.setattr(cli.remote, "worker_info", lambda workdir: {})
+    monkeypatch.setattr(
+        cli.remote,
+        "_read_worker_identity",
+        lambda server, name=None: {"access": "stored", "name": "old-name"},
+    )
+    persisted = []
+    monkeypatch.setattr(cli.remote, "_write_worker_identity", lambda data: persisted.append(data))
+
+    async def fake_resume(url, payload, headers, timeout=None):
+        assert payload["name"] is None
+        assert headers["Authorization"] == "Bearer stored"
+        return {"ok": True, "data": {"name": "renamed"}}
+
+    async def stop_poll(*args, **kwargs):
+        raise RuntimeError("stop polling")
+
+    monkeypatch.setattr(cli.remote, "_worker_resume_or_none", fake_resume)
+    monkeypatch.setattr(cli.remote, "_worker_post_json_forever", stop_poll)
+    with pytest.raises(RuntimeError, match="stop polling"):
+        await cli.remote.run_worker(
+            "https://example.test",
+            "",
+            name="old-name",
+            workdir=str(tmp_path),
+        )
+    assert persisted[-1]["name"] == "renamed"
+
+
+@pytest.mark.asyncio
 async def test_run_worker_reports_version_and_applies_poll_upgrade(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "false")
@@ -220,6 +256,10 @@ async def test_run_worker_transfer_does_not_block_interactive_jobs(tmp_path, mon
                 }
             await asyncio.wait_for(interactive_result_submitted.wait(), timeout=1)
             raise RuntimeError("stop polling")
+        if url.endswith("/remote/heartbeat"):
+            assert payload.get("starting") is True
+            assert payload.get("job_id") in {"transfer", "interactive"}
+            return {"ok": True, "data": {"accepted": True}}
         if url.endswith("/remote/result"):
             submitted_results.append(payload)
             if payload.get("job_id") == "interactive":
@@ -284,6 +324,7 @@ async def test_enroll_worker_reuses_stored_identity(tmp_path, monkeypatch):
 
     async def fake_resume(url, payload, headers, timeout=None):
         assert headers["Authorization"] == "Bearer stored"
+        assert payload["name"] is None
         return {"ok": True, "data": {"name": "worker-a"}}
 
     monkeypatch.setattr(cli.remote, "_worker_resume_or_none", fake_resume)
@@ -326,6 +367,34 @@ async def test_run_enrolled_worker_and_migrate_legacy_identity(tmp_path, monkeyp
     await cli.run_enrolled_worker()
     assert calls == [("https://example.test", "", "worker-a", str(tmp_path), False)]
     assert state.worker_config_path().exists()
+
+
+@pytest.mark.asyncio
+async def test_run_enrolled_worker_prefers_persisted_identity_name(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    state.write_worker_config(
+        server="https://example.test",
+        name="old-name",
+        workdir=str(tmp_path),
+    )
+    monkeypatch.setattr(
+        cli.remote,
+        "_read_worker_identity",
+        lambda server, name=None: {
+            "server": server,
+            "name": "renamed",
+            "access": "stored",
+            "workdir": str(tmp_path),
+        },
+    )
+    calls = []
+
+    async def fake_run(server, invite, name=None, workdir=None, persist=False):
+        calls.append((server, invite, name, workdir, persist))
+
+    monkeypatch.setattr(cli.remote, "run_worker", fake_run)
+    await cli.run_enrolled_worker()
+    assert calls == [("https://example.test", "", "renamed", str(tmp_path), False)]
 
 
 @pytest.mark.asyncio

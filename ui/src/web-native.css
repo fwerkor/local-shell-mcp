@@ -482,6 +482,74 @@ button.summary-card { cursor: pointer; }
   .native-error { color: #ffb5bd; background: #351e25; }
 }
 
+/* Desktop control --------------------------------------------------------- */
+.desktop-page { min-height: 0; }
+.desktop-toolbar .toolbar-group { min-width: 0; flex-wrap: wrap; }
+.desktop-toolbar select[data-role="desktop-window"] { width: min(460px, 38vw); min-width: 240px; }
+.desktop-connection { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; color: #818a9a; background: #f5f6f8; border: 1px solid #e6e8ed; border-radius: 999px; font-size: 11px; }
+.desktop-connection i { width: 6px; height: 6px; border-radius: 50%; background: #9ca4b1; }
+.desktop-connection strong { color: inherit; font-size: inherit; }
+.desktop-connection.online { color: #16825b; background: #e9f8f1; border-color: #d7f0e5; }
+.desktop-connection.online i { background: #2db181; box-shadow: 0 0 0 3px rgba(45,177,129,.11); }
+.desktop-connection.error { color: #a13f49; background: #fff0f1; border-color: #f0d7da; }
+.desktop-connection.error i { background: #d85b69; }
+.desktop-panel { display: grid; grid-template-rows: auto minmax(0,1fr) auto; height: calc(100vh - 180px); min-height: 560px; overflow: hidden; background: #0b1019; border-color: #222d40; }
+.desktop-panel > header { color: #dce4f0; background: #121a28; border-color: #263249; }
+.desktop-panel > header h3 { color: #edf2f9; }
+.desktop-panel > header p { color: #8290a5; }
+.desktop-panel > header > span { color: #a7b2c4; background: #202b3d; }
+.desktop-stage-wrap { min-height: 0; padding: 11px; overflow: auto; background: radial-gradient(circle at 50% 35%, #182234 0, #0c121d 55%, #080d15 100%); scrollbar-color: #41506a #0b111b; }
+.desktop-stage { position: relative; display: grid; width: max-content; min-width: 100%; min-height: 100%; place-items: center; margin: auto; outline: 0; border-radius: 8px; }
+.desktop-stage:focus-visible { box-shadow: inset 0 0 0 2px #7669e9; }
+.desktop-stage img { display: block; width: auto; max-width: calc(100vw - 330px); height: auto; max-height: calc(100vh - 300px); user-select: none; -webkit-user-drag: none; touch-action: none; cursor: default; border-radius: 5px; box-shadow: 0 18px 60px rgba(0,0,0,.42), 0 0 0 1px rgba(255,255,255,.08); }
+.desktop-stage img[hidden] { display: none; }
+.desktop-placeholder { display: grid; max-width: 470px; place-items: center; gap: 7px; padding: 32px; color: #77859b; text-align: center; }
+.desktop-placeholder[hidden] { display: none; }
+.desktop-placeholder strong { color: #c5cfdd; font-size: 14px; }
+.desktop-placeholder span { max-width: 430px; font-size: 12px; line-height: 1.6; }
+.desktop-input-pulse { position: absolute; top: 9px; right: 9px; padding: 5px 8px; color: #ddd9ff; background: rgba(53,44,111,.88); border: 1px solid rgba(151,139,255,.28); border-radius: 7px; box-shadow: 0 7px 22px rgba(0,0,0,.26); backdrop-filter: blur(7px); font-size: 10px; pointer-events: none; }
+.desktop-input-pulse[hidden] { display: none; }
+.desktop-footer { display: grid; grid-template-columns: minmax(360px,1fr) auto; gap: 10px; align-items: center; min-height: 58px; padding: 8px 10px; color: #8491a6; background: #111a28; border-top: 1px solid #263249; }
+.desktop-text-dock { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 7px; align-items: center; }
+.desktop-text-dock > span { color: #7f8ba0; font-size: 11px; font-weight: 650; }
+.desktop-text-dock input { width: 100%; height: 32px; min-width: 0; padding: 0 10px; color: #e5ebf5; background: #080d18; border: 1px solid #2e3a50; border-radius: 7px; outline: none; font-size: 12px; }
+.desktop-text-dock input:focus { border-color: #7568e8; box-shadow: 0 0 0 3px rgba(117,104,232,.12); }
+.desktop-text-dock input:disabled { opacity: .52; }
+.desktop-footer .native-button { color: #cbd4e1; background: #1a2638; border-color: #34435c; }
+.desktop-help { display: grid; justify-items: end; gap: 2px; max-width: 460px; color: #66758b; font-size: 10px; text-align: right; }
+
+@media (max-width: 1100px) {
+  .desktop-toolbar select[data-role="desktop-window"] { width: min(380px, 42vw); min-width: 210px; }
+  .desktop-panel { height: calc(100vh - 190px); }
+  .desktop-stage img { max-width: calc(100vw - 280px); }
+  .desktop-footer { grid-template-columns: 1fr; }
+  .desktop-help { max-width: none; justify-items: start; text-align: left; }
+}
+
+@media (max-width: 850px) {
+  .desktop-toolbar .toolbar-group { width: 100%; }
+  .desktop-toolbar label { flex: 1 1 220px; }
+  .desktop-toolbar select, .desktop-toolbar select[data-role="desktop-window"] { width: 100%; min-width: 0; }
+  .desktop-panel { height: calc(100dvh - 285px); min-height: 460px; }
+  .desktop-stage img { max-width: calc(100vw - 48px); max-height: calc(100dvh - 405px); }
+}
+
+@media (max-width: 720px) {
+  .desktop-panel { height: calc(100dvh - 305px); min-height: 430px; }
+  .desktop-stage-wrap { padding: 6px; }
+  .desktop-stage img { max-width: calc(100vw - 32px); max-height: calc(100dvh - 430px); }
+  .desktop-footer { padding: 7px; }
+  .desktop-text-dock { grid-template-columns: minmax(0,1fr) auto; }
+  .desktop-text-dock > span { display: none; }
+  .desktop-help span:last-child { display: none; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .desktop-connection { color: #98a5b8; background: #172131; border-color: #2b384e; }
+  .desktop-connection.online { color: #8adfbb; background: #15362e; border-color: #214b3f; }
+  .desktop-connection.error { color: #ffb7bf; background: #351f26; border-color: #60313a; }
+}
+
 /* Workbench refinement ---------------------------------------------------- */
 .native-page { gap: 8px; }
 .native-toolbar, .native-panel { border-color: color-mix(in srgb, var(--line) 82%, #cfd5df); box-shadow: 0 1px 2px rgba(16,24,40,.03), 0 12px 36px rgba(35,43,64,.055); }

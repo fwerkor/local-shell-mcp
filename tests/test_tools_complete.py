@@ -101,6 +101,54 @@ def _handled_error_data(result: CallToolResult) -> dict:
 
 
 @pytest.mark.asyncio
+async def test_gui_list_explicitly_requires_execute_scope(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    required = []
+
+    monkeypatch.setattr(
+        tools,
+        "require_current_scopes",
+        lambda scopes: required.append(tuple(scopes)),
+    )
+
+    class Manager:
+        async def list_windows(self):
+            return {"windows": []}
+
+    monkeypatch.setattr(tools, "get_gui_manager", lambda: Manager())
+    mcp = tools.build_mcp()
+    result = await _raw_tool(mcp, "gui_list")()
+
+    assert result["ok"] is True
+    assert ("shell:read", "shell:execute") in required
+
+
+@pytest.mark.asyncio
+async def test_gui_state_explicitly_requires_execute_scope(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    required = []
+
+    monkeypatch.setattr(
+        tools,
+        "require_current_scopes",
+        lambda scopes: required.append(tuple(scopes)),
+    )
+
+    async def gui_state_result(*_args, **_kwargs):
+        return tools._ok({"state_id": "s"})
+
+    monkeypatch.setattr(tools, "_gui_state_result", gui_state_result)
+    mcp = tools.build_mcp()
+    result = await _raw_tool(mcp, "gui_state")(
+        window_id="w",
+        screenshot=False,
+    )
+
+    assert result["ok"] is True
+    assert ("shell:read", "shell:execute") in required
+
+
+@pytest.mark.asyncio
 async def test_dynamic_mcp_downstream_error_is_exposed_as_tool_error(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
 
@@ -137,6 +185,9 @@ class FakeRemoteManager:
 
     def list_machines(self):
         return {"machines": [{"name": "node"}]}
+
+    def reset(self, machine):
+        return {"machine": machine, "reset": True, "cancelled_jobs": 2}
 
     def revoke(self, machine):
         return {"machine": machine, "revoked": True}
@@ -211,7 +262,16 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
     ):
         monkeypatch.setattr(tools, name, sync_value)
 
+    class FakeGuiManager:
+        async def list_windows(self):
+            return {"windows": []}
+
+        async def act(self, window_id, state_id, actions):
+            return {"window_id": window_id, "state_id": state_id, "actions": actions}
+
     monkeypatch.setattr(tools, "_view_image_result", image_value)
+    monkeypatch.setattr(tools, "_gui_state_result", image_value)
+    monkeypatch.setattr(tools, "get_gui_manager", lambda: FakeGuiManager())
     monkeypatch.setattr(downloads, "create_share_link", sync_value)
     monkeypatch.setattr(downloads, "list_share_links", sync_value)
     monkeypatch.setattr(downloads, "revoke_share_link", sync_value)
@@ -243,6 +303,13 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
         "file_grep": {"query": "x"},
         "file_read": {"path": "x"},
         "image_view": {"path": "found.png"},
+        "gui_list": {},
+        "gui_state": {"window_id": "w"},
+        "gui_action": {
+            "window_id": "w",
+            "state_id": "s",
+            "actions": [tools.GuiAction(type="wait")],
+        },
         "link_create": {"path": "found.txt"},
         "link_list": {},
         "link_revoke": {"token": "t"},
@@ -285,12 +352,18 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
     )
     assert renamed["ok"] is True
     assert renamed["data"] == {"old_name": "node", "new_name": "renamed"}
+    reset = await _raw_tool(mcp, "remote_manage")(action="reset", machine="node")
+    assert reset["ok"] is True
+    assert reset["data"] == {"machine": "node", "reset": True, "cancelled_jobs": 2}
     revoked = await _raw_tool(mcp, "remote_manage")(action="revoke", machine="node")
     assert revoked["ok"] is True
     assert revoked["data"] == {"machine": "node", "revoked": True}
     invalid = await _raw_tool(mcp, "remote_manage")(action="rename", machine="node")
     assert invalid.isError is True
     assert _handled_error_data(invalid)["message"] == "new_name is required for action=rename"
+    missing_reset_machine = await _raw_tool(mcp, "remote_manage")(action="reset")
+    assert missing_reset_machine.isError is True
+    assert _handled_error_data(missing_reset_machine)["message"] == "machine is required for action=reset"
 
     remote_cases = {
         "environment_get": {},
@@ -312,6 +385,13 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
         "file_grep": {"query": "x"},
         "file_read": {"path": "x"},
         "image_view": {"path": "x"},
+        "gui_list": {},
+        "gui_state": {"window_id": "w"},
+        "gui_action": {
+            "window_id": "w",
+            "state_id": "s",
+            "actions": [tools.GuiAction(type="wait")],
+        },
         "file_write": {"path": "x", "content": "y"},
         "file_edit": {"path": "x", "edits": []},
         "file_delete": {"path": "x"},
@@ -324,8 +404,8 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
     for name, kwargs in remote_cases.items():
         result = await _raw_tool(mcp, name)(**kwargs, machine="node")
         assert result["ok"] is True, name
-    assert len(fake_remote.calls) == len(remote_cases) - 1
-    assert all(tool != "view_image" for _, tool, _, _ in fake_remote.calls)
+    assert len(fake_remote.calls) == len(remote_cases) - 2
+    assert all(tool not in {"view_image", "gui_state"} for _, tool, _, _ in fake_remote.calls)
     job_list_call = next(call for call in fake_remote.calls if call[1] == "job_list")
     assert job_list_call[2] == {"include_finished": False, "limit": 7}
 
@@ -455,6 +535,62 @@ def test_tool_helpers_audit_serialization_timeout_and_tail(tmp_path, monkeypatch
         },
     )
     assert browser_call["actions"][0]["value"] == "<redacted>"
+
+    gui_call = tools._safe_audit_call_arguments(
+        "gui_action",
+        {
+            "window_id": "w",
+            "state_id": "s",
+            "actions": [
+                tools.GuiAction.model_validate(
+                    {"type": "type", "text": "hunter2"}
+                ),
+                {
+                    "type": "set_value",
+                    "element_id": "e1",
+                    "text": "another-secret",
+                },
+                {"type": "key", "keys": ["CTRL", "A"]},
+            ],
+        },
+    )
+    assert gui_call["actions"][0] == {"type": "type", "text": "<redacted>"}
+    assert gui_call["actions"][1]["text"] == "<redacted>"
+    assert gui_call["actions"][2]["keys"] == "<redacted>"
+    assert gui_call["actions"][1]["element_id"] == "e1"
+
+    gui_state_result = tools.CallToolResult(
+        content=[
+            tools.ImageContent(type="image", data="AAAA", mimeType="image/png"),
+            tools.TextContent(type="text", text="state"),
+        ],
+        structuredContent={
+            "ok": True,
+            "screenshot": True,
+            "bytes": 4,
+            "elements": [
+                {
+                    "element_id": "e1",
+                    "role": "text",
+                    "value": "api-key-secret",
+                },
+                {
+                    "element_id": "e2",
+                    "role": "button",
+                    "name": "Submit",
+                },
+            ],
+        },
+    )
+    audited_gui_state = tools._safe_audit_result("gui_state", gui_state_result)
+    assert audited_gui_state["structuredContent"]["screenshot"] is True
+    assert audited_gui_state["structuredContent"]["bytes"] == 4
+    assert audited_gui_state["structuredContent"]["elements"][0]["value"] == "<redacted>"
+    assert audited_gui_state["structuredContent"]["elements"][0]["element_id"] == "e1"
+    assert audited_gui_state["structuredContent"]["elements"][1]["name"] == "Submit"
+    assert len(audited_gui_state["content"]) == 1
+    assert audited_gui_state["content"][0]["type"] == "text"
+    assert audited_gui_state["content"][0]["text"] == "state"
 
     assert tools._audit_tool_purpose("x", "  purpose ", " explanation ") == {
         "purpose": "purpose",

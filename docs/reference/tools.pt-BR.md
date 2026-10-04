@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 63f9fb40c4fd1c085e87c30ed221598cccacef1a6fb4aeb2bb4f1db520590ada -->
+<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
 # Referência de ferramentas
 
 Esta página é construída a partir dos schemas MCP reais. Execute `python scripts/generate-tools-reference.py` após alterar a superfície pública de tools para atualizar a referência English.
@@ -18,6 +18,7 @@ A maioria das ferramentas retorna um `ToolResult` estruturado com `ok`, `message
 | Descobrir capability MCP externa | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Interagir com uma página | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Executar lógica browser personalizada | `browser_run_script` |
+| Controlar um aplicativo desktop nativo | `gui_list`, `gui_state` e depois `gui_action` |
 | Trabalhar em máquina remota | use a mesma tool com `machine`; use `remote_*` apenas para administração de workers |
 
 ## Workspace interativo
@@ -445,6 +446,7 @@ Escreve arquivo de texto UTF-8 localmente ou em máquina remota.
 | `path` | `string` | required |  |
 | `content` | `string` | required |  |
 | `overwrite` | `boolean` | `true` |  |
+| `encoding` | `string` | `"utf-8"` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
@@ -704,6 +706,54 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 Quando `machine` é fornecido, a chamada também exige `remote:use` e é executada pelo protocolo de remote worker.
 
+## Automação de GUI de desktop
+
+### `gui_list`
+
+Lista local ou remotamente janelas visíveis de aplicativos desktop e as capacidades do backend GUI.
+
+| Parâmetro | Tipo | Obrigatório/padrão | Descrição |
+|---|---|---|---|
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | obrigatório | Logical Session desta chamada. Durante a tarefa, passe o session_id retornado por session_manage. Use null somente quando nenhuma Logical Session estiver ativa. |
+
+Escopos OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Quando `machine` é informado, a chamada também exige `remote:use` e é executada pelo protocolo do worker remoto.
+
+### `gui_state`
+
+Observa uma janela desktop antes de agir. Retorna elementos de acessibilidade, uma captura MCP nativa opcional e um state_id de curta duração. Prefira ações por element_id; coordenadas são relativas à janela observada e são rejeitadas se ela foi movida ou redimensionada.
+
+| Parâmetro | Tipo | Obrigatório/padrão | Descrição |
+|---|---|---|---|
+| `window_id` | `string` | obrigatório |  |
+| `screenshot` | `boolean` | `true` |  |
+| `include_elements` | `boolean` | `true` |  |
+| `max_elements` | `integer` | `300` |  |
+| `max_depth` | `integer` | `12` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | obrigatório | Logical Session desta chamada. Durante a tarefa, passe o session_id retornado por session_manage. Use null somente quando nenhuma Logical Session estiver ativa. |
+
+Escopos OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Quando `machine` é informado, a chamada também exige `remote:use` e é executada pelo protocolo do worker remoto.
+
+### `gui_action`
+
+Executa ações GUI local ou remotamente sobre uma observação gui_state recente. O state_id é de uso único. Prefira element_id semântico; coordenadas x/y brutas são relativas à janela. Suporta click, double_click, right_click, move, scroll, drag, type, key, set_value, focus e wait.
+
+| Parâmetro | Tipo | Obrigatório/padrão | Descrição |
+|---|---|---|---|
+| `window_id` | `string` | obrigatório |  |
+| `state_id` | `string` | obrigatório |  |
+| `actions` | `array[GuiAction]` | obrigatório |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | obrigatório | Logical Session desta chamada. Durante a tarefa, passe o session_id retornado por session_manage. Use null somente quando nenhuma Logical Session estiver ativa. |
+
+Escopos OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Quando `machine` é informado, a chamada também exige `remote:use` e é executada pelo protocolo do worker remoto.
 ## Administração de remote workers
 
 ### `remote_manage`

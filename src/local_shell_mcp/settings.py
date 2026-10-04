@@ -66,6 +66,8 @@ _POSITIVE_INTEGER_SETTINGS = (
     "max_transfer_unpacked_bytes",
     "max_concurrent_commands",
     "max_tmux_sessions",
+    "shell_preflight_expensive_timeout_s",
+    "shell_preflight_repeat_failure_window_s",
     "ui_terminal_idle_timeout_s",
     "ui_terminal_max_sessions",
     "ui_remote_request_timeout_s",
@@ -90,6 +92,7 @@ _NONNEGATIVE_INTEGER_SETTINGS = (
     "file_download_max_file_bytes",
     "oauth_access_token_ttl_s",
     "remote_peer_transfer_port",
+    "shell_preflight_repeat_failure_limit",
 )
 
 
@@ -428,6 +431,11 @@ if _PYDANTIC_AVAILABLE:
         shell_env_blocked_prefixes: Annotated[list[str], NoDecode] = Field(
             default_factory=lambda: ["LOCAL_SHELL_MCP_", "DOCKER_"]
         )
+        # Guard expensive recursive filesystem discovery before shell execution.
+        shell_preflight_enabled: bool = True
+        shell_preflight_expensive_timeout_s: int = 15
+        shell_preflight_repeat_failure_window_s: int = 900
+        shell_preflight_repeat_failure_limit: int = 1
         tmux_bin: str = "tmux"
         rg_bin: str = "rg"
         git_bin: str = "git"
@@ -654,6 +662,10 @@ else:
         shell_env_blocked_prefixes: list[str] = field(
             default_factory=lambda: ["LOCAL_SHELL_MCP_", "DOCKER_"]
         )
+        shell_preflight_enabled: bool = True
+        shell_preflight_expensive_timeout_s: int = 15
+        shell_preflight_repeat_failure_window_s: int = 900
+        shell_preflight_repeat_failure_limit: int = 1
         tmux_bin: str = "tmux"
         rg_bin: str = "rg"
         git_bin: str = "git"

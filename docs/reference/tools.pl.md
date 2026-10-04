@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 63f9fb40c4fd1c085e87c30ed221598cccacef1a6fb4aeb2bb4f1db520590ada -->
+<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
 # Referencja tools
 
 Ta page jest budowana z rzeczywistych MCP tool schemas. Po zmianie public tool surface uruchom `python scripts/generate-tools-reference.py`, aby zaktualizować English reference.
@@ -18,6 +18,7 @@ Większość narzędzi zwraca ustrukturyzowany `ToolResult` zawierający `ok`, `
 | Discover external MCP capability | `mcp_tool_search`, then `mcp_tool_inspect` |
 | Interact z page | `browser_session`, `browser_snapshot`, then `browser_act` |
 | Uruchomić custom browser logic | `browser_run_script` |
+| Sterowanie natywną aplikacją desktopową | `gui_list`, `gui_state`, następnie `gui_action` |
 | Pracować na remote machine | użyj tego samego tool z `machine`; `remote_*` tylko do worker administration |
 
 ## Interactive workspace
@@ -445,6 +446,7 @@ Zapisuje UTF-8 text file lokalnie lub na remote machine.
 | `path` | `string` | required |  |
 | `content` | `string` | required |  |
 | `overwrite` | `boolean` | `true` |  |
+| `encoding` | `string` | `"utf-8"` |  |
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
@@ -704,6 +706,54 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 Gdy podano `machine`, wywołanie wymaga również `remote:use` i działa przez protokół remote worker.
 
+## Automatyzacja GUI pulpitu
+
+### `gui_list`
+
+Wyświetla lokalnie lub zdalnie widoczne okna aplikacji desktopowych oraz możliwości backendu GUI.
+
+| Parametr | Typ | Wymagane/domysłne | Opis |
+|---|---|---|---|
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | wymagane | Logical Session dla tego wywołania. Podczas pracy nad zadaniem przekaż session_id zwrócony przez session_manage. Używaj null tylko wtedy, gdy żadna Logical Session nie jest aktywna. |
+
+Zakresy OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Po podaniu `machine` wywołanie wymaga także `remote:use` i przechodzi przez protokół zdalnego workera.
+
+### `gui_state`
+
+Obserwuje jedno okno pulpitu przed działaniem. Zwraca elementy dostępności, opcjonalny natywny zrzut MCP i krótkotrwały state_id. Preferuj element_id; współrzędne są względne wobec obserwowanego okna i zostaną odrzucone, jeśli okno przesunięto lub przeskalowano.
+
+| Parametr | Typ | Wymagane/domysłne | Opis |
+|---|---|---|---|
+| `window_id` | `string` | wymagane |  |
+| `screenshot` | `boolean` | `true` |  |
+| `include_elements` | `boolean` | `true` |  |
+| `max_elements` | `integer` | `300` |  |
+| `max_depth` | `integer` | `12` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | wymagane | Logical Session dla tego wywołania. Podczas pracy nad zadaniem przekaż session_id zwrócony przez session_manage. Używaj null tylko wtedy, gdy żadna Logical Session nie jest aktywna. |
+
+Zakresy OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Po podaniu `machine` wywołanie wymaga także `remote:use` i przechodzi przez protokół zdalnego workera.
+
+### `gui_action`
+
+Wykonuje lokalnie lub zdalnie akcje GUI na świeżej obserwacji gui_state. state_id jest jednorazowy. Preferuj semantyczne wskazanie element_id; surowe x/y są względne wobec okna. Obsługiwane są click, double_click, right_click, move, scroll, drag, type, key, set_value, focus i wait.
+
+| Parametr | Typ | Wymagane/domysłne | Opis |
+|---|---|---|---|
+| `window_id` | `string` | wymagane |  |
+| `state_id` | `string` | wymagane |  |
+| `actions` | `array[GuiAction]` | wymagane |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | wymagane | Logical Session dla tego wywołania. Podczas pracy nad zadaniem przekaż session_id zwrócony przez session_manage. Używaj null tylko wtedy, gdy żadna Logical Session nie jest aktywna. |
+
+Zakresy OAuth: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Po podaniu `machine` wywołanie wymaga także `remote:use` i przechodzi przez protokół zdalnego workera.
 ## Remote worker administration
 
 ### `remote_manage`

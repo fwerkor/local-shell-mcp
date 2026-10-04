@@ -6,6 +6,10 @@ export interface Machine {
   workdir?: string | null
   last_seen?: number | null
   last_seen_age_s?: number | null
+  queue_depth?: number
+  interactive_queue_depth?: number
+  transfer_queue_depth?: number
+  reset_generation?: number
   capabilities?: string[]
   info?: Record<string, unknown>
 }

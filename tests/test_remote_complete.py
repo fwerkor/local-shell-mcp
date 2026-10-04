@@ -150,6 +150,8 @@ def test_controller_registration_resume_rename_revoke_and_defaults(tmp_path, mon
     renamed = manager.rename("alice@host", "renamed")
     assert renamed == {"old_name": "alice@host", "new_name": "renamed"}
     assert manager.tokens[token] == "renamed"
+    resumed_after_rename = asyncio.run(manager.resume_worker(token, {}))
+    assert resumed_after_rename["name"] == "renamed"
     with pytest.raises(ValueError, match="already exists"):
         manager.rename("renamed", "alice@host-2")
     with pytest.raises(ValueError, match="unknown"):
@@ -172,7 +174,9 @@ def test_controller_poll_result_errors_and_cancellation(tmp_path, monkeypatch):
     manager.tokens[worker.token] = worker.name
     monkeypatch.setattr(remote, "_utc", lambda: 100.0)
 
-    assert asyncio.run(manager.heartbeat("token", {"job_id": "none"}))["accepted"] is True
+    missing = asyncio.run(manager.heartbeat("token", {"job_id": "none"}))
+    assert missing["accepted"] is False
+    assert missing["cancelled"] is True
     assert asyncio.run(manager.submit_result("token", {"job_id": "unknown"})) == {"accepted": False}
 
     async def failed_call():
@@ -433,6 +437,21 @@ def test_worker_transfer_validation_and_curl_failures(tmp_path, monkeypatch):
         "run",
         lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 22, stdout="", stderr="network"),
     )
+
+    class FailedDownloadProcess:
+        def __init__(self, command, **kwargs):
+            del kwargs
+            self.command = command
+            self.returncode = 22
+
+        def communicate(self, timeout=None):
+            del timeout
+            return b"", b"network"
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(remote.subprocess, "Popen", FailedDownloadProcess)
     with pytest.raises(RuntimeError, match="curl exit 22"):
         remote._worker_upload_url("source.bin", valid, 7, digest)
     with pytest.raises(RuntimeError, match="curl exit 22"):

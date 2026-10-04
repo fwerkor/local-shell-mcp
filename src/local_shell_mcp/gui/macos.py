@@ -1,0 +1,930 @@
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import hashlib
+import json
+import subprocess
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
+from pathlib import Path
+from typing import Any
+
+from .base import (
+    GUI_MAX_CAPTURE_DIMENSION,
+    GUI_MAX_CAPTURE_PIXELS,
+    GUI_MAX_ELEMENT_TEXT_BYTES,
+    GUI_MAX_ELEMENT_VALUE_BYTES,
+    GUI_MAX_ELEMENTS,
+    GUI_MAX_ELEMENTS_TOTAL_BYTES,
+    GUI_MAX_WINDOW_TEXT_BYTES,
+    GUI_MAX_WINDOWS,
+    GUI_MAX_WINDOWS_TOTAL_BYTES,
+    GuiSnapshot,
+    GuiUnavailableError,
+    _assert_action_fresh,
+    _truncate_gui_text,
+    display_screenshot_path,
+    quantize_scroll_amount,
+)
+
+_AX_OPERATION_TIMEOUT_S = 30.0
+
+
+def _native():  # noqa: ANN202
+    try:
+        import ApplicationServices as AX
+        import Quartz
+    except ImportError as exc:  # pragma: no cover - macOS dependency guard
+        raise GuiUnavailableError(
+            "macOS GUI automation requires pyobjc-framework-ApplicationServices and "
+            "pyobjc-framework-Quartz"
+        ) from exc
+    return AX, Quartz
+
+
+def _cg_bounds(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {"x": 0, "y": 0, "width": 0, "height": 0}
+    return {
+        "x": int(round(float(value.get("X", value.get("x", 0))))),
+        "y": int(round(float(value.get("Y", value.get("y", 0))))),
+        "width": max(0, int(round(float(value.get("Width", value.get("width", 0)))))),
+        "height": max(0, int(round(float(value.get("Height", value.get("height", 0)))))),
+    }
+
+
+def _ax_copy(AX: Any, element: Any, attribute: str, default: Any = None) -> Any:
+    try:
+        result = AX.AXUIElementCopyAttributeValue(element, attribute, None)
+    except Exception:  # noqa: BLE001 - accessibility providers may reject attributes.
+        return default
+    if isinstance(result, tuple) and len(result) == 2:
+        error, value = result
+        return value if int(error) == 0 else default
+    return result if result is not None else default
+
+
+def _ax_copy_values(
+    AX: Any,
+    element: Any,
+    attribute: str,
+    index: int,
+    max_values: int,
+) -> list[Any]:
+    if index < 0 or max_values <= 0:
+        return []
+    copier = getattr(AX, "AXUIElementCopyAttributeValues", None)
+    if not callable(copier):
+        return []
+    try:
+        result = copier(element, attribute, index, max_values, None)
+    except Exception:  # noqa: BLE001 - accessibility providers may reject ranges.
+        return []
+    if isinstance(result, tuple) and len(result) == 2:
+        error, values = result
+        if int(error) != 0:
+            return []
+    else:
+        values = result
+    if not isinstance(values, (list, tuple)):
+        return []
+    return list(values[:max_values])
+
+
+def _ax_value(AX: Any, value: Any, kind: int) -> Any:
+    if value is None:
+        return None
+    try:
+        result = AX.AXValueGetValue(value, kind, None)
+    except Exception:  # noqa: BLE001 - malformed third-party AX values.
+        return None
+    if isinstance(result, tuple) and len(result) == 2:
+        ok, unpacked = result
+        return unpacked if ok else None
+    return result
+
+
+def _ax_bounds(AX: Any, element: Any) -> dict[str, int]:
+    position = _ax_value(
+        AX,
+        _ax_copy(AX, element, AX.kAXPositionAttribute),
+        AX.kAXValueCGPointType,
+    )
+    size = _ax_value(
+        AX,
+        _ax_copy(AX, element, AX.kAXSizeAttribute),
+        AX.kAXValueCGSizeType,
+    )
+    if position is None or size is None:
+        return {"x": 0, "y": 0, "width": 0, "height": 0}
+    return {
+        "x": int(round(float(position.x))),
+        "y": int(round(float(position.y))),
+        "width": max(0, int(round(float(size.width)))),
+        "height": max(0, int(round(float(size.height)))),
+    }
+
+
+def _ax_element_fingerprint(AX: Any, element: Any) -> str:
+    name = (
+        _ax_copy(AX, element, AX.kAXTitleAttribute, "")
+        or _ax_copy(AX, element, AX.kAXDescriptionAttribute, "")
+    )
+    payload = {
+        "role": _truncate_gui_text(
+            _ax_copy(AX, element, AX.kAXRoleAttribute, ""),
+            GUI_MAX_ELEMENT_TEXT_BYTES,
+        ),
+        "name": _truncate_gui_text(name, GUI_MAX_ELEMENT_TEXT_BYTES),
+        "value": _truncate_gui_text(
+            _ax_copy(AX, element, AX.kAXValueAttribute, ""),
+            GUI_MAX_ELEMENT_VALUE_BYTES,
+        ),
+        "bounds": _ax_bounds(AX, element),
+    }
+    identifier_attr = getattr(AX, "kAXIdentifierAttribute", None)
+    if identifier_attr is not None:
+        payload["identifier"] = _truncate_gui_text(
+            _ax_copy(AX, element, identifier_attr, ""),
+            GUI_MAX_ELEMENT_TEXT_BYTES,
+        )
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()[:16]
+
+
+def _same_bounds(left: dict[str, int], right: dict[str, int], tolerance: int = 3) -> bool:
+    return all(abs(int(left[key]) - int(right[key])) <= tolerance for key in left)
+
+
+def _same_ax_element(AX: Any, left: Any, right: Any) -> bool:
+    if left is right:
+        return True
+    compare = getattr(AX, "CFEqual", None)
+    if callable(compare):
+        with contextlib.suppress(Exception):
+            return bool(compare(left, right))
+    with contextlib.suppress(Exception):
+        return bool(left == right)
+    return False
+
+
+def _validate_capture_bounds(bounds: dict[str, Any]) -> None:
+    width = int(bounds.get("width", 0) or 0)
+    height = int(bounds.get("height", 0) or 0)
+    if width <= 0 or height <= 0:
+        raise GuiUnavailableError("macOS target window has invalid capture bounds")
+    if (
+        width > GUI_MAX_CAPTURE_DIMENSION
+        or height > GUI_MAX_CAPTURE_DIMENSION
+        or width * height > GUI_MAX_CAPTURE_PIXELS
+    ):
+        raise GuiUnavailableError(
+            f"macOS capture dimensions exceed the safe budget: {width}x{height}"
+        )
+
+
+_MAC_KEY_CODES = {
+    "A": 0, "S": 1, "D": 2, "F": 3, "H": 4, "G": 5, "Z": 6, "X": 7,
+    "C": 8, "V": 9, "B": 11, "Q": 12, "W": 13, "E": 14, "R": 15, "Y": 16,
+    "T": 17, "1": 18, "2": 19, "3": 20, "4": 21, "6": 22, "5": 23,
+    "=": 24, "9": 25, "7": 26, "-": 27, "8": 28, "0": 29, "]": 30,
+    "O": 31, "U": 32, "[": 33, "I": 34, "P": 35, "ENTER": 36, "RETURN": 36,
+    "L": 37, "J": 38, "'": 39, "K": 40, ";": 41, "\\": 42, ",": 43,
+    "/": 44, "N": 45, "M": 46, ".": 47, "TAB": 48, "SPACE": 49, "`": 50,
+    "BACKSPACE": 51, "DELETE": 117, "ESC": 53, "ESCAPE": 53, "HOME": 115,
+    "PAGEUP": 116, "END": 119, "PAGEDOWN": 121, "LEFT": 123, "RIGHT": 124,
+    "DOWN": 125, "UP": 126,
+}
+
+
+def _utf16_units(text: str) -> int:
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _unicode_chunks(text: str, max_units: int = 20) -> list[str]:
+    chunks: list[str] = []
+    current = ""
+    units = 0
+    for char in text:
+        char_units = _utf16_units(char)
+        if current and units + char_units > max_units:
+            chunks.append(current)
+            current = ""
+            units = 0
+        current += char
+        units += char_units
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _key_parts(keys: Any) -> list[str]:
+    if isinstance(keys, str):
+        parts = [part.strip() for part in keys.replace("+", " ").split() if part.strip()]
+    elif isinstance(keys, list):
+        parts = [str(part).strip() for part in keys if str(part).strip()]
+    else:
+        raise ValueError("key action requires keys as a string or list")
+    if not parts:
+        raise ValueError("key action requires at least one key")
+    return [part.upper() for part in parts]
+
+
+class MacOSGuiBackend:
+    name = "macos-ax"
+
+    def __init__(self) -> None:
+        self._executor = self._new_executor()
+        self._executor_lock = asyncio.Lock()
+
+    @staticmethod
+    def _new_executor() -> ThreadPoolExecutor:
+        return ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="lsm-macos-ax",
+        )
+
+    async def _run_ax(self, func: Any, /, *args: Any, **kwargs: Any) -> Any:
+        async with self._executor_lock:
+            loop = asyncio.get_running_loop()
+            executor = self._executor
+            future = loop.run_in_executor(
+                executor,
+                partial(func, *args, **kwargs),
+            )
+
+            async def wait_for_native_call() -> Any:
+                try:
+                    return await asyncio.wait_for(
+                        asyncio.shield(future),
+                        timeout=_AX_OPERATION_TIMEOUT_S,
+                    )
+                except TimeoutError as exc:
+                    if self._executor is executor:
+                        self._executor = self._new_executor()
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    raise GuiUnavailableError(
+                        "macOS Accessibility provider timed out; "
+                        "the native AX worker was reset"
+                    ) from exc
+
+            waiter = asyncio.create_task(wait_for_native_call())
+            try:
+                return await asyncio.shield(waiter)
+            except BaseException:
+                with contextlib.suppress(BaseException):
+                    await asyncio.shield(waiter)
+                raise
+
+    def _windows(self) -> list[dict[str, Any]]:
+        _AX, Quartz = _native()
+        options = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
+        rows = Quartz.CGWindowListCopyWindowInfo(options, Quartz.kCGNullWindowID) or []
+        windows = []
+        used_bytes = 2
+        for row in rows:
+            layer = int(row.get(Quartz.kCGWindowLayer, 0) or 0)
+            bounds = _cg_bounds(row.get(Quartz.kCGWindowBounds))
+            window_id = int(row.get(Quartz.kCGWindowNumber, 0) or 0)
+            if layer != 0 or not window_id or bounds["width"] <= 1 or bounds["height"] <= 1:
+                continue
+            record = {
+                "id": f"cg:{window_id}",
+                "title": _truncate_gui_text(
+                    row.get(Quartz.kCGWindowName, ""),
+                    GUI_MAX_WINDOW_TEXT_BYTES,
+                ),
+                "app": _truncate_gui_text(
+                    row.get(Quartz.kCGWindowOwnerName, ""),
+                    GUI_MAX_WINDOW_TEXT_BYTES,
+                ),
+                "pid": int(row.get(Quartz.kCGWindowOwnerPID, 0) or 0),
+                "bounds": bounds,
+            }
+            extra = len(
+                json.dumps(
+                    record,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode("utf-8")
+            ) + (1 if windows else 0)
+            if used_bytes + extra > GUI_MAX_WINDOWS_TOTAL_BYTES:
+                break
+            windows.append(record)
+            used_bytes += extra
+            if len(windows) >= GUI_MAX_WINDOWS:
+                break
+        return windows
+
+    def _find_record(self, window_id: str) -> dict[str, Any]:
+        record = next((item for item in self._windows() if item["id"] == window_id), None)
+        if record is None:
+            raise LookupError(f"Window is no longer available: {window_id}")
+        return record
+
+    def _current_record(self, observed: dict[str, Any]) -> dict[str, Any]:
+        AX, _Quartz = _native()
+        window_id = str(observed.get("id") or "")
+        current = self._find_record(window_id)
+        if int(current.get("pid", 0) or 0) != int(observed.get("pid", 0) or 0):
+            raise LookupError(f"Window identity changed since observation: {window_id}")
+        if observed.get("_ax_identity_required"):
+            observed_ax_window = observed.get("_ax_window")
+            current_ax_window = self._find_ax_window(current)
+            if (
+                observed_ax_window is None
+                or current_ax_window is None
+                or not _same_ax_element(
+                    AX,
+                    observed_ax_window,
+                    current_ax_window,
+                )
+            ):
+                raise LookupError(
+                    f"Window AX identity changed since observation: {window_id}"
+                )
+            current["_ax_identity_required"] = True
+            current["_ax_window"] = current_ax_window
+        elif observed.get("_ax_window") is not None:
+            current_ax_window = self._find_ax_window(current)
+            if current_ax_window is None or not _same_ax_element(
+                AX,
+                observed["_ax_window"],
+                current_ax_window,
+            ):
+                raise LookupError(
+                    f"Window AX identity changed since observation: {window_id}"
+                )
+            current["_ax_window"] = current_ax_window
+        return current
+
+    def _find_ax_window(self, record: dict[str, Any]) -> Any | None:
+        AX, _Quartz = _native()
+        if not bool(AX.AXIsProcessTrusted()):
+            return None
+        app = AX.AXUIElementCreateApplication(int(record["pid"]))
+        windows = _ax_copy_values(
+            AX,
+            app,
+            AX.kAXWindowsAttribute,
+            0,
+            GUI_MAX_WINDOWS * 4,
+        )
+        title = str(record.get("title") or "")
+
+        exact: list[Any] = []
+        geometry_matches: list[Any] = []
+        title_matches: list[Any] = []
+        for window in windows:
+            candidate_title = str(_ax_copy(AX, window, AX.kAXTitleAttribute, "") or "")
+            bounds = _ax_bounds(AX, window)
+            geometry_match = _same_bounds(bounds, record["bounds"])
+            title_match = bool(title and candidate_title == title)
+            if geometry_match:
+                geometry_matches.append(window)
+            if title_match:
+                title_matches.append(window)
+            if geometry_match and title_match:
+                exact.append(window)
+
+        if len(exact) == 1:
+            return exact[0]
+        if len(exact) > 1:
+            return None
+        if len(geometry_matches) == 1 and (
+            not title_matches or title_matches[0] is geometry_matches[0]
+        ):
+            return geometry_matches[0]
+        return None
+
+    def _resolve_ax_locator(self, record: dict[str, Any], locator: dict[str, Any]) -> Any:
+        AX, _Quartz = _native()
+        path = locator.get("path")
+        expected = str(locator.get("fingerprint") or "")
+        observed_element = locator.get("_ax_element")
+        if not isinstance(path, list) or not expected or observed_element is None:
+            raise LookupError("macOS AX locator is invalid or incomplete")
+        element = self._find_ax_window(record)
+        if element is None:
+            raise LookupError("Target AX window is no longer available")
+        for raw_index in path:
+            try:
+                index = int(raw_index)
+                if index < 0 or index >= GUI_MAX_ELEMENTS:
+                    raise ValueError
+                children = _ax_copy_values(
+                    AX,
+                    element,
+                    AX.kAXChildrenAttribute,
+                    index,
+                    1,
+                )
+                element = children[0]
+            except (IndexError, TypeError, ValueError) as exc:
+                raise LookupError(
+                    "Target AX element is no longer available; call gui_state again"
+                ) from exc
+        if _ax_element_fingerprint(AX, element) != expected:
+            raise LookupError(
+                "Target AX element changed since observation; call gui_state again"
+            )
+        if not _same_ax_element(AX, observed_element, element):
+            raise LookupError(
+                "Target AX element identity changed since observation; call gui_state again"
+            )
+        return element
+
+    def _list_windows_sync(self) -> dict[str, Any]:
+        AX, _Quartz = _native()
+        trusted = bool(AX.AXIsProcessTrusted())
+        return {
+            "backend": self.name,
+            "platform": "macos",
+            "windows": self._windows(),
+            "capabilities": {
+                "accessibility": "AXUIElement" if trusted else False,
+                "screen_recording_required": True,
+                "accessibility_permission_required": not trusted,
+                "window_capture": True,
+                "coordinate_input": trusted,
+                "semantic_actions": trusted,
+            },
+        }
+
+    async def list_windows(self) -> dict[str, Any]:
+        return await self._run_ax(self._list_windows_sync)
+
+    def _snapshot_accessibility_sync(
+        self,
+        window_id: str,
+        *,
+        include_elements: bool,
+        max_elements: int,
+        max_depth: int,
+    ) -> tuple[dict[str, Any], bool, list[dict[str, Any]], dict[str, Any]]:
+        AX, _Quartz = _native()
+        record = self._find_record(window_id)
+        trusted = bool(AX.AXIsProcessTrusted())
+        elements: list[dict[str, Any]] = []
+        locators: dict[str, Any] = {}
+
+        ax_window = self._find_ax_window(record) if trusted else None
+        if ax_window is not None:
+            record["_ax_identity_required"] = True
+            record["_ax_window"] = ax_window
+        else:
+            record["_ax_identity_required"] = False
+        if include_elements and ax_window is not None:
+            queue: list[tuple[Any, int, list[int]]] = [(ax_window, 0, [])]
+            used_bytes = 2
+            while queue and len(elements) < max_elements:
+                element, depth, path = queue.pop(0)
+                element_id = f"e{len(elements) + 1}"
+                item = {
+                    "id": element_id,
+                    "role": _truncate_gui_text(
+                        _ax_copy(AX, element, AX.kAXRoleAttribute, ""),
+                        GUI_MAX_ELEMENT_TEXT_BYTES,
+                    ),
+                    "name": _truncate_gui_text(
+                        _ax_copy(AX, element, AX.kAXTitleAttribute, "")
+                        or _ax_copy(AX, element, AX.kAXDescriptionAttribute, ""),
+                        GUI_MAX_ELEMENT_TEXT_BYTES,
+                    ),
+                    "value": _truncate_gui_text(
+                        _ax_copy(AX, element, AX.kAXValueAttribute, ""),
+                        GUI_MAX_ELEMENT_VALUE_BYTES,
+                    ),
+                    "bounds": _ax_bounds(AX, element),
+                    "enabled": bool(
+                        _ax_copy(AX, element, AX.kAXEnabledAttribute, True)
+                    ),
+                    "depth": depth,
+                }
+                encoded = json.dumps(
+                    item,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode("utf-8")
+                extra = len(encoded) + (1 if elements else 0)
+                if used_bytes + extra > GUI_MAX_ELEMENTS_TOTAL_BYTES:
+                    break
+                elements.append(item)
+                used_bytes += extra
+                locators[element_id] = {
+                    "path": list(path),
+                    "fingerprint": _ax_element_fingerprint(AX, element),
+                    "_ax_element": element,
+                }
+                remaining = max_elements - len(elements) - len(queue)
+                if depth >= max_depth or remaining <= 0:
+                    continue
+                queue.extend(
+                    (child, depth + 1, [*path, index])
+                    for index, child in enumerate(
+                        _ax_copy_values(
+                            AX,
+                            element,
+                            AX.kAXChildrenAttribute,
+                            0,
+                            remaining,
+                        )
+                    )
+                )
+
+        return record, trusted, elements, locators
+
+    async def snapshot(
+        self,
+        window_id: str,
+        *,
+        screenshot_path: Path | None,
+        include_elements: bool,
+        max_elements: int,
+        max_depth: int,
+    ) -> GuiSnapshot:
+        record, trusted, elements, locators = await self._run_ax(
+            self._snapshot_accessibility_sync,
+            window_id,
+            include_elements=include_elements,
+            max_elements=max_elements,
+            max_depth=max_depth,
+        )
+
+        screenshot_display: str | None = None
+        if screenshot_path is not None:
+            _validate_capture_bounds(record.get("bounds", {}))
+            window_number = str(window_id).split(":", 1)[1]
+            result = await asyncio.to_thread(
+                subprocess.run,
+                ["/usr/sbin/screencapture", "-x", "-o", "-l", window_number, str(screenshot_path)],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            if result.returncode != 0 or not screenshot_path.is_file():
+                detail = (result.stderr or result.stdout or "").strip()
+                raise GuiUnavailableError(
+                    "macOS window capture failed; grant Screen Recording permission"
+                    + (f": {detail}" if detail else "")
+                )
+            current = await self._run_ax(self._current_record, record)
+            if not _same_bounds(current.get("bounds", {}), record.get("bounds", {})):
+                raise LookupError(
+                    f"Window moved or resized during capture: {window_id}"
+                )
+            for key in ("title", "app", "pid"):
+                if current.get(key) != record.get(key):
+                    raise LookupError(
+                        f"Window identity changed during capture: {window_id}"
+                    )
+            screenshot_display = display_screenshot_path(screenshot_path)
+
+        interactive = trusted and record.get("_ax_window") is not None
+        return GuiSnapshot(
+            window=record,
+            elements=elements,
+            locators=locators,
+            screenshot_path=screenshot_display,
+            capabilities={
+                "accessibility": "AXUIElement" if interactive else False,
+                "accessibility_permission_required": not trusted,
+                "window_capture": screenshot_path is not None,
+                "coordinate_space": "window-relative",
+                "coordinate_input": interactive,
+                "semantic_actions": interactive,
+            },
+        )
+
+    async def focus_window(self, window: dict[str, Any]) -> None:
+        def focus() -> None:
+            AX, _Quartz = _native()
+            target = self._find_ax_window(self._current_record(window))
+            if target is None:
+                raise RuntimeError("Could not resolve the target AX window")
+            error = AX.AXUIElementSetAttributeValue(target, AX.kAXFocusedAttribute, True)
+            if int(error) != 0:
+                error = AX.AXUIElementPerformAction(target, AX.kAXRaiseAction)
+            if int(error) != 0:
+                raise RuntimeError(f"AX focus action failed with error {error}")
+
+        await self._run_ax(focus)
+
+    async def perform_action(
+        self,
+        window: dict[str, Any],
+        locator: Any | None,
+        action: dict[str, Any],
+    ) -> dict[str, Any]:
+        kind = action["type"]
+        if kind == "wait":
+            seconds = max(0.0, min(float(action.get("seconds", 1.0)), 30.0))
+            await asyncio.sleep(seconds)
+            return {"waited_s": seconds}
+        return await self._run_ax(self._perform_action_sync, window, locator, action)
+
+    def _perform_action_sync(
+        self,
+        window: dict[str, Any],
+        locator: Any | None,
+        action: dict[str, Any],
+    ) -> dict[str, Any]:
+        AX, Quartz = _native()
+        if not bool(AX.AXIsProcessTrusted()):
+            raise GuiUnavailableError("Grant Accessibility permission to local-shell-mcp on macOS")
+
+        current_window = self._current_record(window)
+        if locator is not None:
+            if not isinstance(locator, dict):
+                raise LookupError("macOS AX locator is invalid; call gui_state again")
+            locator = self._resolve_ax_locator(current_window, locator)
+        kind = action["type"]
+        _assert_action_fresh(action)
+        if kind == "focus":
+            target = locator or self._find_ax_window(current_window)
+            if target is None:
+                raise RuntimeError("Could not resolve the target AX element")
+            _assert_action_fresh(action)
+            error = AX.AXUIElementSetAttributeValue(target, AX.kAXFocusedAttribute, True)
+            if int(error) != 0 and locator is None:
+                error = AX.AXUIElementPerformAction(target, AX.kAXRaiseAction)
+            if int(error) != 0:
+                raise RuntimeError(f"AX focus action failed with error {error}")
+            return {"semantic": True}
+
+        if kind == "set_value":
+            if locator is None:
+                raise ValueError("set_value requires element_id")
+            _assert_action_fresh(action)
+            error = AX.AXUIElementSetAttributeValue(
+                locator, AX.kAXValueAttribute, str(action.get("text", ""))
+            )
+            if int(error) != 0:
+                raise ValueError(f"Target element rejected AX value update: {error}")
+            return {"semantic": True}
+
+        if kind == "click" and locator is not None:
+            _assert_action_fresh(action)
+            error = AX.AXUIElementPerformAction(locator, AX.kAXPressAction)
+            if int(error) == 0:
+                return {"semantic": True, "method": "AXPress"}
+
+        requires_native_focus = kind in {
+            "click",
+            "double_click",
+            "right_click",
+            "move",
+            "scroll",
+            "drag",
+        }
+        if requires_native_focus or not action.get("_focus_prepared"):
+            ax_window = self._find_ax_window(current_window)
+            if ax_window is None:
+                raise RuntimeError("Could not resolve the target AX window unambiguously")
+            window_error = AX.AXUIElementSetAttributeValue(
+                ax_window, AX.kAXFocusedAttribute, True
+            )
+            if int(window_error) != 0:
+                window_error = AX.AXUIElementPerformAction(ax_window, AX.kAXRaiseAction)
+            if int(window_error) != 0:
+                raise RuntimeError(f"AX target window focus/raise failed with error {window_error}")
+        if requires_native_focus:
+            current_window = self._current_record(window)
+            if not _same_bounds(
+                current_window.get("bounds", {}),
+                window.get("bounds", {}),
+            ):
+                raise LookupError(
+                    "Window moved or resized immediately before pointer input; "
+                    "call gui_state again"
+                )
+
+        if kind == "type":
+            text = str(action.get("text", ""))
+            if locator is not None:
+                error = AX.AXUIElementSetAttributeValue(
+                    locator, AX.kAXFocusedAttribute, True
+                )
+                if int(error) != 0:
+                    raise RuntimeError(
+                        f"Target AX element could not be focused: {error}"
+                    )
+            _assert_action_fresh(action)
+            for chunk in _unicode_chunks(text):
+                event = Quartz.CGEventCreateKeyboardEvent(None, 0, True)
+                Quartz.CGEventKeyboardSetUnicodeString(
+                    event,
+                    _utf16_units(chunk),
+                    chunk,
+                )
+                Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+                up = Quartz.CGEventCreateKeyboardEvent(None, 0, False)
+                Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)
+            return {"characters": len(text)}
+
+        if kind == "key":
+            if locator is not None:
+                error = AX.AXUIElementSetAttributeValue(
+                    locator, AX.kAXFocusedAttribute, True
+                )
+                if int(error) != 0:
+                    raise RuntimeError(
+                        f"Target AX element could not be focused: {error}"
+                    )
+            _assert_action_fresh(action)
+            self._send_key_chord(Quartz, action.get("keys"))
+            return {"keys": action.get("keys")}
+
+        if kind in {"click", "double_click", "right_click", "move", "scroll"}:
+            x, y = self._screen_point(AX, current_window, action, locator)
+            _assert_action_fresh(action)
+            if kind == "move":
+                self._mouse(Quartz, Quartz.kCGEventMouseMoved, x, y, Quartz.kCGMouseButtonLeft)
+            elif kind == "scroll":
+                self._mouse(Quartz, Quartz.kCGEventMouseMoved, x, y, Quartz.kCGMouseButtonLeft)
+                default_y = action.get("amount", -3) if "delta_x" not in action else 0
+                amount_y = quantize_scroll_amount(action.get("delta_y", default_y))
+                amount_x = quantize_scroll_amount(action.get("delta_x", 0))
+                if amount_x or amount_y:
+                    event = Quartz.CGEventCreateScrollWheelEvent(
+                        None,
+                        Quartz.kCGScrollEventUnitLine,
+                        2,
+                        amount_y,
+                        amount_x,
+                    )
+                    Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+            else:
+                right = kind == "right_click"
+                button = Quartz.kCGMouseButtonRight if right else Quartz.kCGMouseButtonLeft
+                down = Quartz.kCGEventRightMouseDown if right else Quartz.kCGEventLeftMouseDown
+                up = Quartz.kCGEventRightMouseUp if right else Quartz.kCGEventLeftMouseUp
+                count = 2 if kind == "double_click" else 1
+                for click_count in range(1, count + 1):
+                    down_event = Quartz.CGEventCreateMouseEvent(None, down, (x, y), button)
+                    up_event = Quartz.CGEventCreateMouseEvent(None, up, (x, y), button)
+                    if count == 2:
+                        Quartz.CGEventSetIntegerValueField(
+                            down_event, Quartz.kCGMouseEventClickState, click_count
+                        )
+                        Quartz.CGEventSetIntegerValueField(
+                            up_event, Quartz.kCGMouseEventClickState, click_count
+                        )
+                    down_posted = False
+                    up_posted = False
+                    try:
+                        Quartz.CGEventPost(Quartz.kCGHIDEventTap, down_event)
+                        down_posted = True
+                        Quartz.CGEventPost(Quartz.kCGHIDEventTap, up_event)
+                        up_posted = True
+                    finally:
+                        if down_posted and not up_posted:
+                            with contextlib.suppress(Exception):
+                                cleanup = Quartz.CGEventCreateMouseEvent(
+                                    None, up, (x, y), button
+                                )
+                                if count == 2:
+                                    Quartz.CGEventSetIntegerValueField(
+                                        cleanup,
+                                        Quartz.kCGMouseEventClickState,
+                                        click_count,
+                                    )
+                                Quartz.CGEventPost(Quartz.kCGHIDEventTap, cleanup)
+            return {"screen_x": x, "screen_y": y}
+
+        if kind == "drag":
+            start_x, start_y = self._screen_point(
+                AX,
+                current_window,
+                {"x": action.get("x"), "y": action.get("y")},
+                locator,
+            )
+            end_x, end_y = self._screen_point(
+                AX,
+                current_window,
+                {"x": action.get("to_x"), "y": action.get("to_y")},
+                None,
+            )
+            _assert_action_fresh(action)
+            pressed = False
+            release_x, release_y = start_x, start_y
+            try:
+                self._mouse(
+                    Quartz,
+                    Quartz.kCGEventLeftMouseDown,
+                    start_x,
+                    start_y,
+                    Quartz.kCGMouseButtonLeft,
+                )
+                pressed = True
+                self._mouse(
+                    Quartz,
+                    Quartz.kCGEventLeftMouseDragged,
+                    end_x,
+                    end_y,
+                    Quartz.kCGMouseButtonLeft,
+                )
+                release_x, release_y = end_x, end_y
+                self._mouse(
+                    Quartz,
+                    Quartz.kCGEventLeftMouseUp,
+                    end_x,
+                    end_y,
+                    Quartz.kCGMouseButtonLeft,
+                )
+                pressed = False
+            finally:
+                if pressed:
+                    with contextlib.suppress(Exception):
+                        self._mouse(
+                            Quartz,
+                            Quartz.kCGEventLeftMouseUp,
+                            release_x,
+                            release_y,
+                            Quartz.kCGMouseButtonLeft,
+                        )
+            return {
+                "from": {"x": start_x, "y": start_y},
+                "to": {"x": end_x, "y": end_y},
+            }
+
+        raise ValueError(f"Unsupported GUI action type on macOS: {kind}")
+
+    @staticmethod
+    def _mouse(Quartz: Any, event_type: int, x: int, y: int, button: int) -> None:
+        event = Quartz.CGEventCreateMouseEvent(None, event_type, (x, y), button)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+
+    @staticmethod
+    def _screen_point(
+        AX: Any,
+        window: dict[str, Any],
+        action: dict[str, Any],
+        locator: Any | None,
+    ) -> tuple[int, int]:
+        if locator is not None and action.get("x") is None and action.get("y") is None:
+            bounds = _ax_bounds(AX, locator)
+            width = int(bounds.get("width", 0))
+            height = int(bounds.get("height", 0))
+            if width <= 0 or height <= 0:
+                raise ValueError("Target element has no usable screen bounds")
+            x = int(bounds.get("x", 0)) + width // 2
+            y = int(bounds.get("y", 0)) + height // 2
+            window_bounds = window["bounds"]
+            left = int(window_bounds["x"])
+            top = int(window_bounds["y"])
+            right = left + int(window_bounds["width"])
+            bottom = top + int(window_bounds["height"])
+            if not (left <= x < right and top <= y < bottom):
+                raise ValueError("Target element center is outside the selected window")
+            return x, y
+        if action.get("x") is None or action.get("y") is None:
+            raise ValueError("Coordinate action requires x and y, or an element_id")
+        bounds = window["bounds"]
+        return int(bounds["x"]) + int(action["x"]), int(bounds["y"]) + int(action["y"])
+
+    @staticmethod
+    def _send_key_chord(Quartz: Any, keys: Any) -> None:
+        parts = _key_parts(keys)
+        modifier_flags = {
+            "SHIFT": Quartz.kCGEventFlagMaskShift,
+            "CTRL": Quartz.kCGEventFlagMaskControl,
+            "CONTROL": Quartz.kCGEventFlagMaskControl,
+            "ALT": Quartz.kCGEventFlagMaskAlternate,
+            "OPTION": Quartz.kCGEventFlagMaskAlternate,
+            "CMD": Quartz.kCGEventFlagMaskCommand,
+            "COMMAND": Quartz.kCGEventFlagMaskCommand,
+            "META": Quartz.kCGEventFlagMaskCommand,
+        }
+        flags = 0
+        ordinary = []
+        for part in parts:
+            if part in modifier_flags:
+                flags |= modifier_flags[part]
+            else:
+                ordinary.append(part)
+        if len(ordinary) != 1:
+            raise ValueError("macOS key action requires exactly one non-modifier key")
+        key = ordinary[0]
+        code = _MAC_KEY_CODES.get(key)
+        if code is None and len(key) == 1:
+            code = _MAC_KEY_CODES.get(key.upper())
+        if code is None:
+            raise ValueError(f"Unsupported macOS key name: {key}")
+        down = Quartz.CGEventCreateKeyboardEvent(None, code, True)
+        up = Quartz.CGEventCreateKeyboardEvent(None, code, False)
+        Quartz.CGEventSetFlags(down, flags)
+        Quartz.CGEventSetFlags(up, flags)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, down)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)
