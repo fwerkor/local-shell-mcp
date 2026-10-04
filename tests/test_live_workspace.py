@@ -1495,7 +1495,7 @@ def test_live_git_routes_remote_inspection_to_selected_machine(tmp_path, monkeyp
         def __init__(self):
             self.calls = []
 
-        async def call(self, machine, tool, args, timeout_s=None):
+        async def call(self, machine, tool, args, timeout_s=None, **_kwargs):
             self.calls.append((machine, tool, args, timeout_s))
             command = args["command"]
             stdout = (
@@ -1578,8 +1578,10 @@ async def test_live_remote_git_shell_rejects_failed_and_invalid_payloads(monkeyp
     class FakeRemote:
         def __init__(self):
             self.response = {"ok": False, "message": "remote failed"}
+            self.calls = []
 
         async def call(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            self.calls.append((args, kwargs))
             return self.response
 
     fake = FakeRemote()
@@ -1593,6 +1595,10 @@ async def test_live_remote_git_shell_rejects_failed_and_invalid_payloads(monkeyp
             timeout_s=15,
             max_output_bytes=80_000,
         )
+    args, kwargs = fake.calls[-1]
+    assert args[2]["timeout_s"] == 15
+    assert kwargs["execution_timeout_s"] == 15
+    assert kwargs["rpc_timeout_s"] == live_routes.remote_execution_rpc_timeout_s(15)
 
     fake.response = {"ok": True, "data": "not-a-dict"}
     with pytest.raises(RuntimeError, match="invalid data"):

@@ -12,10 +12,10 @@ from starlette.routing import Route
 from .auth import Principal, current_principal, require_scopes, verify_request
 from .live_channel import LIVE_API_PREFIX, get_live_channel_manager, live_id_from_claims
 from .models import CommandResult
-from .remote import remote_manager
+from .remote import remote_execution_rpc_timeout_s, remote_manager
 from .session_runtime import get_session_runtime_manager
 from .settings import get_settings
-from .shell_ops import run_shell
+from .shell_ops import public_run_shell_timeout, run_shell
 
 
 def _principal(request: Request) -> Principal:
@@ -74,17 +74,19 @@ async def _run_machine_shell(
             timeout_s=timeout_s,
             max_output_bytes=max_output_bytes,
         )
+    execution_timeout_s = public_run_shell_timeout(timeout_s)
     response = await remote_manager().call(
         machine,
         "run_shell_tool",
         {
             "command": command,
             "cwd": cwd,
-            "timeout_s": timeout_s,
+            "timeout_s": execution_timeout_s,
             "max_output_bytes": max_output_bytes,
             "_human": True,
         },
-        timeout_s=max(timeout_s, get_settings().ui_remote_request_timeout_s),
+        execution_timeout_s=execution_timeout_s,
+        rpc_timeout_s=remote_execution_rpc_timeout_s(execution_timeout_s),
     )
     if not response.get("ok", False):
         raise RuntimeError(response.get("message") or f"Remote Git inspection failed on {machine}")

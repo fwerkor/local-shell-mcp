@@ -81,7 +81,7 @@ async def test_run_shell_tool_rejects_timeout_above_public_cap(tmp_path, monkeyp
 @pytest.mark.asyncio
 async def test_mcp_tool_watchdog_returns_handled_timeout(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
-    monkeypatch.setattr(tools_module, "PUBLIC_TOOL_TIMEOUT_S", 0.01)
+    monkeypatch.setitem(tools_module.PUBLIC_TOOL_TIMEOUT_OVERRIDES_S, "file_tree", 0.01)
     get_settings.cache_clear()
 
     async def hanging_tree(cwd: str = ".", depth: int = 3, max_entries: int = 500):  # noqa: ARG001
@@ -134,7 +134,7 @@ def test_rest_tool_watchdog_times_out_sync_tool(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_mcp_tool_watchdog_times_out_sync_tool(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
-    monkeypatch.setattr(tools_module, "PUBLIC_TOOL_TIMEOUT_S", 0.01)
+    monkeypatch.setitem(tools_module.PUBLIC_TOOL_TIMEOUT_OVERRIDES_S, "file_list", 0.01)
     get_settings.cache_clear()
 
     def blocking_list_dir(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
@@ -707,3 +707,87 @@ def test_native_descendant_pids_are_deepest_first(monkeypatch):
 
     assert descendants[0] == 126
     assert set(descendants) == {84, 100, 126}
+
+
+@pytest.mark.asyncio
+async def test_shell_mutation_idempotency_replays_cached_result(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    calls = 0
+
+    async def callback():
+        nonlocal calls
+        calls += 1
+        return {"session_id": "shell-1", "sent_bytes": 4}
+
+    payload = {"session_id": "shell-1", "input_text": "echo", "enter": True}
+    first = await shell_ops_module._run_shell_mutation_once(
+        "send", "request-1", payload, callback
+    )
+    replay = await shell_ops_module._run_shell_mutation_once(
+        "send", "request-1", payload, callback
+    )
+
+    assert replay == first
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_shell_mutation_idempotency_rejects_changed_arguments(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    calls = 0
+
+    async def callback():
+        nonlocal calls
+        calls += 1
+        return {"ok": True}
+
+    await shell_ops_module._run_shell_mutation_once(
+        "send", "request-2", {"session_id": "shell-1", "input_text": "echo a"}, callback
+    )
+
+    with pytest.raises(ValueError, match="different shell request"):
+        await shell_ops_module._run_shell_mutation_once(
+            "send",
+            "request-2",
+            {"session_id": "shell-1", "input_text": "echo b"},
+            callback,
+        )
+
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_shell_mutation_idempotency_keeps_uncertain_outcome_for_same_request(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    calls = 0
+    payload = {"session_id": "shell-1", "input_text": "start job", "enter": True}
+
+    async def ambiguous_callback():
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("connection lost after send")
+
+    with pytest.raises(RuntimeError, match="connection lost after send"):
+        await shell_ops_module._run_shell_mutation_once(
+            "send", "request-3", payload, ambiguous_callback
+        )
+
+    async def retry_callback():
+        nonlocal calls
+        calls += 1
+        return {"ok": True}
+
+    with pytest.raises(RuntimeError, match="outcome is still being reconciled"):
+        await shell_ops_module._run_shell_mutation_once(
+            "send", "request-3", payload, retry_callback
+        )
+
+    assert calls == 1

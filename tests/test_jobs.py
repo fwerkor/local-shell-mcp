@@ -1477,3 +1477,206 @@ async def test_job_list_does_not_interrupt_active_retry(tmp_path, monkeypatch):
     retried = await retry_task
     assert retried["status"] == "running"
     assert retried["attempts"] == 2
+
+
+@pytest.mark.asyncio
+async def test_job_start_idempotency_key_reuses_job_and_rejects_changed_request(
+    tmp_path, monkeypatch
+):
+    state_dir = tmp_path / ".state"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    started: list[str] = []
+
+    async def fake_start_shell(cwd=".", name=None, command=None):  # noqa: ARG001
+        started.append(str(name))
+        return {"session_id": str(name), "backend": "fake"}
+
+    monkeypatch.setattr(jobs_module, "start_shell", fake_start_shell)
+
+    first = await start_job("echo once", cwd=".", name="dedup", idempotency_key="request-1")
+    replay = await start_job(
+        "echo once", cwd=".", name="dedup", idempotency_key="request-1"
+    )
+
+    assert replay["job_id"] == first["job_id"]
+    assert len(started) == 1
+    with pytest.raises(ValueError, match="different request"):
+        await start_job("echo twice", cwd=".", name="dedup", idempotency_key="request-1")
+
+
+@pytest.mark.asyncio
+async def test_job_retry_idempotency_key_reuses_retry_across_replays(tmp_path, monkeypatch):
+    state_dir = tmp_path / ".state"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    starts: list[str] = []
+
+    async def fake_start_shell(cwd=".", name=None, command=None):  # noqa: ARG001
+        starts.append(str(name))
+        return {"session_id": str(name), "backend": "fake"}
+
+    async def fake_list_shells():
+        return {"sessions": []}
+
+    monkeypatch.setattr(jobs_module, "start_shell", fake_start_shell)
+    monkeypatch.setattr(jobs_module, "list_shells", fake_list_shells)
+    original = await start_job("echo retry", name="retry-key")
+    with jobs_module._store_transaction() as store:
+        jobs_module._find_job(store, original["job_id"])["status"] = "failed"
+
+    first_retry = await retry_job(original["job_id"], idempotency_key="retry-1")
+    replay = await retry_job(original["job_id"], idempotency_key="retry-1")
+
+    assert first_retry["attempts"] == 2
+    assert replay["job_id"] == first_retry["job_id"]
+    assert replay["attempts"] == 2
+    assert len(starts) == 2
+
+
+@pytest.mark.asyncio
+async def test_cancelled_job_start_reconciles_state_and_cleans_created_shell(
+    tmp_path, monkeypatch
+):
+    state_dir = tmp_path / ".state"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    active: set[str] = set()
+    start_entered = asyncio.Event()
+    allow_start_to_finish = asyncio.Event()
+
+    async def fake_list_shells():
+        return {"sessions": [{"session_id": item} for item in sorted(active)]}
+
+    async def fake_start_shell(cwd=".", name=None, command=None):  # noqa: ARG001
+        active.add(str(name))
+        start_entered.set()
+        await allow_start_to_finish.wait()
+        return {"session_id": str(name), "backend": "fake"}
+
+    async def fake_kill_shell(session_id):
+        active.discard(session_id)
+        return {"session_id": session_id, "killed": True, "stderr": ""}
+
+    monkeypatch.setattr(jobs_module, "list_shells", fake_list_shells)
+    monkeypatch.setattr(jobs_module, "start_shell", fake_start_shell)
+    monkeypatch.setattr(jobs_module, "kill_shell", fake_kill_shell)
+
+    start_task = asyncio.create_task(start_job("echo cancel start", name="cancel-start"))
+    await start_entered.wait()
+    start_task.cancel()
+    await asyncio.sleep(0)
+    assert not start_task.done()
+    allow_start_to_finish.set()
+    with pytest.raises(asyncio.CancelledError):
+        await start_task
+
+    with jobs_module._store_transaction() as store:
+        row = next(job for job in store["jobs"] if job["name"] == "cancel-start")
+        assert row["status"] == "failed"
+        assert "operation_id" not in row
+    assert not active
+
+
+@pytest.mark.asyncio
+async def test_cancelled_job_retry_reconciles_state_and_cleans_created_shell(
+    tmp_path, monkeypatch
+):
+    state_dir = tmp_path / ".state"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    active: set[str] = set()
+    retry_entered = asyncio.Event()
+    allow_retry_to_finish = asyncio.Event()
+    start_count = 0
+
+    async def fake_list_shells():
+        return {"sessions": [{"session_id": item} for item in sorted(active)]}
+
+    async def fake_start_shell(cwd=".", name=None, command=None):  # noqa: ARG001
+        nonlocal start_count
+        start_count += 1
+        active.add(str(name))
+        if start_count > 1:
+            retry_entered.set()
+            await allow_retry_to_finish.wait()
+        return {"session_id": str(name), "backend": "fake"}
+
+    async def fake_kill_shell(session_id):
+        active.discard(session_id)
+        return {"session_id": session_id, "killed": True, "stderr": ""}
+
+    monkeypatch.setattr(jobs_module, "list_shells", fake_list_shells)
+    monkeypatch.setattr(jobs_module, "start_shell", fake_start_shell)
+    monkeypatch.setattr(jobs_module, "kill_shell", fake_kill_shell)
+    original = await start_job("echo cancel retry", name="cancel-retry")
+    active.clear()
+    with jobs_module._store_transaction() as store:
+        jobs_module._find_job(store, original["job_id"])["status"] = "failed"
+
+    retry_task = asyncio.create_task(retry_job(original["job_id"]))
+    await retry_entered.wait()
+    retry_task.cancel()
+    await asyncio.sleep(0)
+    assert not retry_task.done()
+    allow_retry_to_finish.set()
+    with pytest.raises(asyncio.CancelledError):
+        await retry_task
+
+    with jobs_module._store_transaction() as store:
+        row = jobs_module._find_job(store, original["job_id"])
+        assert row["status"] == "failed"
+        assert row["attempts"] == 2
+        assert "operation_id" not in row
+        assert "pending_attempt" not in row
+    assert not active
+
+
+@pytest.mark.asyncio
+async def test_cancelled_job_stop_reconciles_state_after_shell_termination(
+    tmp_path, monkeypatch
+):
+    state_dir = tmp_path / ".state"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    active: set[str] = set()
+    stop_entered = asyncio.Event()
+    allow_stop_to_finish = asyncio.Event()
+
+    async def fake_list_shells():
+        return {"sessions": [{"session_id": item} for item in sorted(active)]}
+
+    async def fake_start_shell(cwd=".", name=None, command=None):  # noqa: ARG001
+        active.add(str(name))
+        return {"session_id": str(name), "backend": "fake"}
+
+    async def fake_kill_shell(session_id):
+        stop_entered.set()
+        await allow_stop_to_finish.wait()
+        active.discard(session_id)
+        return {"session_id": session_id, "killed": True, "stderr": ""}
+
+    monkeypatch.setattr(jobs_module, "list_shells", fake_list_shells)
+    monkeypatch.setattr(jobs_module, "start_shell", fake_start_shell)
+    monkeypatch.setattr(jobs_module, "kill_shell", fake_kill_shell)
+    job = await start_job("echo cancel stop", name="cancel-stop")
+
+    stop_task = asyncio.create_task(stop_job(job["job_id"]))
+    await stop_entered.wait()
+    stop_task.cancel()
+    await asyncio.sleep(0)
+    assert not stop_task.done()
+    allow_stop_to_finish.set()
+    with pytest.raises(asyncio.CancelledError):
+        await stop_task
+
+    with jobs_module._store_transaction() as store:
+        row = jobs_module._find_job(store, job["job_id"])
+        assert row["status"] == "stopped"
+        assert "operation_id" not in row
+    assert not active
