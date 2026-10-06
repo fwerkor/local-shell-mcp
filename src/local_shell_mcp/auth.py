@@ -250,7 +250,7 @@ def verify_request(request: Request) -> Principal:
     settings = get_settings()
     path = str(request.url.path)
     if (
-        path.startswith(HUMAN_UI_API_PREFIX)
+        (path.startswith(HUMAN_UI_API_PREFIX) or path == "/mcp")
         and is_loopback_connection(request)
         and has_valid_ui_local_token(request)
     ):

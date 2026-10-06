@@ -121,6 +121,16 @@ Standalone release executables embed the native OpenTUI runtime, while Docker im
 local-shell-mcp tui
 ```
 
+The same local credential can invoke the registered MCP tool surface directly from shell scripts. By default, `call` connects to the running loopback controller, so remote-worker calls use the live controller process instead of a separate process-local worker registry:
+
+```bash
+lsm call run_shell --json '{"command":"uname -a"}'
+lsm call run_shell --json '{"command":"nvidia-smi","machine":"gpu-node"}'
+printf '%s\n' '{"path":"README.md"}' | lsm call file_read
+```
+
+Use `--session s_...` to attach an ordinary tool call to a durable logical Session. `--direct` is available for standalone local calls when no controller is running; remote workers are intentionally unavailable in direct mode.
+
 Files remains an LSM-native three-pane file manager inside OpenTUI for local and remote machines. It renders bounded PNG/JPEG/GIF/WebP thumbnails and provides consistent file operations through the shared service API. Manual actions entered through either human interface are excluded from the MCP audit log; Activity, Audit, and the terminal audit rail show model-originated MCP activity.
 
 See the [human interface guide](https://fwerkor.github.io/local-shell-mcp/guides/human-interface/).

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import local_shell_mcp
+import local_shell_mcp.cli_call as cli_call
 import local_shell_mcp.human_ui as human_ui
 import local_shell_mcp.jobs as jobs
 import local_shell_mcp.main as main_module
@@ -256,16 +257,23 @@ def test_main_subcommands_and_version(monkeypatch, capsys):
     monkeypatch.setattr(jobs, "run_job_runner_cli", lambda argv: calls.append(("job", argv)))
     monkeypatch.setattr(remote_worker_cli, "run_worker_cli", lambda argv: calls.append(("worker", argv)))
     monkeypatch.setattr(human_ui, "run_tui_cli", lambda argv: calls.append(("tui", argv)))
+    monkeypatch.setattr(cli_call, "run_call_cli", lambda argv: calls.append(("call", argv)))
     monkeypatch.setattr(version, "format_version_info", lambda: "version-info")
 
     main_module.main(["job-runner", "a"])
     main_module.main(["worker", "b"])
     main_module.main(["tui", "c"])
+    main_module.main(["call", "run_shell", "--json", "{}"])
     main_module.main(["version"])
     main_module.main(["--version"])
     main_module.main(["-V"])
 
-    assert calls == [("job", ["a"]), ("worker", ["b"]), ("tui", ["c"])]
+    assert calls == [
+        ("job", ["a"]),
+        ("worker", ["b"]),
+        ("tui", ["c"]),
+        ("call", ["run_shell", "--json", "{}"]),
+    ]
     assert capsys.readouterr().out.splitlines() == [
         "version-info",
         local_shell_mcp.__version__,
