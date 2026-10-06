@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -488,7 +489,9 @@ def test_yaml_controller_values_are_loaded_read_only_with_environment_precedence
     assert values["LOCAL_SHELL_MCP_AUTH_MODE"] == "oauth"
     assert values["LOCAL_SHELL_MCP_MAX_TIMEOUT_S"] == "45"
     assert values["LOCAL_SHELL_MCP_WORKSPACE_ROOT"] == "/yaml/workspace"
-    assert values["LOCAL_SHELL_MCP_STATE_DIR"] == "/yaml/workspace/.local-shell-mcp"
+    assert values["LOCAL_SHELL_MCP_STATE_DIR"] == str(
+        Path("/yaml/workspace") / ".local-shell-mcp"
+    )
 
     overridden = cli_call._apply_yaml_controller_values(
         {
@@ -501,7 +504,9 @@ def test_yaml_controller_values_are_loaded_read_only_with_environment_precedence
     assert overridden["LOCAL_SHELL_MCP_HOST"] == "127.0.0.3"
     assert overridden["LOCAL_SHELL_MCP_PORT"] == "9555"
     assert overridden["LOCAL_SHELL_MCP_AUTH_MODE"] == "none"
-    assert overridden["LOCAL_SHELL_MCP_STATE_DIR"] == "/env/workspace/.local-shell-mcp"
+    assert overridden["LOCAL_SHELL_MCP_STATE_DIR"] == str(
+        Path("/env/workspace") / ".local-shell-mcp"
+    )
     assert not (tmp_path / "workspace").exists()
 
     with pytest.raises(ValueError, match="unable to load LOCAL_SHELL_MCP_CONFIG"):
