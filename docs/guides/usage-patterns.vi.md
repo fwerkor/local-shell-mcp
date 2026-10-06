@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 0b086e03bb7fd910e016db31a703908be74f7858846c091c8e784a62e00ec6ca -->
+<!-- i18n-source-sha256: f471795a57e16e999999f856000b779183d5b6c642ffc8c852c77e7faf3bc0dd -->
 # Mẫu sử dụng và hướng dẫn prompting
 
 `local-shell-mcp` cung cấp tools mạnh. Kết quả tốt phụ thuộc vào việc yêu cầu model kiểm tra trước, hành động theo bước nhỏ, chạy xác minh và báo cáo thay đổi.
@@ -29,6 +29,17 @@ Dùng vòng này cho phần lớn coding task:
 | Browser evidence | `browser_snapshot`, `browser_run_script` | Đoán từ tên page/route |
 | Downloadable artifacts | `link_create` | Dán binary content lớn vào chat |
 | Remote machine work | normal tools with `machine`, plus `remote_transfer` | Mở inbound SSH khi outbound worker đã đủ |
+
+## Gọi công cụ từ CLI
+
+Đối với shell script và CI, `lsm call <tool>` gọi cùng bề mặt công cụ đã đăng ký thông qua loopback controller đang chạy, vì vậy remote worker và trạng thái controller được giữ nguyên.
+
+```bash
+lsm call run_shell --json '{"command":"uname -a"}'
+printf '%s\n' '{"path":"README.md"}' | lsm call file_read
+```
+
+Dùng `--session s_...` để gắn lời gọi với một Logical Session. Với Docker Compose, có thể chạy từ thư mục gốc của repository để CLI tự phát hiện đường dẫn token dùng chung mặc định, hoặc truyền `--token-file <path>` khi controller dùng filesystem runtime khác. `--direct` bỏ qua controller và chỉ hỗ trợ lời gọi cục bộ.
 
 ## Template prompt
 

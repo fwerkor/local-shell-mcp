@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 0b086e03bb7fd910e016db31a703908be74f7858846c091c8e784a62e00ec6ca -->
+<!-- i18n-source-sha256: f471795a57e16e999999f856000b779183d5b6c642ffc8c852c77e7faf3bc0dd -->
 # Padrões de uso e guia de prompting
 
 `local-shell-mcp` expõe ferramentas poderosas. Bons resultados dependem de pedir ao modelo que primeiro inspecione, aja em passos pequenos, verifique e relate o que mudou.
@@ -29,6 +29,17 @@ Use este loop na maioria das tarefas de código:
 | Evidência de navegador | `browser_snapshot`, `browser_run_script` | Adivinhar por nomes de páginas/routes |
 | Artefatos baixáveis | `link_create` | Colar grande conteúdo binário no chat |
 | Trabalho em máquina remota | normal tools with `machine`, plus `remote_transfer` | Abrir SSH de entrada quando outbound worker é suficiente |
+
+## Chamar ferramentas pela CLI
+
+Para scripts de shell e CI, `lsm call <tool>` invoca a mesma superfície de ferramentas registradas pelo controller loopback em execução, preservando os remote workers e o estado do controller.
+
+```bash
+lsm call run_shell --json '{"command":"uname -a"}'
+printf '%s\n' '{"path":"README.md"}' | lsm call file_read
+```
+
+Use `--session s_...` para associar a chamada a uma Logical Session. Com Docker Compose, execute a partir da raiz do repository para que a CLI detecte o caminho compartilhado padrão do token, ou passe `--token-file <path>` quando o controller usar outro sistema de arquivos de runtime. `--direct` ignora o controller e funciona somente localmente.
 
 ## Templates de prompt
 

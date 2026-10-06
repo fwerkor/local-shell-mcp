@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 0b086e03bb7fd910e016db31a703908be74f7858846c091c8e784a62e00ec6ca -->
+<!-- i18n-source-sha256: f471795a57e16e999999f856000b779183d5b6c642ffc8c852c77e7faf3bc0dd -->
 # Modelli di utilizzo e guida ai prompt
 
 `local-shell-mcp` espone strumenti potenti. I risultati migliori arrivano chiedendo al modello di ispezionare prima, agire in piccoli passi, verificare e riportare cosa è cambiato.
@@ -29,6 +29,17 @@ Usa questo ciclo per la maggior parte dei task di coding:
 | Evidenza browser | `browser_snapshot`, `browser_run_script` | Indovinare da nomi di pagina o route |
 | Artefatti scaricabili | `link_create` | Incollare grandi contenuti binari in chat |
 | Lavoro su macchina remota | normal tools with `machine`, plus `remote_transfer` | Aprire SSH inbound quando basta outbound worker |
+
+## Chiamare gli strumenti dalla CLI
+
+Per script shell e CI, `lsm call <tool>` richiama la stessa superficie di strumenti registrati tramite il controller loopback in esecuzione, preservando i remote worker e lo stato del controller.
+
+```bash
+lsm call run_shell --json '{"command":"uname -a"}'
+printf '%s\n' '{"path":"README.md"}' | lsm call file_read
+```
+
+Usa `--session s_...` per associare la chiamata a una Logical Session. Con Docker Compose puoi eseguire il comando dalla radice del repository, dove la CLI rileva il percorso condiviso predefinito del token, oppure passare `--token-file <path>` se il controller usa un filesystem runtime diverso. `--direct` bypassa il controller ed è disponibile solo per chiamate locali.
 
 ## Template di prompt
 

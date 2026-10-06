@@ -29,6 +29,17 @@ Use this loop for most coding tasks:
 | Downloadable artifacts | `link_create` | Pasting large binary content into chat |
 | Remote machine work | normal tools with `machine`, plus `remote_transfer` | Opening inbound SSH when outbound worker mode is enough |
 
+## Calling tools from the CLI
+
+For shell scripts and CI, `lsm call <tool>` invokes the same registered tool surface through the running loopback controller, so remote workers and controller state are preserved.
+
+```bash
+lsm call run_shell --json '{"command":"uname -a"}'
+printf '%s\n' '{"path":"README.md"}' | lsm call file_read
+```
+
+Use `--session s_...` to attach the call to a Logical Session. Docker Compose users can run from the repository root (the CLI detects the default shared token path) or pass `--token-file <path>` when the controller uses a different runtime filesystem. `--direct` bypasses the controller and is local-only.
+
 ## Prompt templates
 
 ### Read-only repository orientation

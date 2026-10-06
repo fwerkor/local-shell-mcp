@@ -129,7 +129,7 @@ lsm call run_shell --json '{"command":"nvidia-smi","machine":"gpu-node"}'
 printf '%s\n' '{"path":"README.md"}' | lsm call file_read
 ```
 
-Use `--session s_...` to attach an ordinary tool call to a durable logical Session. `--direct` is available for standalone local calls when no controller is running; remote workers are intentionally unavailable in direct mode.
+Use `--session s_...` to attach an ordinary tool call to a durable logical Session. The default Docker Compose layout is detected when the CLI runs from the repository root; for other split-runtime layouts, pass the controller credential with `--token-file <path>` or share `LOCAL_SHELL_MCP_UI_LOCAL_TOKEN`. A failed underlying command makes `lsm call` exit non-zero. `--direct` is available for standalone local calls when no controller is running; remote workers are intentionally unavailable in direct mode.
 
 Files remains an LSM-native three-pane file manager inside OpenTUI for local and remote machines. It renders bounded PNG/JPEG/GIF/WebP thumbnails and provides consistent file operations through the shared service API. Manual actions entered through either human interface are excluded from the MCP audit log; Activity, Audit, and the terminal audit rail show model-originated MCP activity.
 

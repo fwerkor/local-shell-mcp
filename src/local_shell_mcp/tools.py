@@ -1196,7 +1196,7 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
             started_at = time.monotonic()
             live_manager = get_live_channel_manager()
             logical_manager = get_session_runtime_manager()
-            principal_subject = _current_principal_subject()
+            principal_subject = _current_session_subject()
             live_arguments = _live_event_arguments(__tool_name, safe_call_arguments)
             logical_lease = None
             normalized_tool_action = str(call_arguments.get("action") or "").strip().lower()
@@ -4365,6 +4365,24 @@ def _current_principal_subject() -> str:
     return principal.subject or principal.email or "mcp-client"
 
 
+def _current_session_subject(*, create: bool = False) -> str | None:
+    principal = current_principal()
+    if principal is None:
+        return _current_principal_subject()
+    if principal.claims.get("auth") not in {"native-tui", "localhost-bypass"}:
+        return principal.subject or principal.email or "mcp-client"
+    if not create:
+        # Trusted loopback clients mirror the human UI: an explicitly named
+        # Session may belong to any authenticated local principal.
+        return None
+    settings = get_settings()
+    if settings.auth_mode == "none":
+        return "anonymous"
+    if settings.auth_mode == "oauth":
+        return "local-user"
+    return "local-mcp-client"
+
+
 def _register_maintenance_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -> None:
     shell_read_meta = _oauth_meta(["shell:read"])
     shell_write_meta = _oauth_meta(["shell:read", "shell:write"])
@@ -4381,7 +4399,7 @@ def _register_maintenance_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -
         blockers: list[str] | None = None,
     ) -> ToolResult:
         """Manage one durable Logical Session. Start creates a new task and returns its session_id. Resume continues only the explicit session_id supplied by the user or already present in this conversation. All non-start actions require session_id. Actions: start, resume, get, report, finish, cancel, delete. report accepts summary/findings/next/blockers/objective/label. delete requires a terminal Session."""
-        subject = _current_principal_subject()
+        subject = _current_session_subject(create=action.strip().lower() == "start")
         result = await _tool_call(
             asyncio.to_thread,
             get_session_runtime_manager().manage,
@@ -4446,7 +4464,7 @@ def _register_maintenance_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -
             get_session_runtime_manager().manage_plan,
             session_id,
             action=action,
-            subject=_current_principal_subject(),
+            subject=_current_session_subject(),
             objective=objective,
             steps=steps,
             step_id=step_id,

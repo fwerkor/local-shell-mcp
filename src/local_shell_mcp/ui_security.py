@@ -28,6 +28,23 @@ def _read_token(path: Path) -> str | None:
     return value if len(value) >= 32 else None
 
 
+def get_ui_local_token() -> str | None:
+    """Return an existing local UI credential without creating one."""
+
+    inherited = os.getenv(UI_LOCAL_TOKEN_ENV, "").strip()
+    if len(inherited) >= 32:
+        return inherited
+
+    settings = get_settings()
+    if settings.state_backend != "file":
+        raw = get_state_store().read_bytes("ui/local-token")
+        if raw is None:
+            return None
+        value = raw.decode("utf-8", errors="ignore").strip()
+        return value if len(value) >= 32 else None
+    return _read_token(_token_path())
+
+
 def get_or_create_ui_local_token() -> str:
     """Return the transparent local credential used by native and web-spawned TUIs.
 

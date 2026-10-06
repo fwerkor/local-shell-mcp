@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 0b086e03bb7fd910e016db31a703908be74f7858846c091c8e784a62e00ec6ca -->
+<!-- i18n-source-sha256: f471795a57e16e999999f856000b779183d5b6c642ffc8c852c77e7faf3bc0dd -->
 # Kullanım kalıpları ve prompting kılavuzu
 
 `local-shell-mcp` güçlü tools sunar. İyi sonuçlar için modelden önce inceleme, küçük adımlarla hareket etme, doğrulama ve nelerin değiştiğini raporlama istenmelidir.
@@ -29,6 +29,17 @@
 | Browser evidence | `browser_snapshot`, `browser_run_script` | Page name veya route’dan tahmin etmek |
 | Downloadable artifacts | `link_create` | Büyük binary content’i chat’e yapıştırmak |
 | Remote machine work | normal tools with `machine`, plus `remote_transfer` | Outbound worker yeterliyken inbound SSH açmak |
+
+## CLI üzerinden araç çağırma
+
+Shell betikleri ve CI için `lsm call <tool>`, çalışan loopback controller üzerinden aynı kayıtlı araç yüzeyini çağırır; böylece remote worker ve controller durumu korunur.
+
+```bash
+lsm call run_shell --json '{"command":"uname -a"}'
+printf '%s\n' '{"path":"README.md"}' | lsm call file_read
+```
+
+Çağrıyı bir Logical Session ile ilişkilendirmek için `--session s_...` kullanın. Docker Compose kullanıcıları repository kökünden çalıştırdığında CLI varsayılan paylaşılan token yolunu algılar; controller farklı bir runtime dosya sistemi kullanıyorsa `--token-file <path>` verilebilir. `--direct` controller katmanını atlar ve yalnızca yerel çağrılar içindir.
 
 ## Prompt şablonları
 

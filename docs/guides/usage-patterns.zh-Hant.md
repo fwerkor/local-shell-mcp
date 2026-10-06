@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 0b086e03bb7fd910e016db31a703908be74f7858846c091c8e784a62e00ec6ca -->
+<!-- i18n-source-sha256: f471795a57e16e999999f856000b779183d5b6c642ffc8c852c77e7faf3bc0dd -->
 # 使用模式與提示詞指南
 
 `local-shell-mcp` 暴露的是強工具集。好的結果依賴清晰的工作方式：先檢查，再小步行動，隨後驗證，並說明改動了什麼。
@@ -29,6 +29,17 @@
 | 瀏覽器證據 | `browser_snapshot`、`browser_run_script` | 只根據頁面名或路由猜測 |
 | 可下載產物 | `link_create` | 在聊天中粘貼大型二進制內容 |
 | 遠端機器任務 | 一般工具加 `machine`，以及 `remote_transfer` | 在出站 worker 模式足夠時開放入站 SSH |
+
+## 從 CLI 呼叫工具
+
+對 shell 指令碼與 CI，`lsm call <tool>` 會透過正在執行的本機 loopback controller 呼叫同一套已註冊工具，因此遠端 worker 與 controller 狀態都能保留。
+
+```bash
+lsm call run_shell --json '{"command":"uname -a"}'
+printf '%s\n' '{"path":"README.md"}' | lsm call file_read
+```
+
+使用 `--session s_...` 可將呼叫關聯到 Logical Session。Docker Compose 使用者可在 repository 根目錄執行（CLI 會偵測預設共享 token 路徑）；若 controller 使用不同的 runtime 檔案系統，也可傳入 `--token-file <path>`。`--direct` 會繞過 controller，且僅支援本機呼叫。
 
 ## 提示詞模板
 

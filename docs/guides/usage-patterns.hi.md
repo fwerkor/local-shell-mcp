@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 0b086e03bb7fd910e016db31a703908be74f7858846c091c8e784a62e00ec6ca -->
+<!-- i18n-source-sha256: f471795a57e16e999999f856000b779183d5b6c642ffc8c852c77e7faf3bc0dd -->
 # उपयोग पैटर्न और prompting guide
 
 `local-shell-mcp` शक्तिशाली tools देता है। अच्छे परिणामों के लिए model से पहले निरीक्षण, छोटे कदमों में कार्य, verification और बदली चीजों की रिपोर्ट माँगें।
@@ -29,6 +29,17 @@
 | Browser evidence | `browser_snapshot`, `browser_run_script` | page name/route से अनुमान लगाना |
 | Downloadable artifacts | `link_create` | बड़ा binary content chat में paste करना |
 | Remote machine work | normal tools with `machine`, plus `remote_transfer` | outbound worker पर्याप्त होने पर inbound SSH खोलना |
+
+## CLI से tools कॉल करना
+
+shell scripts और CI के लिए `lsm call <tool>` चल रहे loopback controller के माध्यम से वही registered tool surface कॉल करता है, इसलिए remote workers और controller state सुरक्षित रहती है।
+
+```bash
+lsm call run_shell --json '{"command":"uname -a"}'
+printf '%s\n' '{"path":"README.md"}' | lsm call file_read
+```
+
+कॉल को Logical Session से जोड़ने के लिए `--session s_...` इस्तेमाल करें। Docker Compose में repository root से चलाने पर CLI default shared token path पहचान लेता है; यदि controller अलग runtime filesystem इस्तेमाल करता है तो `--token-file <path>` दें। `--direct` controller को bypass करता है और केवल local calls के लिए है।
 
 ## Prompt templates
 

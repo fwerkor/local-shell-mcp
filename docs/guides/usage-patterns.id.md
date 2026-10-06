@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 0b086e03bb7fd910e016db31a703908be74f7858846c091c8e784a62e00ec6ca -->
+<!-- i18n-source-sha256: f471795a57e16e999999f856000b779183d5b6c642ffc8c852c77e7faf3bc0dd -->
 # Pola penggunaan dan panduan prompting
 
 `local-shell-mcp` menyediakan tools yang kuat. Hasil yang baik bergantung pada meminta model menginspeksi terlebih dahulu, bertindak dalam langkah kecil, melakukan verifikasi, dan melaporkan perubahan.
@@ -29,6 +29,17 @@ Gunakan loop ini untuk sebagian besar task coding:
 | Browser evidence | `browser_snapshot`, `browser_run_script` | Menebak dari nama page/route |
 | Downloadable artifacts | `link_create` | Menempel binary content besar ke chat |
 | Remote machine work | normal tools with `machine`, plus `remote_transfer` | Membuka inbound SSH saat outbound worker sudah cukup |
+
+## Memanggil tool dari CLI
+
+Untuk shell script dan CI, `lsm call <tool>` memanggil permukaan tool terdaftar yang sama melalui loopback controller yang sedang berjalan, sehingga remote worker dan state controller tetap dipertahankan.
+
+```bash
+lsm call run_shell --json '{"command":"uname -a"}'
+printf '%s\n' '{"path":"README.md"}' | lsm call file_read
+```
+
+Gunakan `--session s_...` untuk mengaitkan panggilan dengan Logical Session. Pengguna Docker Compose dapat menjalankannya dari root repository agar CLI mendeteksi path token bersama default, atau memakai `--token-file <path>` jika controller menggunakan filesystem runtime yang berbeda. `--direct` melewati controller dan hanya berlaku untuk panggilan lokal.
 
 ## Template prompt
 

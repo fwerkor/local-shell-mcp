@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 0b086e03bb7fd910e016db31a703908be74f7858846c091c8e784a62e00ec6ca -->
+<!-- i18n-source-sha256: f471795a57e16e999999f856000b779183d5b6c642ffc8c852c77e7faf3bc0dd -->
 # 利用パターンと prompt ガイド
 
 `local-shell-mcp` は強力な tools を公開します。良い結果を得るには、まず inspect し、小さな step で操作し、verification を実行し、変更内容を報告するようモデルに指示します。
@@ -29,6 +29,17 @@
 | browser evidence | `browser_snapshot`, `browser_run_script` | page name/route から推測 |
 | downloadable artifacts | `link_create` | 大きな binary content を chat に貼る |
 | remote machine work | normal tools with `machine`, plus `remote_transfer` | outbound worker で足りるのに inbound SSH を開く |
+
+## CLI からツールを呼び出す
+
+シェルスクリプトや CI では、`lsm call <tool>` が実行中の loopback controller 経由で同じ登録済みツール群を呼び出すため、remote worker と controller の状態が維持されます。
+
+```bash
+lsm call run_shell --json '{"command":"uname -a"}'
+printf '%s\n' '{"path":"README.md"}' | lsm call file_read
+```
+
+`--session s_...` を使うと呼び出しを Logical Session に関連付けられます。Docker Compose では repository ルートから実行すれば既定の共有 token パスが自動検出されます。controller が別の runtime ファイルシステムを使う場合は `--token-file <path>` を指定できます。`--direct` は controller を経由せず、ローカル専用です。
 
 ## Prompt テンプレート
 

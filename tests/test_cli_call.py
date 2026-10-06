@@ -12,7 +12,7 @@ from starlette.requests import Request
 import local_shell_mcp.cli_call as cli_call
 import local_shell_mcp.settings as settings_module
 import local_shell_mcp.tools as tools_module
-from local_shell_mcp.auth import verify_request
+from local_shell_mcp.auth import _CURRENT_PRINCIPAL, Principal, verify_request
 from local_shell_mcp.ui_security import UI_LOCAL_TOKEN_HEADER, get_or_create_ui_local_token
 
 
@@ -70,6 +70,12 @@ def test_validate_loopback_mcp_url():
     assert cli_call._validate_loopback_mcp_url("http://localhost:8765/mcp") == (
         "http://localhost:8765/mcp"
     )
+    assert cli_call._validate_loopback_mcp_url("http://127.0.0.2:8765/mcp") == (
+        "http://127.0.0.2:8765/mcp"
+    )
+    assert cli_call._validate_loopback_mcp_url("http://[::1]:8765/mcp") == (
+        "http://[::1]:8765/mcp"
+    )
     with pytest.raises(ValueError, match="loopback"):
         cli_call._validate_loopback_mcp_url("https://example.com/mcp")
     with pytest.raises(ValueError, match="/mcp"):
@@ -79,11 +85,16 @@ def test_validate_loopback_mcp_url():
 def test_run_call_cli_controller_output_session_and_failure(monkeypatch, capsys):
     calls = []
 
-    async def fake_call(url, tool, arguments):
-        calls.append((url, tool, arguments))
+    async def fake_call(url, tool, arguments, *, local_token, sse_read_timeout):
+        calls.append((url, tool, arguments, local_token, sse_read_timeout))
         return {"ok": True, "data": {"stdout": "ok"}}, False
 
-    monkeypatch.setattr(cli_call, "get_settings", lambda: SimpleNamespace(port=9999))
+    monkeypatch.setattr(
+        cli_call,
+        "get_settings",
+        lambda: SimpleNamespace(port=9999, host="127.0.0.2", max_timeout_s=900),
+    )
+    monkeypatch.setattr(cli_call, "_resolve_local_token", lambda settings, token_file: "secret")
     monkeypatch.setattr(cli_call, "_call_controller", fake_call)
 
     cli_call.run_call_cli(
@@ -92,14 +103,16 @@ def test_run_call_cli_controller_output_session_and_failure(monkeypatch, capsys)
 
     assert calls == [
         (
-            "http://127.0.0.1:9999/mcp",
+            "http://127.0.0.2:9999/mcp",
             "run_shell",
             {"command": "printf ok", "logical_session_id": "s_demo"},
+            "secret",
+            960.0,
         )
     ]
     assert json.loads(capsys.readouterr().out) == {"ok": True, "data": {"stdout": "ok"}}
 
-    async def fake_failure(url, tool, arguments):
+    async def fake_failure(url, tool, arguments, **kwargs):
         return {"ok": False, "message": "boom"}, True
 
     monkeypatch.setattr(cli_call, "_call_controller", fake_failure)
@@ -116,14 +129,19 @@ def test_run_call_cli_direct_and_runtime_error(monkeypatch, capsys):
         calls.append((tool, arguments))
         return {"ok": True}, False
 
-    monkeypatch.setattr(cli_call, "get_settings", lambda: SimpleNamespace(port=8765))
+    monkeypatch.setattr(
+        cli_call,
+        "get_settings",
+        lambda: SimpleNamespace(port=8765, host="0.0.0.0", max_timeout_s=3600),
+    )
+    monkeypatch.setattr(cli_call, "_resolve_local_token", lambda settings, token_file: "secret")
     monkeypatch.setattr(cli_call, "_call_direct", fake_direct)
 
     cli_call.run_call_cli(["environment_get", "--direct", "--json", "{}"])
     assert calls == [("environment_get", {})]
     assert json.loads(capsys.readouterr().out) == {"ok": True}
 
-    async def explode(url, tool, arguments):
+    async def explode(url, tool, arguments, **kwargs):
         raise RuntimeError("controller unavailable")
 
     monkeypatch.setattr(cli_call, "_call_controller", explode)
@@ -176,6 +194,12 @@ def test_normalize_mcp_and_direct_results():
         {"isError": True, "content": []},
         True,
     )
+    assert cli_call._normalize_mcp_result(
+        {"structuredContent": {"ok": True, "data": {"ok": False, "exit_code": 1}}}
+    ) == ({"ok": True, "data": {"ok": False, "exit_code": 1}}, True)
+    assert cli_call._normalize_direct_result(
+        ([], {"ok": True, "data": {"ok": False, "exit_code": 2}})
+    ) == ({"ok": True, "data": {"ok": False, "exit_code": 2}}, True)
     assert cli_call._jsonable((1, [2], {"three": 3})) == [1, [2], {"three": 3}]
 
 
@@ -212,23 +236,27 @@ def test_call_controller_uses_local_token_and_mcp_session(monkeypatch):
                 }
             )
 
-    def fake_transport(url, headers):
-        calls.append(("transport", url, headers))
+    def fake_transport(url, headers, sse_read_timeout):
+        calls.append(("transport", url, headers, sse_read_timeout))
         return Streams()
 
-    monkeypatch.setattr(cli_call, "get_or_create_ui_local_token", lambda: "local-secret")
     monkeypatch.setattr(cli_call, "streamablehttp_client", fake_transport)
     monkeypatch.setattr(cli_call, "ClientSession", Session)
 
     assert asyncio.run(
         cli_call._call_controller(
-            "http://127.0.0.1:8765/mcp", "environment_get", {"logical_session_id": None}
+            "http://127.0.0.1:8765/mcp",
+            "environment_get",
+            {"logical_session_id": None},
+            local_token="local-secret",
+            sse_read_timeout=3660.0,
         )
     ) == ({"ok": True, "data": {"value": 7}}, False)
     assert calls[0] == (
         "transport",
         "http://127.0.0.1:8765/mcp",
         {UI_LOCAL_TOKEN_HEADER: "local-secret"},
+        3660.0,
     )
     assert ("call-tool", "environment_get", {"logical_session_id": None}) in calls
 
@@ -248,7 +276,12 @@ def test_call_direct_reuses_registered_tool_surface(monkeypatch):
 
 
 def test_run_call_cli_rejects_bad_input_url_and_handles_interrupt(monkeypatch, capsys):
-    monkeypatch.setattr(cli_call, "get_settings", lambda: SimpleNamespace(port=8765))
+    monkeypatch.setattr(
+        cli_call,
+        "get_settings",
+        lambda: SimpleNamespace(port=8765, host="127.0.0.1", max_timeout_s=3600),
+    )
+    monkeypatch.setattr(cli_call, "_resolve_local_token", lambda settings, token_file: "secret")
 
     with pytest.raises(SystemExit) as exc:
         cli_call.run_call_cli(["environment_get", "--json", "[]"])
@@ -260,7 +293,13 @@ def test_run_call_cli_rejects_bad_input_url_and_handles_interrupt(monkeypatch, c
         )
     assert exc.value.code == 2
 
-    async def interrupted(url, tool, arguments):
+    with pytest.raises(SystemExit) as exc:
+        cli_call.run_call_cli(
+            ["environment_get", "--json", "{}", "--read-timeout", "0"]
+        )
+    assert exc.value.code == 2
+
+    async def interrupted(url, tool, arguments, **kwargs):
         raise KeyboardInterrupt
 
     monkeypatch.setattr(cli_call, "_call_controller", interrupted)
@@ -268,6 +307,64 @@ def test_run_call_cli_rejects_bad_input_url_and_handles_interrupt(monkeypatch, c
         cli_call.run_call_cli(["environment_get", "--json", "{}"])
     assert exc.value.code == 130
     assert "usage:" in capsys.readouterr().err
+
+
+def test_default_controller_url_respects_loopback_bind():
+    assert cli_call._default_controller_url(SimpleNamespace(host="127.0.0.2", port=9000)) == (
+        "http://127.0.0.2:9000/mcp"
+    )
+    assert cli_call._default_controller_url(SimpleNamespace(host="::1", port=9000)) == (
+        "http://[::1]:9000/mcp"
+    )
+    assert cli_call._default_controller_url(SimpleNamespace(host="0.0.0.0", port=9000)) == (
+        "http://127.0.0.1:9000/mcp"
+    )
+    assert cli_call._default_controller_url(SimpleNamespace(host="not-an-ip", port=9000)) == (
+        "http://127.0.0.1:9000/mcp"
+    )
+
+
+def test_resolve_local_token_supports_shared_files_and_compose(tmp_path, monkeypatch):
+    explicit = tmp_path / "token"
+    explicit.write_text("x" * 40, encoding="utf-8")
+    settings = SimpleNamespace()
+    assert cli_call._resolve_local_token(settings, str(explicit)) == "x" * 40
+
+    monkeypatch.setenv(cli_call.CLI_TOKEN_FILE_ENV, str(explicit))
+    assert cli_call._resolve_local_token(settings, None) == "x" * 40
+    monkeypatch.delenv(cli_call.CLI_TOKEN_FILE_ENV)
+
+    monkeypatch.setattr(cli_call, "get_ui_local_token", lambda: "z" * 40)
+    assert cli_call._resolve_local_token(settings, None) == "z" * 40
+
+    monkeypatch.setattr(cli_call, "get_ui_local_token", lambda: None)
+    compose = tmp_path / "workspaces" / "default" / ".local-shell-mcp" / "ui"
+    compose.mkdir(parents=True)
+    (compose / "local-token").write_text("y" * 40, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert cli_call._resolve_local_token(settings, None) == "y" * 40
+
+    (compose / "local-token").unlink()
+    with pytest.raises(ValueError, match="no controller local credential"):
+        cli_call._resolve_local_token(settings, None)
+    with pytest.raises(ValueError, match="unable to read"):
+        cli_call._read_token_file(tmp_path / "missing")
+    short = tmp_path / "short-token"
+    short.write_text("short", encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid"):
+        cli_call._read_token_file(short)
+
+
+def test_trusted_local_principal_can_use_existing_sessions(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch, auth_mode="oauth")
+    token = _CURRENT_PRINCIPAL.set(
+        Principal(email="localhost", subject="native-tui", claims={"auth": "native-tui"})
+    )
+    try:
+        assert tools_module._current_session_subject() is None
+        assert tools_module._current_session_subject(create=True) == "local-user"
+    finally:
+        _CURRENT_PRINCIPAL.reset(token)
 
 
 def test_local_token_authenticates_loopback_mcp_only(tmp_path, monkeypatch):

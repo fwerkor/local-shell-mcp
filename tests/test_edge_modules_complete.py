@@ -503,14 +503,17 @@ def test_ui_security_creation_races_and_loopback(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     inherited = "i" * 32
     monkeypatch.setenv(ui_security.UI_LOCAL_TOKEN_ENV, inherited)
+    assert ui_security.get_ui_local_token() == inherited
     assert ui_security.get_or_create_ui_local_token() == inherited
     monkeypatch.delenv(ui_security.UI_LOCAL_TOKEN_ENV)
 
     path = ui_security._token_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("e" * 32, encoding="utf-8")
+    assert ui_security.get_ui_local_token() == "e" * 32
     assert ui_security.get_or_create_ui_local_token() == "e" * 32
     path.write_text("short", encoding="utf-8")
+    assert ui_security.get_ui_local_token() is None
     assert ui_security._read_token(path) is None
 
     real_open = os.open
