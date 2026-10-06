@@ -2481,6 +2481,8 @@ def _tmux_input_may_be_prefix(data: bytes) -> bool:
 
 def _validate_tui_api_base(value: str) -> str:
     normalized = str(value).rstrip("/")
+    if "\\" in normalized:
+        raise ValueError("Native TUI --api-base must use a loopback HTTP(S) URL")
     parsed = urlsplit(normalized)
     host = parsed.hostname or ""
     loopback = "%" not in host and host.lower() == "localhost"

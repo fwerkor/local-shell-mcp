@@ -114,7 +114,6 @@ def _parse_dotenv_value(raw: str, *, variables: dict[str, str] | None = None) ->
                     "t": "\t",
                     '"': '"',
                     "\\": "\\",
-                    "$": "$$",
                 }
                 replacement = escapes.get(char)
                 if replacement is None:
@@ -128,10 +127,20 @@ def _parse_dotenv_value(raw: str, *, variables: dict[str, str] | None = None) ->
                 continue
             if char == quote:
                 parsed = "".join(chars)
-                return parsed if quote == "'" else _interpolate_dotenv(parsed, variables)
+                return (
+                    parsed
+                    if quote == "'"
+                    else _interpolate_dotenv(
+                        parsed, variables, escaped_dollars=True
+                    )
+                )
             chars.append(char)
         parsed = "".join(chars)
-        return parsed if quote == "'" else _interpolate_dotenv(parsed, variables)
+        return (
+            parsed
+            if quote == "'"
+            else _interpolate_dotenv(parsed, variables, escaped_dollars=True)
+        )
     for index, char in enumerate(value):
         if char == "#" and index > 0 and value[index - 1].isspace():
             value = value[:index].rstrip()
@@ -139,7 +148,13 @@ def _parse_dotenv_value(raw: str, *, variables: dict[str, str] | None = None) ->
     return _interpolate_dotenv(value, variables)
 
 
-def _interpolate_dotenv(value: str, variables: dict[str, str], *, depth: int = 0) -> str:
+def _interpolate_dotenv(
+    value: str,
+    variables: dict[str, str],
+    *,
+    depth: int = 0,
+    escaped_dollars: bool = False,
+) -> str:
     """Expand Docker Compose-style variables in .env values."""
 
     if depth > 20:
@@ -147,6 +162,15 @@ def _interpolate_dotenv(value: str, variables: dict[str, str], *, depth: int = 0
     output: list[str] = []
     index = 0
     while index < len(value):
+        if (
+            escaped_dollars
+            and value[index] == "\\"
+            and index + 1 < len(value)
+            and value[index + 1] == "$"
+        ):
+            output.append("$")
+            index += 2
+            continue
         if value[index] != "$":
             output.append(value[index])
             index += 1
@@ -160,11 +184,20 @@ def _interpolate_dotenv(value: str, variables: dict[str, str], *, depth: int = 0
             index += 2
             continue
         if next_char == "{":
-            end = _dotenv_interpolation_end(value, index + 2)
+            end = _dotenv_interpolation_end(
+                value, index + 2, escaped_dollars=escaped_dollars
+            )
             if end is None:
                 raise ValueError("invalid dotenv interpolation: missing '}'")
             expression = value[index + 2 : end]
-            output.append(_resolve_dotenv_expression(expression, variables, depth=depth + 1))
+            output.append(
+                _resolve_dotenv_expression(
+                    expression,
+                    variables,
+                    depth=depth + 1,
+                    escaped_dollars=escaped_dollars,
+                )
+            )
             index = end + 1
             continue
         if next_char.isalpha() or next_char == "_":
@@ -179,10 +212,20 @@ def _interpolate_dotenv(value: str, variables: dict[str, str], *, depth: int = 0
     return "".join(output)
 
 
-def _dotenv_interpolation_end(value: str, start: int) -> int | None:
+def _dotenv_interpolation_end(
+    value: str, start: int, *, escaped_dollars: bool = False
+) -> int | None:
     nested = 0
     index = start
     while index < len(value):
+        if (
+            escaped_dollars
+            and value[index] == "\\"
+            and index + 1 < len(value)
+            and value[index + 1] == "$"
+        ):
+            index += 2
+            continue
         if value.startswith("${", index):
             nested += 1
             index += 2
@@ -196,7 +239,11 @@ def _dotenv_interpolation_end(value: str, start: int) -> int | None:
 
 
 def _resolve_dotenv_expression(
-    expression: str, variables: dict[str, str], *, depth: int
+    expression: str,
+    variables: dict[str, str],
+    *,
+    depth: int,
+    escaped_dollars: bool = False,
 ) -> str:
     if not expression or not (expression[0].isalpha() or expression[0] == "_"):
         raise ValueError(f"invalid dotenv interpolation: ${{{expression}}}")
@@ -227,18 +274,41 @@ def _resolve_dotenv_expression(
     missing = not is_set or (use_empty_as_unset and current == "")
 
     if operator in {":-", "-"}:
-        return _interpolate_dotenv(payload, variables, depth=depth) if missing else current
+        return (
+            _interpolate_dotenv(
+                payload,
+                variables,
+                depth=depth,
+                escaped_dollars=escaped_dollars,
+            )
+            if missing
+            else current
+        )
     if operator in {":?", "?"}:
         if missing:
             detail = (
-                _interpolate_dotenv(payload, variables, depth=depth)
+                _interpolate_dotenv(
+                    payload,
+                    variables,
+                    depth=depth,
+                    escaped_dollars=escaped_dollars,
+                )
                 if payload
                 else "required variable is not set"
             )
             raise ValueError(f"{name}: {detail}")
         return current
     if operator in {":+", "+"}:
-        return "" if missing else _interpolate_dotenv(payload, variables, depth=depth)
+        return (
+            ""
+            if missing
+            else _interpolate_dotenv(
+                payload,
+                variables,
+                depth=depth,
+                escaped_dollars=escaped_dollars,
+            )
+        )
     raise ValueError(f"invalid dotenv interpolation: ${{{expression}}}")
 
 
