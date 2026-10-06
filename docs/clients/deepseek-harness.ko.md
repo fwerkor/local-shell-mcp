@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 6fa729155fcc9e524eb3f8081b80d40ceb72c59f5ece4b311809350005468851 -->
+<!-- i18n-source-sha256: 9deaf97f0af15e7af335b40fcf9fe8bc468623d1947e6f8c9afaf7dfaebcc036 -->
 # DeepSeek Harness (DSH)
 
 `local-shell-mcp`는 DeepSeek Harness Web profile에 직접 설치할 수 있습니다. repository의 DSH-aware bridge는 전체 LSM tool surface를 유지하고 각 DSH Session을 안정적인 v4 logical-session identity에 매핑하며 **Live Workspace**를 native DSH conversation view로 추가합니다. local/remote machine, logical Session/Goal Plan, persistent terminal, job, browser session, Dynamic MCP, file link, audit, Live Workspace timeline을 포함한 execution state의 authority는 계속 LSM controller입니다.
@@ -33,13 +33,13 @@ local-shell-mcp :8765
 local-shell-mcp --mode mcp
 ```
 
-그 다음 이 repository를 DSH Web profile에 설치합니다.
+그 다음 전용 DSH npm package를 DSH Web profile에 설치합니다.
 
 ```bash
-dsh plugin --profile web add 'github:fwerkor/local-shell-mcp#main'
+dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
-production에서는 Git spec을 검토된 release tag/commit으로 pin하세요. checkout 개발에서는 현재 directory를 설치할 수 있습니다.
+DSH npm package는 LSM과 동일한 release version을 사용합니다. checkout 개발에서는 현재 directory를 설치할 수 있습니다.
 
 ```bash
 dsh plugin --profile web add .

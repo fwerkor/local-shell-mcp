@@ -25,6 +25,8 @@ def test_dsh_package_declares_dual_face_bundle_and_matches_python_version() -> N
     project = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))["project"]
 
     assert package["name"] == "local-shell-mcp-dsh"
+    assert package.get("private") is not True
+    assert package["publishConfig"]["access"] == "public"
     assert package["version"] == project["version"]
     assert package["type"] == "module"
     assert package["main"] == "./dsh/index.js"
