@@ -1,4 +1,5 @@
 import hashlib
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -39,10 +40,12 @@ def test_compose_cli_credential_rotation_rewrites_existing_assignments(tmp_path)
         'LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=old-verifier\n',
         encoding='utf-8',
     )
-    env_path.chmod(0o644)
+    if os.name != 'nt':
+        env_path.chmod(0o644)
     script = Path(__file__).parents[1] / 'scripts' / 'init_compose_env.py'
     initial_inode = env_path.stat().st_ino
-    assert env_path.stat().st_mode & 0o777 == 0o644
+    if os.name != 'nt':
+        assert env_path.stat().st_mode & 0o777 == 0o644
 
     subprocess.run([sys.executable, str(script), str(env_path)], check=True, capture_output=True)
     first_inode = env_path.stat().st_ino
@@ -69,4 +72,5 @@ def test_compose_cli_credential_rotation_rewrites_existing_assignments(tmp_path)
     assert lines.count(f'LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256={second_verifier}') == 1
     assert not any(first_token in line or first_verifier in line for line in lines)
     assert 'KEEP=value' in lines
-    assert env_path.stat().st_mode & 0o777 == 0o600
+    if os.name != 'nt':
+        assert env_path.stat().st_mode & 0o777 == 0o600
