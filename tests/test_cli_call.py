@@ -160,6 +160,10 @@ def test_normalize_mcp_and_direct_results():
             }
         )
     ) == ({"ok": True, "data": {"value": 2}}, False)
+    assert cli_call._normalize_direct_result({"ok": True, "data": {"plain": True}}) == (
+        {"ok": True, "data": {"plain": True}},
+        False,
+    )
     assert cli_call._normalize_mcp_result(
         SimpleNamespace(
             model_dump=lambda **kwargs: {
@@ -168,6 +172,10 @@ def test_normalize_mcp_and_direct_results():
             }
         )
     ) == ({"ok": False, "message": "bad"}, True)
+    assert cli_call._normalize_mcp_result({"isError": True, "content": []}) == (
+        {"isError": True, "content": []},
+        True,
+    )
     assert cli_call._jsonable((1, [2], {"three": 3})) == [1, [2], {"three": 3}]
 
 
