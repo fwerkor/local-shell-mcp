@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 0b086e03bb7fd910e016db31a703908be74f7858846c091c8e784a62e00ec6ca -->
+<!-- i18n-source-sha256: 382c9edbbba8fa4fb3aab11dcc4127ba80bff8c7104bdedffdf66b9bbcdb744a -->
 # Pola penggunaan dan panduan prompting
 
 `local-shell-mcp` menyediakan tools yang kuat. Hasil yang baik bergantung pada meminta model menginspeksi terlebih dahulu, bertindak dalam langkah kecil, melakukan verifikasi, dan melaporkan perubahan.
@@ -29,6 +29,17 @@ Gunakan loop ini untuk sebagian besar task coding:
 | Browser evidence | `browser_snapshot`, `browser_run_script` | Menebak dari nama page/route |
 | Downloadable artifacts | `link_create` | Menempel binary content besar ke chat |
 | Remote machine work | normal tools with `machine`, plus `remote_transfer` | Membuka inbound SSH saat outbound worker sudah cukup |
+
+## Memanggil tool dari CLI
+
+Untuk shell script dan CI, `lsm call <tool>` memanggil permukaan tool terdaftar yang sama melalui loopback controller yang sedang berjalan, sehingga remote worker dan state controller tetap dipertahankan.
+
+```bash
+lsm call run_shell --json '{"command":"uname -a"}'
+printf '%s\n' '{"path":"README.md"}' | lsm call file_read
+```
+
+Gunakan `--session s_...` untuk mengaitkan panggilan dengan Logical Session. Pada setup Docker Compose yang didokumentasikan, `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN` mentah hanya berada di `.env` milik host yang izinnya dibatasi, sedangkan Compose hanya meneruskan verifier SHA-256 ke controller; layout runtime terpisah lainnya dapat memakai `--token-file <path>`. `--direct` melewati controller, menerapkan pengaturan runtime dari `.env` saat ini di dalam proses, tidak menyuntikkan token CLI host ke lingkungan tool, dan hanya berlaku untuk panggilan lokal. Token Human UI tidak pernah diterima oleh `/mcp`; controller pada runtime terpisah harus mengonfigurasi `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256` yang cocok.
 
 ## Template prompt
 

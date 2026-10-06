@@ -109,13 +109,18 @@ def test_stateless_without_oauth_does_not_require_jwt_secret(tmp_path, monkeypat
     assert settings.auth_mode == "none"
 
 
-def test_stateless_ui_local_token_uses_state_backend(tmp_path, monkeypatch):
+def test_stateless_ui_local_token_remains_process_local(tmp_path, monkeypatch):
     _configure_stateless(tmp_path, monkeypatch)
 
-    token = ui_security.get_or_create_ui_local_token()
+    token = ui_security.issue_ui_local_token(
+        email=None, subject="test", scopes=("shell:read",)
+    )
 
     assert len(token) >= 32
-    assert get_state_store().read_bytes("ui/local-token") == token.encode("utf-8")
+    assert len(ui_security._UI_LOCAL_TOKENS) == 1
+    ui_security.revoke_ui_local_token(token)
+    assert not ui_security._UI_LOCAL_TOKENS
+    assert get_state_store().read_bytes("ui/local-token") is None
     assert not get_settings().state_dir.exists()
 
 

@@ -29,10 +29,13 @@ The exact image content should be treated as a convenience layer, not a stable A
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
+python scripts/init_compose_env.py
 mkdir -p workspaces/default
 docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
+
+The raw CLI token stays only in the host-owned `.env` (mode `0600`). Compose passes only its SHA-256 verifier into the container. This lets `lsm call` authenticate across the Docker published-port bridge without exposing a reusable privileged token to managed shell processes inside the container.
 
 The default Compose file binds the service to localhost:
 

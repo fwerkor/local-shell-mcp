@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 56d5f11100a1906c167afd36354f29742515a26289c62a03f044f3852ce2eaed -->
+<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
 # Docker Compose runtime
 
 Docker Compose çoğu kullanıcı için önerilen runtime’dır. Modele kontrollü Linux workspace, reproducible toolchain, persistent credentials, browser automation desteği ve kolay upgrade yolu sağlar.
@@ -30,10 +30,13 @@ Exact image content bir convenience layer’dır, stable API değildir. Project-
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
+python scripts/init_compose_env.py
 mkdir -p workspaces/default
 docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
+
+Ham CLI token yalnızca host tarafından sahip olunan `.env` dosyasında (mod `0600`) kalır. Compose container’a yalnızca SHA-256 doğrulayıcısını aktarır. Böylece `lsm call`, Docker’ın yayımlanmış port köprüsü üzerinden kimlik doğrulayabilir ve container içindeki yönetilen shell süreçlerine yeniden kullanılabilir ayrıcalıklı bir token açığa çıkarmaz.
 
 Default Compose file service’i localhost’a bind eder:
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 1cb4dc6f53744372145fad4e03a3d413bf105033e13844fea7684ea5f601d6ca -->
+<!-- i18n-source-sha256: 5f07217e742810704f1919224f6cf68bf7b4f5ecf635fadd5ec4d21b072ce6b2 -->
 # Пользовательский интерфейс
 
 `local-shell-mcp` предоставляет два совместимых пользовательских интерфейса поверх одного service API, workspace, реестра persistent terminals, реестра remote workers и MCP audit log:
@@ -124,7 +124,7 @@ Activity объединяет текущие оповещения с недав�
 local-shell-mcp tui
 ```
 
-Нативный TUI не требует входа от человека-оператора. Launcher прозрачно передаёт сгенерированную локальную учётную запись loopback API. Она хранится в настроенном state directory с правами только владельца; reverse proxy, подключающийся через loopback, этот bypass не получает.
+Нативный TUI не требует входа от человека-оператора. В документированной конфигурации Docker Compose launcher повторно использует выделенную CLI credential, хранящуюся только на хосте, для Human UI API через loopback; в других split-runtime конфигурациях можно использовать `--token-file`. Запущенные из браузера экземпляры OpenTUI используют credential внутри процесса controller, которая создаётся лениво и никогда не сохраняется в state directory или state backend. Reverse proxy не получает ни один из этих локальных bypass только из-за подключения через loopback.
 
 Source checkout также может запускать TUI после установки зависимостей Bun:
 

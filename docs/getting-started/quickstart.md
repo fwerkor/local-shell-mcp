@@ -18,6 +18,7 @@ This guide uses Docker Compose as the first runtime and ChatGPT as the first cli
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
+python scripts/init_compose_env.py
 ```
 
 Edit `.env`:

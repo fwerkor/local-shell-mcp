@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import inspect
+import ipaddress
 import json
 import subprocess
 import time
@@ -552,7 +553,12 @@ def _current_principal_allows(scope: str) -> bool:
     principal = current_principal()
     if principal is None:
         return True
-    if principal.claims.get("auth") in {"none", "native-tui", "localhost-bypass"}:
+    if principal.claims.get("auth") in {
+        "none",
+        "native-tui",
+        "local-cli",
+        "localhost-bypass",
+    }:
         return True
     return scope in principal_scopes(principal)
 
@@ -621,6 +627,23 @@ def _transport_security_settings() -> TransportSecuritySettings:
         "https://chatgpt.com",
         "https://chat.openai.com",
     }
+
+    configured_host = str(settings.host or "").strip()
+    configured_candidate = configured_host.strip("[]").split("%", 1)[0]
+    configured_loopback = configured_host.lower() == "localhost"
+    if not configured_loopback:
+        try:
+            configured_loopback = ipaddress.ip_address(configured_candidate).is_loopback
+        except ValueError:
+            configured_loopback = False
+    if configured_loopback:
+        if ":" in configured_candidate:
+            configured_transport_host = f"[{configured_candidate}]"
+        else:
+            configured_transport_host = configured_candidate
+        allowed_hosts.add(configured_transport_host)
+        allowed_hosts.add(f"{configured_transport_host}:*")
+        allowed_origins.add(f"http://{configured_transport_host}:*")
 
     if settings.public_base_url:
         parsed = urlparse(settings.public_base_url)
@@ -1196,7 +1219,7 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
             started_at = time.monotonic()
             live_manager = get_live_channel_manager()
             logical_manager = get_session_runtime_manager()
-            principal_subject = _current_principal_subject()
+            principal_subject = _current_session_subject()
             live_arguments = _live_event_arguments(__tool_name, safe_call_arguments)
             logical_lease = None
             normalized_tool_action = str(call_arguments.get("action") or "").strip().lower()
@@ -4365,6 +4388,24 @@ def _current_principal_subject() -> str:
     return principal.subject or principal.email or "mcp-client"
 
 
+def _current_session_subject(*, create: bool = False) -> str | None:
+    principal = current_principal()
+    if principal is None:
+        return _current_principal_subject()
+    if principal.claims.get("auth") not in {"native-tui", "local-cli", "localhost-bypass"}:
+        return principal.subject or principal.email or "mcp-client"
+    if not create:
+        # Trusted loopback clients mirror the human UI: an explicitly named
+        # Session may belong to any authenticated local principal.
+        return None
+    settings = get_settings()
+    if settings.auth_mode == "none":
+        return "anonymous"
+    if settings.auth_mode == "oauth":
+        return "local-user"
+    return "local-mcp-client"
+
+
 def _register_maintenance_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -> None:
     shell_read_meta = _oauth_meta(["shell:read"])
     shell_write_meta = _oauth_meta(["shell:read", "shell:write"])
@@ -4381,7 +4422,7 @@ def _register_maintenance_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -
         blockers: list[str] | None = None,
     ) -> ToolResult:
         """Manage one durable Logical Session. Start creates a new task and returns its session_id. Resume continues only the explicit session_id supplied by the user or already present in this conversation. All non-start actions require session_id. Actions: start, resume, get, report, finish, cancel, delete. report accepts summary/findings/next/blockers/objective/label. delete requires a terminal Session."""
-        subject = _current_principal_subject()
+        subject = _current_session_subject(create=action.strip().lower() == "start")
         result = await _tool_call(
             asyncio.to_thread,
             get_session_runtime_manager().manage,
@@ -4446,7 +4487,7 @@ def _register_maintenance_tools(mcp: FastMCP, read_only_tool: ToolAnnotations) -
             get_session_runtime_manager().manage_plan,
             session_id,
             action=action,
-            subject=_current_principal_subject(),
+            subject=_current_session_subject(),
             objective=objective,
             steps=steps,
             step_id=step_id,
@@ -4745,7 +4786,12 @@ def _register_live_workspace_tools(
         logical_session_id = None
         if session_id:
             try:
-                await asyncio.to_thread(session_manager.get, session_id, subject=subject)
+                session_subject = _current_session_subject()
+                owner_subject = await asyncio.to_thread(
+                    session_manager.owner_subject,
+                    session_id,
+                    subject=session_subject,
+                )
             except ValueError as exc:
                 if not app_reattach or not str(exc).startswith("Unknown logical session:"):
                     raise
@@ -4753,6 +4799,7 @@ def _register_live_workspace_tools(
                 get_live_channel_manager().detach_logical_session(session_id)
             else:
                 logical_session_id = session_id
+                subject = owner_subject
         channel, live_token = get_live_channel_manager().open(
             subject=subject,
             scopes=scopes,

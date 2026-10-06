@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 56d5f11100a1906c167afd36354f29742515a26289c62a03f044f3852ce2eaed -->
+<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
 # Docker Compose runtime
 
 Docker Compose는 대부분의 사용자에게 권장되는 runtime입니다. 모델에 제어된 Linux workspace, 재현 가능한 toolchain, persistent credentials, browser automation support, 쉬운 upgrade path를 제공합니다.
@@ -30,10 +30,13 @@ Image는 Playwright Python image를 기반으로 하며 폭넓은 development to
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
+python scripts/init_compose_env.py
 mkdir -p workspaces/default
 docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
+
+원본 CLI token은 호스트 소유 `.env`(모드 `0600`)에만 저장됩니다. Compose는 SHA-256 verifier만 컨테이너에 전달합니다. 따라서 `lsm call`은 Docker published-port bridge를 통해 인증할 수 있으면서 컨테이너 내부의 관리되는 shell 프로세스에 재사용 가능한 고권한 token을 노출하지 않습니다.
 
 Default Compose file은 service를 localhost에 bind합니다:
 

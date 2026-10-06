@@ -17,7 +17,7 @@ import local_shell_mcp.live_channel as live_channel_module
 import local_shell_mcp.live_channel_routes as live_routes
 import local_shell_mcp.session_runtime as session_runtime_module
 import local_shell_mcp.tools as tools_module
-from local_shell_mcp.auth import Principal
+from local_shell_mcp.auth import _CURRENT_PRINCIPAL, Principal
 from local_shell_mcp.live_channel import (
     LIVE_EVENT_LIMIT,
     LIVE_RESOURCE_COMPAT_URIS,
@@ -1045,6 +1045,37 @@ async def test_ambiguous_start_persistence_failure_retries_lease_cleanup(tmp_pat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("auth_type", ["local-cli", "native-tui"])
+async def test_trusted_local_workspace_open_uses_existing_session_owner(
+    tmp_path, monkeypatch, auth_type
+):
+    _configure(tmp_path, monkeypatch, auth="oauth")
+    sessions = session_runtime_module.get_session_runtime_manager()
+    started = sessions.manage("local-user", action="start", objective="Trusted local task")
+    session_id = started["session_id"]
+    mcp = build_mcp()
+
+    principal_token = _CURRENT_PRINCIPAL.set(
+        Principal(email="localhost", subject=auth_type, claims={"auth": auth_type})
+    )
+    try:
+        result = await mcp.call_tool(
+            "workspace_open", {"cwd": ".", "session_id": session_id}
+        )
+    finally:
+        _CURRENT_PRINCIPAL.reset(principal_token)
+
+    assert isinstance(result, CallToolResult)
+    assert result.isError is not True
+    channel = live_channel_module.get_live_channel_manager().by_id(
+        result.structuredContent["live_id"]
+    )
+    assert channel is not None
+    assert channel.logical_session_id == session_id
+    assert channel.subject == "local-user"
+
+
+@pytest.mark.asyncio
 async def test_live_workspace_keeps_model_and_human_mutations_collaborative(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth="none")
     mcp = build_mcp()
@@ -1709,21 +1740,21 @@ async def test_live_workspace_session_lookups_run_off_event_loop(tmp_path, monke
         objective="Reconnect target",
     )
     loop_thread = threading.get_ident()
-    get_threads: list[int] = []
-    original_get = manager.get
+    owner_threads: list[int] = []
+    original_owner_subject = manager.owner_subject
 
-    def observed_get(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
-        get_threads.append(threading.get_ident())
-        return original_get(*args, **kwargs)
+    def observed_owner_subject(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        owner_threads.append(threading.get_ident())
+        return original_owner_subject(*args, **kwargs)
 
-    monkeypatch.setattr(manager, "get", observed_get)
+    monkeypatch.setattr(manager, "owner_subject", observed_owner_subject)
     mcp = build_mcp()
     await mcp.call_tool(
         "live_workspace_reconnect",
         {"cwd": ".", "session_id": target["session_id"]},
     )
 
-    assert get_threads and all(thread_id != loop_thread for thread_id in get_threads)
+    assert owner_threads and all(thread_id != loop_thread for thread_id in owner_threads)
 
 
 def test_live_resource_fallbacks_and_explicit_channel_rebinding(tmp_path, monkeypatch):

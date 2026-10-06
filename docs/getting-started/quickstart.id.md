@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ae0d599bfb0c970b203b61f6f5dd022364b0fb13aab0d80ae1b92aaac2a06332 -->
+<!-- i18n-source-sha256: a3fdf9088031e6903b15497a3df881a8e6ed2f6f2b34dd4d0b68b0414a2ca81e -->
 # Mulai cepat
 
 Panduan ini memakai Docker Compose sebagai runtime pertama dan ChatGPT sebagai client pertama. Keduanya adalah pilihan terpisah: Docker, VS Code extension, binary, Python, dan stdio adalah opsi runtime; ChatGPT dan client MCP generik adalah opsi client. Lihat [pilihan runtime dan model deployment](../guides/deployment.md) untuk gambaran lengkap.
@@ -19,6 +19,7 @@ Panduan ini memakai Docker Compose sebagai runtime pertama dan ChatGPT sebagai c
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
+python scripts/init_compose_env.py
 ```
 
 Edit `.env`:

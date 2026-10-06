@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 0b086e03bb7fd910e016db31a703908be74f7858846c091c8e784a62e00ec6ca -->
+<!-- i18n-source-sha256: 382c9edbbba8fa4fb3aab11dcc4127ba80bff8c7104bdedffdf66b9bbcdb744a -->
 # 사용 패턴 및 prompt 가이드
 
 `local-shell-mcp`는 강력한 tools를 제공합니다. 좋은 결과를 얻으려면 먼저 inspect하고, 작은 단계로 행동하고, verification을 실행하고, 무엇이 바뀌었는지 보고하도록 모델에 요청해야 합니다.
@@ -29,6 +29,17 @@
 | browser evidence | `browser_snapshot`, `browser_run_script` | page name이나 route로 추측 |
 | downloadable artifacts | `link_create` | 큰 binary content를 chat에 붙여넣기 |
 | remote machine work | normal tools with `machine`, plus `remote_transfer` | outbound worker로 충분한데 inbound SSH 열기 |
+
+## CLI에서 도구 호출
+
+shell script와 CI에서는 `lsm call <tool>`이 실행 중인 loopback controller를 통해 동일한 등록 도구 표면을 호출하므로 remote worker와 controller 상태가 유지됩니다.
+
+```bash
+lsm call run_shell --json '{"command":"uname -a"}'
+printf '%s\n' '{"path":"README.md"}' | lsm call file_read
+```
+
+`--session s_...`으로 호출을 Logical Session에 연결할 수 있습니다. 문서화된 Docker Compose 구성에서는 원본 `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN`이 권한이 제한된 호스트 소유 `.env`에만 저장되고 Compose는 SHA-256 verifier만 controller에 전달합니다. 다른 분리 runtime 구성에서는 `--token-file <path>`를 사용할 수 있습니다. `--direct`는 controller를 우회하고 현재 `.env`의 runtime 설정을 프로세스 내부에 적용하지만 호스트 CLI token은 도구 환경에 주입하지 않으며 로컬 호출만 지원합니다. Human UI token은 `/mcp`에서 절대 허용되지 않으며, 분리 runtime의 controller에는 일치하는 `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256`을 설정해야 합니다.
 
 ## Prompt 템플릿
 

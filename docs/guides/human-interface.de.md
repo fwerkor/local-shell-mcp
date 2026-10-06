@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 1cb4dc6f53744372145fad4e03a3d413bf105033e13844fea7684ea5f601d6ca -->
+<!-- i18n-source-sha256: 5f07217e742810704f1919224f6cf68bf7b4f5ecf635fadd5ec4d21b072ce6b2 -->
 # Benutzeroberfläche
 
 `local-shell-mcp` bietet zwei kompatible Benutzerschnittstellen über derselben Service-API, demselben Workspace, Persistent-Terminal-Register, Remote-Worker-Register und MCP-Audit-Log:
@@ -124,7 +124,7 @@ Eigenständige Release-Executables enthalten die plattformspezifische OpenTUI-Ru
 local-shell-mcp tui
 ```
 
-Die native TUI verlangt vom menschlichen Bediener keine Anmeldung. Der Launcher übergibt transparent eine erzeugte lokale Berechtigung an die Loopback-API. Diese Berechtigung liegt im konfigurierten State Directory mit ausschließlich für den Eigentümer zugänglichen Rechten; ein Reverse Proxy, der über Loopback verbindet, erhält diesen Bypass nicht.
+Die native TUI verlangt vom menschlichen Bediener keine Anmeldung. Im dokumentierten Docker-Compose-Setup verwendet der Launcher für die Human-UI-API über Loopback dieselbe hostseitige dedizierte CLI-Berechtigung; für andere Split-Runtime-Layouts steht `--token-file` zur Verfügung. Vom Browser gestartete OpenTUI-Instanzen verwenden eine nur im Controller-Prozess gehaltene Berechtigung, die erst bei Bedarf erzeugt und weder im State Directory noch im State Backend gespeichert wird. Ein Reverse Proxy erhält keinen dieser lokalen Bypässe allein dadurch, dass er über Loopback verbindet.
 
 Ein Source-Checkout kann die TUI nach Installation der Bun-Abhängigkeiten ebenfalls ausführen:
 

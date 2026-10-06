@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 56d5f11100a1906c167afd36354f29742515a26289c62a03f044f3852ce2eaed -->
+<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
 # Runtime Docker Compose
 
 Docker Compose là runtime khuyến nghị cho phần lớn người dùng. Nó cung cấp cho model workspace Linux được kiểm soát, toolchain tái lập, persistent credentials, hỗ trợ browser automation và đường upgrade dễ dàng.
@@ -30,10 +30,13 @@ Exact image content là convenience layer, không phải stable API. Project-spe
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
+python scripts/init_compose_env.py
 mkdir -p workspaces/default
 docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
+
+CLI token gốc chỉ nằm trong `.env` thuộc sở hữu host (mode `0600`). Compose chỉ truyền bộ xác minh SHA-256 của token vào container. Nhờ đó `lsm call` có thể xác thực qua cầu nối cổng được Docker publish mà không để lộ token đặc quyền có thể tái sử dụng cho các tiến trình shell được quản lý trong container.
 
 Default Compose file bind service vào localhost:
 

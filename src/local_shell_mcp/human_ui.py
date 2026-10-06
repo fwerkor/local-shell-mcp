@@ -63,7 +63,13 @@ from .shell_ops import (
 )
 from .tmux_helper import resolve_tmux, tmux_socket_name
 from .tui_runtime import materialize_embedded_tui
-from .ui_security import UI_LOCAL_TOKEN_ENV, get_or_create_ui_local_token
+from .ui_security import (
+    CLI_LOCAL_TOKEN_ENV,
+    UI_LOCAL_TOKEN_ENV,
+    UI_LOCAL_TOKEN_FD_ENV,
+    issue_ui_local_token,
+    revoke_ui_local_token,
+)
 from .version import version_info
 
 UI_API_PREFIX = "/api/ui"
@@ -334,7 +340,7 @@ def _request_principal(request: Request) -> Principal:
 
 def _logical_session_subject(request: Request, *, create: bool = False) -> str | None:
     principal = _request_principal(request)
-    if principal.claims.get("auth") not in {"native-tui", "localhost-bypass"}:
+    if principal.claims.get("auth") not in {"native-tui", "local-cli", "localhost-bypass"}:
         return principal.subject or principal.email or "mcp-client"
     if not create:
         return None
@@ -357,7 +363,12 @@ def _require_ui_scopes(
 
 def _ui_principal_allows(request: Request, scope: str) -> bool:
     principal = _request_principal(request)
-    if principal.claims.get("auth") in {"none", "native-tui", "localhost-bypass"}:
+    if principal.claims.get("auth") in {
+        "none",
+        "native-tui",
+        "local-cli",
+        "localhost-bypass",
+    }:
         return True
     return scope in principal_scopes(principal)
 
@@ -1795,7 +1806,15 @@ def resolve_tui_command() -> list[str]:
 
 
 class _UnixPtyProcess:
-    def __init__(self, command: list[str], env: dict[str, str], cols: int, rows: int):
+    def __init__(
+        self,
+        command: list[str],
+        env: dict[str, str],
+        cols: int,
+        rows: int,
+        *,
+        ui_token: str | None = None,
+    ):
         import fcntl
         import pty
         import struct
@@ -1806,16 +1825,33 @@ class _UnixPtyProcess:
         self._termios = termios
         self.master_fd, slave_fd = pty.openpty()
         self.resize(cols, rows)
-        self.process = subprocess.Popen(
-            command,
-            stdin=slave_fd,
-            stdout=slave_fd,
-            stderr=slave_fd,
-            env=env,
-            close_fds=True,
-            start_new_session=True,
-        )
-        os.close(slave_fd)
+        token_read_fd: int | None = None
+        token_write_fd: int | None = None
+        child_env = dict(env)
+        pass_fds: tuple[int, ...] = ()
+        if ui_token:
+            token_read_fd, token_write_fd = os.pipe()
+            child_env[UI_LOCAL_TOKEN_FD_ENV] = str(token_read_fd)
+            pass_fds = (token_read_fd,)
+        try:
+            self.process = subprocess.Popen(
+                command,
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                env=child_env,
+                close_fds=True,
+                pass_fds=pass_fds,
+                start_new_session=True,
+            )
+            if token_write_fd is not None:
+                os.write(token_write_fd, ui_token.encode("utf-8"))
+        finally:
+            os.close(slave_fd)
+            if token_read_fd is not None:
+                os.close(token_read_fd)
+            if token_write_fd is not None:
+                os.close(token_write_fd)
         os.set_blocking(self.master_fd, False)
 
     def resize(self, cols: int, rows: int) -> None:
@@ -1944,9 +1980,15 @@ def _spawn_tui_process(
     cols: int,
     rows: int,
     cell_aspect: float = 2.0,
+    *,
+    ui_token: str | None = None,
 ):  # noqa: ANN201
     settings = get_settings()
     env = os.environ.copy()
+    env.pop(CLI_LOCAL_TOKEN_ENV, None)
+    env.pop("LOCAL_SHELL_MCP_CLI_TOKEN_FILE", None)
+    env.pop(UI_LOCAL_TOKEN_ENV, None)
+    env.pop(UI_LOCAL_TOKEN_FD_ENV, None)
     env.update(
         {
             "TERM": "xterm-256color",
@@ -1958,14 +2000,15 @@ def _spawn_tui_process(
             "TERM_PROGRAM_VERSION": "local-shell-mcp",
             "LOCAL_SHELL_MCP_UI_API_BASE": f"http://127.0.0.1:{settings.port}{UI_API_PREFIX}",
             "LOCAL_SHELL_MCP_UI_MODE": "web",
-            UI_LOCAL_TOKEN_ENV: get_or_create_ui_local_token(),
             "LOCAL_SHELL_MCP_UI_CELL_ASPECT": f"{cell_aspect:.4f}",
         }
     )
     command = resolve_tui_command()
     if os.name == "nt":
+        if ui_token:
+            env[UI_LOCAL_TOKEN_ENV] = ui_token
         return _WindowsPtyProcess(command, env, cols, rows)
-    return _UnixPtyProcess(command, env, cols, rows)
+    return _UnixPtyProcess(command, env, cols, rows, ui_token=ui_token)
 
 
 class _PollingShellProcess:
@@ -2459,7 +2502,11 @@ def run_tui_cli(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--api-base",
         default=f"http://127.0.0.1:{settings.port}{UI_API_PREFIX}",
-        help="Human UI API base URL (local loopback requires no authentication)",
+        help="Human UI API base URL (loopback only)",
+    )
+    parser.add_argument(
+        "--token-file",
+        help="Read the dedicated local CLI credential from this file.",
     )
     args = parser.parse_args(argv)
     env = os.environ.copy()
@@ -2467,9 +2514,20 @@ def run_tui_cli(argv: list[str] | None = None) -> None:
         api_base = _validate_tui_api_base(args.api_base)
     except ValueError as exc:
         parser.error(str(exc))
+    from .cli_call import _cli_environment, _resolve_local_token
+
+    try:
+        cli_token = _resolve_local_token(_cli_environment(), args.token_file)
+    except ValueError as exc:
+        parser.error(str(exc))
     env["LOCAL_SHELL_MCP_UI_API_BASE"] = api_base
     env["LOCAL_SHELL_MCP_UI_MODE"] = "tui"
-    env[UI_LOCAL_TOKEN_ENV] = get_or_create_ui_local_token()
+    env.pop(UI_LOCAL_TOKEN_ENV, None)
+    env.pop(UI_LOCAL_TOKEN_FD_ENV, None)
+    if cli_token is None:
+        env.pop(CLI_LOCAL_TOKEN_ENV, None)
+    else:
+        env[CLI_LOCAL_TOKEN_ENV] = cli_token
     try:
         completed = subprocess.run(resolve_tui_command(), env=env, check=False)
     except KeyboardInterrupt:
@@ -2496,6 +2554,10 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
         return
 
     settings = get_settings()
+    principal = _websocket_principal(websocket) if settings.auth_mode != "none" else None
+    if settings.auth_mode != "none" and principal is None:
+        await websocket.close(code=4401, reason="OAuth authentication required")
+        return
     if settings.disable_local:
         await websocket.close(
             code=4403,
@@ -2537,8 +2599,16 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
             maximum=5.0,
             label="cell_aspect",
         )
-        process = _spawn_tui_process(cols, rows, cell_aspect)
+        ui_token = None
+        if principal is not None:
+            ui_token = issue_ui_local_token(
+                email=principal.email,
+                subject=principal.subject,
+                scopes=principal_scopes(principal),
+            )
+        process = _spawn_tui_process(cols, rows, cell_aspect, ui_token=ui_token)
     except Exception as exc:
+        revoke_ui_local_token(locals().get("ui_token"))
         _ACTIVE_UI_TERMINALS.discard(marker)
         _LOGGER.exception("Unable to start the human-interface TUI process")
         detail = f"{type(exc).__name__}: {exc}"
@@ -2640,6 +2710,7 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
         pass
     finally:
         _ACTIVE_UI_TERMINALS.discard(marker)
+        revoke_ui_local_token(ui_token)
         await process.close()
         with contextlib.suppress(Exception):
             await websocket.close()

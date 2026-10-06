@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 56d5f11100a1906c167afd36354f29742515a26289c62a03f044f3852ce2eaed -->
+<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
 # Docker Compose 運行時
 
 Docker Compose 是大多數用戶的推薦運行時。它爲模型提供受控 Linux 工作區、可重複工具鏈、持久憑據、瀏覽器自動化支持，以及簡單的升級路徑。
@@ -30,10 +30,13 @@ Docker Compose 是大多數用戶的推薦運行時。它爲模型提供受控 L
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
+python scripts/init_compose_env.py
 mkdir -p workspaces/default
 docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
+
+原始 CLI token 只保存在宿主機擁有的 `.env` 中（權限 `0600`）。Compose 只把它的 SHA-256 驗證值傳入容器。這樣 `lsm call` 可以跨 Docker 連接埠橋接完成驗證，同時不會把可重用的高權限 token 暴露給容器內受管理的 shell 程序。
 
 默認 Compose 文件把服務綁定到 localhost：
 

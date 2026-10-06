@@ -796,6 +796,10 @@ def test_concurrent_job_starts_preserve_every_record(tmp_path, monkeypatch):
     monkeypatch.setattr(jobs_module, "start_shell", fake_start_shell)
     monkeypatch.setattr(jobs_module, "list_shells", fake_list_shells)
     monkeypatch.setattr(jobs_module, "_load_store", slow_load)
+    # Coverage instrumentation can make eight serialized store transactions exceed
+    # the production 2s contention timeout. This test validates record preservation,
+    # not timeout behavior; dedicated tests above cover lock timeout handling.
+    monkeypatch.setattr(jobs_module, "JOB_STORE_LOCK_TIMEOUT_S", 10.0)
 
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = [executor.submit(asyncio.run, start_job(f"printf {index}")) for index in range(8)]

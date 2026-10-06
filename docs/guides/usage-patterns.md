@@ -29,6 +29,17 @@ Use this loop for most coding tasks:
 | Downloadable artifacts | `link_create` | Pasting large binary content into chat |
 | Remote machine work | normal tools with `machine`, plus `remote_transfer` | Opening inbound SSH when outbound worker mode is enough |
 
+## Calling tools from the CLI
+
+For shell scripts and CI, `lsm call <tool>` invokes the same registered tool surface through the running loopback controller, so remote workers and controller state are preserved.
+
+```bash
+lsm call run_shell --json '{"command":"uname -a"}'
+printf '%s\n' '{"path":"README.md"}' | lsm call file_read
+```
+
+Use `--session s_...` to attach the call to a Logical Session. In the documented Docker Compose setup, the raw `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN` stays only in the host-owned, permission-restricted `.env`, while Compose passes only its SHA-256 verifier into the controller; other split-runtime layouts can pass `--token-file <path>`. `--direct` bypasses the controller, applies the current `.env` runtime settings in-process, does not inject the host CLI token into the tool environment, and is local-only. The Human UI token is never accepted by `/mcp`; split-runtime controllers must configure the matching `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256`.
+
 ## Prompt templates
 
 ### Read-only repository orientation

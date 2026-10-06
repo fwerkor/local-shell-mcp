@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 0b086e03bb7fd910e016db31a703908be74f7858846c091c8e784a62e00ec6ca -->
+<!-- i18n-source-sha256: 382c9edbbba8fa4fb3aab11dcc4127ba80bff8c7104bdedffdf66b9bbcdb744a -->
 # Wzorce użycia i przewodnik prompting
 
 `local-shell-mcp` udostępnia potężne tools. Dobre wyniki wymagają, by model najpierw sprawdził środowisko, działał małymi krokami, wykonał weryfikację i opisał zmiany.
@@ -29,6 +29,17 @@ Używaj tej pętli dla większości coding tasks:
 | Browser evidence | `browser_snapshot`, `browser_run_script` | Zgadywania po nazwach page/route |
 | Downloadable artifacts | `link_create` | Wklejania dużego binary content do chat |
 | Remote machine work | normal tools with `machine`, plus `remote_transfer` | Otwierania inbound SSH, gdy outbound worker wystarcza |
+
+## Wywoływanie narzędzi z CLI
+
+W skryptach shell i CI polecenie `lsm call <tool>` wywołuje ten sam zarejestrowany zestaw narzędzi przez działający loopback controller, dzięki czemu zachowany jest stan remote workerów i controllera.
+
+```bash
+lsm call run_shell --json '{"command":"uname -a"}'
+printf '%s\n' '{"path":"README.md"}' | lsm call file_read
+```
+
+Użyj `--session s_...`, aby powiązać wywołanie z Logical Session. W udokumentowanej konfiguracji Docker Compose surowy `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN` pozostaje wyłącznie w należącym do hosta i ograniczonym uprawnieniami pliku `.env`, a Compose przekazuje controllerowi tylko weryfikator SHA-256; inne rozdzielone układy runtime mogą użyć `--token-file <path>`. `--direct` pomija controller, stosuje w procesie ustawienia runtime z bieżącego `.env`, nie wstrzykuje host CLI token do środowiska narzędzia i działa wyłącznie lokalnie. Token Human UI nigdy nie jest akceptowany przez `/mcp`; controller w rozdzielonym runtime musi mieć skonfigurowany pasujący `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256`.
 
 ## Szablony prompt
 

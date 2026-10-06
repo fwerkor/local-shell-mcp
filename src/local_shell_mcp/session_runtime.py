@@ -813,6 +813,11 @@ class SessionRuntimeManager:
             logical = self._require_session_locked(session_id, subject)
             return self._public_state_locked(logical)
 
+    def owner_subject(self, session_id: str, *, subject: str | None = None) -> str:
+        """Return the canonical Session owner after applying the requested access check."""
+        with self._lock:
+            return self._require_session_locked(session_id, subject).subject
+
     def list_sessions(self, *, subject: str | None) -> list[dict[str, Any]]:
         """Return Logical Session summaries, optionally scoped to one principal."""
         normalized_subject = str(subject).strip() if subject is not None else None

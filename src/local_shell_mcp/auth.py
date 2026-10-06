@@ -14,7 +14,12 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .audit import audit
 from .settings import Settings, get_settings
-from .ui_security import has_valid_ui_local_token, is_loopback_connection
+from .ui_security import (
+    has_valid_cli_local_token,
+    is_loopback_connection,
+    is_loopback_target,
+    ui_local_token_context,
+)
 
 PUBLIC_PATHS = {
     "/healthz",
@@ -92,7 +97,12 @@ def require_scopes(
     required_set = {str(scope) for scope in required if str(scope)}
     if not required_set:
         return
-    if principal.claims.get("auth") in {"none", "native-tui", "localhost-bypass"}:
+    if principal.claims.get("auth") in {
+        "none",
+        "native-tui",
+        "local-cli",
+        "localhost-bypass",
+    }:
         return
     missing = sorted(required_set - principal_scopes(principal))
     if not missing:
@@ -249,12 +259,25 @@ def _verify_oauth(request: Request, settings: Settings) -> Principal:
 def verify_request(request: Request) -> Principal:
     settings = get_settings()
     path = str(request.url.path)
+    if path == "/mcp" and is_loopback_target(request) and has_valid_cli_local_token(request):
+        return Principal(email="localhost", subject="local-cli", claims={"auth": "local-cli"})
     if (
         path.startswith(HUMAN_UI_API_PREFIX)
-        and is_loopback_connection(request)
-        and has_valid_ui_local_token(request)
+        and is_loopback_target(request)
+        and has_valid_cli_local_token(request)
     ):
-        return Principal(email="localhost", subject="native-tui", claims={"auth": "native-tui"})
+        return Principal(email="localhost", subject="local-cli", claims={"auth": "local-cli"})
+    if path.startswith(HUMAN_UI_API_PREFIX) and is_loopback_connection(request):
+        ui_context = ui_local_token_context(request)
+        if ui_context is not None:
+            return Principal(
+                email=ui_context.email,
+                subject=ui_context.subject,
+                claims={
+                    "auth": "ui-session",
+                    "scope": " ".join(ui_context.scopes),
+                },
+            )
     if path.startswith((HUMAN_UI_API_PREFIX, LIVE_UI_API_PREFIX)):
         token = _extract_token(request)
         if token:

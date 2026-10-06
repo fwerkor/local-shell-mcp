@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 1cb4dc6f53744372145fad4e03a3d413bf105033e13844fea7684ea5f601d6ca -->
+<!-- i18n-source-sha256: 5f07217e742810704f1919224f6cf68bf7b4f5ecf635fadd5ec4d21b072ce6b2 -->
 # Kullanıcı arayüzü
 
 `local-shell-mcp`, aynı service API, workspace, persistent terminal registry, remote-worker registry ve MCP audit log üzerinde iki uyumlu human interface sunar:
@@ -124,7 +124,7 @@ Bağımsız release yürütülebilirleri platform OpenTUI runtime'ını içerir.
 local-shell-mcp tui
 ```
 
-Yerel TUI insan operatörden giriş istemez. Başlatıcı üretilmiş yerel credential'ı loopback API'ye şeffaf biçimde sağlar. Bu credential yapılandırılmış state directory altında yalnızca sahibin erişebileceği izinlerle saklanır; loopback'ten bağlanan reverse proxy bu bypass'ı almaz.
+Yerel TUI insan operatörden giriş istemez. Belgelenen Docker Compose kurulumunda launcher, loopback Human UI API için yalnızca host üzerinde tutulan dedicated CLI credentialı yeniden kullanır; diğer split-runtime düzenlerinde `--token-file` kullanılabilir. Tarayıcı tarafından başlatılan OpenTUI örnekleri controller process içinde gerektiğinde oluşturulan ve state directory ya da state backend içine hiç yazılmayan bir credential kullanır. Reverse proxy yalnızca loopback üzerinden bağlandığı için bu yerel bypasslardan hiçbirini kazanmaz.
 
 Bir source checkout da Bun bağımlılıkları kurulduktan sonra TUI'yi çalıştırabilir:
 

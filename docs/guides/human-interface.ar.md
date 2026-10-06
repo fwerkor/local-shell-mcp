@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 1cb4dc6f53744372145fad4e03a3d413bf105033e13844fea7684ea5f601d6ca -->
+<!-- i18n-source-sha256: 5f07217e742810704f1919224f6cf68bf7b4f5ecf635fadd5ec4d21b072ce6b2 -->
 # واجهة المستخدم
 
 يوفر `local-shell-mcp` واجهتين بشريتين متوافقتين فوق نفس service API وworkspace وسجل persistent terminals وسجل remote workers وسجل تدقيق MCP:
@@ -124,7 +124,7 @@ https://your-public-host.example.com/ui
 local-shell-mcp tui
 ```
 
-لا تطلب TUI الأصلية من المشغّل البشري تسجيل الدخول. يمرر المشغّل credential محليًا مولّدًا إلى loopback API بصورة شفافة. تُخزَّن هذه الـ credential في state directory المضبوط بصلاحيات المالك فقط؛ ولا يحصل reverse proxy المتصل عبر loopback على هذا الـ bypass.
+لا تطلب TUI الأصلية من المشغّل البشري تسجيل الدخول. في إعداد Docker Compose الموثّق، يعيد المشغّل استخدام dedicated CLI credential المحفوظة على المضيف فقط للوصول إلى Human UI API عبر loopback؛ ويمكن استخدام `--token-file` في ترتيبات split-runtime الأخرى. تستخدم مثيلات OpenTUI التي يشغّلها المتصفح credential داخل process الخاص بالـ controller تُنشأ عند الحاجة فقط ولا تُحفظ مطلقًا في state directory أو state backend. ولا يحصل reverse proxy على أي من هذين الـ bypass المحليين لمجرد اتصاله عبر loopback.
 
 يمكن أيضًا لـ source checkout تشغيل TUI بعد تثبيت تبعيات Bun:
 

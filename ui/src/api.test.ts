@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { API_BASE, api, formatError } from "./api"
+import { API_BASE, api, formatError, localAuthHeaders } from "./api"
 
 const originalFetch = globalThis.fetch
 
@@ -13,6 +13,18 @@ function success(data: unknown = { value: true }): Response {
     headers: { "Content-Type": "application/json" },
   })
 }
+
+describe("local API authentication", () => {
+  test("prefers process-local UI credentials and falls back to the dedicated CLI credential", () => {
+    expect(localAuthHeaders("ui-secret", "cli-secret")).toEqual({
+      "X-Local-Shell-MCP-UI-Token": "ui-secret",
+    })
+    expect(localAuthHeaders("", "cli-secret")).toEqual({
+      "X-Local-Shell-MCP-CLI-Token": "cli-secret",
+    })
+    expect(localAuthHeaders("", "")).toEqual({})
+  })
+})
 
 describe("API client endpoint wrappers", () => {
   test("encodes every shared UI endpoint consistently", async () => {

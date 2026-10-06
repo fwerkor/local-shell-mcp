@@ -1,3 +1,5 @@
+import { closeSync, readFileSync } from "node:fs"
+
 import type {
   ApiEnvelope,
   AuditEntry,
@@ -14,8 +16,30 @@ import type {
 } from "./types"
 
 const configuredBase = process.env.LOCAL_SHELL_MCP_UI_API_BASE || "http://127.0.0.1:8765/api/ui"
-const localToken = process.env.LOCAL_SHELL_MCP_UI_LOCAL_TOKEN || ""
+
+function readLocalUiToken(): string {
+  const direct = process.env.LOCAL_SHELL_MCP_UI_LOCAL_TOKEN || ""
+  if (direct) return direct
+  const rawFd = process.env.LOCAL_SHELL_MCP_UI_LOCAL_TOKEN_FD || ""
+  if (!rawFd) return ""
+  const fd = Number.parseInt(rawFd, 10)
+  if (!Number.isInteger(fd) || fd < 0) return ""
+  try {
+    return readFileSync(fd, "utf8").trim()
+  } finally {
+    closeSync(fd)
+  }
+}
+
+const localToken = readLocalUiToken()
+const cliToken = process.env.LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN || ""
 export const API_BASE = configuredBase.replace(/\/$/, "")
+
+export function localAuthHeaders(uiToken = localToken, dedicatedCliToken = cliToken): Record<string, string> {
+  if (uiToken) return { "X-Local-Shell-MCP-UI-Token": uiToken }
+  if (dedicatedCliToken) return { "X-Local-Shell-MCP-CLI-Token": dedicatedCliToken }
+  return {}
+}
 
 function queryString(params: Record<string, string | number | boolean | null | undefined>): string {
   const search = new URLSearchParams()
@@ -43,7 +67,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        ...(localToken ? { "X-Local-Shell-MCP-UI-Token": localToken } : {}),
+        ...localAuthHeaders(),
         ...init?.headers,
       },
     })

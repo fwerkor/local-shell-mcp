@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 0b086e03bb7fd910e016db31a703908be74f7858846c091c8e784a62e00ec6ca -->
+<!-- i18n-source-sha256: 382c9edbbba8fa4fb3aab11dcc4127ba80bff8c7104bdedffdf66b9bbcdb744a -->
 # Mẫu sử dụng và hướng dẫn prompting
 
 `local-shell-mcp` cung cấp tools mạnh. Kết quả tốt phụ thuộc vào việc yêu cầu model kiểm tra trước, hành động theo bước nhỏ, chạy xác minh và báo cáo thay đổi.
@@ -29,6 +29,17 @@ Dùng vòng này cho phần lớn coding task:
 | Browser evidence | `browser_snapshot`, `browser_run_script` | Đoán từ tên page/route |
 | Downloadable artifacts | `link_create` | Dán binary content lớn vào chat |
 | Remote machine work | normal tools with `machine`, plus `remote_transfer` | Mở inbound SSH khi outbound worker đã đủ |
+
+## Gọi công cụ từ CLI
+
+Đối với shell script và CI, `lsm call <tool>` gọi cùng bề mặt công cụ đã đăng ký thông qua loopback controller đang chạy, vì vậy remote worker và trạng thái controller được giữ nguyên.
+
+```bash
+lsm call run_shell --json '{"command":"uname -a"}'
+printf '%s\n' '{"path":"README.md"}' | lsm call file_read
+```
+
+Dùng `--session s_...` để gắn lời gọi với Logical Session. Trong cấu hình Docker Compose được tài liệu hóa, `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN` gốc chỉ nằm trong `.env` thuộc sở hữu host với quyền truy cập hạn chế, còn Compose chỉ truyền bộ xác minh SHA-256 vào controller; các bố cục runtime tách biệt khác có thể dùng `--token-file <path>`. `--direct` bỏ qua controller, áp dụng các thiết lập runtime của `.env` hiện tại ngay trong tiến trình, không đưa host CLI token vào môi trường của công cụ và chỉ hỗ trợ lời gọi cục bộ. Human UI token không bao giờ được `/mcp` chấp nhận; controller trong cấu hình runtime tách biệt phải đặt `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256` tương ứng.
 
 ## Template prompt
 

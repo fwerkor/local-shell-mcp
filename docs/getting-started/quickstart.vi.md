@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ae0d599bfb0c970b203b61f6f5dd022364b0fb13aab0d80ae1b92aaac2a06332 -->
+<!-- i18n-source-sha256: a3fdf9088031e6903b15497a3df881a8e6ed2f6f2b34dd4d0b68b0414a2ca81e -->
 # Bắt đầu nhanh
 
 Hướng dẫn này dùng Docker Compose làm runtime đầu tiên và ChatGPT làm client đầu tiên. Đây là hai lựa chọn độc lập: Docker, VS Code extension, binary, Python và stdio là các lựa chọn runtime; ChatGPT và client MCP chung là các lựa chọn client. Xem [lựa chọn runtime và mô hình deployment](../guides/deployment.md) để có sơ đồ đầy đủ.
@@ -19,6 +19,7 @@ Hướng dẫn này dùng Docker Compose làm runtime đầu tiên và ChatGPT l
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
+python scripts/init_compose_env.py
 ```
 
 Sửa `.env`:

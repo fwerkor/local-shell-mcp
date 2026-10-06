@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 1cb4dc6f53744372145fad4e03a3d413bf105033e13844fea7684ea5f601d6ca -->
+<!-- i18n-source-sha256: 5f07217e742810704f1919224f6cf68bf7b4f5ecf635fadd5ec4d21b072ce6b2 -->
 # Giao diện người dùng
 
 `local-shell-mcp` cung cấp hai human interface tương thích trên cùng service API, workspace, persistent terminal registry, remote-worker registry và MCP audit log:
@@ -124,7 +124,7 @@ Executable release độc lập nhúng runtime OpenTUI theo nền tảng. Chỉ 
 local-shell-mcp tui
 ```
 
-TUI native không yêu cầu người vận hành đăng nhập. Launcher cung cấp minh bạch credential cục bộ được tạo cho loopback API. Credential này được lưu trong state directory đã cấu hình với quyền chỉ dành cho owner; reverse proxy kết nối từ loopback không nhận bypass này.
+TUI native không yêu cầu người vận hành đăng nhập. Trong cấu hình Docker Compose được tài liệu hóa, launcher tái sử dụng dedicated CLI credential chỉ nằm trên host cho Human UI API qua loopback; các bố cục split-runtime khác có thể dùng `--token-file`. Các instance OpenTUI do trình duyệt khởi chạy dùng credential trong process của controller, chỉ được tạo khi cần và không bao giờ được lưu vào state directory hoặc state backend. Reverse proxy không nhận được các bypass cục bộ này chỉ vì kết nối qua loopback.
 
 Checkout source cũng có thể chạy TUI sau khi cài dependency Bun:
 

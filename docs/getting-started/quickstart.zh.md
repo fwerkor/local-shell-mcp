@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ae0d599bfb0c970b203b61f6f5dd022364b0fb13aab0d80ae1b92aaac2a06332 -->
+<!-- i18n-source-sha256: a3fdf9088031e6903b15497a3df881a8e6ed2f6f2b34dd4d0b68b0414a2ca81e -->
 # 快速开始
 
 本页把 Docker Compose 作为第一个运行时，把 ChatGPT 作为第一个客户端。两者是独立选择：Docker、VS Code 扩展、二进制、Python 和 stdio 是运行时；ChatGPT 和通用 MCP 客户端是接入方式。完整关系见 [运行时与客户端模型](../guides/deployment.md)。
@@ -19,6 +19,7 @@
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
+python scripts/init_compose_env.py
 ```
 
 编辑 `.env`：

@@ -702,6 +702,19 @@ def test_transport_security_secret_helpers_and_remote_unwrap(tmp_path, monkeypat
     assert "testserver:*" in security.allowed_hosts
     assert "http://testserver" in security.allowed_origins
 
+    monkeypatch.setenv("LOCAL_SHELL_MCP_HOST", "127.0.0.2")
+    get_settings.cache_clear()
+    security = tools._transport_security_settings()
+    assert "127.0.0.2" in security.allowed_hosts
+    assert "127.0.0.2:*" in security.allowed_hosts
+    assert "http://127.0.0.2:*" in security.allowed_origins
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_HOST", "0.0.0.0")
+    get_settings.cache_clear()
+    security = tools._transport_security_settings()
+    assert "0.0.0.0" not in security.allowed_hosts
+    assert "0.0.0.0:*" not in security.allowed_hosts
+
     base = tmp_path / "repo"
     base.mkdir()
     (base / ".gitignore").write_text("ignored.txt\n!visible/ignored.txt\n", encoding="utf-8")

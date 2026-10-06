@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 56d5f11100a1906c167afd36354f29742515a26289c62a03f044f3852ce2eaed -->
+<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
 # Runtime Docker Compose
 
 Docker Compose — рекомендуемый runtime для большинства пользователей. Он даёт модели контролируемый Linux workspace, воспроизводимый toolchain, persistent credentials, поддержку browser automation и простой путь обновления.
@@ -30,10 +30,13 @@ Image основан на Playwright Python image и устанавливает 
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
+python scripts/init_compose_env.py
 mkdir -p workspaces/default
 docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
+
+Исходный CLI token хранится только в принадлежащем хосту `.env` (режим `0600`). Compose передаёт в контейнер только его SHA-256 verifier. Поэтому `lsm call` может аутентифицироваться через мост опубликованного Docker-порта, не раскрывая повторно используемый привилегированный token управляемым shell-процессам внутри контейнера.
 
 Стандартный Compose file привязывает service к localhost:
 

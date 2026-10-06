@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ae0d599bfb0c970b203b61f6f5dd022364b0fb13aab0d80ae1b92aaac2a06332 -->
+<!-- i18n-source-sha256: a3fdf9088031e6903b15497a3df881a8e6ed2f6f2b34dd4d0b68b0414a2ca81e -->
 # Schnellstart
 
 Diese Anleitung verwendet Docker Compose als ersten Runtime und ChatGPT als ersten Client. Das sind unabhängige Entscheidungen: Docker, VS Code extension, binary, Python und stdio sind Runtime-Optionen; ChatGPT und generische MCP-Clients sind Client-Optionen. Die vollständige Übersicht finden Sie unter [Runtime-Auswahl und Bereitstellungsmodell](../guides/deployment.md).
@@ -19,6 +19,7 @@ Diese Anleitung verwendet Docker Compose als ersten Runtime und ChatGPT als erst
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
+python scripts/init_compose_env.py
 ```
 
 Bearbeiten Sie `.env`:

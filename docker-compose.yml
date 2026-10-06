@@ -4,11 +4,11 @@ services:
     container_name: local-shell-mcp
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8765:8765"
+      - "127.0.0.1:${LOCAL_SHELL_MCP_PORT:-8765}:${LOCAL_SHELL_MCP_PORT:-8765}"
     environment:
       LOCAL_SHELL_MCP_MODE: "mcp"
       LOCAL_SHELL_MCP_HOST: "0.0.0.0"
-      LOCAL_SHELL_MCP_PORT: "8765"
+      LOCAL_SHELL_MCP_PORT: "${LOCAL_SHELL_MCP_PORT:-8765}"
       # The published port is loopback-only; trust proxy headers from the optional
       # cloudflared sidecar so request.client contains the public caller address.
       LOCAL_SHELL_MCP_FORWARDED_ALLOW_IPS: "${LOCAL_SHELL_MCP_FORWARDED_ALLOW_IPS:-*}"
@@ -39,6 +39,9 @@ services:
       LOCAL_SHELL_MCP_UI_WALLPAPER: "${LOCAL_SHELL_MCP_UI_WALLPAPER:-bing}"
       LOCAL_SHELL_MCP_UI_TERMINAL_IDLE_TIMEOUT_S: "${LOCAL_SHELL_MCP_UI_TERMINAL_IDLE_TIMEOUT_S:-3600}"
       LOCAL_SHELL_MCP_UI_TERMINAL_MAX_SESSIONS: "${LOCAL_SHELL_MCP_UI_TERMINAL_MAX_SESSIONS:-8}"
+      # Host CLI authentication uses a one-way verifier. Keep the raw token in
+      # the host-owned .env; never pass it into the tool-execution container.
+      LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256: "${LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256:-}"
       LOCAL_SHELL_MCP_SHELL_ENV_BLOCKLIST: "${LOCAL_SHELL_MCP_SHELL_ENV_BLOCKLIST:-CLOUDFLARE_TUNNEL_TOKEN}"
       LOCAL_SHELL_MCP_SHELL_ENV_BLOCKED_PREFIXES: "${LOCAL_SHELL_MCP_SHELL_ENV_BLOCKED_PREFIXES:-LOCAL_SHELL_MCP_,DOCKER_}"
       LOCAL_SHELL_MCP_SHELL_PREFLIGHT_ENABLED: "${LOCAL_SHELL_MCP_SHELL_PREFLIGHT_ENABLED:-true}"

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 0b086e03bb7fd910e016db31a703908be74f7858846c091c8e784a62e00ec6ca -->
+<!-- i18n-source-sha256: 382c9edbbba8fa4fb3aab11dcc4127ba80bff8c7104bdedffdf66b9bbcdb744a -->
 # 使用模式与提示词指南
 
 `local-shell-mcp` 暴露的是强工具集。好的结果依赖清晰的工作方式：先检查，再小步行动，随后验证，并说明改动了什么。
@@ -29,6 +29,17 @@
 | 浏览器证据 | `browser_snapshot`、`browser_run_script` | 只根据页面名或路由猜测 |
 | 可下载产物 | `link_create` | 在聊天中粘贴大型二进制内容 |
 | 远程机器任务 | 普通工具加 `machine`，以及 `remote_transfer` | 在出站 worker 模式足够时开放入站 SSH |
+
+## 从 CLI 调用工具
+
+对于 shell 脚本和 CI，`lsm call <tool>` 会通过正在运行的本地回环 controller 调用同一套已注册工具，因此远程 worker 和 controller 状态都能保留。
+
+```bash
+lsm call run_shell --json '{"command":"uname -a"}'
+printf '%s\n' '{"path":"README.md"}' | lsm call file_read
+```
+
+使用 `--session s_...` 可将调用关联到 Logical Session。在文档给出的 Docker Compose 配置中，原始 `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN` 只保存在宿主机拥有且权限受限的 `.env` 中，Compose 只把它的 SHA-256 校验值传给 controller；其它分离运行时布局可传入 `--token-file <path>`。`--direct` 会绕过 controller，在进程内应用当前 `.env` 的运行时配置，但不会把宿主机 CLI token 注入工具环境，并且仅支持本地调用。 Human UI token 永远不能用于 `/mcp`；分离运行时的 controller 必须配置匹配的 `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256`。
 
 ## 提示词模板
 

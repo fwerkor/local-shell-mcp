@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: ae0d599bfb0c970b203b61f6f5dd022364b0fb13aab0d80ae1b92aaac2a06332 -->
+<!-- i18n-source-sha256: a3fdf9088031e6903b15497a3df881a8e6ed2f6f2b34dd4d0b68b0414a2ca81e -->
 # クイックスタート
 
 このガイドでは最初の runtime として Docker Compose、最初の client として ChatGPT を使用します。これらは別々の選択です。Docker、VS Code extension、binary、Python、stdio は runtime の選択肢で、ChatGPT と汎用 MCP client は client の選択肢です。全体像は [runtime の選択とデプロイモデル](../guides/deployment.md) を参照してください。
@@ -19,6 +19,7 @@
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
+python scripts/init_compose_env.py
 ```
 
 `.env` を編集します：

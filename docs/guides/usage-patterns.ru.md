@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 0b086e03bb7fd910e016db31a703908be74f7858846c091c8e784a62e00ec6ca -->
+<!-- i18n-source-sha256: 382c9edbbba8fa4fb3aab11dcc4127ba80bff8c7104bdedffdf66b9bbcdb744a -->
 # Сценарии использования и руководство по prompting
 
 `local-shell-mcp` предоставляет мощные tools. Хороший результат требует сначала осмотреть среду, действовать маленькими шагами, выполнять проверку и сообщать, что изменилось.
@@ -29,6 +29,17 @@
 | Browser evidence | `browser_snapshot`, `browser_run_script` | Угадывать по названиям страниц/routes |
 | Downloadable artifacts | `link_create` | Вставлять большие binary data в chat |
 | Работа на remote machine | normal tools with `machine`, plus `remote_transfer` | Открывать inbound SSH, когда достаточно outbound worker |
+
+## Вызов инструментов из CLI
+
+Для shell-скриптов и CI команда `lsm call <tool>` вызывает тот же набор зарегистрированных инструментов через работающий loopback controller, поэтому состояние remote worker и controller сохраняется.
+
+```bash
+lsm call run_shell --json '{"command":"uname -a"}'
+printf '%s\n' '{"path":"README.md"}' | lsm call file_read
+```
+
+Параметр `--session s_...` связывает вызов с Logical Session. В документированной конфигурации Docker Compose исходный `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN` хранится только в ограниченном по правам `.env`, принадлежащем хосту, а Compose передаёт controller только SHA-256 verifier; для других раздельных runtime-конфигураций можно указать `--token-file <path>`. `--direct` обходит controller, применяет runtime-настройки текущего `.env` внутри процесса, не добавляет host CLI token в окружение инструмента и работает только локально. Human UI token никогда не принимается на `/mcp`; в раздельной runtime-конфигурации controller должен получить соответствующий `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256`.
 
 ## Шаблоны prompt
 

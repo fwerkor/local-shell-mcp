@@ -226,6 +226,11 @@ def main(argv: list[str] | None = None) -> None:
 
         run_tui_cli(argv[1:])
         return
+    if argv and argv[0] == "call":
+        from .cli_call import run_call_cli
+
+        run_call_cli(argv[1:])
+        return
     if argv and argv[0] in {"--version", "-V"}:
         from . import __version__
 

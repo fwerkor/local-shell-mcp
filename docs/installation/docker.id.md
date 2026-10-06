@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 56d5f11100a1906c167afd36354f29742515a26289c62a03f044f3852ce2eaed -->
+<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
 # Runtime Docker Compose
 
 Docker Compose adalah runtime yang direkomendasikan untuk sebagian besar pengguna. Ia memberi model workspace Linux terkontrol, toolchain reproducible, persistent credentials, dukungan browser automation, dan jalur upgrade yang mudah.
@@ -30,10 +30,13 @@ Exact image content adalah convenience layer, bukan stable API. Project-specific
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
+python scripts/init_compose_env.py
 mkdir -p workspaces/default
 docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
+
+Token CLI mentah hanya berada di `.env` milik host (mode `0600`). Compose hanya meneruskan verifier SHA-256 ke container. Dengan demikian `lsm call` dapat melakukan autentikasi melalui bridge port Docker yang dipublikasikan tanpa mengekspos token berhak tinggi yang dapat digunakan ulang kepada proses shell terkelola di dalam container.
 
 Default Compose file mengikat service ke localhost:
 

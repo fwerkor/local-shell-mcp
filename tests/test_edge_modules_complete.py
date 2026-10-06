@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import stat
@@ -499,37 +500,67 @@ def test_tmux_selection_backend_and_version(tmp_path, monkeypatch):
     assert version.format_version_info({"version": "1.0", "package_version": "1.0"}) == "local-shell-mcp 1.0"
 
 
-def test_ui_security_creation_races_and_loopback(tmp_path, monkeypatch):
+def test_ui_security_process_local_token_and_loopback(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     inherited = "i" * 32
     monkeypatch.setenv(ui_security.UI_LOCAL_TOKEN_ENV, inherited)
-    assert ui_security.get_or_create_ui_local_token() == inherited
-    monkeypatch.delenv(ui_security.UI_LOCAL_TOKEN_ENV)
 
-    path = ui_security._token_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("e" * 32, encoding="utf-8")
-    assert ui_security.get_or_create_ui_local_token() == "e" * 32
-    path.write_text("short", encoding="utf-8")
-    assert ui_security._read_token(path) is None
+    # Controller authentication never trusts an inherited or persisted Human UI token.
+    inherited_request = _request(headers={ui_security.UI_LOCAL_TOKEN_HEADER: inherited})
+    assert not ui_security.has_valid_ui_local_token(inherited_request)
 
-    real_open = os.open
-    attempts = 0
-
-    def race_open(target, flags, mode=0o777):
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
-            path.write_text("r" * 32, encoding="utf-8")
-            raise FileExistsError(target)
-        return real_open(target, flags, mode)
-
-    monkeypatch.setattr(ui_security.os, "open", race_open)
-    assert ui_security.get_or_create_ui_local_token() == "r" * 32
-
-    connection = _request(headers={ui_security.UI_LOCAL_TOKEN_HEADER: "r" * 32})
+    token = ui_security.issue_ui_local_token(
+        email="operator@example.test",
+        subject="operator",
+        scopes=("shell:read", "remote:use"),
+    )
+    assert len(token) >= 32
+    connection = _request(headers={ui_security.UI_LOCAL_TOKEN_HEADER: token})
+    context = ui_security.ui_local_token_context(connection)
+    assert context is not None
+    assert context.subject == "operator"
+    assert context.scopes == ("remote:use", "shell:read")
     assert ui_security.has_valid_ui_local_token(connection)
+    ui_security.revoke_ui_local_token(token)
+    assert not ui_security.has_valid_ui_local_token(connection)
     assert not ui_security.has_valid_ui_local_token(_request())
+
+    assert not ui_security.cli_local_token_verifier_configured()
+    assert ui_security.cli_local_token_verifier() is None
+    raw_cli_token = "c" * 40
+    cli_digest = hashlib.sha256(raw_cli_token.encode()).hexdigest()
+    monkeypatch.setenv(ui_security.CLI_LOCAL_TOKEN_SHA256_ENV, cli_digest)
+    assert ui_security.cli_local_token_verifier_configured()
+    assert ui_security.cli_local_token_verifier() == cli_digest
+    assert ui_security.has_valid_cli_local_token(
+        _request(headers={ui_security.CLI_LOCAL_TOKEN_HEADER: raw_cli_token})
+    )
+    assert not ui_security.has_valid_cli_local_token(
+        _request(headers={ui_security.CLI_LOCAL_TOKEN_HEADER: "wrong" * 8})
+    )
+    assert not ui_security.has_valid_cli_local_token(_request())
+    monkeypatch.setenv(ui_security.CLI_LOCAL_TOKEN_SHA256_ENV, "g" * 64)
+    assert ui_security.cli_local_token_verifier_configured()
+    assert ui_security.cli_local_token_verifier() is None
+    assert not ui_security.has_valid_cli_local_token(
+        _request(headers={ui_security.CLI_LOCAL_TOKEN_HEADER: raw_cli_token})
+    )
+    monkeypatch.setenv(ui_security.CLI_LOCAL_TOKEN_SHA256_ENV, "short")
+    assert ui_security.cli_local_token_verifier() is None
+    monkeypatch.delenv(ui_security.CLI_LOCAL_TOKEN_SHA256_ENV)
+
+    for host, expected in (
+        ("localhost:8765", True),
+        ("127.0.0.1:8765", True),
+        ("[::1]:8765", True),
+        ("example.com", False),
+        ("invalid", False),
+        ("[::1", False),
+        ("", False),
+    ):
+        headers = {"host": host} if host else {}
+        assert ui_security.is_loopback_target(_request(headers=headers)) is expected
+
     for client, expected in (
         (("localhost", 1), True),
         (("127.0.0.1", 1), True),
@@ -757,26 +788,18 @@ def test_bundled_tmux_permissions_and_windows_import_failure(tmp_path, monkeypat
     assert tmux_helper.persistent_shell_backend_info()["backend"] == "native"
 
 
-def test_ui_token_irrecoverable_paths_and_final_retry(tmp_path, monkeypatch):
+def test_ui_token_creation_never_touches_filesystem(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
-    path = ui_security._token_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    monkeypatch.delenv(ui_security.UI_LOCAL_TOKEN_ENV, raising=False)
+    legacy = tmp_path / ".state" / "ui" / "local-token"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("l" * 64, encoding="utf-8")
 
-    monkeypatch.setattr(ui_security.os, "open", lambda *args, **kwargs: (_ for _ in ()).throw(PermissionError("open")))
-    monkeypatch.setattr(Path, "lstat", lambda self: (_ for _ in ()).throw(FileNotFoundError(self)))
-    with pytest.raises(RuntimeError, match="Unable to create"):
-        ui_security.get_or_create_ui_local_token()
+    token = ui_security.issue_ui_local_token(
+        email=None, subject="test", scopes=("shell:read",)
+    )
 
-    path.write_text("short", encoding="utf-8")
-    monkeypatch.setattr(Path, "lstat", lambda self: SimpleNamespace())
-    monkeypatch.setattr(Path, "unlink", lambda self: (_ for _ in ()).throw(PermissionError("unlink")))
-    with pytest.raises(RuntimeError, match="replace invalid"):
-        ui_security.get_or_create_ui_local_token()
-
-    unlink_calls = []
-    monkeypatch.setattr(Path, "unlink", lambda self: unlink_calls.append(str(self)))
-    monkeypatch.setattr(ui_security, "_read_token", lambda path: None)
-    with pytest.raises(RuntimeError, match="initialize"):
-        ui_security.get_or_create_ui_local_token()
-    assert len(unlink_calls) == 2
+    assert token != "l" * 64
+    assert legacy.read_text(encoding="utf-8") == "l" * 64
+    assert not ui_security.has_valid_ui_local_token(
+        _request(headers={ui_security.UI_LOCAL_TOKEN_HEADER: "l" * 64})
+    )
