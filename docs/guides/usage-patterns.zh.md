@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: bfd205813bd40569d489f7e57417eef5098af2388cdb852b1016deb74a2fc0f1 -->
+<!-- i18n-source-sha256: 2f0d76e5baf715634ab1bed49cb63a1382ae50536e2b8ebb880f3a27df3f8abc -->
 # 使用模式与提示词指南
 
 `local-shell-mcp` 暴露的是强工具集。好的结果依赖清晰的工作方式：先检查，再小步行动，随后验证，并说明改动了什么。
@@ -39,7 +39,7 @@ lsm call run_shell --json '{"command":"uname -a"}'
 printf '%s\n' '{"path":"README.md"}' | lsm call file_read
 ```
 
-使用 `--session s_...` 可将调用关联到 Logical Session。在文档给出的 Docker Compose 配置中，controller 与宿主机 CLI 通过仓库内权限受限的 `.env` 共享 `LOCAL_SHELL_MCP_UI_LOCAL_TOKEN`；其它分离运行时布局可传入 `--token-file <path>`。`--direct` 会绕过 controller，并且仅支持本地调用。
+使用 `--session s_...` 可将调用关联到 Logical Session。在文档给出的 Docker Compose 配置中，原始 `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN` 只保存在宿主机拥有且权限受限的 `.env` 中，Compose 只把它的 SHA-256 校验值传给 controller；其它分离运行时布局可传入 `--token-file <path>`。`--direct` 会绕过 controller，在进程内应用当前 `.env` 的运行时配置，但不会把宿主机 CLI token 注入工具环境，并且仅支持本地调用。
 
 ## 提示词模板
 

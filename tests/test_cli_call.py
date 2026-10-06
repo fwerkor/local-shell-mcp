@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -14,7 +16,12 @@ import local_shell_mcp.settings as settings_module
 import local_shell_mcp.tools as tools_module
 from local_shell_mcp.auth import _CURRENT_PRINCIPAL, Principal, verify_request
 from local_shell_mcp.session_runtime import get_session_runtime_manager
-from local_shell_mcp.ui_security import UI_LOCAL_TOKEN_HEADER, get_or_create_ui_local_token
+from local_shell_mcp.ui_security import (
+    CLI_LOCAL_TOKEN_HEADER,
+    CLI_LOCAL_TOKEN_SHA256_ENV,
+    UI_LOCAL_TOKEN_HEADER,
+    get_or_create_ui_local_token,
+)
 
 
 def _configure(tmp_path, monkeypatch, *, mode: str = "mcp", auth_mode: str = "oauth") -> None:
@@ -27,7 +34,12 @@ def _configure(tmp_path, monkeypatch, *, mode: str = "mcp", auth_mode: str = "oa
     settings_module.get_settings.cache_clear()
 
 
-def _request(path: str, headers: list[tuple[bytes, bytes]] | None = None) -> Request:
+def _request(
+    path: str,
+    headers: list[tuple[bytes, bytes]] | None = None,
+    *,
+    client: tuple[str, int] | None = ("127.0.0.1", 12345),
+) -> Request:
     return Request(
         {
             "type": "http",
@@ -36,7 +48,7 @@ def _request(path: str, headers: list[tuple[bytes, bytes]] | None = None) -> Req
             "path": path,
             "headers": headers or [(b"host", b"127.0.0.1:8765")],
             "query_string": b"",
-            "client": ("127.0.0.1", 12345),
+            "client": client,
             "server": ("127.0.0.1", 8765),
         }
     )
@@ -131,14 +143,16 @@ def test_run_call_cli_controller_output_session_and_failure(monkeypatch, capsys)
 def test_run_call_cli_direct_and_runtime_error(monkeypatch, capsys):
     calls = []
 
-    async def fake_direct(tool, arguments):
-        calls.append((tool, arguments))
+    async def fake_direct(tool, arguments, *, environment=None):
+        calls.append((tool, arguments, environment))
         return {"ok": True}, False
 
+    direct_environment = {"LOCAL_SHELL_MCP_WORKSPACE_ROOT": "/tmp/direct-workspace"}
     monkeypatch.setattr(cli_call, "_call_direct", fake_direct)
+    monkeypatch.setattr(cli_call, "_cli_environment", lambda: direct_environment)
 
     cli_call.run_call_cli(["environment_get", "--direct", "--json", "{}"])
-    assert calls == [("environment_get", {})]
+    assert calls == [("environment_get", {}, direct_environment)]
     assert json.loads(capsys.readouterr().out) == {"ok": True}
 
     async def explode(url, tool, arguments, **kwargs):
@@ -260,7 +274,10 @@ def test_call_controller_uses_local_token_and_mcp_session(monkeypatch):
     assert calls[0] == (
         "transport",
         "http://127.0.0.1:8765/mcp",
-        {UI_LOCAL_TOKEN_HEADER: "local-secret"},
+        {
+            UI_LOCAL_TOKEN_HEADER: "local-secret",
+            CLI_LOCAL_TOKEN_HEADER: "local-secret",
+        },
         3660.0,
         cli_call._loopback_http_client_factory,
     )
@@ -287,6 +304,40 @@ def test_call_direct_reuses_registered_tool_surface_with_trusted_principal(monke
         False,
     )
     assert _CURRENT_PRINCIPAL.get() is None
+
+
+def test_call_direct_applies_dotenv_without_exposing_host_cli_token(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    state_dir = tmp_path / "state"
+    environment = {
+        "LOCAL_SHELL_MCP_WORKSPACE_ROOT": str(workspace),
+        "LOCAL_SHELL_MCP_STATE_DIR": str(state_dir),
+        "LOCAL_SHELL_MCP_AUDIT_LOG_PATH": str(tmp_path / "audit.jsonl"),
+        "LOCAL_SHELL_MCP_AUTH_MODE": "none",
+        "LOCAL_SHELL_MCP_REMOTE_ENABLED": "false",
+        "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN": "host-only-secret-abcdefghijklmnopqrstuvwxyz",
+    }
+
+    class Mcp:
+        async def call_tool(self, tool, arguments):
+            assert tool == "environment_get"
+            assert arguments == {}
+            assert os.environ["LOCAL_SHELL_MCP_WORKSPACE_ROOT"] == str(workspace)
+            assert "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN" not in os.environ
+            return [], {
+                "ok": True,
+                "data": {
+                    "workspace_root": str(settings_module.get_settings().workspace_root),
+                },
+            }
+
+    monkeypatch.setattr(tools_module, "build_mcp", lambda: Mcp())
+    payload, failed = asyncio.run(
+        cli_call._call_direct("environment_get", {}, environment=environment)
+    )
+    assert failed is False
+    assert payload["data"]["workspace_root"] == str(workspace)
+    assert "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN" not in os.environ
 
 
 def test_call_direct_can_attach_existing_local_user_session(tmp_path, monkeypatch):
@@ -497,16 +548,82 @@ def test_run_call_cli_help_does_not_load_controller_configuration(monkeypatch, c
     assert "Invoke one local-shell-mcp tool" in capsys.readouterr().out
 
 
-def test_trusted_local_principal_can_use_existing_sessions(tmp_path, monkeypatch):
+@pytest.mark.parametrize("auth_type", ["native-tui", "local-cli"])
+def test_trusted_local_principal_can_use_existing_sessions(tmp_path, monkeypatch, auth_type):
     _configure(tmp_path, monkeypatch, auth_mode="oauth")
     token = _CURRENT_PRINCIPAL.set(
-        Principal(email="localhost", subject="native-tui", claims={"auth": "native-tui"})
+        Principal(email="localhost", subject=auth_type, claims={"auth": auth_type})
     )
     try:
         assert tools_module._current_session_subject() is None
         assert tools_module._current_session_subject(create=True) == "local-user"
     finally:
         _CURRENT_PRINCIPAL.reset(token)
+
+
+def test_host_cli_token_authenticates_across_compose_bridge_only_for_loopback_target(
+    tmp_path, monkeypatch
+):
+    _configure(tmp_path, monkeypatch)
+    raw_token = "host-cli-token-abcdefghijklmnopqrstuvwxyz-0123456789"
+    monkeypatch.setenv(
+        CLI_LOCAL_TOKEN_SHA256_ENV,
+        hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
+    )
+    bridge_request = _request(
+        "/mcp",
+        [
+            (b"host", b"127.0.0.1:8765"),
+            (CLI_LOCAL_TOKEN_HEADER.encode(), raw_token.encode()),
+        ],
+        client=("172.17.0.1", 45678),
+    )
+    principal = verify_request(bridge_request)
+    assert principal.subject == "local-cli"
+    assert principal.claims["auth"] == "local-cli"
+
+    # In hardened Compose mode, the controller's internal UI token must not
+    # authenticate /mcp even from loopback; only the host-held CLI token may do so.
+    ui_token = get_or_create_ui_local_token().encode()
+    with pytest.raises(HTTPException) as exc:
+        verify_request(
+            _request(
+                "/mcp",
+                [
+                    (b"host", b"127.0.0.1:8765"),
+                    (UI_LOCAL_TOKEN_HEADER.encode(), ui_token),
+                ],
+            )
+        )
+    assert exc.value.status_code == 401
+
+    public_target = _request(
+        "/mcp",
+        [
+            (b"host", b"mcp.example.com"),
+            (CLI_LOCAL_TOKEN_HEADER.encode(), raw_token.encode()),
+        ],
+        client=("172.18.0.3", 45678),
+    )
+    with pytest.raises(HTTPException) as exc:
+        verify_request(public_target)
+    assert exc.value.status_code == 401
+
+    monkeypatch.setenv(CLI_LOCAL_TOKEN_SHA256_ENV, "not-a-valid-digest")
+    with pytest.raises(HTTPException) as exc:
+        verify_request(bridge_request)
+    assert exc.value.status_code == 401
+    with pytest.raises(HTTPException) as exc:
+        verify_request(
+            _request(
+                "/mcp",
+                [
+                    (b"host", b"127.0.0.1:8765"),
+                    (UI_LOCAL_TOKEN_HEADER.encode(), ui_token),
+                ],
+            )
+        )
+    assert exc.value.status_code == 401
 
 
 def test_local_token_authenticates_loopback_mcp_only(tmp_path, monkeypatch):

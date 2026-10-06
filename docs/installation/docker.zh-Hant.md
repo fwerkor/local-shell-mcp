@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: e2dd23efea9768d971fa8a8be723f55cfcac3279adfc82e4185a803e3f05de1e -->
+<!-- i18n-source-sha256: 931645b26427f12938872e36f9c9c3c5b45ff4697c5e3db8ae51d73bb10dc84c -->
 # Docker Compose 運行時
 
 Docker Compose 是大多數用戶的推薦運行時。它爲模型提供受控 Linux 工作區、可重複工具鏈、持久憑據、瀏覽器自動化支持，以及簡單的升級路徑。
@@ -30,14 +30,14 @@ Docker Compose 是大多數用戶的推薦運行時。它爲模型提供受控 L
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
-python -c 'from pathlib import Path; import secrets; p=Path(".env"); s=p.read_text(); p.write_text(s.replace("LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=" + secrets.token_urlsafe(48), 1))'
+python -c 'from pathlib import Path; import hashlib,secrets; p=Path(".env"); s=p.read_text(); t=secrets.token_urlsafe(48); s=s.replace("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=" + t, 1).replace("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=", "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=" + hashlib.sha256(t.encode()).hexdigest(), 1); p.write_text(s)'
 chmod 600 .env
 mkdir -p workspaces/default
 docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-產生的本機 token 保存在宿主機擁有的 `.env` 中（權限 `0600`），並由 Compose 傳入容器。這樣宿主機上的 `lsm call` 可以驗證 loopback controller，而不需讀取容器擁有的狀態檔。
+原始 CLI token 只保存在宿主機擁有的 `.env` 中（權限 `0600`）。Compose 只把它的 SHA-256 驗證值傳入容器。這樣 `lsm call` 可以跨 Docker 連接埠橋接完成驗證，同時不會把可重用的高權限 token 暴露給容器內受管理的 shell 程序。
 
 默認 Compose 文件把服務綁定到 localhost：
 

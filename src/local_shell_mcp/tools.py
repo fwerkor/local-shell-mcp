@@ -552,7 +552,12 @@ def _current_principal_allows(scope: str) -> bool:
     principal = current_principal()
     if principal is None:
         return True
-    if principal.claims.get("auth") in {"none", "native-tui", "localhost-bypass"}:
+    if principal.claims.get("auth") in {
+        "none",
+        "native-tui",
+        "local-cli",
+        "localhost-bypass",
+    }:
         return True
     return scope in principal_scopes(principal)
 
@@ -4369,7 +4374,7 @@ def _current_session_subject(*, create: bool = False) -> str | None:
     principal = current_principal()
     if principal is None:
         return _current_principal_subject()
-    if principal.claims.get("auth") not in {"native-tui", "localhost-bypass"}:
+    if principal.claims.get("auth") not in {"native-tui", "local-cli", "localhost-bypass"}:
         return principal.subject or principal.email or "mcp-client"
     if not create:
         # Trusted loopback clients mirror the human UI: an explicitly named

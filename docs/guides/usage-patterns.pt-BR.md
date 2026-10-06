@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: bfd205813bd40569d489f7e57417eef5098af2388cdb852b1016deb74a2fc0f1 -->
+<!-- i18n-source-sha256: 2f0d76e5baf715634ab1bed49cb63a1382ae50536e2b8ebb880f3a27df3f8abc -->
 # Padrões de uso e guia de prompting
 
 `local-shell-mcp` expõe ferramentas poderosas. Bons resultados dependem de pedir ao modelo que primeiro inspecione, aja em passos pequenos, verifique e relate o que mudou.
@@ -39,7 +39,7 @@ lsm call run_shell --json '{"command":"uname -a"}'
 printf '%s\n' '{"path":"README.md"}' | lsm call file_read
 ```
 
-Use `--session s_...` para associar a chamada a uma Logical Session. Na configuração Docker Compose documentada, o controller e a CLI do host compartilham `LOCAL_SHELL_MCP_UI_LOCAL_TOKEN` pelo `.env` do repositório com permissões restritas; outros layouts com runtimes separados podem usar `--token-file <path>`. `--direct` ignora o controller e funciona somente localmente.
+Use `--session s_...` para associar a chamada a uma Logical Session. Na configuração Docker Compose documentada, o `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN` bruto permanece somente no `.env` pertencente ao host e com permissões restritas, enquanto o Compose passa ao controller apenas o verificador SHA-256; outros layouts com runtimes separados podem usar `--token-file <path>`. `--direct` ignora o controller, aplica no processo as configurações runtime do `.env` atual, não injeta o token CLI do host no ambiente da ferramenta e funciona somente localmente.
 
 ## Templates de prompt
 

@@ -6,6 +6,8 @@ import ipaddress
 import json
 import os
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,7 +17,12 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from .ui_security import UI_LOCAL_TOKEN_ENV, UI_LOCAL_TOKEN_HEADER
+from .ui_security import (
+    CLI_LOCAL_TOKEN_ENV,
+    CLI_LOCAL_TOKEN_HEADER,
+    UI_LOCAL_TOKEN_ENV,
+    UI_LOCAL_TOKEN_HEADER,
+)
 
 CLI_TOKEN_FILE_ENV = "LOCAL_SHELL_MCP_CLI_TOKEN_FILE"
 CLI_DOTENV = ".env"
@@ -155,6 +162,10 @@ def _resolve_local_token(values: dict[str, str], token_file: str | None) -> str 
     if configured_file:
         return _read_token_file(Path(configured_file))
 
+    token = values.get(CLI_LOCAL_TOKEN_ENV, "").strip()
+    if len(token) >= 32:
+        return token
+
     token = values.get(UI_LOCAL_TOKEN_ENV, "").strip()
     if len(token) >= 32:
         return token
@@ -174,6 +185,33 @@ def _resolve_local_token(values: dict[str, str], token_file: str | None) -> str 
             return existing
 
     return None
+
+
+@contextmanager
+def _direct_environment(values: dict[str, str]) -> Iterator[None]:
+    """Temporarily apply CLI dotenv settings for one direct-mode tool call."""
+
+    from . import settings as settings_module
+
+    # Keep the host-only CLI bearer outside the direct tool process environment.
+    excluded = {CLI_LOCAL_TOKEN_ENV}
+    updates = {
+        key: value
+        for key, value in values.items()
+        if key.startswith("LOCAL_SHELL_MCP_") and key not in excluded
+    }
+    previous = {key: os.environ.get(key) for key in updates}
+    try:
+        os.environ.update(updates)
+        settings_module.get_settings.cache_clear()
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        settings_module.get_settings.cache_clear()
 
 
 def _jsonable(value: Any) -> Any:
@@ -228,7 +266,14 @@ async def _call_controller(
     local_token: str | None,
     sse_read_timeout: float,
 ) -> tuple[Any, bool]:
-    headers = {UI_LOCAL_TOKEN_HEADER: local_token} if local_token else None
+    headers = (
+        {
+            UI_LOCAL_TOKEN_HEADER: local_token,
+            CLI_LOCAL_TOKEN_HEADER: local_token,
+        }
+        if local_token
+        else None
+    )
     async with streamablehttp_client(
         url,
         headers=headers,
@@ -242,17 +287,23 @@ async def _call_controller(
     return _normalize_mcp_result(result)
 
 
-async def _call_direct(tool: str, arguments: dict[str, Any]) -> tuple[Any, bool]:
+async def _call_direct(
+    tool: str,
+    arguments: dict[str, Any],
+    *,
+    environment: dict[str, str] | None = None,
+) -> tuple[Any, bool]:
     from .auth import _CURRENT_PRINCIPAL, Principal
     from .tools import build_mcp
 
-    principal_token = _CURRENT_PRINCIPAL.set(
-        Principal(email=None, subject="native-tui", claims={"auth": "native-tui"})
-    )
-    try:
-        result = await build_mcp().call_tool(tool, arguments)
-    finally:
-        _CURRENT_PRINCIPAL.reset(principal_token)
+    with _direct_environment(environment or {}):
+        principal_token = _CURRENT_PRINCIPAL.set(
+            Principal(email=None, subject="native-tui", claims={"auth": "native-tui"})
+        )
+        try:
+            result = await build_mcp().call_tool(tool, arguments)
+        finally:
+            _CURRENT_PRINCIPAL.reset(principal_token)
     return _normalize_direct_result(result)
 
 
@@ -321,7 +372,13 @@ def run_call_cli(argv: list[str] | None = None) -> None:
 
     try:
         if args.direct:
-            payload, failed = asyncio.run(_call_direct(args.tool, arguments))
+            payload, failed = asyncio.run(
+                _call_direct(
+                    args.tool,
+                    arguments,
+                    environment=_cli_environment(),
+                )
+            )
         else:
             try:
                 values = _cli_environment()

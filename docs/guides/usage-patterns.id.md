@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: bfd205813bd40569d489f7e57417eef5098af2388cdb852b1016deb74a2fc0f1 -->
+<!-- i18n-source-sha256: 2f0d76e5baf715634ab1bed49cb63a1382ae50536e2b8ebb880f3a27df3f8abc -->
 # Pola penggunaan dan panduan prompting
 
 `local-shell-mcp` menyediakan tools yang kuat. Hasil yang baik bergantung pada meminta model menginspeksi terlebih dahulu, bertindak dalam langkah kecil, melakukan verifikasi, dan melaporkan perubahan.
@@ -39,7 +39,7 @@ lsm call run_shell --json '{"command":"uname -a"}'
 printf '%s\n' '{"path":"README.md"}' | lsm call file_read
 ```
 
-Gunakan `--session s_...` untuk mengaitkan panggilan dengan Logical Session. Pada setup Docker Compose yang didokumentasikan, controller dan CLI host berbagi `LOCAL_SHELL_MCP_UI_LOCAL_TOKEN` melalui `.env` repository yang dibatasi izinnya; layout runtime terpisah lainnya dapat memakai `--token-file <path>`. `--direct` melewati controller dan hanya berlaku untuk panggilan lokal.
+Gunakan `--session s_...` untuk mengaitkan panggilan dengan Logical Session. Pada setup Docker Compose yang didokumentasikan, `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN` mentah hanya berada di `.env` milik host yang izinnya dibatasi, sedangkan Compose hanya meneruskan verifier SHA-256 ke controller; layout runtime terpisah lainnya dapat memakai `--token-file <path>`. `--direct` melewati controller, menerapkan pengaturan runtime dari `.env` saat ini di dalam proses, tidak menyuntikkan token CLI host ke lingkungan tool, dan hanya berlaku untuk panggilan lokal.
 
 ## Template prompt
 

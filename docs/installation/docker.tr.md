@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: e2dd23efea9768d971fa8a8be723f55cfcac3279adfc82e4185a803e3f05de1e -->
+<!-- i18n-source-sha256: 931645b26427f12938872e36f9c9c3c5b45ff4697c5e3db8ae51d73bb10dc84c -->
 # Docker Compose runtime
 
 Docker Compose çoğu kullanıcı için önerilen runtime’dır. Modele kontrollü Linux workspace, reproducible toolchain, persistent credentials, browser automation desteği ve kolay upgrade yolu sağlar.
@@ -30,14 +30,14 @@ Exact image content bir convenience layer’dır, stable API değildir. Project-
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
-python -c 'from pathlib import Path; import secrets; p=Path(".env"); s=p.read_text(); p.write_text(s.replace("LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=" + secrets.token_urlsafe(48), 1))'
+python -c 'from pathlib import Path; import hashlib,secrets; p=Path(".env"); s=p.read_text(); t=secrets.token_urlsafe(48); s=s.replace("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=" + t, 1).replace("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=", "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=" + hashlib.sha256(t.encode()).hexdigest(), 1); p.write_text(s)'
 chmod 600 .env
 mkdir -p workspaces/default
 docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Üretilen yerel token, host tarafından sahip olunan `.env` dosyasında (mod `0600`) kalır ve Compose tarafından container’a aktarılır. Böylece host üzerindeki `lsm call`, container’a ait durum dosyalarını okumadan loopback controller’a kimlik doğrulayabilir.
+Ham CLI token yalnızca host tarafından sahip olunan `.env` dosyasında (mod `0600`) kalır. Compose container’a yalnızca SHA-256 doğrulayıcısını aktarır. Böylece `lsm call`, Docker’ın yayımlanmış port köprüsü üzerinden kimlik doğrulayabilir ve container içindeki yönetilen shell süreçlerine yeniden kullanılabilir ayrıcalıklı bir token açığa çıkarmaz.
 
 Default Compose file service’i localhost’a bind eder:
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: e2dd23efea9768d971fa8a8be723f55cfcac3279adfc82e4185a803e3f05de1e -->
+<!-- i18n-source-sha256: 931645b26427f12938872e36f9c9c3c5b45ff4697c5e3db8ae51d73bb10dc84c -->
 # Docker Compose runtime
 
 Docker Compose は多くの user に推奨される runtime です。モデルに制御された Linux workspace、再現可能な toolchain、persistent credentials、browser automation support、簡単な upgrade path を提供します。
@@ -30,14 +30,14 @@ Image は Playwright Python image をベースにし、広い development toolch
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
-python -c 'from pathlib import Path; import secrets; p=Path(".env"); s=p.read_text(); p.write_text(s.replace("LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=" + secrets.token_urlsafe(48), 1))'
+python -c 'from pathlib import Path; import hashlib,secrets; p=Path(".env"); s=p.read_text(); t=secrets.token_urlsafe(48); s=s.replace("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=" + t, 1).replace("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=", "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=" + hashlib.sha256(t.encode()).hexdigest(), 1); p.write_text(s)'
 chmod 600 .env
 mkdir -p workspaces/default
 docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-生成されたローカルトークンはホスト所有の `.env`（モード `0600`）に保存され、Compose からコンテナへ渡されます。これにより、ホスト上の `lsm call` はコンテナ所有の状態ファイルを読むことなく loopback controller に認証できます。
+生の CLI トークンはホスト所有の `.env`（モード `0600`）にのみ保存されます。Compose がコンテナへ渡すのは SHA-256 verifier だけです。これにより `lsm call` は Docker の公開ポートブリッジ越しに認証でき、コンテナ内の管理対象 shell プロセスへ再利用可能な高権限トークンを公開しません。
 
 Default Compose file は service を localhost に bind します：
 

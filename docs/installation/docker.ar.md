@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: e2dd23efea9768d971fa8a8be723f55cfcac3279adfc82e4185a803e3f05de1e -->
+<!-- i18n-source-sha256: 931645b26427f12938872e36f9c9c3c5b45ff4697c5e3db8ae51d73bb10dc84c -->
 # Runtime عبر Docker Compose
 
 Docker Compose هو runtime الموصى به لمعظم المستخدمين. يمنح النموذج workspace Linux مضبوطًا وtoolchain قابلًا لإعادة الإنتاج وcredentials دائمة ودعم browser automation ومسار upgrade سهلًا.
@@ -30,14 +30,14 @@ Docker Compose هو runtime الموصى به لمعظم المستخدمين. �
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
-python -c 'from pathlib import Path; import secrets; p=Path(".env"); s=p.read_text(); p.write_text(s.replace("LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=" + secrets.token_urlsafe(48), 1))'
+python -c 'from pathlib import Path; import hashlib,secrets; p=Path(".env"); s=p.read_text(); t=secrets.token_urlsafe(48); s=s.replace("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=" + t, 1).replace("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=", "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=" + hashlib.sha256(t.encode()).hexdigest(), 1); p.write_text(s)'
 chmod 600 .env
 mkdir -p workspaces/default
 docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-يبقى الـ token المحلي المُنشأ داخل ملف `.env` المملوك للمضيف (بالصلاحية `0600`) ويمرره Compose إلى الحاوية. وبذلك يستطيع `lsm call` على المضيف المصادقة مع loopback controller من دون قراءة حالة مملوكة للحاوية.
+يبقى CLI token الخام فقط داخل ملف `.env` المملوك للمضيف (بالصلاحية `0600`). يمرر Compose إلى الحاوية قيمة التحقق SHA-256 فقط. وبذلك يستطيع `lsm call` المصادقة عبر جسر المنفذ المنشور من Docker من دون كشف token ذي صلاحيات عالية وقابل لإعادة الاستخدام لعمليات shell المُدارة داخل الحاوية.
 
 يربط Compose file الافتراضي الخدمة بـ localhost:
 

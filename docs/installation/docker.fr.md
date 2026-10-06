@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: e2dd23efea9768d971fa8a8be723f55cfcac3279adfc82e4185a803e3f05de1e -->
+<!-- i18n-source-sha256: 931645b26427f12938872e36f9c9c3c5b45ff4697c5e3db8ae51d73bb10dc84c -->
 # Runtime Docker Compose
 
 Docker Compose est le runtime recommandé pour la plupart des utilisateurs. Il donne au modèle un workspace Linux contrôlé, un toolchain reproductible, des credentials persistants, le support de browser automation et un chemin de mise à jour simple.
@@ -30,14 +30,14 @@ Le contenu exact de l’image est une couche de commodité, pas une API stable. 
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
-python -c 'from pathlib import Path; import secrets; p=Path(".env"); s=p.read_text(); p.write_text(s.replace("LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=" + secrets.token_urlsafe(48), 1))'
+python -c 'from pathlib import Path; import hashlib,secrets; p=Path(".env"); s=p.read_text(); t=secrets.token_urlsafe(48); s=s.replace("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=" + t, 1).replace("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=", "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=" + hashlib.sha256(t.encode()).hexdigest(), 1); p.write_text(s)'
 chmod 600 .env
 mkdir -p workspaces/default
 docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Le token local généré reste dans le `.env` appartenant à l’hôte (mode `0600`) et Compose le transmet au conteneur. Ainsi, `lsm call` sur l’hôte peut s’authentifier auprès du loopback controller sans lire l’état appartenant au conteneur.
+Le token CLI brut reste uniquement dans le `.env` appartenant à l’hôte (mode `0600`). Compose ne transmet au conteneur que son vérificateur SHA-256. Ainsi, `lsm call` peut s’authentifier à travers le pont du port publié par Docker sans exposer de token privilégié réutilisable aux processus shell gérés dans le conteneur.
 
 Le fichier Compose par défaut lie le service à localhost :
 

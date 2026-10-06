@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import stat
@@ -533,6 +534,43 @@ def test_ui_security_creation_races_and_loopback(tmp_path, monkeypatch):
     connection = _request(headers={ui_security.UI_LOCAL_TOKEN_HEADER: "r" * 32})
     assert ui_security.has_valid_ui_local_token(connection)
     assert not ui_security.has_valid_ui_local_token(_request())
+
+    assert not ui_security.cli_local_token_verifier_configured()
+    assert ui_security.cli_local_token_verifier() is None
+    raw_cli_token = "c" * 40
+    cli_digest = hashlib.sha256(raw_cli_token.encode()).hexdigest()
+    monkeypatch.setenv(ui_security.CLI_LOCAL_TOKEN_SHA256_ENV, cli_digest)
+    assert ui_security.cli_local_token_verifier_configured()
+    assert ui_security.cli_local_token_verifier() == cli_digest
+    assert ui_security.has_valid_cli_local_token(
+        _request(headers={ui_security.CLI_LOCAL_TOKEN_HEADER: raw_cli_token})
+    )
+    assert not ui_security.has_valid_cli_local_token(
+        _request(headers={ui_security.CLI_LOCAL_TOKEN_HEADER: "wrong" * 8})
+    )
+    assert not ui_security.has_valid_cli_local_token(_request())
+    monkeypatch.setenv(ui_security.CLI_LOCAL_TOKEN_SHA256_ENV, "g" * 64)
+    assert ui_security.cli_local_token_verifier_configured()
+    assert ui_security.cli_local_token_verifier() is None
+    assert not ui_security.has_valid_cli_local_token(
+        _request(headers={ui_security.CLI_LOCAL_TOKEN_HEADER: raw_cli_token})
+    )
+    monkeypatch.setenv(ui_security.CLI_LOCAL_TOKEN_SHA256_ENV, "short")
+    assert ui_security.cli_local_token_verifier() is None
+    monkeypatch.delenv(ui_security.CLI_LOCAL_TOKEN_SHA256_ENV)
+
+    for host, expected in (
+        ("localhost:8765", True),
+        ("127.0.0.1:8765", True),
+        ("[::1]:8765", True),
+        ("example.com", False),
+        ("invalid", False),
+        ("[::1", False),
+        ("", False),
+    ):
+        headers = {"host": host} if host else {}
+        assert ui_security.is_loopback_target(_request(headers=headers)) is expected
+
     for client, expected in (
         (("localhost", 1), True),
         (("127.0.0.1", 1), True),

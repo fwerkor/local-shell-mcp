@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: bfd205813bd40569d489f7e57417eef5098af2388cdb852b1016deb74a2fc0f1 -->
+<!-- i18n-source-sha256: 2f0d76e5baf715634ab1bed49cb63a1382ae50536e2b8ebb880f3a27df3f8abc -->
 # Mẫu sử dụng và hướng dẫn prompting
 
 `local-shell-mcp` cung cấp tools mạnh. Kết quả tốt phụ thuộc vào việc yêu cầu model kiểm tra trước, hành động theo bước nhỏ, chạy xác minh và báo cáo thay đổi.
@@ -39,7 +39,7 @@ lsm call run_shell --json '{"command":"uname -a"}'
 printf '%s\n' '{"path":"README.md"}' | lsm call file_read
 ```
 
-Dùng `--session s_...` để gắn lời gọi với Logical Session. Trong cấu hình Docker Compose được tài liệu hóa, controller và CLI trên host dùng chung `LOCAL_SHELL_MCP_UI_LOCAL_TOKEN` qua `.env` của repository với quyền truy cập hạn chế; các bố cục runtime tách biệt khác có thể dùng `--token-file <path>`. `--direct` bỏ qua controller và chỉ hỗ trợ lời gọi cục bộ.
+Dùng `--session s_...` để gắn lời gọi với Logical Session. Trong cấu hình Docker Compose được tài liệu hóa, `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN` gốc chỉ nằm trong `.env` thuộc sở hữu host với quyền truy cập hạn chế, còn Compose chỉ truyền bộ xác minh SHA-256 vào controller; các bố cục runtime tách biệt khác có thể dùng `--token-file <path>`. `--direct` bỏ qua controller, áp dụng các thiết lập runtime của `.env` hiện tại ngay trong tiến trình, không đưa host CLI token vào môi trường của công cụ và chỉ hỗ trợ lời gọi cục bộ.
 
 ## Template prompt
 

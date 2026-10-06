@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import hmac
 import ipaddress
 import os
 import secrets
 from contextlib import suppress
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from starlette.requests import HTTPConnection
 
@@ -14,6 +16,9 @@ from .state_store import get_state_store, state_lock
 
 UI_LOCAL_TOKEN_HEADER = "x-local-shell-mcp-ui-token"
 UI_LOCAL_TOKEN_ENV = "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN"
+CLI_LOCAL_TOKEN_HEADER = "x-local-shell-mcp-cli-token"
+CLI_LOCAL_TOKEN_ENV = "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN"
+CLI_LOCAL_TOKEN_SHA256_ENV = "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256"
 
 
 def _token_path() -> Path:
@@ -120,6 +125,54 @@ def has_valid_ui_local_token(connection: HTTPConnection) -> bool:
         return False
     expected = get_or_create_ui_local_token()
     return hmac.compare_digest(submitted, expected)
+
+
+def cli_local_token_verifier_configured() -> bool:
+    return bool(os.getenv(CLI_LOCAL_TOKEN_SHA256_ENV, "").strip())
+
+
+def cli_local_token_verifier() -> str | None:
+    expected_digest = os.getenv(CLI_LOCAL_TOKEN_SHA256_ENV, "").strip().lower()
+    if len(expected_digest) != 64:
+        return None
+    try:
+        bytes.fromhex(expected_digest)
+    except ValueError:
+        return None
+    return expected_digest
+
+
+def has_valid_cli_local_token(connection: HTTPConnection) -> bool:
+    submitted = connection.headers.get(CLI_LOCAL_TOKEN_HEADER, "").strip()
+    expected_digest = cli_local_token_verifier()
+    if not submitted or expected_digest is None:
+        return False
+    digest = hashlib.sha256(submitted.encode("utf-8")).hexdigest()
+    return hmac.compare_digest(digest, expected_digest)
+
+
+def is_loopback_target(connection: HTTPConnection) -> bool:
+    """Return whether the request targets a loopback Host value.
+
+    This survives Docker's published-port bridge, where the transport peer may be
+    the bridge gateway instead of 127.0.0.1. Public tunnel requests retain their
+    public Host value and therefore do not receive the host-CLI bypass.
+    """
+
+    host_header = connection.headers.get("host", "").strip()
+    if not host_header:
+        return False
+    try:
+        host = urlsplit(f"//{host_header}").hostname or ""
+    except ValueError:
+        return False
+    if host.lower() == "localhost":
+        return True
+    candidate = host.split("%", 1)[0].strip("[]")
+    try:
+        return ipaddress.ip_address(candidate).is_loopback
+    except ValueError:
+        return False
 
 
 def is_loopback_connection(connection: HTTPConnection) -> bool:

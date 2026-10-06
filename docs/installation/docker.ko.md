@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: e2dd23efea9768d971fa8a8be723f55cfcac3279adfc82e4185a803e3f05de1e -->
+<!-- i18n-source-sha256: 931645b26427f12938872e36f9c9c3c5b45ff4697c5e3db8ae51d73bb10dc84c -->
 # Docker Compose runtime
 
 Docker Compose는 대부분의 사용자에게 권장되는 runtime입니다. 모델에 제어된 Linux workspace, 재현 가능한 toolchain, persistent credentials, browser automation support, 쉬운 upgrade path를 제공합니다.
@@ -30,14 +30,14 @@ Image는 Playwright Python image를 기반으로 하며 폭넓은 development to
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
-python -c 'from pathlib import Path; import secrets; p=Path(".env"); s=p.read_text(); p.write_text(s.replace("LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=" + secrets.token_urlsafe(48), 1))'
+python -c 'from pathlib import Path; import hashlib,secrets; p=Path(".env"); s=p.read_text(); t=secrets.token_urlsafe(48); s=s.replace("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=" + t, 1).replace("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=", "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=" + hashlib.sha256(t.encode()).hexdigest(), 1); p.write_text(s)'
 chmod 600 .env
 mkdir -p workspaces/default
 docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-생성된 로컬 token은 호스트 소유 `.env`(모드 `0600`)에 저장되고 Compose를 통해 컨테이너에 전달됩니다. 따라서 호스트의 `lsm call`은 컨테이너 소유 상태 파일을 읽지 않고 loopback controller에 인증할 수 있습니다.
+원본 CLI token은 호스트 소유 `.env`(모드 `0600`)에만 저장됩니다. Compose는 SHA-256 verifier만 컨테이너에 전달합니다. 따라서 `lsm call`은 Docker published-port bridge를 통해 인증할 수 있으면서 컨테이너 내부의 관리되는 shell 프로세스에 재사용 가능한 고권한 token을 노출하지 않습니다.
 
 Default Compose file은 service를 localhost에 bind합니다:
 

@@ -38,7 +38,7 @@ lsm call run_shell --json '{"command":"uname -a"}'
 printf '%s\n' '{"path":"README.md"}' | lsm call file_read
 ```
 
-Use `--session s_...` to attach the call to a Logical Session. In the documented Docker Compose setup, the controller and host CLI share `LOCAL_SHELL_MCP_UI_LOCAL_TOKEN` through the repository’s permission-restricted `.env`; other split-runtime layouts can pass `--token-file <path>`. `--direct` bypasses the controller and is local-only.
+Use `--session s_...` to attach the call to a Logical Session. In the documented Docker Compose setup, the raw `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN` stays only in the host-owned, permission-restricted `.env`, while Compose passes only its SHA-256 verifier into the controller; other split-runtime layouts can pass `--token-file <path>`. `--direct` bypasses the controller, applies the current `.env` runtime settings in-process, does not inject the host CLI token into the tool environment, and is local-only.
 
 ## Prompt templates
 

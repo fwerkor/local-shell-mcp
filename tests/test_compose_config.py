@@ -1,5 +1,7 @@
 from pathlib import Path
 
+HOST_ONLY_SETTINGS = {"LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN"}
+
 
 def test_compose_forwards_every_example_service_setting() -> None:
     example_lines = Path('.env.example').read_text(encoding='utf-8').splitlines()
@@ -10,5 +12,11 @@ def test_compose_forwards_every_example_service_setting() -> None:
     }
     compose = Path('docker-compose.yml').read_text(encoding='utf-8')
 
-    missing = sorted(name for name in example_settings if f'${{{name}' not in compose)
+    missing = sorted(
+        name
+        for name in example_settings - HOST_ONLY_SETTINGS
+        if f'${{{name}' not in compose
+    )
     assert missing == []
+    assert "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN:" not in compose
+    assert "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256:" in compose

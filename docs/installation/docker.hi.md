@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: e2dd23efea9768d971fa8a8be723f55cfcac3279adfc82e4185a803e3f05de1e -->
+<!-- i18n-source-sha256: 931645b26427f12938872e36f9c9c3c5b45ff4697c5e3db8ae51d73bb10dc84c -->
 # Docker Compose runtime
 
 Docker Compose अधिकांश उपयोगकर्ताओं के लिए अनुशंसित runtime है। यह model को controlled Linux workspace, reproducible toolchain, persistent credentials, browser automation support और आसान upgrade path देता है।
@@ -30,14 +30,14 @@ Image का exact content convenience layer है, stable API नहीं। 
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
-python -c 'from pathlib import Path; import secrets; p=Path(".env"); s=p.read_text(); p.write_text(s.replace("LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=" + secrets.token_urlsafe(48), 1))'
+python -c 'from pathlib import Path; import hashlib,secrets; p=Path(".env"); s=p.read_text(); t=secrets.token_urlsafe(48); s=s.replace("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=" + t, 1).replace("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=", "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=" + hashlib.sha256(t.encode()).hexdigest(), 1); p.write_text(s)'
 chmod 600 .env
 mkdir -p workspaces/default
 docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-बनाया गया local token host-owned `.env` (mode `0600`) में रहता है और Compose उसे container में पास करता है। इससे host पर `lsm call` container-owned state पढ़े बिना loopback controller से authenticate कर सकता है।
+मूल CLI token केवल host-owned `.env` (mode `0600`) में रहता है। Compose container में सिर्फ उसका SHA-256 verifier भेजता है। इससे `lsm call` Docker published-port bridge के पार authenticate कर सकता है, जबकि container के managed shell processes को कोई reusable privileged token नहीं मिलता।
 
 Default Compose file service को localhost से bind करती है:
 

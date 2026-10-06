@@ -334,7 +334,7 @@ def _request_principal(request: Request) -> Principal:
 
 def _logical_session_subject(request: Request, *, create: bool = False) -> str | None:
     principal = _request_principal(request)
-    if principal.claims.get("auth") not in {"native-tui", "localhost-bypass"}:
+    if principal.claims.get("auth") not in {"native-tui", "local-cli", "localhost-bypass"}:
         return principal.subject or principal.email or "mcp-client"
     if not create:
         return None
@@ -357,7 +357,12 @@ def _require_ui_scopes(
 
 def _ui_principal_allows(request: Request, scope: str) -> bool:
     principal = _request_principal(request)
-    if principal.claims.get("auth") in {"none", "native-tui", "localhost-bypass"}:
+    if principal.claims.get("auth") in {
+        "none",
+        "native-tui",
+        "local-cli",
+        "localhost-bypass",
+    }:
         return True
     return scope in principal_scopes(principal)
 
