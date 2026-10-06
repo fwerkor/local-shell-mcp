@@ -16,9 +16,9 @@ from .audit import audit
 from .settings import Settings, get_settings
 from .ui_security import (
     has_valid_cli_local_token,
-    has_valid_ui_local_token,
     is_loopback_connection,
     is_loopback_target,
+    ui_local_token_context,
 )
 
 PUBLIC_PATHS = {
@@ -263,10 +263,21 @@ def verify_request(request: Request) -> Principal:
         return Principal(email="localhost", subject="local-cli", claims={"auth": "local-cli"})
     if (
         path.startswith(HUMAN_UI_API_PREFIX)
-        and is_loopback_connection(request)
-        and has_valid_ui_local_token(request)
+        and is_loopback_target(request)
+        and has_valid_cli_local_token(request)
     ):
-        return Principal(email="localhost", subject="native-tui", claims={"auth": "native-tui"})
+        return Principal(email="localhost", subject="local-cli", claims={"auth": "local-cli"})
+    if path.startswith(HUMAN_UI_API_PREFIX) and is_loopback_connection(request):
+        ui_context = ui_local_token_context(request)
+        if ui_context is not None:
+            return Principal(
+                email=ui_context.email,
+                subject=ui_context.subject,
+                claims={
+                    "auth": "ui-session",
+                    "scope": " ".join(ui_context.scopes),
+                },
+            )
     if path.startswith((HUMAN_UI_API_PREFIX, LIVE_UI_API_PREFIX)):
         token = _extract_token(request)
         if token:

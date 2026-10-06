@@ -765,8 +765,10 @@ def test_resolve_spawn_and_tui_cli_branches(tmp_path, monkeypatch):
     captured = {}
 
     class FakeUnix:
-        def __init__(self, command, env, cols, rows):
-            captured.update(command=command, env=env, cols=cols, rows=rows)
+        def __init__(self, command, env, cols, rows, *, ui_token=None):
+            captured.update(
+                command=command, env=env, cols=cols, rows=rows, ui_token=ui_token
+            )
 
     monkeypatch.setenv("LOCAL_SHELL_MCP_UI_TUI_COMMAND", "/tmp/tui")
     get_settings.cache_clear()
@@ -774,19 +776,46 @@ def test_resolve_spawn_and_tui_cli_branches(tmp_path, monkeypatch):
     os_proxy = SimpleNamespace(**{**vars(os), "name": "posix"})
     monkeypatch.setattr(ui, "os", os_proxy)
     monkeypatch.setattr(ui, "resolve_tui_command", lambda: ["/tmp/tui"])
-    ui._spawn_tui_process(80, 24, 2.75)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN", "should-not-reach-web-tui")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_CLI_TOKEN_FILE", "/host/cli-token")
+    ui._spawn_tui_process(80, 24, 2.75, ui_token="scoped-ui-token")
     assert captured["env"]["LOCAL_SHELL_MCP_UI_MODE"] == "web"
     assert captured["env"]["TERM"] == "xterm-256color"
     assert captured["env"]["COLORTERM"] == "truecolor"
     assert captured["env"]["TERM_PROGRAM"] == "vscode"
     assert captured["env"]["TERM_PROGRAM_VERSION"] == "local-shell-mcp"
     assert captured["env"]["LOCAL_SHELL_MCP_UI_CELL_ASPECT"] == "2.7500"
+    assert captured["ui_token"] == "scoped-ui-token"
+    assert "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN" not in captured["env"]
+    assert "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN_FD" not in captured["env"]
+    assert "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN" not in captured["env"]
+    assert "LOCAL_SHELL_MCP_CLI_TOKEN_FILE" not in captured["env"]
+
+    import local_shell_mcp.cli_call as cli_call_module
+
+    standalone_token = "standalone-cli-token-abcdefghijklmnopqrstuvwxyz-0123456789"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_UI_LOCAL_TOKEN", "stale-ui-token")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_UI_LOCAL_TOKEN_FD", "99")
+    monkeypatch.setattr(
+        cli_call_module,
+        "_cli_environment",
+        lambda: {"LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN": standalone_token},
+    )
+    subprocess_call = {}
+
+    def completed(*args, **kwargs):
+        subprocess_call.update(args=args, kwargs=kwargs)
+        return SimpleNamespace(returncode=7)
 
     monkeypatch.setattr(ui, "resolve_tui_command", lambda: ["tui"])
-    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=7))
+    monkeypatch.setattr(subprocess, "run", completed)
     with pytest.raises(SystemExit) as raised:
         ui.run_tui_cli(["--api-base", "http://localhost:8765/api/ui"])
     assert raised.value.code == 7
+    standalone_env = subprocess_call["kwargs"]["env"]
+    assert standalone_env["LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN"] == standalone_token
+    assert "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN" not in standalone_env
+    assert "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN_FD" not in standalone_env
 
     def interrupted(*args, **kwargs):
         raise KeyboardInterrupt
@@ -977,7 +1006,7 @@ def test_websocket_control_flow_and_limits(tmp_path, monkeypatch):
         asyncio.run(ui.ui_terminal_websocket(failed_accept))
     assert id(failed_accept) not in ui._ACTIVE_UI_TERMINALS
 
-    monkeypatch.setattr(ui, "_spawn_tui_process", lambda *args: (_ for _ in ()).throw(RuntimeError("spawn")))
+    monkeypatch.setattr(ui, "_spawn_tui_process", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("spawn")))
     spawn_failure = Socket()
     asyncio.run(ui.ui_terminal_websocket(spawn_failure))
     assert b"Unable to start the TUI" in spawn_failure.sent[0]
@@ -989,13 +1018,13 @@ def test_websocket_control_flow_and_limits(tmp_path, monkeypatch):
             return {"type": "websocket.disconnect"}
 
     process = Process([b""], exit_code=0)
-    monkeypatch.setattr(ui, "_spawn_tui_process", lambda *args: process)
+    monkeypatch.setattr(ui, "_spawn_tui_process", lambda *args, **kwargs: process)
     exited = WaitingSocket()
     asyncio.run(ui.ui_terminal_websocket(exited))
     assert any(code == ui.UI_TUI_EXIT_CODE for code, _ in exited.closed)
 
     process = Process([b""], exit_code=1)
-    monkeypatch.setattr(ui, "_spawn_tui_process", lambda *args: process)
+    monkeypatch.setattr(ui, "_spawn_tui_process", lambda *args, **kwargs: process)
     crashed = WaitingSocket()
     asyncio.run(ui.ui_terminal_websocket(crashed))
     assert all(code != ui.UI_TUI_EXIT_CODE for code, _ in crashed.closed)
@@ -1005,7 +1034,7 @@ def test_websocket_control_flow_and_limits(tmp_path, monkeypatch):
     monkeypatch.setattr(
         ui,
         "_spawn_tui_process",
-        lambda *args: spawn_calls.append(args) or process,
+        lambda *args, **kwargs: spawn_calls.append(args) or process,
     )
     messages = [
         {"type": "websocket.receive", "bytes": b"bytes"},
@@ -1028,7 +1057,7 @@ def test_websocket_control_flow_and_limits(tmp_path, monkeypatch):
     assert process.closed is True
 
     process = Process([b"keep-running"] * 10)
-    monkeypatch.setattr(ui, "_spawn_tui_process", lambda *args: process)
+    monkeypatch.setattr(ui, "_spawn_tui_process", lambda *args, **kwargs: process)
     invalid_resize = Socket(
         [
             {

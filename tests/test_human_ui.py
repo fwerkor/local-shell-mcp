@@ -44,7 +44,7 @@ from local_shell_mcp.oauth import issue_access_token, public_base_url
 from local_shell_mcp.remote import execute_worker_tool
 from local_shell_mcp.session_runtime import get_session_runtime_manager
 from local_shell_mcp.settings import get_settings
-from local_shell_mcp.ui_security import UI_LOCAL_TOKEN_HEADER, get_or_create_ui_local_token
+from local_shell_mcp.ui_security import UI_LOCAL_TOKEN_HEADER, issue_ui_local_token
 
 
 def _configure(tmp_path, monkeypatch, *, auth_mode: str = "none") -> None:
@@ -872,11 +872,11 @@ def test_webui_shell_is_public_but_api_remains_oauth_protected(tmp_path, monkeyp
     assert api.status_code == 401
 
 
-def test_native_tui_token_bypasses_oauth_without_weakening_browser_api(tmp_path, monkeypatch):
+def test_scoped_ui_token_preserves_oauth_permissions(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth_mode="oauth")
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST", "false")
     get_settings.cache_clear()
-    token = get_or_create_ui_local_token()
+    token = issue_ui_local_token(email=None, subject="operator", scopes=("shell:read",))
     client = TestClient(build_http_app(), client=("127.0.0.1", 4242))
 
     response = client.get(
@@ -889,13 +889,20 @@ def test_native_tui_token_bypasses_oauth_without_weakening_browser_api(tmp_path,
     assert payload["machines"]["machines"][0]["name"] == "local"
     assert payload["features"] == {"remote": False, "wallpaper": "bing"}
 
+    forbidden = client.post(
+        "/api/ui/remotes",
+        headers={UI_LOCAL_TOKEN_HEADER: token},
+        json={},
+    )
+    assert forbidden.status_code == 403
+    assert "remote:use" in forbidden.json()["message"]
 
 
 def test_native_tui_token_is_rejected_from_non_loopback_peer(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth_mode="oauth")
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST", "false")
     get_settings.cache_clear()
-    token = get_or_create_ui_local_token()
+    token = issue_ui_local_token(email=None, subject="operator", scopes=("shell:read",))
     client = TestClient(build_http_app(), client=("203.0.113.9", 4242))
 
     response = client.get(
@@ -1055,30 +1062,28 @@ def test_http_localhost_bypass_is_not_inherited_by_reverse_proxy(tmp_path, monke
     assert proxied.status_code == 401
 
 
-def test_invalid_ui_token_path_fails_without_recursion(tmp_path, monkeypatch):
+def test_legacy_ui_token_path_is_ignored(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    token_path = tmp_path / ".state" / "ui" / "local-token"
+    token_path.parent.mkdir(parents=True)
+    legacy = "legacy-ui-token-abcdefghijklmnopqrstuvwxyz-0123456789"
+    token_path.write_text(legacy, encoding="utf-8")
+
+    token = issue_ui_local_token(email=None, subject="operator", scopes=("shell:read",))
+
+    assert token != legacy
+    assert token_path.read_text(encoding="utf-8") == legacy
+
+
+def test_ui_token_creation_ignores_unusable_legacy_path(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     token_path = tmp_path / ".state" / "ui" / "local-token"
     token_path.mkdir(parents=True)
 
-    with pytest.raises(RuntimeError, match="invalid UI local token path"):
-        get_or_create_ui_local_token()
+    token = issue_ui_local_token(email=None, subject="operator", scopes=("shell:read",))
 
-
-def test_permission_error_for_existing_ui_token_path_is_reported(tmp_path, monkeypatch):
-    _configure(tmp_path, monkeypatch)
-    token_path = tmp_path / ".state" / "ui" / "local-token"
-    token_path.mkdir(parents=True)
-    real_open = os.open
-
-    def permission_denied(path, flags, mode=0o777):  # noqa: ANN001
-        if os.fspath(path) == os.fspath(token_path):
-            raise PermissionError(13, "Permission denied", os.fspath(path))
-        return real_open(path, flags, mode)
-
-    monkeypatch.setattr(os, "open", permission_denied)
-
-    with pytest.raises(RuntimeError, match="invalid UI local token path"):
-        get_or_create_ui_local_token()
+    assert len(token) >= 32
+    assert token_path.is_dir()
 
 
 def test_terminal_idle_timeout_uses_latest_input_or_output_activity():

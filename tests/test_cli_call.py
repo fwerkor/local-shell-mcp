@@ -21,7 +21,7 @@ from local_shell_mcp.ui_security import (
     CLI_LOCAL_TOKEN_HEADER,
     CLI_LOCAL_TOKEN_SHA256_ENV,
     UI_LOCAL_TOKEN_HEADER,
-    get_or_create_ui_local_token,
+    issue_ui_local_token,
 )
 
 
@@ -786,9 +786,23 @@ def test_host_cli_token_authenticates_across_compose_bridge_only_for_loopback_ta
     assert principal.subject == "local-cli"
     assert principal.claims["auth"] == "local-cli"
 
+    ui_bridge_request = _request(
+        "/api/ui/bootstrap",
+        [
+            (b"host", b"127.0.0.1:8765"),
+            (CLI_LOCAL_TOKEN_HEADER.encode(), raw_token.encode()),
+        ],
+        client=("172.17.0.1", 45678),
+    )
+    ui_principal = verify_request(ui_bridge_request)
+    assert ui_principal.subject == "local-cli"
+    assert ui_principal.claims["auth"] == "local-cli"
+
     # In hardened Compose mode, the controller's internal UI token must not
     # authenticate /mcp even from loopback; only the host-held CLI token may do so.
-    ui_token = get_or_create_ui_local_token().encode()
+    ui_token = issue_ui_local_token(
+        email=None, subject="operator", scopes=("shell:read", "remote:use")
+    ).encode()
     with pytest.raises(HTTPException) as exc:
         verify_request(
             _request(
@@ -813,6 +827,18 @@ def test_host_cli_token_authenticates_across_compose_bridge_only_for_loopback_ta
         verify_request(public_target)
     assert exc.value.status_code == 401
 
+    public_ui_target = _request(
+        "/api/ui/bootstrap",
+        [
+            (b"host", b"mcp.example.com"),
+            (CLI_LOCAL_TOKEN_HEADER.encode(), raw_token.encode()),
+        ],
+        client=("172.18.0.3", 45678),
+    )
+    with pytest.raises(HTTPException) as exc:
+        verify_request(public_ui_target)
+    assert exc.value.status_code == 401
+
     monkeypatch.setenv(CLI_LOCAL_TOKEN_SHA256_ENV, "not-a-valid-digest")
     with pytest.raises(HTTPException) as exc:
         verify_request(bridge_request)
@@ -832,7 +858,9 @@ def test_host_cli_token_authenticates_across_compose_bridge_only_for_loopback_ta
 
 def test_ui_token_never_authenticates_mcp(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
-    token = get_or_create_ui_local_token().encode()
+    token = issue_ui_local_token(
+        email="operator@example.test", subject="operator", scopes=("shell:read",)
+    ).encode()
 
     with pytest.raises(HTTPException) as exc:
         verify_request(
@@ -855,5 +883,6 @@ def test_ui_token_never_authenticates_mcp(tmp_path, monkeypatch):
             ],
         )
     )
-    assert principal.subject == "native-tui"
-    assert principal.claims["auth"] == "native-tui"
+    assert principal.subject == "operator"
+    assert principal.claims["auth"] == "ui-session"
+    assert principal.claims["scope"] == "shell:read"

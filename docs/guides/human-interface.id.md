@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 1cb4dc6f53744372145fad4e03a3d413bf105033e13844fea7684ea5f601d6ca -->
+<!-- i18n-source-sha256: 5f07217e742810704f1919224f6cf68bf7b4f5ecf635fadd5ec4d21b072ce6b2 -->
 # Antarmuka pengguna
 
 `local-shell-mcp` menyediakan dua human interface yang kompatibel di atas service API, workspace, persistent terminal registry, remote-worker registry, dan MCP audit log yang sama:
@@ -124,7 +124,7 @@ Executable release mandiri menyematkan runtime OpenTUI platform. Simpan hanya ex
 local-shell-mcp tui
 ```
 
-TUI native tidak meminta operator manusia untuk login. Launcher secara transparan memberikan credential lokal yang dihasilkan ke API loopback. Credential ini disimpan di state directory yang dikonfigurasi dengan izin khusus pemilik; reverse proxy yang terhubung dari loopback tidak menerima bypass ini.
+TUI native tidak meminta operator manusia untuk login. Pada setup Docker Compose yang didokumentasikan, launcher memakai kembali dedicated CLI credential yang hanya berada di host untuk Human UI API melalui loopback; layout split-runtime lain dapat memakai `--token-file`. Instance OpenTUI yang dibuat dari browser menggunakan credential di dalam process controller yang dibuat secara lazy dan tidak pernah disimpan ke state directory atau state backend. Reverse proxy tidak memperoleh bypass lokal ini hanya karena terhubung melalui loopback.
 
 Checkout source juga dapat menjalankan TUI setelah memasang dependency Bun:
 

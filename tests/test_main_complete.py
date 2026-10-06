@@ -67,6 +67,24 @@ def test_run_mcp_stdio_and_legacy_fallback(monkeypatch):
     assert legacy.calls == [("run", "streamable-http"), ("run", "sse")]
 
 
+def test_run_mcp_does_not_eagerly_create_ui_credential(monkeypatch):
+    import local_shell_mcp.ui_security as ui_security
+
+    fake = FakeMcp(legacy_type_error=True)
+    monkeypatch.setattr(settings_module, "get_settings", lambda: _settings())
+    monkeypatch.setattr(settings_module, "validate_public_oauth_configuration", lambda value: None)
+    monkeypatch.setattr(tools, "build_mcp", lambda: fake)
+    monkeypatch.setattr(
+        ui_security,
+        "issue_ui_local_token",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("UI credential materialized at startup")),
+    )
+
+    main_module.run_mcp()
+
+    assert fake.calls == [("run", "streamable-http"), ("run", "sse")]
+
+
 def test_run_mcp_streamable_and_sse(monkeypatch):
     runs = []
 

@@ -122,7 +122,7 @@ Standalone release executables embed the native OpenTUI runtime, while Docker im
 local-shell-mcp tui
 ```
 
-A dedicated local CLI credential can invoke the registered MCP tool surface directly from shell scripts; the Human UI token is intentionally never accepted by `/mcp`. By default, `call` connects to the running loopback controller, so remote-worker calls use the live controller process instead of a separate process-local worker registry:
+The native TUI authenticates the loopback Human UI API with the same host-only dedicated CLI credential used by `lsm call`; split-runtime layouts can pass `--token-file`. Browser-spawned OpenTUI uses a controller-process credential created lazily in memory and never writes that privileged credential to the state directory or state backend. A dedicated local CLI credential can also invoke the registered MCP tool surface directly from shell scripts; the Human UI token is intentionally never accepted by `/mcp`. By default, `call` connects to the running loopback controller, so remote-worker calls use the live controller process instead of a separate process-local worker registry:
 
 ```bash
 lsm call run_shell --json '{"command":"uname -a"}'

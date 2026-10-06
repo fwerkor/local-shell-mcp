@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 1cb4dc6f53744372145fad4e03a3d413bf105033e13844fea7684ea5f601d6ca -->
+<!-- i18n-source-sha256: 5f07217e742810704f1919224f6cf68bf7b4f5ecf635fadd5ec4d21b072ce6b2 -->
 # Interface humaine
 
 `local-shell-mcp` fournit deux interfaces humaines compatibles au-dessus de la même API de service, du même workspace, registre de terminaux persistants, registre de workers distants et journal d’audit MCP :
@@ -124,7 +124,7 @@ Les exécutables release autonomes intègrent le runtime OpenTUI de la plateform
 local-shell-mcp tui
 ```
 
-La TUI native ne demande pas à l’opérateur humain de se connecter. Le lanceur transmet de manière transparente une identité locale générée à l’API loopback. Cette identité est stockée dans le state directory configuré avec des permissions réservées au propriétaire ; un reverse proxy connecté depuis loopback ne reçoit pas ce bypass.
+La TUI native ne demande pas à l’opérateur humain de se connecter. Dans la configuration Docker Compose documentée, le lanceur réutilise l’identifiant CLI dédié conservé uniquement sur l’hôte pour l’API Human UI en loopback ; les autres configurations split-runtime peuvent utiliser `--token-file`. Les instances OpenTUI lancées depuis le navigateur utilisent un identifiant propre au processus controller, créé à la demande et jamais persisté dans le state directory ni dans le state backend. Un reverse proxy n’obtient aucun de ces bypass locaux simplement parce qu’il se connecte via loopback.
 
 Un checkout des sources peut également exécuter la TUI après installation des dépendances Bun :
 

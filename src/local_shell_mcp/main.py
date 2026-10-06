@@ -159,13 +159,6 @@ def run_mcp() -> None:
 
     settings = get_settings()
     validate_public_oauth_configuration(settings)
-    if settings.mode != "stdio" and settings.auth_mode != "none":
-        from .ui_security import get_or_create_ui_local_token
-
-        # Create the controller-owned loopback credential before clients try to
-        # read it. The CLI only consumes an existing credential unless an
-        # explicit shared token is configured.
-        get_or_create_ui_local_token()
     mcp = build_mcp()
 
     if settings.mode == "stdio":

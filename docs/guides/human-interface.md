@@ -123,7 +123,7 @@ Standalone release executables embed the platform OpenTUI runtime. Keep only the
 local-shell-mcp tui
 ```
 
-The native TUI does not ask the human operator to log in. The launcher supplies a generated local credential to the loopback API transparently. This credential is stored under the configured state directory with owner-only permissions; a reverse proxy connecting from loopback does not receive the bypass.
+The native TUI does not ask the human operator to log in. In the documented Docker Compose setup, the launcher reuses the host-only dedicated CLI credential for the loopback Human UI API; use `--token-file` for other split-runtime layouts. Browser-spawned OpenTUI instances use a controller-process credential that is created lazily and never persisted to the state directory or state backend. A reverse proxy does not receive either local bypass merely by connecting over loopback.
 
 A source checkout can also run the TUI after installing Bun dependencies:
 

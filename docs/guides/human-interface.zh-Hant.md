@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 1cb4dc6f53744372145fad4e03a3d413bf105033e13844fea7684ea5f601d6ca -->
+<!-- i18n-source-sha256: 5f07217e742810704f1919224f6cf68bf7b4f5ecf635fadd5ec4d21b072ce6b2 -->
 # 人機介面
 
 `local-shell-mcp` 在同一個服務 API、工作區、持久終端註冊表、遠端 worker 註冊表和 MCP 稽核日誌之上提供兩種相容的人機介面：
@@ -124,7 +124,7 @@ Activity 合併顯示目前警示與近期 MCP 稽核活動。人類輸入的命
 local-shell-mcp tui
 ```
 
-原生 TUI 不要求人工操作員登入。啟動器會透明地向 loopback API 提供自動產生的本機憑證。該憑證存放在設定的 state directory 中，並使用僅 owner 可存取的權限；即使反向代理從 loopback 連線，也不會取得此 bypass。
+原生 TUI 不要求人工操作員登入。在文件中的 Docker Compose 設定裡，啟動器會對 loopback Human UI API 重用僅保留在 host 的專用 CLI 憑證；其他 split-runtime 配置可使用 `--token-file`。由瀏覽器啟動的 OpenTUI 會使用只存在於 controller process、按需建立的憑證，絕不寫入 state directory 或 state backend。反向代理不會僅因從 loopback 連線就取得這些本機 bypass。
 
 原始碼 checkout 在安裝 Bun 相依套件後也可執行 TUI：
 

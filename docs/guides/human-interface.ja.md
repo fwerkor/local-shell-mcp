@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 1cb4dc6f53744372145fad4e03a3d413bf105033e13844fea7684ea5f601d6ca -->
+<!-- i18n-source-sha256: 5f07217e742810704f1919224f6cf68bf7b4f5ecf635fadd5ec4d21b072ce6b2 -->
 # ヒューマンインターフェース
 
 `local-shell-mcp` は、同じ service API、workspace、persistent terminal registry、remote-worker registry、MCP audit log の上に、互換性のある2つの human interface を提供します。
@@ -124,7 +124,7 @@ Activity は現在のアラートと最近の MCP 監査アクティビティを
 local-shell-mcp tui
 ```
 
-ネイティブ TUI は人間のオペレーターにログインを要求しません。ランチャーが生成したローカル資格情報を loopback API に透過的に渡します。この資格情報は設定済み state directory に owner のみが読める権限で保存され、loopback から接続するリバースプロキシには bypass は与えられません。
+ネイティブ TUI は人間のオペレーターにログインを要求しません。文書化された Docker Compose 構成では、ランチャーは loopback の Human UI API に対してホスト側だけに保持される専用 CLI credential を再利用し、別の split-runtime 構成では `--token-file` を使用できます。ブラウザから起動される OpenTUI は controller process 内で遅延生成される credential を使い、state directory や state backend には一切永続化しません。reverse proxy は loopback から接続しただけでは、これらのローカル bypass を取得できません。
 
 ソース checkout でも Bun 依存関係をインストールすれば TUI を実行できます。
 
