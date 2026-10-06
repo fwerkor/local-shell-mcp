@@ -551,7 +551,7 @@ def test_controller_defaults_reject_invalid_values():
         cli_call._controller_defaults({"LOCAL_SHELL_MCP_MAX_TIMEOUT_S": "0"})
 
 
-def test_loopback_http_client_factory_disables_environment_proxies(monkeypatch):
+def test_loopback_http_client_factory_disables_redirects_and_environment_proxies(monkeypatch):
     captured = {}
 
     def fake_client(**kwargs):
@@ -566,10 +566,108 @@ def test_loopback_http_client_factory_disables_environment_proxies(monkeypatch):
     )
     assert result is not None
     assert captured["trust_env"] is False
-    assert captured["follow_redirects"] is True
+    assert captured["follow_redirects"] is False
     assert captured["headers"] == {"x": "y"}
     assert captured["timeout"] is timeout
     assert captured["auth"] is auth
+
+
+def test_run_call_cli_explicit_controller_options_bypass_unrelated_local_config(
+    tmp_path, monkeypatch, capsys
+):
+    token_file = tmp_path / "controller-token"
+    token_file.write_text("t" * 40, encoding="utf-8")
+    missing_config = tmp_path / "missing.yaml"
+    calls = []
+    monkeypatch.setattr(
+        cli_call,
+        "_cli_environment",
+        lambda: {
+            "LOCAL_SHELL_MCP_CONFIG": str(missing_config),
+            "LOCAL_SHELL_MCP_PORT": "not-a-port",
+            "LOCAL_SHELL_MCP_MAX_TIMEOUT_S": "not-a-timeout",
+            "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN": "short",
+        },
+    )
+
+    async def fake_call(url, tool, arguments, *, local_token, sse_read_timeout):
+        calls.append((url, tool, arguments, local_token, sse_read_timeout))
+        return {"ok": True}, False
+
+    monkeypatch.setattr(cli_call, "_call_controller", fake_call)
+    cli_call.run_call_cli(
+        [
+            "environment_get",
+            "--json",
+            "{}",
+            "--url",
+            "http://127.0.0.1:9911/mcp",
+            "--token-file",
+            str(token_file),
+            "--read-timeout",
+            "12",
+        ]
+    )
+
+    assert calls == [
+        (
+            "http://127.0.0.1:9911/mcp",
+            "environment_get",
+            {},
+            "t" * 40,
+            12.0,
+        )
+    ]
+    assert json.loads(capsys.readouterr().out) == {"ok": True}
+
+
+def test_run_call_cli_explicit_url_does_not_validate_unused_port(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(
+        cli_call,
+        "_cli_environment",
+        lambda: {
+            "LOCAL_SHELL_MCP_PORT": "not-a-port",
+            "LOCAL_SHELL_MCP_MAX_TIMEOUT_S": "15",
+        },
+    )
+
+    async def fake_call(url, tool, arguments, *, local_token, sse_read_timeout):
+        calls.append((url, sse_read_timeout))
+        return {"ok": True}, False
+
+    monkeypatch.setattr(cli_call, "_call_controller", fake_call)
+    cli_call.run_call_cli(
+        ["environment_get", "--json", "{}", "--url", "http://127.0.0.1:9912/mcp"]
+    )
+    assert calls == [("http://127.0.0.1:9912/mcp", 300.0)]
+    assert json.loads(capsys.readouterr().out) == {"ok": True}
+
+
+def test_run_call_cli_explicit_timeout_does_not_validate_unused_max_timeout(
+    monkeypatch, capsys
+):
+    calls = []
+    monkeypatch.setattr(
+        cli_call,
+        "_cli_environment",
+        lambda: {
+            "LOCAL_SHELL_MCP_HOST": "127.0.0.2",
+            "LOCAL_SHELL_MCP_PORT": "9913",
+            "LOCAL_SHELL_MCP_MAX_TIMEOUT_S": "not-a-timeout",
+        },
+    )
+
+    async def fake_call(url, tool, arguments, *, local_token, sse_read_timeout):
+        calls.append((url, sse_read_timeout))
+        return {"ok": True}, False
+
+    monkeypatch.setattr(cli_call, "_call_controller", fake_call)
+    cli_call.run_call_cli(
+        ["environment_get", "--json", "{}", "--read-timeout", "9"]
+    )
+    assert calls == [("http://127.0.0.2:9913/mcp", 9.0)]
+    assert json.loads(capsys.readouterr().out) == {"ok": True}
 
 
 def test_run_call_cli_auth_none_without_explicit_token_sends_none(monkeypatch, capsys):

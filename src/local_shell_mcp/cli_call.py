@@ -163,21 +163,31 @@ def _apply_yaml_controller_values(values: dict[str, str]) -> dict[str, str]:
     return merged
 
 
-def _controller_defaults(values: dict[str, str]) -> _ControllerDefaults:
+def _controller_endpoint_defaults(values: dict[str, str]) -> tuple[str, int]:
     host = values.get("LOCAL_SHELL_MCP_HOST", "0.0.0.0").strip() or "0.0.0.0"
-    auth_mode = values.get("LOCAL_SHELL_MCP_AUTH_MODE", "oauth").strip().lower() or "oauth"
     try:
         port = int(values.get("LOCAL_SHELL_MCP_PORT", "8765"))
     except ValueError as exc:
         raise ValueError("LOCAL_SHELL_MCP_PORT must be an integer") from exc
+    if not 1 <= port <= 65535:
+        raise ValueError("LOCAL_SHELL_MCP_PORT must be between 1 and 65535")
+    return host, port
+
+
+def _controller_max_timeout(values: dict[str, str]) -> float:
     try:
         max_timeout_s = float(values.get("LOCAL_SHELL_MCP_MAX_TIMEOUT_S", "3600"))
     except ValueError as exc:
         raise ValueError("LOCAL_SHELL_MCP_MAX_TIMEOUT_S must be a number") from exc
-    if not 1 <= port <= 65535:
-        raise ValueError("LOCAL_SHELL_MCP_PORT must be between 1 and 65535")
     if max_timeout_s <= 0:
         raise ValueError("LOCAL_SHELL_MCP_MAX_TIMEOUT_S must be greater than zero")
+    return max_timeout_s
+
+
+def _controller_defaults(values: dict[str, str]) -> _ControllerDefaults:
+    host, port = _controller_endpoint_defaults(values)
+    max_timeout_s = _controller_max_timeout(values)
+    auth_mode = values.get("LOCAL_SHELL_MCP_AUTH_MODE", "oauth").strip().lower() or "oauth"
     return _ControllerDefaults(
         host=host,
         port=port,
@@ -360,7 +370,7 @@ def _loopback_http_client_factory(
         headers=headers,
         timeout=timeout,
         auth=auth,
-        follow_redirects=True,
+        follow_redirects=False,
         trust_env=False,
     )
 
@@ -425,16 +435,26 @@ def run_call_cli(argv: list[str] | None = None) -> None:
             )
         else:
             try:
-                values = _apply_yaml_controller_values(_cli_environment())
-                settings = _controller_defaults(values)
-                url = _validate_loopback_mcp_url(args.url or _default_controller_url(settings))
-                local_token = _resolve_local_token(values, args.token_file)
+                raw_values = _cli_environment()
+                values = (
+                    _apply_yaml_controller_values(raw_values)
+                    if args.url is None or args.read_timeout is None
+                    else raw_values
+                )
+                if args.url is None:
+                    host, port = _controller_endpoint_defaults(values)
+                    url = _validate_loopback_mcp_url(
+                        _default_controller_url(_ControllerDefaults(host=host, port=port))
+                    )
+                else:
+                    url = _validate_loopback_mcp_url(args.url)
+                local_token = _resolve_local_token(raw_values, args.token_file)
             except ValueError as exc:
                 parser.error(str(exc))
             read_timeout = (
                 args.read_timeout
                 if args.read_timeout is not None
-                else max(300.0, settings.max_timeout_s + 60.0)
+                else max(300.0, _controller_max_timeout(values) + 60.0)
             )
             if read_timeout <= 0:
                 parser.error("--read-timeout must be greater than zero")
