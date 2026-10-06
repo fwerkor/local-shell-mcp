@@ -536,6 +536,35 @@ def test_run_call_cli_auth_none_skips_token_resolution(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out) == {"ok": True}
 
 
+def test_run_call_cli_auth_none_honors_explicit_token_file(tmp_path, monkeypatch, capsys):
+    token_file = tmp_path / "controller-token"
+    token_file.write_text("t" * 40, encoding="utf-8")
+    calls = []
+
+    monkeypatch.setattr(
+        cli_call,
+        "_cli_environment",
+        lambda: {"LOCAL_SHELL_MCP_AUTH_MODE": "none"},
+    )
+
+    async def fake_call(url, tool, arguments, *, local_token, sse_read_timeout):
+        calls.append((url, tool, arguments, local_token, sse_read_timeout))
+        return {"ok": True}, False
+
+    monkeypatch.setattr(cli_call, "_call_controller", fake_call)
+    cli_call.run_call_cli(
+        [
+            "environment_get",
+            "--json",
+            "{}",
+            "--token-file",
+            str(token_file),
+        ]
+    )
+    assert calls[0][3] == "t" * 40
+    assert json.loads(capsys.readouterr().out) == {"ok": True}
+
+
 def test_run_call_cli_help_does_not_load_controller_configuration(monkeypatch, capsys):
     monkeypatch.setattr(
         cli_call,

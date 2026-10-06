@@ -384,11 +384,12 @@ def run_call_cli(argv: list[str] | None = None) -> None:
                 values = _cli_environment()
                 settings = _controller_defaults(values)
                 url = _validate_loopback_mcp_url(args.url or _default_controller_url(settings))
-                local_token = (
-                    None
-                    if settings.auth_mode == "none"
-                    else _resolve_local_token(values, args.token_file)
-                )
+                if args.token_file is not None:
+                    local_token = _resolve_local_token(values, args.token_file)
+                elif settings.auth_mode == "none":
+                    local_token = None
+                else:
+                    local_token = _resolve_local_token(values, None)
             except ValueError as exc:
                 parser.error(str(exc))
             read_timeout = (

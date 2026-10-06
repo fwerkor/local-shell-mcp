@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import inspect
+import ipaddress
 import json
 import subprocess
 import time
@@ -626,6 +627,23 @@ def _transport_security_settings() -> TransportSecuritySettings:
         "https://chatgpt.com",
         "https://chat.openai.com",
     }
+
+    configured_host = str(settings.host or "").strip()
+    configured_candidate = configured_host.strip("[]").split("%", 1)[0]
+    configured_loopback = configured_host.lower() == "localhost"
+    if not configured_loopback:
+        try:
+            configured_loopback = ipaddress.ip_address(configured_candidate).is_loopback
+        except ValueError:
+            configured_loopback = False
+    if configured_loopback:
+        if ":" in configured_candidate:
+            configured_transport_host = f"[{configured_candidate}]"
+        else:
+            configured_transport_host = configured_candidate
+        allowed_hosts.add(configured_transport_host)
+        allowed_hosts.add(f"{configured_transport_host}:*")
+        allowed_origins.add(f"http://{configured_transport_host}:*")
 
     if settings.public_base_url:
         parsed = urlparse(settings.public_base_url)

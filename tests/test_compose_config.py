@@ -1,3 +1,6 @@
+import hashlib
+import subprocess
+import sys
 from pathlib import Path
 
 HOST_ONLY_SETTINGS = {"LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN"}
@@ -20,3 +23,43 @@ def test_compose_forwards_every_example_service_setting() -> None:
     assert missing == []
     assert "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN:" not in compose
     assert "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256:" in compose
+    assert (
+        '127.0.0.1:${LOCAL_SHELL_MCP_PORT:-8765}:${LOCAL_SHELL_MCP_PORT:-8765}'
+        in compose
+    )
+    assert 'LOCAL_SHELL_MCP_PORT: "${LOCAL_SHELL_MCP_PORT:-8765}"' in compose
+    assert "LOCAL_SHELL_MCP_PORT=8765" in Path('.env.example').read_text(encoding='utf-8')
+
+
+def test_compose_cli_credential_rotation_rewrites_existing_assignments(tmp_path) -> None:
+    env_path = tmp_path / '.env'
+    env_path.write_text(
+        'KEEP=value\n'
+        'LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=old-token\n'
+        'LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=old-verifier\n',
+        encoding='utf-8',
+    )
+    script = Path(__file__).parents[1] / 'scripts' / 'init_compose_env.py'
+
+    subprocess.run([sys.executable, str(script), str(env_path)], check=True, capture_output=True)
+    first = dict(
+        line.split('=', 1)
+        for line in env_path.read_text(encoding='utf-8').splitlines()
+        if '=' in line
+    )
+    first_token = first['LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN']
+    first_verifier = first['LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256']
+    assert first_verifier == hashlib.sha256(first_token.encode()).hexdigest()
+
+    subprocess.run([sys.executable, str(script), str(env_path)], check=True, capture_output=True)
+    lines = env_path.read_text(encoding='utf-8').splitlines()
+    second = dict(line.split('=', 1) for line in lines if '=' in line)
+    second_token = second['LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN']
+    second_verifier = second['LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256']
+
+    assert second_verifier == hashlib.sha256(second_token.encode()).hexdigest()
+    assert lines.count(f'LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN={second_token}') == 1
+    assert lines.count(f'LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256={second_verifier}') == 1
+    assert not any(first_token in line or first_verifier in line for line in lines)
+    assert 'KEEP=value' in lines
+    assert env_path.stat().st_mode & 0o777 == 0o600

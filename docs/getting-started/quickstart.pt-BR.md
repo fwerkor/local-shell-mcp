@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 81fe33aa286565e6436467d117cc77d94ec91671e33e559a6bb888223d0c8bc1 -->
+<!-- i18n-source-sha256: a3fdf9088031e6903b15497a3df881a8e6ed2f6f2b34dd4d0b68b0414a2ca81e -->
 # Início rápido
 
 Este guia usa Docker Compose como primeiro runtime e ChatGPT como primeiro client. São escolhas independentes: Docker, VS Code extension, binary, Python e stdio são opções de runtime; ChatGPT e clientes MCP genéricos são opções de client. Consulte [opções de runtime e modelo de implantação](../guides/deployment.md) para o mapa completo.
@@ -19,8 +19,7 @@ Este guia usa Docker Compose como primeiro runtime e ChatGPT como primeiro clien
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
-python -c 'from pathlib import Path; import hashlib,secrets; p=Path(".env"); s=p.read_text(); t=secrets.token_urlsafe(48); s=s.replace("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=" + t, 1).replace("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=", "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=" + hashlib.sha256(t.encode()).hexdigest(), 1); p.write_text(s)'
-chmod 600 .env
+python scripts/init_compose_env.py
 ```
 
 Edite `.env`:

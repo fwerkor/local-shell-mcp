@@ -4,11 +4,11 @@ services:
     container_name: local-shell-mcp
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8765:8765"
+      - "127.0.0.1:${LOCAL_SHELL_MCP_PORT:-8765}:${LOCAL_SHELL_MCP_PORT:-8765}"
     environment:
       LOCAL_SHELL_MCP_MODE: "mcp"
       LOCAL_SHELL_MCP_HOST: "0.0.0.0"
-      LOCAL_SHELL_MCP_PORT: "8765"
+      LOCAL_SHELL_MCP_PORT: "${LOCAL_SHELL_MCP_PORT:-8765}"
       # The published port is loopback-only; trust proxy headers from the optional
       # cloudflared sidecar so request.client contains the public caller address.
       LOCAL_SHELL_MCP_FORWARDED_ALLOW_IPS: "${LOCAL_SHELL_MCP_FORWARDED_ALLOW_IPS:-*}"

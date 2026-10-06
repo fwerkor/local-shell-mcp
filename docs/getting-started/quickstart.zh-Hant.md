@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 81fe33aa286565e6436467d117cc77d94ec91671e33e559a6bb888223d0c8bc1 -->
+<!-- i18n-source-sha256: a3fdf9088031e6903b15497a3df881a8e6ed2f6f2b34dd4d0b68b0414a2ca81e -->
 # 快速開始
 
 本頁把 Docker Compose 作爲第一個運行時，把 ChatGPT 作爲第一個客戶端。兩者是獨立選擇：Docker、VS Code 擴展、二進制、Python 和 stdio 是運行時；ChatGPT 和通用 MCP 客戶端是接入方式。完整關係見 [運行時與客戶端模型](../guides/deployment.md)。
@@ -19,8 +19,7 @@
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
-python -c 'from pathlib import Path; import hashlib,secrets; p=Path(".env"); s=p.read_text(); t=secrets.token_urlsafe(48); s=s.replace("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN=" + t, 1).replace("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=", "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=" + hashlib.sha256(t.encode()).hexdigest(), 1); p.write_text(s)'
-chmod 600 .env
+python scripts/init_compose_env.py
 ```
 
 編輯 `.env`：
