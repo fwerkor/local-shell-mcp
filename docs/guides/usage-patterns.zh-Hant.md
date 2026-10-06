@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: f471795a57e16e999999f856000b779183d5b6c642ffc8c852c77e7faf3bc0dd -->
+<!-- i18n-source-sha256: bfd205813bd40569d489f7e57417eef5098af2388cdb852b1016deb74a2fc0f1 -->
 # 使用模式與提示詞指南
 
 `local-shell-mcp` 暴露的是強工具集。好的結果依賴清晰的工作方式：先檢查，再小步行動，隨後驗證，並說明改動了什麼。
@@ -39,7 +39,7 @@ lsm call run_shell --json '{"command":"uname -a"}'
 printf '%s\n' '{"path":"README.md"}' | lsm call file_read
 ```
 
-使用 `--session s_...` 可將呼叫關聯到 Logical Session。Docker Compose 使用者可在 repository 根目錄執行（CLI 會偵測預設共享 token 路徑）；若 controller 使用不同的 runtime 檔案系統，也可傳入 `--token-file <path>`。`--direct` 會繞過 controller，且僅支援本機呼叫。
+使用 `--session s_...` 可將呼叫關聯到 Logical Session。在文件中的 Docker Compose 設定裡，controller 與宿主機 CLI 透過 repository 內權限受限的 `.env` 共享 `LOCAL_SHELL_MCP_UI_LOCAL_TOKEN`；其他分離 runtime 配置可傳入 `--token-file <path>`。`--direct` 會繞過 controller，且僅支援本機呼叫。
 
 ## 提示詞模板
 

@@ -6,17 +6,28 @@ import ipaddress
 import json
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from .settings import get_settings
-from .ui_security import UI_LOCAL_TOKEN_ENV, UI_LOCAL_TOKEN_HEADER, get_ui_local_token
+from .ui_security import UI_LOCAL_TOKEN_ENV, UI_LOCAL_TOKEN_HEADER
 
 CLI_TOKEN_FILE_ENV = "LOCAL_SHELL_MCP_CLI_TOKEN_FILE"
+CLI_DOTENV = ".env"
+DEFAULT_LOCAL_TOKEN_PATH = Path("/workspace/.local-shell-mcp/ui/local-token")
+
+
+@dataclass(frozen=True)
+class _ControllerDefaults:
+    host: str = "0.0.0.0"
+    port: int = 8765
+    max_timeout_s: float = 3600.0
+    auth_mode: str = "oauth"
 
 
 def _parse_arguments(raw: str | None) -> dict[str, Any]:
@@ -52,8 +63,62 @@ def _validate_loopback_mcp_url(value: str) -> str:
     return normalized if parsed.path else normalized + "/mcp"
 
 
-def _default_controller_url(settings: Any) -> str:
-    host = str(getattr(settings, "host", "") or "").strip()
+def _read_dotenv(path: Path) -> dict[str, str]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    values: dict[str, str] = {}
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        values[key] = value
+    return values
+
+
+def _cli_environment() -> dict[str, str]:
+    values = _read_dotenv(Path.cwd() / CLI_DOTENV)
+    for key, value in os.environ.items():
+        if key.startswith("LOCAL_SHELL_MCP_"):
+            values[key] = value
+    return values
+
+
+def _controller_defaults(values: dict[str, str]) -> _ControllerDefaults:
+    host = values.get("LOCAL_SHELL_MCP_HOST", "0.0.0.0").strip() or "0.0.0.0"
+    auth_mode = values.get("LOCAL_SHELL_MCP_AUTH_MODE", "oauth").strip().lower() or "oauth"
+    try:
+        port = int(values.get("LOCAL_SHELL_MCP_PORT", "8765"))
+    except ValueError as exc:
+        raise ValueError("LOCAL_SHELL_MCP_PORT must be an integer") from exc
+    try:
+        max_timeout_s = float(values.get("LOCAL_SHELL_MCP_MAX_TIMEOUT_S", "3600"))
+    except ValueError as exc:
+        raise ValueError("LOCAL_SHELL_MCP_MAX_TIMEOUT_S must be a number") from exc
+    if not 1 <= port <= 65535:
+        raise ValueError("LOCAL_SHELL_MCP_PORT must be between 1 and 65535")
+    if max_timeout_s <= 0:
+        raise ValueError("LOCAL_SHELL_MCP_MAX_TIMEOUT_S must be greater than zero")
+    return _ControllerDefaults(
+        host=host,
+        port=port,
+        max_timeout_s=max_timeout_s,
+        auth_mode=auth_mode,
+    )
+
+
+def _default_controller_url(settings: _ControllerDefaults) -> str:
+    host = str(settings.host or "").strip()
     candidate = host.strip("[]").split("%", 1)[0]
     is_loopback = host.lower() == "localhost"
     if not is_loopback:
@@ -78,25 +143,37 @@ def _read_token_file(path: Path) -> str:
     return value
 
 
-def _resolve_local_token(settings: Any, token_file: str | None) -> str:
-    configured_file = token_file or os.getenv(CLI_TOKEN_FILE_ENV, "").strip() or None
+def _try_read_token_file(path: Path) -> str | None:
+    try:
+        return _read_token_file(path)
+    except ValueError:
+        return None
+
+
+def _resolve_local_token(values: dict[str, str], token_file: str | None) -> str | None:
+    configured_file = token_file or values.get(CLI_TOKEN_FILE_ENV, "").strip() or None
     if configured_file:
         return _read_token_file(Path(configured_file))
 
-    token = get_ui_local_token()
-    if token:
+    token = values.get(UI_LOCAL_TOKEN_ENV, "").strip()
+    if len(token) >= 32:
         return token
 
-    # The documented Docker Compose runtime bind-mounts ./workspaces/default to
-    # /workspace, so the controller-created token is visible at this host path.
-    compose_token = Path.cwd() / "workspaces" / "default" / ".local-shell-mcp" / "ui" / "local-token"
-    if compose_token.is_file():
-        return _read_token_file(compose_token)
+    state_dir = values.get("LOCAL_SHELL_MCP_STATE_DIR", "").strip()
+    workspace = values.get("LOCAL_SHELL_MCP_WORKSPACE_ROOT", "").strip()
+    candidates: list[Path] = []
+    if state_dir:
+        candidates.append(Path(state_dir).expanduser() / "ui" / "local-token")
+    elif workspace:
+        candidates.append(Path(workspace).expanduser() / ".local-shell-mcp" / "ui" / "local-token")
+    else:
+        candidates.append(DEFAULT_LOCAL_TOKEN_PATH)
+    for candidate in candidates:
+        existing = _try_read_token_file(candidate)
+        if existing:
+            return existing
 
-    raise ValueError(
-        "no controller local credential is available; use --token-file, set "
-        f"{CLI_TOKEN_FILE_ENV}, or share {UI_LOCAL_TOKEN_ENV} with the controller"
-    )
+    return None
 
 
 def _jsonable(value: Any) -> Any:
@@ -148,14 +225,15 @@ async def _call_controller(
     tool: str,
     arguments: dict[str, Any],
     *,
-    local_token: str,
+    local_token: str | None,
     sse_read_timeout: float,
 ) -> tuple[Any, bool]:
-    headers = {UI_LOCAL_TOKEN_HEADER: local_token}
+    headers = {UI_LOCAL_TOKEN_HEADER: local_token} if local_token else None
     async with streamablehttp_client(
         url,
         headers=headers,
         sse_read_timeout=sse_read_timeout,
+        httpx_client_factory=_loopback_http_client_factory,
     ) as streams:
         read_stream, write_stream, _ = streams
         async with ClientSession(read_stream, write_stream) as session:
@@ -165,14 +243,34 @@ async def _call_controller(
 
 
 async def _call_direct(tool: str, arguments: dict[str, Any]) -> tuple[Any, bool]:
+    from .auth import _CURRENT_PRINCIPAL, Principal
     from .tools import build_mcp
 
-    result = await build_mcp().call_tool(tool, arguments)
+    principal_token = _CURRENT_PRINCIPAL.set(
+        Principal(email=None, subject="native-tui", claims={"auth": "native-tui"})
+    )
+    try:
+        result = await build_mcp().call_tool(tool, arguments)
+    finally:
+        _CURRENT_PRINCIPAL.reset(principal_token)
     return _normalize_direct_result(result)
 
 
+def _loopback_http_client_factory(
+    headers: dict[str, str] | None = None,
+    timeout: httpx.Timeout | None = None,
+    auth: httpx.Auth | None = None,
+) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        headers=headers,
+        timeout=timeout,
+        auth=auth,
+        follow_redirects=True,
+        trust_env=False,
+    )
+
+
 def run_call_cli(argv: list[str] | None = None) -> None:
-    settings = get_settings()
     parser = argparse.ArgumentParser(
         prog="local-shell-mcp call",
         description="Invoke one local-shell-mcp tool from the command line.",
@@ -190,7 +288,7 @@ def run_call_cli(argv: list[str] | None = None) -> None:
     )
     parser.add_argument(
         "--url",
-        default=_default_controller_url(settings),
+        default=None,
         help="Running local controller MCP URL (loopback only).",
     )
     parser.add_argument(
@@ -203,7 +301,7 @@ def run_call_cli(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--read-timeout",
         type=float,
-        default=max(300.0, float(getattr(settings, "max_timeout_s", 3600)) + 60.0),
+        default=None,
         help="Maximum quiet SSE read interval in seconds for controller calls.",
     )
     parser.add_argument(
@@ -226,11 +324,22 @@ def run_call_cli(argv: list[str] | None = None) -> None:
             payload, failed = asyncio.run(_call_direct(args.tool, arguments))
         else:
             try:
-                url = _validate_loopback_mcp_url(args.url)
-                local_token = _resolve_local_token(settings, args.token_file)
+                values = _cli_environment()
+                settings = _controller_defaults(values)
+                url = _validate_loopback_mcp_url(args.url or _default_controller_url(settings))
+                local_token = (
+                    None
+                    if settings.auth_mode == "none"
+                    else _resolve_local_token(values, args.token_file)
+                )
             except ValueError as exc:
                 parser.error(str(exc))
-            if args.read_timeout <= 0:
+            read_timeout = (
+                args.read_timeout
+                if args.read_timeout is not None
+                else max(300.0, settings.max_timeout_s + 60.0)
+            )
+            if read_timeout <= 0:
                 parser.error("--read-timeout must be greater than zero")
             payload, failed = asyncio.run(
                 _call_controller(
@@ -238,7 +347,7 @@ def run_call_cli(argv: list[str] | None = None) -> None:
                     args.tool,
                     arguments,
                     local_token=local_token,
-                    sse_read_timeout=args.read_timeout,
+                    sse_read_timeout=read_timeout,
                 )
             )
     except KeyboardInterrupt:

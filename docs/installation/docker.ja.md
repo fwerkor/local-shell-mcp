@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 56d5f11100a1906c167afd36354f29742515a26289c62a03f044f3852ce2eaed -->
+<!-- i18n-source-sha256: e2dd23efea9768d971fa8a8be723f55cfcac3279adfc82e4185a803e3f05de1e -->
 # Docker Compose runtime
 
 Docker Compose は多くの user に推奨される runtime です。モデルに制御された Linux workspace、再現可能な toolchain、persistent credentials、browser automation support、簡単な upgrade path を提供します。
@@ -30,10 +30,14 @@ Image は Playwright Python image をベースにし、広い development toolch
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
+python -c 'from pathlib import Path; import secrets; p=Path(".env"); s=p.read_text(); p.write_text(s.replace("LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=" + secrets.token_urlsafe(48), 1))'
+chmod 600 .env
 mkdir -p workspaces/default
 docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
+
+生成されたローカルトークンはホスト所有の `.env`（モード `0600`）に保存され、Compose からコンテナへ渡されます。これにより、ホスト上の `lsm call` はコンテナ所有の状態ファイルを読むことなく loopback controller に認証できます。
 
 Default Compose file は service を localhost に bind します：
 

@@ -29,10 +29,14 @@ The exact image content should be treated as a convenience layer, not a stable A
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
+python -c 'from pathlib import Path; import secrets; p=Path(".env"); s=p.read_text(); p.write_text(s.replace("LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=" + secrets.token_urlsafe(48), 1))'
+chmod 600 .env
 mkdir -p workspaces/default
 docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
+
+The generated local token stays in the host-owned `.env` (mode `0600`) and is passed into the container by Compose. This lets `lsm call` on the host authenticate to the loopback controller without reading container-owned state.
 
 The default Compose file binds the service to localhost:
 

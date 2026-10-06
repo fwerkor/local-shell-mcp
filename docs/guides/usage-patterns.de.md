@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: f471795a57e16e999999f856000b779183d5b6c642ffc8c852c77e7faf3bc0dd -->
+<!-- i18n-source-sha256: bfd205813bd40569d489f7e57417eef5098af2388cdb852b1016deb74a2fc0f1 -->
 # Nutzungsmuster und Prompt-Leitfaden
 
 `local-shell-mcp` stellt leistungsfähige Tools bereit. Gute Ergebnisse entstehen, wenn das Modell zuerst prüft, in kleinen Schritten handelt, verifiziert und die Änderungen berichtet.
@@ -39,7 +39,7 @@ lsm call run_shell --json '{"command":"uname -a"}'
 printf '%s\n' '{"path":"README.md"}' | lsm call file_read
 ```
 
-Mit `--session s_...` lässt sich der Aufruf einer Logical Session zuordnen. Bei Docker Compose kann der Befehl im Repository-Stamm ausgeführt werden; die CLI erkennt dort den standardmäßig gemeinsam genutzten Token-Pfad. Verwendet der Controller ein anderes Runtime-Dateisystem, kann `--token-file <path>` angegeben werden. `--direct` umgeht den Controller und ist nur lokal verfügbar.
+Mit `--session s_...` lässt sich der Aufruf einer Logical Session zuordnen. Im dokumentierten Docker-Compose-Setup teilen Controller und Host-CLI `LOCAL_SHELL_MCP_UI_LOCAL_TOKEN` über die zugriffsbeschränkte `.env` des Repositorys; andere getrennte Runtime-Layouts können `--token-file <path>` verwenden. `--direct` umgeht den Controller und ist nur lokal verfügbar.
 
 ## Prompt-Vorlagen
 

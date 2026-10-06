@@ -38,7 +38,7 @@ lsm call run_shell --json '{"command":"uname -a"}'
 printf '%s\n' '{"path":"README.md"}' | lsm call file_read
 ```
 
-Use `--session s_...` to attach the call to a Logical Session. Docker Compose users can run from the repository root (the CLI detects the default shared token path) or pass `--token-file <path>` when the controller uses a different runtime filesystem. `--direct` bypasses the controller and is local-only.
+Use `--session s_...` to attach the call to a Logical Session. In the documented Docker Compose setup, the controller and host CLI share `LOCAL_SHELL_MCP_UI_LOCAL_TOKEN` through the repository’s permission-restricted `.env`; other split-runtime layouts can pass `--token-file <path>`. `--direct` bypasses the controller and is local-only.
 
 ## Prompt templates
 

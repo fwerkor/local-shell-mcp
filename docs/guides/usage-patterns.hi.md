@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: f471795a57e16e999999f856000b779183d5b6c642ffc8c852c77e7faf3bc0dd -->
+<!-- i18n-source-sha256: bfd205813bd40569d489f7e57417eef5098af2388cdb852b1016deb74a2fc0f1 -->
 # उपयोग पैटर्न और prompting guide
 
 `local-shell-mcp` शक्तिशाली tools देता है। अच्छे परिणामों के लिए model से पहले निरीक्षण, छोटे कदमों में कार्य, verification और बदली चीजों की रिपोर्ट माँगें।
@@ -39,7 +39,7 @@ lsm call run_shell --json '{"command":"uname -a"}'
 printf '%s\n' '{"path":"README.md"}' | lsm call file_read
 ```
 
-कॉल को Logical Session से जोड़ने के लिए `--session s_...` इस्तेमाल करें। Docker Compose में repository root से चलाने पर CLI default shared token path पहचान लेता है; यदि controller अलग runtime filesystem इस्तेमाल करता है तो `--token-file <path>` दें। `--direct` controller को bypass करता है और केवल local calls के लिए है।
+कॉल को Logical Session से जोड़ने के लिए `--session s_...` इस्तेमाल करें। दस्तावेज़ित Docker Compose setup में controller और host CLI repository के permission-restricted `.env` के जरिए `LOCAL_SHELL_MCP_UI_LOCAL_TOKEN` साझा करते हैं; अन्य split-runtime layouts `--token-file <path>` इस्तेमाल कर सकते हैं। `--direct` controller को bypass करता है और केवल local calls के लिए है।
 
 ## Prompt templates
 

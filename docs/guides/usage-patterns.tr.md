@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: f471795a57e16e999999f856000b779183d5b6c642ffc8c852c77e7faf3bc0dd -->
+<!-- i18n-source-sha256: bfd205813bd40569d489f7e57417eef5098af2388cdb852b1016deb74a2fc0f1 -->
 # Kullanım kalıpları ve prompting kılavuzu
 
 `local-shell-mcp` güçlü tools sunar. İyi sonuçlar için modelden önce inceleme, küçük adımlarla hareket etme, doğrulama ve nelerin değiştiğini raporlama istenmelidir.
@@ -39,7 +39,7 @@ lsm call run_shell --json '{"command":"uname -a"}'
 printf '%s\n' '{"path":"README.md"}' | lsm call file_read
 ```
 
-Çağrıyı bir Logical Session ile ilişkilendirmek için `--session s_...` kullanın. Docker Compose kullanıcıları repository kökünden çalıştırdığında CLI varsayılan paylaşılan token yolunu algılar; controller farklı bir runtime dosya sistemi kullanıyorsa `--token-file <path>` verilebilir. `--direct` controller katmanını atlar ve yalnızca yerel çağrılar içindir.
+Çağrıyı bir Logical Session ile ilişkilendirmek için `--session s_...` kullanın. Belgelenen Docker Compose kurulumunda controller ve host CLI, repository içindeki izinleri kısıtlanmış `.env` üzerinden `LOCAL_SHELL_MCP_UI_LOCAL_TOKEN` değerini paylaşır; diğer ayrık runtime düzenleri `--token-file <path>` kullanabilir. `--direct` controller katmanını atlar ve yalnızca yerel çağrılar içindir.
 
 ## Prompt şablonları
 

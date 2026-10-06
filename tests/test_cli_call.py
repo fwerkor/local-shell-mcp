@@ -13,6 +13,7 @@ import local_shell_mcp.cli_call as cli_call
 import local_shell_mcp.settings as settings_module
 import local_shell_mcp.tools as tools_module
 from local_shell_mcp.auth import _CURRENT_PRINCIPAL, Principal, verify_request
+from local_shell_mcp.session_runtime import get_session_runtime_manager
 from local_shell_mcp.ui_security import UI_LOCAL_TOKEN_HEADER, get_or_create_ui_local_token
 
 
@@ -91,10 +92,15 @@ def test_run_call_cli_controller_output_session_and_failure(monkeypatch, capsys)
 
     monkeypatch.setattr(
         cli_call,
-        "get_settings",
-        lambda: SimpleNamespace(port=9999, host="127.0.0.2", max_timeout_s=900),
+        "_cli_environment",
+        lambda: {
+            "LOCAL_SHELL_MCP_HOST": "127.0.0.2",
+            "LOCAL_SHELL_MCP_PORT": "9999",
+            "LOCAL_SHELL_MCP_MAX_TIMEOUT_S": "900",
+            "LOCAL_SHELL_MCP_AUTH_MODE": "oauth",
+            "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN": "secret" * 8,
+        },
     )
-    monkeypatch.setattr(cli_call, "_resolve_local_token", lambda settings, token_file: "secret")
     monkeypatch.setattr(cli_call, "_call_controller", fake_call)
 
     cli_call.run_call_cli(
@@ -106,7 +112,7 @@ def test_run_call_cli_controller_output_session_and_failure(monkeypatch, capsys)
             "http://127.0.0.2:9999/mcp",
             "run_shell",
             {"command": "printf ok", "logical_session_id": "s_demo"},
-            "secret",
+            "secret" * 8,
             960.0,
         )
     ]
@@ -129,12 +135,6 @@ def test_run_call_cli_direct_and_runtime_error(monkeypatch, capsys):
         calls.append((tool, arguments))
         return {"ok": True}, False
 
-    monkeypatch.setattr(
-        cli_call,
-        "get_settings",
-        lambda: SimpleNamespace(port=8765, host="0.0.0.0", max_timeout_s=3600),
-    )
-    monkeypatch.setattr(cli_call, "_resolve_local_token", lambda settings, token_file: "secret")
     monkeypatch.setattr(cli_call, "_call_direct", fake_direct)
 
     cli_call.run_call_cli(["environment_get", "--direct", "--json", "{}"])
@@ -144,6 +144,11 @@ def test_run_call_cli_direct_and_runtime_error(monkeypatch, capsys):
     async def explode(url, tool, arguments, **kwargs):
         raise RuntimeError("controller unavailable")
 
+    monkeypatch.setattr(
+        cli_call,
+        "_cli_environment",
+        lambda: {"LOCAL_SHELL_MCP_AUTH_MODE": "none"},
+    )
     monkeypatch.setattr(cli_call, "_call_controller", explode)
     with pytest.raises(SystemExit) as exc:
         cli_call.run_call_cli(["environment_get", "--json", "{}"])
@@ -236,8 +241,8 @@ def test_call_controller_uses_local_token_and_mcp_session(monkeypatch):
                 }
             )
 
-    def fake_transport(url, headers, sse_read_timeout):
-        calls.append(("transport", url, headers, sse_read_timeout))
+    def fake_transport(url, headers, sse_read_timeout, httpx_client_factory):
+        calls.append(("transport", url, headers, sse_read_timeout, httpx_client_factory))
         return Streams()
 
     monkeypatch.setattr(cli_call, "streamablehttp_client", fake_transport)
@@ -257,15 +262,23 @@ def test_call_controller_uses_local_token_and_mcp_session(monkeypatch):
         "http://127.0.0.1:8765/mcp",
         {UI_LOCAL_TOKEN_HEADER: "local-secret"},
         3660.0,
+        cli_call._loopback_http_client_factory,
     )
     assert ("call-tool", "environment_get", {"logical_session_id": None}) in calls
 
 
-def test_call_direct_reuses_registered_tool_surface(monkeypatch):
+def test_call_direct_reuses_registered_tool_surface_with_trusted_principal(monkeypatch):
+    assert _CURRENT_PRINCIPAL.get() is None
+
     class Mcp:
         async def call_tool(self, tool, arguments):
             assert tool == "environment_get"
             assert arguments == {}
+            principal = _CURRENT_PRINCIPAL.get()
+            assert principal is not None
+            assert principal.subject == "native-tui"
+            assert principal.claims["auth"] == "native-tui"
+            assert tools_module._current_session_subject() is None
             return [], {"ok": True, "data": {"direct": True}}
 
     monkeypatch.setattr(tools_module, "build_mcp", lambda: Mcp())
@@ -273,15 +286,34 @@ def test_call_direct_reuses_registered_tool_surface(monkeypatch):
         {"ok": True, "data": {"direct": True}},
         False,
     )
+    assert _CURRENT_PRINCIPAL.get() is None
+
+
+def test_call_direct_can_attach_existing_local_user_session(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch, auth_mode="oauth")
+    manager = get_session_runtime_manager()
+    session = manager.manage("local-user", action="start", objective="existing local task")
+    session_id = session["session_id"]
+
+    payload, failed = asyncio.run(
+        cli_call._call_direct(
+            "environment_get",
+            {"logical_session_id": session_id},
+        )
+    )
+
+    assert failed is False
+    assert payload["ok"] is True
+    current = manager.get(session_id, subject="local-user")
+    assert any(item["type"] == "tool.completed" for item in current["recent_activity"])
 
 
 def test_run_call_cli_rejects_bad_input_url_and_handles_interrupt(monkeypatch, capsys):
     monkeypatch.setattr(
         cli_call,
-        "get_settings",
-        lambda: SimpleNamespace(port=8765, host="127.0.0.1", max_timeout_s=3600),
+        "_cli_environment",
+        lambda: {"LOCAL_SHELL_MCP_AUTH_MODE": "none"},
     )
-    monkeypatch.setattr(cli_call, "_resolve_local_token", lambda settings, token_file: "secret")
 
     with pytest.raises(SystemExit) as exc:
         cli_call.run_call_cli(["environment_get", "--json", "[]"])
@@ -324,35 +356,145 @@ def test_default_controller_url_respects_loopback_bind():
     )
 
 
-def test_resolve_local_token_supports_shared_files_and_compose(tmp_path, monkeypatch):
+def test_resolve_local_token_supports_env_and_files(tmp_path):
     explicit = tmp_path / "token"
     explicit.write_text("x" * 40, encoding="utf-8")
-    settings = SimpleNamespace()
-    assert cli_call._resolve_local_token(settings, str(explicit)) == "x" * 40
+    assert cli_call._resolve_local_token({}, str(explicit)) == "x" * 40
+    assert cli_call._resolve_local_token({cli_call.CLI_TOKEN_FILE_ENV: str(explicit)}, None) == (
+        "x" * 40
+    )
+    assert cli_call._resolve_local_token({"LOCAL_SHELL_MCP_UI_LOCAL_TOKEN": "z" * 40}, None) == (
+        "z" * 40
+    )
 
-    monkeypatch.setenv(cli_call.CLI_TOKEN_FILE_ENV, str(explicit))
-    assert cli_call._resolve_local_token(settings, None) == "x" * 40
-    monkeypatch.delenv(cli_call.CLI_TOKEN_FILE_ENV)
+    state_dir = tmp_path / "state"
+    token_path = state_dir / "ui" / "local-token"
+    token_path.parent.mkdir(parents=True)
+    token_path.write_text("s" * 40, encoding="utf-8")
+    assert cli_call._resolve_local_token(
+        {"LOCAL_SHELL_MCP_STATE_DIR": str(state_dir)}, None
+    ) == "s" * 40
 
-    monkeypatch.setattr(cli_call, "get_ui_local_token", lambda: "z" * 40)
-    assert cli_call._resolve_local_token(settings, None) == "z" * 40
+    workspace = tmp_path / "workspace"
+    workspace_token = workspace / ".local-shell-mcp" / "ui" / "local-token"
+    workspace_token.parent.mkdir(parents=True)
+    workspace_token.write_text("w" * 40, encoding="utf-8")
+    assert cli_call._resolve_local_token(
+        {"LOCAL_SHELL_MCP_WORKSPACE_ROOT": str(workspace)}, None
+    ) == "w" * 40
 
-    monkeypatch.setattr(cli_call, "get_ui_local_token", lambda: None)
-    compose = tmp_path / "workspaces" / "default" / ".local-shell-mcp" / "ui"
-    compose.mkdir(parents=True)
-    (compose / "local-token").write_text("y" * 40, encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    assert cli_call._resolve_local_token(settings, None) == "y" * 40
+    workspace_token.write_text("short", encoding="utf-8")
+    assert cli_call._resolve_local_token(
+        {"LOCAL_SHELL_MCP_WORKSPACE_ROOT": str(workspace)}, None
+    ) is None
 
-    (compose / "local-token").unlink()
-    with pytest.raises(ValueError, match="no controller local credential"):
-        cli_call._resolve_local_token(settings, None)
+    default_token = tmp_path / "default-token"
+    default_token.write_text("d" * 40, encoding="utf-8")
+    original_default = cli_call.DEFAULT_LOCAL_TOKEN_PATH
+    cli_call.DEFAULT_LOCAL_TOKEN_PATH = default_token
+    try:
+        assert cli_call._resolve_local_token({}, None) == "d" * 40
+        default_token.write_text("short", encoding="utf-8")
+        assert cli_call._resolve_local_token({}, None) is None
+    finally:
+        cli_call.DEFAULT_LOCAL_TOKEN_PATH = original_default
+
     with pytest.raises(ValueError, match="unable to read"):
         cli_call._read_token_file(tmp_path / "missing")
-    short = tmp_path / "short-token"
-    short.write_text("short", encoding="utf-8")
     with pytest.raises(ValueError, match="invalid"):
-        cli_call._read_token_file(short)
+        cli_call._read_token_file(workspace_token)
+
+
+def test_dotenv_and_cli_environment_are_read_only(tmp_path, monkeypatch):
+    dotenv = tmp_path / ".env"
+    dotenv.write_text(
+        "# comment\n"
+        "LOCAL_SHELL_MCP_HOST='127.0.0.2'\n"
+        "export LOCAL_SHELL_MCP_PORT=9999\n"
+        "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=dotenv-token-abcdefghijklmnopqrstuvwxyz\n"
+        "ignored-line\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_PORT", "10001")
+    values = cli_call._cli_environment()
+    assert values["LOCAL_SHELL_MCP_HOST"] == "127.0.0.2"
+    assert values["LOCAL_SHELL_MCP_PORT"] == "10001"
+    assert values["LOCAL_SHELL_MCP_UI_LOCAL_TOKEN"].startswith("dotenv-token-")
+
+    settings = cli_call._controller_defaults(values)
+    assert settings.host == "127.0.0.2"
+    assert settings.port == 10001
+    assert settings.auth_mode == "oauth"
+    assert not (tmp_path / "workspace").exists()
+
+
+def test_controller_defaults_reject_invalid_values():
+    with pytest.raises(ValueError, match="integer"):
+        cli_call._controller_defaults({"LOCAL_SHELL_MCP_PORT": "bad"})
+    with pytest.raises(ValueError, match="between 1 and 65535"):
+        cli_call._controller_defaults({"LOCAL_SHELL_MCP_PORT": "70000"})
+    with pytest.raises(ValueError, match="number"):
+        cli_call._controller_defaults({"LOCAL_SHELL_MCP_MAX_TIMEOUT_S": "bad"})
+    with pytest.raises(ValueError, match="greater than zero"):
+        cli_call._controller_defaults({"LOCAL_SHELL_MCP_MAX_TIMEOUT_S": "0"})
+
+
+def test_loopback_http_client_factory_disables_environment_proxies(monkeypatch):
+    captured = {}
+
+    def fake_client(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(cli_call.httpx, "AsyncClient", fake_client)
+    timeout = cli_call.httpx.Timeout(10.0)
+    auth = object()
+    result = cli_call._loopback_http_client_factory(
+        headers={"x": "y"}, timeout=timeout, auth=auth
+    )
+    assert result is not None
+    assert captured["trust_env"] is False
+    assert captured["follow_redirects"] is True
+    assert captured["headers"] == {"x": "y"}
+    assert captured["timeout"] is timeout
+    assert captured["auth"] is auth
+
+
+def test_run_call_cli_auth_none_skips_token_resolution(monkeypatch, capsys):
+    calls = []
+
+    monkeypatch.setattr(
+        cli_call,
+        "_cli_environment",
+        lambda: {"LOCAL_SHELL_MCP_AUTH_MODE": "none"},
+    )
+    monkeypatch.setattr(
+        cli_call,
+        "_resolve_local_token",
+        lambda values, token_file: (_ for _ in ()).throw(AssertionError("token lookup")),
+    )
+
+    async def fake_call(url, tool, arguments, *, local_token, sse_read_timeout):
+        calls.append((url, tool, arguments, local_token, sse_read_timeout))
+        return {"ok": True}, False
+
+    monkeypatch.setattr(cli_call, "_call_controller", fake_call)
+    cli_call.run_call_cli(["environment_get", "--json", "{}"])
+    assert calls[0][3] is None
+    assert json.loads(capsys.readouterr().out) == {"ok": True}
+
+
+def test_run_call_cli_help_does_not_load_controller_configuration(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli_call,
+        "_cli_environment",
+        lambda: (_ for _ in ()).throw(AssertionError("configuration loaded")),
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli_call.run_call_cli(["--help"])
+    assert exc.value.code == 0
+    assert "Invoke one local-shell-mcp tool" in capsys.readouterr().out
 
 
 def test_trusted_local_principal_can_use_existing_sessions(tmp_path, monkeypatch):

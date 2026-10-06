@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 56d5f11100a1906c167afd36354f29742515a26289c62a03f044f3852ce2eaed -->
+<!-- i18n-source-sha256: e2dd23efea9768d971fa8a8be723f55cfcac3279adfc82e4185a803e3f05de1e -->
 # Docker Compose runtime
 
 Docker Compose çoğu kullanıcı için önerilen runtime’dır. Modele kontrollü Linux workspace, reproducible toolchain, persistent credentials, browser automation desteği ve kolay upgrade yolu sağlar.
@@ -30,10 +30,14 @@ Exact image content bir convenience layer’dır, stable API değildir. Project-
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
+python -c 'from pathlib import Path; import secrets; p=Path(".env"); s=p.read_text(); p.write_text(s.replace("LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=" + secrets.token_urlsafe(48), 1))'
+chmod 600 .env
 mkdir -p workspaces/default
 docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
+
+Üretilen yerel token, host tarafından sahip olunan `.env` dosyasında (mod `0600`) kalır ve Compose tarafından container’a aktarılır. Böylece host üzerindeki `lsm call`, container’a ait durum dosyalarını okumadan loopback controller’a kimlik doğrulayabilir.
 
 Default Compose file service’i localhost’a bind eder:
 

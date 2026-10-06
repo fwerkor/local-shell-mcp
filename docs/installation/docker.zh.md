@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 56d5f11100a1906c167afd36354f29742515a26289c62a03f044f3852ce2eaed -->
+<!-- i18n-source-sha256: e2dd23efea9768d971fa8a8be723f55cfcac3279adfc82e4185a803e3f05de1e -->
 # Docker Compose 运行时
 
 Docker Compose 是大多数用户的推荐运行时。它为模型提供受控 Linux 工作区、可重复工具链、持久凭据、浏览器自动化支持，以及简单的升级路径。
@@ -30,10 +30,14 @@ Docker Compose 是大多数用户的推荐运行时。它为模型提供受控 L
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
+python -c 'from pathlib import Path; import secrets; p=Path(".env"); s=p.read_text(); p.write_text(s.replace("LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=" + secrets.token_urlsafe(48), 1))'
+chmod 600 .env
 mkdir -p workspaces/default
 docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
+
+生成的本地 token 保存在宿主机拥有的 `.env` 中（权限 `0600`），并由 Compose 传入容器。这样宿主机上的 `lsm call` 可以认证到 loopback controller，而不需要读取容器拥有的状态文件。
 
 默认 Compose 文件把服务绑定到 localhost：
 

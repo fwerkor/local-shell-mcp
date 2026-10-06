@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: f471795a57e16e999999f856000b779183d5b6c642ffc8c852c77e7faf3bc0dd -->
+<!-- i18n-source-sha256: bfd205813bd40569d489f7e57417eef5098af2388cdb852b1016deb74a2fc0f1 -->
 # أنماط الاستخدام ودليل كتابة prompts
 
 يعرض `local-shell-mcp` أدوات قوية. تعتمد النتائج الجيدة على طلب الفحص أولًا، والعمل بخطوات صغيرة، وإجراء التحقق، وشرح ما تغيّر.
@@ -39,7 +39,7 @@ lsm call run_shell --json '{"command":"uname -a"}'
 printf '%s\n' '{"path":"README.md"}' | lsm call file_read
 ```
 
-استخدم `--session s_...` لربط الاستدعاء بـ Logical Session. مع Docker Compose يمكن التشغيل من جذر repository لكي يكتشف CLI مسار token المشترك الافتراضي، أو تمرير `--token-file <path>` عندما يستخدم controller نظام ملفات runtime مختلفًا. الخيار `--direct` يتجاوز controller ويعمل محليًا فقط.
+استخدم `--session s_...` لربط الاستدعاء بـ Logical Session. في إعداد Docker Compose الموثق، يشترك controller وCLI على المضيف في `LOCAL_SHELL_MCP_UI_LOCAL_TOKEN` عبر ملف `.env` في المستودع ذي الصلاحيات المقيدة؛ ويمكن لتخطيطات runtime المنفصلة الأخرى استخدام `--token-file <path>`. الخيار `--direct` يتجاوز controller ويعمل محليًا فقط.
 
 ## قوالب prompt
 

@@ -66,6 +66,8 @@ Clone the repository and prepare configuration:
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
 cp .env.example .env
+python -c 'from pathlib import Path; import secrets; p=Path(".env"); s=p.read_text(); p.write_text(s.replace("LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=", "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=" + secrets.token_urlsafe(48), 1))'
+chmod 600 .env
 ```
 
 Set at least these values in `.env`:
@@ -129,7 +131,7 @@ lsm call run_shell --json '{"command":"nvidia-smi","machine":"gpu-node"}'
 printf '%s\n' '{"path":"README.md"}' | lsm call file_read
 ```
 
-Use `--session s_...` to attach an ordinary tool call to a durable logical Session. The default Docker Compose layout is detected when the CLI runs from the repository root; for other split-runtime layouts, pass the controller credential with `--token-file <path>` or share `LOCAL_SHELL_MCP_UI_LOCAL_TOKEN`. A failed underlying command makes `lsm call` exit non-zero. `--direct` is available for standalone local calls when no controller is running; remote workers are intentionally unavailable in direct mode.
+Use `--session s_...` to attach an ordinary tool call to a durable logical Session. In the documented Docker Compose setup, the controller and host CLI share `LOCAL_SHELL_MCP_UI_LOCAL_TOKEN` through the repository's permission-restricted `.env`; the CLI reads that file without initializing server state. Other split-runtime layouts can use `--token-file <path>` or the same environment variable. A failed underlying command makes `lsm call` exit non-zero. `--direct` is available for standalone local calls when no controller is running; remote workers are intentionally unavailable in direct mode.
 
 Files remains an LSM-native three-pane file manager inside OpenTUI for local and remote machines. It renders bounded PNG/JPEG/GIF/WebP thumbnails and provides consistent file operations through the shared service API. Manual actions entered through either human interface are excluded from the MCP audit log; Activity, Audit, and the terminal audit rail show model-originated MCP activity.
 
