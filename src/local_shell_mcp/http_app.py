@@ -52,15 +52,46 @@ from .skill_ops import (
 from .version import version_info
 
 PUBLIC_TOOL_TIMEOUT_S = PUBLIC_TOOL_WATCHDOG_TIMEOUT_S
+DEFAULT_HTTP_TOOL_WATCHDOG_TIMEOUT_S = 30
+BROWSER_HTTP_TOOL_WATCHDOG_TIMEOUT_S = 75
+LONG_HTTP_TOOL_WATCHDOG_TIMEOUT_S = PUBLIC_TOOL_WATCHDOG_TIMEOUT_S
 NON_CANCELLABLE_HTTP_MUTATIONS = frozenset(
     {
-        "/tools/download/create",
-        "/tools/download/revoke",
-        "/tools/write_file",
-        "/tools/edit_file",
-        "/tools/delete",
+        ("POST", "/tools/shell_start"),
+        ("POST", "/tools/shell_send"),
+        ("POST", "/tools/shell_kill"),
+        ("POST", "/tools/download/create"),
+        ("POST", "/tools/download/revoke"),
+        ("POST", "/tools/write_file"),
+        ("POST", "/tools/edit_file"),
+        ("POST", "/tools/delete"),
     }
 )
+HTTP_TOOL_WATCHDOG_TIMEOUTS_S: dict[tuple[str, str], float | None] = {
+    ("GET", "/tools/skills_list"): DEFAULT_HTTP_TOOL_WATCHDOG_TIMEOUT_S,
+    ("POST", "/tools/skill_load"): DEFAULT_HTTP_TOOL_WATCHDOG_TIMEOUT_S,
+    ("POST", "/tools/skill_read_file"): DEFAULT_HTTP_TOOL_WATCHDOG_TIMEOUT_S,
+    ("POST", "/tools/run_shell"): LONG_HTTP_TOOL_WATCHDOG_TIMEOUT_S,
+    ("POST", "/tools/shell_start"): None,
+    ("POST", "/tools/shell_send"): None,
+    ("POST", "/tools/shell_read"): DEFAULT_HTTP_TOOL_WATCHDOG_TIMEOUT_S,
+    ("POST", "/tools/shell_kill"): None,
+    ("GET", "/tools/shell_list"): DEFAULT_HTTP_TOOL_WATCHDOG_TIMEOUT_S,
+    ("POST", "/tools/list_files"): DEFAULT_HTTP_TOOL_WATCHDOG_TIMEOUT_S,
+    ("POST", "/tools/tree"): DEFAULT_HTTP_TOOL_WATCHDOG_TIMEOUT_S,
+    ("POST", "/tools/glob"): DEFAULT_HTTP_TOOL_WATCHDOG_TIMEOUT_S,
+    ("POST", "/tools/grep"): DEFAULT_HTTP_TOOL_WATCHDOG_TIMEOUT_S,
+    ("POST", "/tools/read_file"): DEFAULT_HTTP_TOOL_WATCHDOG_TIMEOUT_S,
+    ("POST", "/tools/write_file"): None,
+    ("POST", "/tools/edit_file"): None,
+    ("POST", "/tools/delete"): None,
+    ("POST", "/tools/download/create"): None,
+    ("GET", "/tools/download/list"): DEFAULT_HTTP_TOOL_WATCHDOG_TIMEOUT_S,
+    ("POST", "/tools/download/revoke"): None,
+    ("POST", "/tools/browser/capture"): BROWSER_HTTP_TOOL_WATCHDOG_TIMEOUT_S,
+    ("POST", "/tools/browser/text"): BROWSER_HTTP_TOOL_WATCHDOG_TIMEOUT_S,
+    ("POST", "/tools/playwright/run_script"): LONG_HTTP_TOOL_WATCHDOG_TIMEOUT_S,
+}
 
 
 class SkillLoadRequest(BaseModel):
@@ -158,19 +189,35 @@ def _install_exception_handlers(app: FastAPI) -> None:
 def _install_tool_timeout_middleware(app: FastAPI) -> None:
     @app.middleware("http")
     async def tools_timeout_middleware(request: Request, call_next):  # noqa: ANN001
-        if not request.url.path.startswith("/tools/"):
+        route_key = (request.method.upper(), request.url.path)
+        if route_key not in HTTP_TOOL_WATCHDOG_TIMEOUTS_S:
             return await call_next(request)
-        if request.url.path in NON_CANCELLABLE_HTTP_MUTATIONS:
+        if route_key in NON_CANCELLABLE_HTTP_MUTATIONS:
             return await call_next(request)
+        route_timeout_s = HTTP_TOOL_WATCHDOG_TIMEOUTS_S[route_key]
+        if route_timeout_s is None:
+            return await call_next(request)
+        # Keep the old constant as a ceiling and a convenient short-timeout test hook.
+        timeout_s = min(route_timeout_s, PUBLIC_TOOL_TIMEOUT_S)
         try:
-            return await asyncio.wait_for(call_next(request), timeout=PUBLIC_TOOL_TIMEOUT_S)
+            return await asyncio.wait_for(call_next(request), timeout=timeout_s)
         except TimeoutError:
+            # Authentication and authorization failures should keep their original
+            # status even when an aggressively short watchdog fires first.
+            try:
+                principal_dep(request)
+            except HTTPException as exc:
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content={"ok": False, "error": "http_error", "message": exc.detail},
+                    headers=exc.headers,
+                )
             return JSONResponse(
                 status_code=504,
                 content={
                     "ok": False,
                     "error": "tool_timeout",
-                    "message": f"{request.url.path} exceeded {PUBLIC_TOOL_TIMEOUT_S} second public tool timeout",
+                    "message": f"{request.url.path} exceeded {timeout_s:g} second public tool timeout",
                 },
             )
 
@@ -225,12 +272,15 @@ def _register_shell_routes(app: FastAPI) -> None:
 
     @app.post("/tools/shell_start")
     async def api_shell_start(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await start_shell(body.get("cwd", "."), body.get("name"), body.get("command"))
+        return await start_shell(
+            body.get("cwd", "."), body.get("name"), body.get("command"), body.get("idempotency_key")
+        )
 
     @app.post("/tools/shell_send")
     async def api_shell_send(body: dict, _: Principal = PRINCIPAL_DEP):
         return await send_shell(
-            body["session_id"], body["input_text"], _body_bool(body, "enter", True)
+            body["session_id"], body["input_text"], _body_bool(body, "enter", True),
+            body.get("idempotency_key"),
         )
 
     @app.post("/tools/shell_read")
@@ -239,7 +289,7 @@ def _register_shell_routes(app: FastAPI) -> None:
 
     @app.post("/tools/shell_kill")
     async def api_shell_kill(body: dict, _: Principal = PRINCIPAL_DEP):
-        return await kill_shell(body["session_id"])
+        return await kill_shell(body["session_id"], body.get("idempotency_key"))
 
     @app.get("/tools/shell_list")
     async def api_shell_list(_: Principal = PRINCIPAL_DEP):

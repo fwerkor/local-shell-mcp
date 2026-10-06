@@ -307,7 +307,9 @@ async def test_mcp_mutation_does_not_return_before_thread_finishes(tmp_path, mon
 
     def delayed_write(path, content, overwrite=True, expected_sha256=None):
         del path, overwrite, expected_sha256
-        time.sleep(0.05)
+        # Exceed even the watchdog's minimum wait, so accidental timeout wrapping
+        # fails reliably instead of depending on CI scheduling speed.
+        time.sleep(0.2)
         marker.write_text(content, encoding="utf-8")
         return {"path": "target.txt", "bytes": len(content), "created": True}
 
