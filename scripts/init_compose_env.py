@@ -34,7 +34,8 @@ def _write_private_atomic(path: Path, text: str) -> None:
     fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=directory)
     temporary_path = Path(temporary_name)
     try:
-        os.fchmod(fd, 0o600)
+        if os.name != "nt":
+            os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(text)
             handle.flush()
