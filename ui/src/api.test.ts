@@ -74,6 +74,7 @@ describe("API client endpoint wrappers", () => {
     expect(calls[14]!.init?.method).toBe("POST")
     expect(calls.every((call) => new Headers(call.init?.headers).get("Accept") === "application/json")).toBe(true)
     expect(calls.every((call) => new Headers(call.init?.headers).get("Content-Type") === "application/json")).toBe(true)
+    expect(calls.every((call) => call.init?.redirect === "error")).toBe(true)
   })
 
   test("propagates an already-aborted external signal", async () => {

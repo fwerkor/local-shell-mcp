@@ -4,6 +4,7 @@ import asyncio
 import base64
 import binascii
 import contextlib
+import ipaddress
 import json
 import logging
 import os
@@ -2481,11 +2482,14 @@ def _tmux_input_may_be_prefix(data: bytes) -> bool:
 def _validate_tui_api_base(value: str) -> str:
     normalized = str(value).rstrip("/")
     parsed = urlsplit(normalized)
-    if parsed.scheme not in {"http", "https"} or parsed.hostname not in {
-        "127.0.0.1",
-        "::1",
-        "localhost",
-    }:
+    host = parsed.hostname or ""
+    loopback = host.lower() == "localhost"
+    if not loopback:
+        try:
+            loopback = ipaddress.ip_address(host.split("%", 1)[0]).is_loopback
+        except ValueError:
+            loopback = False
+    if parsed.scheme not in {"http", "https"} or not loopback:
         raise ValueError("Native TUI --api-base must use a loopback HTTP(S) URL")
     return normalized
 
@@ -2494,15 +2498,14 @@ def run_tui_cli(argv: list[str] | None = None) -> None:
     import argparse
     import subprocess
 
-    settings = get_settings()
     parser = argparse.ArgumentParser(
         prog="local-shell-mcp tui",
         description="Launch the local-shell-mcp OpenTUI against a running service.",
     )
     parser.add_argument(
         "--api-base",
-        default=f"http://127.0.0.1:{settings.port}{UI_API_PREFIX}",
-        help="Human UI API base URL (loopback only)",
+        default=None,
+        help="Human UI API base URL (loopback only; defaults from local controller config)",
     )
     parser.add_argument(
         "--token-file",
@@ -2510,14 +2513,24 @@ def run_tui_cli(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
     env = os.environ.copy()
-    try:
-        api_base = _validate_tui_api_base(args.api_base)
-    except ValueError as exc:
-        parser.error(str(exc))
-    from .cli_call import _cli_environment, _resolve_local_token
+    from .cli_call import (
+        _apply_yaml_controller_values,
+        _cli_environment,
+        _controller_endpoint_defaults,
+        _loopback_http_url,
+        _resolve_local_token,
+    )
 
     try:
-        cli_token = _resolve_local_token(_cli_environment(), args.token_file)
+        cli_values = _cli_environment()
+        if args.api_base is None:
+            endpoint_values = _apply_yaml_controller_values(cli_values)
+            host, port = _controller_endpoint_defaults(endpoint_values)
+            api_base = _loopback_http_url(host, port, UI_API_PREFIX)
+        else:
+            api_base = args.api_base
+        api_base = _validate_tui_api_base(api_base)
+        cli_token = _resolve_local_token(cli_values, args.token_file)
     except ValueError as exc:
         parser.error(str(exc))
     env["LOCAL_SHELL_MCP_UI_API_BASE"] = api_base

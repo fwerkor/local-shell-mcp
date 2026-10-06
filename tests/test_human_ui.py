@@ -946,6 +946,9 @@ def test_native_tui_api_base_must_be_loopback():
     assert _validate_tui_api_base("https://localhost:8765/api/ui") == (
         "https://localhost:8765/api/ui"
     )
+    assert _validate_tui_api_base("http://127.0.0.2:8765/api/ui") == (
+        "http://127.0.0.2:8765/api/ui"
+    )
     with pytest.raises(ValueError, match="loopback"):
         _validate_tui_api_base("https://control.example.com/api/ui")
 

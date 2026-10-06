@@ -63,6 +63,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     const response = await fetch(`${API_BASE}${path}`, {
       ...init,
+      redirect: "error",
       signal: controller.signal,
       headers: {
         Accept: "application/json",
