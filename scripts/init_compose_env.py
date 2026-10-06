@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import secrets
+import tempfile
+from contextlib import suppress
 from pathlib import Path
 
 CLI_TOKEN_KEY = "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN"
@@ -25,14 +28,32 @@ def _set_assignment(text: str, key: str, value: str) -> str:
     return "\n".join(output) + "\n"
 
 
+def _write_private_atomic(path: Path, text: str) -> None:
+    path = path.expanduser()
+    directory = path.parent
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=directory)
+    temporary_path = Path(temporary_name)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+    except BaseException:
+        with suppress(OSError):
+            os.close(fd)
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
 def rotate_cli_credentials(path: Path) -> tuple[str, str]:
     text = path.read_text(encoding="utf-8")
     token = secrets.token_urlsafe(48)
     verifier = hashlib.sha256(token.encode("utf-8")).hexdigest()
     text = _set_assignment(text, CLI_TOKEN_KEY, token)
     text = _set_assignment(text, CLI_VERIFIER_KEY, verifier)
-    path.write_text(text, encoding="utf-8")
-    path.chmod(0o600)
+    _write_private_atomic(path, text)
     return token, verifier
 
 

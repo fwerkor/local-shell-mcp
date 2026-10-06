@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 2f0d76e5baf715634ab1bed49cb63a1382ae50536e2b8ebb880f3a27df3f8abc -->
+<!-- i18n-source-sha256: 382c9edbbba8fa4fb3aab11dcc4127ba80bff8c7104bdedffdf66b9bbcdb744a -->
 # Kullanım kalıpları ve prompting kılavuzu
 
 `local-shell-mcp` güçlü tools sunar. İyi sonuçlar için modelden önce inceleme, küçük adımlarla hareket etme, doğrulama ve nelerin değiştiğini raporlama istenmelidir.
@@ -39,7 +39,7 @@ lsm call run_shell --json '{"command":"uname -a"}'
 printf '%s\n' '{"path":"README.md"}' | lsm call file_read
 ```
 
-Çağrıyı bir Logical Session ile ilişkilendirmek için `--session s_...` kullanın. Belgelenen Docker Compose kurulumunda ham `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN` yalnızca host tarafından sahip olunan ve izinleri kısıtlanmış `.env` içinde kalır; Compose controller’a yalnızca SHA-256 doğrulayıcısını aktarır. Diğer ayrık runtime düzenleri `--token-file <path>` kullanabilir. `--direct` controller katmanını atlar, geçerli `.env` runtime ayarlarını süreç içinde uygular, host CLI token değerini araç ortamına enjekte etmez ve yalnızca yerel çağrılar içindir.
+Çağrıyı bir Logical Session ile ilişkilendirmek için `--session s_...` kullanın. Belgelenen Docker Compose kurulumunda ham `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN` yalnızca host tarafından sahip olunan ve izinleri kısıtlanmış `.env` içinde kalır; Compose controller’a yalnızca SHA-256 doğrulayıcısını aktarır. Diğer ayrık runtime düzenleri `--token-file <path>` kullanabilir. `--direct` controller katmanını atlar, geçerli `.env` runtime ayarlarını süreç içinde uygular, host CLI token değerini araç ortamına enjekte etmez ve yalnızca yerel çağrılar içindir. Human UI token `/mcp` tarafından hiçbir zaman kabul edilmez; ayrık runtime controller’ı eşleşen `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256` değerini yapılandırmalıdır.
 
 ## Prompt şablonları
 

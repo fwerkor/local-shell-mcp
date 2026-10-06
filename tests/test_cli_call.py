@@ -110,7 +110,7 @@ def test_run_call_cli_controller_output_session_and_failure(monkeypatch, capsys)
             "LOCAL_SHELL_MCP_PORT": "9999",
             "LOCAL_SHELL_MCP_MAX_TIMEOUT_S": "900",
             "LOCAL_SHELL_MCP_AUTH_MODE": "oauth",
-            "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN": "secret" * 8,
+            "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN": "secret" * 8,
         },
     )
     monkeypatch.setattr(cli_call, "_call_controller", fake_call)
@@ -274,10 +274,7 @@ def test_call_controller_uses_local_token_and_mcp_session(monkeypatch):
     assert calls[0] == (
         "transport",
         "http://127.0.0.1:8765/mcp",
-        {
-            UI_LOCAL_TOKEN_HEADER: "local-secret",
-            CLI_LOCAL_TOKEN_HEADER: "local-secret",
-        },
+        {CLI_LOCAL_TOKEN_HEADER: "local-secret"},
         3660.0,
         cli_call._loopback_http_client_factory,
     )
@@ -309,6 +306,10 @@ def test_call_direct_reuses_registered_tool_surface_with_trusted_principal(monke
 def test_call_direct_applies_dotenv_without_exposing_host_cli_token(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     state_dir = tmp_path / "state"
+    inherited_token = "inherited-host-secret-abcdefghijklmnopqrstuvwxyz"
+    inherited_token_file = str(tmp_path / "inherited-token-file")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN", inherited_token)
+    monkeypatch.setenv(cli_call.CLI_TOKEN_FILE_ENV, inherited_token_file)
     environment = {
         "LOCAL_SHELL_MCP_WORKSPACE_ROOT": str(workspace),
         "LOCAL_SHELL_MCP_STATE_DIR": str(state_dir),
@@ -324,6 +325,7 @@ def test_call_direct_applies_dotenv_without_exposing_host_cli_token(tmp_path, mo
             assert arguments == {}
             assert os.environ["LOCAL_SHELL_MCP_WORKSPACE_ROOT"] == str(workspace)
             assert "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN" not in os.environ
+            assert cli_call.CLI_TOKEN_FILE_ENV not in os.environ
             return [], {
                 "ok": True,
                 "data": {
@@ -337,7 +339,8 @@ def test_call_direct_applies_dotenv_without_exposing_host_cli_token(tmp_path, mo
     )
     assert failed is False
     assert payload["data"]["workspace_root"] == str(workspace)
-    assert "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN" not in os.environ
+    assert os.environ["LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN"] == inherited_token
+    assert os.environ[cli_call.CLI_TOKEN_FILE_ENV] == inherited_token_file
 
 
 def test_call_direct_can_attach_existing_local_user_session(tmp_path, monkeypatch):
@@ -407,65 +410,50 @@ def test_default_controller_url_respects_loopback_bind():
     )
 
 
-def test_resolve_local_token_supports_env_and_files(tmp_path):
+def test_resolve_local_token_supports_explicit_cli_credentials_only(tmp_path):
     explicit = tmp_path / "token"
     explicit.write_text("x" * 40, encoding="utf-8")
     assert cli_call._resolve_local_token({}, str(explicit)) == "x" * 40
     assert cli_call._resolve_local_token({cli_call.CLI_TOKEN_FILE_ENV: str(explicit)}, None) == (
         "x" * 40
     )
-    assert cli_call._resolve_local_token({"LOCAL_SHELL_MCP_UI_LOCAL_TOKEN": "z" * 40}, None) == (
-        "z" * 40
-    )
-
-    state_dir = tmp_path / "state"
-    token_path = state_dir / "ui" / "local-token"
-    token_path.parent.mkdir(parents=True)
-    token_path.write_text("s" * 40, encoding="utf-8")
     assert cli_call._resolve_local_token(
-        {"LOCAL_SHELL_MCP_STATE_DIR": str(state_dir)}, None
-    ) == "s" * 40
-
-    workspace = tmp_path / "workspace"
-    workspace_token = workspace / ".local-shell-mcp" / "ui" / "local-token"
-    workspace_token.parent.mkdir(parents=True)
-    workspace_token.write_text("w" * 40, encoding="utf-8")
+        {"LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN": "z" * 40}, None
+    ) == "z" * 40
     assert cli_call._resolve_local_token(
-        {"LOCAL_SHELL_MCP_WORKSPACE_ROOT": str(workspace)}, None
-    ) == "w" * 40
-
-    workspace_token.write_text("short", encoding="utf-8")
+        {"LOCAL_SHELL_MCP_UI_LOCAL_TOKEN": "u" * 40}, None
+    ) is None
     assert cli_call._resolve_local_token(
-        {"LOCAL_SHELL_MCP_WORKSPACE_ROOT": str(workspace)}, None
+        {"LOCAL_SHELL_MCP_STATE_DIR": str(tmp_path / "state")}, None
     ) is None
 
-    default_token = tmp_path / "default-token"
-    default_token.write_text("d" * 40, encoding="utf-8")
-    original_default = cli_call.DEFAULT_LOCAL_TOKEN_PATH
-    cli_call.DEFAULT_LOCAL_TOKEN_PATH = default_token
-    try:
-        assert cli_call._resolve_local_token({}, None) == "d" * 40
-        default_token.write_text("short", encoding="utf-8")
-        assert cli_call._resolve_local_token({}, None) is None
-    finally:
-        cli_call.DEFAULT_LOCAL_TOKEN_PATH = original_default
-
+    with pytest.raises(ValueError, match="at least 32"):
+        cli_call._resolve_local_token({"LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN": "short"}, None)
     with pytest.raises(ValueError, match="unable to read"):
         cli_call._read_token_file(tmp_path / "missing")
+    explicit.write_text("short", encoding="utf-8")
     with pytest.raises(ValueError, match="invalid"):
-        cli_call._read_token_file(workspace_token)
+        cli_call._read_token_file(explicit)
 
 
 def test_dotenv_and_cli_environment_are_read_only(tmp_path, monkeypatch):
     dotenv = tmp_path / ".env"
     dotenv.write_text(
         "# comment\n"
-        "LOCAL_SHELL_MCP_HOST='127.0.0.2'\n"
-        "export LOCAL_SHELL_MCP_PORT=9999\n"
+        "LOCAL_SHELL_MCP_HOST='127.0.0.2' # loopback\n"
+        "export LOCAL_SHELL_MCP_PORT=9999 # controller port\n"
         "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=dotenv-token-abcdefghijklmnopqrstuvwxyz\n"
+        "LOCAL_SHELL_MCP_PUBLIC_BASE_URL=\"https://example.test/#fragment\" # public URL\n"
+        "LOCAL_SHELL_MCP_STATE_BACKEND_URL=redis://cache#0\n"
         "ignored-line\n",
         encoding="utf-8",
     )
+    parsed = cli_call._read_dotenv(dotenv)
+    assert parsed["LOCAL_SHELL_MCP_HOST"] == "127.0.0.2"
+    assert parsed["LOCAL_SHELL_MCP_PORT"] == "9999"
+    assert parsed["LOCAL_SHELL_MCP_PUBLIC_BASE_URL"] == "https://example.test/#fragment"
+    assert parsed["LOCAL_SHELL_MCP_STATE_BACKEND_URL"] == "redis://cache#0"
+
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("LOCAL_SHELL_MCP_PORT", "10001")
     values = cli_call._cli_environment()
@@ -478,6 +466,73 @@ def test_dotenv_and_cli_environment_are_read_only(tmp_path, monkeypatch):
     assert settings.port == 10001
     assert settings.auth_mode == "oauth"
     assert not (tmp_path / "workspace").exists()
+
+
+def test_yaml_controller_values_are_loaded_read_only_with_environment_precedence(
+    tmp_path, monkeypatch
+):
+    config = tmp_path / "controller.yaml"
+    config.write_text(
+        "host: 127.0.0.3\n"
+        "port: 9123\n"
+        "auth_mode: oauth\n"
+        "max_timeout_s: 45\n"
+        "workspace_root: /yaml/workspace\n",
+        encoding="utf-8",
+    )
+    values = cli_call._apply_yaml_controller_values(
+        {"LOCAL_SHELL_MCP_CONFIG": str(config)}
+    )
+    assert values["LOCAL_SHELL_MCP_HOST"] == "127.0.0.3"
+    assert values["LOCAL_SHELL_MCP_PORT"] == "9123"
+    assert values["LOCAL_SHELL_MCP_AUTH_MODE"] == "oauth"
+    assert values["LOCAL_SHELL_MCP_MAX_TIMEOUT_S"] == "45"
+    assert values["LOCAL_SHELL_MCP_WORKSPACE_ROOT"] == "/yaml/workspace"
+    assert values["LOCAL_SHELL_MCP_STATE_DIR"] == "/yaml/workspace/.local-shell-mcp"
+
+    overridden = cli_call._apply_yaml_controller_values(
+        {
+            "LOCAL_SHELL_MCP_CONFIG": str(config),
+            "LOCAL_SHELL_MCP_PORT": "9555",
+            "LOCAL_SHELL_MCP_AUTH_MODE": "none",
+            "LOCAL_SHELL_MCP_WORKSPACE_ROOT": "/env/workspace",
+        }
+    )
+    assert overridden["LOCAL_SHELL_MCP_HOST"] == "127.0.0.3"
+    assert overridden["LOCAL_SHELL_MCP_PORT"] == "9555"
+    assert overridden["LOCAL_SHELL_MCP_AUTH_MODE"] == "none"
+    assert overridden["LOCAL_SHELL_MCP_STATE_DIR"] == "/env/workspace/.local-shell-mcp"
+    assert not (tmp_path / "workspace").exists()
+
+    with pytest.raises(ValueError, match="unable to load LOCAL_SHELL_MCP_CONFIG"):
+        cli_call._apply_yaml_controller_values(
+            {"LOCAL_SHELL_MCP_CONFIG": str(tmp_path / "missing.yaml")}
+        )
+
+
+def test_run_call_cli_uses_yaml_controller_defaults(tmp_path, monkeypatch, capsys):
+    config = tmp_path / "controller.yaml"
+    config.write_text(
+        "host: 127.0.0.4\nport: 9234\nauth_mode: none\nmax_timeout_s: 120\n",
+        encoding="utf-8",
+    )
+    calls = []
+    monkeypatch.setattr(
+        cli_call,
+        "_cli_environment",
+        lambda: {"LOCAL_SHELL_MCP_CONFIG": str(config)},
+    )
+
+    async def fake_call(url, tool, arguments, *, local_token, sse_read_timeout):
+        calls.append((url, tool, arguments, local_token, sse_read_timeout))
+        return {"ok": True}, False
+
+    monkeypatch.setattr(cli_call, "_call_controller", fake_call)
+    cli_call.run_call_cli(["environment_get", "--json", "{}"])
+    assert calls == [
+        ("http://127.0.0.4:9234/mcp", "environment_get", {}, None, 300.0)
+    ]
+    assert json.loads(capsys.readouterr().out) == {"ok": True}
 
 
 def test_controller_defaults_reject_invalid_values():
@@ -512,18 +567,13 @@ def test_loopback_http_client_factory_disables_environment_proxies(monkeypatch):
     assert captured["auth"] is auth
 
 
-def test_run_call_cli_auth_none_skips_token_resolution(monkeypatch, capsys):
+def test_run_call_cli_auth_none_without_explicit_token_sends_none(monkeypatch, capsys):
     calls = []
 
     monkeypatch.setattr(
         cli_call,
         "_cli_environment",
         lambda: {"LOCAL_SHELL_MCP_AUTH_MODE": "none"},
-    )
-    monkeypatch.setattr(
-        cli_call,
-        "_resolve_local_token",
-        lambda values, token_file: (_ for _ in ()).throw(AssertionError("token lookup")),
     )
 
     async def fake_call(url, tool, arguments, *, local_token, sse_read_timeout):
@@ -562,6 +612,28 @@ def test_run_call_cli_auth_none_honors_explicit_token_file(tmp_path, monkeypatch
         ]
     )
     assert calls[0][3] == "t" * 40
+    assert json.loads(capsys.readouterr().out) == {"ok": True}
+
+
+def test_run_call_cli_auth_none_honors_explicit_token_environment(monkeypatch, capsys):
+    calls = []
+    token = "e" * 40
+    monkeypatch.setattr(
+        cli_call,
+        "_cli_environment",
+        lambda: {
+            "LOCAL_SHELL_MCP_AUTH_MODE": "none",
+            "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN": token,
+        },
+    )
+
+    async def fake_call(url, tool, arguments, *, local_token, sse_read_timeout):
+        calls.append((url, tool, arguments, local_token, sse_read_timeout))
+        return {"ok": True}, False
+
+    monkeypatch.setattr(cli_call, "_call_controller", fake_call)
+    cli_call.run_call_cli(["environment_get", "--json", "{}"])
+    assert calls[0][3] == token
     assert json.loads(capsys.readouterr().out) == {"ok": True}
 
 
@@ -655,29 +727,14 @@ def test_host_cli_token_authenticates_across_compose_bridge_only_for_loopback_ta
     assert exc.value.status_code == 401
 
 
-def test_local_token_authenticates_loopback_mcp_only(tmp_path, monkeypatch):
+def test_ui_token_never_authenticates_mcp(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     token = get_or_create_ui_local_token().encode()
-    request = _request(
-        "/mcp",
-        [
-            (b"host", b"127.0.0.1:8765"),
-            (UI_LOCAL_TOKEN_HEADER.encode(), token),
-        ],
-    )
-
-    principal = verify_request(request)
-    assert principal.subject == "native-tui"
-    assert principal.claims["auth"] == "native-tui"
-
-    with pytest.raises(HTTPException) as exc:
-        verify_request(_request("/mcp"))
-    assert exc.value.status_code == 401
 
     with pytest.raises(HTTPException) as exc:
         verify_request(
             _request(
-                "/other",
+                "/mcp",
                 [
                     (b"host", b"127.0.0.1:8765"),
                     (UI_LOCAL_TOKEN_HEADER.encode(), token),
@@ -685,3 +742,15 @@ def test_local_token_authenticates_loopback_mcp_only(tmp_path, monkeypatch):
             )
         )
     assert exc.value.status_code == 401
+
+    principal = verify_request(
+        _request(
+            "/api/ui/bootstrap",
+            [
+                (b"host", b"127.0.0.1:8765"),
+                (UI_LOCAL_TOKEN_HEADER.encode(), token),
+            ],
+        )
+    )
+    assert principal.subject == "native-tui"
+    assert principal.claims["auth"] == "native-tui"

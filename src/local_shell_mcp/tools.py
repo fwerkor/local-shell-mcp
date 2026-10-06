@@ -4786,7 +4786,12 @@ def _register_live_workspace_tools(
         logical_session_id = None
         if session_id:
             try:
-                await asyncio.to_thread(session_manager.get, session_id, subject=subject)
+                session_subject = _current_session_subject()
+                owner_subject = await asyncio.to_thread(
+                    session_manager.owner_subject,
+                    session_id,
+                    subject=session_subject,
+                )
             except ValueError as exc:
                 if not app_reattach or not str(exc).startswith("Unknown logical session:"):
                     raise
@@ -4794,6 +4799,7 @@ def _register_live_workspace_tools(
                 get_live_channel_manager().detach_logical_session(session_id)
             else:
                 logical_session_id = session_id
+                subject = owner_subject
         channel, live_token = get_live_channel_manager().open(
             subject=subject,
             scopes=scopes,

@@ -39,9 +39,14 @@ def test_compose_cli_credential_rotation_rewrites_existing_assignments(tmp_path)
         'LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256=old-verifier\n',
         encoding='utf-8',
     )
+    env_path.chmod(0o644)
     script = Path(__file__).parents[1] / 'scripts' / 'init_compose_env.py'
+    initial_inode = env_path.stat().st_ino
+    assert env_path.stat().st_mode & 0o777 == 0o644
 
     subprocess.run([sys.executable, str(script), str(env_path)], check=True, capture_output=True)
+    first_inode = env_path.stat().st_ino
+    assert first_inode != initial_inode
     first = dict(
         line.split('=', 1)
         for line in env_path.read_text(encoding='utf-8').splitlines()
@@ -52,6 +57,8 @@ def test_compose_cli_credential_rotation_rewrites_existing_assignments(tmp_path)
     assert first_verifier == hashlib.sha256(first_token.encode()).hexdigest()
 
     subprocess.run([sys.executable, str(script), str(env_path)], check=True, capture_output=True)
+    second_inode = env_path.stat().st_ino
+    assert second_inode != first_inode
     lines = env_path.read_text(encoding='utf-8').splitlines()
     second = dict(line.split('=', 1) for line in lines if '=' in line)
     second_token = second['LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN']

@@ -15,7 +15,6 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from .audit import audit
 from .settings import Settings, get_settings
 from .ui_security import (
-    cli_local_token_verifier_configured,
     has_valid_cli_local_token,
     has_valid_ui_local_token,
     is_loopback_connection,
@@ -262,10 +261,8 @@ def verify_request(request: Request) -> Principal:
     path = str(request.url.path)
     if path == "/mcp" and is_loopback_target(request) and has_valid_cli_local_token(request):
         return Principal(email="localhost", subject="local-cli", claims={"auth": "local-cli"})
-    ui_token_mcp_allowed = path != "/mcp" or not cli_local_token_verifier_configured()
     if (
-        (path.startswith(HUMAN_UI_API_PREFIX) or path == "/mcp")
-        and ui_token_mcp_allowed
+        path.startswith(HUMAN_UI_API_PREFIX)
         and is_loopback_connection(request)
         and has_valid_ui_local_token(request)
     ):

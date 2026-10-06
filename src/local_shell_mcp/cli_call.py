@@ -20,13 +20,18 @@ from mcp.client.streamable_http import streamablehttp_client
 from .ui_security import (
     CLI_LOCAL_TOKEN_ENV,
     CLI_LOCAL_TOKEN_HEADER,
-    UI_LOCAL_TOKEN_ENV,
-    UI_LOCAL_TOKEN_HEADER,
 )
 
 CLI_TOKEN_FILE_ENV = "LOCAL_SHELL_MCP_CLI_TOKEN_FILE"
 CLI_DOTENV = ".env"
-DEFAULT_LOCAL_TOKEN_PATH = Path("/workspace/.local-shell-mcp/ui/local-token")
+CLI_YAML_ENV_FIELDS = {
+    "host": "LOCAL_SHELL_MCP_HOST",
+    "port": "LOCAL_SHELL_MCP_PORT",
+    "max_timeout_s": "LOCAL_SHELL_MCP_MAX_TIMEOUT_S",
+    "auth_mode": "LOCAL_SHELL_MCP_AUTH_MODE",
+    "workspace_root": "LOCAL_SHELL_MCP_WORKSPACE_ROOT",
+    "state_dir": "LOCAL_SHELL_MCP_STATE_DIR",
+}
 
 
 @dataclass(frozen=True)
@@ -86,11 +91,40 @@ def _read_dotenv(path: Path) -> dict[str, str]:
             continue
         key, value = line.split("=", 1)
         key = key.strip()
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-            value = value[1:-1]
+        value = _parse_dotenv_value(value)
         values[key] = value
     return values
+
+
+def _parse_dotenv_value(raw: str) -> str:
+    value = raw.strip()
+    if not value:
+        return ""
+    if value[0] in {"'", '"'}:
+        quote = value[0]
+        escaped = False
+        chars: list[str] = []
+        for char in value[1:]:
+            if quote == '"' and escaped:
+                escapes = {"n": "\n", "r": "\r", "t": "\t", '"': '"', "\\": "\\"}
+                replacement = escapes.get(char)
+                if replacement is None:
+                    chars.extend(("\\", char))
+                else:
+                    chars.append(replacement)
+                escaped = False
+                continue
+            if quote == '"' and char == "\\":
+                escaped = True
+                continue
+            if char == quote:
+                return "".join(chars)
+            chars.append(char)
+        return "".join(chars)
+    for index, char in enumerate(value):
+        if char == "#" and index > 0 and value[index - 1].isspace():
+            return value[:index].rstrip()
+    return value
 
 
 def _cli_environment() -> dict[str, str]:
@@ -99,6 +133,34 @@ def _cli_environment() -> dict[str, str]:
         if key.startswith("LOCAL_SHELL_MCP_"):
             values[key] = value
     return values
+
+
+def _apply_yaml_controller_values(values: dict[str, str]) -> dict[str, str]:
+    config = values.get("LOCAL_SHELL_MCP_CONFIG", "").strip()
+    if not config:
+        return dict(values)
+
+    from .settings import _flatten_yaml
+
+    path = Path(config).expanduser()
+    try:
+        flat = _flatten_yaml(path)
+    except (FileNotFoundError, OSError, RuntimeError, ValueError) as exc:
+        raise ValueError(f"unable to load LOCAL_SHELL_MCP_CONFIG {path}: {exc}") from exc
+
+    merged: dict[str, str] = {}
+    for field, env_name in CLI_YAML_ENV_FIELDS.items():
+        if field in flat and flat[field] is not None:
+            merged[env_name] = str(flat[field])
+    merged.update(values)
+
+    if "LOCAL_SHELL_MCP_STATE_DIR" not in values and "state_dir" not in flat:
+        workspace = merged.get("LOCAL_SHELL_MCP_WORKSPACE_ROOT", "").strip()
+        if workspace:
+            merged["LOCAL_SHELL_MCP_STATE_DIR"] = str(
+                Path(workspace).expanduser() / ".local-shell-mcp"
+            )
+    return merged
 
 
 def _controller_defaults(values: dict[str, str]) -> _ControllerDefaults:
@@ -150,39 +212,16 @@ def _read_token_file(path: Path) -> str:
     return value
 
 
-def _try_read_token_file(path: Path) -> str | None:
-    try:
-        return _read_token_file(path)
-    except ValueError:
-        return None
-
-
 def _resolve_local_token(values: dict[str, str], token_file: str | None) -> str | None:
     configured_file = token_file or values.get(CLI_TOKEN_FILE_ENV, "").strip() or None
     if configured_file:
         return _read_token_file(Path(configured_file))
 
     token = values.get(CLI_LOCAL_TOKEN_ENV, "").strip()
-    if len(token) >= 32:
+    if token:
+        if len(token) < 32:
+            raise ValueError(f"{CLI_LOCAL_TOKEN_ENV} must contain at least 32 characters")
         return token
-
-    token = values.get(UI_LOCAL_TOKEN_ENV, "").strip()
-    if len(token) >= 32:
-        return token
-
-    state_dir = values.get("LOCAL_SHELL_MCP_STATE_DIR", "").strip()
-    workspace = values.get("LOCAL_SHELL_MCP_WORKSPACE_ROOT", "").strip()
-    candidates: list[Path] = []
-    if state_dir:
-        candidates.append(Path(state_dir).expanduser() / "ui" / "local-token")
-    elif workspace:
-        candidates.append(Path(workspace).expanduser() / ".local-shell-mcp" / "ui" / "local-token")
-    else:
-        candidates.append(DEFAULT_LOCAL_TOKEN_PATH)
-    for candidate in candidates:
-        existing = _try_read_token_file(candidate)
-        if existing:
-            return existing
 
     return None
 
@@ -194,19 +233,27 @@ def _direct_environment(values: dict[str, str]) -> Iterator[None]:
     from . import settings as settings_module
 
     # Keep the host-only CLI bearer outside the direct tool process environment.
-    excluded = {CLI_LOCAL_TOKEN_ENV}
+    excluded = {CLI_LOCAL_TOKEN_ENV, CLI_TOKEN_FILE_ENV}
     updates = {
         key: value
         for key, value in values.items()
         if key.startswith("LOCAL_SHELL_MCP_") and key not in excluded
     }
     previous = {key: os.environ.get(key) for key in updates}
+    sensitive_previous = {key: os.environ.get(key) for key in excluded}
     try:
+        for key in excluded:
+            os.environ.pop(key, None)
         os.environ.update(updates)
         settings_module.get_settings.cache_clear()
         yield
     finally:
         for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        for key, value in sensitive_previous.items():
             if value is None:
                 os.environ.pop(key, None)
             else:
@@ -267,10 +314,7 @@ async def _call_controller(
     sse_read_timeout: float,
 ) -> tuple[Any, bool]:
     headers = (
-        {
-            UI_LOCAL_TOKEN_HEADER: local_token,
-            CLI_LOCAL_TOKEN_HEADER: local_token,
-        }
+        {CLI_LOCAL_TOKEN_HEADER: local_token}
         if local_token
         else None
     )
@@ -381,15 +425,10 @@ def run_call_cli(argv: list[str] | None = None) -> None:
             )
         else:
             try:
-                values = _cli_environment()
+                values = _apply_yaml_controller_values(_cli_environment())
                 settings = _controller_defaults(values)
                 url = _validate_loopback_mcp_url(args.url or _default_controller_url(settings))
-                if args.token_file is not None:
-                    local_token = _resolve_local_token(values, args.token_file)
-                elif settings.auth_mode == "none":
-                    local_token = None
-                else:
-                    local_token = _resolve_local_token(values, None)
+                local_token = _resolve_local_token(values, args.token_file)
             except ValueError as exc:
                 parser.error(str(exc))
             read_timeout = (

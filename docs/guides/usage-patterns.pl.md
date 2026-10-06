@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 2f0d76e5baf715634ab1bed49cb63a1382ae50536e2b8ebb880f3a27df3f8abc -->
+<!-- i18n-source-sha256: 382c9edbbba8fa4fb3aab11dcc4127ba80bff8c7104bdedffdf66b9bbcdb744a -->
 # Wzorce użycia i przewodnik prompting
 
 `local-shell-mcp` udostępnia potężne tools. Dobre wyniki wymagają, by model najpierw sprawdził środowisko, działał małymi krokami, wykonał weryfikację i opisał zmiany.
@@ -39,7 +39,7 @@ lsm call run_shell --json '{"command":"uname -a"}'
 printf '%s\n' '{"path":"README.md"}' | lsm call file_read
 ```
 
-Użyj `--session s_...`, aby powiązać wywołanie z Logical Session. W udokumentowanej konfiguracji Docker Compose surowy `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN` pozostaje wyłącznie w należącym do hosta i ograniczonym uprawnieniami pliku `.env`, a Compose przekazuje controllerowi tylko weryfikator SHA-256; inne rozdzielone układy runtime mogą użyć `--token-file <path>`. `--direct` pomija controller, stosuje w procesie ustawienia runtime z bieżącego `.env`, nie wstrzykuje host CLI token do środowiska narzędzia i działa wyłącznie lokalnie.
+Użyj `--session s_...`, aby powiązać wywołanie z Logical Session. W udokumentowanej konfiguracji Docker Compose surowy `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN` pozostaje wyłącznie w należącym do hosta i ograniczonym uprawnieniami pliku `.env`, a Compose przekazuje controllerowi tylko weryfikator SHA-256; inne rozdzielone układy runtime mogą użyć `--token-file <path>`. `--direct` pomija controller, stosuje w procesie ustawienia runtime z bieżącego `.env`, nie wstrzykuje host CLI token do środowiska narzędzia i działa wyłącznie lokalnie. Token Human UI nigdy nie jest akceptowany przez `/mcp`; controller w rozdzielonym runtime musi mieć skonfigurowany pasujący `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256`.
 
 ## Szablony prompt
 
