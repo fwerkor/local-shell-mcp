@@ -2,7 +2,6 @@
   "name": "local-shell-mcp-dsh",
   "version": "5.0.1",
   "description": "DeepSeek Harness bridge for the full local-shell-mcp tool surface and per-session Live Workspace.",
-  "private": true,
   "type": "module",
   "main": "./dsh/index.js",
   "exports": {
@@ -52,5 +51,15 @@
     "src/local_shell_mcp/ui_static/live-workspace.html",
     "src/local_shell_mcp/ui_static/live-workspace-aliases.json",
     "LICENSE"
-  ]
+  ],
+  "homepage": "https://github.com/fwerkor/local-shell-mcp#deepseek-harness-plugin",
+  "bugs": {
+    "url": "https://github.com/fwerkor/local-shell-mcp/issues"
+  },
+  "scripts": {
+    "check": "node --check dsh/index.js && node --check dsh/client.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

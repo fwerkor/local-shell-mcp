@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 6fa729155fcc9e524eb3f8081b80d40ceb72c59f5ece4b311809350005468851 -->
+<!-- i18n-source-sha256: 9deaf97f0af15e7af335b40fcf9fe8bc468623d1947e6f8c9afaf7dfaebcc036 -->
 # DeepSeek Harness (DSH)
 
 `local-shell-mcp` có thể được cài trực tiếp vào DeepSeek Harness Web profile. Repository cung cấp DSH-aware bridge giữ toàn bộ LSM tool surface, ánh xạ mỗi DSH Session sang identity logical-session v4 ổn định và thêm **Live Workspace** như native DSH conversation view. LSM vẫn là authority của execution state: machine local/remote, logical Session và Goal Plan, persistent terminal, job, browser session, Dynamic MCP, file link, audit và Live Workspace timeline.
@@ -33,13 +33,13 @@ Khởi động LSM trước:
 local-shell-mcp --mode mcp
 ```
 
-Sau đó cài repository này vào DSH Web profile:
+Sau đó cài gói npm DSH chuyên dụng vào DSH Web profile:
 
 ```bash
-dsh plugin --profile web add 'github:fwerkor/local-shell-mcp#main'
+dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
-Trong production, pin Git spec vào release tag hoặc commit đã review. Khi develop từ checkout, cài current directory:
+Gói npm DSH dùng cùng phiên bản release với LSM. Khi phát triển từ checkout, cài thư mục hiện tại:
 
 ```bash
 dsh plugin --profile web add .

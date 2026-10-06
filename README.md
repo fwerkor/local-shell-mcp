@@ -159,13 +159,13 @@ Read the dedicated [ChatGPT connector guide](https://fwerkor.github.io/local-she
 
 [![dsh.so install](https://www.dsh.so/badge/install/local-shell-mcp.svg)](https://www.dsh.so/artifact/local-shell-mcp)
 
-The repository root is also a DSH plugin bundle. With a normal LSM HTTP/MCP service running on the same host, install it directly into a DSH profile:
+The DSH bridge is published separately as `local-shell-mcp-dsh`. With a normal LSM HTTP/MCP service running on the same host, install the plugin into a DSH profile:
 
 ```bash
-dsh plugin --profile web add 'github:fwerkor/local-shell-mcp#main'
+dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
-The bundle uses an LSM-aware Streamable HTTP bridge and keeps the complete LSM tool surface, including `remote_manage`, `remote_transfer`, browser tools, and Dynamic MCP tools. Each DSH Session receives a stable v4 logical-session identity, so its Logical Session, active run, Activity, and native **Live Workspace** view stay isolated from other DSH conversations and survive DSH-side MCP transport recreation. DSH sees model tools under the normal `mcp__lsm__*` namespace. For production, pin the Git spec to a reviewed release or commit.
+The bundle uses an LSM-aware Streamable HTTP bridge and keeps the complete LSM tool surface, including `remote_manage`, `remote_transfer`, browser tools, and Dynamic MCP tools. Each DSH Session receives a stable v4 logical-session identity, so its Logical Session, active run, Activity, and native **Live Workspace** view stay isolated from other DSH conversations and survive DSH-side MCP transport recreation. DSH sees model tools under the normal `mcp__lsm__*` namespace. The DSH npm package follows the same release version as LSM. Repository installs remain useful for development from a checkout.
 
 See the [DeepSeek Harness integration guide](https://fwerkor.github.io/local-shell-mcp/clients/deepseek-harness/).
 

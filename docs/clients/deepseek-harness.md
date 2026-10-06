@@ -36,13 +36,13 @@ Start LSM first:
 local-shell-mcp --mode mcp
 ```
 
-Then install this repository into the DSH Web profile:
+Then install the dedicated DSH npm package into the DSH Web profile:
 
 ```bash
-dsh plugin --profile web add 'github:fwerkor/local-shell-mcp#main'
+dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
-For production, pin the Git spec to a reviewed release tag or commit. For development from a checkout:
+The DSH npm package uses the same release version as LSM. For development from a checkout:
 
 ```bash
 dsh plugin --profile web add .

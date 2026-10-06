@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 6fa729155fcc9e524eb3f8081b80d40ceb72c59f5ece4b311809350005468851 -->
+<!-- i18n-source-sha256: 9deaf97f0af15e7af335b40fcf9fe8bc468623d1947e6f8c9afaf7dfaebcc036 -->
 # DeepSeek Harness (DSH)
 
 يمكن تثبيت `local-shell-mcp` مباشرة في DeepSeek Harness Web profile. يتضمن repository bridge واعيًا بـ DSH يحافظ على كامل LSM tool surface، ويربط كل DSH Session بهوية v4 logical-session ثابتة، ويضيف **Live Workspace** كـ DSH conversation view أصلية. يبقى LSM هو authority لحالة التنفيذ كلها: الأجهزة local/remote، وlogical Sessions وGoal Plans، وpersistent terminals وjobs وbrowser sessions وDynamic MCP وfile links وaudit وLive Workspace timeline.
@@ -33,13 +33,13 @@ local-shell-mcp :8765
 local-shell-mcp --mode mcp
 ```
 
-ثم ثبّت repository في DSH Web profile:
+ثم ثبّت حزمة DSH المخصّصة من npm في DSH Web profile:
 
 ```bash
-dsh plugin --profile web add 'github:fwerkor/local-shell-mcp#main'
+dsh plugin --profile web add local-shell-mcp-dsh
 ```
 
-في production ثبّت Git spec على release tag أو commit تمت مراجعته. للتطوير من checkout ثبّت المجلد الحالي:
+تستخدم حزمة DSH على npm إصدار release نفسه الخاص بـ LSM. وللتطوير من checkout، ثبّت المجلد الحالي:
 
 ```bash
 dsh plugin --profile web add .

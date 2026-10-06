@@ -186,6 +186,19 @@ def main() -> int:
         print("npm prereleases must use a non-latest dist-tag while stable releases update latest.")
         return 1
 
+    dsh_npm_job = jobs.get("publish-dsh-npm", {})
+    dsh_npm_publish_script = step_script(dsh_npm_job, "Publish DSH npm plugin")
+    dsh_npm_prepare_script = step_script(dsh_npm_job, "Prepare DSH npm plugin version")
+    if "npm publish" not in dsh_npm_publish_script or dsh_npm_job.get("environment") != "npm":
+        print("Release workflow must publish the DSH npm plugin from the protected npm environment.")
+        return 1
+    if "npm version" not in dsh_npm_prepare_script or "RELEASE_VERSION" not in dsh_npm_prepare_script:
+        print("DSH npm publication must derive its version from validated release metadata.")
+        return 1
+    if "--tag next" not in dsh_npm_publish_script or "--tag latest" not in dsh_npm_publish_script:
+        print("DSH npm prereleases must use a non-latest dist-tag while stable releases update latest.")
+        return 1
+
     snap_publish_job = jobs.get("publish-snap", {})
     if snap_publish_job.get("environment") != "snapcraft":
         print("Snap Store publication must run from the protected snapcraft environment.")
