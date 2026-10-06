@@ -951,6 +951,8 @@ def test_native_tui_api_base_must_be_loopback():
     )
     with pytest.raises(ValueError, match="loopback"):
         _validate_tui_api_base("https://control.example.com/api/ui")
+    with pytest.raises(ValueError, match="loopback"):
+        _validate_tui_api_base("http://127.0.0.1%2eevil.com:8765/api/ui")
 
 def _websocket_for_test(*, client_host: str = "127.0.0.1", protocols: list[str] | None = None) -> WebSocket:
     headers = [(b"host", b"control.example.com")]

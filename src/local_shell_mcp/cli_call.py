@@ -108,7 +108,14 @@ def _parse_dotenv_value(raw: str, *, variables: dict[str, str] | None = None) ->
         chars: list[str] = []
         for char in value[1:]:
             if quote == '"' and escaped:
-                escapes = {"n": "\n", "r": "\r", "t": "\t", '"': '"', "\\": "\\"}
+                escapes = {
+                    "n": "\n",
+                    "r": "\r",
+                    "t": "\t",
+                    '"': '"',
+                    "\\": "\\",
+                    "$": "$$",
+                }
                 replacement = escapes.get(char)
                 if replacement is None:
                     chars.extend(("\\", char))

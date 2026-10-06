@@ -482,6 +482,10 @@ def test_compose_dotenv_interpolation_forms():
     variables = {"SET": "value", "EMPTY": ""}
 
     assert cli_call._interpolate_dotenv("$SET/${SET}/$$", variables) == "value/value/$"
+    assert (
+        cli_call._parse_dotenv_value(r'"prefix-\$SET"', variables=variables)
+        == "prefix-$SET"
+    )
     assert cli_call._interpolate_dotenv("${UNSET:-fallback}", variables) == "fallback"
     assert cli_call._interpolate_dotenv("${EMPTY:-fallback}", variables) == "fallback"
     assert cli_call._interpolate_dotenv("${EMPTY-fallback}", variables) == ""
