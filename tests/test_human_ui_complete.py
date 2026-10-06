@@ -799,7 +799,11 @@ def test_resolve_spawn_and_tui_cli_branches(tmp_path, monkeypatch):
     monkeypatch.setattr(
         cli_call_module,
         "_cli_environment",
-        lambda: {"LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN": standalone_token},
+        lambda: {
+            "LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN": standalone_token,
+            "LOCAL_SHELL_MCP_HOST": "0.0.0.0",
+            "LOCAL_SHELL_MCP_PORT": "9912",
+        },
     )
     subprocess_call = {}
 
@@ -816,6 +820,14 @@ def test_resolve_spawn_and_tui_cli_branches(tmp_path, monkeypatch):
     assert standalone_env["LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN"] == standalone_token
     assert "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN" not in standalone_env
     assert "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN_FD" not in standalone_env
+
+    subprocess_call.clear()
+    with pytest.raises(SystemExit) as raised:
+        ui.run_tui_cli([])
+    assert raised.value.code == 7
+    assert subprocess_call["kwargs"]["env"]["LOCAL_SHELL_MCP_UI_API_BASE"] == (
+        "http://127.0.0.1:9912/api/ui"
+    )
 
     def interrupted(*args, **kwargs):
         raise KeyboardInterrupt

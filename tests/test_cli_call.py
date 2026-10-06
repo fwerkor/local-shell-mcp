@@ -439,21 +439,30 @@ def test_resolve_local_token_supports_explicit_cli_credentials_only(tmp_path):
 
 def test_dotenv_and_cli_environment_are_read_only(tmp_path, monkeypatch):
     dotenv = tmp_path / ".env"
+    monkeypatch.setenv("MCP_PORT", "9999")
+    monkeypatch.setenv("LSM_ROOT", "/srv/lsm")
     dotenv.write_text(
         "# comment\n"
         "LOCAL_SHELL_MCP_HOST='127.0.0.2' # loopback\n"
-        "export LOCAL_SHELL_MCP_PORT=9999 # controller port\n"
+        "export LOCAL_SHELL_MCP_PORT=${MCP_PORT:-8765} # controller port\n"
+        "LOCAL_SHELL_MCP_WORKSPACE_ROOT=\"${LSM_ROOT:-/workspace}/data\"\n"
         "LOCAL_SHELL_MCP_UI_LOCAL_TOKEN=dotenv-token-abcdefghijklmnopqrstuvwxyz\n"
         "LOCAL_SHELL_MCP_PUBLIC_BASE_URL=\"https://example.test/#fragment\" # public URL\n"
         "LOCAL_SHELL_MCP_STATE_BACKEND_URL=redis://cache#0\n"
+        "LOCAL_SHELL_MCP_STATE_DIR='${LSM_ROOT:-/workspace}/literal'\n"
+        "LOCAL_SHELL_MCP_LOG_LEVEL=${UNSET_LEVEL:-${DEFAULT_LEVEL:-WARNING}}\n"
+        "DEFAULT_LEVEL=INFO\n"
         "ignored-line\n",
         encoding="utf-8",
     )
     parsed = cli_call._read_dotenv(dotenv)
     assert parsed["LOCAL_SHELL_MCP_HOST"] == "127.0.0.2"
     assert parsed["LOCAL_SHELL_MCP_PORT"] == "9999"
+    assert parsed["LOCAL_SHELL_MCP_WORKSPACE_ROOT"] == "/srv/lsm/data"
     assert parsed["LOCAL_SHELL_MCP_PUBLIC_BASE_URL"] == "https://example.test/#fragment"
     assert parsed["LOCAL_SHELL_MCP_STATE_BACKEND_URL"] == "redis://cache#0"
+    assert parsed["LOCAL_SHELL_MCP_STATE_DIR"] == "${LSM_ROOT:-/workspace}/literal"
+    assert parsed["LOCAL_SHELL_MCP_LOG_LEVEL"] == "WARNING"
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("LOCAL_SHELL_MCP_PORT", "10001")
@@ -467,6 +476,37 @@ def test_dotenv_and_cli_environment_are_read_only(tmp_path, monkeypatch):
     assert settings.port == 10001
     assert settings.auth_mode == "oauth"
     assert not (tmp_path / "workspace").exists()
+
+
+def test_compose_dotenv_interpolation_forms():
+    variables = {"SET": "value", "EMPTY": ""}
+
+    assert cli_call._interpolate_dotenv("$SET/${SET}/$$", variables) == "value/value/$"
+    assert cli_call._interpolate_dotenv("${UNSET:-fallback}", variables) == "fallback"
+    assert cli_call._interpolate_dotenv("${EMPTY:-fallback}", variables) == "fallback"
+    assert cli_call._interpolate_dotenv("${EMPTY-fallback}", variables) == ""
+    assert cli_call._interpolate_dotenv("${UNSET-fallback}", variables) == "fallback"
+    assert cli_call._interpolate_dotenv("${SET:+alternate}", variables) == "alternate"
+    assert cli_call._interpolate_dotenv("${UNSET:+alternate}", variables) == ""
+    assert cli_call._interpolate_dotenv("${SET+alternate}", variables) == "alternate"
+    assert cli_call._interpolate_dotenv("${EMPTY:+alternate}", variables) == ""
+    assert cli_call._interpolate_dotenv("${EMPTY+alternate}", variables) == "alternate"
+    assert cli_call._interpolate_dotenv("${UNSET:-${SET:-fallback}}", variables) == "value"
+    assert cli_call._interpolate_dotenv("${SET:?required}", variables) == "value"
+    assert cli_call._interpolate_dotenv("${EMPTY?required}", variables) == ""
+
+    with pytest.raises(ValueError, match="EMPTY: required"):
+        cli_call._interpolate_dotenv("${EMPTY:?required}", variables)
+    with pytest.raises(ValueError, match="UNSET: required"):
+        cli_call._interpolate_dotenv("${UNSET?required}", variables)
+    with pytest.raises(ValueError, match="missing"):
+        cli_call._interpolate_dotenv("${SET", variables)
+    with pytest.raises(ValueError, match="invalid dotenv interpolation"):
+        cli_call._interpolate_dotenv("${9BAD}", variables)
+    with pytest.raises(ValueError, match="invalid dotenv interpolation"):
+        cli_call._interpolate_dotenv("${SET:=other}", variables)
+    with pytest.raises(ValueError, match="nested too deeply"):
+        cli_call._interpolate_dotenv("value", variables, depth=21)
 
 
 def test_yaml_controller_values_are_loaded_read_only_with_environment_precedence(

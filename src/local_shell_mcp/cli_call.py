@@ -91,15 +91,17 @@ def _read_dotenv(path: Path) -> dict[str, str]:
             continue
         key, value = line.split("=", 1)
         key = key.strip()
-        value = _parse_dotenv_value(value)
+        lookup = {**values, **os.environ}
+        value = _parse_dotenv_value(value, variables=lookup)
         values[key] = value
     return values
 
 
-def _parse_dotenv_value(raw: str) -> str:
+def _parse_dotenv_value(raw: str, *, variables: dict[str, str] | None = None) -> str:
     value = raw.strip()
     if not value:
         return ""
+    variables = variables or {}
     if value[0] in {"'", '"'}:
         quote = value[0]
         escaped = False
@@ -118,13 +120,119 @@ def _parse_dotenv_value(raw: str) -> str:
                 escaped = True
                 continue
             if char == quote:
-                return "".join(chars)
+                parsed = "".join(chars)
+                return parsed if quote == "'" else _interpolate_dotenv(parsed, variables)
             chars.append(char)
-        return "".join(chars)
+        parsed = "".join(chars)
+        return parsed if quote == "'" else _interpolate_dotenv(parsed, variables)
     for index, char in enumerate(value):
         if char == "#" and index > 0 and value[index - 1].isspace():
-            return value[:index].rstrip()
-    return value
+            value = value[:index].rstrip()
+            break
+    return _interpolate_dotenv(value, variables)
+
+
+def _interpolate_dotenv(value: str, variables: dict[str, str], *, depth: int = 0) -> str:
+    """Expand Docker Compose-style variables in .env values."""
+
+    if depth > 20:
+        raise ValueError("dotenv interpolation is nested too deeply")
+    output: list[str] = []
+    index = 0
+    while index < len(value):
+        if value[index] != "$":
+            output.append(value[index])
+            index += 1
+            continue
+        if index + 1 >= len(value):
+            output.append("$")
+            break
+        next_char = value[index + 1]
+        if next_char == "$":
+            output.append("$")
+            index += 2
+            continue
+        if next_char == "{":
+            end = _dotenv_interpolation_end(value, index + 2)
+            if end is None:
+                raise ValueError("invalid dotenv interpolation: missing '}'")
+            expression = value[index + 2 : end]
+            output.append(_resolve_dotenv_expression(expression, variables, depth=depth + 1))
+            index = end + 1
+            continue
+        if next_char.isalpha() or next_char == "_":
+            end = index + 2
+            while end < len(value) and (value[end].isalnum() or value[end] == "_"):
+                end += 1
+            output.append(variables.get(value[index + 1 : end], ""))
+            index = end
+            continue
+        output.append("$")
+        index += 1
+    return "".join(output)
+
+
+def _dotenv_interpolation_end(value: str, start: int) -> int | None:
+    nested = 0
+    index = start
+    while index < len(value):
+        if value.startswith("${", index):
+            nested += 1
+            index += 2
+            continue
+        if value[index] == "}":
+            if nested == 0:
+                return index
+            nested -= 1
+        index += 1
+    return None
+
+
+def _resolve_dotenv_expression(
+    expression: str, variables: dict[str, str], *, depth: int
+) -> str:
+    if not expression or not (expression[0].isalpha() or expression[0] == "_"):
+        raise ValueError(f"invalid dotenv interpolation: ${{{expression}}}")
+    name_end = 1
+    while name_end < len(expression) and (
+        expression[name_end].isalnum() or expression[name_end] == "_"
+    ):
+        name_end += 1
+    name = expression[:name_end]
+    remainder = expression[name_end:]
+    is_set = name in variables
+    current = variables.get(name, "")
+    if not remainder:
+        return current
+
+    operator = next(
+        (
+            candidate
+            for candidate in (":-", ":?", ":+", "-", "?", "+")
+            if remainder.startswith(candidate)
+        ),
+        None,
+    )
+    if operator is None:
+        raise ValueError(f"invalid dotenv interpolation: ${{{expression}}}")
+    payload = remainder[len(operator) :]
+    use_empty_as_unset = operator.startswith(":")
+    missing = not is_set or (use_empty_as_unset and current == "")
+
+    if operator in {":-", "-"}:
+        return _interpolate_dotenv(payload, variables, depth=depth) if missing else current
+    if operator in {":?", "?"}:
+        if missing:
+            detail = (
+                _interpolate_dotenv(payload, variables, depth=depth)
+                if payload
+                else "required variable is not set"
+            )
+            raise ValueError(f"{name}: {detail}")
+        return current
+    if operator in {":+", "+"}:
+        return "" if missing else _interpolate_dotenv(payload, variables, depth=depth)
+    raise ValueError(f"invalid dotenv interpolation: ${{{expression}}}")
 
 
 def _cli_environment() -> dict[str, str]:
@@ -196,8 +304,8 @@ def _controller_defaults(values: dict[str, str]) -> _ControllerDefaults:
     )
 
 
-def _default_controller_url(settings: _ControllerDefaults) -> str:
-    host = str(settings.host or "").strip()
+def _loopback_http_url(host: str, port: int, path: str) -> str:
+    host = str(host or "").strip()
     candidate = host.strip("[]").split("%", 1)[0]
     is_loopback = host.lower() == "localhost"
     if not is_loopback:
@@ -209,7 +317,11 @@ def _default_controller_url(settings: _ControllerDefaults) -> str:
         host = "127.0.0.1"
     elif ":" in host and not host.startswith("["):
         host = f"[{host}]"
-    return f"http://{host}:{settings.port}/mcp"
+    return f"http://{host}:{port}{path}"
+
+
+def _default_controller_url(settings: _ControllerDefaults) -> str:
+    return _loopback_http_url(settings.host, settings.port, "/mcp")
 
 
 def _read_token_file(path: Path) -> str:
