@@ -2481,12 +2481,14 @@ def _tmux_input_may_be_prefix(data: bytes) -> bool:
 
 def _validate_tui_api_base(value: str) -> str:
     normalized = str(value).rstrip("/")
+    if "\\" in normalized:
+        raise ValueError("Native TUI --api-base must use a loopback HTTP(S) URL")
     parsed = urlsplit(normalized)
     host = parsed.hostname or ""
-    loopback = host.lower() == "localhost"
-    if not loopback:
+    loopback = "%" not in host and host.lower() == "localhost"
+    if not loopback and "%" not in host:
         try:
-            loopback = ipaddress.ip_address(host.split("%", 1)[0]).is_loopback
+            loopback = ipaddress.ip_address(host).is_loopback
         except ValueError:
             loopback = False
     if parsed.scheme not in {"http", "https"} or not loopback:
