@@ -276,8 +276,8 @@ def test_run_uvicorn_interrupts_remote_polls_before_base_shutdown(monkeypatch):
     assert calls == [
         ("prepare", None),
         ("interrupt", None),
-        ("flush", None),
         ("base", ["socket"]),
+        ("flush", None),
     ]
 
 

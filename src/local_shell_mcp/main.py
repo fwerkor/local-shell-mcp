@@ -81,8 +81,8 @@ def _run_uvicorn(app, settings) -> None:  # noqa: ANN001
     class ShutdownAwareServer(uvicorn.Server):
         async def shutdown(self, sockets=None) -> None:  # noqa: ANN001
             _interrupt_remote_polls_for_shutdown()
-            await _flush_remote_state_for_shutdown(remote_manager())
             await super().shutdown(sockets=sockets)
+            await _flush_remote_state_for_shutdown(remote_manager())
 
     config = uvicorn.Config(
         app,
