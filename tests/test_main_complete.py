@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -278,6 +279,27 @@ def test_run_uvicorn_interrupts_remote_polls_before_base_shutdown(monkeypatch):
         ("flush", None),
         ("base", ["socket"]),
     ]
+
+
+def test_remote_state_shutdown_flush_is_bounded(caplog):
+    release = threading.Event()
+    manager = SimpleNamespace(flush_registry=lambda: release.wait(1))
+    try:
+        asyncio.run(main_module._flush_remote_state_for_shutdown(manager, timeout_s=0.001))
+        assert "Timed out persisting remote worker state" in caplog.text
+    finally:
+        release.set()
+
+
+def test_remote_state_shutdown_flush_logs_failures(caplog):
+    def fail_flush():
+        raise OSError("state backend unavailable")
+
+    manager = SimpleNamespace(flush_registry=fail_flush)
+    asyncio.run(main_module._flush_remote_state_for_shutdown(manager, timeout_s=0.1))
+
+    assert "Failed to persist remote worker state" in caplog.text
+    assert "state backend unavailable" in caplog.text
 
 
 def test_main_subcommands_and_version(monkeypatch, capsys):
