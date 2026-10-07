@@ -244,6 +244,45 @@ def test_coalescing_attaches_legacy_command_preflight_by_call_id():
     assert rows[0][audit_module._AUDIT_SOURCE_INDEXES] == [0, 1, 2]
 
 
+def test_event_filter_matches_nested_command_preflight():
+    records = [
+        {
+            "ts": 1,
+            "event": "mcp_tool_call_start",
+            "call_id": "call-1",
+            "tool": "run_shell",
+        },
+        {
+            "ts": 2,
+            "event": "command_preflight",
+            "parent_call_id": "call-1",
+            "tool": "run_shell",
+            "action": "allow",
+        },
+        {
+            "ts": 3,
+            "event": "mcp_tool_call_end",
+            "call_id": "call-1",
+            "tool": "run_shell",
+            "ok": True,
+        },
+    ]
+
+    matched = audit_module._matching_audit_rows(
+        records,
+        node=None,
+        event="command_preflight",
+        operation=None,
+        session=None,
+        search=None,
+        start_ts=None,
+        end_ts=None,
+    )
+
+    assert len(matched) == 1
+    assert matched[0]["call_id"] == "call-1"
+
+
 def test_query_audit_covers_tail_reading_and_filter_rejections(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     assert audit_module.query_audit() == {"entries": [], "count": 0, "total_matched": 0}
@@ -526,6 +565,16 @@ def test_audit_payload_helpers_cover_edge_paths(tmp_path, monkeypatch):
     assert audit_module._bounded_preview_record(oversized, 20) == b""
     bounded = json.loads(audit_module._bounded_preview_record(oversized, 300))
     assert bounded["audit_payloads_omitted"] == "record exceeded audit retention limit"
+    oversized_child = {
+        "id": "oversized-child",
+        "ts": 2,
+        "event": "command_preflight",
+        "tool": "run_shell",
+        "parent_call_id": "call-1",
+        "payload": "x" * 10_000,
+    }
+    bounded_child = json.loads(audit_module._bounded_preview_record(oversized_child, 300))
+    assert bounded_child["parent_call_id"] == "call-1"
     assert audit_module._bounded_preview_unit([], 100) == []
     unit = [
         (0, b"invalid\n", None, set()),

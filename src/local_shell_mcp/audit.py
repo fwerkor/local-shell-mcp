@@ -461,7 +461,17 @@ def _bounded_preview_record(record: dict[str, Any], max_bytes: int) -> bytes:
         return encoded
     essential = {
         name: preview[name]
-        for name in ("id", "ts", "event", "tool", "call_id", "ok", "error", "error_type")
+        for name in (
+            "id",
+            "ts",
+            "event",
+            "tool",
+            "call_id",
+            "parent_call_id",
+            "ok",
+            "error",
+            "error_type",
+        )
         if name in preview
     }
     essential["audit_payloads_omitted"] = "record exceeded audit retention limit"
@@ -1627,8 +1637,18 @@ def _matching_audit_rows(
             continue
         if node_filter and node_filter != str(row.get("node") or "local").casefold():
             continue
+        related_events = row.get("related_events") or []
+        related_event_names = [
+            str(item.get("event") or "")
+            for item in related_events
+            if isinstance(item, dict)
+        ]
         event_text = " ".join(
-            [str(row.get("event") or ""), *map(str, row.get("source_events") or [])]
+            [
+                str(row.get("event") or ""),
+                *map(str, row.get("source_events") or []),
+                *related_event_names,
+            ]
         )
         if event_filter and event_filter not in event_text.casefold():
             continue
