@@ -120,6 +120,14 @@ describe("Native WebUI actions", () => {
     expect(styles).toContain("body.native-view-active #refresh-button { display: inline-flex; }")
   })
 
+  test("keeps overview card footers pinned to the bottom of stretched dashboard rows", async () => {
+    const styles = await Bun.file(new URL("./web.css", import.meta.url)).text()
+
+    expect(styles).toContain(".attention-panel, .workloads-panel, .activity-panel { display:flex; flex-direction:column; }")
+    expect(styles).toContain(".attention-panel .attention-list, .workloads-panel .workload-list, .activity-panel .activity-list { flex:1 1 auto; }")
+    expect(styles).toContain(".workloads-panel .workload-list { display:flex; flex-direction:column; }")
+  })
+
   test("uses two visible file panes after the machine rail is hidden", async () => {
     const styles = await Bun.file(new URL("./web-native.css", import.meta.url)).text()
     const compactRule = styles.lastIndexOf("@media (max-width: 1100px)")
