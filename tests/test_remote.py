@@ -906,6 +906,52 @@ def test_merge_worker_resource_usage_validates_metrics():
     assert worker.info["cpu_percent"] == 100.0
 
 
+def test_merge_worker_resource_usage_rejects_stale_and_clears_unavailable_metrics():
+    worker = remote.RemoteWorker(
+        name="worker-a",
+        token="token-a",
+        info={
+            "sampled_at": 200.0,
+            "cpu_percent": 75.0,
+            "memory_percent": 60.0,
+            "memory_used_bytes": 600,
+            "memory_total_bytes": 1000,
+        },
+    )
+
+    remote._merge_worker_resource_usage(  # noqa: SLF001
+        worker,
+        {
+            "resources": {
+                "sampled_at": 150.0,
+                "cpu_percent": 10.0,
+                "memory_percent": 20.0,
+            }
+        },
+    )
+    assert worker.info["sampled_at"] == 200.0
+    assert worker.info["cpu_percent"] == 75.0
+    assert worker.info["memory_percent"] == 60.0
+
+    remote._merge_worker_resource_usage(  # noqa: SLF001
+        worker,
+        {
+            "resources": {
+                "sampled_at": 250.0,
+                "cpu_percent": None,
+                "memory_percent": None,
+                "memory_used_bytes": None,
+                "memory_total_bytes": None,
+            }
+        },
+    )
+    assert worker.info["sampled_at"] == 250.0
+    assert "cpu_percent" not in worker.info
+    assert "memory_percent" not in worker.info
+    assert "memory_used_bytes" not in worker.info
+    assert "memory_total_bytes" not in worker.info
+
+
 def test_worker_retry_delay_is_capped():
     assert [remote._worker_retry_delay(i) for i in range(7)] == [1.0, 2.0, 4.0, 8.0, 16.0, 30.0, 30.0]  # noqa: SLF001
 

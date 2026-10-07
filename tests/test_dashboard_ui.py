@@ -74,6 +74,26 @@ def test_local_dashboard_snapshot_calculates_rates_and_percentages(tmp_path, mon
     assert second["uptime_s"] == 123
 
 
+def test_local_dashboard_snapshot_uses_cross_platform_memory_reader(tmp_path, monkeypatch):
+    monkeypatch.setattr(ui.sys, "platform", "darwin")
+    monkeypatch.setattr(ui, "_CPU_SAMPLE", None)
+    monkeypatch.setattr(ui, "_NETWORK_SAMPLE", None)
+    monkeypatch.setattr(ui, "_read_linux_cpu_times", lambda: None)
+    monkeypatch.setattr(ui, "_read_linux_network", lambda: None)
+    monkeypatch.setattr(ui, "_read_worker_memory", lambda: (1_000, 250))
+    monkeypatch.setattr(ui.os, "getloadavg", lambda: (0.0, 0.0, 0.0), raising=False)
+    monkeypatch.setattr(ui.Path, "read_text", lambda *args, **kwargs: (_ for _ in ()).throw(OSError()))
+    DiskUsage = namedtuple("DiskUsage", "total used free")
+    monkeypatch.setattr(ui.shutil, "disk_usage", lambda path: DiskUsage(1000, 600, 400))
+    monkeypatch.setattr(ui, "get_settings", lambda: SimpleNamespace(workspace_root=tmp_path))
+
+    snapshot = ui._local_system_snapshot()
+
+    assert snapshot["memory_percent"] == 25.0
+    assert snapshot["memory_used_bytes"] == 250
+    assert snapshot["memory_total_bytes"] == 1_000
+
+
 def test_dashboard_helpers_build_alerts_and_activity(tmp_path, monkeypatch):
     monkeypatch.setattr(ui, "get_settings", lambda: SimpleNamespace(workspace_root=tmp_path))
     alerts = ui._dashboard_alerts(

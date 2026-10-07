@@ -454,7 +454,7 @@ function machineRows(machines: Machine[], localSystem?: Record<string, unknown>)
     const info = machine.info || {}
     const status = stringValue(machine.status, "unknown")
     const online = status === "online"
-    const local = Boolean(info.local) || machine.name === "local"
+    const local = Boolean(info.local)
     const cpu = local ? numberValue(localSystem?.cpu_percent) : numberValue(info.cpu_percent)
     const memory = local ? numberValue(localSystem?.memory_percent) : numberValue(info.memory_percent)
     const resources = [resourceMini("CPU", cpu), resourceMini("MEM", memory)].filter(Boolean).join("")

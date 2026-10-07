@@ -598,6 +598,30 @@ def _merge_worker_resource_usage(worker: RemoteWorker, payload: dict[str, Any]) 
     resources = payload.get("resources")
     if not isinstance(resources, dict):
         return
+
+    incoming_sampled_at: float | None = None
+    sampled_at_value = resources.get("sampled_at")
+    if sampled_at_value is not None and not isinstance(sampled_at_value, bool):
+        try:
+            candidate = float(sampled_at_value)
+        except (TypeError, ValueError):
+            pass
+        else:
+            if math.isfinite(candidate) and candidate >= 0:
+                incoming_sampled_at = candidate
+    stored_sampled_at = worker.info.get("sampled_at")
+    if incoming_sampled_at is not None and not isinstance(stored_sampled_at, bool):
+        try:
+            stored_numeric = float(stored_sampled_at)
+        except (TypeError, ValueError):
+            stored_numeric = None
+        if (
+            stored_numeric is not None
+            and math.isfinite(stored_numeric)
+            and incoming_sampled_at < stored_numeric
+        ):
+            return
+
     for key in (
         "sampled_at",
         "cpu_percent",
@@ -606,8 +630,14 @@ def _merge_worker_resource_usage(worker: RemoteWorker, payload: dict[str, Any]) 
         "memory_used_bytes",
         "memory_total_bytes",
     ):
-        value = resources.get(key)
-        if value is None or isinstance(value, bool):
+        if key not in resources:
+            continue
+        value = resources[key]
+        if value is None:
+            if key != "sampled_at":
+                worker.info.pop(key, None)
+            continue
+        if isinstance(value, bool):
             continue
         try:
             numeric = float(value)
@@ -3276,11 +3306,12 @@ def worker_info(workdir: str) -> dict[str, Any]:
 def _worker_poll_payload(
     poll_request_timeout_s: float | None = None,
     lane: str | None = None,
+    resources: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "protocol_version": REMOTE_WORKER_POLL_PROTOCOL_VERSION,
         "worker_version": __version__,
-        "resources": _worker_resource_snapshot(),
+        "resources": dict(resources) if resources is not None else _worker_resource_snapshot(),
     }
     if lane is not None:
         payload["lane"] = lane
@@ -3867,7 +3898,7 @@ async def _execute_worker_job_with_heartbeat(
     start_payload: dict[str, Any] = {
         "job_id": job.get("id"),
         "starting": True,
-        "resources": _worker_resource_snapshot(),
+        "resources": await asyncio.to_thread(_worker_resource_snapshot),
     }
     if job_generation is not None:
         start_payload["reset_generation"] = job_generation
@@ -3904,12 +3935,13 @@ async def _execute_worker_job_with_heartbeat(
             if task.done():
                 return
             try:
+                resources = await asyncio.to_thread(_worker_resource_snapshot)
                 response = await asyncio.to_thread(
                     _worker_post_json,
                     f"{server}{REMOTE_API_PREFIX}/heartbeat",
                     {
                         "job_id": job.get("id"),
-                        "resources": _worker_resource_snapshot(),
+                        "resources": resources,
                     },
                     headers,
                     30,
@@ -3971,12 +4003,13 @@ async def _submit_worker_result_with_heartbeat(
             if submission.done():
                 return
             try:
+                resources = await asyncio.to_thread(_worker_resource_snapshot)
                 response = await asyncio.to_thread(
                     _worker_post_json,
                     f"{server}{REMOTE_API_PREFIX}/heartbeat",
                     {
                         "job_id": result.get("job_id"),
-                        "resources": _worker_resource_snapshot(),
+                        "resources": resources,
                     },
                     headers,
                     30,
@@ -4149,9 +4182,10 @@ async def _worker_poll_lane(
 
         state.polling += 1
         try:
+            resources = await asyncio.to_thread(_worker_resource_snapshot)
             poll_body = await _worker_post_json_forever(
                 f"{server}{REMOTE_API_PREFIX}/poll",
-                _worker_poll_payload(poll_request_timeout_s, lane),
+                _worker_poll_payload(poll_request_timeout_s, lane, resources),
                 headers,
                 poll_request_timeout_s,
                 "poll",
@@ -4248,12 +4282,13 @@ async def _run_worker_locked(
 
     _get_settings.cache_clear()
     server = server.rstrip("/")
+    worker_details = await asyncio.to_thread(worker_info, workdir)
     register_payload = {
         "invite": invite,
         "name": name,
         "workdir": workdir,
         "capabilities": worker_capabilities(),
-        "info": worker_info(workdir),
+        "info": worker_details,
     }
     identity = _read_worker_identity(server, name)
     body: dict[str, Any] | None = None
