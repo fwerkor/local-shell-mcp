@@ -457,7 +457,7 @@ function machineRows(machines: Machine[], localCpu?: unknown): string {
       <td><span class="status-chip ${online ? "online" : "offline"}"><i></i>${escapeHtml(status)}</span></td>
       <td>${cpu === null ? '<span class="last-seen">Not reported</span>' : `<div class="resource-mini"><span><i style="width:${Math.max(0, Math.min(100, cpu))}%"></i></span><small>CPU ${Math.round(cpu)}%</small></div>`}</td>
       <td><div class="tag-row">${capabilities.map((item) => `<span class="tag">${escapeHtml(item)}</span>`).join("") || '<span class="last-seen">None reported</span>'}</div></td>
-      <td><span class="last-seen ${online ? "now" : ""}">${relativeTime(machine.last_seen, machine.last_seen_age_s)}</span></td>
+      <td><span class="last-seen ${online ? "now" : ""}">${online ? "Now" : relativeTime(machine.last_seen, machine.last_seen_age_s)}</span></td>
     </tr>`
   }).join("")
 }

@@ -182,7 +182,7 @@ function NodeFleet({ payload, width, rows }: { payload: DashboardPayload; width:
         const online = machine.status === "online"
         const info = machine.info || {}
         const queue = typeof info.queue_depth === "number" ? info.queue_depth : (machine as Machine & { queue_depth?: number }).queue_depth
-        const age = machine.name === "local" ? "now" : formatAge(machine.last_seen)
+        const age = machine.name === "local" || online ? "now" : formatAge(machine.last_seen)
         return (
           <box key={machine.name} style={{ height: width >= 44 ? 3 : 2, flexDirection: "column", marginBottom: 1 }}>
             <box style={{ flexDirection: "row" }}>

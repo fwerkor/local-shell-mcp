@@ -499,6 +499,7 @@ class RemoteManager:
                 "Remote worker registry is unreadable and no valid backup is available; "
                 "refusing to reset it"
             ) from main_error
+        now = _utc()
         existing_workers = {worker.token: worker for worker in self.workers.values()}
         workers: dict[str, RemoteWorker] = {}
         tokens: dict[str, str] = {}
@@ -509,14 +510,26 @@ class RemoteManager:
             access = str(item.get("access") or item.get("to" + "ken") or "").strip()
             if not name or not access or name in workers or access in tokens:
                 continue
+            try:
+                persisted_last_seen = float(item.get("last_seen") or 0.0)
+            except (TypeError, ValueError):
+                persisted_last_seen = 0.0
+            if (
+                not math.isfinite(persisted_last_seen)
+                or persisted_last_seen < 0
+                or persisted_last_seen > now
+            ):
+                persisted_last_seen = 0.0
             worker = existing_workers.get(access)
             if worker is None:
                 worker = RemoteWorker(
                     name=name,
                     token=access,
-                    last_seen=0.0,
+                    last_seen=persisted_last_seen,
                     status="offline",
                 )
+            else:
+                worker.last_seen = max(worker.last_seen, persisted_last_seen)
             worker.name = name
             worker.workdir = str(item.get("workdir") or "")
             worker.created_at = float(item.get("created_at") or _utc())
@@ -528,7 +541,6 @@ class RemoteManager:
                 worker.reset_generation = 0
             workers[name] = worker
             tokens[access] = name
-        now = _utc()
         invites: dict[str, RemoteInvite] = {}
         for item in registry["invites"]:
             code = str(item.get("code") or "").strip()
@@ -567,6 +579,7 @@ class RemoteManager:
                     "access": worker.token,
                     "workdir": worker.workdir,
                     "created_at": worker.created_at,
+                    "last_seen": worker.last_seen,
                     "capabilities": worker.capabilities,
                     "info": worker.info,
                     "reset_generation": worker.reset_generation,
@@ -615,6 +628,11 @@ class RemoteManager:
                     path=REMOTE_WORKER_REGISTRY_BACKUP_FILE_NAME,
                     error=repr(exc),
                 )
+
+    def flush_registry(self) -> None:
+        """Persist the latest in-memory worker state before controller shutdown."""
+        with self._state_lock, self._registry_transaction_unlocked():
+            self._save_registry_unlocked()
 
     def _join_url(self, base_url: str | None = None) -> str:
         settings = get_settings()
@@ -1088,7 +1106,12 @@ class RemoteManager:
             worker = self.workers.get(machine)
             if not worker:
                 raise ValueError(f"unknown remote machine: {machine}")
-            if _utc() - worker.last_seen > max(2 * settings.remote_poll_timeout_s, 60):
+            now = _utc()
+            if (
+                worker.status != "online"
+                or not worker.last_seen
+                or now - worker.last_seen > max(2 * settings.remote_poll_timeout_s, 60)
+            ):
                 worker.status = "offline"
                 raise RuntimeError(f"remote machine is offline: {machine}")
             max_pending = max(1, settings.remote_max_pending_jobs)
@@ -1228,7 +1251,9 @@ class RemoteManager:
                 last_seen_age_s = None if not worker.last_seen else max(0.0, now - worker.last_seen)
                 status = (
                     "online"
-                    if last_seen_age_s is not None and last_seen_age_s <= offline_after_s
+                    if worker.status == "online"
+                    and last_seen_age_s is not None
+                    and last_seen_age_s <= offline_after_s
                     else "offline"
                 )
                 worker.status = status
@@ -1238,7 +1263,7 @@ class RemoteManager:
                         "name": worker.name,
                         "status": status,
                         "workdir": worker.workdir,
-                        "last_seen": worker.last_seen,
+                        "last_seen": worker.last_seen if worker.last_seen > 0 else None,
                         "last_seen_age_s": last_seen_age_s,
                         "offline_after_s": offline_after_s,
                         "queue_depth": worker.queue.qsize() + worker.transfer_queue.qsize(),

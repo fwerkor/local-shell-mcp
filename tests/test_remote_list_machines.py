@@ -32,6 +32,23 @@ def test_list_machines_reports_counts_and_details(tmp_path, monkeypatch):
     assert result["machines"][1]["status"] == "offline"
 
 
+def test_list_machines_reports_unknown_last_seen_without_epoch_age(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+
+    manager = RemoteManager()
+    manager._registry_loaded = True
+    worker = RemoteWorker(name="legacy-worker", token="legacy", last_seen=0)
+    manager.workers = {worker.name: worker}
+    manager.tokens = {worker.token: worker.name}
+
+    result = manager.list_machines()
+
+    assert result["machines"][0]["status"] == "offline"
+    assert result["machines"][0]["last_seen"] is None
+    assert result["machines"][0]["last_seen_age_s"] is None
+
+
 def test_worker_info_reports_runtime_version(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "local_shell_mcp.remote.persistent_shell_backend_info", lambda: {"backend": "test"}
