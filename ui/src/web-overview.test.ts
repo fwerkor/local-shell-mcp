@@ -12,5 +12,7 @@ describe("WebUI overview", () => {
     expect(machineTable).not.toContain("<th>Capabilities</th>")
     expect(machineTable).not.toContain("capabilities.map")
     expect(machineTable).toContain('colspan="4"')
+    expect(machineTable).toContain("const local = Boolean(info.local)")
+    expect(machineTable).not.toContain('machine.name === "local"')
   })
 })
