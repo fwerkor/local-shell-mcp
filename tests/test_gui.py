@@ -3511,6 +3511,8 @@ async def test_gui_action_rechecks_state_ttl_after_execution_queue(tmp_path, mon
 
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setattr(base, "GUI_STATE_TTL_S", 0.02)
+    now = [100.0]
+    monkeypatch.setattr(base.time, "monotonic", lambda: now[0])
     backend = FakeBackend()
     manager = GuiManager(backend)
     state = await manager.snapshot("window:1", screenshot=False)
@@ -3523,7 +3525,7 @@ async def test_gui_action_rechecks_state_ttl_after_execution_queue(tmp_path, mon
             [{"type": "click", "x": 1, "y": 1}],
         )
     )
-    await asyncio.sleep(0.04)
+    now[0] += 0.04
     manager._execution_lock.release()
 
     with pytest.raises(GuiStaleStateError, match="stale"):
@@ -3953,7 +3955,7 @@ async def test_cancelled_native_action_keeps_execution_lock_until_backend_settle
             [{"type": "click", "x": 2, "y": 2}],
         )
     )
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0)
     assert backend.calls == 1
     assert backend.max_active == 1
 
@@ -4027,7 +4029,7 @@ async def test_cancelled_gui_capture_holds_execution_lock_until_backend_settles(
             [{"type": "click", "x": 1, "y": 1}],
         )
     )
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0)
     assert not backend.action_started.is_set()
 
     backend.release_capture.set()

@@ -827,7 +827,7 @@ async def test_cancelled_thread_mutation_holds_logical_lease_until_worker_finish
     assert manager._sessions[session_id].in_flight_calls
 
     task.cancel()
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(0)
     assert not task.done()
     assert manager._sessions[session_id].in_flight_calls
     with pytest.raises(ValueError, match="tool calls are in flight"):

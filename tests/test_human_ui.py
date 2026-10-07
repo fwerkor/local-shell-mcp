@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import importlib.util
 import json
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -378,9 +378,10 @@ def test_ui_assets_reject_symlinks_outside_asset_root(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_local_file_api_does_not_block_event_loop(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
+    event_loop_thread = threading.get_ident()
 
     def slow_list(*args, **kwargs):  # noqa: ANN002, ANN003
-        time.sleep(0.25)
+        assert threading.get_ident() != event_loop_thread
         return []
 
     monkeypatch.setattr("local_shell_mcp.human_ui.list_dir", slow_list)
@@ -398,12 +399,7 @@ async def test_local_file_api_does_not_block_event_loop(tmp_path, monkeypatch):
         "server": ("127.0.0.1", 8765),
     }
     request = Request(scope)
-    started = time.perf_counter()
-    task = asyncio.create_task(api_files(request))
-    await asyncio.sleep(0.05)
-
-    assert time.perf_counter() - started < 0.15
-    response = await task
+    response = await api_files(request)
     assert response.status_code == 200
 
 def test_human_file_api_has_three_pane_directory_payload(tmp_path, monkeypatch):

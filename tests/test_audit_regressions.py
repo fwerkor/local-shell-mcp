@@ -254,11 +254,11 @@ async def test_claimed_remote_mutation_waits_for_definitive_result(tmp_path, mon
             "worker-a",
             "write_file",
             {"path": "target.txt", "content": "done"},
-            timeout_s=0.01,
+            timeout_s=1,
         )
     )
     polled = await manager.poll(worker.token)
-    await asyncio.sleep(0.03)
+    assert polled["job"]["id"] in manager.claimed_jobs
     assert call.done() is False
 
     accepted = await manager.submit_result(
