@@ -126,7 +126,8 @@ describe("Native WebUI actions", () => {
 
     expect(web).toContain('resourceMini("CPU", cpu)')
     expect(web).toContain('resourceMini("MEM", memory)')
-    expect(web).toContain('const local = Boolean(info.local) || machine.name === "local"')
+    expect(web).toContain("const local = Boolean(info.local)")
+    expect(web).not.toContain('machine.name === "local"')
     expect(web).toContain("local ? numberValue(localSystem?.memory_percent) : numberValue(info.memory_percent)")
     expect(styles).toContain(".resource-stack")
   })
