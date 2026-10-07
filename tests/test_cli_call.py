@@ -500,6 +500,12 @@ def test_compose_dotenv_interpolation_forms():
         )
         == "${SET}x"
     )
+    assert (
+        cli_call._parse_dotenv_value(
+            r'"${UNSET:-\${SET}"', variables=variables
+        )
+        == "${SET"
+    )
     assert cli_call._interpolate_dotenv("${UNSET:-fallback}", variables) == "fallback"
     assert cli_call._interpolate_dotenv("${EMPTY:-fallback}", variables) == "fallback"
     assert cli_call._interpolate_dotenv("${EMPTY-fallback}", variables) == ""
@@ -519,6 +525,8 @@ def test_compose_dotenv_interpolation_forms():
         cli_call._interpolate_dotenv("${UNSET?required}", variables)
     with pytest.raises(ValueError, match="missing"):
         cli_call._interpolate_dotenv("${SET", variables)
+    with pytest.raises(ValueError, match="missing"):
+        cli_call._parse_dotenv_value(r'"${UNSET:-${SET}"', variables=variables)
     with pytest.raises(ValueError, match="invalid dotenv interpolation"):
         cli_call._interpolate_dotenv("${9BAD}", variables)
     with pytest.raises(ValueError, match="invalid dotenv interpolation"):

@@ -207,6 +207,7 @@ def _dotenv_interpolation_end(
     value: str, start: int, *, decode_escapes: bool = False
 ) -> int | None:
     nested = 0
+    last_closing: int | None = None
     index = start
     while index < len(value):
         if decode_escapes and value[index] == "\\" and index + 1 < len(value):
@@ -231,11 +232,12 @@ def _dotenv_interpolation_end(
             index += 2
             continue
         if value[index] == "}":
+            last_closing = index
             if nested == 0:
                 return index
             nested -= 1
         index += 1
-    return None
+    return last_closing
 
 
 def _resolve_dotenv_expression(
