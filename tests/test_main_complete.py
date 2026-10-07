@@ -255,6 +255,11 @@ def test_run_uvicorn_interrupts_remote_polls_before_base_shutdown(monkeypatch):
         "_interrupt_remote_polls_for_shutdown",
         lambda: calls.append(("interrupt", None)) or 0,
     )
+    monkeypatch.setattr(
+        remote,
+        "remote_manager",
+        lambda: SimpleNamespace(flush_registry=lambda: calls.append(("flush", None))),
+    )
 
     settings = _settings()
     main_module._run_uvicorn("app", settings)
@@ -267,7 +272,12 @@ def test_run_uvicorn_interrupts_remote_polls_before_base_shutdown(monkeypatch):
         "timeout_graceful_shutdown": 10,
         "log_level": "warning",
     }
-    assert calls == [("prepare", None), ("interrupt", None), ("base", ["socket"])]
+    assert calls == [
+        ("prepare", None),
+        ("interrupt", None),
+        ("flush", None),
+        ("base", ["socket"]),
+    ]
 
 
 def test_main_subcommands_and_version(monkeypatch, capsys):

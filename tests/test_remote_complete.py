@@ -165,6 +165,27 @@ def test_controller_registration_resume_rename_revoke_and_defaults(tmp_path, mon
         manager._worker_by_token(token)
 
 
+def test_remote_registry_flush_preserves_last_seen_across_restart(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    manager = remote.RemoteManager()
+    manager._registry_loaded = True
+    worker = remote.RemoteWorker(name="node", token="token", last_seen=100.0, status="online")
+    manager.workers[worker.name] = worker
+    manager.tokens[worker.token] = worker.name
+
+    manager.flush_registry()
+    worker.last_seen = 180.0
+    manager.flush_registry()
+
+    monkeypatch.setattr(remote, "_utc", lambda: 300.0)
+    reloaded = remote.RemoteManager()
+    machines = reloaded.list_machines()
+
+    assert machines["machines"][0]["last_seen"] == 180.0
+    assert machines["machines"][0]["last_seen_age_s"] == 120.0
+    assert machines["machines"][0]["status"] == "offline"
+
+
 def test_controller_poll_result_errors_and_cancellation(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     manager = remote.RemoteManager()

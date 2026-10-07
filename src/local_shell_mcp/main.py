@@ -44,11 +44,18 @@ def _run_uvicorn(app, settings) -> None:  # noqa: ANN001
     from .remote import (
         _interrupt_remote_polls_for_shutdown,
         _prepare_remote_polls_for_server_start,
+        remote_manager,
     )
 
     class ShutdownAwareServer(uvicorn.Server):
         async def shutdown(self, sockets=None) -> None:  # noqa: ANN001
             _interrupt_remote_polls_for_shutdown()
+            try:
+                remote_manager().flush_registry()
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "Failed to persist remote worker state during controller shutdown"
+                )
             await super().shutdown(sockets=sockets)
 
     config = uvicorn.Config(
