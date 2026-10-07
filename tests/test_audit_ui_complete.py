@@ -202,6 +202,48 @@ def test_coalescing_keeps_semantic_child_details_without_duplicate_rows():
     assert [item[0] for item in units[0]] == [0, 1, 2, 3]
 
 
+def test_coalescing_attaches_legacy_command_preflight_by_call_id():
+    records = [
+        {
+            "ts": 1,
+            "event": "mcp_tool_call_start",
+            "call_id": "call-1",
+            "tool": "run_shell",
+        },
+        {
+            "ts": 2,
+            "event": "command_preflight",
+            "call_id": "call-1",
+            "tool": "run_shell",
+            "action": "allow",
+            "cost_score": 0,
+        },
+        {
+            "ts": 3,
+            "event": "mcp_tool_call_end",
+            "call_id": "call-1",
+            "tool": "run_shell",
+            "ok": True,
+        },
+    ]
+
+    rows = audit_module._coalesce_audit_records(records)
+
+    assert len(rows) == 1
+    assert rows[0]["paired"] is True
+    assert rows[0]["status"] == "success"
+    assert rows[0]["related_events"] == [
+        {
+            "event": "command_preflight",
+            "call_id": "call-1",
+            "tool": "run_shell",
+            "action": "allow",
+            "cost_score": 0,
+        }
+    ]
+    assert rows[0][audit_module._AUDIT_SOURCE_INDEXES] == [0, 1, 2]
+
+
 def test_query_audit_covers_tail_reading_and_filter_rejections(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     assert audit_module.query_audit() == {"entries": [], "count": 0, "total_matched": 0}

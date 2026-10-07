@@ -1483,6 +1483,8 @@ def _coalesce_audit_records(records: list[dict[str, Any]]) -> list[dict[str, Any
         if event == "auth_ok":
             continue
         parent_call_id = str(record.get("parent_call_id") or "")
+        if not parent_call_id and event == "command_preflight":
+            parent_call_id = str(record.get("call_id") or "")
         if parent_call_id:
             parent = entries_by_id.get(parent_call_id)
             if parent is not None:

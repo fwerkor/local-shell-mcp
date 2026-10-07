@@ -1313,7 +1313,7 @@ def _install_mcp_tool_watchdogs(mcp: FastMCP) -> None:
                     if preflight_decision is not None:
                         audit(
                             "command_preflight",
-                            call_id=call_id,
+                            parent_call_id=call_id,
                             tool=__tool_name,
                             action=preflight_decision.action,
                             reason_code=preflight_decision.reason_code,
