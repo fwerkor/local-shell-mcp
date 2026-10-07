@@ -127,6 +127,8 @@ REMOTE_WORKER_RESULT_OUTBOX_MAX_ITEMS = 1_024
 REMOTE_WORKER_RESULT_OUTBOX_MAX_BYTES = 256 * 1024 * 1024
 _WORKER_RESOURCE_SAMPLE_TTL_S = 1.0
 _WORKER_RESOURCE_SAMPLE_LOCK = threading.Lock()
+_WORKER_RESOURCE_SAMPLE_GENERATION = uuid.uuid4().hex
+_WORKER_RESOURCE_SAMPLE_SEQUENCE = 0
 _WORKER_CPU_SAMPLE: tuple[int, int] | None = None
 _WORKER_RESOURCE_SAMPLE: tuple[float, dict[str, Any]] | None = None
 
@@ -475,7 +477,7 @@ def _read_worker_memory() -> tuple[int, int] | None:
 
 
 def _worker_resource_snapshot() -> dict[str, Any]:
-    global _WORKER_CPU_SAMPLE, _WORKER_RESOURCE_SAMPLE
+    global _WORKER_CPU_SAMPLE, _WORKER_RESOURCE_SAMPLE, _WORKER_RESOURCE_SAMPLE_SEQUENCE
 
     monotonic_now = time.monotonic()
     with _WORKER_RESOURCE_SAMPLE_LOCK:
@@ -515,7 +517,10 @@ def _worker_resource_snapshot() -> dict[str, Any]:
                 1,
             )
 
+        _WORKER_RESOURCE_SAMPLE_SEQUENCE += 1
         snapshot = {
+            "sample_generation": _WORKER_RESOURCE_SAMPLE_GENERATION,
+            "sample_sequence": _WORKER_RESOURCE_SAMPLE_SEQUENCE,
             "sampled_at": time.time(),
             "cpu_percent": cpu_percent,
             "cpu_count": cpu_count,
@@ -626,31 +631,50 @@ def _merge_worker_resource_usage(worker: RemoteWorker, payload: dict[str, Any]) 
     if not isinstance(resources, dict):
         return
 
-    incoming_sampled_at: float | None = None
+    order_present = "sample_generation" in resources or "sample_sequence" in resources
+    incoming_generation = resources.get("sample_generation")
+    incoming_sequence_value = resources.get("sample_sequence")
+    incoming_sequence: int | None = None
+    if order_present:
+        if not isinstance(incoming_generation, str) or not incoming_generation:
+            return
+        if (
+            not isinstance(incoming_sequence_value, int)
+            or isinstance(incoming_sequence_value, bool)
+            or incoming_sequence_value < 1
+        ):
+            return
+        incoming_sequence = incoming_sequence_value
+
+        stored_generation = worker.info.get("sample_generation")
+        if isinstance(stored_generation, str) and stored_generation:
+            if incoming_generation != stored_generation:
+                return
+            stored_sequence_value = worker.info.get("sample_sequence")
+            if (
+                isinstance(stored_sequence_value, int)
+                and not isinstance(stored_sequence_value, bool)
+                and incoming_sequence < stored_sequence_value
+            ):
+                return
+        worker.info["sample_generation"] = incoming_generation
+        worker.info["sample_sequence"] = incoming_sequence
+    elif isinstance(worker.info.get("sample_generation"), str):
+        # Once a worker has advertised ordered resource samples, do not let an
+        # unordered payload from an older runtime overwrite them.
+        return
+
     sampled_at_value = resources.get("sampled_at")
     if sampled_at_value is not None and not isinstance(sampled_at_value, bool):
         try:
-            candidate = float(sampled_at_value)
+            sampled_at = float(sampled_at_value)
         except (TypeError, ValueError):
             pass
         else:
-            if math.isfinite(candidate) and candidate >= 0:
-                incoming_sampled_at = candidate
-    stored_sampled_at = worker.info.get("sampled_at")
-    if incoming_sampled_at is not None and not isinstance(stored_sampled_at, bool):
-        try:
-            stored_numeric = float(stored_sampled_at)
-        except (TypeError, ValueError):
-            stored_numeric = None
-        if (
-            stored_numeric is not None
-            and math.isfinite(stored_numeric)
-            and incoming_sampled_at < stored_numeric
-        ):
-            return
+            if math.isfinite(sampled_at) and sampled_at >= 0:
+                worker.info["sampled_at"] = sampled_at
 
     for key in (
-        "sampled_at",
         "cpu_percent",
         "cpu_count",
         "memory_percent",
@@ -661,8 +685,7 @@ def _merge_worker_resource_usage(worker: RemoteWorker, payload: dict[str, Any]) 
             continue
         value = resources[key]
         if value is None:
-            if key != "sampled_at":
-                worker.info.pop(key, None)
+            worker.info.pop(key, None)
             continue
         if isinstance(value, bool):
             continue

@@ -752,6 +752,8 @@ def test_worker_poll_payload_advertises_current_long_poll_budget(monkeypatch):
 def test_worker_resource_snapshot_calculates_cpu_and_memory(monkeypatch):
     monkeypatch.setattr(remote, "_WORKER_CPU_SAMPLE", None)
     monkeypatch.setattr(remote, "_WORKER_RESOURCE_SAMPLE", None)
+    monkeypatch.setattr(remote, "_WORKER_RESOURCE_SAMPLE_GENERATION", "runtime-a")
+    monkeypatch.setattr(remote, "_WORKER_RESOURCE_SAMPLE_SEQUENCE", 0)
     cpu = iter([(1000, 200), (1200, 250)])
     monotonic = iter([10.0, 12.0])
     monkeypatch.setattr(remote, "_read_worker_cpu_times", lambda: next(cpu))
@@ -764,7 +766,10 @@ def test_worker_resource_snapshot_calculates_cpu_and_memory(monkeypatch):
     second = remote._worker_resource_snapshot()  # noqa: SLF001
 
     assert first["cpu_percent"] == 50.0
+    assert first["sample_generation"] == "runtime-a"
+    assert first["sample_sequence"] == 1
     assert second["cpu_percent"] == 75.0
+    assert second["sample_sequence"] == 2
     assert second["cpu_count"] == 4
     assert second["memory_percent"] == 50.0
     assert second["memory_used_bytes"] == 500
@@ -933,6 +938,8 @@ def test_merge_worker_resource_usage_rejects_stale_and_clears_unavailable_metric
         name="worker-a",
         token="token-a",
         info={
+            "sample_generation": "runtime-a",
+            "sample_sequence": 2,
             "sampled_at": 200.0,
             "cpu_percent": 75.0,
             "memory_percent": 60.0,
@@ -945,12 +952,15 @@ def test_merge_worker_resource_usage_rejects_stale_and_clears_unavailable_metric
         worker,
         {
             "resources": {
-                "sampled_at": 150.0,
+                "sample_generation": "runtime-a",
+                "sample_sequence": 1,
+                "sampled_at": 300.0,
                 "cpu_percent": 10.0,
                 "memory_percent": 20.0,
             }
         },
     )
+    assert worker.info["sample_sequence"] == 2
     assert worker.info["sampled_at"] == 200.0
     assert worker.info["cpu_percent"] == 75.0
     assert worker.info["memory_percent"] == 60.0
@@ -959,7 +969,9 @@ def test_merge_worker_resource_usage_rejects_stale_and_clears_unavailable_metric
         worker,
         {
             "resources": {
-                "sampled_at": 250.0,
+                "sample_generation": "runtime-a",
+                "sample_sequence": 3,
+                "sampled_at": 150.0,
                 "cpu_percent": None,
                 "memory_percent": None,
                 "memory_used_bytes": None,
@@ -967,11 +979,28 @@ def test_merge_worker_resource_usage_rejects_stale_and_clears_unavailable_metric
             }
         },
     )
-    assert worker.info["sampled_at"] == 250.0
+    assert worker.info["sample_sequence"] == 3
+    assert worker.info["sampled_at"] == 150.0
     assert "cpu_percent" not in worker.info
     assert "memory_percent" not in worker.info
     assert "memory_used_bytes" not in worker.info
     assert "memory_total_bytes" not in worker.info
+
+    remote._merge_worker_resource_usage(  # noqa: SLF001
+        worker,
+        {
+            "resources": {
+                "sample_generation": "runtime-old",
+                "sample_sequence": 99,
+                "sampled_at": 400.0,
+                "cpu_percent": 5.0,
+            }
+        },
+    )
+    assert worker.info["sample_generation"] == "runtime-a"
+    assert worker.info["sample_sequence"] == 3
+    assert worker.info["sampled_at"] == 150.0
+    assert "cpu_percent" not in worker.info
 
 
 def test_worker_retry_delay_is_capped():
