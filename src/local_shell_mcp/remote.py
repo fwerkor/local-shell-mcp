@@ -101,7 +101,8 @@ REMOTE_API_PREFIX = "/remote"
 REMOTE_WORKER_BUNDLE_PATH = "/remote/worker-bundle.tgz"
 REMOTE_WORKER_LANE_PROTOCOL_VERSION = 3
 REMOTE_WORKER_RESET_PROTOCOL_VERSION = 4
-REMOTE_WORKER_POLL_PROTOCOL_VERSION = REMOTE_WORKER_RESET_PROTOCOL_VERSION
+REMOTE_WORKER_RESOURCE_PROTOCOL_VERSION = 5
+REMOTE_WORKER_POLL_PROTOCOL_VERSION = REMOTE_WORKER_RESOURCE_PROTOCOL_VERSION
 _WORKER_CONNECT_TIMEOUT_S = 10.0
 _WORKER_POLL_TIMEOUT_GRACE_S = 10.0
 _WORKER_TRANSFER_LEASE_REFRESH_INTERVAL_S = 60.0
@@ -124,6 +125,10 @@ REMOTE_QUEUE_TIMEOUT_S = 30.0
 REMOTE_RESULT_GRACE_S = 120.0
 REMOTE_WORKER_RESULT_OUTBOX_MAX_ITEMS = 1_024
 REMOTE_WORKER_RESULT_OUTBOX_MAX_BYTES = 256 * 1024 * 1024
+_WORKER_RESOURCE_SAMPLE_TTL_S = 1.0
+_WORKER_RESOURCE_SAMPLE_LOCK = threading.Lock()
+_WORKER_CPU_SAMPLE: tuple[int, int] | None = None
+_WORKER_RESOURCE_SAMPLE: tuple[float, dict[str, Any]] | None = None
 
 
 def remote_execution_rpc_timeout_s(
@@ -274,6 +279,189 @@ def _remote_heartbeat_interval_s() -> int:
     return max(5, min(get_settings().remote_poll_timeout_s // 2, 30))
 
 
+def _read_worker_cpu_times() -> tuple[int, int] | None:
+    if sys.platform.startswith("linux"):
+        try:
+            fields = Path("/proc/stat").read_text(encoding="utf-8").splitlines()[0].split()
+            values = [int(value) for value in fields[1:]]
+        except (OSError, ValueError, IndexError):
+            return None
+        if len(values) < 4:
+            return None
+        idle = values[3] + (values[4] if len(values) > 4 else 0)
+        return sum(values), idle
+
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            idle = wintypes.FILETIME()
+            kernel = wintypes.FILETIME()
+            user = wintypes.FILETIME()
+            if not ctypes.windll.kernel32.GetSystemTimes(  # type: ignore[attr-defined]
+                ctypes.byref(idle), ctypes.byref(kernel), ctypes.byref(user)
+            ):
+                return None
+
+            def ticks(value: Any) -> int:
+                return (int(value.dwHighDateTime) << 32) | int(value.dwLowDateTime)
+
+            return ticks(kernel) + ticks(user), ticks(idle)
+        except (AttributeError, OSError, ValueError):
+            return None
+
+    if sys.platform == "darwin" or sys.platform.startswith("freebsd"):
+        try:
+            result = subprocess.run(
+                ["sysctl", "-n", "kern.cp_time"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=1,
+            )
+            values = [int(value) for value in result.stdout.split()]
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return None
+        if len(values) < 5:
+            return None
+        return sum(values), values[4]
+
+    return None
+
+
+def _read_worker_memory() -> tuple[int, int] | None:
+    if sys.platform.startswith("linux"):
+        try:
+            rows: dict[str, int] = {}
+            for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+                key, value = line.split(":", 1)
+                rows[key] = int(value.strip().split()[0]) * 1024
+            total = rows["MemTotal"]
+            available = rows.get("MemAvailable", rows.get("MemFree", 0))
+        except (OSError, ValueError, KeyError):
+            return None
+        return total, max(0, total - available)
+
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class MemoryStatusEx(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", wintypes.DWORD),
+                    ("dwMemoryLoad", wintypes.DWORD),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            status = MemoryStatusEx()
+            status.dwLength = ctypes.sizeof(status)
+            if not ctypes.windll.kernel32.GlobalMemoryStatusEx(  # type: ignore[attr-defined]
+                ctypes.byref(status)
+            ):
+                return None
+            total = int(status.ullTotalPhys)
+            return total, max(0, total - int(status.ullAvailPhys))
+        except (AttributeError, OSError, ValueError):
+            return None
+
+    if sys.platform == "darwin":
+        try:
+            total_result = subprocess.run(
+                ["sysctl", "-n", "hw.memsize"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=1,
+            )
+            vm_result = subprocess.run(
+                ["vm_stat"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=1,
+            )
+            total = int(total_result.stdout.strip())
+            lines = vm_result.stdout.splitlines()
+            page_size_match = re.search(r"page size of (\d+) bytes", lines[0] if lines else "")
+            page_size = int(page_size_match.group(1)) if page_size_match else 4096
+            pages: dict[str, int] = {}
+            for line in lines[1:]:
+                match = re.match(r"([^:]+):\s+(\d+)\.?", line.strip())
+                if match:
+                    pages[match.group(1)] = int(match.group(2))
+            available_pages = sum(
+                pages.get(key, 0)
+                for key in ("Pages free", "Pages inactive", "Pages speculative")
+            )
+            available = min(total, available_pages * page_size)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return None
+        return total, max(0, total - available)
+
+    return None
+
+
+def _worker_resource_snapshot() -> dict[str, Any]:
+    global _WORKER_CPU_SAMPLE, _WORKER_RESOURCE_SAMPLE
+
+    monotonic_now = time.monotonic()
+    with _WORKER_RESOURCE_SAMPLE_LOCK:
+        if (
+            _WORKER_RESOURCE_SAMPLE is not None
+            and monotonic_now - _WORKER_RESOURCE_SAMPLE[0] < _WORKER_RESOURCE_SAMPLE_TTL_S
+        ):
+            return dict(_WORKER_RESOURCE_SAMPLE[1])
+
+        cpu_times = _read_worker_cpu_times()
+        cpu_percent: float | None = None
+        if cpu_times is not None:
+            if _WORKER_CPU_SAMPLE is not None:
+                total_delta = cpu_times[0] - _WORKER_CPU_SAMPLE[0]
+                idle_delta = cpu_times[1] - _WORKER_CPU_SAMPLE[1]
+                if total_delta > 0:
+                    cpu_percent = round(
+                        max(0.0, min(100.0, (total_delta - idle_delta) * 100.0 / total_delta)),
+                        1,
+                    )
+            _WORKER_CPU_SAMPLE = cpu_times
+
+        cpu_count = max(1, os.cpu_count() or 1)
+        load_1m: float | None = None
+        with contextlib.suppress(OSError, AttributeError):
+            load_1m = float(os.getloadavg()[0])
+        if cpu_percent is None and load_1m is not None:
+            cpu_percent = round(max(0.0, min(100.0, load_1m * 100.0 / cpu_count)), 1)
+
+        memory = _read_worker_memory()
+        memory_total = memory[0] if memory else None
+        memory_used = memory[1] if memory else None
+        memory_percent = None
+        if memory_total and memory_used is not None:
+            memory_percent = round(
+                max(0.0, min(100.0, memory_used * 100.0 / memory_total)),
+                1,
+            )
+
+        snapshot = {
+            "sampled_at": time.time(),
+            "cpu_percent": cpu_percent,
+            "cpu_count": cpu_count,
+            "memory_percent": memory_percent,
+            "memory_used_bytes": memory_used,
+            "memory_total_bytes": memory_total,
+        }
+        _WORKER_RESOURCE_SAMPLE = (monotonic_now, snapshot)
+        return dict(snapshot)
+
+
 def _validate_machine_name(value: str) -> str:
     name = value.strip()
     if not name:
@@ -366,6 +554,35 @@ class RemoteWorker:
     queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
     transfer_queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
     reset_generation: int = 0
+
+
+def _merge_worker_resource_usage(worker: RemoteWorker, payload: dict[str, Any]) -> None:
+    resources = payload.get("resources")
+    if not isinstance(resources, dict):
+        return
+    for key in (
+        "sampled_at",
+        "cpu_percent",
+        "cpu_count",
+        "memory_percent",
+        "memory_used_bytes",
+        "memory_total_bytes",
+    ):
+        value = resources.get(key)
+        if value is None or isinstance(value, bool):
+            continue
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(numeric) or numeric < 0:
+            continue
+        if key in {"cpu_percent", "memory_percent"}:
+            numeric = max(0.0, min(100.0, numeric))
+        if key in {"cpu_count", "memory_used_bytes", "memory_total_bytes"}:
+            worker.info[key] = int(numeric)
+        else:
+            worker.info[key] = numeric
 
 
 class RemoteManager:
@@ -858,6 +1075,7 @@ class RemoteManager:
         with self._state_lock:
             worker.status = "online"
             worker.last_seen = _utc()
+            _merge_worker_resource_usage(worker, payload)
             if worker_version:
                 worker.info["lsm_version"] = worker_version
             if protocol_version:
@@ -941,6 +1159,7 @@ class RemoteManager:
         with self._state_lock:
             worker.status = "online"
             worker.last_seen = _utc()
+            _merge_worker_resource_usage(worker, payload)
             name = worker.name
             self._prune_cancelled_jobs_locked()
             assigned_machine = self.pending_machines.get(job_id) if job_id else None
@@ -2987,6 +3206,7 @@ def worker_info(workdir: str) -> dict[str, Any]:
         "python": sys.version.split()[0],
         "platform": sys.platform,
         "persistent_shell": persistent_shell_backend_info(),
+        **_worker_resource_snapshot(),
     }
 
 
@@ -2997,6 +3217,7 @@ def _worker_poll_payload(
     payload: dict[str, Any] = {
         "protocol_version": REMOTE_WORKER_POLL_PROTOCOL_VERSION,
         "worker_version": __version__,
+        "resources": _worker_resource_snapshot(),
     }
     if lane is not None:
         payload["lane"] = lane

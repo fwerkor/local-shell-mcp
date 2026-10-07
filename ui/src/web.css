@@ -169,6 +169,7 @@ th:nth-child(1){width:31%} th:nth-child(2){width:14%} th:nth-child(3){width:18%}
 .status-chip i { width:5px; height:5px; border-radius:50%; }
 .status-chip.online { color:#167c59; background:#eaf8f2; }
 .status-chip.online i { background:#27ad7b; }
+.resource-stack { display:grid; gap:5px; min-width:112px; }
 .resource-mini { display:grid; grid-template-columns:49px auto; align-items:center; gap:7px; }
 .resource-mini > span { height:5px; overflow:hidden; background:#edf0f4; border-radius:999px; }
 .resource-mini > span i { display:block; height:100%; background:#7568e8; border-radius:inherit; }

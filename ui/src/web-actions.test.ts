@@ -120,6 +120,16 @@ describe("Native WebUI actions", () => {
     expect(styles).toContain("body.native-view-active #refresh-button { display: inline-flex; }")
   })
 
+  test("shows CPU and memory together in machine resource rows", async () => {
+    const web = await Bun.file(new URL("./web.ts", import.meta.url)).text()
+    const styles = await Bun.file(new URL("./web.css", import.meta.url)).text()
+
+    expect(web).toContain('resourceMini("CPU", cpu)')
+    expect(web).toContain('resourceMini("MEM", memory)')
+    expect(web).toContain("numberValue(info.memory_percent)")
+    expect(styles).toContain(".resource-stack")
+  })
+
   test("uses two visible file panes after the machine rail is hidden", async () => {
     const styles = await Bun.file(new URL("./web-native.css", import.meta.url)).text()
     const compactRule = styles.lastIndexOf("@media (max-width: 1100px)")

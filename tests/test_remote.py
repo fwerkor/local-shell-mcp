@@ -1,6 +1,7 @@
 
 
 import asyncio
+import ctypes
 import json
 import subprocess
 import sys
@@ -74,6 +75,39 @@ async def test_timed_out_remote_job_is_skipped_on_next_poll(tmp_path, monkeypatc
     assert result["job"]["id"] == "job-valid"
     assert cancelled_job["id"] not in manager.cancelled_jobs
     assert cancelled_job["id"] not in manager.pending
+
+
+@pytest.mark.asyncio
+async def test_remote_poll_updates_machine_resource_info(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    manager = remote.RemoteManager()
+    worker = remote.RemoteWorker(name="worker-a", token="token-a")
+    manager.workers[worker.name] = worker
+    manager.tokens[worker.token] = worker.name
+    worker.queue.put_nowait({"id": "job-1", "tool": "list_files", "args": {}})
+
+    await manager.poll(
+        worker.token,
+        {
+            "resources": {
+                "cpu_percent": 23.4,
+                "cpu_count": 16,
+                "memory_percent": 61.2,
+                "memory_used_bytes": 6_120,
+                "memory_total_bytes": 10_000,
+                "sampled_at": 123.5,
+            }
+        },
+    )
+
+    assert worker.info["cpu_percent"] == 23.4
+    assert worker.info["cpu_count"] == 16
+    assert worker.info["memory_percent"] == 61.2
+    assert worker.info["memory_used_bytes"] == 6_120
+    assert worker.info["memory_total_bytes"] == 10_000
+    assert worker.info["sampled_at"] == 123.5
 
 
 @pytest.mark.asyncio
@@ -701,12 +735,160 @@ def test_worker_poll_request_timeout_uses_only_advertised_values():
         assert remote._worker_poll_request_timeout_s({"poll_timeout_s": value}) is None  # noqa: SLF001
 
 
-def test_worker_poll_payload_advertises_current_long_poll_budget():
+def test_worker_poll_payload_advertises_current_long_poll_budget(monkeypatch):
+    monkeypatch.setattr(
+        remote,
+        "_worker_resource_snapshot",
+        lambda: {"cpu_percent": 12.5, "memory_percent": 34.5},
+    )
     assert remote._worker_poll_payload() == {  # noqa: SLF001
         "protocol_version": remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION,
         "worker_version": remote.__version__,
+        "resources": {"cpu_percent": 12.5, "memory_percent": 34.5},
     }
     assert remote._worker_poll_payload(27)["poll_timeout_s"] == 17  # noqa: SLF001
+
+
+def test_worker_resource_snapshot_calculates_cpu_and_memory(monkeypatch):
+    monkeypatch.setattr(remote, "_WORKER_CPU_SAMPLE", None)
+    monkeypatch.setattr(remote, "_WORKER_RESOURCE_SAMPLE", None)
+    cpu = iter([(1000, 200), (1200, 250)])
+    monotonic = iter([10.0, 12.0])
+    monkeypatch.setattr(remote, "_read_worker_cpu_times", lambda: next(cpu))
+    monkeypatch.setattr(remote, "_read_worker_memory", lambda: (1000, 500))
+    monkeypatch.setattr(remote.os, "getloadavg", lambda: (2.0, 1.0, 0.5), raising=False)
+    monkeypatch.setattr(remote.os, "cpu_count", lambda: 4)
+    monkeypatch.setattr(remote.time, "monotonic", lambda: next(monotonic))
+
+    first = remote._worker_resource_snapshot()  # noqa: SLF001
+    second = remote._worker_resource_snapshot()  # noqa: SLF001
+
+    assert first["cpu_percent"] == 50.0
+    assert second["cpu_percent"] == 75.0
+    assert second["cpu_count"] == 4
+    assert second["memory_percent"] == 50.0
+    assert second["memory_used_bytes"] == 500
+    assert second["memory_total_bytes"] == 1000
+
+
+def test_worker_resource_snapshot_reuses_short_lived_sample(monkeypatch):
+    monkeypatch.setattr(remote, "_WORKER_CPU_SAMPLE", None)
+    monkeypatch.setattr(remote, "_WORKER_RESOURCE_SAMPLE", None)
+    monkeypatch.setattr(remote, "_read_worker_cpu_times", lambda: (1000, 200))
+    monkeypatch.setattr(remote, "_read_worker_memory", lambda: (1000, 500))
+    monkeypatch.setattr(remote.os, "getloadavg", lambda: (1.0, 0.5, 0.25), raising=False)
+    monkeypatch.setattr(remote.os, "cpu_count", lambda: 4)
+    monotonic = iter([10.0, 10.5])
+    monkeypatch.setattr(remote.time, "monotonic", lambda: next(monotonic))
+
+    first = remote._worker_resource_snapshot()  # noqa: SLF001
+    second = remote._worker_resource_snapshot()  # noqa: SLF001
+
+    assert second == first
+
+
+def test_worker_resource_readers_linux(monkeypatch):
+    monkeypatch.setattr(remote.sys, "platform", "linux")
+    samples = {
+        "/proc/stat": "cpu  100 5 25 200 10 0 0 0 0 0\n",
+        "/proc/meminfo": "MemTotal: 1000 kB\nMemAvailable: 400 kB\n",
+    }
+    monkeypatch.setattr(
+        remote.Path,
+        "read_text",
+        lambda path, **kwargs: samples[str(path).replace("\\", "/")],
+    )
+
+    assert remote._read_worker_cpu_times() == (340, 210)  # noqa: SLF001
+    assert remote._read_worker_memory() == (1_024_000, 614_400)  # noqa: SLF001
+
+
+def test_worker_resource_readers_windows(monkeypatch):
+    monkeypatch.setattr(remote.sys, "platform", "win32")
+
+    class Kernel32:
+        @staticmethod
+        def GetSystemTimes(idle, kernel, user):  # noqa: N802, ANN001
+            idle._obj.dwLowDateTime = 10
+            kernel._obj.dwLowDateTime = 30
+            user._obj.dwLowDateTime = 20
+            return 1
+
+        @staticmethod
+        def GlobalMemoryStatusEx(status):  # noqa: N802, ANN001
+            status._obj.ullTotalPhys = 1_000
+            status._obj.ullAvailPhys = 250
+            return 1
+
+    monkeypatch.setattr(ctypes, "windll", SimpleNamespace(kernel32=Kernel32()), raising=False)
+
+    assert remote._read_worker_cpu_times() == (50, 10)  # noqa: SLF001
+    assert remote._read_worker_memory() == (1_000, 750)  # noqa: SLF001
+
+
+def test_worker_resource_readers_darwin(monkeypatch):
+    monkeypatch.setattr(remote.sys, "platform", "darwin")
+
+    def fake_run(command, **kwargs):  # noqa: ANN001, ARG001
+        if command == ["sysctl", "-n", "kern.cp_time"]:
+            return SimpleNamespace(stdout="10 20 30 40 50\n")
+        if command == ["sysctl", "-n", "hw.memsize"]:
+            return SimpleNamespace(stdout="1048576\n")
+        assert command == ["vm_stat"]
+        return SimpleNamespace(
+            stdout=(
+                "Mach Virtual Memory Statistics: (page size of 4096 bytes)\n"
+                "Pages free: 10.\n"
+                "Pages inactive: 20.\n"
+                "Pages speculative: 5.\n"
+                "Pages active: 100.\n"
+            )
+        )
+
+    monkeypatch.setattr(remote.subprocess, "run", fake_run)
+
+    assert remote._read_worker_cpu_times() == (150, 50)  # noqa: SLF001
+    assert remote._read_worker_memory() == (1_048_576, 905_216)  # noqa: SLF001
+
+
+def test_worker_resource_readers_fail_closed(monkeypatch):
+    monkeypatch.setattr(remote.sys, "platform", "linux")
+    monkeypatch.setattr(
+        remote.Path,
+        "read_text",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("unavailable")),
+    )
+    assert remote._read_worker_cpu_times() is None  # noqa: SLF001
+    assert remote._read_worker_memory() is None  # noqa: SLF001
+
+    monkeypatch.setattr(remote.sys, "platform", "plan9")
+    assert remote._read_worker_cpu_times() is None  # noqa: SLF001
+    assert remote._read_worker_memory() is None  # noqa: SLF001
+
+
+def test_merge_worker_resource_usage_validates_metrics():
+    worker = remote.RemoteWorker(name="worker-a", token="token-a")
+    remote._merge_worker_resource_usage(  # noqa: SLF001
+        worker,
+        {
+            "resources": {
+                "cpu_percent": 120,
+                "memory_percent": -1,
+                "cpu_count": 16.9,
+                "memory_used_bytes": "6120",
+                "memory_total_bytes": float("nan"),
+                "sampled_at": True,
+            }
+        },
+    )
+
+    assert worker.info == {
+        "cpu_percent": 100.0,
+        "cpu_count": 16,
+        "memory_used_bytes": 6120,
+    }
+    remote._merge_worker_resource_usage(worker, {"resources": "invalid"})  # noqa: SLF001
+    assert worker.info["cpu_percent"] == 100.0
 
 
 def test_worker_retry_delay_is_capped():
