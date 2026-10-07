@@ -159,7 +159,7 @@ table { width:100%; border-collapse:collapse; table-layout:fixed; }
 th { height:32px; padding:0 12px; color:#9299a6; background:#fafbfc; border-bottom:1px solid #eceef2; font-size:10px; font-weight:650; text-align:left; text-transform:uppercase; letter-spacing:.045em; }
 td { height:59px; padding:0 12px; border-bottom:1px solid #eff1f4; color:#5e687a; font-size:11px; vertical-align:middle; }
 tbody tr:last-child td { border-bottom:0; }
-th:nth-child(1){width:31%} th:nth-child(2){width:14%} th:nth-child(3){width:18%} th:nth-child(4){width:25%} th:nth-child(5){width:12%}
+th:nth-child(1){width:38%} th:nth-child(2){width:17%} th:nth-child(3){width:28%} th:nth-child(4){width:17%}
 .machine-cell { display:flex; align-items:center; gap:9px; }
 .machine-avatar { display:grid; place-items:center; width:30px; height:30px; border-radius:8px; }
 .machine-avatar svg { width:16px; height:16px; }
