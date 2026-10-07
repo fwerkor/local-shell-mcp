@@ -444,6 +444,33 @@ def _read_worker_memory() -> tuple[int, int] | None:
             return None
         return total, max(0, total - available)
 
+    if sys.platform.startswith("freebsd"):
+        try:
+            result = subprocess.run(
+                [
+                    "sysctl",
+                    "-n",
+                    "hw.physmem",
+                    "vm.stats.vm.v_page_size",
+                    "vm.stats.vm.v_free_count",
+                    "vm.stats.vm.v_inactive_count",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=1,
+            )
+            values = [int(value.strip()) for value in result.stdout.splitlines() if value.strip()]
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return None
+        if len(values) != 4:
+            return None
+        total, page_size, free_pages, inactive_pages = values
+        if total <= 0 or page_size <= 0:
+            return None
+        available = min(total, max(0, (free_pages + inactive_pages) * page_size))
+        return total, max(0, total - available)
+
     return None
 
 

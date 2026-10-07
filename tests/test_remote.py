@@ -866,6 +866,28 @@ def test_worker_resource_readers_darwin(monkeypatch):
     assert remote._read_worker_memory() == (1_048_576, 905_216)  # noqa: SLF001
 
 
+def test_worker_resource_readers_freebsd(monkeypatch):
+    monkeypatch.setattr(remote.sys, "platform", "freebsd14")
+
+    def fake_run(command, **kwargs):  # noqa: ANN001, ARG001
+        if command == ["sysctl", "-n", "kern.cp_time"]:
+            return SimpleNamespace(stdout="10 20 30 40 50\n")
+        assert command == [
+            "sysctl",
+            "-n",
+            "hw.physmem",
+            "vm.stats.vm.v_page_size",
+            "vm.stats.vm.v_free_count",
+            "vm.stats.vm.v_inactive_count",
+        ]
+        return SimpleNamespace(stdout="1048576\n4096\n10\n20\n")
+
+    monkeypatch.setattr(remote.subprocess, "run", fake_run)
+
+    assert remote._read_worker_cpu_times() == (150, 50)  # noqa: SLF001
+    assert remote._read_worker_memory() == (1_048_576, 925_696)  # noqa: SLF001
+
+
 def test_worker_resource_readers_fail_closed(monkeypatch):
     monkeypatch.setattr(remote.sys, "platform", "linux")
     monkeypatch.setattr(
