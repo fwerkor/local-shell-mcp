@@ -461,7 +461,17 @@ def _bounded_preview_record(record: dict[str, Any], max_bytes: int) -> bytes:
         return encoded
     essential = {
         name: preview[name]
-        for name in ("id", "ts", "event", "tool", "call_id", "ok", "error", "error_type")
+        for name in (
+            "id",
+            "ts",
+            "event",
+            "tool",
+            "call_id",
+            "parent_call_id",
+            "ok",
+            "error",
+            "error_type",
+        )
         if name in preview
     }
     essential["audit_payloads_omitted"] = "record exceeded audit retention limit"
@@ -477,8 +487,11 @@ def _retention_units(
     for index, (raw_line, record, payload_ids) in enumerate(parsed):
         call_id = ""
         if isinstance(record, dict):
-            if record.get("event") in {"mcp_tool_call_start", "mcp_tool_call_end"}:
+            event = str(record.get("event") or "")
+            if event in {"mcp_tool_call_start", "mcp_tool_call_end"}:
                 call_id = str(record.get("call_id") or "")
+            elif event == "command_preflight":
+                call_id = str(record.get("parent_call_id") or record.get("call_id") or "")
             else:
                 call_id = str(record.get("parent_call_id") or "")
         if call_id:
@@ -1483,6 +1496,8 @@ def _coalesce_audit_records(records: list[dict[str, Any]]) -> list[dict[str, Any
         if event == "auth_ok":
             continue
         parent_call_id = str(record.get("parent_call_id") or "")
+        if not parent_call_id and event == "command_preflight":
+            parent_call_id = str(record.get("call_id") or "")
         if parent_call_id:
             parent = entries_by_id.get(parent_call_id)
             if parent is not None:
@@ -1625,8 +1640,18 @@ def _matching_audit_rows(
             continue
         if node_filter and node_filter != str(row.get("node") or "local").casefold():
             continue
+        related_events = row.get("related_events") or []
+        related_event_names = [
+            str(item.get("event") or "")
+            for item in related_events
+            if isinstance(item, dict)
+        ]
         event_text = " ".join(
-            [str(row.get("event") or ""), *map(str, row.get("source_events") or [])]
+            [
+                str(row.get("event") or ""),
+                *map(str, row.get("source_events") or []),
+                *related_event_names,
+            ]
         )
         if event_filter and event_filter not in event_text.casefold():
             continue
