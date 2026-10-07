@@ -120,6 +120,18 @@ describe("Native WebUI actions", () => {
     expect(styles).toContain("body.native-view-active #refresh-button { display: inline-flex; }")
   })
 
+  test("shows CPU and memory together in machine resource rows", async () => {
+    const web = await Bun.file(new URL("./web.ts", import.meta.url)).text()
+    const styles = await Bun.file(new URL("./web.css", import.meta.url)).text()
+
+    expect(web).toContain('resourceMini("CPU", cpu)')
+    expect(web).toContain('resourceMini("MEM", memory)')
+    expect(web).toContain("const local = Boolean(info.local)")
+    expect(web).not.toContain('machine.name === "local"')
+    expect(web).toContain("local ? numberValue(localSystem?.memory_percent) : numberValue(info.memory_percent)")
+    expect(styles).toContain(".resource-stack")
+  })
+
   test("keeps overview card footers pinned to the bottom of stretched dashboard rows", async () => {
     const styles = await Bun.file(new URL("./web.css", import.meta.url)).text()
 

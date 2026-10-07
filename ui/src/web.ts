@@ -442,19 +442,28 @@ function machineIcon(machine: Machine): string {
   return capabilities.some((item) => item.toLowerCase().includes("gpu")) ? ICONS.gpu : ICONS.machine
 }
 
-function machineRows(machines: Machine[], localCpu?: unknown): string {
+function resourceMini(label: string, value: number | null): string {
+  if (value === null) return ""
+  const percent = Math.max(0, Math.min(100, value))
+  return `<div class="resource-mini"><span><i style="width:${percent}%"></i></span><small>${label} ${Math.round(value)}%</small></div>`
+}
+
+function machineRows(machines: Machine[], localSystem?: Record<string, unknown>): string {
   if (!machines.length) return '<tr><td colspan="4"><div class="empty-state">No machines are registered.</div></td></tr>'
   return machines.map((machine, index) => {
     const info = machine.info || {}
     const status = stringValue(machine.status, "unknown")
     const online = status === "online"
-    const cpu = index === 0 ? numberValue(localCpu) : numberValue(info.cpu_percent)
+    const local = Boolean(info.local)
+    const cpu = local ? numberValue(localSystem?.cpu_percent) : numberValue(info.cpu_percent)
+    const memory = local ? numberValue(localSystem?.memory_percent) : numberValue(info.memory_percent)
+    const resources = [resourceMini("CPU", cpu), resourceMini("MEM", memory)].filter(Boolean).join("")
     const version = stringValue(info.version) || stringValue(info.lsm_version)
     const subtitle = [machinePlatform(machine), version ? `LSM ${version}` : ""].filter(Boolean).join(" · ")
     return `<tr>
-      <td><div class="machine-cell"><span class="machine-avatar ${index === 0 ? "local" : index % 2 ? "gpu" : "lab"}">${machineIcon(machine)}</span><span><strong>${escapeHtml(machine.name || "unnamed")}</strong><small>${escapeHtml(subtitle)}</small></span></div></td>
+      <td><div class="machine-cell"><span class="machine-avatar ${local ? "local" : index % 2 ? "gpu" : "lab"}">${machineIcon(machine)}</span><span><strong>${escapeHtml(machine.name || "unnamed")}</strong><small>${escapeHtml(subtitle)}</small></span></div></td>
       <td><span class="status-chip ${online ? "online" : "offline"}"><i></i>${escapeHtml(status)}</span></td>
-      <td>${cpu === null ? '<span class="last-seen">Not reported</span>' : `<div class="resource-mini"><span><i style="width:${Math.max(0, Math.min(100, cpu))}%"></i></span><small>CPU ${Math.round(cpu)}%</small></div>`}</td>
+      <td>${resources ? `<div class="resource-stack">${resources}</div>` : '<span class="last-seen">Not reported</span>'}</td>
       <td><span class="last-seen ${online ? "now" : ""}">${online ? "Now" : relativeTime(machine.last_seen, machine.last_seen_age_s)}</span></td>
     </tr>`
   }).join("")
@@ -464,7 +473,7 @@ function machineTable(data: DashboardData, full = false): string {
   const machines = data.machines?.machines || []
   return `<div class="table-wrap"><table class="${full ? "large-table" : ""}">
     <thead><tr><th>Machine</th><th>Status</th><th>Resources</th><th>Last seen</th></tr></thead>
-    <tbody>${machineRows(machines, data.system?.cpu_percent)}</tbody>
+    <tbody>${machineRows(machines, data.system)}</tbody>
   </table></div>`
 }
 

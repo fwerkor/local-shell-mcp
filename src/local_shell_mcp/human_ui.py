@@ -46,6 +46,7 @@ from .oauth import ALL_OAUTH_SCOPES
 from .remote import (
     REMOTE_QUEUE_TIMEOUT_S,
     REMOTE_RESULT_GRACE_S,
+    _read_worker_memory,
     remote_execution_rpc_timeout_s,
     remote_manager,
 )
@@ -174,7 +175,7 @@ def _local_system_snapshot() -> dict[str, Any]:
     if cpu_percent is None and load_1m is not None:
         cpu_percent = round(max(0.0, min(100.0, load_1m * 100.0 / cpu_count)), 1)
 
-    memory = _read_linux_memory()
+    memory = _read_linux_memory() if sys.platform.startswith("linux") else _read_worker_memory()
     memory_total = memory[0] if memory else None
     memory_used = memory[1] if memory else None
     try:

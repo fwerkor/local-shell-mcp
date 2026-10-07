@@ -186,6 +186,11 @@ async def test_run_worker_reports_version_and_applies_poll_upgrade(tmp_path, mon
     monkeypatch.setattr(cli.remote, "_worker_post_json_forever", fake_post)
     monkeypatch.setattr(cli.remote, "_upgrade_worker_runtime", fake_upgrade)
     monkeypatch.setattr(cli.remote, "_worker_retry_delay", lambda attempt: 0)
+    monkeypatch.setattr(
+        cli.remote,
+        "_worker_resource_snapshot",
+        lambda: {"cpu_percent": 12.5, "memory_percent": 34.5},
+    )
 
     with pytest.raises(RuntimeError, match="stop polling"):
         await cli.remote.run_worker(
@@ -200,6 +205,7 @@ async def test_run_worker_reports_version_and_applies_poll_upgrade(tmp_path, mon
         "worker_version": cli.remote.__version__,
         "poll_timeout_s": 17,
         "lane": "interactive",
+        "resources": {"cpu_percent": 12.5, "memory_percent": 34.5},
     }
 
 
