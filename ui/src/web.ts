@@ -443,20 +443,18 @@ function machineIcon(machine: Machine): string {
 }
 
 function machineRows(machines: Machine[], localCpu?: unknown): string {
-  if (!machines.length) return '<tr><td colspan="5"><div class="empty-state">No machines are registered.</div></td></tr>'
+  if (!machines.length) return '<tr><td colspan="4"><div class="empty-state">No machines are registered.</div></td></tr>'
   return machines.map((machine, index) => {
     const info = machine.info || {}
     const status = stringValue(machine.status, "unknown")
     const online = status === "online"
     const cpu = index === 0 ? numberValue(localCpu) : numberValue(info.cpu_percent)
-    const capabilities = (machine.capabilities || []).slice(0, 4)
     const version = stringValue(info.version) || stringValue(info.lsm_version)
     const subtitle = [machinePlatform(machine), version ? `LSM ${version}` : ""].filter(Boolean).join(" · ")
     return `<tr>
       <td><div class="machine-cell"><span class="machine-avatar ${index === 0 ? "local" : index % 2 ? "gpu" : "lab"}">${machineIcon(machine)}</span><span><strong>${escapeHtml(machine.name || "unnamed")}</strong><small>${escapeHtml(subtitle)}</small></span></div></td>
       <td><span class="status-chip ${online ? "online" : "offline"}"><i></i>${escapeHtml(status)}</span></td>
       <td>${cpu === null ? '<span class="last-seen">Not reported</span>' : `<div class="resource-mini"><span><i style="width:${Math.max(0, Math.min(100, cpu))}%"></i></span><small>CPU ${Math.round(cpu)}%</small></div>`}</td>
-      <td><div class="tag-row">${capabilities.map((item) => `<span class="tag">${escapeHtml(item)}</span>`).join("") || '<span class="last-seen">None reported</span>'}</div></td>
       <td><span class="last-seen ${online ? "now" : ""}">${online ? "Now" : relativeTime(machine.last_seen, machine.last_seen_age_s)}</span></td>
     </tr>`
   }).join("")
@@ -465,7 +463,7 @@ function machineRows(machines: Machine[], localCpu?: unknown): string {
 function machineTable(data: DashboardData, full = false): string {
   const machines = data.machines?.machines || []
   return `<div class="table-wrap"><table class="${full ? "large-table" : ""}">
-    <thead><tr><th>Machine</th><th>Status</th><th>Resources</th><th>Capabilities</th><th>Last seen</th></tr></thead>
+    <thead><tr><th>Machine</th><th>Status</th><th>Resources</th><th>Last seen</th></tr></thead>
     <tbody>${machineRows(machines, data.system?.cpu_percent)}</tbody>
   </table></div>`
 }
