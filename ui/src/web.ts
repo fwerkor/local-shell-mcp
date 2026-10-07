@@ -454,18 +454,19 @@ function machineRows(machines: Machine[], localSystem?: Record<string, unknown>)
     const info = machine.info || {}
     const status = stringValue(machine.status, "unknown")
     const online = status === "online"
-    const cpu = index === 0 ? numberValue(localSystem?.cpu_percent) : numberValue(info.cpu_percent)
-    const memory = index === 0 ? numberValue(localSystem?.memory_percent) : numberValue(info.memory_percent)
+    const local = Boolean(info.local) || machine.name === "local"
+    const cpu = local ? numberValue(localSystem?.cpu_percent) : numberValue(info.cpu_percent)
+    const memory = local ? numberValue(localSystem?.memory_percent) : numberValue(info.memory_percent)
     const resources = [resourceMini("CPU", cpu), resourceMini("MEM", memory)].filter(Boolean).join("")
     const capabilities = (machine.capabilities || []).slice(0, 4)
     const version = stringValue(info.version) || stringValue(info.lsm_version)
     const subtitle = [machinePlatform(machine), version ? `LSM ${version}` : ""].filter(Boolean).join(" · ")
     return `<tr>
-      <td><div class="machine-cell"><span class="machine-avatar ${index === 0 ? "local" : index % 2 ? "gpu" : "lab"}">${machineIcon(machine)}</span><span><strong>${escapeHtml(machine.name || "unnamed")}</strong><small>${escapeHtml(subtitle)}</small></span></div></td>
+      <td><div class="machine-cell"><span class="machine-avatar ${local ? "local" : index % 2 ? "gpu" : "lab"}">${machineIcon(machine)}</span><span><strong>${escapeHtml(machine.name || "unnamed")}</strong><small>${escapeHtml(subtitle)}</small></span></div></td>
       <td><span class="status-chip ${online ? "online" : "offline"}"><i></i>${escapeHtml(status)}</span></td>
       <td>${resources ? `<div class="resource-stack">${resources}</div>` : '<span class="last-seen">Not reported</span>'}</td>
       <td><div class="tag-row">${capabilities.map((item) => `<span class="tag">${escapeHtml(item)}</span>`).join("") || '<span class="last-seen">None reported</span>'}</div></td>
-      <td><span class="last-seen ${online ? "now" : ""}">${relativeTime(machine.last_seen, machine.last_seen_age_s)}</span></td>
+      <td><span class="last-seen ${online ? "now" : ""}">${online ? "Now" : relativeTime(machine.last_seen, machine.last_seen_age_s)}</span></td>
     </tr>`
   }).join("")
 }

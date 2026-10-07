@@ -126,8 +126,17 @@ describe("Native WebUI actions", () => {
 
     expect(web).toContain('resourceMini("CPU", cpu)')
     expect(web).toContain('resourceMini("MEM", memory)')
-    expect(web).toContain("numberValue(info.memory_percent)")
+    expect(web).toContain('const local = Boolean(info.local) || machine.name === "local"')
+    expect(web).toContain("local ? numberValue(localSystem?.memory_percent) : numberValue(info.memory_percent)")
     expect(styles).toContain(".resource-stack")
+  })
+
+  test("keeps overview card footers pinned to the bottom of stretched dashboard rows", async () => {
+    const styles = await Bun.file(new URL("./web.css", import.meta.url)).text()
+
+    expect(styles).toContain(".attention-panel, .workloads-panel, .activity-panel { display:flex; flex-direction:column; }")
+    expect(styles).toContain(".attention-panel .attention-list, .workloads-panel .workload-list, .activity-panel .activity-list { flex:1 1 auto; }")
+    expect(styles).toContain(".workloads-panel .workload-list { display:flex; flex-direction:column; }")
   })
 
   test("uses two visible file panes after the machine rail is hidden", async () => {

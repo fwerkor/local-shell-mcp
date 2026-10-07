@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import os
 import sys
+import threading
 
 # Long-lived MCP connections must not prevent process supervisors from observing exit.
 _GRACEFUL_SHUTDOWN_TIMEOUT_S = 10
+_REMOTE_STATE_FLUSH_TIMEOUT_S = 1.0
 _LOG_LEVEL_ENV = "LOCAL_SHELL_MCP_LOG_LEVEL"
 _DEFAULT_LOG_LEVEL = "WARNING"
 _LOG_LEVELS = {
@@ -35,6 +38,34 @@ def _configure_logging() -> str:
     return name
 
 
+async def _flush_remote_state_for_shutdown(manager, timeout_s: float | None = None) -> None:  # noqa: ANN001
+    timeout = _REMOTE_STATE_FLUSH_TIMEOUT_S if timeout_s is None else max(0.0, timeout_s)
+    finished = threading.Event()
+    logger = logging.getLogger(__name__)
+
+    def flush() -> None:
+        try:
+            manager.flush_registry()
+        except Exception:
+            logger.exception("Failed to persist remote worker state during controller shutdown")
+        finally:
+            finished.set()
+
+    threading.Thread(
+        target=flush,
+        name="lsm-remote-state-flush",
+        daemon=True,
+    ).start()
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not finished.is_set():
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            logger.warning("Timed out persisting remote worker state during controller shutdown")
+            return
+        await asyncio.sleep(min(0.01, remaining))
+
+
 def _run_uvicorn(app, settings) -> None:  # noqa: ANN001
     from contextlib import suppress
 
@@ -44,12 +75,14 @@ def _run_uvicorn(app, settings) -> None:  # noqa: ANN001
     from .remote import (
         _interrupt_remote_polls_for_shutdown,
         _prepare_remote_polls_for_server_start,
+        remote_manager,
     )
 
     class ShutdownAwareServer(uvicorn.Server):
         async def shutdown(self, sockets=None) -> None:  # noqa: ANN001
             _interrupt_remote_polls_for_shutdown()
             await super().shutdown(sockets=sockets)
+            await _flush_remote_state_for_shutdown(remote_manager())
 
     config = uvicorn.Config(
         app,

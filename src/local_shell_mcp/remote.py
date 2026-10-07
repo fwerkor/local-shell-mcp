@@ -289,7 +289,8 @@ def _read_worker_cpu_times() -> tuple[int, int] | None:
         if len(values) < 4:
             return None
         idle = values[3] + (values[4] if len(values) > 4 else 0)
-        return sum(values), idle
+        total = sum(value for index, value in enumerate(values) if index not in {8, 9})
+        return total, idle
 
     if sys.platform == "win32":
         try:
@@ -311,7 +312,44 @@ def _read_worker_cpu_times() -> tuple[int, int] | None:
         except (AttributeError, OSError, ValueError):
             return None
 
-    if sys.platform == "darwin" or sys.platform.startswith("freebsd"):
+    if sys.platform == "darwin":
+        try:
+            import ctypes
+
+            host_cpu_load_info = 3
+            cpu_state_idle = 2
+
+            class HostCpuLoadInfo(ctypes.Structure):
+                _fields_ = [("cpu_ticks", ctypes.c_uint32 * 4)]
+
+            libsystem = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+            libsystem.mach_host_self.restype = ctypes.c_uint32
+            libsystem.host_statistics.argtypes = [
+                ctypes.c_uint32,
+                ctypes.c_int,
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_uint32),
+            ]
+            libsystem.host_statistics.restype = ctypes.c_int
+
+            info = HostCpuLoadInfo()
+            count = ctypes.c_uint32(
+                ctypes.sizeof(HostCpuLoadInfo) // ctypes.sizeof(ctypes.c_int)
+            )
+            status = libsystem.host_statistics(
+                libsystem.mach_host_self(),
+                host_cpu_load_info,
+                ctypes.cast(ctypes.byref(info), ctypes.POINTER(ctypes.c_int)),
+                ctypes.byref(count),
+            )
+            if status != 0:
+                return None
+            values = [int(value) for value in info.cpu_ticks]
+        except (AttributeError, OSError, TypeError, ValueError):
+            return None
+        return sum(values), values[cpu_state_idle]
+
+    if sys.platform.startswith("freebsd"):
         try:
             result = subprocess.run(
                 ["sysctl", "-n", "kern.cp_time"],
@@ -716,6 +754,7 @@ class RemoteManager:
                 "Remote worker registry is unreadable and no valid backup is available; "
                 "refusing to reset it"
             ) from main_error
+        now = _utc()
         existing_workers = {worker.token: worker for worker in self.workers.values()}
         workers: dict[str, RemoteWorker] = {}
         tokens: dict[str, str] = {}
@@ -726,14 +765,26 @@ class RemoteManager:
             access = str(item.get("access") or item.get("to" + "ken") or "").strip()
             if not name or not access or name in workers or access in tokens:
                 continue
+            try:
+                persisted_last_seen = float(item.get("last_seen") or 0.0)
+            except (TypeError, ValueError):
+                persisted_last_seen = 0.0
+            if (
+                not math.isfinite(persisted_last_seen)
+                or persisted_last_seen < 0
+                or persisted_last_seen > now
+            ):
+                persisted_last_seen = 0.0
             worker = existing_workers.get(access)
             if worker is None:
                 worker = RemoteWorker(
                     name=name,
                     token=access,
-                    last_seen=0.0,
+                    last_seen=persisted_last_seen,
                     status="offline",
                 )
+            else:
+                worker.last_seen = max(worker.last_seen, persisted_last_seen)
             worker.name = name
             worker.workdir = str(item.get("workdir") or "")
             worker.created_at = float(item.get("created_at") or _utc())
@@ -745,7 +796,6 @@ class RemoteManager:
                 worker.reset_generation = 0
             workers[name] = worker
             tokens[access] = name
-        now = _utc()
         invites: dict[str, RemoteInvite] = {}
         for item in registry["invites"]:
             code = str(item.get("code") or "").strip()
@@ -784,6 +834,7 @@ class RemoteManager:
                     "access": worker.token,
                     "workdir": worker.workdir,
                     "created_at": worker.created_at,
+                    "last_seen": worker.last_seen,
                     "capabilities": worker.capabilities,
                     "info": worker.info,
                     "reset_generation": worker.reset_generation,
@@ -832,6 +883,11 @@ class RemoteManager:
                     path=REMOTE_WORKER_REGISTRY_BACKUP_FILE_NAME,
                     error=repr(exc),
                 )
+
+    def flush_registry(self) -> None:
+        """Persist the latest in-memory worker state before controller shutdown."""
+        with self._state_lock, self._registry_transaction_unlocked():
+            self._save_registry_unlocked()
 
     def _join_url(self, base_url: str | None = None) -> str:
         settings = get_settings()
@@ -1307,7 +1363,12 @@ class RemoteManager:
             worker = self.workers.get(machine)
             if not worker:
                 raise ValueError(f"unknown remote machine: {machine}")
-            if _utc() - worker.last_seen > max(2 * settings.remote_poll_timeout_s, 60):
+            now = _utc()
+            if (
+                worker.status != "online"
+                or not worker.last_seen
+                or now - worker.last_seen > max(2 * settings.remote_poll_timeout_s, 60)
+            ):
                 worker.status = "offline"
                 raise RuntimeError(f"remote machine is offline: {machine}")
             max_pending = max(1, settings.remote_max_pending_jobs)
@@ -1447,7 +1508,9 @@ class RemoteManager:
                 last_seen_age_s = None if not worker.last_seen else max(0.0, now - worker.last_seen)
                 status = (
                     "online"
-                    if last_seen_age_s is not None and last_seen_age_s <= offline_after_s
+                    if worker.status == "online"
+                    and last_seen_age_s is not None
+                    and last_seen_age_s <= offline_after_s
                     else "offline"
                 )
                 worker.status = status
@@ -1457,7 +1520,7 @@ class RemoteManager:
                         "name": worker.name,
                         "status": status,
                         "workdir": worker.workdir,
-                        "last_seen": worker.last_seen,
+                        "last_seen": worker.last_seen if worker.last_seen > 0 else None,
                         "last_seen_age_s": last_seen_age_s,
                         "offline_after_s": offline_after_s,
                         "queue_depth": worker.queue.qsize() + worker.transfer_queue.qsize(),
@@ -3801,7 +3864,11 @@ async def _execute_worker_job_with_heartbeat(
     heartbeat_interval_s: float,
 ) -> Any:
     job_generation = _worker_reset_generation(job)
-    start_payload: dict[str, Any] = {"job_id": job.get("id"), "starting": True}
+    start_payload: dict[str, Any] = {
+        "job_id": job.get("id"),
+        "starting": True,
+        "resources": _worker_resource_snapshot(),
+    }
     if job_generation is not None:
         start_payload["reset_generation"] = job_generation
     start_response = await _worker_post_json_forever(
@@ -3840,7 +3907,10 @@ async def _execute_worker_job_with_heartbeat(
                 response = await asyncio.to_thread(
                     _worker_post_json,
                     f"{server}{REMOTE_API_PREFIX}/heartbeat",
-                    {"job_id": job.get("id")},
+                    {
+                        "job_id": job.get("id"),
+                        "resources": _worker_resource_snapshot(),
+                    },
                     headers,
                     30,
                 )
@@ -3904,7 +3974,10 @@ async def _submit_worker_result_with_heartbeat(
                 response = await asyncio.to_thread(
                     _worker_post_json,
                     f"{server}{REMOTE_API_PREFIX}/heartbeat",
-                    {"job_id": result.get("job_id")},
+                    {
+                        "job_id": result.get("job_id"),
+                        "resources": _worker_resource_snapshot(),
+                    },
                     headers,
                     30,
                 )

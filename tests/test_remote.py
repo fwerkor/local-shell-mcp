@@ -790,7 +790,7 @@ def test_worker_resource_snapshot_reuses_short_lived_sample(monkeypatch):
 def test_worker_resource_readers_linux(monkeypatch):
     monkeypatch.setattr(remote.sys, "platform", "linux")
     samples = {
-        "/proc/stat": "cpu  100 5 25 200 10 0 0 0 0 0\n",
+        "/proc/stat": "cpu  100 5 25 200 10 0 0 0 50 10\n",
         "/proc/meminfo": "MemTotal: 1000 kB\nMemAvailable: 400 kB\n",
     }
     monkeypatch.setattr(
@@ -829,9 +829,24 @@ def test_worker_resource_readers_windows(monkeypatch):
 def test_worker_resource_readers_darwin(monkeypatch):
     monkeypatch.setattr(remote.sys, "platform", "darwin")
 
+    def mach_host_self():
+        return 42
+
+    def host_statistics(host, flavor, info_ptr, count_ptr):  # noqa: ANN001
+        assert host == 42
+        assert flavor == 3
+        assert ctypes.cast(count_ptr, ctypes.POINTER(ctypes.c_uint32)).contents.value == 4
+        ticks = ctypes.cast(info_ptr, ctypes.POINTER(ctypes.c_uint32 * 4)).contents
+        ticks[:] = (10, 20, 30, 40)
+        return 0
+
+    libsystem = SimpleNamespace(
+        mach_host_self=mach_host_self,
+        host_statistics=host_statistics,
+    )
+    monkeypatch.setattr(ctypes, "CDLL", lambda *args, **kwargs: libsystem)
+
     def fake_run(command, **kwargs):  # noqa: ANN001, ARG001
-        if command == ["sysctl", "-n", "kern.cp_time"]:
-            return SimpleNamespace(stdout="10 20 30 40 50\n")
         if command == ["sysctl", "-n", "hw.memsize"]:
             return SimpleNamespace(stdout="1048576\n")
         assert command == ["vm_stat"]
@@ -847,7 +862,7 @@ def test_worker_resource_readers_darwin(monkeypatch):
 
     monkeypatch.setattr(remote.subprocess, "run", fake_run)
 
-    assert remote._read_worker_cpu_times() == (150, 50)  # noqa: SLF001
+    assert remote._read_worker_cpu_times() == (100, 30)  # noqa: SLF001
     assert remote._read_worker_memory() == (1_048_576, 905_216)  # noqa: SLF001
 
 
@@ -1480,6 +1495,7 @@ async def test_worker_job_is_rejected_before_execution_when_reset_generation_cha
             "job_id": "job-reset",
             "starting": True,
             "reset_generation": 1,
+            "resources": payload["resources"],
         }
         assert headers == {"Authorization": "Bearer token"}
         assert timeout == 30
@@ -1529,9 +1545,10 @@ async def test_worker_job_is_cancelled_when_reset_happens_after_start(monkeypatc
                 "job_id": "job-reset",
                 "starting": True,
                 "reset_generation": 1,
+                "resources": payload["resources"],
             }
             return {"ok": True, "data": {"accepted": True, "reset_generation": 1}}
-        assert payload == {"job_id": "job-reset"}
+        assert payload == {"job_id": "job-reset", "resources": payload["resources"]}
         heartbeat_count += 1
         return {"ok": True, "data": {"accepted": True, "reset_generation": 2}}
 
@@ -1572,6 +1589,7 @@ async def test_worker_retried_preserved_start_executes_after_generation_change(m
             "job_id": "job-write",
             "starting": True,
             "reset_generation": 5,
+            "resources": payload["resources"],
         }
         assert headers == {"Authorization": "Bearer token"}
         assert timeout == 30
@@ -1619,9 +1637,10 @@ async def test_started_reset_preserved_worker_job_ignores_generation_change(monk
                 "job_id": "job-preserved",
                 "starting": True,
                 "reset_generation": 5,
+                "resources": payload["resources"],
             }
             return {"ok": True, "data": {"accepted": True, "reset_generation": 5}}
-        assert payload == {"job_id": "job-preserved"}
+        assert payload == {"job_id": "job-preserved", "resources": payload["resources"]}
         heartbeat_seen.set()
         return {"ok": True, "data": {"accepted": True, "reset_generation": 6}}
 
@@ -1660,9 +1679,9 @@ async def test_worker_job_sends_heartbeats_while_running(monkeypatch):
         assert headers == {"Authorization": "Bearer token"}
         assert timeout == 30
         if payload.get("starting"):
-            assert payload == {"job_id": "job-1", "starting": True}
+            assert payload == {"job_id": "job-1", "starting": True, "resources": payload["resources"]}
             return {"ok": True, "data": {"accepted": True}}
-        assert payload == {"job_id": "job-1"}
+        assert payload == {"job_id": "job-1", "resources": payload["resources"]}
         loop.call_soon_threadsafe(heartbeat_seen.set)
         return {"ok": True, "data": {"accepted": True}}
 
@@ -1700,7 +1719,7 @@ async def test_worker_result_submission_sends_heartbeats_while_retrying(monkeypa
             return {"ok": True, "data": {"accepted": True}}
         assert url.endswith("/heartbeat")
         assert timeout == 30
-        assert payload == {"job_id": "job-1"}
+        assert payload == {"job_id": "job-1", "resources": payload["resources"]}
         heartbeat_calls.append(url)
         return {"ok": True, "data": {"accepted": True}}
 
@@ -1746,7 +1765,7 @@ async def test_worker_result_submission_stops_when_controller_cancels(monkeypatc
             raise RuntimeError("slow result upload")
         assert url.endswith("/heartbeat")
         assert timeout == 30
-        assert payload == {"job_id": "job-1"}
+        assert payload == {"job_id": "job-1", "resources": payload["resources"]}
         heartbeat_calls.append(payload)
         return {"ok": True, "data": {"accepted": True, "cancelled": True}}
 
@@ -1763,7 +1782,7 @@ async def test_worker_result_submission_stops_when_controller_cancels(monkeypatc
 
     assert response == {"ok": True, "data": {"accepted": False, "cancelled": True}}
     assert result_attempts >= 1
-    assert heartbeat_calls == [{"job_id": "job-1"}]
+    assert heartbeat_calls == [{"job_id": "job-1", "resources": heartbeat_calls[0]["resources"]}]
     attempts_after_cancel = result_attempts
     await asyncio.sleep(0.06)
     assert result_attempts == attempts_after_cancel
@@ -1788,7 +1807,7 @@ async def test_worker_result_submission_stops_when_reset_generation_changes(monk
             raise RuntimeError("slow result upload")
         assert url.endswith("/heartbeat")
         assert timeout == 30
-        assert payload == {"job_id": "job-reset"}
+        assert payload == {"job_id": "job-reset", "resources": payload["resources"]}
         return {"ok": True, "data": {"accepted": True, "reset_generation": 4}}
 
     monkeypatch.setattr(remote, "_worker_post_json", fake_post)
@@ -1830,7 +1849,7 @@ async def test_worker_result_submission_preserves_started_mutation_across_reset(
             return {"ok": True, "data": {"accepted": True}}
         assert url.endswith("/heartbeat")
         assert timeout == 30
-        assert payload == {"job_id": "job-write"}
+        assert payload == {"job_id": "job-write", "resources": payload["resources"]}
         heartbeat_calls += 1
         return {"ok": True, "data": {"accepted": True, "reset_generation": 4}}
 

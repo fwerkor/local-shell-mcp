@@ -144,6 +144,10 @@ body.native-view-active .topbar p { margin-top: 3px; font-size: 13px; }
 .network-bar i { background:#48c294; }
 .dashboard-grid { display:grid; grid-template-columns:minmax(0,1.75fr) minmax(320px,.75fr); gap:14px; margin-top:14px; }
 .panel { background:var(--panel); border:1px solid var(--line); border-radius:13px; box-shadow:var(--shadow); overflow:hidden; }
+.attention-panel, .workloads-panel, .activity-panel { display:flex; flex-direction:column; }
+.attention-panel .attention-list, .workloads-panel .workload-list, .activity-panel .activity-list { flex:1 1 auto; }
+.workloads-panel .workload-list { display:flex; flex-direction:column; }
+.workloads-panel .workload-list > .empty-state { flex:1 1 auto; }
 .panel-header { display:flex; justify-content:space-between; gap:14px; align-items:center; min-height:65px; padding:14px 17px; border-bottom:1px solid #eceef2; }
 .panel-header.compact { min-height:65px; }
 .panel-header h3 { margin:0; color:#20283a; font-size:13px; letter-spacing:-.015em; }
