@@ -242,6 +242,11 @@ def test_coalescing_attaches_legacy_command_preflight_by_call_id():
         }
     ]
     assert rows[0][audit_module._AUDIT_SOURCE_INDEXES] == [0, 1, 2]
+    units = audit_module._retention_units(
+        [(audit_module._encode_audit_record(record), record, set()) for record in records]
+    )
+    assert len(units) == 1
+    assert [item[0] for item in units[0]] == [0, 1, 2]
 
 
 def test_event_filter_matches_nested_command_preflight():

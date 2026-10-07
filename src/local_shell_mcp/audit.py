@@ -487,8 +487,11 @@ def _retention_units(
     for index, (raw_line, record, payload_ids) in enumerate(parsed):
         call_id = ""
         if isinstance(record, dict):
-            if record.get("event") in {"mcp_tool_call_start", "mcp_tool_call_end"}:
+            event = str(record.get("event") or "")
+            if event in {"mcp_tool_call_start", "mcp_tool_call_end"}:
                 call_id = str(record.get("call_id") or "")
+            elif event == "command_preflight":
+                call_id = str(record.get("parent_call_id") or record.get("call_id") or "")
             else:
                 call_id = str(record.get("parent_call_id") or "")
         if call_id:
