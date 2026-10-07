@@ -46,6 +46,7 @@ def test_linux_dashboard_readers_parse_proc_files(monkeypatch):
 
 
 def test_local_dashboard_snapshot_calculates_rates_and_percentages(tmp_path, monkeypatch):
+    monkeypatch.setattr(ui.sys, "platform", "linux")
     monkeypatch.setattr(ui, "_CPU_SAMPLE", None)
     monkeypatch.setattr(ui, "_NETWORK_SAMPLE", None)
     cpu = iter([(1000, 200), (1200, 250)])
