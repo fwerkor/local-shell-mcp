@@ -176,7 +176,7 @@ async def test_completed_output_is_captured_before_zero_retention_pruning(
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_JOBS", "0")
     get_settings.cache_clear()
     log = isolated_job_workspace / "result.log"
-    log.write_text("completed\n")
+    log.write_bytes(b"completed\n")
     status = isolated_job_workspace / "result.status"
     status.write_text(json.dumps({"completed_at": time.time(), "exit_code": 0}))
 
