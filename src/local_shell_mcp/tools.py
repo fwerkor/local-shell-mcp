@@ -3852,13 +3852,12 @@ def _register_command_tools(mcp: FastMCP, settings: Any) -> None:
             return await _remote_call(
                 settings,
                 machine,
-                "run_shell_tool",
+                "run_shell_persist_tool" if persist_on_timeout else "run_shell_tool",
                 {
                     "command": command,
                     "cwd": cwd,
                     "timeout_s": timeout_s,
                     "max_output_bytes": max_output_bytes,
-                    "persist_on_timeout": persist_on_timeout,
                 },
                 execution_timeout_s=public_run_shell_timeout(timeout_s) + (30 if persist_on_timeout else 0),
             )
@@ -3887,8 +3886,8 @@ def _register_command_tools(mcp: FastMCP, settings: Any) -> None:
             return await _remote_call(
                 settings,
                 machine,
-                "run_python_tool",
-                {"code": code, "cwd": cwd, "timeout_s": public_run_shell_timeout(timeout_s), "persist_on_timeout": persist_on_timeout},
+                "run_python_persist_tool" if persist_on_timeout else "run_python_tool",
+                {"code": code, "cwd": cwd, "timeout_s": public_run_shell_timeout(timeout_s)},
                 execution_timeout_s=public_run_shell_timeout(timeout_s) + (30 if persist_on_timeout else 0),
             )
         if persist_on_timeout:

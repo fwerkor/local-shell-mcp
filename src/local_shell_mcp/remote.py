@@ -181,6 +181,8 @@ REMOTE_NON_CANCELLABLE_WORKER_TOOLS = frozenset(
         "job_start",
         "job_stop",
         "job_retry",
+        "run_shell_persist_tool",
+        "run_python_persist_tool",
         "transfer_gui_temp_stat",
         "transfer_gui_temp_put_url",
         "transfer_gui_temp_delete",
@@ -2026,6 +2028,8 @@ WORKER_COMMAND_TOOLS = frozenset(
     {
         "run_shell_tool",
         "run_python_tool",
+        "run_shell_persist_tool",
+        "run_python_persist_tool",
         "apply_patch",
     }
 )
@@ -2840,12 +2844,14 @@ async def _execute_environment_worker_tool(tool: str, args: dict[str, Any]) -> A
 
 
 async def _execute_command_worker_tool(tool: str, args: dict[str, Any]) -> Any:
+    if tool == "run_shell_persist_tool":
+        return await run_job_with_timeout(
+            args["command"], args.get("cwd", "."), args.get("timeout_s"),
+            args.get("max_output_bytes"),
+        )
     if tool == "run_shell_tool":
-        if args.get("persist_on_timeout", False):
-            return await run_job_with_timeout(
-                args["command"], args.get("cwd", "."), args.get("timeout_s"),
-                args.get("max_output_bytes"),
-            )
+        if args.get("persist_on_timeout"):
+            raise ValueError("persistent shell calls require run_shell_persist_tool")
         return (
             await public_run_shell(
                 args["command"],
@@ -2855,9 +2861,11 @@ async def _execute_command_worker_tool(tool: str, args: dict[str, Any]) -> Any:
             )
         ).model_dump()
 
+    if tool == "run_python_persist_tool":
+        return await _run_python(args["code"], args.get("cwd", "."), args.get("timeout_s", 60), True)
     if tool == "run_python_tool":
-        if args.get("persist_on_timeout", False):
-            return await _run_python(args["code"], args.get("cwd", "."), args.get("timeout_s", 60), True)
+        if args.get("persist_on_timeout"):
+            raise ValueError("persistent Python calls require run_python_persist_tool")
         return await _run_python(args["code"], args.get("cwd", "."), args.get("timeout_s", 60))
 
     if tool == "apply_patch":

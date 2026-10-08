@@ -1,6 +1,7 @@
 """Opt-in conversion of timed-out commands to tracked, durable jobs."""
 
 import asyncio
+import os
 import time
 from pathlib import Path
 
@@ -74,7 +75,8 @@ async def test_completed_persistent_call_returns_exit_code_and_bounded_output(
     assert result["timed_out"] is False
     assert result["persisted"] is False
     assert result["job_status"] == "failed"
-    assert result["exit_code"] == 7
+    # PowerShell -Command maps nonzero native-process exit codes to 1.
+    assert result["exit_code"] == (1 if os.name == "nt" else 7)
     assert result["ok"] is False
     assert len(result["stdout"].encode()) <= 32
     assert "fail" in result["stdout"]
@@ -130,8 +132,8 @@ async def test_worker_receives_persistence_option(monkeypatch):
 
     monkeypatch.setattr(remote, "run_job_with_timeout", fake_job)
     result = await remote._execute_command_worker_tool(
-        "run_shell_tool",
-        {"command": "sleep 10", "cwd": ".", "timeout_s": 1, "persist_on_timeout": True},
+        "run_shell_persist_tool",
+        {"command": "sleep 10", "cwd": ".", "timeout_s": 1},
     )
     assert result["job_id"] == "job_test"
     assert seen == [("sleep 10", ".", 1, None)]
@@ -142,11 +144,24 @@ async def test_worker_receives_persistence_option(monkeypatch):
 
     monkeypatch.setattr(remote, "_run_python", fake_python)
     result = await remote._execute_command_worker_tool(
-        "run_python_tool",
-        {"code": "print(1)", "cwd": ".", "timeout_s": 1, "persist_on_timeout": True},
+        "run_python_persist_tool",
+        {"code": "print(1)", "cwd": ".", "timeout_s": 1},
     )
     assert result["job_id"] == "job_python"
     assert seen[-1] == ("print(1)", ".", 1, True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool", "args"),
+    [
+        ("run_shell_tool", {"command": "echo unsafe", "persist_on_timeout": True}),
+        ("run_python_tool", {"code": "print('unsafe')", "persist_on_timeout": True}),
+    ],
+)
+async def test_ordinary_worker_operations_reject_unprotected_persistence(tool, args):
+    with pytest.raises(ValueError, match="require run_"):
+        await remote._execute_command_worker_tool(tool, args)
 
 
 @pytest.mark.asyncio
@@ -191,8 +206,16 @@ async def test_remote_tool_forwards_opt_in_flag(monkeypatch, isolated_job_worksp
             name, {**payload, "machine": "worker1", "timeout_s": 1, "persist_on_timeout": True}
         )
         assert _structured(result)["data"]["job_id"] == "job_test"
-    assert [row[2]["persist_on_timeout"] for row in seen] == [True, True]
+    assert [row[1] for row in seen] == ["run_shell_persist_tool", "run_python_persist_tool"]
     assert all(row[3]["execution_timeout_s"] > 1 for row in seen)
+
+    seen.clear()
+    for name, payload in (
+        ("run_shell", {"command": "echo ok"}),
+        ("run_python", {"code": "print(1)"}),
+    ):
+        await mcp.call_tool(name, {**payload, "machine": "worker1"})
+    assert [row[1] for row in seen] == ["run_shell_tool", "run_python_tool"]
 
 
 @pytest.mark.asyncio
