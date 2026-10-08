@@ -84,9 +84,6 @@ def worker_bundle_bytes() -> bytes:
         legacy_main.size = len(_LEGACY_WORKER_MAIN)
         legacy_main.mode = 0o644
         tar.addfile(_normalized_tar_info(legacy_main), io.BytesIO(_LEGACY_WORKER_MAIN))
-        seen: set[str] = set()
-        for dist_name in remote.REMOTE_WORKER_DISTRIBUTIONS:
-            remote._add_distribution_to_tar(tar, dist_name, seen)  # noqa: SLF001
     return buffer.getvalue()
 
 

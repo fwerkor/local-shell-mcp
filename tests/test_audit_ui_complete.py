@@ -331,15 +331,6 @@ def test_query_audit_covers_tail_reading_and_filter_rejections(tmp_path, monkeyp
     assert audit_module.query_audit(search="missing")["total_matched"] == 0
 
 
-def test_trim_audit_log_without_newline_keeps_bounded_tail(tmp_path):
-    path = tmp_path / "audit.jsonl"
-    path.write_bytes(b"x" * 200)
-
-    audit_module._trim_audit_log(path, 100)
-
-    assert path.read_bytes() == b"x" * 50
-
-
 def test_payload_reference_namespace_does_not_capture_user_dictionaries():
     legacy_shaped = {
         "$audit_payload": "a" * 64,

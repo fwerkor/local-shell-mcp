@@ -67,7 +67,7 @@ def _request(
     )
 
 
-def test_audit_serialization_trimming_and_all_filters(tmp_path, monkeypatch):
+def test_audit_serialization_and_all_filters(tmp_path, monkeypatch):
     _configure(
         tmp_path,
         monkeypatch,
@@ -103,13 +103,6 @@ def test_audit_serialization_trimming_and_all_filters(tmp_path, monkeypatch):
     assert "object at" in value["object"]
 
     path = settings.audit_log_path
-    audit_module._trim_audit_log(path, 100)
-    path.write_text("short\n", encoding="utf-8")
-    audit_module._trim_audit_log(path, 100)
-    path.write_text(("x" * 60 + "\n") * 10, encoding="utf-8")
-    audit_module._trim_audit_log(path, 100)
-    assert path.stat().st_size <= 100
-
     settings.max_audit_tail_bytes = 10_000
     settings.max_audit_log_bytes = 10_000
     rows = [

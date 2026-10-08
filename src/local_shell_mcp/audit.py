@@ -1119,30 +1119,6 @@ def _enforce_state_audit_storage_limit(
         _set_state_payload_bytes(retained_payload_bytes)
 
 
-def _trim_audit_log(path: Path, max_bytes: int) -> bool:
-    if max_bytes <= 0 or not path.exists():
-        return False
-    size = path.stat().st_size
-    if size <= max_bytes:
-        return False
-
-    keep_bytes = max(1, max_bytes // 2)
-    with path.open("rb") as f:
-        f.seek(max(0, size - keep_bytes))
-        data = f.read(keep_bytes)
-    first_newline = data.find(b"\n")
-    if first_newline >= 0:
-        data = data[first_newline + 1 :]
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
-    try:
-        _write_private_bytes(tmp, data)
-        tmp.replace(path)
-    finally:
-        with contextlib.suppress(OSError):
-            tmp.unlink(missing_ok=True)
-    return True
-
-
 @contextmanager
 def suppress_audit() -> Iterator[None]:
     """Exclude direct human UI activity from the MCP audit stream."""
