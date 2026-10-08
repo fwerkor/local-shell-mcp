@@ -56,7 +56,8 @@ def test_install_launcher_and_path_configuration_are_idempotent(tmp_path, monkey
     script = launcher.read_text(encoding="utf-8")
     assert str(state.worker_state_dir().resolve()) in script
     assert str(Path(sys.executable).resolve()) in script
-    assert "-m local_shell_mcp.main" in script
+    assert "-m local_shell_mcp.remote_worker" in script
+    assert "-m local_shell_mcp.main" not in script
     if os.name != "nt":
         assert stat.S_IMODE(launcher.stat().st_mode) == 0o755
 
@@ -99,6 +100,8 @@ def test_windows_launcher_and_user_path(tmp_path, monkeypatch):
     assert launcher.name == "local-shell-mcp.cmd"
     script = launcher.read_text(encoding="utf-8")
     assert "@echo off" in script
+    assert "-m local_shell_mcp.remote_worker" in script
+    assert "-m local_shell_mcp.main" not in script
     assert str(state.worker_state_dir().resolve()) in script
     assert str(Path(sys.executable).resolve()) in script
 

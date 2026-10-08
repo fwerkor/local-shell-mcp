@@ -10,6 +10,7 @@ from contextlib import nullcontext
 import pytest
 
 from local_shell_mcp import audit as audit_module
+from local_shell_mcp import remote_worker
 from local_shell_mcp import remote_worker_cli as cli
 from local_shell_mcp import remote_worker_service as service
 from local_shell_mcp import remote_worker_state as state
@@ -34,6 +35,21 @@ import local_shell_mcp.remote_worker_cli  # noqa: F401
 assert "local_shell_mcp.audit_archive_codec" not in sys.modules
 '''
     subprocess.run([sys.executable, "-c", script], check=True, env=os.environ.copy())
+
+
+def test_worker_entrypoint_only_dispatches_worker_management(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(remote_worker, "run_worker_cli", lambda args: calls.append(args))
+
+    remote_worker.main(["worker", "status"])
+    remote_worker.main(["status"])
+    assert calls == [["status"], ["status"]]
+
+    monkeypatch.setattr(remote_worker, "run_worker_cli", cli.run_worker_cli)
+    with pytest.raises(SystemExit) as exc:
+        remote_worker.main(["worker", "call", "run_shell", "--direct"])
+    assert exc.value.code == 2
+    assert "invalid choice: 'call'" in capsys.readouterr().err
 
 
 def _configure(tmp_path, monkeypatch):
