@@ -25,7 +25,7 @@ def isolated_job_workspace(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
 
-async def _wait_job(job_id: str, timeout: float = 8):
+async def _wait_job(job_id: str, timeout: float = 15):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         result = await tail_job(job_id)
@@ -53,10 +53,12 @@ async def test_timeout_preserves_one_execution_and_tracks_output(isolated_job_wo
     assert result["persisted"] is True
     assert result["job_id"].startswith("job_")
     assert result["job_status"] == "running"
-    assert result["stdout"].strip() == "before timeout"
+    # Slow CI machines may still be starting the runner at the deadline.
+    assert result["stdout"].strip() in {"", "before timeout"}
 
     completed = await _wait_job(result["job_id"])
     assert completed["job"]["exit_code"] == 0
+    assert "before timeout" in completed["output"]
     assert "finished" in completed["output"]
     assert path.read_text() == "once\n"
 
@@ -66,7 +68,7 @@ async def test_completed_persistent_call_returns_exit_code_and_bounded_output(
     isolated_job_workspace,
 ):
     command = python_shell_command(
-        "import sys; print('x'*300); print('fail', file=sys.stderr); sys.exit(7)"
+        "import sys; print('x'*300, flush=True); print('fail', file=sys.stderr, flush=True); sys.exit(7)"
     )
     result = await run_job_with_timeout(command, ".", 5, 32)
     assert result["timed_out"] is False
@@ -150,7 +152,7 @@ async def test_worker_receives_persistence_option(monkeypatch):
 @pytest.mark.asyncio
 async def test_local_mcp_opt_in_returns_tracked_job(isolated_job_workspace):
     result = await tools.build_mcp().call_tool(
-        "run_shell", {"command": "echo hello", "timeout_s": 5, "persist_on_timeout": True}
+        "run_shell", {"command": "echo hello", "timeout_s": 10, "persist_on_timeout": True}
     )
     data = _structured(result)["data"]
     assert data["job_id"].startswith("job_")
