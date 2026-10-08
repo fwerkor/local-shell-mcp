@@ -233,9 +233,9 @@ def test_full_and_dependency_light_settings_share_all_defaults(monkeypatch):
 
     full = settings.Settings()
     fallback = _load_fallback_settings(monkeypatch)
-    assert set(settings.Settings.model_fields) == {
+    assert list(settings.Settings.model_fields) == [
         entry.name for entry in fields(fallback.Settings)
-    }
+    ]
 
     light = fallback.Settings()
     assert full.model_dump(mode="json") == light.model_dump(mode="json")
