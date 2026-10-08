@@ -51,6 +51,3 @@ class _MemoryStateStore:
     def delete(self, key: str) -> None:
         self.deleted.append(key)
         self.values.pop(key, None)
-
-
-
