@@ -25,7 +25,10 @@ def test_remote_inline_gui_image_rejects_invalid_payloads() -> None:
         )
 
 @pytest.mark.asyncio
-async def test_remote_call_disabled_and_failure_shapes(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_remote_call_disabled_and_failure_shapes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _transfer_workspace(tmp_path, monkeypatch)
     disabled = SimpleNamespace(remote_enabled=False)
     result = await mcp_tools._remote_call(disabled, "node", "file_read", {})
     assert result.isError is True

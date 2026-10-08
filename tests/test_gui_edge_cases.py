@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -52,6 +53,7 @@ def test_gui_batch_validation_edge_inputs(action: dict[str, object], message: st
     with pytest.raises(ValueError, match=message):
         gui_base.GuiManager._validate_action_batch([action])
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX-only permission enforcement")
 def test_prepare_gui_screenshot_path_rejects_insecure_directory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -64,6 +66,7 @@ def test_prepare_gui_screenshot_path_rejects_insecure_directory(
     with pytest.raises(gui_base.GuiUnavailableError, match="directory"):
         gui_base._prepare_gui_screenshot_path("shot")
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX-only permission enforcement")
 def test_prepare_gui_screenshot_path_removes_insecure_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -97,6 +100,7 @@ def test_prepare_gui_screenshot_path_cleans_up_failed_lease(
         gui_base._prepare_gui_screenshot_path("shot")
     assert not list(tmp_path.glob("shot-*.png"))
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX-only permission enforcement")
 def test_secure_gui_screenshot_file_reports_chmod_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -90,6 +90,7 @@ def test_safe_audit_call_argument_redaction_edges() -> None:
 def test_secret_scan_candidates_falls_back_when_ripgrep_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    _transfer_workspace(tmp_path, monkeypatch)
     base = tmp_path / "repo"
     base.mkdir()
     (base / ".gitignore").write_text("ignored.txt\n")
