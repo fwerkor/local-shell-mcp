@@ -15,6 +15,35 @@ from .settings import get_settings
 
 REMOTE_WORKER_MANIFEST_PATH = "/remote/worker-manifest.json"
 REMOTE_WORKER_PUBLIC_MANIFEST_URL = remote.REMOTE_WORKER_BUNDLE_PATH + "?manifest=1"
+# This archive is installed on untrusted workers, not on the controller.
+# Keep the common execution modules, but never distribute controller UI,
+# endpoint/authentication handlers, or its privileged CLI entry points.
+_CONTROLLER_ONLY_MODULES = {
+    "auth.py",
+    "cli_call.py",
+    "command_preflight.py",
+    "deprecated_tools.py",
+    "downloads.py",
+    "dynamic_mcp.py",
+    "http_app.py",
+    "human_ui.py",
+    "live_channel.py",
+    "live_channel_routes.py",
+    "main.py",
+    "oauth.py",
+    "remote_worker_routes.py",
+    "tools.py",
+    "tui_runtime.py",
+    "ui_security.py",
+}
+# Previously installed workers re-execute `python -m local_shell_mcp.main
+# worker run` during their first upgrade. Supply only a passive shim so they
+# can transition to the new worker-only entrypoint without going offline.
+_LEGACY_WORKER_MAIN = (
+    b"from local_shell_mcp.remote_worker import main\n"
+    b"if __name__ == '__main__':\n"
+    b"    main()\n"
+)
 
 
 def _normalized_tar_info(info: tarfile.TarInfo) -> tarfile.TarInfo:
@@ -38,6 +67,8 @@ def worker_bundle_bytes() -> bytes:
             if not path.is_file():
                 continue
             relative = path.relative_to(package_root)
+            if len(relative.parts) == 1 and relative.name in _CONTROLLER_ONLY_MODULES:
+                continue
             is_python = path.suffix == ".py"
             is_helper = relative.parts[:1] == ("helpers",) and path.name in {
                 "tmux",
@@ -49,6 +80,10 @@ def worker_bundle_bytes() -> bytes:
                     arcname=str(path.relative_to(package_root.parent)),
                     filter=_normalized_tar_info,
                 )
+        legacy_main = tarfile.TarInfo("local_shell_mcp/main.py")
+        legacy_main.size = len(_LEGACY_WORKER_MAIN)
+        legacy_main.mode = 0o644
+        tar.addfile(_normalized_tar_info(legacy_main), io.BytesIO(_LEGACY_WORKER_MAIN))
         seen: set[str] = set()
         for dist_name in remote.REMOTE_WORKER_DISTRIBUTIONS:
             remote._add_distribution_to_tar(tar, dist_name, seen)  # noqa: SLF001

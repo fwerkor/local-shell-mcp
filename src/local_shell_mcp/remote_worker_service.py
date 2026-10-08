@@ -438,9 +438,9 @@ with open(LOG_PATH, "a", encoding="utf-8", buffering=1) as worker_log:
     sys.stdout = worker_log
     sys.stderr = worker_log
     try:
-        from local_shell_mcp.main import main
+        from local_shell_mcp.remote_worker import main
 
-        main(["worker", "run"])
+        main(["run"])
     except BaseException:
         traceback.print_exc()
         raise
@@ -704,7 +704,7 @@ def _start_process() -> None:
     if _read_pid():
         return
     worker_state_dir().mkdir(parents=True, exist_ok=True)
-    command = [sys.executable, "-m", "local_shell_mcp.main", "worker", "run"]
+    command = [sys.executable, "-m", "local_shell_mcp.remote_worker", "run"]
     with worker_log_path().open("ab") as log:
         if os.name == "nt":
             flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(

@@ -157,7 +157,7 @@ async def run_enrolled_worker() -> None:
 def _worker_run_exec_argv() -> list[str]:
     if is_frozen_app():
         return [sys.executable, "worker", "run"]
-    return [sys.executable, "-m", "local_shell_mcp.main", "worker", "run"]
+    return [sys.executable, "-m", "local_shell_mcp.remote_worker", "run"]
 
 
 def _reexec_worker_run() -> None:
@@ -259,6 +259,7 @@ def _run_command(args: argparse.Namespace) -> None:
         config = _load_config_or_migrate()
         before = service_status()
         result = install_or_update_runtime(str(config["server"]), force=args.force)
+        install_launcher()
         if result["updated"]:
             refresh_installed_service_definition()
             if before["running"]:
@@ -281,9 +282,6 @@ def _run_command(args: argparse.Namespace) -> None:
 
 def run_worker_cli(argv: list[str] | None = None) -> None:
     argv = sys.argv[1:] if argv is None else list(argv)
-    if argv and argv[0].startswith("-"):
-        remote.run_worker_cli(argv)
-        return
     try:
         _run_command(_parser().parse_args(argv))
     except KeyboardInterrupt:

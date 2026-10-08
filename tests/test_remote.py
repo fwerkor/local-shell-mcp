@@ -13,7 +13,6 @@ from types import SimpleNamespace
 import pytest
 
 from local_shell_mcp import remote
-from local_shell_mcp.remote import join_script
 from local_shell_mcp.settings import get_settings
 
 
@@ -522,35 +521,6 @@ async def test_lane_upgrade_migrates_queued_transfer_jobs(tmp_path, monkeypatch)
     )
     await call
 
-@pytest.mark.asyncio
-async def test_join_script_loads_vendored_worker_dependencies(tmp_path, monkeypatch):
-    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
-    monkeypatch.setenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL", "https://local-shell-mcp.example.test")
-    get_settings.cache_clear()
-
-    response = await join_script(None)  # type: ignore[arg-type]
-    script = response.body.decode("utf-8")
-
-    assert 'export PYTHONPATH="$RUNTIME_ROOT:$RUNTIME_ROOT/vendor:${PYTHONPATH:-}"' in script
-    assert 'RUNTIME_ROOT="$STATE_HOME/runtime"' in script
-    assert 'mv "$RUNTIME_NEXT" "$RUNTIME_ROOT"' in script
-
-
-@pytest.mark.asyncio
-async def test_join_script_reports_download_progress_and_uses_worker_entrypoint(tmp_path, monkeypatch):
-    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
-    monkeypatch.setenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL", "https://local-shell-mcp.example.test")
-    get_settings.cache_clear()
-
-    response = await join_script(None)  # type: ignore[arg-type]
-    script = response.body.decode("utf-8")
-
-    assert "Downloading worker bundle" in script
-    assert "--progress-bar" in script
-    assert "python3 -m local_shell_mcp.remote_worker" in script
-    assert "python3 -m local_shell_mcp.main worker" not in script
-
-
 def test_worker_post_json_uses_curl_and_parses_success(monkeypatch):
     calls = []
 
@@ -1017,7 +987,7 @@ def test_reexec_updated_worker_runtime_prefers_installed_bundle(tmp_path, monkey
     monkeypatch.setattr(
         remote_worker_cli,
         "_worker_run_exec_argv",
-        lambda: [sys.executable, "-m", "local_shell_mcp.main", "worker", "run"],
+        lambda: [sys.executable, "-m", "local_shell_mcp.remote_worker", "run"],
     )
     monkeypatch.setattr(remote_worker_service, "_current_worker_is_managed", lambda: False)
     calls = []
@@ -1031,7 +1001,7 @@ def test_reexec_updated_worker_runtime_prefers_installed_bundle(tmp_path, monkey
     assert calls == [
         (
             sys.executable,
-            [sys.executable, "-m", "local_shell_mcp.main", "worker", "run"],
+            [sys.executable, "-m", "local_shell_mcp.remote_worker", "run"],
         )
     ]
 
@@ -1050,7 +1020,7 @@ def test_reexec_updated_managed_windows_worker_uses_service_launcher(tmp_path, m
     monkeypatch.setattr(
         remote_worker_cli,
         "_worker_run_exec_argv",
-        lambda: [sys.executable, "-m", "local_shell_mcp.main", "worker", "run"],
+        lambda: [sys.executable, "-m", "local_shell_mcp.remote_worker", "run"],
     )
     monkeypatch.setattr(remote_worker_service, "_current_worker_is_managed", lambda: True)
     monkeypatch.setattr(remote_worker_service, "_windows_pythonw_executable", lambda: pythonw)
@@ -1064,7 +1034,7 @@ def test_reexec_updated_managed_windows_worker_uses_service_launcher(tmp_path, m
 
 @pytest.mark.asyncio
 async def test_upgrade_worker_runtime_validates_manifest_version(monkeypatch):
-    from local_shell_mcp import remote_worker_installer, remote_worker_service
+    from local_shell_mcp import remote_worker_installer, remote_worker_service, remote_worker_state
 
     monkeypatch.setattr(
         remote_worker_installer,
@@ -1095,33 +1065,10 @@ async def test_upgrade_worker_runtime_validates_manifest_version(monkeypatch):
         "refresh_installed_service_definition",
         lambda: calls.append("refresh"),
     )
+    monkeypatch.setattr(remote_worker_state, "install_launcher", lambda: calls.append("launcher"))
     monkeypatch.setattr(remote, "_reexec_updated_worker_runtime", lambda: calls.append("reexec"))
     await remote._upgrade_worker_runtime("https://example.test", "3.2.0")  # noqa: SLF001
-    assert calls == ["refresh", "reexec"]
-
-
-def test_worker_cli_keyboard_interrupt_exits_cleanly():
-    code = """
-import sys as _sys
-_sys.path.insert(0, "src")
-
-from local_shell_mcp import remote
-
-
-def fake_asyncio_run(coro):
-    coro.close()
-    raise KeyboardInterrupt
-
-
-remote.asyncio.run = fake_asyncio_run
-remote.run_worker_cli(["--server", "https://example.test", "--invite", "lsmcp_inv_test"])
-"""
-
-    completed = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)  # noqa: S603
-
-    assert completed.returncode == 130
-    assert "Status: disconnected by user." in completed.stderr
-    assert "Traceback" not in completed.stderr
+    assert calls == ["launcher", "refresh", "reexec"]
 
 
 @pytest.mark.asyncio

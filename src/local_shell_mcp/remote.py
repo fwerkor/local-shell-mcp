@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import asyncio
 import base64
 import contextlib
@@ -24,7 +23,6 @@ import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass, field
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -1763,94 +1761,6 @@ def _bearer_token(request: Any) -> str:
     return ""
 
 
-async def worker_bundle(request: Any):  # noqa: ARG001, ANN201
-    from starlette.responses import Response
-
-    package_root = Path(__file__).resolve().parent
-    buffer = BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
-        for path in package_root.rglob("*"):
-            if not path.is_file():
-                continue
-            relative = path.relative_to(package_root)
-            is_python = path.suffix == ".py"
-            is_helper = relative.parts[:1] == ("helpers",) and (
-                path.name == "tmux" or path.name == "tmux.LICENSE"
-            )
-            if is_python or is_helper:
-                tar.add(path, arcname=str(path.relative_to(package_root.parent)))
-        seen: set[str] = set()
-        for dist_name in REMOTE_WORKER_DISTRIBUTIONS:
-            _add_distribution_to_tar(tar, dist_name, seen)
-    return Response(buffer.getvalue(), media_type="application/gzip")
-
-
-async def join_script(request: Any):  # noqa: ARG001, ANN201
-    from starlette.responses import PlainTextResponse
-
-    settings = get_settings()
-    server = (settings.public_base_url or f"http://{settings.host}:{settings.port}").rstrip("/")
-    script = f"""#!/usr/bin/env bash
-set -euo pipefail
-SERVER={shlex.quote(server)}
-BUNDLE_URL="$SERVER{REMOTE_WORKER_BUNDLE_PATH}"
-INVITE=""
-NAME=""
-WORKDIR=""
-BACKGROUND=0
-PERSIST=0
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --invite) INVITE="${{2:-}}"; shift 2 ;;
-    --name) NAME="${{2:-}}"; shift 2 ;;
-    --workdir) WORKDIR="${{2:-}}"; shift 2 ;;
-    --background) BACKGROUND=1; shift ;;
-    --persist) PERSIST=1; shift ;;
-    *) echo "unknown argument: $1" >&2; exit 2 ;;
-  esac
-done
-if [ -z "$INVITE" ]; then echo "--invite is required" >&2; exit 2; fi
-if [ -z "$WORKDIR" ]; then WORKDIR="$PWD"; fi
-if ! command -v python3 >/dev/null 2>&1; then echo "python3 is required" >&2; exit 2; fi
-if ! command -v curl >/dev/null 2>&1; then echo "curl is required" >&2; exit 2; fi
-if ! command -v tar >/dev/null 2>&1; then echo "tar is required" >&2; exit 2; fi
-TMPDIR="$(mktemp -d)"
-cleanup() {{ rm -rf "$TMPDIR"; }}
-trap cleanup EXIT
-echo "Downloading worker bundle..." >&2
-curl -fL --progress-bar "$BUNDLE_URL" -o "$TMPDIR/worker.tgz"
-RUNTIME_ROOT="$TMPDIR/runtime"
-if [ "$BACKGROUND" = "1" ] || [ "$PERSIST" = "1" ]; then
-  STATE_HOME="${{XDG_STATE_HOME:-$HOME/.local/state}}/local-shell-mcp-worker"
-  RUNTIME_ROOT="$STATE_HOME/runtime"
-  RUNTIME_NEXT="$STATE_HOME/runtime.next.$$"
-  rm -rf "$RUNTIME_NEXT"
-  mkdir -p "$RUNTIME_NEXT"
-  echo "Installing worker bundle..." >&2
-  tar -xzf "$TMPDIR/worker.tgz" -C "$RUNTIME_NEXT"
-  rm -rf "$RUNTIME_ROOT"
-  mv "$RUNTIME_NEXT" "$RUNTIME_ROOT"
-else
-  mkdir -p "$RUNTIME_ROOT"
-  echo "Extracting worker bundle..." >&2
-  tar -xzf "$TMPDIR/worker.tgz" -C "$RUNTIME_ROOT"
-fi
-echo "Starting worker..." >&2
-export PYTHONPATH="$RUNTIME_ROOT:$RUNTIME_ROOT/vendor:${{PYTHONPATH:-}}"
-ARGS=(--server "$SERVER" --invite "$INVITE" --workdir "$WORKDIR")
-if [ -n "$NAME" ]; then ARGS+=(--name "$NAME"); fi
-if [ "$PERSIST" = "1" ]; then ARGS+=(--persist); fi
-if [ "$BACKGROUND" = "1" ]; then
-  mkdir -p "$HOME/.local/state/local-shell-mcp-worker"
-  nohup python3 -m local_shell_mcp.remote_worker "${{ARGS[@]}}" > "$HOME/.local/state/local-shell-mcp-worker/worker.log" 2>&1 &
-  echo "local-shell-mcp worker started in background. Log: $HOME/.local/state/local-shell-mcp-worker/worker.log"
-else
-  exec python3 -m local_shell_mcp.remote_worker "${{ARGS[@]}}"
-fi
-"""
-    return PlainTextResponse(script, media_type="text/x-shellscript")
-
-
 async def register_endpoint(request: Any):  # noqa: ANN201
     from starlette.responses import JSONResponse
 
@@ -1904,23 +1814,6 @@ async def result_endpoint(request: Any):  # noqa: ANN201
         )
     except Exception as exc:
         return _error(str(exc), type(exc).__name__, 401)
-
-
-def remote_routes() -> list[Any]:
-    from starlette.routing import Route
-
-    from .remote_transfer import remote_transfer_routes
-
-    return [
-        Route(REMOTE_JOIN_PATH, join_script, methods=["GET"]),
-        Route(REMOTE_WORKER_BUNDLE_PATH, worker_bundle, methods=["GET"]),
-        Route(f"{REMOTE_API_PREFIX}/register", register_endpoint, methods=["POST"]),
-        Route(f"{REMOTE_API_PREFIX}/res" + "ume", resume_endpoint, methods=["POST"]),
-        Route(f"{REMOTE_API_PREFIX}/poll", poll_endpoint, methods=["POST"]),
-        Route(f"{REMOTE_API_PREFIX}/heartbeat", heartbeat_endpoint, methods=["POST"]),
-        Route(f"{REMOTE_API_PREFIX}/result", result_endpoint, methods=["POST"]),
-        *remote_transfer_routes(),
-    ]
 
 
 def _assert_worker_text_input_size(label: str, text: str) -> None:
@@ -3448,6 +3341,7 @@ def _reexec_updated_worker_runtime() -> None:
 async def _upgrade_worker_runtime(server: str, target_version: str) -> None:
     from .remote_worker_installer import install_or_update_runtime
     from .remote_worker_service import refresh_installed_service_definition
+    from .remote_worker_state import install_launcher
 
     result = await asyncio.to_thread(install_or_update_runtime, server)
     installed_version = str(result.get("version") or "")
@@ -3456,6 +3350,7 @@ async def _upgrade_worker_runtime(server: str, target_version: str) -> None:
             f"controller requested worker {target_version}, but manifest provides "
             f"{installed_version or 'no version'}"
         )
+    await asyncio.to_thread(install_launcher)
     await asyncio.to_thread(refresh_installed_service_definition)
     print(
         f"Status: worker runtime updated to {installed_version or 'unknown'}; restarting...",
@@ -4470,25 +4365,3 @@ async def _run_worker_locked(
         for task in [*lane_tasks, *sender_tasks]:
             task.cancel()
         await asyncio.gather(*lane_tasks, *sender_tasks, return_exceptions=True)
-
-
-def run_worker_cli(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(
-        description="Connect this machine to a local-shell-mcp control server"
-    )
-    parser.add_argument("--server", required=True)
-    parser.add_argument("--invite", required=True)
-    parser.add_argument("--name", default=None)
-    parser.add_argument("--workdir", default=None)
-    parser.add_argument(
-        "--persist", action="store_true", help="Reserved for future user-service installation"
-    )
-    args = parser.parse_args(argv)
-    try:
-        asyncio.run(run_worker(args.server, args.invite, args.name, args.workdir, args.persist))
-    except KeyboardInterrupt:
-        print("\nStatus: disconnected by user.", file=sys.stderr, flush=True)
-        raise SystemExit(130) from None
-    except Exception as exc:  # noqa: BLE001
-        print(f"Status: connection failed: {exc}", file=sys.stderr, flush=True)
-        raise SystemExit(1) from None
