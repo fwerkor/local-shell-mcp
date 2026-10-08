@@ -61,6 +61,7 @@ from .jobs import (
     start_job,
     stop_job,
     tail_job,
+    write_durable_python_script,
 )
 from .models import ok_result as _ok
 from .patch_ops import git_apply_command, git_apply_prefix, normalize_patch_text
@@ -2000,13 +2001,16 @@ async def _run_python(
     code: str, cwd: str = ".", timeout_s: int = 60, persist_on_timeout: bool = False
 ) -> dict[str, Any]:
     _assert_worker_text_input_size("Python script", code)
-    await asyncio.to_thread(prune_temp_dir)
-    script = temp_dir() / f"remote-script-{uuid.uuid4().hex}.py"
-    script.parent.mkdir(parents=True, exist_ok=True)
-    await asyncio.to_thread(script.write_text, code, encoding="utf-8")
+    if persist_on_timeout:
+        script = await asyncio.to_thread(write_durable_python_script, code)
+    else:
+        await asyncio.to_thread(prune_temp_dir)
+        script = temp_dir() / f"remote-script-{uuid.uuid4().hex}.py"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(script.write_text, code, encoding="utf-8")
     command = f"{quote_shell_executable(get_settings().python_bin)} {quote_shell_argument(str(script))}"
     if persist_on_timeout:
-        result = await run_job_with_timeout(command, cwd, timeout_s, 1_000_000)
+        result = await run_job_with_timeout(command, cwd, timeout_s, 1_000_000, script_path=script)
     else:
         result = (
             await run_shell(

@@ -69,6 +69,7 @@ from .jobs import (
     start_managed_job,
     stop_job,
     tail_job,
+    write_durable_python_script,
 )
 from .live_channel import (
     LIVE_RESOURCE_COMPAT_URIS,
@@ -391,14 +392,17 @@ async def _run_python(
     code: str, cwd: str = ".", timeout_s: int = 60, persist_on_timeout: bool = False
 ) -> dict:
     _assert_text_input_size("Python script", code)
-    await asyncio.to_thread(prune_temp_dir)
-    path = temp_dir() / f"script-{uuid.uuid4().hex}.py"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    await asyncio.to_thread(path.write_text, code, encoding="utf-8")
+    if persist_on_timeout:
+        path = await asyncio.to_thread(write_durable_python_script, code)
+    else:
+        await asyncio.to_thread(prune_temp_dir)
+        path = temp_dir() / f"script-{uuid.uuid4().hex}.py"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(path.write_text, code, encoding="utf-8")
     python = quote_shell_executable(get_settings().python_bin)
     command = f"{python} {quote_shell_argument(str(path))}"
     if persist_on_timeout:
-        result = await run_job_with_timeout(command, cwd, timeout_s, 1_000_000)
+        result = await run_job_with_timeout(command, cwd, timeout_s, 1_000_000, script_path=path)
     else:
         result = (
             await run_shell(
@@ -505,6 +509,8 @@ REMOTE_MACHINE_ARGUMENTS = frozenset({"machine", "source_machine", "destination_
 def _public_tool_timeout_s(tool_name: str, arguments: dict[str, Any]) -> float | None:
     """Return a watchdog budget derived from the public tool and its execution limit."""
     if tool_name in NON_CANCELLABLE_TOOL_NAMES:
+        return None
+    if tool_name in {"run_shell", "run_python"} and arguments.get("persist_on_timeout") is True:
         return None
     if tool_name in {"run_shell", "run_python"}:
         try:

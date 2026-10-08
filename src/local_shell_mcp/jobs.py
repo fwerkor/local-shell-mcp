@@ -81,6 +81,13 @@ def _job_runtime_dir() -> Path:
     return path
 
 
+def write_durable_python_script(code: str) -> Path:
+    """Store code beside tracked jobs for later job_retry calls."""
+    script = _job_runtime_dir() / "scripts" / f"script-{uuid.uuid4().hex}.py"
+    _private_write_text(script, code)
+    return script
+
+
 def _managed_deferred_update_dir() -> Path:
     return get_settings().state_dir / "jobs" / "deferred"
 
@@ -270,6 +277,12 @@ def _prune_store(store: dict[str, Any]) -> None:
     store["jobs"] = [job for job in jobs if id(job) in keep_ids]
     for job in removed:
         _remove_attempt_files(str(job.get("job_id") or ""))
+        script_path = job.get("script_path")
+        if script_path:
+            script = Path(str(script_path))
+            if script.parent.resolve(strict=False) == (_job_runtime_dir() / "scripts").resolve(strict=False):
+                with contextlib.suppress(OSError):
+                    script.unlink(missing_ok=True)
 
 
 def _save_store(store: dict[str, Any]) -> None:
@@ -1288,6 +1301,7 @@ async def start_job(
     cwd: str = ".",
     name: str | None = None,
     idempotency_key: str | None = None,
+    script_path: str | None = None,
 ) -> dict[str, Any]:
     idempotency_key = _normalize_idempotency_key(idempotency_key)
     request_fingerprint = _idempotency_fingerprint(
@@ -1314,6 +1328,7 @@ async def start_job(
         "name": display_name,
         "status": "starting",
         "command": command,
+        "script_path": script_path,
         "cwd": cwd,
         "session_id": shell_name,
         "backend": None,
@@ -1430,6 +1445,8 @@ async def run_job_with_timeout(
     cwd: str = ".",
     timeout_s: int | None = None,
     max_output_bytes: int | None = None,
+    *,
+    script_path: Path | None = None,
 ) -> dict[str, Any]:
     """Wait for a tracked command, leaving the *same* job running on timeout.
 
@@ -1439,7 +1456,10 @@ async def run_job_with_timeout(
     timeout = public_run_shell_timeout(timeout_s)
     output_limit = _effective_output_limit(max_output_bytes)
     started = time.monotonic()
-    job = await start_job(command, cwd)
+    if script_path is None:
+        job = await start_job(command, cwd)
+    else:
+        job = await start_job(command, cwd, script_path=str(script_path))
     job_id = str(job["job_id"])
     status_path = _attempt_paths(job_id, 1)["status"]
     deadline = started + timeout
@@ -1455,13 +1475,18 @@ async def run_job_with_timeout(
     finished = current.get("status") in TERMINAL_STATUSES
     # tail_job may fall back to terminal screen content before the first log
     # write; only return the actual persisted command log.
+    log_path = _attempt_paths(job_id, 1)["log"]
     output = (
         str(snapshot.get("output") or "")
         if finished
-        else _read_log_tail(str(_attempt_paths(job_id, 1)["log"]), lines=0)
+        else _read_log_tail(str(log_path), lines=0)
     )
     output_bytes = output.encode("utf-8")
-    truncated = bool(current.get("log_truncated")) or len(output_bytes) > output_limit
+    try:
+        log_at_cap = not finished and log_path.stat().st_size >= max(1, get_settings().max_job_log_bytes)
+    except OSError:
+        log_at_cap = False
+    truncated = bool(current.get("log_truncated")) or log_at_cap or len(output_bytes) > output_limit
     if len(output_bytes) > output_limit:
         output = output_bytes[-output_limit:].decode("utf-8", errors="replace")
     # The job runner combines both streams into its persistent log.

@@ -8,9 +8,11 @@ from pathlib import Path
 import pytest
 from conftest import python_shell_command
 
+import local_shell_mcp.jobs as jobs
 import local_shell_mcp.remote as remote
 import local_shell_mcp.tools as tools
-from local_shell_mcp.jobs import run_job_with_timeout, tail_job
+from local_shell_mcp.fs_ops import prune_temp_dir, temp_dir
+from local_shell_mcp.jobs import retry_job, run_job_with_timeout, tail_job
 from local_shell_mcp.settings import get_settings
 
 
@@ -100,6 +102,67 @@ async def test_run_python_can_persist_and_keep_script_path(isolated_job_workspac
     assert result["job_id"]
     assert result["script_path"].endswith(".py")
     await _wait_job(result["job_id"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("runner", ["local", "worker"])
+async def test_persistent_python_script_survives_pruning_and_retry(
+    runner, isolated_job_workspace, monkeypatch
+):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_TMP_FILES", "1")
+    get_settings.cache_clear()
+    marker = isolated_job_workspace / "reruns.txt"
+    code = f"from pathlib import Path; Path({str(marker)!r}).open('a').write('once\\n')"
+    entrypoint = tools._run_python if runner == "local" else remote._run_python
+    result = await entrypoint(code, ".", 10, True)
+    assert result["ok"] is True
+    script = isolated_job_workspace / result["script_path"]
+    assert script.is_file()
+
+    for i in range(10):
+        (temp_dir() / f"temporary-{i}.txt").write_text(str(i))
+    prune_temp_dir()
+    assert script.read_text() == code
+
+    retried = await retry_job(result["job_id"])
+    completed = await _wait_job(retried["job_id"])
+    assert completed["job"]["exit_code"] == 0
+    assert marker.read_text() == "once\nonce\n"
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_JOBS", "1")
+    get_settings.cache_clear()
+    await run_job_with_timeout("echo cleanup", ".", 10)
+    assert not script.exists()
+
+
+@pytest.mark.asyncio
+async def test_live_log_cap_is_reported_as_truncated(isolated_job_workspace, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_JOB_LOG_BYTES", "64")
+    get_settings.cache_clear()
+    log = isolated_job_workspace / "job.log"
+    log.write_bytes(b"x" * 64)
+
+    async def fake_start(command, cwd):
+        return {"job_id": "job_test"}
+
+    async def fake_tail(job_id, lines=0):
+        return {"job": {"status": "running", "exit_code": None}, "output": ""}
+
+    monkeypatch.setattr(jobs, "start_job", fake_start)
+    monkeypatch.setattr(jobs, "tail_job", fake_tail)
+    monkeypatch.setattr(jobs, "_attempt_paths", lambda _id, _attempt: {"log": log, "status": log.with_suffix(".status")})
+    result = await run_job_with_timeout("echo x", ".", 1, 1000)
+    assert result["timed_out"] is True
+    assert result["truncated"] is True
+
+
+def test_opted_in_local_command_is_not_cancelled_by_tool_watchdog():
+    for name in ("run_shell", "run_python"):
+        assert tools._public_tool_timeout_s(name, {"persist_on_timeout": True}) is None
+        assert tools._public_tool_timeout_s(
+            name, {"persist_on_timeout": True, "machine": "worker"}
+        ) is None
+        assert tools._public_tool_timeout_s(name, {}) is not None
 
 
 @pytest.mark.asyncio
