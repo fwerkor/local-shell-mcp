@@ -147,7 +147,7 @@ async def test_live_log_cap_is_reported_as_truncated(isolated_job_workspace, mon
     log = isolated_job_workspace / "job.log"
     log.write_bytes(b"x" * 64)
 
-    async def fake_start(command, cwd):
+    async def fake_start(command, cwd, **kwargs):
         with jobs._store_transaction() as store:
             store["jobs"].append(
                 {
@@ -180,7 +180,7 @@ async def test_completed_output_is_captured_before_zero_retention_pruning(
     status = isolated_job_workspace / "result.status"
     status.write_text(json.dumps({"completed_at": time.time(), "exit_code": 0}))
 
-    async def fake_start(command, cwd):
+    async def fake_start(command, cwd, **kwargs):
         with jobs._store_transaction() as store:
             store["jobs"].append(
                 {
@@ -372,3 +372,127 @@ async def test_expensive_preflight_cannot_be_bypassed_with_persistence(
         },
     )
     assert _structured(result)["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_concurrent_list_cannot_prune_initial_call_result(
+    isolated_job_workspace, monkeypatch
+):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_JOBS", "0")
+    get_settings.cache_clear()
+    log = isolated_job_workspace / "result.log"
+    status = isolated_job_workspace / "result.status"
+
+    async def fake_shells():
+        return {"sessions": [{"session_id": "live_session"}]}
+
+    async def fake_start(command, cwd, **kwargs):
+        assert kwargs["initial_call_lease_s"] > 0
+        with jobs._store_transaction() as store:
+            store["jobs"].append(
+                {
+                    "job_id": "leased_job",
+                    "status": "running",
+                    "command": command,
+                    "session_id": "live_session",
+                    "created_at": time.time(),
+                    "log_path": str(log),
+                    "status_path": str(status),
+                    "initial_call_lease_until": time.time() + kwargs["initial_call_lease_s"],
+                }
+            )
+        return {"job_id": "leased_job", "session_id": "live_session"}
+
+    async def concurrent_poll():
+        await asyncio.sleep(0.05)
+        log.write_bytes(b"success\n")
+        status.write_text(json.dumps({"completed_at": time.time(), "exit_code": 0}))
+        visible = await jobs.list_jobs()
+        assert visible["jobs"][0]["job_id"] == "leased_job"
+
+    monkeypatch.setattr(jobs, "start_job", fake_start)
+    monkeypatch.setattr(jobs, "list_shells", fake_shells)
+    monkeypatch.setattr(jobs, "_attempt_paths", lambda *_: {"log": log, "status": status})
+    poll = asyncio.create_task(concurrent_poll())
+    result = await run_job_with_timeout("echo success", ".", 2)
+    await poll
+    assert result["ok"] is True
+    assert result["stdout"] == "success\n"
+    assert (await jobs.list_jobs())["jobs"] == []
+
+
+@pytest.mark.asyncio
+async def test_dead_runner_returns_lost_before_deadline(isolated_job_workspace, monkeypatch):
+    log = isolated_job_workspace / "result.log"
+    log.write_bytes(b"partial")
+    status = isolated_job_workspace / "missing.status"
+
+    async def fake_start(command, cwd, **kwargs):
+        with jobs._store_transaction() as store:
+            store["jobs"].append(
+                {
+                    "job_id": "lost_job",
+                    "status": "running",
+                    "command": command,
+                    "session_id": "dead_session",
+                    "created_at": time.time(),
+                    "log_path": str(log),
+                    "status_path": str(status),
+                    "initial_call_lease_until": time.time() + kwargs["initial_call_lease_s"],
+                }
+            )
+        return {"job_id": "lost_job", "session_id": "dead_session"}
+
+    async def no_shells():
+        return {"sessions": []}
+
+    monkeypatch.setattr(jobs, "start_job", fake_start)
+    monkeypatch.setattr(jobs, "list_shells", no_shells)
+    monkeypatch.setattr(jobs, "_attempt_paths", lambda *_: {"log": log, "status": status})
+    result = await run_job_with_timeout("false", ".", 10)
+    assert result["duration_ms"] < 3000
+    assert result["job_status"] == "lost"
+    assert result["ok"] is False
+    assert result["timed_out"] is False
+    assert result["persisted"] is False
+    assert result["stdout"] == "partial"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw,limit,expected_truncation",
+    [
+        (b"\xff" * 5, 5, False),
+        (b"\xff" * 8, 5, True),
+        (b"\xff" + b"OK", 5, False),
+    ],
+)
+async def test_persistent_output_limits_raw_bytes_before_decoding(
+    raw, limit, expected_truncation, isolated_job_workspace, monkeypatch
+):
+    log = isolated_job_workspace / "result.log"
+    log.write_bytes(raw)
+    status = isolated_job_workspace / "result.status"
+    status.write_text(json.dumps({"completed_at": time.time(), "exit_code": 0}))
+
+    async def fake_start(command, cwd, **kwargs):
+        with jobs._store_transaction() as store:
+            store["jobs"].append(
+                {
+                    "job_id": "raw_job",
+                    "status": "running",
+                    "command": command,
+                    "created_at": time.time(),
+                    "log_path": str(log),
+                    "status_path": str(status),
+                    "initial_call_lease_until": time.time() + kwargs["initial_call_lease_s"],
+                }
+            )
+        return {"job_id": "raw_job"}
+
+    monkeypatch.setattr(jobs, "start_job", fake_start)
+    monkeypatch.setattr(jobs, "_attempt_paths", lambda *_: {"log": log, "status": status})
+    result = await run_job_with_timeout("echo bytes", ".", 1, limit)
+    assert result["truncated"] is expected_truncation
+    assert len(result["stdout"].encode("utf-8")) <= limit
+    assert result["ok"] is True
