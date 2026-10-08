@@ -942,16 +942,12 @@ async def test_gui_state_result_remote_screenshot_and_cleanup(tmp_path, monkeypa
 
     monkeypatch.setattr(tools, "_remote_worker_data", invalid_refresh)
     with pytest.raises(RuntimeError, match="invalid data"):
-        await tools._refresh_remote_gui_state_once("node", "w", "s")
-    with pytest.raises(RuntimeError, match="invalid data"):
         await tools._refresh_remote_gui_frame_once("node", "w", "obs")
     with pytest.raises(RuntimeError, match="invalid data"):
         await tools._discard_remote_gui_state_once("node", "w", "s")
     with pytest.raises(RuntimeError, match="invalid data"):
         await tools._discard_remote_gui_frame_once("node", "w", "obs")
     monkeypatch.setattr(tools, "_REMOTE_GUI_STATE_REFRESH_INTERVAL_S", 0)
-    with pytest.raises(RuntimeError, match="invalid data"):
-        await tools._refresh_remote_gui_state_lease("node", "w", "s")
     with pytest.raises(RuntimeError, match="invalid data"):
         await tools._refresh_remote_gui_frame_lease("node", "w", "obs")
 

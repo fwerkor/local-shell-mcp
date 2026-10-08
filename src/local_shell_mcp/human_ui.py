@@ -46,6 +46,7 @@ from .oauth import ALL_OAUTH_SCOPES
 from .remote import (
     REMOTE_QUEUE_TIMEOUT_S,
     REMOTE_RESULT_GRACE_S,
+    _read_worker_cpu_times,
     _read_worker_memory,
     remote_execution_rpc_timeout_s,
     remote_manager,
@@ -92,31 +93,6 @@ _CPU_SAMPLE: tuple[int, int] | None = None
 _NETWORK_SAMPLE: tuple[float, int, int] | None = None
 
 
-def _read_linux_cpu_times() -> tuple[int, int] | None:
-    try:
-        fields = Path("/proc/stat").read_text(encoding="utf-8").splitlines()[0].split()
-        values = [int(value) for value in fields[1:]]
-    except (OSError, ValueError, IndexError):
-        return None
-    if len(values) < 4:
-        return None
-    idle = values[3] + (values[4] if len(values) > 4 else 0)
-    return sum(values), idle
-
-
-def _read_linux_memory() -> tuple[int, int] | None:
-    try:
-        rows = {}
-        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
-            key, value = line.split(":", 1)
-            rows[key] = int(value.strip().split()[0]) * 1024
-        total = rows["MemTotal"]
-        available = rows.get("MemAvailable", rows.get("MemFree", 0))
-    except (OSError, ValueError, KeyError):
-        return None
-    return total, max(0, total - available)
-
-
 def _read_linux_network() -> tuple[int, int] | None:
     try:
         lines = Path("/proc/net/dev").read_text(encoding="utf-8").splitlines()[2:]
@@ -148,7 +124,7 @@ def _local_system_snapshot() -> dict[str, Any]:
     with contextlib.suppress(OSError, AttributeError):
         load_1m = round(float(os.getloadavg()[0]), 2)
 
-    cpu_times = _read_linux_cpu_times()
+    cpu_times = _read_worker_cpu_times()
     cpu_percent: float | None = None
     network = _read_linux_network()
     network_rx_bps = network_tx_bps = 0.0
@@ -175,7 +151,7 @@ def _local_system_snapshot() -> dict[str, Any]:
     if cpu_percent is None and load_1m is not None:
         cpu_percent = round(max(0.0, min(100.0, load_1m * 100.0 / cpu_count)), 1)
 
-    memory = _read_linux_memory() if sys.platform.startswith("linux") else _read_worker_memory()
+    memory = _read_worker_memory()
     memory_total = memory[0] if memory else None
     memory_used = memory[1] if memory else None
     try:
@@ -1470,7 +1446,6 @@ async def api_terminal_action(request: Request) -> Response:
         return _json_ok(result)
     except Exception as exc:
         return _json_error(exc)
-
 
 
 async def api_logical_sessions(request: Request) -> Response:

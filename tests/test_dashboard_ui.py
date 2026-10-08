@@ -38,8 +38,6 @@ def test_linux_dashboard_readers_parse_proc_files(monkeypatch):
 
     monkeypatch.setattr(ui.Path, "read_text", read_text)
 
-    assert ui._read_linux_cpu_times() == (340, 210)
-    assert ui._read_linux_memory() == (1_024_000, 614_400)
     assert ui._read_linux_network() == (1000, 2000)
     assert ui._percent(25, 100) == 25.0
     assert ui._percent(1, 0) is None
@@ -52,8 +50,8 @@ def test_local_dashboard_snapshot_calculates_rates_and_percentages(tmp_path, mon
     cpu = iter([(1000, 200), (1200, 250)])
     network = iter([(100, 50), (300, 150)])
     monotonic = iter([10.0, 12.0])
-    monkeypatch.setattr(ui, "_read_linux_cpu_times", lambda: next(cpu))
-    monkeypatch.setattr(ui, "_read_linux_memory", lambda: (1000, 500))
+    monkeypatch.setattr(ui, "_read_worker_cpu_times", lambda: next(cpu))
+    monkeypatch.setattr(ui, "_read_worker_memory", lambda: (1000, 500))
     monkeypatch.setattr(ui, "_read_linux_network", lambda: next(network))
     monkeypatch.setattr(ui.os, "getloadavg", lambda: (2.0, 1.0, 0.5), raising=False)
     monkeypatch.setattr(ui.os, "cpu_count", lambda: 4)
@@ -79,7 +77,7 @@ def test_local_dashboard_snapshot_uses_cross_platform_memory_reader(tmp_path, mo
     monkeypatch.setattr(ui.sys, "platform", "darwin")
     monkeypatch.setattr(ui, "_CPU_SAMPLE", None)
     monkeypatch.setattr(ui, "_NETWORK_SAMPLE", None)
-    monkeypatch.setattr(ui, "_read_linux_cpu_times", lambda: None)
+    monkeypatch.setattr(ui, "_read_worker_cpu_times", lambda: None)
     monkeypatch.setattr(ui, "_read_linux_network", lambda: None)
     monkeypatch.setattr(ui, "_read_worker_memory", lambda: (1_000, 250))
     monkeypatch.setattr(ui.os, "getloadavg", lambda: (0.0, 0.0, 0.0), raising=False)

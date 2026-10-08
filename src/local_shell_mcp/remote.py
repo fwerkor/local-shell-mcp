@@ -112,11 +112,6 @@ REMOTE_WORKER_POLL_PROTOCOL_VERSION = REMOTE_WORKER_RESOURCE_PROTOCOL_VERSION
 _WORKER_CONNECT_TIMEOUT_S = 10.0
 _WORKER_POLL_TIMEOUT_GRACE_S = 10.0
 _WORKER_TRANSFER_LEASE_REFRESH_INTERVAL_S = 60.0
-# The remote worker is designed to start on machines that only have Python, curl,
-# and tar. Keep this empty unless a dependency is pure Python and imported on the
-# worker startup path. Tool-specific dependencies such as Playwright should be
-# installed by the tool command on the remote machine, not vendored from the
-# controller's Python ABI.
 REMOTE_WORKER_REGISTRY_FILE_NAME = "remote-workers.json"
 REMOTE_WORKER_REGISTRY_BACKUP_FILE_NAME = "remote-workers.json.bak"
 REMOTE_WORKER_REGISTRY_GENERATION_FILE_NAME = "remote-workers.generation"
@@ -185,9 +180,7 @@ REMOTE_NON_CANCELLABLE_WORKER_TOOLS = frozenset(
         "transfer_gui_temp_delete",
     }
 )
-REMOTE_RESET_PRESERVED_WORKER_TOOLS = REMOTE_NON_CANCELLABLE_WORKER_TOOLS | frozenset(
-    {"shell_start", "job_start", "job_retry"}
-)
+REMOTE_RESET_PRESERVED_WORKER_TOOLS = REMOTE_NON_CANCELLABLE_WORKER_TOOLS
 
 
 def _worker_job_lane(tool: str, lane: str | None = None) -> str:

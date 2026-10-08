@@ -371,18 +371,6 @@ def _controller_max_timeout(values: dict[str, str]) -> float:
     return max_timeout_s
 
 
-def _controller_defaults(values: dict[str, str]) -> _ControllerDefaults:
-    host, port = _controller_endpoint_defaults(values)
-    max_timeout_s = _controller_max_timeout(values)
-    auth_mode = values.get("LOCAL_SHELL_MCP_AUTH_MODE", "oauth").strip().lower() or "oauth"
-    return _ControllerDefaults(
-        host=host,
-        port=port,
-        max_timeout_s=max_timeout_s,
-        auth_mode=auth_mode,
-    )
-
-
 def _loopback_http_url(host: str, port: int, path: str) -> str:
     host = str(host or "").strip()
     candidate = host.strip("[]").split("%", 1)[0]

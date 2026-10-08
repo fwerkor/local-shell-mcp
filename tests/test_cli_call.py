@@ -471,10 +471,7 @@ def test_dotenv_and_cli_environment_are_read_only(tmp_path, monkeypatch):
     assert values["LOCAL_SHELL_MCP_PORT"] == "10001"
     assert values["LOCAL_SHELL_MCP_UI_LOCAL_TOKEN"].startswith("dotenv-token-")
 
-    settings = cli_call._controller_defaults(values)
-    assert settings.host == "127.0.0.2"
-    assert settings.port == 10001
-    assert settings.auth_mode == "oauth"
+    assert cli_call._controller_endpoint_defaults(values) == ("127.0.0.2", 10001)
     assert not (tmp_path / "workspace").exists()
 
 
@@ -608,13 +605,13 @@ def test_run_call_cli_uses_yaml_controller_defaults(tmp_path, monkeypatch, capsy
 
 def test_controller_defaults_reject_invalid_values():
     with pytest.raises(ValueError, match="integer"):
-        cli_call._controller_defaults({"LOCAL_SHELL_MCP_PORT": "bad"})
+        cli_call._controller_endpoint_defaults({"LOCAL_SHELL_MCP_PORT": "bad"})
     with pytest.raises(ValueError, match="between 1 and 65535"):
-        cli_call._controller_defaults({"LOCAL_SHELL_MCP_PORT": "70000"})
+        cli_call._controller_endpoint_defaults({"LOCAL_SHELL_MCP_PORT": "70000"})
     with pytest.raises(ValueError, match="number"):
-        cli_call._controller_defaults({"LOCAL_SHELL_MCP_MAX_TIMEOUT_S": "bad"})
+        cli_call._controller_max_timeout({"LOCAL_SHELL_MCP_MAX_TIMEOUT_S": "bad"})
     with pytest.raises(ValueError, match="greater than zero"):
-        cli_call._controller_defaults({"LOCAL_SHELL_MCP_MAX_TIMEOUT_S": "0"})
+        cli_call._controller_max_timeout({"LOCAL_SHELL_MCP_MAX_TIMEOUT_S": "0"})
 
 
 def test_loopback_http_client_factory_disables_redirects_and_environment_proxies(monkeypatch):

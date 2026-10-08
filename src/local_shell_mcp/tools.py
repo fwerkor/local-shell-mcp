@@ -572,20 +572,6 @@ def _oauth_meta(scopes: list[str]) -> dict[str, Any]:
     return _security_meta([_oauth_security_scheme(scopes)])
 
 
-def _current_principal_allows(scope: str) -> bool:
-    principal = current_principal()
-    if principal is None:
-        return True
-    if principal.claims.get("auth") in {
-        "none",
-        "native-tui",
-        "local-cli",
-        "localhost-bypass",
-    }:
-        return True
-    return scope in principal_scopes(principal)
-
-
 def _live_workspace_api_base() -> str:
     settings = get_settings()
     if settings.public_base_url:
@@ -3457,23 +3443,6 @@ async def _gui_frame_data(
 _REMOTE_GUI_STATE_REFRESH_INTERVAL_S = 10.0
 
 
-async def _refresh_remote_gui_state_lease(
-    machine: str,
-    window_id: str,
-    state_id: str,
-) -> None:
-    while True:
-        await asyncio.sleep(_REMOTE_GUI_STATE_REFRESH_INTERVAL_S)
-        refreshed = await _remote_worker_data(
-            machine,
-            "gui_state_refresh",
-            {"window_id": window_id, "state_id": state_id},
-            30,
-        )
-        if not isinstance(refreshed, dict):
-            raise RuntimeError("Remote gui_state_refresh returned invalid data")
-
-
 async def _refresh_remote_gui_frame_lease(
     machine: str,
     window_id: str,
@@ -3504,22 +3473,6 @@ async def _refresh_remote_gui_frame_once(
     )
     if not isinstance(refreshed, dict):
         raise RuntimeError("Remote gui_frame_refresh returned invalid data")
-    return refreshed
-
-
-async def _refresh_remote_gui_state_once(
-    machine: str,
-    window_id: str,
-    state_id: str,
-) -> dict[str, Any]:
-    refreshed = await _remote_worker_data(
-        machine,
-        "gui_state_refresh",
-        {"window_id": window_id, "state_id": state_id},
-        30,
-    )
-    if not isinstance(refreshed, dict):
-        raise RuntimeError("Remote gui_state_refresh returned invalid data")
     return refreshed
 
 

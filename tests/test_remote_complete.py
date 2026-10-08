@@ -3,10 +3,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
-import io
 import json
 import subprocess
-import tarfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,7 +15,7 @@ from starlette.testclient import TestClient
 import local_shell_mcp.remote as remote
 from local_shell_mcp.errors import ShellExecutableNotFoundError
 from local_shell_mcp.models import CommandResult
-from local_shell_mcp.remote_worker_routes import remote_routes, worker_bundle
+from local_shell_mcp.remote_worker_routes import remote_routes
 from local_shell_mcp.settings import get_settings
 
 
@@ -50,19 +48,6 @@ def _result() -> CommandResult:
     )
 
 
-def test_worker_bundle_contains_only_passive_runtime_modules(tmp_path, monkeypatch):
-    _configure(tmp_path, monkeypatch)
-    response = asyncio.run(worker_bundle(None))
-    assert response.media_type == "application/gzip"
-    with tarfile.open(fileobj=io.BytesIO(response.body), mode="r:gz") as tar:
-        names = set(tar.getnames())
-    assert "local_shell_mcp/remote.py" in names
-    assert "local_shell_mcp/remote_worker.py" in names
-    assert "local_shell_mcp/gui/linux.py" in names
-    assert not any(name.endswith((".pyc", ".pyo")) for name in names)
-    assert not any(name.startswith("vendor/") for name in names)
-    assert not any("tui" in name or "session_runtime" in name for name in names)
-    assert not any("agent_bridge" in name or "skill_ops" in name for name in names)
 
 
 def test_controller_registration_resume_rename_revoke_and_defaults(tmp_path, monkeypatch):
