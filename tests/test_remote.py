@@ -996,8 +996,7 @@ def test_reexec_updated_worker_runtime_prefers_installed_bundle(tmp_path, monkey
     remote._reexec_updated_worker_runtime()  # noqa: SLF001
 
     pythonpath = remote.os.environ["PYTHONPATH"].split(remote.os.pathsep)
-    assert pythonpath[:2] == [str(runtime), str(runtime / "vendor")]
-    assert pythonpath[2:] == ["/old/runtime", "/other"]
+    assert pythonpath == [str(runtime), "/old/runtime", "/other"]
     assert calls == [
         (
             sys.executable,

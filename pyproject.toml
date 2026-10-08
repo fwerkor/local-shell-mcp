@@ -103,7 +103,14 @@ omit = [
   "*/local_shell_mcp/gui/linux_portal.py",
   "*/local_shell_mcp/gui/macos.py",
   "*/local_shell_mcp/gui/windows.py",
+  # The bundled compatibility shim has different contents from controller main.py.
+  "*/runtime/local_shell_mcp/main.py",
 ]
+
+[tool.coverage.paths]
+# Process E2E executes copies of the same source inside an extracted worker
+# bundle. Combine their coverage with the original modules, not as new files.
+source = ["src/local_shell_mcp", "*/runtime/local_shell_mcp"]
 
 [tool.coverage.report]
 fail_under = 95
