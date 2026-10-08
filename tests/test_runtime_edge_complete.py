@@ -109,7 +109,7 @@ def test_job_runner_arguments_status_and_operations(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     paths = jobs._attempt_paths("job", 2)
     argv = jobs._runner_argv(paths, tmp_path)
-    assert argv[1:4] == ["-m", "local_shell_mcp.main", "job-runner"]
+    assert argv[1:4] == ["-m", "local_shell_mcp.remote_worker", "job-runner"]
     monkeypatch.setattr(jobs.sys, "frozen", True, raising=False)
     assert jobs._runner_argv(paths, tmp_path)[1] == "job-runner"
 

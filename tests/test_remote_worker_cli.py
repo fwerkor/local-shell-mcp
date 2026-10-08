@@ -5,11 +5,9 @@ import json
 import os
 import subprocess
 import sys
-from contextlib import nullcontext
 
 import pytest
 
-from local_shell_mcp import audit as audit_module
 from local_shell_mcp import remote_worker
 from local_shell_mcp import remote_worker_cli as cli
 from local_shell_mcp import remote_worker_service as service
@@ -50,6 +48,17 @@ def test_worker_entrypoint_only_dispatches_worker_management(monkeypatch, capsys
         remote_worker.main(["worker", "call", "run_shell", "--direct"])
     assert exc.value.code == 2
     assert "invalid choice: 'call'" in capsys.readouterr().err
+
+    with pytest.raises(SystemExit) as help_exit:
+        remote_worker.main(["worker", "--help"])
+    assert help_exit.value.code == 0
+    usage = capsys.readouterr().out
+    assert "status" in usage and "update" in usage
+    assert "--server" not in usage
+    with pytest.raises(SystemExit) as help_exit:
+        remote_worker.main(["--help"])
+    assert help_exit.value.code == 0
+    assert "status" in capsys.readouterr().out
 
 
 def test_worker_entrypoint_preserves_required_subprocess_helpers(monkeypatch, tmp_path):
@@ -447,27 +456,8 @@ async def test_run_enrolled_worker_rejects_missing_identity(tmp_path, monkeypatc
         await cli.run_enrolled_worker()
 
 
-def test_legacy_worker_cli_suppresses_audit_archives(monkeypatch):
-    monkeypatch.setattr(service, "worker_run_lock", nullcontext)
-    observed = []
-
-    async def fake_locked(server, invite, name=None, workdir=None, persist=False):
-        observed.append(audit_module._AUDIT_ARCHIVE_ENABLED.get())  # noqa: SLF001
-
-    monkeypatch.setattr(cli.remote, "_run_worker_locked", fake_locked)
-    cli.remote.run_worker_cli(["--server", "https://example.test", "--invite", "x"])
-
-    assert observed == [False]
-    assert audit_module._AUDIT_ARCHIVE_ENABLED.get() is True  # noqa: SLF001
-
-
-def test_cli_legacy_and_lifecycle_dispatch(tmp_path, monkeypatch, capsys):
+def test_cli_lifecycle_dispatch(tmp_path, monkeypatch, capsys):
     _configure(tmp_path, monkeypatch)
-    legacy = []
-    monkeypatch.setattr(cli.remote, "run_worker_cli", lambda argv: legacy.append(argv))
-    cli.run_worker_cli(["--server", "https://example.test", "--invite", "x"])
-    assert legacy
-
     monkeypatch.setattr(cli, "service_status", lambda: {"running": True})
     cli.run_worker_cli(["status"])
     assert '"running": true' in capsys.readouterr().out
@@ -510,10 +500,11 @@ def test_cli_update_restarts_running_service(tmp_path, monkeypatch, capsys):
         "refresh_installed_service_definition",
         lambda: calls.append("refresh"),
     )
+    monkeypatch.setattr(cli, "install_launcher", lambda: calls.append("launcher"))
     monkeypatch.setattr(cli, "stop_service", lambda: calls.append("stop"))
     monkeypatch.setattr(cli, "start_service", lambda: calls.append("start"))
     cli.run_worker_cli(["update", "--force"])
-    assert calls == ["refresh", "stop", "start"]
+    assert calls == ["launcher", "refresh", "stop", "start"]
     assert '"force": true' in capsys.readouterr().out
 
 
@@ -532,11 +523,16 @@ def test_cli_update_refreshes_stopped_service_definition(tmp_path, monkeypatch):
         "refresh_installed_service_definition",
         lambda: calls.append("refresh"),
     )
+    monkeypatch.setattr(cli, "install_launcher", lambda: calls.append("launcher"))
     monkeypatch.setattr(cli, "stop_service", lambda: pytest.fail("stopped inactive service"))
     monkeypatch.setattr(cli, "start_service", lambda: pytest.fail("started inactive service"))
 
     cli.run_worker_cli(["update"])
-    assert calls == ["refresh"]
+    assert calls == ["launcher", "refresh"]
+    calls.clear()
+    monkeypatch.setattr(cli, "install_or_update_runtime", lambda server, force=False: {"updated": False})
+    cli.run_worker_cli(["update"])
+    assert calls == ["launcher"]
 
 
 def test_cli_errors_are_clean(monkeypatch, capsys):
