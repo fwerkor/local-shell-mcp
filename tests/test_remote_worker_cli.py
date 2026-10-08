@@ -52,6 +52,25 @@ def test_worker_entrypoint_only_dispatches_worker_management(monkeypatch, capsys
     assert "invalid choice: 'call'" in capsys.readouterr().err
 
 
+def test_worker_entrypoint_preserves_required_subprocess_helpers(monkeypatch, tmp_path):
+    from local_shell_mcp import jobs
+    from local_shell_mcp.gui import windows
+
+    calls = []
+    monkeypatch.setattr(jobs, "run_job_runner_cli", lambda args: calls.append(("job", args)))
+    monkeypatch.setattr(
+        windows,
+        "_capture_window_image_native",
+        lambda hwnd, path: calls.append(("capture", hwnd, path)),
+    )
+    destination = tmp_path / "window.png"
+    remote_worker.main(["job-runner", "--help"])
+    remote_worker.main(["_gui-capture-window", "123", str(destination)])
+    assert calls == [("job", ["--help"]), ("capture", 123, destination)]
+    with pytest.raises(SystemExit, match="requires HWND and destination"):
+        remote_worker.main(["_gui-capture-window", "123"])
+
+
 def _configure(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
@@ -590,8 +609,7 @@ def test_worker_run_reexec_uses_token_free_argv(monkeypatch):
     assert cli._worker_run_exec_argv() == [  # noqa: SLF001
         cli.sys.executable,
         "-m",
-        "local_shell_mcp.main",
-        "worker",
+        "local_shell_mcp.remote_worker",
         "run",
     ]
     monkeypatch.setattr(cli, "is_frozen_app", lambda: True)

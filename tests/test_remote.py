@@ -1017,7 +1017,7 @@ def test_reexec_updated_worker_runtime_prefers_installed_bundle(tmp_path, monkey
     monkeypatch.setattr(
         remote_worker_cli,
         "_worker_run_exec_argv",
-        lambda: [sys.executable, "-m", "local_shell_mcp.main", "worker", "run"],
+        lambda: [sys.executable, "-m", "local_shell_mcp.remote_worker", "run"],
     )
     monkeypatch.setattr(remote_worker_service, "_current_worker_is_managed", lambda: False)
     calls = []
@@ -1031,7 +1031,7 @@ def test_reexec_updated_worker_runtime_prefers_installed_bundle(tmp_path, monkey
     assert calls == [
         (
             sys.executable,
-            [sys.executable, "-m", "local_shell_mcp.main", "worker", "run"],
+            [sys.executable, "-m", "local_shell_mcp.remote_worker", "run"],
         )
     ]
 
@@ -1050,7 +1050,7 @@ def test_reexec_updated_managed_windows_worker_uses_service_launcher(tmp_path, m
     monkeypatch.setattr(
         remote_worker_cli,
         "_worker_run_exec_argv",
-        lambda: [sys.executable, "-m", "local_shell_mcp.main", "worker", "run"],
+        lambda: [sys.executable, "-m", "local_shell_mcp.remote_worker", "run"],
     )
     monkeypatch.setattr(remote_worker_service, "_current_worker_is_managed", lambda: True)
     monkeypatch.setattr(remote_worker_service, "_windows_pythonw_executable", lambda: pythonw)

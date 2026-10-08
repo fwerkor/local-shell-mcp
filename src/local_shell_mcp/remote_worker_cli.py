@@ -157,7 +157,7 @@ async def run_enrolled_worker() -> None:
 def _worker_run_exec_argv() -> list[str]:
     if is_frozen_app():
         return [sys.executable, "worker", "run"]
-    return [sys.executable, "-m", "local_shell_mcp.main", "worker", "run"]
+    return [sys.executable, "-m", "local_shell_mcp.remote_worker", "run"]
 
 
 def _reexec_worker_run() -> None:

@@ -558,7 +558,7 @@ def _runner_argv(paths: dict[str, Path], cwd: Path) -> list[str]:
     ]
     if getattr(sys, "frozen", False):
         return [sys.executable, *arguments]
-    return [sys.executable, "-m", "local_shell_mcp.main", *arguments]
+    return [sys.executable, "-m", "local_shell_mcp.remote_worker", *arguments]
 
 
 def _powershell_quote(value: str) -> str:
