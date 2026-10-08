@@ -1,6 +1,7 @@
 """Opt-in conversion of timed-out commands to tracked, durable jobs."""
 
 import asyncio
+import json
 import os
 import time
 from pathlib import Path
@@ -147,17 +148,85 @@ async def test_live_log_cap_is_reported_as_truncated(isolated_job_workspace, mon
     log.write_bytes(b"x" * 64)
 
     async def fake_start(command, cwd):
+        with jobs._store_transaction() as store:
+            store["jobs"].append(
+                {
+                    "job_id": "job_test",
+                    "status": "running",
+                    "command": command,
+                    "cwd": cwd,
+                    "created_at": time.time(),
+                    "log_path": str(log),
+                    "status_path": str(log.with_suffix(".status")),
+                }
+            )
         return {"job_id": "job_test"}
 
-    async def fake_tail(job_id, lines=0):
-        return {"job": {"status": "running", "exit_code": None}, "output": ""}
-
     monkeypatch.setattr(jobs, "start_job", fake_start)
-    monkeypatch.setattr(jobs, "tail_job", fake_tail)
     monkeypatch.setattr(jobs, "_attempt_paths", lambda _id, _attempt: {"log": log, "status": log.with_suffix(".status")})
     result = await run_job_with_timeout("echo x", ".", 1, 1000)
     assert result["timed_out"] is True
     assert result["truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_completed_output_is_captured_before_zero_retention_pruning(
+    isolated_job_workspace, monkeypatch
+):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_JOBS", "0")
+    get_settings.cache_clear()
+    log = isolated_job_workspace / "result.log"
+    log.write_text("completed\n")
+    status = isolated_job_workspace / "result.status"
+    status.write_text(json.dumps({"completed_at": time.time(), "exit_code": 0}))
+
+    async def fake_start(command, cwd):
+        with jobs._store_transaction() as store:
+            store["jobs"].append(
+                {
+                    "job_id": "job_test",
+                    "status": "running",
+                    "command": command,
+                    "cwd": cwd,
+                    "created_at": time.time(),
+                    "log_path": str(log),
+                    "status_path": str(status),
+                }
+            )
+        return {"job_id": "job_test"}
+
+    monkeypatch.setattr(jobs, "start_job", fake_start)
+    monkeypatch.setattr(jobs, "_attempt_paths", lambda _id, _attempt: {"log": log, "status": status})
+    result = await run_job_with_timeout("echo completed", ".", 1)
+    assert result["ok"] is True
+    assert result["stdout"] == "completed\n"
+    assert result["exit_code"] == 0
+    assert (await jobs.list_jobs())["jobs"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("runner", ["local", "worker"])
+async def test_python_invalid_calls_leave_no_durable_script(runner, isolated_job_workspace):
+    entrypoint = tools._run_python if runner == "local" else remote._run_python
+    with pytest.raises(ValueError, match="timeout_s"):
+        await entrypoint("print('x')", ".", 121, True)
+    with pytest.raises(Exception, match="missing|not found|exist"):
+        await entrypoint("print('x')", "nonexistent-subdirectory", 3, True)
+    assert not list((get_settings().state_dir / "jobs" / "scripts").glob("*.py"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("runner", ["local", "worker"])
+async def test_python_failed_start_cleans_unreferenced_script(runner, isolated_job_workspace, monkeypatch):
+    entrypoint = tools._run_python if runner == "local" else remote._run_python
+
+    async def reject_start(*args, **kwargs):
+        raise PermissionError("blocked start")
+
+    monkeypatch.setattr(jobs, "start_job", reject_start)
+    with pytest.raises(PermissionError, match="blocked start"):
+        await entrypoint("print('x')", ".", 3, True)
+    assert not list((get_settings().state_dir / "jobs" / "scripts").glob("*.py"))
 
 
 def test_opted_in_local_command_is_not_cancelled_by_tool_watchdog():

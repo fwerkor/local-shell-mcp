@@ -55,6 +55,7 @@ from .fs_ops import (
 )
 from .jobs import (
     JOB_LIST_DEFAULT_LIMIT,
+    discard_unreferenced_python_script,
     list_jobs,
     retry_job,
     run_job_with_timeout,
@@ -2002,6 +2003,8 @@ async def _run_python(
 ) -> dict[str, Any]:
     _assert_worker_text_input_size("Python script", code)
     if persist_on_timeout:
+        public_run_shell_timeout(timeout_s)
+        resolve_path(cwd, must_exist=True)
         script = await asyncio.to_thread(write_durable_python_script, code)
     else:
         await asyncio.to_thread(prune_temp_dir)
@@ -2010,7 +2013,12 @@ async def _run_python(
         await asyncio.to_thread(script.write_text, code, encoding="utf-8")
     command = f"{quote_shell_executable(get_settings().python_bin)} {quote_shell_argument(str(script))}"
     if persist_on_timeout:
-        result = await run_job_with_timeout(command, cwd, timeout_s, 1_000_000, script_path=script)
+        try:
+            result = await run_job_with_timeout(command, cwd, timeout_s, 1_000_000, script_path=script)
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(discard_unreferenced_python_script, script)
+            raise
     else:
         result = (
             await run_shell(

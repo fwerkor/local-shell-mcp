@@ -88,6 +88,16 @@ def write_durable_python_script(code: str) -> Path:
     return script
 
 
+def discard_unreferenced_python_script(script: Path) -> None:
+    """Clean up a script when startup failed before recording its job."""
+    if script.parent.resolve(strict=False) != (_job_runtime_dir() / "scripts").resolve(strict=False):
+        return
+    with _store_transaction() as store:
+        referenced = any(job.get("script_path") == str(script) for job in store.get("jobs", []))
+    if not referenced:
+        script.unlink(missing_ok=True)
+
+
 def _managed_deferred_update_dir() -> Path:
     return get_settings().state_dir / "jobs" / "deferred"
 
@@ -1470,23 +1480,23 @@ async def run_job_with_timeout(
             break
         await asyncio.sleep(min(0.2, remaining))
 
-    snapshot = await tail_job(job_id, lines=0)
-    current = snapshot["job"]
-    finished = current.get("status") in TERMINAL_STATUSES
-    # tail_job may fall back to terminal screen content before the first log
-    # write; only return the actual persisted command log.
     log_path = _attempt_paths(job_id, 1)["log"]
-    output = (
-        str(snapshot.get("output") or "")
-        if finished
-        else _read_log_tail(str(log_path), lines=0)
-    )
+    # Capture the terminal status and log while holding the store lock: once
+    # released, max_jobs=0 may prune the completed job and its attempt files.
+    with _store_transaction() as store:
+        stored_job = _find_job(store, job_id)
+        status_payload = _read_status(stored_job)
+        if status_payload is not None:
+            _apply_status_payload(stored_job, status_payload, _utc())
+        current = _public_job(stored_job)
+        output = _read_log_tail(str(log_path), lines=0)
+        try:
+            log_at_cap = log_path.stat().st_size >= max(1, get_settings().max_job_log_bytes)
+        except OSError:
+            log_at_cap = False
+    finished = current.get("status") in TERMINAL_STATUSES
     output_bytes = output.encode("utf-8")
-    try:
-        log_at_cap = not finished and log_path.stat().st_size >= max(1, get_settings().max_job_log_bytes)
-    except OSError:
-        log_at_cap = False
-    truncated = bool(current.get("log_truncated")) or log_at_cap or len(output_bytes) > output_limit
+    truncated = bool(current.get("log_truncated")) or (not finished and log_at_cap) or len(output_bytes) > output_limit
     if len(output_bytes) > output_limit:
         output = output_bytes[-output_limit:].decode("utf-8", errors="replace")
     # The job runner combines both streams into its persistent log.

@@ -61,6 +61,7 @@ from .image_ops import (
 from .jobs import (
     JOB_LIST_DEFAULT_LIMIT,
     ManagedJobContext,
+    discard_unreferenced_python_script,
     list_jobs,
     register_managed_job_handler,
     retry_job,
@@ -393,6 +394,8 @@ async def _run_python(
 ) -> dict:
     _assert_text_input_size("Python script", code)
     if persist_on_timeout:
+        public_run_shell_timeout(timeout_s)
+        resolve_path(cwd, must_exist=True)
         path = await asyncio.to_thread(write_durable_python_script, code)
     else:
         await asyncio.to_thread(prune_temp_dir)
@@ -402,7 +405,12 @@ async def _run_python(
     python = quote_shell_executable(get_settings().python_bin)
     command = f"{python} {quote_shell_argument(str(path))}"
     if persist_on_timeout:
-        result = await run_job_with_timeout(command, cwd, timeout_s, 1_000_000, script_path=path)
+        try:
+            result = await run_job_with_timeout(command, cwd, timeout_s, 1_000_000, script_path=path)
+        except BaseException:
+            with suppress(Exception):
+                await asyncio.to_thread(discard_unreferenced_python_script, path)
+            raise
     else:
         result = (
             await run_shell(
