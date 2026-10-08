@@ -6,9 +6,11 @@ import platform
 import socket
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 from contextlib import suppress
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -17,7 +19,7 @@ from starlette.applications import Starlette
 
 import local_shell_mcp.remote as remote
 import local_shell_mcp.tools as tools
-from local_shell_mcp.remote_worker_routes import remote_routes
+from local_shell_mcp.remote_worker_routes import remote_routes, worker_bundle_bytes
 from local_shell_mcp.settings import get_settings
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -79,6 +81,13 @@ def _worker_environment(worker_root: Path) -> dict[str, str]:
 def _start_worker(base_url: str, invite: str, worker_root: Path) -> subprocess.Popen[str]:
     workspace = worker_root / "workspace"
     workspace.mkdir(parents=True, exist_ok=True)
+    runtime = worker_root / "runtime"
+    if not runtime.exists():
+        runtime.mkdir()
+        with tarfile.open(fileobj=BytesIO(worker_bundle_bytes()), mode="r:gz") as bundle:
+            bundle.extractall(runtime, filter="data")
+    env = _worker_environment(worker_root)
+    env["PYTHONPATH"] = str(runtime) + os.pathsep + env["PYTHONPATH"]
     return subprocess.Popen(  # noqa: S603
         [
             sys.executable,
@@ -94,8 +103,8 @@ def _start_worker(base_url: str, invite: str, worker_root: Path) -> subprocess.P
             "--workdir",
             str(workspace),
         ],
-        cwd=ROOT,
-        env=_worker_environment(worker_root),
+        cwd=worker_root,
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

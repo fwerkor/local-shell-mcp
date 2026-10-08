@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
+<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
 # Tham chiếu tools
 
 Page này được xây từ MCP tool schemas thực tế. Chạy `python scripts/generate-tools-reference.py` sau khi thay đổi public tool surface để cập nhật English reference.
@@ -149,6 +149,8 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 Chạy một non-interactive shell command local hoặc trên remote machine. Dùng cho build, test, package-manager, Git và inspection commands cần hoàn thành nhanh. Với process long-running, interactive hoặc streaming, dùng `shell_start` hoặc `job_start`. Optional purpose/explanation fields cho phép nêu lý do chạy command.
 
+Với `persist_on_timeout=true` (mặc định false), cùng một tác vụ tiếp tục chạy sau khi hết thời gian và trả về `job_id`. Dùng `job_tail` để xem; stdout và stderr được gộp.
+
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `command` | `string` | required |  |
@@ -158,6 +160,7 @@ Chạy một non-interactive shell command local hoặc trên remote machine. D�
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `persist_on_timeout` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -168,6 +171,8 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 
 Viết và chạy short Python script local hoặc trên remote machine.
 
+Với `persist_on_timeout=true` (mặc định false), cùng một tác vụ tiếp tục chạy sau khi hết thời gian và trả về `job_id`. Dùng `job_tail` để xem; stdout và stderr được gộp.
+
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `code` | `string` | required |  |
@@ -176,6 +181,7 @@ Viết và chạy short Python script local hoặc trên remote machine.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `persist_on_timeout` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -194,6 +200,7 @@ Khởi động persistent interactive shell local hoặc trên remote machine.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -210,6 +217,7 @@ Gửi input tới persistent local/remote shell session.
 | `input_text` | `string` | required |  |
 | `enter` | `boolean` | `true` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -239,6 +247,7 @@ Kết thúc persistent local/remote shell session.
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -270,6 +279,7 @@ Khởi động tracked long-running job local hoặc trên remote machine.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -330,6 +340,7 @@ Khởi động lại stopped/exited tracked local/remote job.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

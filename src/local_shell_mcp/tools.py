@@ -61,13 +61,16 @@ from .image_ops import (
 from .jobs import (
     JOB_LIST_DEFAULT_LIMIT,
     ManagedJobContext,
+    discard_unreferenced_python_script,
     list_jobs,
     register_managed_job_handler,
     retry_job,
+    run_job_with_timeout,
     start_job,
     start_managed_job,
     stop_job,
     tail_job,
+    write_durable_python_script,
 )
 from .live_channel import (
     LIVE_RESOURCE_COMPAT_URIS,
@@ -386,20 +389,38 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict:
     return {**result.model_dump(), "patch_path": relative_display(patch_path)}
 
 
-async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict:
+async def _run_python(
+    code: str, cwd: str = ".", timeout_s: int = 60, persist_on_timeout: bool = False
+) -> dict:
     _assert_text_input_size("Python script", code)
-    await asyncio.to_thread(prune_temp_dir)
-    path = temp_dir() / f"script-{uuid.uuid4().hex}.py"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    await asyncio.to_thread(path.write_text, code, encoding="utf-8")
+    if persist_on_timeout:
+        public_run_shell_timeout(timeout_s)
+        resolve_path(cwd, must_exist=True)
+        path = await asyncio.to_thread(write_durable_python_script, code)
+    else:
+        await asyncio.to_thread(prune_temp_dir)
+        path = temp_dir() / f"script-{uuid.uuid4().hex}.py"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(path.write_text, code, encoding="utf-8")
     python = quote_shell_executable(get_settings().python_bin)
-    result = await run_shell(
-        f"{python} {quote_shell_argument(str(path))}",
-        cwd=cwd,
-        timeout_s=public_run_shell_timeout(timeout_s),
-        max_output_bytes=1_000_000,
-    )
-    return {**result.model_dump(), "script_path": relative_display(path)}
+    command = f"{python} {quote_shell_argument(str(path))}"
+    if persist_on_timeout:
+        try:
+            result = await run_job_with_timeout(command, cwd, timeout_s, 1_000_000, script_path=path)
+        except BaseException:
+            with suppress(Exception):
+                await asyncio.to_thread(discard_unreferenced_python_script, path)
+            raise
+    else:
+        result = (
+            await run_shell(
+                command,
+                cwd=cwd,
+                timeout_s=public_run_shell_timeout(timeout_s),
+                max_output_bytes=1_000_000,
+            )
+        ).model_dump()
+    return {**result, "script_path": relative_display(path)}
 
 
 SECRET_PATTERNS = {
@@ -496,6 +517,8 @@ REMOTE_MACHINE_ARGUMENTS = frozenset({"machine", "source_machine", "destination_
 def _public_tool_timeout_s(tool_name: str, arguments: dict[str, Any]) -> float | None:
     """Return a watchdog budget derived from the public tool and its execution limit."""
     if tool_name in NON_CANCELLABLE_TOOL_NAMES:
+        return None
+    if tool_name in {"run_shell", "run_python"} and arguments.get("persist_on_timeout") is True:
         return None
     if tool_name in {"run_shell", "run_python"}:
         try:
@@ -844,12 +867,13 @@ def _command_preflight_for_call(
         settings=settings,
         recent_activity=recent_activity,
     )
-    if tool_name in {"job_start", "shell_start"} and decision.action == "limit":
+    persistent_run = tool_name == "run_shell" and call_arguments.get("persist_on_timeout") is True
+    if (tool_name in {"job_start", "shell_start"} or persistent_run) and decision.action == "limit":
         return CommandPreflightDecision(
             action="block",
             reason_code="expensive_discovery_requires_bounded_tool",
             message=(
-                "Refusing unbounded recursive filesystem discovery in a long-running shell. "
+                "Refusing unbounded recursive filesystem discovery in a persistent job. "
                 "Use file_glob/file_grep/file_tree or add an explicit depth bound."
             ),
             cost_score=decision.cost_score,
@@ -3787,23 +3811,26 @@ def _register_command_tools(mcp: FastMCP, settings: Any) -> None:
         purpose: str | None = None,
         explanation: str | None = None,
         machine: str | None = None,
+        persist_on_timeout: bool = False,
     ) -> ToolResult:
-        """Run one non-interactive shell command locally or on a remote machine. Use for build, test, package-manager, Git, and inspection commands that should finish promptly. For long-running, interactive, or streaming processes, use shell_start or job_start. Optional purpose/explanation fields let agents state why the command is being run."""
+        """Run a shell command locally or remotely for builds, tests, package managers, and Git. For long-running, interactive, or streaming processes, use shell_start or job_start. Optional purpose/explanation fields state why it runs. With persist_on_timeout=true (default false), start one tracked job and wait up to timeout_s; if still running, return its job_id without rerunning the command. Persistent-job output combines stdout and stderr."""
         _audit_tool_purpose("run_shell", purpose, explanation)
         if machine:
             return await _remote_call(
                 settings,
                 machine,
-                "run_shell_tool",
+                "run_shell_persist_tool" if persist_on_timeout else "run_shell_tool",
                 {
                     "command": command,
                     "cwd": cwd,
                     "timeout_s": timeout_s,
                     "max_output_bytes": max_output_bytes,
                 },
-                execution_timeout_s=public_run_shell_timeout(timeout_s),
+                execution_timeout_s=public_run_shell_timeout(timeout_s) + (30 if persist_on_timeout else 0),
             )
         try:
+            if persist_on_timeout:
+                return _ok(await run_job_with_timeout(command, cwd, timeout_s, max_output_bytes))
             return _ok(
                 (await public_run_shell(command, cwd, timeout_s, max_output_bytes)).model_dump()
             )
@@ -3818,17 +3845,20 @@ def _register_command_tools(mcp: FastMCP, settings: Any) -> None:
         purpose: str | None = None,
         explanation: str | None = None,
         machine: str | None = None,
+        persist_on_timeout: bool = False,
     ) -> ToolResult:
-        """Write and run a short Python script locally or on a remote machine."""
+        """Write and run Python locally or remotely. persist_on_timeout=true (default false) keeps the same tracked job running and returns job_id when timeout_s expires; query it with job_tail/job_list. Persistent-job output combines stdout and stderr."""
         _audit_tool_purpose("run_python", purpose, explanation)
         if machine:
             return await _remote_call(
                 settings,
                 machine,
-                "run_python_tool",
+                "run_python_persist_tool" if persist_on_timeout else "run_python_tool",
                 {"code": code, "cwd": cwd, "timeout_s": public_run_shell_timeout(timeout_s)},
-                execution_timeout_s=public_run_shell_timeout(timeout_s),
+                execution_timeout_s=public_run_shell_timeout(timeout_s) + (30 if persist_on_timeout else 0),
             )
+        if persist_on_timeout:
+            return await _tool_call(_run_python, code, cwd, timeout_s, True)
         return await _tool_call(_run_python, code, cwd, timeout_s)
 
 

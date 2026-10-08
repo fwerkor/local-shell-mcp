@@ -49,7 +49,17 @@ from .fs_ops import (
     write_content,
     write_text,
 )
-from .jobs import JOB_LIST_DEFAULT_LIMIT, list_jobs, retry_job, start_job, stop_job, tail_job
+from .jobs import (
+    JOB_LIST_DEFAULT_LIMIT,
+    discard_unreferenced_python_script,
+    list_jobs,
+    retry_job,
+    run_job_with_timeout,
+    start_job,
+    stop_job,
+    tail_job,
+    write_durable_python_script,
+)
 from .models import ok_result as _ok
 from .patch_ops import git_apply_command, git_apply_prefix, normalize_patch_text
 from .peer_transfer import close_peer_receiver, open_peer_receiver
@@ -163,6 +173,8 @@ REMOTE_NON_CANCELLABLE_WORKER_TOOLS = frozenset(
         "job_start",
         "job_stop",
         "job_retry",
+        "run_shell_persist_tool",
+        "run_python_persist_tool",
         "transfer_gui_temp_stat",
         "transfer_gui_temp_put_url",
         "transfer_gui_temp_delete",
@@ -1829,19 +1841,37 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
     return {**result.model_dump(), "patch_path": relative_display(patch_path)}
 
 
-async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict[str, Any]:
+async def _run_python(
+    code: str, cwd: str = ".", timeout_s: int = 60, persist_on_timeout: bool = False
+) -> dict[str, Any]:
     _assert_worker_text_input_size("Python script", code)
-    await asyncio.to_thread(prune_temp_dir)
-    script = temp_dir() / f"remote-script-{uuid.uuid4().hex}.py"
-    script.parent.mkdir(parents=True, exist_ok=True)
-    await asyncio.to_thread(script.write_text, code, encoding="utf-8")
-    result = await run_shell(
-        f"{quote_shell_executable(get_settings().python_bin)} {quote_shell_argument(str(script))}",
-        cwd=cwd,
-        timeout_s=public_run_shell_timeout(timeout_s),
-        max_output_bytes=1_000_000,
-    )
-    return {**result.model_dump(), "script_path": relative_display(script)}
+    if persist_on_timeout:
+        public_run_shell_timeout(timeout_s)
+        resolve_path(cwd, must_exist=True)
+        script = await asyncio.to_thread(write_durable_python_script, code)
+    else:
+        await asyncio.to_thread(prune_temp_dir)
+        script = temp_dir() / f"remote-script-{uuid.uuid4().hex}.py"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(script.write_text, code, encoding="utf-8")
+    command = f"{quote_shell_executable(get_settings().python_bin)} {quote_shell_argument(str(script))}"
+    if persist_on_timeout:
+        try:
+            result = await run_job_with_timeout(command, cwd, timeout_s, 1_000_000, script_path=script)
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(discard_unreferenced_python_script, script)
+            raise
+    else:
+        result = (
+            await run_shell(
+                command,
+                cwd=cwd,
+                timeout_s=public_run_shell_timeout(timeout_s),
+                max_output_bytes=1_000_000,
+            )
+        ).model_dump()
+    return {**result, "script_path": relative_display(script)}
 
 
 WORKER_ENVIRONMENT_TOOLS = frozenset(
@@ -1853,6 +1883,8 @@ WORKER_COMMAND_TOOLS = frozenset(
     {
         "run_shell_tool",
         "run_python_tool",
+        "run_shell_persist_tool",
+        "run_python_persist_tool",
         "apply_patch",
     }
 )
@@ -2667,7 +2699,14 @@ async def _execute_environment_worker_tool(tool: str, args: dict[str, Any]) -> A
 
 
 async def _execute_command_worker_tool(tool: str, args: dict[str, Any]) -> Any:
+    if tool == "run_shell_persist_tool":
+        return await run_job_with_timeout(
+            args["command"], args.get("cwd", "."), args.get("timeout_s"),
+            args.get("max_output_bytes"),
+        )
     if tool == "run_shell_tool":
+        if args.get("persist_on_timeout"):
+            raise ValueError("persistent shell calls require run_shell_persist_tool")
         return (
             await public_run_shell(
                 args["command"],
@@ -2677,7 +2716,11 @@ async def _execute_command_worker_tool(tool: str, args: dict[str, Any]) -> Any:
             )
         ).model_dump()
 
+    if tool == "run_python_persist_tool":
+        return await _run_python(args["code"], args.get("cwd", "."), args.get("timeout_s", 60), True)
     if tool == "run_python_tool":
+        if args.get("persist_on_timeout"):
+            raise ValueError("persistent Python calls require run_python_persist_tool")
         return await _run_python(args["code"], args.get("cwd", "."), args.get("timeout_s", 60))
 
     if tool == "apply_patch":
@@ -3227,7 +3270,7 @@ def _reexec_updated_worker_runtime() -> None:
     from .remote_worker_state import worker_runtime_dir
 
     runtime = worker_runtime_dir()
-    preferred = [str(runtime), str(runtime / "vendor")]
+    preferred = [str(runtime)]
     current = [entry for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep) if entry]
     os.environ["PYTHONPATH"] = os.pathsep.join(
         preferred + [entry for entry in current if entry not in preferred]

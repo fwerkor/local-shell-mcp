@@ -15,26 +15,44 @@ from .settings import get_settings
 
 REMOTE_WORKER_MANIFEST_PATH = "/remote/worker-manifest.json"
 REMOTE_WORKER_PUBLIC_MANIFEST_URL = remote.REMOTE_WORKER_BUNDLE_PATH + "?manifest=1"
-# This archive is installed on untrusted workers, not on the controller.
-# Keep the common execution modules, but never distribute controller UI,
-# endpoint/authentication handlers, or its privileged CLI entry points.
-_CONTROLLER_ONLY_MODULES = {
-    "auth.py",
-    "cli_call.py",
-    "command_preflight.py",
-    "deprecated_tools.py",
-    "downloads.py",
-    "dynamic_mcp.py",
-    "http_app.py",
-    "human_ui.py",
-    "live_channel.py",
-    "live_channel_routes.py",
-    "main.py",
-    "oauth.py",
-    "remote_worker_routes.py",
-    "tools.py",
-    "tui_runtime.py",
-    "ui_security.py",
+# Only the worker runtime's executable dependencies belong in this archive.
+# New controller/TUI modules must never be bundled by default.
+_WORKER_PYTHON_FILES = {
+    "__init__.py",
+    "audit.py",
+    "audit_archive_codec.py",
+    "browser_sessions.py",
+    "conpty_ops.py",
+    "errors.py",
+    "fs_ops.py",
+    "jobs.py",
+    "models.py",
+    "patch_ops.py",
+    "peer_transfer.py",
+    "playwright_ops.py",
+    "process_utils.py",
+    "remote.py",
+    "remote_worker.py",
+    "remote_worker_cli.py",
+    "remote_worker_installer.py",
+    "remote_worker_service.py",
+    "remote_worker_state.py",
+    "search_ops.py",
+    "settings.py",
+    "shell_environment.py",
+    "shell_ops.py",
+    "state_store.py",
+    "tmux_helper.py",
+    "transfer_ops.py",
+    "version.py",
+    "gui/__init__.py",
+    "gui/base.py",
+    "gui/linux.py",
+    "gui/linux_atspi_helper.py",
+    "gui/linux_eis.py",
+    "gui/linux_portal.py",
+    "gui/macos.py",
+    "gui/windows.py",
 }
 # Previously installed workers re-execute `python -m local_shell_mcp.main
 # worker run` during their first upgrade. Supply only a passive shim so they
@@ -67,9 +85,7 @@ def worker_bundle_bytes() -> bytes:
             if not path.is_file():
                 continue
             relative = path.relative_to(package_root)
-            if len(relative.parts) == 1 and relative.name in _CONTROLLER_ONLY_MODULES:
-                continue
-            is_python = path.suffix == ".py"
+            is_python = relative.as_posix() in _WORKER_PYTHON_FILES
             is_helper = relative.parts[:1] == ("helpers",) and path.name in {
                 "tmux",
                 "tmux.LICENSE",
@@ -200,7 +216,7 @@ else
   mkdir -p "$RUNTIME_ROOT"
   tar -xzf "$TMPDIR/worker.tgz" -C "$RUNTIME_ROOT"
 fi
-export PYTHONPATH="$RUNTIME_ROOT:$RUNTIME_ROOT/vendor${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$RUNTIME_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 ENROLL_ARGS=(enroll --server "$SERVER" --invite-stdin --workdir "$WORKDIR" --runtime-digest "$REMOTE_DIGEST" --runtime-version "$REMOTE_VERSION")
 if [ -n "$NAME" ]; then ENROLL_ARGS+=(--name "$NAME"); fi
 printf '%s\n' "$INVITE" | python3 -m local_shell_mcp.remote_worker "${ENROLL_ARGS[@]}"
@@ -335,7 +351,7 @@ try {
   }
 
   $env:LOCAL_SHELL_MCP_WORKER_STATE_DIR = $StateHome
-  $WorkerPythonPath = "$RuntimeRoot;$RuntimeRoot\vendor"
+  $WorkerPythonPath = "$RuntimeRoot"
   if ($env:PYTHONPATH) { $WorkerPythonPath += ";$env:PYTHONPATH" }
   $env:PYTHONPATH = $WorkerPythonPath
   $EnrollArgs = @($PythonPrefix) + @(

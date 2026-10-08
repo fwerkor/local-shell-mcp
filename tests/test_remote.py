@@ -996,8 +996,7 @@ def test_reexec_updated_worker_runtime_prefers_installed_bundle(tmp_path, monkey
     remote._reexec_updated_worker_runtime()  # noqa: SLF001
 
     pythonpath = remote.os.environ["PYTHONPATH"].split(remote.os.pathsep)
-    assert pythonpath[:2] == [str(runtime), str(runtime / "vendor")]
-    assert pythonpath[2:] == ["/old/runtime", "/other"]
+    assert pythonpath == [str(runtime), "/old/runtime", "/other"]
     assert calls == [
         (
             sys.executable,
@@ -1321,7 +1320,8 @@ async def test_remote_reset_preserves_started_non_cancellable_mutation(tmp_path,
 
 
 @pytest.mark.asyncio
-async def test_remote_reset_cancels_claimed_mutation_that_has_not_started(tmp_path, monkeypatch):
+@pytest.mark.parametrize("tool", ["write_file", "run_shell_persist_tool", "run_python_persist_tool"])
+async def test_remote_reset_cancels_claimed_mutation_that_has_not_started(tmp_path, monkeypatch, tool):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
     get_settings.cache_clear()
@@ -1339,7 +1339,7 @@ async def test_remote_reset_cancels_claimed_mutation_that_has_not_started(tmp_pa
     monkeypatch.setattr(remote, "_utc", lambda: 100.0)
 
     mutation = asyncio.create_task(
-        manager.call("worker-a", "write_file", {"path": "x", "content": "y"}, timeout_s=10)
+        manager.call("worker-a", tool, {"path": "x", "content": "y"}, timeout_s=10)
     )
     await asyncio.sleep(0)
     claimed = await manager.poll(
@@ -1430,7 +1430,9 @@ async def test_remote_reset_preserves_claimed_protected_job_on_legacy_worker(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tool", ["shell_start", "job_start", "job_retry"])
+@pytest.mark.parametrize(
+    "tool", ["shell_start", "job_start", "job_retry", "run_shell_persist_tool", "run_python_persist_tool"]
+)
 async def test_remote_reset_preserves_started_persistent_process_mutations(
     tmp_path, monkeypatch, tool
 ):
@@ -1662,7 +1664,9 @@ async def test_worker_retried_preserved_start_executes_after_generation_change(m
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tool", ["write_file", "shell_start", "job_start", "job_retry"])
+@pytest.mark.parametrize(
+    "tool", ["write_file", "shell_start", "job_start", "job_retry", "run_shell_persist_tool", "run_python_persist_tool"]
+)
 async def test_started_reset_preserved_worker_job_ignores_generation_change(monkeypatch, tool):
     heartbeat_seen = asyncio.Event()
 

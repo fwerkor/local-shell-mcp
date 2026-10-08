@@ -146,7 +146,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `run_shell`
 
-Run one non-interactive shell command locally or on a remote machine. Use for build, test, package-manager, Git, and inspection commands that should finish promptly. For long-running, interactive, or streaming processes, use shell_start or job_start. Optional purpose/explanation fields let agents state why the command is being run.
+Run a shell command locally or remotely for builds, tests, package managers, and Git. For long-running, interactive, or streaming processes, use shell_start or job_start. Optional purpose/explanation fields state why it runs. With persist_on_timeout=true (default false), start one tracked job and wait up to timeout_s; if still running, return its job_id without rerunning the command. Persistent-job output combines stdout and stderr.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -157,6 +157,7 @@ Run one non-interactive shell command locally or on a remote machine. Use for bu
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `persist_on_timeout` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -165,7 +166,7 @@ When `machine` is supplied, the call additionally requires `remote:use` and runs
 
 ### `run_python`
 
-Write and run a short Python script locally or on a remote machine.
+Write and run Python locally or remotely. persist_on_timeout=true (default false) keeps the same tracked job running and returns job_id when timeout_s expires; query it with job_tail/job_list. Persistent-job output combines stdout and stderr.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -175,6 +176,7 @@ Write and run a short Python script locally or on a remote machine.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `persist_on_timeout` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -183,7 +185,7 @@ When `machine` is supplied, the call additionally requires `remote:use` and runs
 
 ### `shell_start`
 
-Start a persistent interactive shell locally or on a remote machine.
+Start a persistent interactive shell locally or on a remote machine. Reuse idempotency_key when retrying an ambiguous request.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -193,6 +195,7 @@ Start a persistent interactive shell locally or on a remote machine.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -201,7 +204,7 @@ When `machine` is supplied, the call additionally requires `remote:use` and runs
 
 ### `shell_send`
 
-Send input to a persistent local or remote shell session.
+Send input to a persistent local or remote shell session. Reuse idempotency_key when retrying an ambiguous request.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -209,6 +212,7 @@ Send input to a persistent local or remote shell session.
 | `input_text` | `string` | required |  |
 | `enter` | `boolean` | `true` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -238,6 +242,7 @@ Terminate a persistent local or remote shell session.
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -259,7 +264,7 @@ When `machine` is supplied, the call additionally requires `remote:use` and runs
 
 ### `job_start`
 
-Start a tracked long-running job locally or on a remote machine.
+Start a tracked job. Reuse idempotency_key when retrying an ambiguous request.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -269,6 +274,7 @@ Start a tracked long-running job locally or on a remote machine.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -321,7 +327,7 @@ When `machine` is supplied, the call additionally requires `remote:use` and runs
 
 ### `job_retry`
 
-Restart a stopped or exited tracked local or remote job.
+Retry a tracked job. Reuse idempotency_key when retrying an ambiguous request.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -329,6 +335,7 @@ Restart a stopped or exited tracked local or remote job.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -758,7 +765,7 @@ When `machine` is supplied, the call additionally requires `remote:use` and runs
 
 ### `remote_manage`
 
-Manage remote workers with action=invite, list, revoke, or rename. invite accepts name/workdir/ttl_s; revoke requires machine; rename requires machine and new_name.
+Manage remote workers with action=invite, list, reset, revoke, or rename. invite accepts name/workdir/ttl_s; reset/revoke require machine; rename requires machine and new_name. reset clears queued and safely cancellable active control-plane requests without disconnecting the worker; already-started protected mutations and persistent-process starts are preserved.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|

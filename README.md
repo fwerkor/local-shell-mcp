@@ -132,7 +132,7 @@ printf '%s\n' '{"path":"README.md"}' | lsm call file_read
 
 Use `--session s_...` to attach an ordinary tool call to a durable logical Session. In the documented Docker Compose setup, the raw `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN` stays only in the host-owned, permission-restricted `.env`; Compose passes only its SHA-256 verifier into the controller, and the CLI reads the raw value without initializing server state. Other split-runtime layouts can use `--token-file <path>` or the same environment variable, with the matching `LOCAL_SHELL_MCP_CLI_LOCAL_TOKEN_SHA256` configured on the controller. A failed underlying command makes `lsm call` exit non-zero. `--direct` is available for standalone local calls when no controller is running; remote workers are intentionally unavailable in direct mode.
 
-The worker-installed `local-shell-mcp` launcher is management-only (`worker start`, `worker status`, etc.); it does not expose `call`. Workers receive and report tasks but cannot initiate controller tool calls using worker credentials.
+The worker-installed `local-shell-mcp` launcher is management-only (`worker start`, `worker status`, etc.); it exposes neither `call` nor `tui`. The worker download contains only explicitly selected execution modules, not the Controller CLI, TUI, or WebUI. Workers receive and report tasks but cannot initiate controller tool calls using worker credentials.
 
 Files remains an LSM-native three-pane file manager inside OpenTUI for local and remote machines. It renders bounded PNG/JPEG/GIF/WebP thumbnails and provides consistent file operations through the shared service API. Manual actions entered through either human interface are excluded from the MCP audit log; Activity, Audit, and the terminal audit rail show model-originated MCP activity.
 
@@ -220,6 +220,18 @@ The public MCP surface includes:
 - Sessions: `session_manage` for durable task context, progress handoff, agent-run takeover, and cross-run inheritance.
 - Planning: `plan_manage` for optional Session-owned Goal mode and automatic continuation.
 - Diagnostics: `environment_get` (including version information), `secret_scan`, and `audit_tail`.
+
+Both `run_shell` and `run_python` accept `persist_on_timeout` (default `false`). Set it to
+`true` to start the command as a tracked job and wait up to `timeout_s`; if it is still
+running, the tool returns `timed_out: true`, `job_id`, and `job_status` without stopping
+or rerunning the command. Continue with `job_tail`, `job_list`, and `job_stop`, supplying
+the same `machine` for remote jobs. Opted-in calls use the job runner's combined
+stdout/stderr log, including when the command finishes within the wait period.
+
+```bash
+lsm call run_shell --json '{"command":"make test","timeout_s":10,"persist_on_timeout":true}'
+lsm call run_python --json '{"code":"import time; time.sleep(60)","timeout_s":10,"persist_on_timeout":true}'
+```
 
 The detailed tool reference, including purpose, inputs, returns, combinations, and notes for every tool, is available in the [docs](https://fwerkor.github.io/local-shell-mcp/reference/tools/).
 
