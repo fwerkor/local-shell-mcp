@@ -112,9 +112,7 @@ def _validate_numeric_settings(settings: Settings) -> None:
     if settings.max_timeout_s < settings.default_timeout_s:
         raise ValueError("max_timeout_s must be >= default_timeout_s")
     if settings.file_download_max_ttl_s < settings.file_download_default_ttl_s:
-        raise ValueError(
-            "file_download_max_ttl_s must be >= file_download_default_ttl_s"
-        )
+        raise ValueError("file_download_max_ttl_s must be >= file_download_default_ttl_s")
 
 
 def _matches_default_path(value: Path, default: Path) -> bool:
@@ -319,9 +317,195 @@ def _without_environment_overrides(values: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _setting_factory(*, default_factory: Any) -> Any:
+    if _PYDANTIC_AVAILABLE:
+        return Field(default_factory=default_factory)
+    from dataclasses import field
+
+    return field(default_factory=default_factory)
+
+
+class _SettingsFields:
+    host: str = "0.0.0.0"
+    port: int = 8765
+    forwarded_allow_ips: str = "127.0.0.1"
+    mode: Literal["mcp", "http", "both", "stdio"] = "mcp"
+
+    workspace_root: Path = DEFAULT_WORKSPACE_ROOT
+    audit_log_path: Path = DEFAULT_AUDIT_LOG_PATH
+    state_dir: Path = DEFAULT_STATE_DIR
+    agent_config_dir: Path = DEFAULT_AGENT_CONFIG_DIR
+
+    # By default, tools are limited to workspace_root. Set true only inside a disposable container.
+    allow_full_container: bool = False
+    # Disable the controller host as an execution/workspace target while keeping
+    # remote workers and control-plane services available.
+    disable_local: bool = False
+    # Run the controller without persistent local state. This implies disable_local
+    # and defaults the state backend to process memory unless Redis is configured.
+    stateless_controller: bool = False
+    state_backend: Literal["file", "memory", "redis"] = "file"
+    state_backend_url: str | None = None
+    state_backend_prefix: str = "local-shell-mcp"
+
+    default_timeout_s: int = 60
+    max_timeout_s: int = 3600
+    max_output_bytes: int = 200_000
+    max_file_read_bytes: int = 512_000
+    max_file_write_bytes: int = 5_000_000
+    max_grep_results: int = 200
+    max_directory_entries: int = 5_000
+    max_glob_results: int = 5_000
+    max_tree_entries: int = 5_000
+    max_skills: int = 256
+    max_skill_related_files: int = 1_000
+    max_skill_scan_entries: int = 5_000
+    max_skill_path_bytes: int = 200_000
+    max_read_many_files: int = 100
+    max_read_many_total_bytes: int = 5_000_000
+    max_http_request_bytes: int = 16_000_000
+    max_job_log_bytes: int = 10_000_000
+    max_jobs: int = 1_000
+    max_audit_tail_bytes: int = 1_000_000
+    max_audit_log_bytes: int = 20_000_000
+    max_audit_archive_bytes: int = 512_000_000
+    max_tmp_files: int = 500
+    max_tmp_bytes: int = 50_000_000
+    max_transfer_archive_entries: int = 100_000
+    max_transfer_unpacked_bytes: int = 10_000_000_000
+    max_concurrent_commands: int = 4
+    max_tmux_sessions: int = 16
+
+    # Durable Logical Sessions and optional Goal plans exposed through MCP.
+    logical_sessions_enabled: bool = True
+
+    # Human-facing OpenTUI/WebUI. The browser interface is mounted on the same
+    # ASGI service and launches the exact same TUI executable as the local CLI.
+    ui_enabled: bool = True
+    # MCP App Live Workspace. This can be disabled independently of the native UI.
+    live_workspace_enabled: bool = True
+    ui_path: str = "/ui"
+    ui_tui_command: str | None = None
+    ui_wallpaper: Literal["bing", "aurora", "none"] = "bing"
+    ui_terminal_idle_timeout_s: int = 3600
+    ui_terminal_max_sessions: int = 8
+    ui_remote_request_timeout_s: int = 30
+
+    # Skills use a fixed tool surface and are merged from workspace-level
+    # .agents/skills, agent_config_dir/skills, and the global universal directory.
+
+    file_download_enabled: bool = True
+    file_download_default_ttl_s: int = 3600
+    file_download_max_ttl_s: int = 604800
+    file_download_default_max_downloads: int = 0
+    file_download_max_file_bytes: int = 0
+
+    # Remote worker mode is enabled by default. Remote machines join with one-time
+    # invites, poll for jobs over outbound HTTP(S), and expose near-parity tools.
+    remote_enabled: bool = True
+    remote_invite_ttl_s: int = 600
+    remote_poll_timeout_s: int = 25
+    remote_job_timeout_s: int = 3600
+    remote_max_pending_jobs: int = 256
+    remote_cancelled_job_ttl_s: int = 3600
+    remote_transfer_strategy: Literal["auto", "relay", "direct", "object_store"] = "auto"
+    remote_peer_transfer_enabled: bool = False
+    remote_peer_transfer_bind_host: str = "0.0.0.0"
+    remote_peer_transfer_advertise_host: str | None = None
+    remote_peer_transfer_port: int = 0
+    remote_peer_transfer_timeout_s: int = 3600
+    remote_transfer_s3_bucket: str | None = None
+    remote_transfer_s3_prefix: str = "local-shell-mcp"
+    remote_transfer_s3_region: str | None = None
+    remote_transfer_s3_endpoint_url: str | None = None
+    remote_transfer_s3_presign_ttl_s: int = 3600
+
+    shell_executable: str = _setting_factory(default_factory=default_shell_executable)
+    shell_env_blocklist: Annotated[list[str], NoDecode] = _setting_factory(
+        default_factory=lambda: ["CLOUDFLARE_TUNNEL_TOKEN"]
+    )
+    shell_env_blocked_prefixes: Annotated[list[str], NoDecode] = _setting_factory(
+        default_factory=lambda: ["LOCAL_SHELL_MCP_", "DOCKER_"]
+    )
+    # Guard expensive recursive filesystem discovery before shell execution.
+    shell_preflight_enabled: bool = True
+    shell_preflight_expensive_timeout_s: int = 15
+    shell_preflight_repeat_failure_window_s: int = 900
+    shell_preflight_repeat_failure_limit: int = 1
+    tmux_bin: str = "tmux"
+    rg_bin: str = "rg"
+    git_bin: str = "git"
+    python_bin: str = _setting_factory(default_factory=default_python_executable)
+
+    # Authentication. OAuth is the default for ChatGPT custom connectors.
+    auth_mode: Literal["none", "oauth"] = "oauth"
+    auth_bypass_localhost: bool = True
+    require_auth_for_mcp_discovery: bool = True
+    mcp_session_idle_timeout_s: int = 180
+    mcp_max_sessions: int = 1024
+
+    # Built-in OAuth 2.1 authorization server for ChatGPT MCP connectors.
+    # Set public_base_url to the externally reachable HTTPS origin, e.g. https://local-shell-mcp.example.com
+    public_base_url: str | None = None
+    oauth_issuer: str | None = None
+    oauth_resource: str | None = None
+    oauth_admin_pin: str | None = None
+    oauth_jwt_secret: str = _setting_factory(
+        default_factory=lambda: os.getenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET") or "dev-change-me"
+    )
+    # 0 means access tokens never expire.
+    oauth_access_token_ttl_s: int = 0
+    oauth_code_ttl_s: int = 300
+
+    # Command policy. Set denylist empty if this container is intentionally disposable.
+    command_denylist: Annotated[list[str], NoDecode] = _setting_factory(
+        default_factory=lambda: [
+            "docker.sock",
+            "/var/run/docker.sock",
+            "mkfs",
+            "mount ",
+            "umount ",
+            "shutdown",
+            "reboot",
+            "systemctl ",
+            "iptables",
+            "nft ",
+        ]
+    )
+    path_denylist: Annotated[list[str], NoDecode] = _setting_factory(
+        default_factory=lambda: [
+            ".ssh/id_rsa",
+            ".ssh/id_ed25519",
+            ".env",
+            "secrets",
+            "credentials",
+            ".git/config",
+        ]
+    )
+
+    def with_workspace_relative_defaults(self) -> Settings:
+        updates = {}
+        workspace_is_default = _matches_default_path(self.workspace_root, DEFAULT_WORKSPACE_ROOT)
+        state_is_default = _matches_default_path(self.state_dir, DEFAULT_STATE_DIR)
+        if state_is_default and not workspace_is_default:
+            updates["state_dir"] = self.workspace_root / ".local-shell-mcp"
+        state_dir = updates.get("state_dir", self.state_dir)
+        if _matches_default_path(self.audit_log_path, DEFAULT_AUDIT_LOG_PATH):
+            updates["audit_log_path"] = state_dir / "audit.jsonl"
+        if _matches_default_path(self.agent_config_dir, DEFAULT_AGENT_CONFIG_DIR):
+            updates["agent_config_dir"] = state_dir / "agent_config"
+        return self.model_copy(update=updates) if updates else self
+
+
+if not _PYDANTIC_AVAILABLE:
+    from dataclasses import dataclass
+
+    dataclass(_SettingsFields)
+
+
 if _PYDANTIC_AVAILABLE:
 
-    class Settings(BaseSettings):
+    class Settings(_SettingsFields, BaseSettings):
         """Runtime settings.
 
         Environment variables use the LOCAL_SHELL_MCP_ prefix.
@@ -329,163 +513,6 @@ if _PYDANTIC_AVAILABLE:
         """
 
         model_config = SettingsConfigDict(env_prefix="LOCAL_SHELL_MCP_", extra="ignore")
-
-        host: str = "0.0.0.0"
-        port: int = 8765
-        forwarded_allow_ips: str = "127.0.0.1"
-        mode: Literal["mcp", "http", "both", "stdio"] = "mcp"
-
-        workspace_root: Path = DEFAULT_WORKSPACE_ROOT
-        audit_log_path: Path = DEFAULT_AUDIT_LOG_PATH
-        state_dir: Path = DEFAULT_STATE_DIR
-        agent_config_dir: Path = DEFAULT_AGENT_CONFIG_DIR
-
-        # By default, tools are limited to workspace_root. Set true only inside a disposable container.
-        allow_full_container: bool = False
-        # Disable the controller host as an execution/workspace target while keeping
-        # remote workers and control-plane services available.
-        disable_local: bool = False
-        # Run the controller without persistent local state. This implies disable_local
-        # and defaults the state backend to process memory unless Redis is configured.
-        stateless_controller: bool = False
-        state_backend: Literal["file", "memory", "redis"] = "file"
-        state_backend_url: str | None = None
-        state_backend_prefix: str = "local-shell-mcp"
-
-        default_timeout_s: int = 60
-        max_timeout_s: int = 3600
-        max_output_bytes: int = 200_000
-        max_file_read_bytes: int = 512_000
-        max_file_write_bytes: int = 5_000_000
-        max_grep_results: int = 200
-        max_directory_entries: int = 5_000
-        max_glob_results: int = 5_000
-        max_tree_entries: int = 5_000
-        max_skills: int = 256
-        max_skill_related_files: int = 1_000
-        max_skill_scan_entries: int = 5_000
-        max_skill_path_bytes: int = 200_000
-        max_read_many_files: int = 100
-        max_read_many_total_bytes: int = 5_000_000
-        max_http_request_bytes: int = 16_000_000
-        max_job_log_bytes: int = 10_000_000
-        max_jobs: int = 1_000
-        max_audit_tail_bytes: int = 1_000_000
-        max_audit_log_bytes: int = 20_000_000
-        max_audit_archive_bytes: int = 512_000_000
-        max_tmp_files: int = 500
-        max_tmp_bytes: int = 50_000_000
-        max_transfer_archive_entries: int = 100_000
-        max_transfer_unpacked_bytes: int = 10_000_000_000
-        max_concurrent_commands: int = 4
-        max_tmux_sessions: int = 16
-
-        # Durable Logical Sessions and optional Goal plans exposed through MCP.
-        logical_sessions_enabled: bool = True
-
-        # Human-facing OpenTUI/WebUI. The browser interface is mounted on the same
-        # ASGI service and launches the exact same TUI executable as the local CLI.
-        ui_enabled: bool = True
-        # MCP App Live Workspace. This can be disabled independently of the native UI.
-        live_workspace_enabled: bool = True
-        ui_path: str = "/ui"
-        ui_tui_command: str | None = None
-        ui_wallpaper: Literal["bing", "aurora", "none"] = "bing"
-        ui_terminal_idle_timeout_s: int = 3600
-        ui_terminal_max_sessions: int = 8
-        ui_remote_request_timeout_s: int = 30
-
-        # Skills use a fixed tool surface and are merged from workspace-level
-        # .agents/skills, agent_config_dir/skills, and the global universal directory.
-
-        file_download_enabled: bool = True
-        file_download_default_ttl_s: int = 3600
-        file_download_max_ttl_s: int = 604800
-        file_download_default_max_downloads: int = 0
-        file_download_max_file_bytes: int = 0
-
-        # Remote worker mode is enabled by default. Remote machines join with one-time
-        # invites, poll for jobs over outbound HTTP(S), and expose near-parity tools.
-        remote_enabled: bool = True
-        remote_invite_ttl_s: int = 600
-        remote_poll_timeout_s: int = 25
-        remote_job_timeout_s: int = 3600
-        remote_max_pending_jobs: int = 256
-        remote_cancelled_job_ttl_s: int = 3600
-        remote_transfer_strategy: Literal["auto", "relay", "direct", "object_store"] = "auto"
-        remote_peer_transfer_enabled: bool = False
-        remote_peer_transfer_bind_host: str = "0.0.0.0"
-        remote_peer_transfer_advertise_host: str | None = None
-        remote_peer_transfer_port: int = 0
-        remote_peer_transfer_timeout_s: int = 3600
-        remote_transfer_s3_bucket: str | None = None
-        remote_transfer_s3_prefix: str = "local-shell-mcp"
-        remote_transfer_s3_region: str | None = None
-        remote_transfer_s3_endpoint_url: str | None = None
-        remote_transfer_s3_presign_ttl_s: int = 3600
-
-        shell_executable: str = Field(default_factory=default_shell_executable)
-        shell_env_blocklist: Annotated[list[str], NoDecode] = Field(
-            default_factory=lambda: ["CLOUDFLARE_TUNNEL_TOKEN"]
-        )
-        shell_env_blocked_prefixes: Annotated[list[str], NoDecode] = Field(
-            default_factory=lambda: ["LOCAL_SHELL_MCP_", "DOCKER_"]
-        )
-        # Guard expensive recursive filesystem discovery before shell execution.
-        shell_preflight_enabled: bool = True
-        shell_preflight_expensive_timeout_s: int = 15
-        shell_preflight_repeat_failure_window_s: int = 900
-        shell_preflight_repeat_failure_limit: int = 1
-        tmux_bin: str = "tmux"
-        rg_bin: str = "rg"
-        git_bin: str = "git"
-        python_bin: str = Field(default_factory=default_python_executable)
-
-        # Authentication. OAuth is the default for ChatGPT custom connectors.
-        auth_mode: Literal["none", "oauth"] = "oauth"
-        auth_bypass_localhost: bool = True
-        require_auth_for_mcp_discovery: bool = True
-        mcp_session_idle_timeout_s: int = 180
-        mcp_max_sessions: int = 1024
-
-        # Built-in OAuth 2.1 authorization server for ChatGPT MCP connectors.
-        # Set public_base_url to the externally reachable HTTPS origin, e.g. https://local-shell-mcp.example.com
-        public_base_url: str | None = None
-        oauth_issuer: str | None = None
-        oauth_resource: str | None = None
-        oauth_admin_pin: str | None = None
-        oauth_jwt_secret: str = Field(
-            default_factory=lambda: os.getenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET") or "dev-change-me"
-        )
-        # 0 means access tokens never expire.
-        oauth_access_token_ttl_s: int = 0
-        oauth_code_ttl_s: int = 300
-
-        # Command policy. Set denylist empty if this container is intentionally disposable.
-        command_denylist: Annotated[list[str], NoDecode] = Field(
-            default_factory=lambda: [
-                "docker.sock",
-                "/var/run/docker.sock",
-                "mkfs",
-                "mount ",
-                "umount ",
-                "shutdown",
-                "reboot",
-                "systemctl ",
-                "iptables",
-                "nft ",
-            ]
-        )
-        path_denylist: Annotated[list[str], NoDecode] = Field(
-            default_factory=lambda: [
-                ".ssh/id_rsa",
-                ".ssh/id_ed25519",
-                ".env",
-                "secrets",
-                "credentials",
-                ".git/config",
-            ]
-        )
 
         @field_validator("ui_path", mode="before")
         @classmethod
@@ -534,26 +561,9 @@ if _PYDANTIC_AVAILABLE:
             merged.update(flat)
             return Settings(**merged)
 
-        def with_workspace_relative_defaults(self) -> Settings:
-            updates = {}
-            workspace_is_default = _matches_default_path(
-                self.workspace_root, DEFAULT_WORKSPACE_ROOT
-            )
-            state_is_default = _matches_default_path(self.state_dir, DEFAULT_STATE_DIR)
-            if state_is_default and not workspace_is_default:
-                updates["state_dir"] = self.workspace_root / ".local-shell-mcp"
-            state_dir = updates.get("state_dir", self.state_dir)
-            if _matches_default_path(self.audit_log_path, DEFAULT_AUDIT_LOG_PATH):
-                updates["audit_log_path"] = state_dir / "audit.jsonl"
-            if _matches_default_path(self.agent_config_dir, DEFAULT_AGENT_CONFIG_DIR):
-                updates["agent_config_dir"] = state_dir / "agent_config"
-
-            if not updates:
-                return self
-            return self.model_copy(update=updates)
 
 else:
-    from dataclasses import InitVar, asdict, dataclass, field, fields, replace
+    from dataclasses import InitVar, asdict, dataclass, fields, replace
 
     def _env_bool(value: str) -> bool:
         return value.strip().lower() in {"1", "true", "yes", "on"}
@@ -574,143 +584,9 @@ else:
         return value
 
     @dataclass
-    class Settings:
+    class Settings(_SettingsFields):
         """Dependency-light fallback settings for remote worker bootstraps."""
 
-        host: str = "0.0.0.0"
-        port: int = 8765
-        forwarded_allow_ips: str = "127.0.0.1"
-        mode: Literal["mcp", "http", "both", "stdio"] = "mcp"
-
-        workspace_root: Path = DEFAULT_WORKSPACE_ROOT
-        audit_log_path: Path = DEFAULT_AUDIT_LOG_PATH
-        state_dir: Path = DEFAULT_STATE_DIR
-        agent_config_dir: Path = DEFAULT_AGENT_CONFIG_DIR
-
-        allow_full_container: bool = False
-        disable_local: bool = False
-        stateless_controller: bool = False
-        state_backend: Literal["file", "memory", "redis"] = "file"
-        state_backend_url: str | None = None
-        state_backend_prefix: str = "local-shell-mcp"
-
-        default_timeout_s: int = 60
-        max_timeout_s: int = 3600
-        max_output_bytes: int = 200_000
-        max_file_read_bytes: int = 512_000
-        max_file_write_bytes: int = 5_000_000
-        max_grep_results: int = 200
-        max_directory_entries: int = 5_000
-        max_glob_results: int = 5_000
-        max_tree_entries: int = 5_000
-        max_skills: int = 256
-        max_skill_related_files: int = 1_000
-        max_skill_scan_entries: int = 5_000
-        max_skill_path_bytes: int = 200_000
-        max_read_many_files: int = 100
-        max_read_many_total_bytes: int = 5_000_000
-        max_http_request_bytes: int = 16_000_000
-        max_job_log_bytes: int = 10_000_000
-        max_jobs: int = 1_000
-        max_audit_tail_bytes: int = 1_000_000
-        max_audit_log_bytes: int = 20_000_000
-        max_audit_archive_bytes: int = 512_000_000
-        max_tmp_files: int = 500
-        max_tmp_bytes: int = 50_000_000
-        max_transfer_archive_entries: int = 100_000
-        max_transfer_unpacked_bytes: int = 10_000_000_000
-        max_concurrent_commands: int = 4
-        max_tmux_sessions: int = 16
-
-        logical_sessions_enabled: bool = True
-
-        ui_enabled: bool = True
-        live_workspace_enabled: bool = True
-        ui_path: str = "/ui"
-        ui_tui_command: str | None = None
-        ui_wallpaper: Literal["bing", "aurora", "none"] = "bing"
-        ui_terminal_idle_timeout_s: int = 3600
-        ui_terminal_max_sessions: int = 8
-        ui_remote_request_timeout_s: int = 30
-
-        file_download_enabled: bool = True
-        file_download_default_ttl_s: int = 3600
-        file_download_max_ttl_s: int = 604800
-        file_download_default_max_downloads: int = 0
-        file_download_max_file_bytes: int = 0
-
-        remote_enabled: bool = True
-        remote_invite_ttl_s: int = 600
-        remote_poll_timeout_s: int = 25
-        remote_job_timeout_s: int = 3600
-        remote_max_pending_jobs: int = 256
-        remote_cancelled_job_ttl_s: int = 3600
-        remote_transfer_strategy: Literal["auto", "relay", "direct", "object_store"] = "auto"
-        remote_peer_transfer_enabled: bool = False
-        remote_peer_transfer_bind_host: str = "0.0.0.0"
-        remote_peer_transfer_advertise_host: str | None = None
-        remote_peer_transfer_port: int = 0
-        remote_peer_transfer_timeout_s: int = 3600
-        remote_transfer_s3_bucket: str | None = None
-        remote_transfer_s3_prefix: str = "local-shell-mcp"
-        remote_transfer_s3_region: str | None = None
-        remote_transfer_s3_endpoint_url: str | None = None
-        remote_transfer_s3_presign_ttl_s: int = 3600
-
-        shell_executable: str = field(default_factory=default_shell_executable)
-        shell_env_blocklist: list[str] = field(default_factory=lambda: ["CLOUDFLARE_TUNNEL_TOKEN"])
-        shell_env_blocked_prefixes: list[str] = field(
-            default_factory=lambda: ["LOCAL_SHELL_MCP_", "DOCKER_"]
-        )
-        shell_preflight_enabled: bool = True
-        shell_preflight_expensive_timeout_s: int = 15
-        shell_preflight_repeat_failure_window_s: int = 900
-        shell_preflight_repeat_failure_limit: int = 1
-        tmux_bin: str = "tmux"
-        rg_bin: str = "rg"
-        git_bin: str = "git"
-        python_bin: str = field(default_factory=default_python_executable)
-
-        auth_mode: Literal["none", "oauth"] = "oauth"
-        auth_bypass_localhost: bool = True
-        require_auth_for_mcp_discovery: bool = True
-        mcp_session_idle_timeout_s: int = 180
-        mcp_max_sessions: int = 1024
-
-        public_base_url: str | None = None
-        oauth_issuer: str | None = None
-        oauth_resource: str | None = None
-        oauth_admin_pin: str | None = None
-        oauth_jwt_secret: str = field(
-            default_factory=lambda: os.getenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET") or "dev-change-me"
-        )
-        oauth_access_token_ttl_s: int = 0
-        oauth_code_ttl_s: int = 300
-
-        command_denylist: list[str] = field(
-            default_factory=lambda: [
-                "docker.sock",
-                "/var/run/docker.sock",
-                "mkfs",
-                "mount ",
-                "umount ",
-                "shutdown",
-                "reboot",
-                "systemctl ",
-                "iptables",
-                "nft ",
-            ]
-        )
-        path_denylist: list[str] = field(
-            default_factory=lambda: [
-                ".ssh/id_rsa",
-                ".ssh/id_ed25519",
-                ".env",
-                "secrets",
-                "credentials",
-                ".git/config",
-            ]
-        )
         _load_environment: InitVar[bool] = True
 
         def __post_init__(self, _load_environment: bool) -> None:
@@ -765,21 +641,6 @@ else:
             merged = self.model_dump()
             merged.update(flat)
             return Settings(**merged, _load_environment=False)
-
-        def with_workspace_relative_defaults(self) -> Settings:
-            updates = {}
-            workspace_is_default = _matches_default_path(
-                self.workspace_root, DEFAULT_WORKSPACE_ROOT
-            )
-            state_is_default = _matches_default_path(self.state_dir, DEFAULT_STATE_DIR)
-            if state_is_default and not workspace_is_default:
-                updates["state_dir"] = self.workspace_root / ".local-shell-mcp"
-            state_dir = updates.get("state_dir", self.state_dir)
-            if _matches_default_path(self.audit_log_path, DEFAULT_AUDIT_LOG_PATH):
-                updates["audit_log_path"] = state_dir / "audit.jsonl"
-            if _matches_default_path(self.agent_config_dir, DEFAULT_AGENT_CONFIG_DIR):
-                updates["agent_config_dir"] = state_dir / "agent_config"
-            return self.model_copy(update=updates) if updates else self
 
 
 @lru_cache(maxsize=1)

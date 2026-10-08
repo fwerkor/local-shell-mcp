@@ -228,6 +228,21 @@ def _load_fallback_settings(monkeypatch):
     return module
 
 
+def test_full_and_dependency_light_settings_share_all_defaults(monkeypatch):
+    from dataclasses import fields
+
+    full = settings.Settings()
+    fallback = _load_fallback_settings(monkeypatch)
+    assert set(settings.Settings.model_fields) == {
+        entry.name for entry in fields(fallback.Settings)
+    }
+
+    light = fallback.Settings()
+    assert full.model_dump(mode="json") == light.model_dump(mode="json")
+    assert light.shell_env_blocklist is not fallback.Settings().shell_env_blocklist
+    assert light.command_denylist is not fallback.Settings().command_denylist
+
+
 def test_dependency_light_fallback_settings(tmp_path, monkeypatch):
     fallback = _load_fallback_settings(monkeypatch)
 
