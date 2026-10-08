@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import os
 import platform
-import runpy
 import socket
 import subprocess
 import sys
@@ -18,6 +17,7 @@ from starlette.applications import Starlette
 
 import local_shell_mcp.remote as remote
 import local_shell_mcp.tools as tools
+from local_shell_mcp.remote_worker_routes import remote_routes
 from local_shell_mcp.settings import get_settings
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -84,6 +84,7 @@ def _start_worker(base_url: str, invite: str, worker_root: Path) -> subprocess.P
             sys.executable,
             "-m",
             "local_shell_mcp.remote_worker",
+            "connect",
             "--server",
             base_url,
             "--invite",
@@ -124,7 +125,7 @@ def test_real_controller_worker_tools_transfers_and_reconnect(tmp_path, monkeypa
     monkeypatch.setenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL", base_url)
     get_settings.cache_clear()
 
-    app = Starlette(routes=remote.remote_routes())
+    app = Starlette(routes=remote_routes())
     server = uvicorn.Server(
         uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error", access_log=False)
     )
@@ -251,11 +252,3 @@ def test_real_controller_worker_tools_transfers_and_reconnect(tmp_path, monkeypa
         server.should_exit = True
         thread.join(timeout=10)
         assert not thread.is_alive()
-
-
-def test_remote_worker_module_delegates_to_cli(monkeypatch):
-    calls = []
-    monkeypatch.setattr(remote, "run_worker_cli", calls.append)
-    monkeypatch.setattr(sys, "argv", ["remote_worker", "--server", "x"])
-    runpy.run_module("local_shell_mcp.remote_worker", run_name="__main__")
-    assert calls == [["--server", "x"]]

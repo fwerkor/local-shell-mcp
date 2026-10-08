@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import os
 import shutil
 import subprocess
 import sys
+import tarfile
 from types import SimpleNamespace
 
 import pytest
@@ -23,6 +26,17 @@ async def test_worker_bundle_and_manifest_are_stable(tmp_path, monkeypatch):
     routes.worker_bundle_bytes.cache_clear()
     second = routes.worker_bundle_bytes()
     assert first == second
+    with tarfile.open(fileobj=io.BytesIO(first), mode="r:gz") as archive:
+        names = set(archive.getnames())
+        assert "local_shell_mcp/remote_worker.py" in names
+        assert archive.extractfile("local_shell_mcp/main.py").read() == (
+            routes._LEGACY_WORKER_MAIN  # noqa: SLF001
+        )
+        assert "local_shell_mcp/cli_call.py" not in names
+        for module in routes._CONTROLLER_ONLY_MODULES:  # noqa: SLF001
+            if module == "main.py":
+                continue  # legacy passive-only transition shim
+            assert f"local_shell_mcp/{module}" not in names
 
     response = await routes.worker_manifest(None)  # type: ignore[arg-type]
     data = json.loads(response.body)
@@ -38,6 +52,44 @@ async def test_worker_bundle_and_manifest_are_stable(tmp_path, monkeypatch):
     bundle = await routes.worker_bundle(None)  # type: ignore[arg-type]
     assert bundle.body == first
     assert bundle.headers["cache-control"] == "no-store"
+
+
+def test_worker_bundle_entrypoint_isolated_from_controller_cli(tmp_path):
+    payload = routes.worker_bundle_bytes()
+    with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
+        archive.extractall(tmp_path, filter="data")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(tmp_path) + os.pathsep + str(tmp_path / "vendor")
+    denied = subprocess.run(
+        [sys.executable, "-m", "local_shell_mcp.remote_worker", "worker", "call", "run_shell"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+        check=False,
+    )
+    assert denied.returncode == 2
+    assert "invalid choice: 'call'" in denied.stderr
+    controller_cli = subprocess.run(
+        [sys.executable, "-m", "local_shell_mcp.main", "call", "--help"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+        check=False,
+    )
+    assert controller_cli.returncode == 2
+    assert "invalid choice: 'call'" in controller_cli.stderr
+    legacy = subprocess.run(
+        [sys.executable, "-m", "local_shell_mcp.main", "worker", "call", "run_shell"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+        check=False,
+    )
+    assert legacy.returncode == 2
+    assert "invalid choice: 'call'" in legacy.stderr
 
 
 @pytest.mark.asyncio

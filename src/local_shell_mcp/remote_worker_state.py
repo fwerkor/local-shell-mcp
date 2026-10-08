@@ -130,7 +130,7 @@ if not exist "%RUNTIME%\\local_shell_mcp" (
   exit /b 1
 )
 set "PYTHONPATH=%RUNTIME%;%RUNTIME%\\vendor;%PYTHONPATH%"
-"{python}" -m local_shell_mcp.main %*
+"{python}" -m local_shell_mcp.remote_worker %*
 exit /b %ERRORLEVEL%
 '''
     else:
@@ -143,7 +143,7 @@ if [ ! -d "$RUNTIME/local_shell_mcp" ]; then
   exit 1
 fi
 export PYTHONPATH="$RUNTIME:$RUNTIME/vendor${{PYTHONPATH:+:$PYTHONPATH}}"
-exec {shlex.quote(python)} -m local_shell_mcp.main "$@"
+exec {shlex.quote(python)} -m local_shell_mcp.remote_worker "$@"
 '''
     _atomic_write_text(launcher, script, 0o755)
     return launcher

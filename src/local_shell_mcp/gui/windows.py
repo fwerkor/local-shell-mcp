@@ -281,7 +281,7 @@ def _capture_window_image(hwnd: int, destination: Path) -> None:
         argv = [
             sys.executable,
             "-m",
-            "local_shell_mcp.main",
+            "local_shell_mcp.remote_worker",
             "_gui-capture-window",
             str(int(hwnd)),
             str(destination),

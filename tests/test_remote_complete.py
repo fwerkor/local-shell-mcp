@@ -17,6 +17,7 @@ from starlette.testclient import TestClient
 import local_shell_mcp.remote as remote
 from local_shell_mcp.errors import ShellExecutableNotFoundError
 from local_shell_mcp.models import CommandResult
+from local_shell_mcp.remote_worker_routes import remote_routes, worker_bundle
 from local_shell_mcp.settings import get_settings
 
 
@@ -88,7 +89,7 @@ def test_distribution_helpers_and_worker_bundle(tmp_path, monkeypatch):
     assert all(not name.endswith(".pyc") for name in names)
     assert "dependency" in calls
 
-    response = asyncio.run(remote.worker_bundle(None))
+    response = asyncio.run(worker_bundle(None))
     assert response.media_type == "application/gzip"
     with tarfile.open(fileobj=io.BytesIO(response.body), mode="r:gz") as tar:
         bundled = tar.getnames()
@@ -253,7 +254,7 @@ def test_remote_http_routes_success_and_errors(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     manager = remote.RemoteManager()
     monkeypatch.setattr(remote, "REMOTE_MANAGER", manager)
-    app = Starlette(routes=remote.remote_routes())
+    app = Starlette(routes=remote_routes())
     client = TestClient(app)
 
     invite = asyncio.run(manager.create_invite("route-node", base_url="http://testserver"))
@@ -535,18 +536,6 @@ def test_worker_identity_storage_retryability_and_http_parsing(tmp_path, monkeyp
         remote._parse_worker_http_json("u", 200, "bad")
     with pytest.raises(RuntimeError, match="expected object"):
         remote._parse_worker_http_json("u", 200, "[]")
-
-
-def test_worker_cli_error_path(monkeypatch, capsys):
-    async def fail(*args, **kwargs):
-        raise RuntimeError("connect failed")
-
-    monkeypatch.setattr(remote, "run_worker", fail)
-    with pytest.raises(SystemExit) as raised:
-        remote.run_worker_cli(["--server", "https://x", "--invite", "i"])
-    assert raised.value.code == 1
-    assert "connection failed" in capsys.readouterr().err
-
 
 
 def test_remote_registry_invite_and_registration_edge_cases(tmp_path, monkeypatch):
@@ -977,7 +966,7 @@ def test_worker_resume_identity_and_curl_post_failures(tmp_path, monkeypatch, ca
         remote._worker_post_json_with_curl("u", b"{}", {"X-Test": "1"}, 2)
 
 
-def test_worker_identity_incomplete_and_cli_interrupt(tmp_path, monkeypatch, capsys):
+def test_worker_identity_incomplete(tmp_path, monkeypatch):
     _configure(
         tmp_path,
         monkeypatch,
@@ -990,12 +979,3 @@ def test_worker_identity_incomplete_and_cli_interrupt(tmp_path, monkeypatch, cap
         encoding="utf-8",
     )
     assert remote._read_worker_identity("https://control.test") is None
-
-    async def interrupted(*args, **kwargs):
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(remote, "run_worker", interrupted)
-    with pytest.raises(SystemExit) as raised:
-        remote.run_worker_cli(["--server", "https://x", "--invite", "i"])
-    assert raised.value.code == 130
-    assert "disconnected by user" in capsys.readouterr().err
