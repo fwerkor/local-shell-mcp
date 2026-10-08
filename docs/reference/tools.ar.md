@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
+<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
 # مرجع الأدوات
 
 تُبنى هذه الصفحة من MCP tool schemas الفعلية. شغّل `python scripts/generate-tools-reference.py` بعد تغيير public tool surface لتحديث English reference.
@@ -149,6 +149,8 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 يشغّل command shell واحدة غير تفاعلية محليًا أو على machine بعيدة. استخدمه لـ build وtest وpackage-manager وGit وinspection التي ينبغي أن تنتهي سريعًا. للعمليات الطويلة أو التفاعلية أو streaming استخدم `shell_start` أو `job_start`. تسمح حقول purpose/explanation الاختيارية بذكر سبب التشغيل.
 
+عند ضبط `persist_on_timeout=true` (الافتراضي false)، تستمر المهمة نفسها بعد انتهاء المهلة وتعيد `job_id`. استخدم `job_tail` لقراءة النتائج؛ يتم دمج stdout وstderr.
+
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
 | `command` | `string` | required |  |
@@ -158,6 +160,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `persist_on_timeout` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -168,6 +171,8 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 يكتب ويشغّل script Python قصيرة محليًا أو على machine بعيدة.
 
+عند ضبط `persist_on_timeout=true` (الافتراضي false)، تستمر المهمة نفسها بعد انتهاء المهلة وتعيد `job_id`. استخدم `job_tail` لقراءة النتائج؛ يتم دمج stdout وstderr.
+
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
 | `code` | `string` | required |  |
@@ -176,6 +181,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `persist_on_timeout` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -194,6 +200,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -210,6 +217,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `input_text` | `string` | required |  |
 | `enter` | `boolean` | `true` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -239,6 +247,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -270,6 +279,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -330,6 +340,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

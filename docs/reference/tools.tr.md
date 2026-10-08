@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
+<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
 # Tools referansı
 
 Bu page gerçek MCP tool schemas üzerinden oluşturulur. Public tool surface değiştiğinde English reference güncellemek için `python scripts/generate-tools-reference.py` çalıştırın.
@@ -149,6 +149,8 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 Local veya remote machine üzerinde bir non-interactive shell command çalıştırır. Hızlı bitmesi gereken build, test, package-manager, Git ve inspection commands için kullanın. Long-running, interactive veya streaming process için `shell_start` ya da `job_start` kullanın. Optional purpose/explanation fields command’in neden çalıştırıldığını belirtebilir.
 
+`persist_on_timeout=true` (varsayılan false) ile aynı iş zaman aşımından sonra da çalışır ve `job_id` döndürür. `job_tail` ile izleyin; stdout ve stderr birleştirilir.
+
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `command` | `string` | required |  |
@@ -158,6 +160,7 @@ Local veya remote machine üzerinde bir non-interactive shell command çalışt�
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `persist_on_timeout` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -168,6 +171,8 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 Local veya remote machine üzerinde short Python script yazar ve çalıştırır.
 
+`persist_on_timeout=true` (varsayılan false) ile aynı iş zaman aşımından sonra da çalışır ve `job_id` döndürür. `job_tail` ile izleyin; stdout ve stderr birleştirilir.
+
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `code` | `string` | required |  |
@@ -176,6 +181,7 @@ Local veya remote machine üzerinde short Python script yazar ve çalıştırır
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `persist_on_timeout` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -194,6 +200,7 @@ Local veya remote machine üzerinde persistent interactive shell başlatır.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -210,6 +217,7 @@ Persistent local/remote shell session’a input gönderir.
 | `input_text` | `string` | required |  |
 | `enter` | `boolean` | `true` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -239,6 +247,7 @@ Persistent local/remote shell session sonlandırır.
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -270,6 +279,7 @@ Local veya remote machine üzerinde tracked long-running job başlatır.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -330,6 +340,7 @@ Stopped/exited tracked local/remote job yeniden başlatır.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
+<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
 # Referensi tools
 
 Page ini dibangun dari MCP tool schemas yang sebenarnya. Jalankan `python scripts/generate-tools-reference.py` setelah mengubah public tool surface untuk memperbarui English reference.
@@ -149,6 +149,8 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 Menjalankan satu non-interactive shell command secara lokal atau pada remote machine. Gunakan untuk build, test, package-manager, Git, dan inspection commands yang harus selesai segera. Untuk process long-running, interactive, atau streaming gunakan `shell_start` atau `job_start`. Optional purpose/explanation fields dapat menjelaskan alasan command dijalankan.
 
+Dengan `persist_on_timeout=true` (bawaan false), pekerjaan yang sama tetap berjalan setelah batas waktu dan mengembalikan `job_id`. Gunakan `job_tail`; stdout dan stderr digabung.
+
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `command` | `string` | required |  |
@@ -158,6 +160,7 @@ Menjalankan satu non-interactive shell command secara lokal atau pada remote mac
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `persist_on_timeout` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -168,6 +171,8 @@ Saat `machine` diberikan, call juga memerlukan `remote:use` dan dijalankan melal
 
 Menulis dan menjalankan short Python script secara lokal atau pada remote machine.
 
+Dengan `persist_on_timeout=true` (bawaan false), pekerjaan yang sama tetap berjalan setelah batas waktu dan mengembalikan `job_id`. Gunakan `job_tail`; stdout dan stderr digabung.
+
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `code` | `string` | required |  |
@@ -176,6 +181,7 @@ Menulis dan menjalankan short Python script secara lokal atau pada remote machin
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `persist_on_timeout` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -194,6 +200,7 @@ Memulai persistent interactive shell secara lokal atau pada remote machine.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -210,6 +217,7 @@ Mengirim input ke persistent local/remote shell session.
 | `input_text` | `string` | required |  |
 | `enter` | `boolean` | `true` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -239,6 +247,7 @@ Menghentikan persistent local/remote shell session.
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -270,6 +279,7 @@ Memulai tracked long-running job secara lokal atau pada remote machine.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -330,6 +340,7 @@ Memulai ulang stopped/exited tracked local/remote job.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

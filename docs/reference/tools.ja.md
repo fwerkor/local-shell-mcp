@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
+<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
 # Tools reference
 
 このページは実際の MCP tool schema から構成されます。Public tool surface を変更した後は `python scripts/generate-tools-reference.py` を実行して English reference を更新します。
@@ -149,6 +149,8 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 Local または remote machine で non-interactive shell command を 1 回実行します。速やかに完了する build、test、package-manager、Git、inspection commands に使い、long-running、interactive、streaming process には `shell_start` または `job_start` を使います。Optional purpose/explanation fields で実行理由を示せます。
 
+`persist_on_timeout=true`（既定値 false）にすると、タイムアウト後も同じジョブを継続し、`job_id` を返します。`job_tail` で確認できます。標準出力と標準エラーは統合されます。
+
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `command` | `string` | required |  |
@@ -158,6 +160,7 @@ Local または remote machine で non-interactive shell command を 1 回実行
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `persist_on_timeout` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -168,6 +171,8 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 Local または remote machine で short Python script を書いて実行します。
 
+`persist_on_timeout=true`（既定値 false）にすると、タイムアウト後も同じジョブを継続し、`job_id` を返します。`job_tail` で確認できます。標準出力と標準エラーは統合されます。
+
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `code` | `string` | required |  |
@@ -176,6 +181,7 @@ Local または remote machine で short Python script を書いて実行しま�
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `persist_on_timeout` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -194,6 +200,7 @@ Local または remote machine で persistent interactive shell を開始しま�
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -210,6 +217,7 @@ Persistent local/remote shell session に input を送ります。
 | `input_text` | `string` | required |  |
 | `enter` | `boolean` | `true` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -239,6 +247,7 @@ Persistent local/remote shell session を終了します。
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -270,6 +279,7 @@ Local または remote machine で tracked long-running job を開始します�
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -330,6 +340,7 @@ Stopped/exited tracked local/remote job を再起動します。
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

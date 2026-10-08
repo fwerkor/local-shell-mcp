@@ -26,9 +26,11 @@ from .process_utils import managed_process_kwargs
 from .settings import get_settings
 from .shell_environment import filtered_subprocess_env
 from .shell_ops import (
+    _effective_output_limit,
     check_command_policy,
     kill_shell,
     list_shells,
+    public_run_shell_timeout,
     read_shell,
     start_shell,
 )
@@ -1423,6 +1425,62 @@ async def start_job(
         _ACTIVE_JOB_OPERATIONS.discard(operation_id)
 
 
+async def run_job_with_timeout(
+    command: str,
+    cwd: str = ".",
+    timeout_s: int | None = None,
+    max_output_bytes: int | None = None,
+) -> dict[str, Any]:
+    """Wait for a tracked command, leaving the *same* job running on timeout.
+
+    The job must be persistent from the outset. Starting a fresh job after a
+    conventional run_shell timeout could execute a mutation twice.
+    """
+    timeout = public_run_shell_timeout(timeout_s)
+    output_limit = _effective_output_limit(max_output_bytes)
+    started = time.monotonic()
+    job = await start_job(command, cwd)
+    job_id = str(job["job_id"])
+    status_path = _attempt_paths(job_id, 1)["status"]
+    deadline = started + timeout
+
+    while _read_status_path(status_path) is None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        await asyncio.sleep(min(0.2, remaining))
+
+    snapshot = await tail_job(job_id, lines=0)
+    current = snapshot["job"]
+    finished = current.get("status") in TERMINAL_STATUSES
+    # tail_job may fall back to terminal screen content before the first log
+    # write; only return the actual persisted command log.
+    output = (
+        str(snapshot.get("output") or "")
+        if finished
+        else _read_log_tail(str(_attempt_paths(job_id, 1)["log"]), lines=0)
+    )
+    output_bytes = output.encode("utf-8")
+    truncated = bool(current.get("log_truncated")) or len(output_bytes) > output_limit
+    if len(output_bytes) > output_limit:
+        output = output_bytes[-output_limit:].decode("utf-8", errors="replace")
+    # The job runner combines both streams into its persistent log.
+    return {
+        "ok": finished and current.get("exit_code") == 0,
+        "exit_code": current.get("exit_code") if finished else None,
+        "timed_out": not finished,
+        "duration_ms": int((time.monotonic() - started) * 1000),
+        "cwd": cwd,
+        "command": command,
+        "stdout": output,
+        "stderr": "",
+        "truncated": truncated,
+        "job_id": job_id,
+        "job_status": current.get("status"),
+        "persisted": not finished,
+    }
+
+
 async def list_jobs(
     include_finished: bool = True,
     limit: int = JOB_LIST_DEFAULT_LIMIT,
@@ -1990,7 +2048,9 @@ def run_job_runner_cli(argv: list[str] | None = None) -> None:
             with contextlib.suppress(OSError):
                 log_path.chmod(0o600)
             while True:
-                chunk = process.stdout.read(65536)
+                # BufferedReader.read(n) waits for n bytes or EOF, so short
+                # progress messages otherwise remain invisible until exit.
+                chunk = process.stdout.read1(65536)
                 if not chunk:
                     break
                 output_bytes += len(chunk)

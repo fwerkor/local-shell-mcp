@@ -53,7 +53,15 @@ from .fs_ops import (
     write_content,
     write_text,
 )
-from .jobs import JOB_LIST_DEFAULT_LIMIT, list_jobs, retry_job, start_job, stop_job, tail_job
+from .jobs import (
+    JOB_LIST_DEFAULT_LIMIT,
+    list_jobs,
+    retry_job,
+    run_job_with_timeout,
+    start_job,
+    stop_job,
+    tail_job,
+)
 from .models import ok_result as _ok
 from .patch_ops import git_apply_command, git_apply_prefix, normalize_patch_text
 from .peer_transfer import close_peer_receiver, open_peer_receiver
@@ -1986,19 +1994,27 @@ async def _apply_patch_text(patch: str, cwd: str = ".") -> dict[str, Any]:
     return {**result.model_dump(), "patch_path": relative_display(patch_path)}
 
 
-async def _run_python(code: str, cwd: str = ".", timeout_s: int = 60) -> dict[str, Any]:
+async def _run_python(
+    code: str, cwd: str = ".", timeout_s: int = 60, persist_on_timeout: bool = False
+) -> dict[str, Any]:
     _assert_worker_text_input_size("Python script", code)
     await asyncio.to_thread(prune_temp_dir)
     script = temp_dir() / f"remote-script-{uuid.uuid4().hex}.py"
     script.parent.mkdir(parents=True, exist_ok=True)
     await asyncio.to_thread(script.write_text, code, encoding="utf-8")
-    result = await run_shell(
-        f"{quote_shell_executable(get_settings().python_bin)} {quote_shell_argument(str(script))}",
-        cwd=cwd,
-        timeout_s=public_run_shell_timeout(timeout_s),
-        max_output_bytes=1_000_000,
-    )
-    return {**result.model_dump(), "script_path": relative_display(script)}
+    command = f"{quote_shell_executable(get_settings().python_bin)} {quote_shell_argument(str(script))}"
+    if persist_on_timeout:
+        result = await run_job_with_timeout(command, cwd, timeout_s, 1_000_000)
+    else:
+        result = (
+            await run_shell(
+                command,
+                cwd=cwd,
+                timeout_s=public_run_shell_timeout(timeout_s),
+                max_output_bytes=1_000_000,
+            )
+        ).model_dump()
+    return {**result, "script_path": relative_display(script)}
 
 
 WORKER_ENVIRONMENT_TOOLS = frozenset(
@@ -2825,6 +2841,11 @@ async def _execute_environment_worker_tool(tool: str, args: dict[str, Any]) -> A
 
 async def _execute_command_worker_tool(tool: str, args: dict[str, Any]) -> Any:
     if tool == "run_shell_tool":
+        if args.get("persist_on_timeout", False):
+            return await run_job_with_timeout(
+                args["command"], args.get("cwd", "."), args.get("timeout_s"),
+                args.get("max_output_bytes"),
+            )
         return (
             await public_run_shell(
                 args["command"],
@@ -2835,6 +2856,8 @@ async def _execute_command_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         ).model_dump()
 
     if tool == "run_python_tool":
+        if args.get("persist_on_timeout", False):
+            return await _run_python(args["code"], args.get("cwd", "."), args.get("timeout_s", 60), True)
         return await _run_python(args["code"], args.get("cwd", "."), args.get("timeout_s", 60))
 
     if tool == "apply_patch":

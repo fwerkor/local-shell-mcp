@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
+<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
 # 工具參考
 
 本頁由實際 MCP tool schema 產生。公開工具介面變更後，執行 `python scripts/generate-tools-reference.py` 更新 English 參考頁。
@@ -149,6 +149,8 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 在本機或 remote machine 執行一次非互動 shell command。適合應快速完成的 build、test、package-manager、Git 與 inspection command；長時間、互動式或 streaming process 應使用 `shell_start` 或 `job_start`。可選 purpose/explanation 欄位可說明執行原因。
 
+啟用 `persist_on_timeout=true`（預設 false）後，同一次執行在逾時後持續作為工作執行並回傳 `job_id`；可用 `job_tail` 查詢。工作日誌合併 stdout/stderr。
+
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
 | `command` | `string` | required |  |
@@ -158,6 +160,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `persist_on_timeout` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -168,6 +171,8 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 在本機或 remote machine 寫入並執行短 Python script。
 
+啟用 `persist_on_timeout=true`（預設 false）後，同一次執行在逾時後持續作為工作執行並回傳 `job_id`；可用 `job_tail` 查詢。工作日誌合併 stdout/stderr。
+
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
 | `code` | `string` | required |  |
@@ -176,6 +181,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `persist_on_timeout` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -194,6 +200,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -210,6 +217,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `input_text` | `string` | required |  |
 | `enter` | `boolean` | `true` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -239,6 +247,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -270,6 +279,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -330,6 +340,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

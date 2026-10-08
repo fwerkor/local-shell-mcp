@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
+<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
 # Riferimento strumenti
 
 Questa pagina è costruita dagli effettivi schema MCP. Esegui `python scripts/generate-tools-reference.py` dopo modifiche alla superficie pubblica degli strumenti per aggiornare il riferimento English.
@@ -149,6 +149,8 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 Esegue un command shell non interattivo localmente o su macchina remota. Usalo per build, test, package-manager, Git e inspection che devono terminare rapidamente. Per processi lunghi, interattivi o streaming usa `shell_start` o `job_start`. Campi opzionali purpose/explanation permettono di indicare perché viene eseguito il command.
 
+Con `persist_on_timeout=true` (predefinito false), lo stesso processo continua dopo il timeout e restituisce `job_id`. Consultare `job_tail`; stdout e stderr vengono uniti.
+
 | Parametro | Tipo | Obbligatorio/default | Descrizione |
 |---|---|---|---|
 | `command` | `string` | required |  |
@@ -158,6 +160,7 @@ Esegue un command shell non interattivo localmente o su macchina remota. Usalo p
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `persist_on_timeout` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session per questa chiamata tool. Durante il lavoro sul task, passa il session_id restituito da session_manage. Usa null solo quando non è attiva alcuna Logical Session. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -168,6 +171,8 @@ Quando viene fornito `machine`, la chiamata richiede anche `remote:use` e viene 
 
 Scrive ed esegue un breve script Python localmente o su macchina remota.
 
+Con `persist_on_timeout=true` (predefinito false), lo stesso processo continua dopo il timeout e restituisce `job_id`. Consultare `job_tail`; stdout e stderr vengono uniti.
+
 | Parametro | Tipo | Obbligatorio/default | Descrizione |
 |---|---|---|---|
 | `code` | `string` | required |  |
@@ -176,6 +181,7 @@ Scrive ed esegue un breve script Python localmente o su macchina remota.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `persist_on_timeout` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session per questa chiamata tool. Durante il lavoro sul task, passa il session_id restituito da session_manage. Usa null solo quando non è attiva alcuna Logical Session. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -194,6 +200,7 @@ Avvia shell interattiva persistente localmente o su macchina remota.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session per questa chiamata tool. Durante il lavoro sul task, passa il session_id restituito da session_manage. Usa null solo quando non è attiva alcuna Logical Session. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -210,6 +217,7 @@ Invia input a sessione shell persistente locale o remota.
 | `input_text` | `string` | required |  |
 | `enter` | `boolean` | `true` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session per questa chiamata tool. Durante il lavoro sul task, passa il session_id restituito da session_manage. Usa null solo quando non è attiva alcuna Logical Session. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -239,6 +247,7 @@ Termina sessione shell persistente locale o remota.
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session per questa chiamata tool. Durante il lavoro sul task, passa il session_id restituito da session_manage. Usa null solo quando non è attiva alcuna Logical Session. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -270,6 +279,7 @@ Avvia job lungo tracciato localmente o su macchina remota.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session per questa chiamata tool. Durante il lavoro sul task, passa il session_id restituito da session_manage. Usa null solo quando non è attiva alcuna Logical Session. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -330,6 +340,7 @@ Riavvia job locale o remoto tracciato fermo o terminato.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session per questa chiamata tool. Durante il lavoro sul task, passa il session_id restituito da session_manage. Usa null solo quando non è attiva alcuna Logical Session. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
