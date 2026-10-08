@@ -131,7 +131,11 @@ async def test_persistent_python_script_survives_pruning_and_retry(
 
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_JOBS", "1")
     get_settings.cache_clear()
-    await run_job_with_timeout("echo cleanup", ".", 10)
+    # Test retention pruning without starting a third shell on a crowded CI runner.
+    with jobs._store_transaction() as store:
+        store["jobs"].append(
+            {"job_id": "newer_job", "status": "succeeded", "created_at": time.time() + 1}
+        )
     assert not script.exists()
 
 
