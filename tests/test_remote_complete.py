@@ -50,51 +50,19 @@ def _result() -> CommandResult:
     )
 
 
-def test_distribution_helpers_and_worker_bundle(tmp_path, monkeypatch):
+def test_worker_bundle_contains_only_passive_runtime_modules(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
-    assert remote._canonical_dist_name("My_Pkg.Name") == "my-pkg-name"
-    assert remote._dist_name_from_requirement("pkg-name>=1") == "pkg-name"
-    assert remote._dist_name_from_requirement("extra; extra == 'x'") is None
-    assert remote._dist_name_from_requirement(" !!!") is None
-
-    package_file = tmp_path / "module.py"
-    package_file.write_text("x = 1\n", encoding="utf-8")
-    bytecode = tmp_path / "module.pyc"
-    bytecode.write_bytes(b"ignored")
-    unsafe = Path("../unsafe.py")
-
-    class FakeDist:
-        requires = ["dependency>=1", "optional; extra == 'feature'"]
-        files = [Path("module.py"), Path("module.pyc"), unsafe]
-
-        def locate_file(self, entry):
-            return tmp_path / entry
-
-    calls = []
-
-    def distribution(name):
-        calls.append(name)
-        if name == "missing":
-            raise remote.importlib_metadata.PackageNotFoundError(name)
-        return FakeDist()
-
-    monkeypatch.setattr(remote.importlib_metadata, "distribution", distribution)
-    buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
-        remote._add_distribution_to_tar(tar, "root", set())
-        remote._add_distribution_to_tar(tar, "missing", set())
-    with tarfile.open(fileobj=io.BytesIO(buffer.getvalue()), mode="r:gz") as tar:
-        names = tar.getnames()
-    assert "vendor/module.py" in names
-    assert all(not name.endswith(".pyc") for name in names)
-    assert "dependency" in calls
-
     response = asyncio.run(worker_bundle(None))
     assert response.media_type == "application/gzip"
     with tarfile.open(fileobj=io.BytesIO(response.body), mode="r:gz") as tar:
-        bundled = tar.getnames()
-    assert "local_shell_mcp/remote.py" in bundled
-    assert not any(name.endswith(".pyc") for name in bundled)
+        names = set(tar.getnames())
+    assert "local_shell_mcp/remote.py" in names
+    assert "local_shell_mcp/remote_worker.py" in names
+    assert "local_shell_mcp/gui/linux.py" in names
+    assert not any(name.endswith((".pyc", ".pyo")) for name in names)
+    assert not any(name.startswith("vendor/") for name in names)
+    assert not any("tui" in name or "session_runtime" in name for name in names)
+    assert not any("agent_bridge" in name or "skill_ops" in name for name in names)
 
 
 def test_controller_registration_resume_rename_revoke_and_defaults(tmp_path, monkeypatch):

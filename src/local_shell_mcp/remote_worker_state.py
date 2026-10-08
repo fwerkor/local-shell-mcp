@@ -129,7 +129,7 @@ if not exist "%RUNTIME%\\local_shell_mcp" (
   echo local-shell-mcp worker runtime is not installed: %RUNTIME% 1>&2
   exit /b 1
 )
-set "PYTHONPATH=%RUNTIME%;%RUNTIME%\\vendor;%PYTHONPATH%"
+set "PYTHONPATH=%RUNTIME%;%PYTHONPATH%"
 "{python}" -m local_shell_mcp.remote_worker %*
 exit /b %ERRORLEVEL%
 '''
@@ -142,7 +142,7 @@ if [ ! -d "$RUNTIME/local_shell_mcp" ]; then
   echo "local-shell-mcp worker runtime is not installed: $RUNTIME" >&2
   exit 1
 fi
-export PYTHONPATH="$RUNTIME:$RUNTIME/vendor${{PYTHONPATH:+:$PYTHONPATH}}"
+export PYTHONPATH="$RUNTIME${{PYTHONPATH:+:$PYTHONPATH}}"
 exec {shlex.quote(python)} -m local_shell_mcp.remote_worker "$@"
 '''
     _atomic_write_text(launcher, script, 0o755)
