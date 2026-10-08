@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 13df63c51bc29aa49ae386e7c96e1f729d23914343856b4d20f8776ca0a2acda -->
+<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
 # Tools reference
 
 이 페이지는 실제 MCP tool schema에서 구성됩니다. Public tool surface를 변경한 뒤 `python scripts/generate-tools-reference.py`를 실행해 English reference를 갱신하십시오.
@@ -149,6 +149,8 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 Local 또는 remote machine에서 non-interactive shell command 하나를 실행합니다. 빠르게 끝나야 하는 build, test, package-manager, Git, inspection command에 사용하며 long-running, interactive, streaming process에는 `shell_start` 또는 `job_start`를 사용합니다. Optional purpose/explanation fields로 실행 이유를 설명할 수 있습니다.
 
+`persist_on_timeout=true`(기본값 false)를 설정하면 시간 초과 후에도 동일한 작업이 계속 실행되며 `job_id`를 반환합니다. `job_tail`로 확인할 수 있습니다. stdout/stderr는 통합됩니다.
+
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `command` | `string` | required |  |
@@ -158,6 +160,7 @@ Local 또는 remote machine에서 non-interactive shell command 하나를 실행
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `persist_on_timeout` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -168,6 +171,8 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 Local 또는 remote machine에서 short Python script를 작성하고 실행합니다.
 
+`persist_on_timeout=true`(기본값 false)를 설정하면 시간 초과 후에도 동일한 작업이 계속 실행되며 `job_id`를 반환합니다. `job_tail`로 확인할 수 있습니다. stdout/stderr는 통합됩니다.
+
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `code` | `string` | required |  |
@@ -176,6 +181,7 @@ Local 또는 remote machine에서 short Python script를 작성하고 실행합�
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `persist_on_timeout` | `boolean` | `false` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -194,6 +200,7 @@ Local 또는 remote machine에서 persistent interactive shell을 시작합니�
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -210,6 +217,7 @@ Persistent local/remote shell session에 input을 보냅니다.
 | `input_text` | `string` | required |  |
 | `enter` | `boolean` | `true` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -239,6 +247,7 @@ Persistent local/remote shell session을 종료합니다.
 |---|---|---|---|
 | `session_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -270,6 +279,7 @@ Local 또는 remote machine에서 tracked long-running job을 시작합니다.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
@@ -330,6 +340,7 @@ Stopped/exited tracked local/remote job을 다시 시작합니다.
 | `purpose` | `string \| null` | `null` |  |
 | `explanation` | `string \| null` | `null` |  |
 | `machine` | `string \| null` | `null` |  |
+| `idempotency_key` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
 OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.

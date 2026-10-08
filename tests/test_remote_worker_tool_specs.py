@@ -20,6 +20,8 @@ def test_remote_worker_allowlist_covers_core_capabilities():
     assert {
         "run_shell_tool",
         "run_python_tool",
+        "run_shell_persist_tool",
+        "run_python_persist_tool",
         "read_file",
         "write_file",
         "job_start",

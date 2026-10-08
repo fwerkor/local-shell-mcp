@@ -221,6 +221,18 @@ The public MCP surface includes:
 - Planning: `plan_manage` for optional Session-owned Goal mode and automatic continuation.
 - Diagnostics: `environment_get` (including version information), `secret_scan`, and `audit_tail`.
 
+Both `run_shell` and `run_python` accept `persist_on_timeout` (default `false`). Set it to
+`true` to start the command as a tracked job and wait up to `timeout_s`; if it is still
+running, the tool returns `timed_out: true`, `job_id`, and `job_status` without stopping
+or rerunning the command. Continue with `job_tail`, `job_list`, and `job_stop`, supplying
+the same `machine` for remote jobs. Opted-in calls use the job runner's combined
+stdout/stderr log, including when the command finishes within the wait period.
+
+```bash
+lsm call run_shell --json '{"command":"make test","timeout_s":10,"persist_on_timeout":true}'
+lsm call run_python --json '{"code":"import time; time.sleep(60)","timeout_s":10,"persist_on_timeout":true}'
+```
+
 The detailed tool reference, including purpose, inputs, returns, combinations, and notes for every tool, is available in the [docs](https://fwerkor.github.io/local-shell-mcp/reference/tools/).
 
 ## Related projects
