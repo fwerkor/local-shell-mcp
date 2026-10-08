@@ -26,9 +26,11 @@ from .process_utils import managed_process_kwargs
 from .settings import get_settings
 from .shell_environment import filtered_subprocess_env
 from .shell_ops import (
+    _effective_output_limit,
     check_command_policy,
     kill_shell,
     list_shells,
+    public_run_shell_timeout,
     read_shell,
     start_shell,
 )
@@ -77,6 +79,23 @@ def _job_runtime_dir() -> Path:
     path = get_settings().state_dir / "jobs"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def write_durable_python_script(code: str) -> Path:
+    """Store code beside tracked jobs for later job_retry calls."""
+    script = _job_runtime_dir() / "scripts" / f"script-{uuid.uuid4().hex}.py"
+    _private_write_text(script, code)
+    return script
+
+
+def discard_unreferenced_python_script(script: Path) -> None:
+    """Clean up a script when startup failed before recording its job."""
+    if script.parent.resolve(strict=False) != (_job_runtime_dir() / "scripts").resolve(strict=False):
+        return
+    with _store_transaction() as store:
+        referenced = any(job.get("script_path") == str(script) for job in store.get("jobs", []))
+    if not referenced:
+        script.unlink(missing_ok=True)
 
 
 def _managed_deferred_update_dir() -> Path:
@@ -256,9 +275,20 @@ def _remove_attempt_files(job_id: str, keep_attempt: int | None = None) -> None:
 def _prune_store(store: dict[str, Any]) -> None:
     jobs = [job for job in store.get("jobs", []) if isinstance(job, dict)]
     max_jobs = max(0, int(get_settings().max_jobs))
-    active = [job for job in jobs if job.get("status") not in TERMINAL_STATUSES]
+    now = _utc()
+    active = [
+        job
+        for job in jobs
+        if job.get("status") not in TERMINAL_STATUSES
+        or float(job.get("initial_call_lease_until") or 0) > now
+    ]
     finished = sorted(
-        (job for job in jobs if job.get("status") in TERMINAL_STATUSES),
+        (
+            job
+            for job in jobs
+            if job.get("status") in TERMINAL_STATUSES
+            and float(job.get("initial_call_lease_until") or 0) <= now
+        ),
         key=lambda job: float(job.get("created_at") or 0),
         reverse=True,
     )
@@ -268,6 +298,14 @@ def _prune_store(store: dict[str, Any]) -> None:
     store["jobs"] = [job for job in jobs if id(job) in keep_ids]
     for job in removed:
         _remove_attempt_files(str(job.get("job_id") or ""))
+        script_path = job.get("script_path")
+        if script_path:
+            script = Path(str(script_path))
+            if script.parent.resolve(strict=False) == (_job_runtime_dir() / "scripts").resolve(
+                strict=False
+            ):
+                with contextlib.suppress(OSError):
+                    script.unlink(missing_ok=True)
 
 
 def _save_store(store: dict[str, Any]) -> None:
@@ -1015,29 +1053,24 @@ def _find_job(store: dict[str, Any], job_id: str) -> dict[str, Any]:
     raise KeyError(f"job not found: {job_id}")
 
 
-def _read_log_tail(path: str | None, lines: int) -> str:
+def _read_log_bytes(path: str | None) -> bytes:
     if not path:
-        return ""
+        return b""
+    max_bytes = max(1, get_settings().max_job_log_bytes)
     if path.startswith("state://"):
-        data = get_state_store().read_bytes(path.removeprefix("state://")) or b""
-        max_bytes = max(1, get_settings().max_job_log_bytes)
-        data = data[-max_bytes:]
-        text = data.decode("utf-8", errors="replace")
-        if lines > 0:
-            split = text.splitlines()
-            text = "\n".join(split[-max(1, lines) :])
-            if data.endswith((b"\n", b"\r")) and text:
-                text += "\n"
-        return text
+        return (get_state_store().read_bytes(path.removeprefix("state://")) or b"")[-max_bytes:]
     target = Path(path)
     if not target.is_file():
-        return ""
-    max_bytes = max(1, get_settings().max_job_log_bytes)
-    size = target.stat().st_size
+        return b""
     with target.open("rb") as handle:
+        size = target.stat().st_size
         if size > max_bytes:
             handle.seek(size - max_bytes)
-        data = handle.read(max_bytes)
+        return handle.read(max_bytes)
+
+
+def _read_log_tail(path: str | None, lines: int) -> str:
+    data = _read_log_bytes(path)
     text = data.decode("utf-8", errors="replace")
     if lines > 0:
         split = text.splitlines()
@@ -1286,6 +1319,8 @@ async def start_job(
     cwd: str = ".",
     name: str | None = None,
     idempotency_key: str | None = None,
+    script_path: str | None = None,
+    initial_call_lease_s: float | None = None,
 ) -> dict[str, Any]:
     idempotency_key = _normalize_idempotency_key(idempotency_key)
     request_fingerprint = _idempotency_fingerprint(
@@ -1312,6 +1347,7 @@ async def start_job(
         "name": display_name,
         "status": "starting",
         "command": command,
+        "script_path": script_path,
         "cwd": cwd,
         "session_id": shell_name,
         "backend": None,
@@ -1325,6 +1361,8 @@ async def start_job(
         "exit_code": None,
         "attempts": 1,
     }
+    if initial_call_lease_s is not None:
+        job["initial_call_lease_until"] = now + initial_call_lease_s
     operation_id = _begin_job_operation(job, "start")
     existing_job = None
     try:
@@ -1378,6 +1416,7 @@ async def start_job(
                     and _job_operation_matches(current, operation_id)
                 ):
                     _clear_job_operation(current)
+                    current.pop("initial_call_lease_until", None)
                     current["status"] = "failed"
                     current["updated_at"] = _utc()
                     current["completed_at"] = current["updated_at"]
@@ -1421,6 +1460,102 @@ async def start_job(
         return public_job
     finally:
         _ACTIVE_JOB_OPERATIONS.discard(operation_id)
+
+
+async def run_job_with_timeout(
+    command: str,
+    cwd: str = ".",
+    timeout_s: int | None = None,
+    max_output_bytes: int | None = None,
+    *,
+    script_path: Path | None = None,
+) -> dict[str, Any]:
+    """Wait for a tracked command, leaving the *same* job running on timeout.
+
+    The job must be persistent from the outset. Starting a fresh job after a
+    conventional run_shell timeout could execute a mutation twice.
+    """
+    timeout = public_run_shell_timeout(timeout_s)
+    output_limit = _effective_output_limit(max_output_bytes)
+    started = time.monotonic()
+    job = await start_job(
+        command,
+        cwd,
+        script_path=str(script_path) if script_path is not None else None,
+        initial_call_lease_s=300,
+    )
+    job_id = str(job["job_id"])
+    status_path = _attempt_paths(job_id, 1)["status"]
+    deadline = started + timeout
+    next_check = time.monotonic() + 0.5
+    active_sessions: set[str] | None = None
+    try:
+        while _read_status_path(status_path) is None:
+            now = time.monotonic()
+            if now >= deadline:
+                break
+            if now >= next_check and job.get("session_id"):
+                next_check = now + 0.5
+                try:
+                    active_sessions = _active_session_ids(await list_shells())
+                except Exception:
+                    active_sessions = None
+                else:
+                    if str(job["session_id"]) not in active_sessions:
+                        break
+            await asyncio.sleep(min(0.2, deadline - now))
+
+        log_path = _attempt_paths(job_id, 1)["log"]
+        with _store_transaction() as store:
+            stored_job = _find_job(store, job_id)
+            status_payload = _read_status(stored_job)
+            if status_payload is not None:
+                _apply_status_payload(stored_job, status_payload, _utc())
+            elif (
+                active_sessions is not None
+                and str(job.get("session_id") or "") not in active_sessions
+            ):
+                _refresh_job_status(stored_job, active_sessions)
+            current = _public_job(stored_job)
+            output_bytes = _read_log_bytes(str(log_path))
+            try:
+                log_at_cap = log_path.stat().st_size >= max(1, get_settings().max_job_log_bytes)
+            except OSError:
+                log_at_cap = False
+    finally:
+        # Also release on an interrupted response; the runner itself remains durable.
+        with _store_transaction() as store:
+            for row in store.get("jobs", []):
+                if row.get("job_id") == job_id:
+                    row.pop("initial_call_lease_until", None)
+                    break
+
+    finished = current.get("status") in TERMINAL_STATUSES
+    truncated = (
+        bool(current.get("log_truncated"))
+        or (not finished and log_at_cap)
+        or len(output_bytes) > output_limit
+    )
+    output = output_bytes[-output_limit:].decode("utf-8", errors="replace")
+    # Invalid source bytes may expand into multibyte replacement characters.
+    encoded = output.encode("utf-8")
+    if len(encoded) > output_limit:
+        output = encoded[-output_limit:].decode("utf-8", errors="ignore")
+    # The job runner combines both streams into its persistent log.
+    return {
+        "ok": finished and current.get("exit_code") == 0,
+        "exit_code": current.get("exit_code") if finished else None,
+        "timed_out": not finished,
+        "duration_ms": int((time.monotonic() - started) * 1000),
+        "cwd": cwd,
+        "command": command,
+        "stdout": output,
+        "stderr": "",
+        "truncated": truncated,
+        "job_id": job_id,
+        "job_status": current.get("status"),
+        "persisted": not finished,
+    }
 
 
 async def list_jobs(
@@ -1990,7 +2125,9 @@ def run_job_runner_cli(argv: list[str] | None = None) -> None:
             with contextlib.suppress(OSError):
                 log_path.chmod(0o600)
             while True:
-                chunk = process.stdout.read(65536)
+                # BufferedReader.read(n) waits for n bytes or EOF, so short
+                # progress messages otherwise remain invisible until exit.
+                chunk = process.stdout.read1(65536)
                 if not chunk:
                     break
                 output_bytes += len(chunk)

@@ -119,7 +119,7 @@ async def test_sender_discards_result_rejected_by_controller(outbox, monkeypatch
     assert not in_progress
 
 
-@pytest.mark.parametrize("tool", ["shell_start", "run_shell_tool"])
+@pytest.mark.parametrize("tool", ["shell_start", "run_shell_tool", "run_shell_persist_tool", "run_python_persist_tool"])
 async def test_spooled_result_retains_reset_generation_and_mutation_preservation(
     outbox, monkeypatch, tool
 ):
@@ -136,7 +136,7 @@ async def test_spooled_result_retains_reset_generation_and_mutation_preservation
     path = next(outbox.glob("*.json"))
     persisted = json.loads(path.read_text(encoding="utf-8"))
     assert persisted["reset_generation"] == 3
-    assert bool(persisted.get("preserve_across_reset")) == (tool == "shell_start")
+    assert bool(persisted.get("preserve_across_reset")) == (tool != "run_shell_tool")
     attempts = 0
 
     def post(url, payload, headers=None, timeout=None):
@@ -166,4 +166,4 @@ async def test_spooled_result_retains_reset_generation_and_mutation_preservation
         sender.cancel()
         with pytest.raises(asyncio.CancelledError):
             await sender
-    assert attempts == 3 if tool == "shell_start" else attempts < 3
+    assert attempts == 3 if tool != "run_shell_tool" else attempts < 3
