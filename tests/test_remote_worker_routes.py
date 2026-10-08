@@ -32,11 +32,15 @@ async def test_worker_bundle_and_manifest_are_stable(tmp_path, monkeypatch):
         assert archive.extractfile("local_shell_mcp/main.py").read() == (
             routes._LEGACY_WORKER_MAIN  # noqa: SLF001
         )
+        expected_python = {
+            f"local_shell_mcp/{name}" for name in routes._WORKER_PYTHON_FILES  # noqa: SLF001
+        }
+        actual_python = {name for name in names if name.endswith(".py")}
+        assert actual_python == expected_python | {"local_shell_mcp/main.py"}
+        assert not any("tui" in name or "human_ui" in name for name in names)
+        assert not any("agent_bridge" in name or "session_runtime" in name for name in names)
         assert "local_shell_mcp/cli_call.py" not in names
-        for module in routes._CONTROLLER_ONLY_MODULES:  # noqa: SLF001
-            if module == "main.py":
-                continue  # legacy passive-only transition shim
-            assert f"local_shell_mcp/{module}" not in names
+        assert "local_shell_mcp/tools.py" not in names
 
     response = await routes.worker_manifest(None)  # type: ignore[arg-type]
     data = json.loads(response.body)
@@ -59,7 +63,25 @@ def test_worker_bundle_entrypoint_isolated_from_controller_cli(tmp_path):
     with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
         archive.extractall(tmp_path, filter="data")
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(tmp_path) + os.pathsep + str(tmp_path / "vendor")
+    env["PYTHONPATH"] = str(tmp_path)
+    isolation = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import importlib.util, local_shell_mcp; "
+            "print(local_shell_mcp.__file__); "
+            "assert all(importlib.util.find_spec('local_shell_mcp.' + name) is None "
+            "for name in ('human_ui', 'tui_runtime', 'cli_call', 'tools', "
+            "'session_runtime', 'remote_transfer', 'skill_ops', 'oauth'))",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+        check=False,
+    )
+    assert isolation.returncode == 0, isolation.stderr
+    assert isolation.stdout.strip() == str(tmp_path / "local_shell_mcp" / "__init__.py")
     denied = subprocess.run(
         [sys.executable, "-m", "local_shell_mcp.remote_worker", "worker", "call", "run_shell"],
         capture_output=True,
@@ -90,6 +112,17 @@ def test_worker_bundle_entrypoint_isolated_from_controller_cli(tmp_path):
     )
     assert legacy.returncode == 2
     assert "invalid choice: 'call'" in legacy.stderr
+    for command in ("tui", "call"):
+        denied = subprocess.run(
+            [sys.executable, "-m", "local_shell_mcp.remote_worker", command],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=tmp_path,
+            check=False,
+        )
+        assert denied.returncode == 2
+        assert f"invalid choice: '{command}'" in denied.stderr
 
 
 @pytest.mark.asyncio

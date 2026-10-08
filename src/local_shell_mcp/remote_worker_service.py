@@ -409,7 +409,6 @@ def _write_windows_task_launcher() -> Path:
     path = _windows_task_launcher_path()
     state_dir = str(worker_state_dir().resolve())
     runtime_dir = str(worker_runtime_dir().resolve())
-    vendor_dir = str((worker_runtime_dir() / "vendor").resolve())
     log_path = str(worker_log_path().resolve())
     content = f'''from __future__ import annotations
 
@@ -419,20 +418,19 @@ import traceback
 
 STATE_DIR = {state_dir!r}
 RUNTIME_DIR = {runtime_dir!r}
-VENDOR_DIR = {vendor_dir!r}
 LOG_PATH = {log_path!r}
 
 os.environ["PYTHONUNBUFFERED"] = "1"
 os.environ[{_WORKER_MANAGED_ENV!r}] = "1"
 os.environ["LOCAL_SHELL_MCP_WORKER_STATE_DIR"] = STATE_DIR
 existing_pythonpath = os.environ.get("PYTHONPATH")
-runtime_pythonpath = os.pathsep.join((RUNTIME_DIR, VENDOR_DIR))
+runtime_pythonpath = RUNTIME_DIR
 os.environ["PYTHONPATH"] = (
     runtime_pythonpath
     if not existing_pythonpath
     else runtime_pythonpath + os.pathsep + existing_pythonpath
 )
-sys.path[:0] = [RUNTIME_DIR, VENDOR_DIR]
+sys.path.insert(0, RUNTIME_DIR)
 
 with open(LOG_PATH, "a", encoding="utf-8", buffering=1) as worker_log:
     sys.stdout = worker_log
@@ -693,7 +691,7 @@ def _process_environment() -> dict[str, str]:
     env.pop("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", None)
     runtime = worker_runtime_dir()
     current = env.get("PYTHONPATH", "")
-    pythonpath = os.pathsep.join((str(runtime), str(runtime / "vendor")))
+    pythonpath = str(runtime)
     env["PYTHONPATH"] = pythonpath + (os.pathsep + current if current else "")
     env["LOCAL_SHELL_MCP_WORKER_STATE_DIR"] = str(worker_state_dir().resolve())
     env[_WORKER_MANAGED_ENV] = "1"
