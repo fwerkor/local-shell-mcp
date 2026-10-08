@@ -4,7 +4,6 @@ import asyncio
 import base64
 import contextlib
 import hashlib
-import importlib.metadata as importlib_metadata
 import json
 import math
 import os
@@ -15,7 +14,6 @@ import shutil
 import socket
 import subprocess
 import sys
-import tarfile
 import threading
 import time
 import urllib.error
@@ -109,7 +107,6 @@ _WORKER_TRANSFER_LEASE_REFRESH_INTERVAL_S = 60.0
 # worker startup path. Tool-specific dependencies such as Playwright should be
 # installed by the tool command on the remote machine, not vendored from the
 # controller's Python ABI.
-REMOTE_WORKER_DISTRIBUTIONS: tuple[str, ...] = ()
 REMOTE_WORKER_REGISTRY_FILE_NAME = "remote-workers.json"
 REMOTE_WORKER_REGISTRY_BACKUP_FILE_NAME = "remote-workers.json.bak"
 REMOTE_WORKER_REGISTRY_GENERATION_FILE_NAME = "remote-workers.generation"
@@ -229,46 +226,6 @@ class WorkerHttpError(RuntimeError):
         self.status_code = status_code
         self.detail = detail
         super().__init__(f"worker HTTP POST {url} failed with {status_code}: {detail}")
-
-
-def _canonical_dist_name(name: str) -> str:
-    return re.sub(r"[-_.]+", "-", name).lower()
-
-
-def _dist_name_from_requirement(requirement: str) -> str | None:
-    # importlib.metadata exposes optional extras in dist.requires too. Do not
-    # vendor those implicitly: extras often pull in native extensions for the
-    # controller's Python ABI, which can break remote workers running a different
-    # Python minor version.
-    if "extra ==" in requirement or "extra==" in requirement:
-        return None
-    match = re.match(r"\s*([A-Za-z0-9_.-]+)", requirement)
-    return match.group(1) if match else None
-
-
-def _add_distribution_to_tar(tar: tarfile.TarFile, dist_name: str, seen: set[str]) -> None:
-    canonical = _canonical_dist_name(dist_name)
-    if canonical in seen:
-        return
-    seen.add(canonical)
-    try:
-        dist = importlib_metadata.distribution(dist_name)
-    except importlib_metadata.PackageNotFoundError:
-        return
-
-    for requirement in dist.requires or []:
-        required_name = _dist_name_from_requirement(requirement)
-        if required_name:
-            _add_distribution_to_tar(tar, required_name, seen)
-
-    for entry in dist.files or []:
-        entry_path = Path(entry)
-        if entry_path.is_absolute() or ".." in entry_path.parts:
-            continue
-        source = Path(dist.locate_file(entry))
-        if not source.is_file() or source.suffix in {".pyc", ".pyo"}:
-            continue
-        tar.add(source, arcname=str(Path("vendor") / entry_path))
 
 
 def _utc() -> float:
@@ -3277,7 +3234,7 @@ def _reexec_updated_worker_runtime() -> None:
     from .remote_worker_state import worker_runtime_dir
 
     runtime = worker_runtime_dir()
-    preferred = [str(runtime), str(runtime / "vendor")]
+    preferred = [str(runtime)]
     current = [entry for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep) if entry]
     os.environ["PYTHONPATH"] = os.pathsep.join(
         preferred + [entry for entry in current if entry not in preferred]
