@@ -8,6 +8,7 @@ from edge_case_support import symlink_or_skip
 from edge_case_support import workspace as _transfer_workspace
 from pydantic import BaseModel
 
+import local_shell_mcp.auth as auth
 import local_shell_mcp.tools as mcp_tools
 import local_shell_mcp.transfer_ops as transfer_ops
 from local_shell_mcp.auth import Principal
@@ -34,18 +35,21 @@ def test_public_tool_timeout_uncovered_paths(
 ) -> None:
     assert mcp_tools._public_tool_timeout_s(tool_name, arguments) == expected
 
-def test_current_principal_allows_scopes(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mcp_tools, "current_principal", lambda: None)
-    assert mcp_tools._current_principal_allows("shell:write")
+def test_current_principal_scope_enforcement(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(auth, "current_principal", lambda: None)
+    auth.require_current_scopes(["shell:write"])
 
     local = Principal(None, "local", {"auth": "local-cli"})
-    monkeypatch.setattr(mcp_tools, "current_principal", lambda: local)
-    assert mcp_tools._current_principal_allows("anything")
+    monkeypatch.setattr(auth, "current_principal", lambda: local)
+    auth.require_current_scopes(["anything"])
 
     oauth = Principal("user@example.com", "subject", {"auth": "oauth", "scope": "shell:read"})
-    monkeypatch.setattr(mcp_tools, "current_principal", lambda: oauth)
-    assert mcp_tools._current_principal_allows("shell:read")
-    assert not mcp_tools._current_principal_allows("shell:write")
+    monkeypatch.setattr(auth, "current_principal", lambda: oauth)
+    auth.require_current_scopes(["shell:read"])
+    with pytest.raises(auth.HTTPException) as error:
+        auth.require_current_scopes(["shell:write"])
+    assert error.value.status_code == 403
+    assert "shell:write" in error.value.headers["WWW-Authenticate"]
 
 class _AuditAction(BaseModel):
     text: str | None = None
