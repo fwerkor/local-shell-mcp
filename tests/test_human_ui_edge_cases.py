@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import local_shell_mcp.human_ui as human_ui
+import local_shell_mcp.remote as remote
 
 
 @pytest.mark.parametrize(
@@ -21,7 +22,9 @@ import local_shell_mcp.human_ui as human_ui
 def test_human_ui_remote_version_shapes(machine: dict[str, object], expected: str | None) -> None:
     assert human_ui._remote_version(machine) == expected
 
-def test_human_ui_linux_cpu_time_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_remote_linux_cpu_time_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(remote.sys, "platform", "linux")
+
     class FakeProc:
         def __init__(self, text: str) -> None:
             self.text = text
@@ -29,14 +32,14 @@ def test_human_ui_linux_cpu_time_parsing(monkeypatch: pytest.MonkeyPatch) -> Non
         def read_text(self, **kwargs) -> str:
             return self.text
 
-    monkeypatch.setattr(human_ui, "Path", lambda path: FakeProc("cpu 1 2 3\n"))
-    assert human_ui._read_linux_cpu_times() is None
-    monkeypatch.setattr(human_ui, "Path", lambda path: FakeProc("cpu 1 2 3 4\n"))
-    assert human_ui._read_linux_cpu_times() == (10, 4)
-    monkeypatch.setattr(human_ui, "Path", lambda path: FakeProc("cpu 1 2 3 4 5\n"))
-    assert human_ui._read_linux_cpu_times() == (15, 9)
-    monkeypatch.setattr(human_ui, "Path", lambda path: FakeProc("bad"))
-    assert human_ui._read_linux_cpu_times() is None
+    monkeypatch.setattr(remote, "Path", lambda path: FakeProc("cpu 1 2 3\n"))
+    assert remote._read_worker_cpu_times() is None
+    monkeypatch.setattr(remote, "Path", lambda path: FakeProc("cpu 1 2 3 4\n"))
+    assert remote._read_worker_cpu_times() == (10, 4)
+    monkeypatch.setattr(remote, "Path", lambda path: FakeProc("cpu 1 2 3 4 5\n"))
+    assert remote._read_worker_cpu_times() == (15, 9)
+    monkeypatch.setattr(remote, "Path", lambda path: FakeProc("bad"))
+    assert remote._read_worker_cpu_times() is None
 
 def test_human_ui_local_system_snapshot_delta_and_fallback(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -47,9 +50,8 @@ def test_human_ui_local_system_snapshot_delta_and_fallback(
     monkeypatch.setattr(human_ui.time, "monotonic", lambda: 10.0)
     monkeypatch.setattr(human_ui.os, "getloadavg", lambda: (0.5, 0.0, 0.0), raising=False)
     monkeypatch.setattr(human_ui.os, "cpu_count", lambda: 4)
-    monkeypatch.setattr(human_ui, "_read_linux_cpu_times", lambda: (200, 60))
+    monkeypatch.setattr(human_ui, "_read_worker_cpu_times", lambda: (200, 60))
     monkeypatch.setattr(human_ui, "_read_linux_network", lambda: (1600, 2600))
-    monkeypatch.setattr(human_ui, "_read_linux_memory", lambda: (1000, 250))
     monkeypatch.setattr(human_ui, "_read_worker_memory", lambda: (1000, 250))
     monkeypatch.setattr(
         human_ui.shutil,
@@ -72,9 +74,8 @@ def test_human_ui_local_system_snapshot_delta_and_fallback(
 
     human_ui._CPU_SAMPLE = None
     human_ui._NETWORK_SAMPLE = None
-    monkeypatch.setattr(human_ui, "_read_linux_cpu_times", lambda: None)
+    monkeypatch.setattr(human_ui, "_read_worker_cpu_times", lambda: None)
     monkeypatch.setattr(human_ui, "_read_linux_network", lambda: None)
-    monkeypatch.setattr(human_ui, "_read_linux_memory", lambda: None)
     monkeypatch.setattr(human_ui, "_read_worker_memory", lambda: None)
     monkeypatch.setattr(
         human_ui.shutil,

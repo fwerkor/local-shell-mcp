@@ -5,44 +5,49 @@ import asyncio
 import pytest
 
 import local_shell_mcp.human_ui as human_ui
+import local_shell_mcp.remote as remote
 import local_shell_mcp.tools as tools
 
 
 @pytest.mark.parametrize(
-    "reader",
+    ("module", "reader"),
     [
-        human_ui._read_linux_cpu_times,
-        human_ui._read_linux_memory,
-        human_ui._read_linux_network,
+        (remote, remote._read_worker_cpu_times),
+        (remote, remote._read_worker_memory),
+        (human_ui, human_ui._read_linux_network),
     ],
 )
 def test_local_system_snapshot_readers_tolerate_unavailable_proc_files(
-    monkeypatch: pytest.MonkeyPatch, reader
+    monkeypatch: pytest.MonkeyPatch, module, reader
 ) -> None:
     class MissingProcFile:
         def read_text(self, **kwargs):
             raise FileNotFoundError("procfs unavailable")
 
-    monkeypatch.setattr(human_ui, "Path", lambda path: MissingProcFile())
+    monkeypatch.setattr(module, "Path", lambda path: MissingProcFile())
+    if module is remote:
+        monkeypatch.setattr(remote.sys, "platform", "linux")
     assert reader() is None
 
 
 @pytest.mark.parametrize(
-    ("reader", "content"),
+    ("module", "reader", "content"),
     [
-        (human_ui._read_linux_cpu_times, "cpu 42 malformed 4\n"),
-        (human_ui._read_linux_memory, "MemTotal: malformed kB\n"),
-        (human_ui._read_linux_network, "header\nheader\ninvalid record\n"),
+        (remote, remote._read_worker_cpu_times, "cpu 42 malformed 4\n"),
+        (remote, remote._read_worker_memory, "MemTotal: malformed kB\n"),
+        (human_ui, human_ui._read_linux_network, "header\nheader\ninvalid record\n"),
     ],
 )
 def test_local_system_snapshot_readers_tolerate_malformed_proc_contents(
-    monkeypatch: pytest.MonkeyPatch, reader, content: str
+    monkeypatch: pytest.MonkeyPatch, module, reader, content: str
 ) -> None:
     class MalformedProcFile:
         def read_text(self, **kwargs):
             return content
 
-    monkeypatch.setattr(human_ui, "Path", lambda path: MalformedProcFile())
+    monkeypatch.setattr(module, "Path", lambda path: MalformedProcFile())
+    if module is remote:
+        monkeypatch.setattr(remote.sys, "platform", "linux")
     assert reader() is None
 
 
@@ -73,12 +78,13 @@ async def test_cancelled_tool_waits_for_inflight_side_effect_to_finish() -> None
 
 
 @pytest.mark.parametrize(
-    ("reader", "content", "expected"),
+    ("module", "reader", "content", "expected"),
     [
-        (human_ui._read_linux_cpu_times, "cpu 1 2 3 4\n", (10, 4)),
-        (human_ui._read_linux_cpu_times, "cpu 1 2 3\n", None),
-        (human_ui._read_linux_memory, "MemTotal: 100 kB\nMemFree: 40 kB\n", (102400, 61440)),
+        (remote, remote._read_worker_cpu_times, "cpu 1 2 3 4\n", (10, 4)),
+        (remote, remote._read_worker_cpu_times, "cpu 1 2 3\n", None),
+        (remote, remote._read_worker_memory, "MemTotal: 100 kB\nMemFree: 40 kB\n", (102400, 61440)),
         (
+            human_ui,
             human_ui._read_linux_network,
             "header\nheader\nlo: 1 0 0 0 0 0 0 0 2 0 0 0 0 0 0 0\neth0: 100 0 0 0 0 0 0 0 200 0 0 0 0 0 0 0\n",
             (100, 200),
@@ -86,13 +92,15 @@ async def test_cancelled_tool_waits_for_inflight_side_effect_to_finish() -> None
     ],
 )
 def test_local_system_snapshot_parses_partial_proc_records(
-    monkeypatch: pytest.MonkeyPatch, reader, content: str, expected
+    monkeypatch: pytest.MonkeyPatch, module, reader, content: str, expected
 ) -> None:
     class ProcFile:
         def read_text(self, **kwargs):
             return content
 
-    monkeypatch.setattr(human_ui, "Path", lambda path: ProcFile())
+    monkeypatch.setattr(module, "Path", lambda path: ProcFile())
+    if module is remote:
+        monkeypatch.setattr(remote.sys, "platform", "linux")
     assert reader() == expected
 
 
