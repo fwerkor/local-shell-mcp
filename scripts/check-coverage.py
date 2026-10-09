@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-GLOBAL_MINIMUM = 93.0
+GLOBAL_MINIMUM = 95.0
 MODULE_MINIMUM = 90.0
 
 
