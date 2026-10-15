@@ -12,7 +12,7 @@ import threading
 import time
 import uuid
 import zlib
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -484,6 +484,7 @@ def _retention_units(
 ) -> list[list[tuple[int, bytes, dict[str, Any] | None, set[str]]]]:
     units: list[list[tuple[int, bytes, dict[str, Any] | None, set[str]]]] = []
     call_units: dict[str, list[tuple[int, bytes, dict[str, Any] | None, set[str]]]] = {}
+    remote_job_parents = _remote_job_parent_ids(record for _, record, _ in parsed)
     for index, (raw_line, record, payload_ids) in enumerate(parsed):
         call_id = ""
         if isinstance(record, dict):
@@ -492,6 +493,11 @@ def _retention_units(
                 call_id = str(record.get("call_id") or "")
             elif event == "command_preflight":
                 call_id = str(record.get("parent_call_id") or record.get("call_id") or "")
+            elif event in {"remote_job_claimed", "remote_job_result_accepted"}:
+                call_id = str(
+                    record.get("parent_call_id")
+                    or remote_job_parents.get(str(record.get("job_id") or ""), "")
+                )
             else:
                 call_id = str(record.get("parent_call_id") or "")
         if call_id:
@@ -1461,11 +1467,23 @@ def _nested_semantic_event(record: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _remote_job_parent_ids(records: Iterable[dict[str, Any] | None]) -> dict[str, str]:
+    return {
+        str(record["job_id"]): str(record["parent_call_id"])
+        for record in records
+        if isinstance(record, dict)
+        and record.get("event") == "remote_job_enqueued"
+        and record.get("job_id")
+        and record.get("parent_call_id")
+    }
+
+
 def _coalesce_audit_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     pending_by_id: dict[str, dict[str, Any]] = {}
     entries_by_id: dict[str, dict[str, Any]] = {}
     pending_legacy: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    remote_job_parents = _remote_job_parent_ids(records)
 
     for index, record in enumerate(records):
         event = str(record.get("event") or "")
@@ -1474,6 +1492,8 @@ def _coalesce_audit_records(records: list[dict[str, Any]]) -> list[dict[str, Any
         parent_call_id = str(record.get("parent_call_id") or "")
         if not parent_call_id and event == "command_preflight":
             parent_call_id = str(record.get("call_id") or "")
+        if not parent_call_id and event in {"remote_job_claimed", "remote_job_result_accepted"}:
+            parent_call_id = remote_job_parents.get(str(record.get("job_id") or ""), "")
         if parent_call_id:
             parent = entries_by_id.get(parent_call_id)
             if parent is not None:
