@@ -139,3 +139,92 @@ def test_remote_job_lifecycle_coalesces_by_job_id_and_preserves_details(tmp_path
     )
     assert len(units) == 4
     assert sorted(len(unit) for unit in units) == [1, 1, 5, 5]
+
+
+def test_remote_lifecycle_time_filters_use_child_timestamp(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    records = [
+        {"ts": 10, "event": "mcp_tool_call_start", "call_id": "call-1", "tool": "run_shell"},
+        {"ts": 12, "event": "remote_job_enqueued", "parent_call_id": "call-1", "job_id": "job-1", "machine": "worker-a"},
+        {"ts": 16, "event": "remote_job_claimed", "job_id": "job-1", "machine": "worker-a"},
+        {"ts": 24, "event": "remote_job_result_accepted", "job_id": "job-1", "machine": "worker-a"},
+        {"ts": 25, "event": "mcp_tool_call_end", "call_id": "call-1", "tool": "run_shell", "ok": True},
+    ]
+    get_settings().audit_log_path.write_text(
+        "".join(json.dumps(record) + "\n" for record in records), encoding="utf-8"
+    )
+
+    detail = audit_module.get_audit_entry("call:call-1")
+    assert [item["ts"] for item in detail["related_events"]] == [12, 16, 24]
+    assert audit_module.query_audit(start_ts=20)["total_matched"] == 0
+    assert audit_module.query_audit(event="remote_job_result_accepted", start_ts=20, end_ts=24)["total_matched"] == 1
+    assert audit_module.query_audit(event="remote_job_result_accepted", end_ts=20)["total_matched"] == 0
+    assert audit_module.query_audit(event="remote_job_claimed", start_ts=15, end_ts=18)["total_matched"] == 1
+    assert audit_module.query_audit(event="remote_job_claimed", start_ts=20)["total_matched"] == 0
+    assert audit_module.query_audit(event="mcp_tool_call_start", start_ts=20)["total_matched"] == 0
+
+
+def test_remote_worker_node_filter_includes_nested_transfer_nodes(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    records = [
+        {"ts": 1, "event": "mcp_tool_call_start", "call_id": "transfer", "tool": "remote_transfer", "arguments": {"keyword_args": {"source_machine": "worker-a", "destination_machine": "worker-b"}}},
+        {"ts": 2, "event": "remote_job_enqueued", "parent_call_id": "transfer", "job_id": "job-a", "machine": "worker-a"},
+        {"ts": 3, "event": "remote_job_claimed", "job_id": "job-a", "machine": "worker-a"},
+        {"ts": 4, "event": "remote_job_result_accepted", "job_id": "job-a", "machine": "worker-a"},
+        {"ts": 5, "event": "remote_job_enqueued", "parent_call_id": "transfer", "job_id": "job-b", "machine": "worker-b"},
+        {"ts": 6, "event": "remote_job_claimed", "job_id": "job-b", "machine": "worker-b"},
+        {"ts": 7, "event": "remote_job_result_accepted", "job_id": "job-b", "machine": "worker-b"},
+        {"ts": 8, "event": "mcp_tool_call_end", "call_id": "transfer", "tool": "remote_transfer", "ok": True},
+    ]
+    get_settings().audit_log_path.write_text(
+        "".join(json.dumps(record) + "\n" for record in records), encoding="utf-8"
+    )
+
+    assert audit_module.query_audit(node="worker-a")["total_matched"] == 1
+    assert audit_module.query_audit(node="worker-b")["total_matched"] == 1
+    assert audit_module.query_audit(node="worker-c")["total_matched"] == 0
+    assert audit_module.query_audit(node="worker-b", operation="remote")["total_matched"] == 1
+    assert audit_module.query_audit(node="worker-a", event="remote_job_claimed", start_ts=3, end_ts=3)["total_matched"] == 1
+    assert audit_module.query_audit(node="worker-b", event="remote_job_claimed", start_ts=3, end_ts=3)["total_matched"] == 0
+    assert audit_module.query_audit(node="worker-b", event="remote_job_result_accepted", start_ts=4, end_ts=4)["total_matched"] == 0
+    assert audit_module.query_audit(node="worker-b", event="remote_job_result_accepted", start_ts=7, end_ts=7)["total_matched"] == 1
+
+
+def test_nested_event_without_machine_inherits_parent_node():
+    records = [
+        {"ts": 1, "event": "mcp_tool_call_start", "call_id": "file", "tool": "revoke_file_link"},
+        {"ts": 2, "event": "download_link_revoked", "parent_call_id": "file", "path": "report.txt"},
+        {"ts": 3, "event": "mcp_tool_call_end", "call_id": "file", "tool": "revoke_file_link", "ok": True},
+    ]
+    result = audit_module._matching_audit_rows(
+        records, node="local", event="download_link_revoked", operation=None,
+        session=None, search=None, start_ts=1, end_ts=3,
+    )
+    assert [row["id"] for row in result] == ["call:file"]
+
+
+def test_bounded_audit_unit_keeps_remote_job_association():
+    records = [
+        {"ts": 1, "event": "mcp_tool_call_start", "call_id": "call-1", "tool": "run_shell", "payload": "x" * 4000},
+        {"ts": 2, "event": "remote_job_enqueued", "parent_call_id": "call-1", "job_id": "job-1", "machine": "worker-a", "payload": "x" * 4000},
+        {"ts": 3, "event": "remote_job_claimed", "job_id": "job-1", "machine": "worker-a", "payload": "x" * 4000},
+        {"ts": 4, "event": "remote_job_result_accepted", "job_id": "job-1", "machine": "worker-a", "payload": "x" * 4000},
+        {"ts": 5, "event": "mcp_tool_call_end", "call_id": "call-1", "tool": "run_shell", "ok": True, "payload": "x" * 4000},
+    ]
+    unit = [
+        (index, audit_module._encode_audit_record(record), record, set())
+        for index, record in enumerate(records)
+    ]
+    bounded = audit_module._bounded_preview_unit(unit, 1300)
+    assert len(bounded) == 5
+    assert sum(len(raw) for _, raw in bounded) <= 1300
+    retained = [json.loads(raw) for _, raw in bounded]
+    assert all(record.get("payload") is None for record in retained)
+    assert [record["job_id"] for record in retained[1:4]] == ["job-1"] * 3
+    assert retained[2]["parent_call_id"] == retained[3]["parent_call_id"] == "call-1"
+    assert [record["event"] for record in audit_module._coalesce_audit_records(retained)] == [
+        "mcp_tool_call"
+    ]
+    assert len(audit_module._coalesce_audit_records(retained)[0]["related_events"]) == 3
+    without_enqueued = [record for record in retained if record["event"] != "remote_job_enqueued"]
+    assert len(audit_module._coalesce_audit_records(without_enqueued)) == 1

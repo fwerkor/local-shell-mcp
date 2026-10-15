@@ -468,6 +468,8 @@ def _bounded_preview_record(record: dict[str, Any], max_bytes: int) -> bytes:
             "tool",
             "call_id",
             "parent_call_id",
+            "job_id",
+            "machine",
             "ok",
             "error",
             "error_type",
@@ -521,9 +523,14 @@ def _bounded_preview_unit(
         return []
     per_record = max(1, max_bytes // len(unit))
     bounded: list[tuple[int, bytes]] = []
+    remote_job_parents = _remote_job_parent_ids(record for _, _, record, _ in unit)
     for index, _raw_line, record, _payload_ids in unit:
         if record is None:
             continue
+        if record.get("event") in {"remote_job_claimed", "remote_job_result_accepted"}:
+            parent_call_id = remote_job_parents.get(str(record.get("job_id") or ""))
+            if parent_call_id and not record.get("parent_call_id"):
+                record = {**record, "parent_call_id": parent_call_id}
         encoded = _bounded_preview_record(record, per_record)
         if encoded:
             bounded.append((index, encoded))
@@ -1462,9 +1469,10 @@ def _nested_semantic_event(record: dict[str, Any]) -> dict[str, Any] | None:
     event = str(record.get("event") or "")
     if not event or event in _NESTED_LIFECYCLE_EVENTS:
         return None
-    return {
-        name: value for name, value in record.items() if name not in {"id", "ts", "parent_call_id"}
-    }
+    excluded = {"id", "parent_call_id"}
+    if event not in {"remote_job_enqueued", "remote_job_claimed", "remote_job_result_accepted"}:
+        excluded.add("ts")
+    return {name: value for name, value in record.items() if name not in excluded}
 
 
 def _remote_job_parent_ids(records: Iterable[dict[str, Any] | None]) -> dict[str, str]:
@@ -1628,28 +1636,46 @@ def _matching_audit_rows(
     operation_filter = (operation or "").casefold().strip()
     session_filter = (session or "").casefold().strip()
     matched: list[dict[str, Any]] = []
-    for row in _coalesce_audit_records(records):
-        ts = float(row.get("ts") or 0)
-        if start_ts is not None and ts < start_ts:
-            continue
-        if end_ts is not None and ts > end_ts:
-            continue
-        if node_filter and node_filter != str(row.get("node") or "local").casefold():
-            continue
-        related_events = row.get("related_events") or []
-        related_event_names = [
-            str(item.get("event") or "")
-            for item in related_events
-            if isinstance(item, dict)
-        ]
-        event_text = " ".join(
-            [
-                str(row.get("event") or ""),
-                *map(str, row.get("source_events") or []),
-                *related_event_names,
-            ]
+
+    def in_time_range(ts: Any) -> bool:
+        timestamp = float(ts or 0)
+        return (start_ts is None or timestamp >= start_ts) and (
+            end_ts is None or timestamp <= end_ts
         )
-        if event_filter and event_filter not in event_text.casefold():
+
+    for row in _coalesce_audit_records(records):
+        related_events = row.get("related_events") or []
+        related_events = [item for item in related_events if isinstance(item, dict)]
+        parent_node_matches = not node_filter or node_filter == str(row.get("node") or "local").casefold()
+        nested_node_matches = not node_filter or any(
+            node_filter == str(item.get("machine") or item.get("node") or "").casefold()
+            for item in related_events
+        )
+        if event_filter:
+            parent_event_matches = any(
+                event_filter in str(value).casefold()
+                for value in [row.get("event"), *(row.get("source_events") or [])]
+            )
+            parent_matches = (
+                parent_event_matches
+                and in_time_range(row.get("ts"))
+                and (parent_node_matches or nested_node_matches)
+            )
+            nested_matches = any(
+                event_filter in str(item.get("event") or "").casefold()
+                and in_time_range(item.get("ts", row.get("ts")))
+                and (
+                    not node_filter
+                    or node_filter
+                    == str(item.get("machine") or item.get("node") or row.get("node") or "local").casefold()
+                )
+                for item in related_events
+            )
+            if not parent_matches and not nested_matches:
+                continue
+        elif not in_time_range(row.get("ts")) or not (
+            parent_node_matches or nested_node_matches
+        ):
             continue
         if operation_filter and operation_filter != str(row.get("operation") or "").casefold():
             continue
