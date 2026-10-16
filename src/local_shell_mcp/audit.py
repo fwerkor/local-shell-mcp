@@ -450,14 +450,16 @@ def _encode_audit_record(record: dict[str, Any]) -> bytes:
     return (json.dumps(record, ensure_ascii=False, default=str) + "\n").encode("utf-8")
 
 
-def _bounded_preview_record(record: dict[str, Any], max_bytes: int) -> bytes:
+def _bounded_preview_record(
+    record: dict[str, Any], max_bytes: int, *, compact: bool = False
+) -> bytes:
     preview = _resolve_record_payloads(record, full=False)
     payload_ids: set[str] = set()
     _collect_payload_ids(record, payload_ids)
     if payload_ids:
         preview["audit_payloads_omitted"] = "full payload omitted from live audit log"
     encoded = _encode_audit_record(preview)
-    if len(encoded) <= max_bytes:
+    if not compact and len(encoded) <= max_bytes:
         return encoded
     essential = {
         name: preview[name]
@@ -522,8 +524,8 @@ def _bounded_preview_unit(
     if not unit:
         return []
     per_record = max(1, max_bytes // len(unit))
-    bounded: list[tuple[int, bytes]] = []
     remote_job_parents = _remote_job_parent_ids(record for _, _, record, _ in unit)
+    records: list[tuple[int, dict[str, Any]]] = []
     for index, _raw_line, record, _payload_ids in unit:
         if record is None:
             continue
@@ -531,10 +533,28 @@ def _bounded_preview_unit(
             parent_call_id = remote_job_parents.get(str(record.get("job_id") or ""))
             if parent_call_id and not record.get("parent_call_id"):
                 record = {**record, "parent_call_id": parent_call_id}
-        encoded = _bounded_preview_record(record, per_record)
+        records.append((index, record))
+
+    evenly_bounded = [
+        (index, _bounded_preview_record(record, per_record)) for index, record in records
+    ]
+    if all(encoded for _, encoded in evenly_bounded):
+        return evenly_bounded
+
+    # Preserve the call first, then its completion and newest lifecycle evidence.
+    # Equal per-record slices can be smaller than even a minimal UUID-bearing record.
+    priority = {"mcp_tool_call_start": 0, "mcp_tool_call_end": 1}
+    prioritized = sorted(
+        records, key=lambda item: (priority.get(item[1].get("event"), 2), -item[0])
+    )
+    bounded: list[tuple[int, bytes]] = []
+    remaining = max_bytes
+    for index, record in prioritized:
+        encoded = _bounded_preview_record(record, remaining, compact=True)
         if encoded:
             bounded.append((index, encoded))
-    return bounded
+            remaining -= len(encoded)
+    return sorted(bounded)
 
 
 def _parse_retention_lines(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from uuid import uuid4
 
 import local_shell_mcp.audit as audit_module
 from local_shell_mcp.settings import get_settings
@@ -228,3 +229,38 @@ def test_bounded_audit_unit_keeps_remote_job_association():
     assert len(audit_module._coalesce_audit_records(retained)[0]["related_events"]) == 3
     without_enqueued = [record for record in retained if record["event"] != "remote_job_enqueued"]
     assert len(audit_module._coalesce_audit_records(without_enqueued)) == 1
+
+
+def test_tight_retention_budget_keeps_newest_remote_call_and_result(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "1000")
+    get_settings.cache_clear()
+
+    call_id = str(uuid4())
+    job_id = str(uuid4())
+    records = [
+        {"id": str(uuid4()), "ts": 10, "event": "mcp_tool_call_start", "call_id": call_id, "tool": "run_shell"},
+        {"id": str(uuid4()), "ts": 11, "event": "remote_job_enqueued", "job_id": job_id, "parent_call_id": call_id, "machine": "worker-a"},
+        {"id": str(uuid4()), "ts": 12, "event": "remote_job_claimed", "job_id": job_id, "machine": "worker-a"},
+        {"id": str(uuid4()), "ts": 13, "event": "remote_job_result_accepted", "job_id": job_id, "machine": "worker-a"},
+        {"id": str(uuid4()), "ts": 14, "event": "mcp_tool_call_end", "call_id": call_id, "tool": "run_shell", "ok": True},
+    ]
+    for record in records:
+        record["payload"] = "x" * 4000
+    log_path = get_settings().audit_log_path
+    log_path.write_bytes(b"".join(audit_module._encode_audit_record(record) for record in records))
+
+    audit_module._enforce_audit_storage_limit(log_path, 1000)
+
+    assert 0 < log_path.stat().st_size <= 1000
+    retained = [json.loads(line) for line in log_path.read_text().splitlines()]
+    assert {"mcp_tool_call_start", "mcp_tool_call_end", "remote_job_result_accepted"} <= {
+        record["event"] for record in retained
+    }
+    assert all("payload" not in record for record in retained)
+    rows = audit_module._coalesce_audit_records(retained)
+    assert len(rows) == 1
+    assert rows[0]["paired"] is True
+    assert rows[0]["status"] == "success"
+    assert any(item["event"] == "remote_job_result_accepted" for item in rows[0]["related_events"])
+    assert audit_module.query_audit(event="remote_job_result_accepted", node="worker-a")["total_matched"] == 1
