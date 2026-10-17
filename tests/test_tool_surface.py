@@ -121,7 +121,10 @@ async def test_mcp_tool_surface_is_stable(tmp_path, monkeypatch):
 
     assert set(tools) == CORE_TOOL_NAMES | REMOTE_DEPENDENT_TOOL_NAMES | APP_ONLY_TOOL_NAMES
     assert set(tools).isdisjoint(REMOVED_TOOL_NAMES)
-    assert all(tool.outputSchema is not None for tool in tools.values())
+    assert {name for name, tool in tools.items() if tool.outputSchema is None} == {
+        "image_view",
+        "gui_state",
+    }
     model_visible = {
         name
         for name, tool in tools.items()

@@ -4147,13 +4147,13 @@ def _register_workspace_read_tools(
             binary_preview_bytes,
         )
 
-    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
+    @mcp.tool(structured_output=False, annotations=read_only_tool, meta=shell_read_meta)
     async def image_view(
         path: str,
         machine: str | None = None,
-    ) -> ViewImageResult:
+    ) -> CallToolResult:
         """View a PNG, JPEG, GIF, or WebP file as native MCP image content locally or on a remote machine. Use this instead of file_read when visual inspection is needed. Remote images reuse the existing file-transfer protocol, so the worker does not need a new image-specific RPC."""
-        return cast(ViewImageResult, await _view_image_result(path, machine))
+        return await _view_image_result(path, machine)
 
 
 def _register_gui_tools(
@@ -4176,7 +4176,7 @@ def _register_gui_tools(
             )
         return await _tool_call(get_gui_manager().list_windows)
 
-    @mcp.tool(structured_output=True, meta=shell_execute_meta)
+    @mcp.tool(structured_output=False, meta=shell_execute_meta)
     async def gui_state(
         window_id: str,
         screenshot: bool = True,
@@ -4184,19 +4184,16 @@ def _register_gui_tools(
         max_elements: int = 300,
         max_depth: int = 12,
         machine: str | None = None,
-    ) -> GuiStateResult:
+    ) -> CallToolResult:
         """Observe one desktop window before acting. Returns its accessibility elements plus an optional native MCP screenshot and a short-lived state_id. Prefer element_id actions; coordinate actions are relative to the observed window and are rejected if the window moved or resized."""
         require_current_scopes(("shell:read", "shell:execute"))
-        return cast(
-            GuiStateResult,
-            await _gui_state_result(
-                window_id,
-                screenshot=screenshot,
-                include_elements=include_elements,
-                max_elements=max_elements,
-                max_depth=max_depth,
-                machine=machine,
-            ),
+        return await _gui_state_result(
+            window_id,
+            screenshot=screenshot,
+            include_elements=include_elements,
+            max_elements=max_elements,
+            max_depth=max_depth,
+            machine=machine,
         )
 
     @mcp.tool(structured_output=True, meta=shell_execute_meta)

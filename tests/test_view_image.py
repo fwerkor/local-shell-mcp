@@ -5,12 +5,14 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
+from mcp.shared.memory import create_connected_server_and_client_session
 from mcp.types import CallToolResult, ImageContent, TextContent
 from PIL import Image
 
 import local_shell_mcp.tools as tools
 from local_shell_mcp.image_ops import (
     MAX_VIEW_IMAGE_BYTES,
+    ImageFile,
     assert_view_image_size,
     detect_image_type,
     make_image_preview,
@@ -126,6 +128,46 @@ async def test_view_image_returns_native_mcp_image_content(tmp_path, monkeypatch
     assert image.mimeType == "image/png"
     assert base64.b64decode(image.data) == PNG
     assert "pixel.png" in text.text
+
+
+@pytest.mark.asyncio
+async def test_multimodal_tools_deliver_images_to_mcp_clients(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    (tmp_path / "pixel.png").write_bytes(PNG)
+
+    async def fake_gui_state(*args, **kwargs):
+        return tools._gui_state_call_result(
+            {"backend": "test", "state_id": "state-1", "state_ttl_s": 30},
+            None,
+            ImageFile("pixel.png", PNG, "png", "image/png", len(PNG)),
+        )
+
+    monkeypatch.setattr(tools, "_gui_state_result", fake_gui_state)
+    async with create_connected_server_and_client_session(tools.build_mcp()) as client:
+        registered = {tool.name: tool for tool in (await client.list_tools()).tools}
+        assert registered["image_view"].outputSchema is None
+        assert registered["gui_state"].outputSchema is None
+        assert registered["file_read"].outputSchema is not None
+
+        for name, args in [
+            ("image_view", {"path": "pixel.png"}),
+            ("gui_state", {"window_id": "window-1"}),
+        ]:
+            result = await client.call_tool(name, args)
+            assert result.isError is False
+            images = [item for item in result.content if isinstance(item, ImageContent)]
+            assert len(images) == 1
+            assert images[0].mimeType == "image/png"
+            assert base64.b64decode(images[0].data) == PNG
+            assert any(isinstance(item, TextContent) for item in result.content)
+            assert result.structuredContent["ok"] is True
+            if name == "gui_state":
+                assert result.structuredContent["state_id"] == "state-1"
+
+        invalid = await client.call_tool("image_view", {"path": "missing.png"})
+        assert invalid.isError is True
+        assert invalid.structuredContent["ok"] is False
+        assert all(not isinstance(item, ImageContent) for item in invalid.content)
 
 
 @pytest.mark.asyncio
