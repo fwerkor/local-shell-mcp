@@ -122,7 +122,10 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
     assert scopes("file_patch") == full_scopes
     assert scopes("browser_run_script") == full_scopes
     assert scopes("remote_transfer") == full_scopes
-    assert all(tool.outputSchema is not None for tool in tools.values())
+    assert {name for name, tool in tools.items() if tool.outputSchema is None} == {
+        "image_view",
+        "gui_state",
+    }
     assert tools["run_shell"].outputSchema["title"] == "ToolResult"
     assert set(tools["run_shell"].outputSchema["properties"]) == {"ok", "message", "data"}
     assert set(tools["file_write"].inputSchema["properties"]["encoding"]["enum"]) == {
