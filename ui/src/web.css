@@ -183,8 +183,13 @@ th:nth-child(1){width:38%} th:nth-child(2){width:17%} th:nth-child(3){width:28%}
 .last-seen { color:#7e8797; font-size:10px; }
 .last-seen.now { color:#4f596b; }
 .count-badge { display:grid; place-items:center; width:25px; height:25px; color:#9a5f13; background:#fff1d8; border-radius:8px; font-size:11px; font-weight:700; }
-.attention-list { padding:2px 15px 0; }
-.attention-item { position:relative; display:grid; grid-template-columns:31px 1fr auto; gap:9px; padding:14px 0; border-bottom:1px solid #eff1f4; }
+.attention-panel { height:0; min-height:100%; }
+.attention-panel .panel-header, .attention-panel .full-width-link { flex-shrink:0; }
+.attention-panel .attention-list { flex:1 1 0; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:2px 15px 0; scrollbar-width:thin; }
+.attention-list > .empty-state { min-height:100%; }
+.attention-list:focus-visible { outline:2px solid #7567ef; outline-offset:-3px; }
+.attention-item { position:relative; display:grid; grid-template-columns:31px minmax(0,1fr); gap:9px; padding:14px 0; border-bottom:1px solid #eff1f4; }
+.attention-item > div:last-child { min-width:0; overflow-wrap:anywhere; }
 .attention-icon { display:grid; place-items:center; width:30px; height:30px; border-radius:8px; }
 .attention-icon svg { width:16px; height:16px; }
 .warning-item .attention-icon { color:#ad6813; background:#fff3df; }
@@ -357,6 +362,8 @@ button.nav-item.active { color: white; background: #232d42; box-shadow: inset 3p
   .status-stats { grid-column: 1 / -1; min-width: 0; border-left: 0; border-top: 1px solid rgba(255,255,255,.1); }
   .metric-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .dashboard-grid, .lower-grid { grid-template-columns: 1fr; }
+  .attention-panel { height:auto; min-height:0; }
+  .attention-panel .attention-list { flex:none; max-height:60vh; }
 }
 @media (max-width: 720px) {
   .app-shell { display: block; }

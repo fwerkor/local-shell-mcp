@@ -140,6 +140,21 @@ describe("Native WebUI actions", () => {
     expect(styles).toContain(".workloads-panel .workload-list { display:flex; flex-direction:column; }")
   })
 
+  test("renders all current alerts within the available dashboard height", async () => {
+    const web = await Bun.file(new URL("./web.ts", import.meta.url)).text()
+    const styles = await Bun.file(new URL("./web.css", import.meta.url)).text()
+    const items = web.slice(web.indexOf("function alertItems("), web.indexOf("function metricCard("))
+
+    expect(items).toContain("return alerts.map(")
+    expect(items).not.toContain(".slice(")
+    expect(web).toContain('class="attention-list" role="region" aria-label="Current alerts" tabindex="0"')
+    expect(web).toContain('alertList.scrollTop = alertScrollTop')
+    expect(web).toContain('if (alertFocused) alertList.focus({ preventScroll: true })')
+    expect(styles).toContain(".attention-panel { height:0; min-height:100%; }")
+    expect(styles).toContain(".attention-panel .attention-list { flex:1 1 0; min-height:0; overflow-y:auto;")
+    expect(styles).toContain(".attention-panel .attention-list { flex:none; max-height:60vh; }")
+  })
+
   test("uses two visible file panes after the machine rail is hidden", async () => {
     const styles = await Bun.file(new URL("./web-native.css", import.meta.url)).text()
     const compactRule = styles.lastIndexOf("@media (max-width: 1100px)")
