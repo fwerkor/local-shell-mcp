@@ -520,10 +520,9 @@ function activityRows(entries: Activity[], limit = 4): string {
   }).join("")
 }
 
-function alertItems(alerts: Alert[], limit = 2): string {
-  const rows = alerts.slice(0, limit)
-  if (!rows.length) return '<div class="empty-state">Nothing needs attention.</div>'
-  return rows.map((alert) => {
+function alertItems(alerts: Alert[]): string {
+  if (!alerts.length) return '<div class="empty-state">Nothing needs attention.</div>'
+  return alerts.map((alert) => {
     const severity = stringValue(alert.severity, "info")
     return `<div class="attention-item ${severity === "warning" || severity === "critical" ? "warning-item" : "info-item"}">
       <div class="attention-icon">${severity === "warning" || severity === "critical" ? ICONS.warning : ICONS.info}</div>
@@ -581,7 +580,7 @@ function overviewTemplate(data: DashboardData): string {
   </section>
   <section class="dashboard-grid">
     <article class="panel machines-panel"><div class="panel-header"><div><h3>Machines</h3><p>Controller and connected remote workers</p></div><button class="text-button" type="button" data-view="remotes">Manage remotes →</button></div>${machineTable(data)}</article>
-    <article class="panel attention-panel"><div class="panel-header compact"><div><h3>Needs attention</h3><p>Controller and worker alerts</p></div><span class="count-badge">${alerts.length}</span></div><div class="attention-list">${alertItems(alerts)}</div><button class="full-width-link" type="button" data-view="activity">View all alerts</button></article>
+    <article class="panel attention-panel"><div class="panel-header compact"><div><h3>Needs attention</h3><p>Controller and worker alerts</p></div><span class="count-badge">${alerts.length}</span></div><div class="attention-list" role="region" aria-label="Current alerts" tabindex="0">${alertItems(alerts)}</div><button class="full-width-link" type="button" data-view="activity">View all alerts</button></article>
   </section>
   <section class="dashboard-grid lower-grid">
     <article class="panel workloads-panel"><div class="panel-header"><div><h3>Active workloads</h3><p>Tracked jobs and persistent shell sessions</p></div><button class="text-button" type="button" data-view="workloads">View all →</button></div><div class="workload-list">${workloadRows(data)}</div><button class="full-width-link" type="button" data-view="workloads">Manage ${activeWorkloads} active workloads</button></article>
@@ -651,7 +650,15 @@ function renderActiveView(): void {
   }
   if (activeView === "overview") {
     destroyNativeController()
+    const previousAlertList = viewRoot.querySelector<HTMLElement>(".attention-list")
+    const alertScrollTop = previousAlertList?.scrollTop || 0
+    const alertFocused = document.activeElement === previousAlertList
     viewRoot.innerHTML = overviewTemplate(dashboardData!)
+    const alertList = viewRoot.querySelector<HTMLElement>(".attention-list")
+    if (alertList) {
+      alertList.scrollTop = alertScrollTop
+      if (alertFocused) alertList.focus({ preventScroll: true })
+    }
     bindRenderedActions()
     return
   }
