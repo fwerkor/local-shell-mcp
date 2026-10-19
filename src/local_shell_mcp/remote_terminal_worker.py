@@ -116,7 +116,7 @@ def _bridge_url(server: str, ticket: str) -> str:
         (
             "wss" if source.scheme == "https" else "ws",
             source.netloc,
-            "/remote/terminal/ws",
+            source.path.rstrip("/") + "/remote/terminal/ws",
             urlencode({"ticket": ticket}),
             "",
         )

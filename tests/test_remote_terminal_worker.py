@@ -19,6 +19,10 @@ def test_relay_url_and_invalid_url():
         worker._bridge_url("http://localhost:1000", "key")
         == "ws://localhost:1000/remote/terminal/ws?ticket=key"
     )
+    assert (
+        worker._bridge_url("https://controller.test/mcp", "key")
+        == "wss://controller.test/mcp/remote/terminal/ws?ticket=key"
+    )
     with pytest.raises(ValueError):
         worker._bridge_url("file:///etc/passwd", "key")
 
