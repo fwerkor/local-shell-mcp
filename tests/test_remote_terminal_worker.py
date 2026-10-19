@@ -23,6 +23,7 @@ def test_relay_url_and_invalid_url():
         worker._bridge_url("file:///etc/passwd", "key")
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX PTY only")
 @pytest.mark.asyncio
 async def test_worker_rejects_non_tmux_sessions_and_invalid_input(monkeypatch):
     monkeypatch.setattr(
@@ -92,6 +93,7 @@ async def test_worker_stream_forwards_raw_bytes_resizes_and_closes(monkeypatch):
     assert events[-1] == ("close",)
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX PTY only")
 @pytest.mark.asyncio
 async def test_worker_validates_session_before_start(monkeypatch):
     monkeypatch.setattr(
@@ -169,6 +171,7 @@ async def test_real_tmux_attached_pty_preserves_ansi_and_detach(monkeypatch):
         command("kill-server")
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX PTY only")
 @pytest.mark.asyncio
 async def test_worker_start_returns_success_and_shutdown_does_not_leak(monkeypatch):
     from local_shell_mcp import remote_terminal_ws_client
@@ -220,6 +223,7 @@ async def test_worker_start_returns_success_and_shutdown_does_not_leak(monkeypat
     assert not worker._ACTIVE_ATTACHMENTS
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX PTY only")
 @pytest.mark.asyncio
 async def test_worker_rejects_unavailable_tmux_and_failing_attachment(monkeypatch):
 
@@ -252,6 +256,7 @@ async def test_native_pty_read_and_write_errors():
         await attachment.write(b"keyboard")
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX PTY only")
 @pytest.mark.asyncio
 async def test_native_pty_process_creation_error_closes_descriptors(monkeypatch):
     import subprocess
@@ -274,6 +279,7 @@ async def test_pty_write_rejects_stalled_fd(monkeypatch):
         await attachment.write(b"x")
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX PTY only")
 @pytest.mark.asyncio
 async def test_pty_close_force_kills_unresponsive_attach(monkeypatch):
     attachment = object.__new__(worker._TmuxPtyAttachment)
