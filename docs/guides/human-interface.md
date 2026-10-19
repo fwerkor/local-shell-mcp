@@ -102,14 +102,6 @@ Workloads combines active tracked jobs and standalone persistent shell sessions.
 
 Activity combines current alerts with recent MCP audit activity. Human-entered commands and file operations remain excluded from the MCP audit log.
 
-### Desktop streaming
-
-Native Desktop uses an authenticated WebSocket (`/ui/ws/desktop`) to display compressed JPEG frames and send window-relative mouse/keyboard events. It no longer polls `gui/frame` or calls `gui/action` for each interaction. Frames are scaled to at most 1280 × 800 and constrained to 128 KiB; unchanged images are not retransmitted. Short-lived observation IDs and window geometry continue to guard input targeting.
-
-For remote machines, the Controller starts and stops a Worker stream using `gui_stream_start` and `gui_stream_stop`. The Worker sends frame data and receives queued input through the dedicated `/remote/gui/stream/{stream_id}` transport, authenticated with its enrolled Worker credential and a per-stream secret. These frame/input exchanges do not create per-frame remote tool audit records. Slow browser clients retain at most one pending frame and stale observations are released. Disconnects release stream state and stop the worker task.
-
-This is bandwidth-conscious still-frame streaming, not a VNC, RDP or WebRTC video codec; platform capture and input permissions, including Linux Wayland Portal prompts, still apply.
-
 ## Browser OpenTUI
 
 Selecting **OpenTUI** lazily starts the same OpenTUI application used by the native terminal launcher. The browser console retains:
