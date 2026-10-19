@@ -876,14 +876,16 @@ class SessionRuntimeManager:
                     return self.list_sessions(subject=subject, _state_lock_held=True)
             if self._uses_shared_state_backend():
                 self._refresh_all_sessions_locked()
-            self._expire_idle_sessions_locked(normalized_subject)
+            with contextlib.suppress(Exception):
+                self._expire_idle_sessions_locked(normalized_subject)
             owners = {
                 item.subject
                 for item in self._sessions.values()
                 if normalized_subject is None or item.subject == normalized_subject
             }
             for owner in owners:
-                self._prune_session_history_locked(owner)
+                with contextlib.suppress(Exception):
+                    self._prune_session_history_locked(owner)
             logical_sessions = [
                 session
                 for session in self._sessions.values()
@@ -1579,8 +1581,9 @@ class SessionRuntimeManager:
                         _state_lock_held=True,
                     )
             logical = self._require_session_locked(session_id, subject)
-            plan = logical.plan
             now = time.time()
+            self._mark_stale_locked(logical, now)
+            plan = logical.plan
             in_flight_calls = self._in_flight_count_locked(logical.session_id)
             pending_fresh = bool(
                 plan is not None
@@ -1633,7 +1636,10 @@ class SessionRuntimeManager:
                 "valid": valid,
                 "session_id": logical.session_id,
                 "plan": (
-                    plan.public_state(now, in_flight_calls=in_flight_calls)
+                    plan.public_state(
+                        now, in_flight_calls=in_flight_calls,
+                        session_active=logical.status == "active",
+                    )
                     if plan is not None
                     else None
                 ),

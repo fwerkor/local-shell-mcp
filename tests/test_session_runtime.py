@@ -1353,3 +1353,41 @@ def test_plan_state_expires_idle_session_without_another_access(tmp_path):
     manager._save_locked(logical)
     assert manager.plan_state(session_id)["continuation_due"] is False
     assert manager.get(session_id)["status"] == "stale"
+
+
+def test_session_listing_survives_best_effort_prune_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr("local_shell_mcp.session_runtime.SESSION_HISTORY_LIMIT_PER_PRINCIPAL", 2)
+    manager = SessionRuntimeManager(tmp_path / ".state")
+    first = manager.manage("user", action="start")["session_id"]
+    second = manager.manage("user", action="start")["session_id"]
+    third = manager.manage("user", action="start")["session_id"]
+    manager.manage("user", action="finish", session_id=first)
+    store = manager._state_store()
+
+    def unavailable_delete(key):
+        raise OSError("temporary storage failure")
+
+    monkeypatch.setattr(store, "delete", unavailable_delete)
+    monkeypatch.setattr(manager, "_state_store", lambda: store)
+    listed = manager.list_sessions(subject="user")
+    assert {item["session_id"] for item in listed} == {first, second, third}
+    assert manager.get(second)["status"] == "active"
+
+
+def test_continuation_validation_rechecks_session_expiry(tmp_path):
+    manager = SessionRuntimeManager(tmp_path / ".state")
+    session_id = manager.manage("user", action="start")["session_id"]
+    manager.manage_plan(session_id, action="start", objective="Work", steps=[{"id": "one", "text": "Do it"}])
+    logical = manager._sessions[session_id]
+    assert logical.plan is not None
+    logical.plan.last_agent_activity -= PLAN_EXECUTION_LEASE_S + 1
+    manager._save_locked(logical)
+    claimed = manager.claim_plan_continuation(session_id)
+    assert claimed is not None
+    logical.updated_at -= SESSION_STALE_AFTER_S + 1
+    manager._save_locked(logical)
+
+    result = manager.validate_plan_continuation(session_id, claimed["claim_id"])
+    assert result["valid"] is False
+    assert result["plan"]["continuation_due"] is False
+    assert manager.get(session_id)["status"] == "stale"
