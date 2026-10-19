@@ -1285,3 +1285,71 @@ def test_stale_plan_does_not_auto_continue(tmp_path):
     assert manager.plan_state(session_id)["continuation_due"] is False
     assert manager.claim_plan_continuation(session_id) is None
     assert manager.manage("user", action="resume", session_id=session_id)["status"] == "active"
+
+
+@pytest.mark.parametrize("action", ["report", "finish", "cancel"])
+def test_expired_session_requires_resume_before_mutation(tmp_path, action):
+    manager = SessionRuntimeManager(tmp_path / ".state")
+    session_id = manager.manage("user", action="start", objective="Old task")["session_id"]
+    logical = manager._sessions[session_id]
+    logical.updated_at -= SESSION_STALE_AFTER_S + 1
+    manager._save_locked(logical)
+
+    kwargs = {"summary": "This must not revive the session"} if action == "report" else {}
+    with pytest.raises(ValueError, match="Logical session is stale"):
+        manager.manage("user", action=action, session_id=session_id, **kwargs)
+    state = manager.get(session_id, subject="user")
+    assert state["status"] == "stale"
+    assert state["progress"]["summary"] is None
+
+
+def test_expired_session_can_be_deleted_or_resumed_without_prior_get(tmp_path):
+    manager = SessionRuntimeManager(tmp_path / ".state")
+    expired = manager.manage("user", action="start")["session_id"]
+    logical = manager._sessions[expired]
+    logical.updated_at -= SESSION_STALE_AFTER_S + 1
+    manager._save_locked(logical)
+    assert manager.manage("user", action="delete", session_id=expired)["deleted"] is True
+    with pytest.raises(ValueError, match="Unknown logical session"):
+        manager.get(expired)
+
+    resumed = manager.manage("user", action="start")["session_id"]
+    logical = manager._sessions[resumed]
+    logical.updated_at -= SESSION_STALE_AFTER_S + 1
+    manager._save_locked(logical)
+    state = manager.manage("user", action="resume", session_id=resumed)
+    assert state["status"] == "active"
+    assert [event["type"] for event in state["recent_activity"][-2:]] == [
+        "session.stale", "session.resumed"
+    ]
+
+
+def test_expired_session_plan_get_reports_no_goal_or_continuation(tmp_path):
+    manager = SessionRuntimeManager(tmp_path / ".state")
+    session_id = manager.manage("user", action="start")["session_id"]
+    manager.manage_plan(session_id, action="start", objective="Work", steps=[{"id": "one", "text": "Do it"}])
+    logical = manager._sessions[session_id]
+    assert logical.plan is not None
+    logical.plan.last_agent_activity -= SESSION_STALE_AFTER_S + 1
+    logical.updated_at -= SESSION_STALE_AFTER_S + 1
+    manager._save_locked(logical)
+
+    state = manager.manage_plan(session_id, action="get", subject="user")
+    assert state["goal_mode"] is False
+    assert state["plan"]["status"] == "active"
+    assert state["plan"]["continuation_due"] is False
+    assert manager.get(session_id)["status"] == "stale"
+    assert manager.plan_state(session_id)["continuation_due"] is False
+
+
+def test_plan_state_expires_idle_session_without_another_access(tmp_path):
+    manager = SessionRuntimeManager(tmp_path / ".state")
+    session_id = manager.manage("user", action="start")["session_id"]
+    manager.manage_plan(session_id, action="start", objective="Work", steps=[{"id": "one", "text": "Do it"}])
+    logical = manager._sessions[session_id]
+    assert logical.plan is not None
+    logical.plan.last_agent_activity -= SESSION_STALE_AFTER_S + 1
+    logical.updated_at -= SESSION_STALE_AFTER_S + 1
+    manager._save_locked(logical)
+    assert manager.plan_state(session_id)["continuation_due"] is False
+    assert manager.get(session_id)["status"] == "stale"

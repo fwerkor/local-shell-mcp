@@ -728,9 +728,9 @@ class SessionRuntimeManager:
                     )
 
             logical = self._require_session_locked(session_id, subject)
+            self._mark_stale_locked(logical, time.time())
 
             if normalized_action == "get":
-                self._mark_stale_locked(logical, time.time())
                 return self._public_state_locked(logical)
 
             if normalized_action == "delete":
@@ -902,8 +902,9 @@ class SessionRuntimeManager:
     ) -> dict[str, Any] | None:
         if not session_id:
             return None
-        with self._lock:
+        with self._lock, self._shared_session_locks_locked([session_id]):
             logical = self._require_session_locked(session_id, subject)
+            self._mark_stale_locked(logical, time.time())
             return (
                 logical.plan.public_state(
                     in_flight_calls=self._in_flight_count_locked(logical.session_id),
@@ -1179,7 +1180,6 @@ class SessionRuntimeManager:
             self._ensure_loaded_locked()
             if (
                 not _state_lock_held
-                and normalized_action != "get"
                 and self._uses_shared_state_backend()
             ):
                 with self._shared_session_locks_locked([session_id]):
@@ -1197,6 +1197,7 @@ class SessionRuntimeManager:
                         _state_lock_held=True,
                     )
             logical = self._require_session_locked(session_id, subject)
+            self._mark_stale_locked(logical, time.time())
             if normalized_action != "get" and logical.status != "active":
                 raise ValueError(f"Logical session is {logical.status}")
             return self._manage_plan_transaction_locked(
@@ -1272,10 +1273,13 @@ class SessionRuntimeManager:
         if normalized_action == "get":
             return {
                 "session_id": logical.session_id,
-                "goal_mode": bool(plan and plan.status in {"active", "blocked"}),
+                "goal_mode": logical.status == "active" and bool(
+                    plan and plan.status in {"active", "blocked"}
+                ),
                 "plan": (
                     plan.public_state(
-                        in_flight_calls=self._in_flight_count_locked(logical.session_id)
+                        in_flight_calls=self._in_flight_count_locked(logical.session_id),
+                        session_active=logical.status == "active",
                     )
                     if plan
                     else None
