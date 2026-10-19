@@ -150,7 +150,7 @@ Dashboard to operacyjny przegląd OpenTUI. Szerokie terminale pokazują osobne r
 
 ### Files
 
-Files to natywny dla LSM trójpanelowy menedżer plików dla maszyn lokalnych i zdalnych. Oferuje tworzenie, edycję, zmianę nazw, kopiowanie, przenoszenie, wklejanie, usuwanie, przełączanie plików ukrytych, odświeżanie, podgląd tekstu, podgląd binarny i ograniczone miniatury obrazów.
+Files to internetowy eksplorator plików dla komputerów lokalnych i zdalnych. Oferuje drzewo katalogów, widok listy i siatki, wyszukiwanie w folderze, menu kontekstowe, wielokrotny wybór i ładowanie na żądanie. Pliki można przesyłać z przeglądarki i pobierać przy użyciu krótkotrwałych biletów z uprawnieniem do odczytu, bez publicznych linków. Przesyłanie binarne odbywa się strumieniowo i transakcyjnie zamiast przez JSON Base64. Dostępne są również edycja tekstu, tworzenie, zmiana nazw, kopiowanie, przenoszenie, usuwanie i pokazywanie ukrytych plików.
 
 ### Terminals
 

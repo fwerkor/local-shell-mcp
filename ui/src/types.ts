@@ -35,6 +35,7 @@ export interface FilesPayload {
   parent: string
   entries: FileEntry[]
   parent_entries: FileEntry[]
+  truncated?: boolean
 }
 
 export interface FilePreview {

@@ -24,12 +24,12 @@ describe("Native WebUI actions", () => {
     const sessions = await Bun.file(new URL("./web-native/sessions.ts", import.meta.url)).text()
     const remotes = await Bun.file(new URL("./web-native/remotes.ts", import.meta.url)).text()
 
-    for (const source of [files, sessions, remotes]) {
+    for (const source of [sessions, remotes]) {
       expect(source).toContain('this.listen(root, "keydown"')
       expect(source).toContain('event.key === "ArrowDown"')
       expect(source).toContain('event.key === "Enter"')
     }
-    for (const source of [files, sessions]) {
+    for (const source of [sessions]) {
       expect(source).toContain("tabIndex = -1")
       expect(source).toContain("tabIndex = 0")
     }
@@ -37,7 +37,10 @@ describe("Native WebUI actions", () => {
     expect(sessions).toContain("data-session-id")
     expect(remotes).toContain("data-remote-name")
     expect(remotes).toContain("focusedName")
-    expect(files).toContain("this.select(entryPath, true)")
+    expect(files).toContain("onSetPath:")
+    expect(files).toContain("onRequestData:")
+    expect(files).toContain("onDownloadFile:")
+    expect(files).toContain('event.key === "Enter"')
   })
 
   test("rerenders remote details when reset queue state changes", async () => {
@@ -80,8 +83,9 @@ describe("Native WebUI actions", () => {
     const audit = await Bun.file(new URL("./web-native/audit.ts", import.meta.url)).text()
     const terminals = await Bun.file(new URL("./web-native/terminals.ts", import.meta.url)).text()
 
-    expect(files).toContain('"open"')
-    expect(files).toContain('data-action="parent"')
+    expect(files).toContain("onOpenFile:")
+    expect(files).toContain("onDownloadFile:")
+    expect(files).toContain('data-action="up"')
     expect(audit).toContain('data-action="previous-record"')
     expect(audit).toContain('data-action="next-record"')
     expect(audit).toContain('button("Advanced", "toggle-advanced")')
@@ -155,15 +159,14 @@ describe("Native WebUI actions", () => {
     expect(styles).toContain(".attention-panel .attention-list { flex:none; max-height:60vh; }")
   })
 
-  test("uses two visible file panes after the machine rail is hidden", async () => {
+  test("uses a standalone responsive web file explorer", async () => {
     const styles = await Bun.file(new URL("./web-native.css", import.meta.url)).text()
-    const compactRule = styles.lastIndexOf("@media (max-width: 1100px)")
-    const narrowRule = styles.lastIndexOf("@media (max-width: 850px)")
-    const compactStyles = styles.slice(compactRule, narrowRule)
-
-    expect(compactRule).toBeGreaterThan(styles.lastIndexOf("@media (max-width: 1200px)"))
-    expect(compactStyles).toContain(".files-layout, .files-layout.no-parent { grid-template-columns: minmax(0,1fr); }")
-    expect(compactStyles).toContain(".files-layout.preview-open, .files-layout.no-parent.preview-open { grid-template-columns: minmax(360px,1fr) minmax(280px,.65fr); }")
+    const files = await Bun.file(new URL("./web-native/files.ts", import.meta.url)).text()
+    expect(styles).toContain(".explorer-host")
+    expect(styles).toContain("@media (max-width:850px)")
+    expect(styles).not.toContain(".files-layout")
+    expect(files).toContain("createRoot(")
+    expect(files).toContain("Filemanager")
   })
 
   test("keeps the mobile terminal height override after desktop refinements", async () => {

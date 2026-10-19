@@ -150,7 +150,7 @@ Dashboard OpenTUI का operational overview है। Wide terminals node, wor
 
 ### Files
 
-Files स्थानीय और remote machines के लिए LSM-native three-pane file manager है। यह create, edit, rename, copy, move, paste, delete, hidden-file toggle, refresh, text preview, binary preview और bounded image thumbnails देता है।
+Files स्थानीय और रिमोट मशीनों के लिए वेब फ़ाइल एक्सप्लोरर है। इसमें फ़ोल्डर ट्री, सूची और ग्रिड दृश्य, फ़ोल्डर खोज, संदर्भ मेनू, एकाधिक चयन और आवश्यकता पर फ़ोल्डर लोडिंग उपलब्ध हैं। ब्राउज़र से सीधे अपलोड किया जा सकता है, और सार्वजनिक शेयर लिंक के बिना अल्पकालिक रीड-अधिकृत टिकट से डाउनलोड किया जा सकता है। बाइनरी अपलोड Base64 JSON के बजाय ट्रांज़ैक्शनल स्ट्रीमिंग का उपयोग करते हैं। टेक्स्ट संपादन, फ़ाइल/फ़ोल्डर बनाना, नाम बदलना, कॉपी, मूव, हटाना और छिपी फ़ाइलें दिखाना भी समर्थित है।
 
 ### Terminals
 

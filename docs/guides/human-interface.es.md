@@ -150,7 +150,7 @@ Dashboard es el resumen operativo de OpenTUI. Los terminales anchos muestran reg
 
 ### Files
 
-Files es un administrador de archivos nativo de LSM con tres paneles para máquinas locales y remotas. Permite crear, editar, renombrar, copiar, mover, pegar, eliminar, alternar archivos ocultos, refrescar, previsualizar texto, previsualizar binarios y mostrar miniaturas de imágenes acotadas.
+Files es un explorador web de archivos para máquinas locales y remotas. Incluye árbol de carpetas, vistas de lista y cuadrícula, búsqueda dentro de carpetas, menús contextuales, selección múltiple y carga diferida. Permite subir archivos desde el navegador y descargarlos mediante tickets temporales con permiso de lectura, sin crear enlaces públicos. Las subidas binarias utilizan transferencias transaccionales por streaming en vez de JSON Base64. También admite edición de texto, creación, cambio de nombre, copia, traslado, eliminación y archivos ocultos.
 
 ### Terminals
 

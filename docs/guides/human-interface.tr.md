@@ -150,7 +150,7 @@ Dashboard, OpenTUI operasyonel görünümüdür. Geniş terminaller node, worklo
 
 ### Files
 
-Files, yerel ve uzak makineler için LSM'ye özgü üç panelli dosya yöneticisidir. Oluşturma, düzenleme, yeniden adlandırma, kopyalama, taşıma, yapıştırma, silme, gizli dosya geçişi, yenileme, metin önizleme, ikili önizleme ve sınırlı resim küçük resimleri sağlar.
+Files, yerel ve uzak makineler için web tabanlı bir dosya gezginidir. Klasör ağacı, liste ve ızgara görünümleri, klasör içinde arama, sağ tık menüleri, çoklu seçim ve isteğe bağlı dizin yükleme sağlar. Dosyalar tarayıcıdan doğrudan yüklenebilir; genel paylaşım bağlantısı oluşturmadan, okuma yetkisi doğrulanan kısa ömürlü indirme biletleriyle indirilebilir. İkili yüklemeler Base64 JSON yerine işlemsel akış aktarımı kullanır. Metin düzenleme, oluşturma, yeniden adlandırma, kopyalama, taşıma, silme ve gizli dosyaları görüntüleme de desteklenir.
 
 ### Terminals
 
