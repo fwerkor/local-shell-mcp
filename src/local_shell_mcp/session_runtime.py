@@ -32,7 +32,9 @@ PLAN_STEP_STATUSES = frozenset({"pending", "active", "completed", "skipped"})
 # coalesces into one row, so 200 raw events yields roughly 100 visible tool rows.
 SESSION_ACTIVITY_LIMIT = 200
 SESSION_IN_FLIGHT_LEASE_S = 2 * 60 * 60
-# Soft retention target: unfinished/resumable Sessions are never evicted to meet it.
+SESSION_STALE_AFTER_S = 24 * 60 * 60
+SESSION_PRUNABLE_STATUSES = frozenset({"completed", "cancelled", "failed", "stale"})
+# Soft retention target: active Sessions are never evicted to meet it.
 SESSION_HISTORY_LIMIT_PER_PRINCIPAL = 100
 SESSION_REPORT_LIST_LIMIT = 50
 SESSION_TEXT_LIMIT = 20_000
@@ -83,7 +85,7 @@ class PlanState:
         return any(step.status in {"pending", "active"} for step in self.steps)
 
     def public_state(
-        self, now: float | None = None, *, in_flight_calls: int = 0
+        self, now: float | None = None, *, in_flight_calls: int = 0, session_active: bool = True
     ) -> dict[str, Any]:
         current = time.time() if now is None else now
         due_at = self.last_agent_activity + PLAN_EXECUTION_LEASE_S
@@ -109,6 +111,7 @@ class PlanState:
             "continuation_due_at": due_at,
             "continuation_due": (
                 self.status == "active"
+                and session_active
                 and not self.continuation_pending
                 and in_flight_calls == 0
                 and self.continuation_count < PLAN_MAX_CONTINUATIONS
@@ -169,7 +172,9 @@ class LogicalSession:
             "updated_at": self.updated_at,
             "progress": self.progress.public_state(),
             "plan": (
-                self.plan.public_state(in_flight_calls=in_flight_calls)
+                self.plan.public_state(
+                    in_flight_calls=in_flight_calls, session_active=self.status == "active"
+                )
                 if self.plan
                 else None
             ),
@@ -555,6 +560,43 @@ class SessionRuntimeManager:
             in_flight_calls=self._in_flight_count_locked(session.session_id),
         )
 
+    def _mark_stale_locked(self, session: LogicalSession, now: float) -> bool:
+        if (
+            session.status != "active"
+            or now - session.updated_at < SESSION_STALE_AFTER_S
+            or self._in_flight_count_locked(session.session_id)
+        ):
+            return False
+        snapshot = copy.deepcopy(session)
+        try:
+            session.status = "stale"
+            if session.plan is not None:
+                session.plan.continuation_pending = False
+                session.plan.continuation_pending_since = None
+                session.plan.continuation_claim_id = None
+                session.plan.continuation_reserved = False
+            self._append_activity_locked(session, "session.stale", actor="system")
+        except Exception as exc:
+            self._restore_snapshot_locked(snapshot, exc, context="Session stale transition")
+            raise
+        return True
+
+    def _expire_idle_sessions_locked(self, subject: str | None = None) -> None:
+        now = time.time()
+        ids = [
+            item.session_id
+            for item in self._sessions.values()
+            if item.status == "active"
+            and (subject is None or item.subject == subject)
+            and now - item.updated_at >= SESSION_STALE_AFTER_S
+        ]
+        for session_id in ids:
+            with self._shared_session_locks_locked([session_id]):
+                self._refresh_session_locked(session_id)
+                session = self._sessions.get(session_id)
+                if session is not None and (subject is None or session.subject == subject):
+                    self._mark_stale_locked(session, now)
+
     def _prune_session_history_locked(self, subject: str) -> None:
         """Trim old terminal Sessions without deleting resumable work."""
         retained = [item for item in self._sessions.values() if item.subject == subject]
@@ -564,12 +606,12 @@ class SessionRuntimeManager:
 
         candidates = []
         for item in retained:
-            if item.status not in {"completed", "cancelled"}:
+            if item.status not in SESSION_PRUNABLE_STATUSES:
                 continue
             if self._in_flight_count_locked(item.session_id):
                 continue
             candidates.append(item)
-        candidates.sort(key=lambda item: (item.updated_at, item.created_at))
+        candidates.sort(key=lambda item: (item.created_at, item.updated_at))
 
         for candidate in candidates:
             if excess <= 0:
@@ -581,7 +623,7 @@ class SessionRuntimeManager:
                     current = self._sessions.get(session_id)
                     if current is None or current.subject != subject:
                         continue
-                    if current.status not in {"completed", "cancelled"}:
+                    if current.status not in SESSION_PRUNABLE_STATUSES:
                         continue
                     if self._in_flight_count_locked(session_id):
                         continue
@@ -659,6 +701,7 @@ class SessionRuntimeManager:
                         self._state_store().delete(f"sessions/{logical.session_id}.json")
                     raise exc
                 with contextlib.suppress(Exception):
+                    self._expire_idle_sessions_locked(normalized_subject)
                     self._prune_session_history_locked(normalized_subject)
                 return self._public_state_locked(logical)
 
@@ -667,7 +710,6 @@ class SessionRuntimeManager:
 
             if (
                 not _state_lock_held
-                and normalized_action not in {"get"}
                 and self._uses_shared_state_backend()
             ):
                 with self._shared_session_locks_locked([session_id]):
@@ -688,6 +730,7 @@ class SessionRuntimeManager:
             logical = self._require_session_locked(session_id, subject)
 
             if normalized_action == "get":
+                self._mark_stale_locked(logical, time.time())
                 return self._public_state_locked(logical)
 
             if normalized_action == "delete":
@@ -702,7 +745,7 @@ class SessionRuntimeManager:
                 return {"session_id": logical.session_id, "deleted": True}
 
             if normalized_action == "resume":
-                if logical.status not in {"active", "completed"}:
+                if logical.status not in {"active", "completed", "stale"}:
                     raise ValueError(f"Cannot resume a {logical.status} session")
                 snapshot = copy.deepcopy(logical)
                 try:
@@ -809,8 +852,9 @@ class SessionRuntimeManager:
             raise AssertionError("unreachable")
 
     def get(self, session_id: str, *, subject: str | None = None) -> dict[str, Any]:
-        with self._lock:
+        with self._lock, self._shared_session_locks_locked([session_id]):
             logical = self._require_session_locked(session_id, subject)
+            self._mark_stale_locked(logical, time.time())
             return self._public_state_locked(logical)
 
     def owner_subject(self, session_id: str, *, subject: str | None = None) -> str:
@@ -818,15 +862,28 @@ class SessionRuntimeManager:
         with self._lock:
             return self._require_session_locked(session_id, subject).subject
 
-    def list_sessions(self, *, subject: str | None) -> list[dict[str, Any]]:
+    def list_sessions(
+        self, *, subject: str | None, _state_lock_held: bool = False
+    ) -> list[dict[str, Any]]:
         """Return Logical Session summaries, optionally scoped to one principal."""
         normalized_subject = str(subject).strip() if subject is not None else None
         if subject is not None and not normalized_subject:
             raise ValueError("subject is required")
         with self._lock:
             self._ensure_loaded_locked()
+            if not _state_lock_held and self._uses_shared_state_backend():
+                with self._state_store().lock("sessions/history"):
+                    return self.list_sessions(subject=subject, _state_lock_held=True)
             if self._uses_shared_state_backend():
                 self._refresh_all_sessions_locked()
+            self._expire_idle_sessions_locked(normalized_subject)
+            owners = {
+                item.subject
+                for item in self._sessions.values()
+                if normalized_subject is None or item.subject == normalized_subject
+            }
+            for owner in owners:
+                self._prune_session_history_locked(owner)
             logical_sessions = [
                 session
                 for session in self._sessions.values()
@@ -849,7 +906,8 @@ class SessionRuntimeManager:
             logical = self._require_session_locked(session_id, subject)
             return (
                 logical.plan.public_state(
-                    in_flight_calls=self._in_flight_count_locked(logical.session_id)
+                    in_flight_calls=self._in_flight_count_locked(logical.session_id),
+                    session_active=logical.status == "active",
                 )
                 if logical.plan
                 else None
@@ -879,6 +937,7 @@ class SessionRuntimeManager:
                         _state_lock_held=True,
                     )
             logical = self._require_session_locked(session_id, subject)
+            self._mark_stale_locked(logical, time.time())
             if logical.status != "active":
                 raise RuntimeError(
                     f"Logical session is {logical.status}; start or resume another session"
@@ -1399,9 +1458,10 @@ class SessionRuntimeManager:
         )
         return {
             "session_id": logical.session_id,
-            "goal_mode": plan.status in {"active", "blocked"},
+            "goal_mode": logical.status == "active" and plan.status in {"active", "blocked"},
             "plan": plan.public_state(
-                now, in_flight_calls=self._in_flight_count_locked(logical.session_id)
+                now, in_flight_calls=self._in_flight_count_locked(logical.session_id),
+                session_active=logical.status == "active",
             ),
         }
 
@@ -1423,10 +1483,11 @@ class SessionRuntimeManager:
                         _state_lock_held=True,
                     )
             logical = self._require_session_locked(session_id, subject)
-            plan = logical.plan
-            if plan is None or plan.status != "active":
-                return None
             now = time.time()
+            self._mark_stale_locked(logical, now)
+            plan = logical.plan
+            if logical.status != "active" or plan is None or plan.status != "active":
+                return None
             requested_claim_id = str(claim_id or "").strip() or None
             if requested_claim_id is not None and len(requested_claim_id) > PLAN_CONTINUATION_CLAIM_ID_LIMIT:
                 raise ValueError(
@@ -1523,7 +1584,8 @@ class SessionRuntimeManager:
                 and now - plan.continuation_pending_since < PLAN_CONTINUATION_PENDING_TTL_S
             )
             valid = bool(
-                plan is not None
+                logical.status == "active"
+                and plan is not None
                 and plan.status == "active"
                 and plan.continuation_pending
                 and plan.continuation_claim_id == claim_id

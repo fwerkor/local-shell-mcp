@@ -99,7 +99,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-Manage one durable Logical Session. Start creates a new task and returns its session_id. Resume continues only the explicit session_id supplied by the user or already present in this conversation. All non-start actions require session_id. Actions: start, resume, get, report, finish, cancel, delete. report accepts summary/findings/next/blockers/objective/label. delete requires a terminal Session.
+Manage one durable Logical Session. Start creates a new task and returns its session_id. Resume continues only the explicit session_id supplied by the user or already present in this conversation. All non-start actions require session_id. Actions: start, resume, get, report, finish, cancel, delete. report accepts summary/findings/next/blockers/objective/label. delete requires a terminal Session. Active Sessions idle for 24 hours become stale on access/list/start (unless a tool call is in flight); stale Sessions are resumable and eligible for oldest-first history pruning.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|

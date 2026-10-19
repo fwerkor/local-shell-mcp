@@ -55,7 +55,7 @@ export function SessionsScreen({
   keyboardEnabled: boolean
   onInteractionLockChange: (locked: boolean) => void
 }) {
-  const [payload, setPayload] = useState<LogicalSessionsPayload>({ sessions: [], counts: { active: 0, completed: 0, cancelled: 0, total: 0 } })
+  const [payload, setPayload] = useState<LogicalSessionsPayload>({ sessions: [], counts: { active: 0, completed: 0, cancelled: 0, stale: 0, total: 0 } })
   const [selected, setSelected] = useState(0)
   const [detail, setDetail] = useState<LogicalSession | null>(null)
   const [activePane, setActivePane] = useState<SessionPane>("list")
@@ -316,7 +316,7 @@ export function SessionsScreen({
                     onMouseDown={() => setSelected(index)}
                     style={{ height: 2, flexDirection: "row", alignItems: "center", paddingLeft: 1, paddingRight: 1, backgroundColor: active ? colors.selected : index % 2 ? theme.panelAlt : undefined }}
                   >
-                    <text fg={statusColor(session.status)} attributes={1} content={`${session.status === "active" ? "●" : session.status === "completed" ? "✓" : "×"} ${session.status.slice(0, 7).padEnd(8)} `} />
+                    <text fg={statusColor(session.status)} attributes={1} content={`${session.status === "active" ? "●" : session.status === "completed" ? "✓" : session.status === "stale" ? "·" : "×"} ${session.status.slice(0, 7).padEnd(8)} `} />
                     <text fg={active ? theme.text : theme.muted} attributes={active ? 1 : 0} content={short(sessionTitle(session), compact ? Math.max(18, width - 22) : 34).padEnd(compact ? 1 : 36)} />
                     {!compact && <text fg={session.plan ? colors.accent : theme.faint} content={short(goalSummary(session), 16)} />}
                   </box>

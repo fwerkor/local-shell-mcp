@@ -17,6 +17,7 @@ from local_shell_mcp.session_runtime import (
     SESSION_ACTIVITY_LIMIT,
     SESSION_HISTORY_LIMIT_PER_PRINCIPAL,
     SESSION_IN_FLIGHT_LEASE_S,
+    SESSION_STALE_AFTER_S,
     SessionRuntimeManager,
 )
 from local_shell_mcp.settings import get_settings
@@ -1217,3 +1218,70 @@ def test_continuation_abandon_and_unreserved_report_edges(tmp_path):
             session_id, accepted=True, claim_id="c_unreserved"
         )
     assert manager.abandon_plan_continuation(session_id, "c_unreserved") is True
+
+
+def test_idle_session_becomes_stale_and_can_resume(tmp_path):
+    manager = SessionRuntimeManager(tmp_path / ".state")
+    session_id = manager.manage("user", action="start", objective="Forgotten task")["session_id"]
+    logical = manager._sessions[session_id]
+    logical.updated_at -= SESSION_STALE_AFTER_S + 1
+    manager._save_locked(logical)
+
+    state = manager.get(session_id, subject="user")
+    assert state["status"] == "stale"
+    assert state["recent_activity"][-1]["type"] == "session.stale"
+    assert state["recent_activity"][-1]["actor"] == "system"
+    assert manager.manage("user", action="get", session_id=session_id)["status"] == "stale"
+    assert [entry["type"] for entry in manager.get(session_id)["recent_activity"]].count("session.stale") == 1
+    assert SessionRuntimeManager(tmp_path / ".state").get(session_id)["status"] == "stale"
+    assert manager.manage("user", action="resume", session_id=session_id)["status"] == "active"
+
+
+def test_stale_transition_ignores_independent_workloads_and_protects_tool_calls(tmp_path):
+    manager = SessionRuntimeManager(tmp_path / ".state")
+    session_id = manager.manage("user", action="start")["session_id"]
+    lease = manager.begin_tool_call(session_id, "running-call", subject="user")
+    logical = manager._sessions[session_id]
+    logical.updated_at -= SESSION_STALE_AFTER_S + 1
+    manager._save_locked(logical)
+    assert manager.list_sessions(subject="user")[0]["status"] == "active"
+    manager.finish_tool_call(lease, "tool.completed")
+    manager._sessions[session_id].updated_at -= SESSION_STALE_AFTER_S + 1
+    manager._save_locked(manager._sessions[session_id])
+    # Persistent Job/Shell state is never consulted by Logical Session expiry.
+    assert manager.list_sessions(subject="user")[0]["status"] == "stale"
+
+
+def test_stale_history_competes_with_other_terminal_sessions_by_age(tmp_path, monkeypatch):
+    monkeypatch.setattr("local_shell_mcp.session_runtime.SESSION_HISTORY_LIMIT_PER_PRINCIPAL", 3)
+    manager = SessionRuntimeManager(tmp_path / ".state")
+    oldest = manager.manage("user", action="start")["session_id"]
+    manager.manage("user", action="finish", session_id=oldest)
+    idle = manager.manage("user", action="start")["session_id"]
+    manager._sessions[idle].updated_at -= SESSION_STALE_AFTER_S + 1
+    manager._save_locked(manager._sessions[idle])
+    newer = manager.manage("user", action="start")["session_id"]
+    manager.manage("user", action="cancel", session_id=newer)
+
+    current = manager.manage("user", action="start")["session_id"]
+    with pytest.raises(ValueError, match="Unknown logical session"):
+        manager.get(oldest)
+    assert manager.get(idle)["status"] == "stale"
+    assert manager.get(newer)["status"] == "cancelled"
+    manager.manage("user", action="start")
+    with pytest.raises(ValueError, match="Unknown logical session"):
+        manager.get(idle)
+    assert manager.get(newer)["status"] == "cancelled"
+    assert manager.get(current)["status"] == "active"
+
+
+def test_stale_plan_does_not_auto_continue(tmp_path):
+    manager = SessionRuntimeManager(tmp_path / ".state")
+    session_id = manager.manage("user", action="start")["session_id"]
+    manager.manage_plan(session_id, action="start", objective="Plan", steps=[{"id": "a", "text": "A"}])
+    manager._sessions[session_id].updated_at -= SESSION_STALE_AFTER_S + 1
+    manager._save_locked(manager._sessions[session_id])
+    assert manager.get(session_id)["status"] == "stale"
+    assert manager.plan_state(session_id)["continuation_due"] is False
+    assert manager.claim_plan_continuation(session_id) is None
+    assert manager.manage("user", action="resume", session_id=session_id)["status"] == "active"

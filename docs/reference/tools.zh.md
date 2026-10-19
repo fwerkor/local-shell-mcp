@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-管理单一持久 Logical Session。start 创建新任务并返回其 session_id。resume 只会继续用户明确提供、或本对话中已经存在的 session_id。除 start 外的所有 action 都必须提供 session_id。Action：start、resume、get、report、finish、cancel、delete。report 接受 summary/findings/next/blockers/objective/label；delete 需要 terminal Session。
+管理单一持久 Logical Session。start 创建新任务并返回其 session_id。resume 只会继续用户明确提供、或本对话中已经存在的 session_id。除 start 外的所有 action 都必须提供 session_id。Action：start、resume、get、report、finish、cancel、delete。report 接受 summary/findings/next/blockers/objective/label；delete 需要终态 Session。活跃 Session 闲置 24 小时且没有进行中工具调用时，在访问、列举或新建 Session 时转为 stale；stale 可恢复，并与其他终态 Session 一起按创建时间从旧到新清理。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
