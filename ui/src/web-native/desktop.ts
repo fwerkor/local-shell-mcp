@@ -137,26 +137,15 @@ export class DesktopController extends BaseController {
   private loadingWindows = false
   private pendingWindowsRefresh = false
   private pendingWindowsForceFrame = false
-  private framePromise: Promise<void> | null = null
-  private frameRequestKey = ""
-  private frameAbort: AbortController | null = null
+  private socket: WebSocket | null = null
   private frameUrl = ""
   private frameBounds: GuiBounds | null = null
   private frameObservationId = ""
-  private frameMachine = ""
-  private frameWindowId = ""
-  private pendingObservationDiscards = new Map<string, {
-    machine: string
-    windowId: string
-    observationId: string
-  }>()
   private frameExpiresAt = 0
   private frameInputEnabled = false
-  private frameEpoch = 0
   private actionTargetEpoch = 0
   private actionQueue: Promise<void> = Promise.resolve()
   private pendingActions = 0
-  private frameDirty = false
   private pointerStart: PointerStart | null = null
   private suppressClickUntil = 0
   private clickTimer: number | null = null
@@ -165,6 +154,8 @@ export class DesktopController extends BaseController {
   private wheelPoint: Point | null = null
   private wheelBounds: GuiBounds | null = null
   private wheelObservationId = ""
+  private imageQueue: Promise<void> = Promise.resolve()
+  private pendingFrame: (GuiBounds & { observation_id: string; ttl_s: number; coordinate_input: boolean }) | null = null
 
   constructor(context: NativePageContext) {
     super(context)
@@ -172,7 +163,6 @@ export class DesktopController extends BaseController {
 
   private invalidateActionTarget(): void {
     this.actionTargetEpoch += 1
-    this.frameDirty = false
   }
 
   mount(root: HTMLElement): void {
@@ -234,17 +224,6 @@ export class DesktopController extends BaseController {
     const form = this.root.querySelector<HTMLFormElement>("[data-role=desktop-text-form]")
     if (form) this.listen(form, "submit", (event) => this.onTextSubmit(event as SubmitEvent))
 
-    this.every(() => {
-      if (this.destroyed || !this.selectedWindowId || this.pendingActions !== 0) return
-      if (this.captureRequiresFocus) {
-        this.expireFocusSensitiveFrame()
-        return
-      }
-      void this.refreshFrame()
-    }, 1000)
-    this.every(() => {
-      if (!this.destroyed && !this.loadingWindows) void this.refreshWindows(false)
-    }, 5000)
     void this.refresh()
   }
 
@@ -254,8 +233,7 @@ export class DesktopController extends BaseController {
 
   override destroy(): void {
     this.invalidateActionTarget()
-    this.clearFrame()
-    this.flushObservationDiscards()
+    this.disconnect()
     super.destroy()
   }
 
@@ -276,7 +254,7 @@ export class DesktopController extends BaseController {
       this.selectedWindowId = ""
       this.windows = []
       this.invalidateActionTarget()
-      this.clearFrame()
+      this.disconnect()
     }
 
     const machineSelect = this.root.querySelector<HTMLSelectElement>("[data-role=desktop-machine]")
@@ -319,7 +297,7 @@ export class DesktopController extends BaseController {
           : "Choose a window to begin."
       )
     }
-    if (scale) scale.textContent = this.frameBounds ? "1:1 logical" : "—"
+    if (scale) scale.textContent = this.frameBounds ? "Window coordinates" : "—"
     if (connection) {
       connection.classList.toggle("error", error)
       connection.classList.toggle("online", Boolean(current && this.frameBounds && !error))
@@ -351,20 +329,16 @@ export class DesktopController extends BaseController {
       if (!this.windows.some((window) => window.id === previous)) {
         this.selectedWindowId = this.windows[0]?.id || ""
         this.invalidateActionTarget()
-        this.clearFrame()
+        this.disconnect()
       }
       this.renderSelectors()
-      if (
-        this.selectedWindowId
-        && (forceFrame || !this.frameBounds)
-        && !this.captureRequiresFocus
-      ) await this.refreshFrame()
+      if (this.selectedWindowId && (forceFrame || !this.socket)) this.connect()
     } catch (error) {
       if (requestedMachine !== this.machine) return
       this.windows = []
       this.selectedWindowId = ""
       this.invalidateActionTarget()
-      this.clearFrame()
+      this.disconnect()
       this.renderSelectors()
       this.renderStatus(error instanceof Error ? error.message : String(error), true)
     } finally {
@@ -382,177 +356,132 @@ export class DesktopController extends BaseController {
     }
   }
 
-  private refreshFrame(): Promise<void> {
-    const key = `${this.machine}\0${this.selectedWindowId}`
-    if (this.framePromise && this.frameRequestKey === key) return this.framePromise
-    if (this.framePromise && this.frameRequestKey !== key) this.frameAbort?.abort()
+  private protocols(): string[] {
+    const protocols = ["lsm-ui"]
+    const token = this.context.accessToken()
+    if (token) {
+      let binary = ""
+      for (const byte of new TextEncoder().encode(token)) binary += String.fromCharCode(byte)
+      protocols.push(`bearer.${btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}`)
+    }
+    return protocols
+  }
 
-    const controller = new AbortController()
-    this.frameAbort = controller
-    this.frameRequestKey = key
-    const promise = this.loadFrame(key, controller).finally(() => {
-      if (this.framePromise === promise) {
-        this.framePromise = null
-        this.frameAbort = null
-        this.frameRequestKey = ""
+  private connect(): void {
+    if (!this.selectedWindowId) return
+    this.disconnect()
+    const scheme = location.protocol === "https:" ? "wss:" : "ws:"
+    const url = new URL(`${scheme}//${location.host}${this.context.uiPath}/ws/desktop`)
+    url.searchParams.set("machine", this.machine)
+    url.searchParams.set("window_id", this.selectedWindowId)
+    const socket = new WebSocket(url, this.protocols())
+    socket.binaryType = "arraybuffer"
+    this.socket = socket
+    this.renderStatus("Connecting to desktop…")
+    socket.onmessage = (event) => {
+      if (socket !== this.socket) return
+      if (typeof event.data === "string") {
+        this.handleControl(event.data)
+      } else {
+        const metadata = this.pendingFrame
+        this.pendingFrame = null
+        if (!metadata) return
+        this.imageQueue = this.imageQueue.then(
+          () => this.displayImage(socket, metadata, event.data as Blob | ArrayBuffer),
+          () => this.displayImage(socket, metadata, event.data as Blob | ArrayBuffer),
+        )
       }
-    })
-    this.framePromise = promise
-    return promise
+    }
+    socket.onerror = () => {
+      if (socket === this.socket) this.renderStatus("Desktop stream connection failed", true)
+    }
+    socket.onclose = (event) => {
+      if (socket !== this.socket) return
+      this.disconnect()
+      this.renderStatus(event.reason || "Desktop disconnected; select Refresh windows to reconnect", true)
+    }
   }
 
-  private invalidatePendingFrameRequest(): void {
-    if (!this.framePromise) return
-    this.frameEpoch += 1
-    this.frameAbort?.abort()
-    this.frameAbort = null
-    this.framePromise = null
-    this.frameRequestKey = ""
-  }
-
-  private async loadFrame(requestKey: string, controller: AbortController): Promise<void> {
-    const windowId = this.selectedWindowId
-    if (!windowId) {
-      this.clearFrame()
+  private handleControl(raw: string): void {
+    let message: Record<string, unknown>
+    try {
+      message = JSON.parse(raw) as Record<string, unknown>
+    } catch {
       return
     }
-    const requestedMachine = this.machine
-    const epoch = ++this.frameEpoch
-    const search = queryString({ machine: requestedMachine, window_id: windowId })
-    const headers: HeadersInit = { Accept: "image/png,image/jpeg,image/webp,*/*" }
-    const token = this.context.accessToken()
-    if (token) headers.Authorization = `Bearer ${token}`
+    if (message.type === "error") {
+      this.context.notify(String(message.message || "Desktop error"), "error")
+      return
+    }
+    if (message.type !== "frame") return
+    if (typeof message.warning === "string") this.context.notify(message.warning, "error")
+    const bounds = message.bounds as GuiBounds | undefined
+    const observationId = message.observation_id
+    const ttl = message.ttl_s
+    if (!bounds || !bounds.width || !bounds.height || typeof observationId !== "string" || typeof ttl !== "number") return
+    const metadata = { ...bounds, observation_id: observationId, ttl_s: ttl, coordinate_input: message.coordinate_input === true }
+    if (message.image) {
+      this.pendingFrame = metadata
+    } else if (this.frameUrl) {
+      this.publishFrame(metadata)
+    }
+  }
+
+  private publishFrame(data: GuiBounds & { observation_id: string; ttl_s: number; coordinate_input: boolean }): void {
+    this.frameBounds = { x: data.x, y: data.y, width: data.width, height: data.height }
+    this.frameObservationId = data.observation_id
+    this.frameExpiresAt = Date.now() + Math.max(0, data.ttl_s * 1000 - 1000)
+    this.frameInputEnabled = data.coordinate_input
+    this.renderStatus()
+  }
+
+  private async displayImage(socket: WebSocket, metadata: GuiBounds & { observation_id: string; ttl_s: number; coordinate_input: boolean }, data: Blob | ArrayBuffer): Promise<void> {
+    const blob = data instanceof Blob ? data : new Blob([data], { type: "image/jpeg" })
+    const url = URL.createObjectURL(blob)
     try {
-      const response = await fetch(`${this.context.apiPrefix || "/api/ui"}/gui/frame${search}`, {
-        headers,
-        cache: "no-store",
-        credentials: "omit",
-        signal: controller.signal,
-      })
-      if (!response.ok) {
-        let message = `GUI frame returned HTTP ${response.status}`
-        try {
-          const payload = await response.json() as { message?: string }
-          if (payload.message) message = payload.message
-        } catch {
-          // Keep the HTTP error.
-        }
-        throw new Error(message)
-      }
-      const observationReceivedAt = Date.now()
-      const bounds: GuiBounds = {
-        x: numericHeader(response, "X-LSM-GUI-Window-X"),
-        y: numericHeader(response, "X-LSM-GUI-Window-Y"),
-        width: numericHeader(response, "X-LSM-GUI-Window-Width"),
-        height: numericHeader(response, "X-LSM-GUI-Window-Height"),
-      }
-      if (!bounds.width || !bounds.height) throw new Error("GUI frame returned invalid window bounds")
-      const observationId = response.headers.get("X-LSM-GUI-Observation-ID") || ""
-      if (!observationId) throw new Error("GUI frame returned no observation token")
-      const observationTtlS = numericHeader(response, "X-LSM-GUI-Observation-TTL-S")
-      if (observationTtlS <= 0) throw new Error("GUI frame returned invalid observation TTL")
-      const coordinateInput = response.headers.get("X-LSM-GUI-Coordinate-Input") === "1"
-      const blob = await response.blob()
-      if (
-        this.destroyed
-        || controller.signal.aborted
-        || requestKey !== this.frameRequestKey
-        || epoch !== this.frameEpoch
-        || requestedMachine !== this.machine
-        || windowId !== this.selectedWindowId
-      ) {
-        this.queueObservationDiscard(requestedMachine, windowId, observationId)
-        return
-      }
-      const nextUrl = URL.createObjectURL(blob)
-      try {
-        await this.decodeFrame(nextUrl)
-      } catch (error) {
-        URL.revokeObjectURL(nextUrl)
-        this.queueObservationDiscard(requestedMachine, windowId, observationId)
-        throw error
-      }
-      if (
-        this.destroyed
-        || controller.signal.aborted
-        || requestKey !== this.frameRequestKey
-        || epoch !== this.frameEpoch
-        || requestedMachine !== this.machine
-        || windowId !== this.selectedWindowId
-      ) {
-        URL.revokeObjectURL(nextUrl)
-        this.queueObservationDiscard(requestedMachine, windowId, observationId)
-        return
-      }
-      const frameExpiresAt = observationReceivedAt + Math.max(0, observationTtlS * 1000 - 1000)
-      if (frameExpiresAt <= Date.now()) {
-        URL.revokeObjectURL(nextUrl)
-        this.queueObservationDiscard(requestedMachine, windowId, observationId)
-        throw new Error("GUI frame observation expired during transfer; refresh the frame")
-      }
-      const previousUrl = this.frameUrl
-      const previousMachine = this.frameMachine
-      const previousWindowId = this.frameWindowId
-      const previousObservationId = this.frameObservationId
-      this.frameUrl = nextUrl
-      this.frameBounds = bounds
-      this.frameObservationId = observationId
-      this.frameMachine = requestedMachine
-      this.frameWindowId = windowId
-      this.frameExpiresAt = frameExpiresAt
-      this.frameInputEnabled = coordinateInput
+      const decoded = document.createElement("img")
+      decoded.src = url
+      await decoded.decode()
+      if (socket !== this.socket) return
       const image = this.root.querySelector<HTMLImageElement>("[data-role=desktop-frame]")
       const placeholder = this.root.querySelector<HTMLElement>("[data-role=desktop-placeholder]")
       if (image) {
-        image.src = nextUrl
+        image.src = url
         image.hidden = false
       }
       if (placeholder) placeholder.hidden = true
-      if (previousUrl) URL.revokeObjectURL(previousUrl)
-      if (previousObservationId && previousObservationId !== observationId) {
-        this.queueObservationDiscard(
-          previousMachine,
-          previousWindowId,
-          previousObservationId,
-        )
-      }
-      this.renderStatus()
-    } catch (error) {
-      if (
-        controller.signal.aborted
-        || requestKey !== this.frameRequestKey
-        || epoch !== this.frameEpoch
-        || requestedMachine !== this.machine
-        || windowId !== this.selectedWindowId
-      ) return
-      const message = error instanceof Error ? error.message : String(error)
-      this.clearFrame()
-      this.renderStatus(message, true)
+      const previous = this.frameUrl
+      this.frameUrl = url
+      this.publishFrame(metadata)
+      if (previous) URL.revokeObjectURL(previous)
+    } finally {
+      if (this.frameUrl !== url) URL.revokeObjectURL(url)
     }
   }
 
-  private async decodeFrame(url: string): Promise<void> {
-    const image = document.createElement("img")
-    image.src = url
-    await image.decode()
+  private refreshFrame(): void {
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify({ type: "refresh" }))
+    } else {
+      this.connect()
+    }
   }
 
-  private clearFrame(): void {
-    const previousMachine = this.frameMachine
-    const previousWindowId = this.frameWindowId
-    const previousObservationId = this.frameObservationId
-    this.frameEpoch += 1
+  private disconnect(): void {
+    const socket = this.socket
+    this.socket = null
+    if (socket) {
+      socket.onclose = null
+      socket.close()
+    }
+    this.pendingFrame = null
     this.cancelPendingPointerInput()
-    this.frameAbort?.abort()
-    this.frameAbort = null
-    this.frameRequestKey = ""
     this.frameBounds = null
     this.frameObservationId = ""
-    this.frameMachine = ""
-    this.frameWindowId = ""
     this.frameExpiresAt = 0
     this.frameInputEnabled = false
-    this.revokeFrame()
+    if (this.frameUrl) URL.revokeObjectURL(this.frameUrl)
+    this.frameUrl = ""
     const image = this.root?.querySelector<HTMLImageElement>("[data-role=desktop-frame]")
     const placeholder = this.root?.querySelector<HTMLElement>("[data-role=desktop-placeholder]")
     if (image) {
@@ -560,70 +489,10 @@ export class DesktopController extends BaseController {
       image.removeAttribute("src")
     }
     if (placeholder) placeholder.hidden = false
-    this.queueObservationDiscard(
-      previousMachine,
-      previousWindowId,
-      previousObservationId,
-    )
-  }
-
-  private expireFocusSensitiveFrame(now = Date.now()): boolean {
-    if (
-      !this.captureRequiresFocus
-      || !this.frameBounds
-      || !this.frameObservationId
-      || !this.frameExpiresAt
-      || now < this.frameExpiresAt
-    ) return false
-    this.invalidateActionTarget()
-    this.clearFrame()
-    this.renderStatus("Displayed frame expired; refresh the frame to continue.", true)
-    return true
-  }
-
-  private revokeFrame(): void {
-    if (!this.frameUrl) return
-    URL.revokeObjectURL(this.frameUrl)
-    this.frameUrl = ""
-  }
-
-  private observationDiscardKey(
-    machine: string,
-    windowId: string,
-    observationId: string,
-  ): string {
-    return [machine, windowId, observationId].join("\0")
-  }
-
-  private queueObservationDiscard(
-    machine: string,
-    windowId: string,
-    observationId: string,
-  ): void {
-    if (!machine || !windowId || !observationId) return
-    this.pendingObservationDiscards.set(
-      this.observationDiscardKey(machine, windowId, observationId),
-      { machine, windowId, observationId },
-    )
-    this.flushObservationDiscards()
   }
 
   private flushObservationDiscards(): void {
-    if (
-      this.pendingActions !== 0
-      || this.clickTimer !== null
-      || this.wheelTimer !== null
-      || this.pointerStart !== null
-    ) return
-    const pending = [...this.pendingObservationDiscards.values()]
-    this.pendingObservationDiscards.clear()
-    for (const item of pending) {
-      void this.context.api.send("/gui/frame/discard", "POST", {
-        machine: item.machine,
-        window_id: item.windowId,
-        observation_id: item.observationId,
-      }).catch(() => undefined)
-    }
+    // The server stream owns observation lifetimes; the browser never discards them.
   }
 
   private pointForEvent(event: MouseEvent): Point | null {
@@ -634,70 +503,22 @@ export class DesktopController extends BaseController {
     return framePoint(event.clientX, event.clientY, image.getBoundingClientRect(), bounds)
   }
 
-  private queueAction(
-    action: GuiAction,
-    observedBounds?: GuiBounds,
-    observedObservationId?: string,
-  ): void {
-    const windowId = this.selectedWindowId
-    const machine = this.machine
-    const targetEpoch = this.actionTargetEpoch
-    const bounds = observedBounds ? { ...observedBounds } : this.frameBounds ? { ...this.frameBounds } : null
-    const observationId = observedObservationId || this.frameObservationId
-    if (!windowId || !bounds || !observationId || !this.frameInputEnabled) return
-    if (this.pendingActions >= MAX_PENDING_DESKTOP_ACTIONS) return
-
-    this.invalidatePendingFrameRequest()
-    this.pendingActions += 1
+  private queueAction(action: GuiAction, observedBounds?: GuiBounds, observedObservationId?: string): void {
+    const socket = this.socket
+    const epoch = this.actionTargetEpoch
+    const bounds = observedBounds || this.frameBounds
+    const observation_id = observedObservationId || this.frameObservationId
+    if (!socket || socket.readyState !== WebSocket.OPEN || !bounds || !observation_id || !this.frameInputEnabled) return
+    if (Date.now() >= this.frameExpiresAt || this.pendingActions >= MAX_PENDING_DESKTOP_ACTIONS) return
+    this.pendingActions++
     this.renderInputPulse()
-    const run = async () => {
+    const run = () => {
       try {
-        if (
-          this.destroyed
-          || targetEpoch !== this.actionTargetEpoch
-          || machine !== this.machine
-          || windowId !== this.selectedWindowId
-        ) return
-        await this.context.api.send("/gui/action", "POST", {
-          machine,
-          window_id: windowId,
-          observation_id: observationId,
-          bounds,
-          actions: [action],
-        })
-        if (
-          targetEpoch === this.actionTargetEpoch
-          && machine === this.machine
-          && windowId === this.selectedWindowId
-        ) {
-          this.frameDirty = true
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        this.context.notify(`Desktop input: ${message}`, "error")
-        if (
-          machine === this.machine
-          && windowId === this.selectedWindowId
-          && /moved|resized|no longer available|stale|expired|changed since observation|different window|frame bounds/i.test(message)
-        ) {
-          this.invalidateActionTarget()
-          this.clearFrame()
-          await this.refreshWindows(true)
-        }
+        if (socket !== this.socket || epoch !== this.actionTargetEpoch) return
+        socket.send(JSON.stringify({ type: "action", observation_id, bounds, action }))
       } finally {
         this.pendingActions = Math.max(0, this.pendingActions - 1)
         this.renderInputPulse()
-        this.flushObservationDiscards()
-        if (
-          this.pendingActions === 0
-          && this.frameDirty
-          && targetEpoch === this.actionTargetEpoch
-          && machine === this.machine
-          && windowId === this.selectedWindowId
-        ) {
-          this.frameDirty = false
-          await this.refreshFrame()
-        }
       }
     }
     this.actionQueue = this.actionQueue.then(run, run)
@@ -731,7 +552,7 @@ export class DesktopController extends BaseController {
       this.backend = ""
       this.captureRequiresFocus = false
       this.invalidateActionTarget()
-      this.clearFrame()
+      this.disconnect()
       this.renderSelectors()
       void this.refreshWindows(true)
       return
@@ -740,9 +561,9 @@ export class DesktopController extends BaseController {
       if (target.value === this.selectedWindowId) return
       this.selectedWindowId = target.value
       this.invalidateActionTarget()
-      this.clearFrame()
+      this.disconnect()
       this.renderSelectors()
-      if (!this.captureRequiresFocus) void this.refreshFrame()
+      this.connect()
     }
   }
 
@@ -753,7 +574,7 @@ export class DesktopController extends BaseController {
       return
     }
     if (actionTarget?.dataset.action === "desktop-refresh-frame") {
-      void this.refreshFrame()
+      this.refreshFrame()
       return
     }
 

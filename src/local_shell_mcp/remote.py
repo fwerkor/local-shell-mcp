@@ -1962,6 +1962,8 @@ WORKER_GUI_TOOLS = frozenset(
         "gui_frame_discard",
         "gui_human_action",
         "gui_action",
+        "gui_stream_start",
+        "gui_stream_stop",
     }
 )
 REMOTE_WORKER_TOOL_NAMES = frozenset().union(
@@ -3079,6 +3081,10 @@ def _linux_gui_preflight_session_type() -> str:
 
 
 async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
+    from .desktop_stream import start_worker_stream, stop_worker_stream
+    if tool == "gui_stream_stop":
+        stop_worker_stream(args["stream_id"])
+        return {"stopped": True}
     from .gui import GuiUnavailableError, get_gui_manager
     from .remote_worker_installer import ensure_gui_dependencies
 
@@ -3107,7 +3113,7 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
             )
 
     allow_dependency_install = bool(args.pop("_allow_dependency_install", False))
-    if tool in {"gui_state", "gui_frame", "gui_human_action", "gui_action"}:
+    if tool in {"gui_state", "gui_frame", "gui_human_action", "gui_action", "gui_stream_start"}:
         allow_dependency_install = True
     dependency_check_required = tool not in {
         "gui_state_refresh",
@@ -3143,6 +3149,9 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
                 f"{dependency_status.get('error') or 'installation failed'}"
             )
 
+    if tool == "gui_stream_start":
+        start_worker_stream(args["stream_id"], args["secret"], args["window_id"])
+        return {"started": True}
     if tool == "gui_list":
         return await manager.list_windows()
     if tool == "gui_state":
@@ -4272,6 +4281,9 @@ async def _run_worker_locked(
         flush=True,
     )
     headers = {"Author" + "ization": "B" + "earer " + access}
+    from .desktop_stream import configure_worker_stream
+
+    configure_worker_stream(server, headers)
     lane_state = _WorkerLaneState()
     lane_state_changed = asyncio.Event()
     upgrade_lock = asyncio.Lock()

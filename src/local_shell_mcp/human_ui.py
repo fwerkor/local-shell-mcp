@@ -4,6 +4,7 @@ import asyncio
 import base64
 import binascii
 import contextlib
+import hashlib
 import ipaddress
 import json
 import logging
@@ -2990,6 +2991,169 @@ async def ui_root_redirect(request: Request) -> RedirectResponse:  # noqa: ARG00
     return RedirectResponse(f"./{ui_path}/", status_code=307)
 
 
+
+async def ui_desktop_websocket(websocket: WebSocket) -> None:
+    """Dedicated human control channel; frames/actions are not tool calls."""
+    principal = _websocket_principal(websocket)
+    if principal is None:
+        await websocket.close(code=4401, reason="Authentication required")
+        return
+    machine = str(websocket.query_params.get("machine") or "local")
+    window_id = str(websocket.query_params.get("window_id") or "")
+    try:
+        require_scopes(
+            principal,
+            ["shell:read", "shell:execute", *(["remote:use"] if machine != "local" else [])],
+        )
+        if not window_id or len(window_id.encode()) > 1024:
+            raise ValueError("A valid window_id is required")
+        if machine == "local" and get_settings().disable_local:
+            raise PermissionError("Local access is disabled")
+    except Exception as exc:
+        await websocket.close(code=4403, reason=str(exc)[:120])
+        return
+
+    from .desktop_stream import (
+        FRAME_INTERVAL_S,
+        STREAMS,
+        DesktopStream,
+        capture_frame,
+        frame_metadata,
+    )
+
+    stream = DesktopStream(machine, window_id)
+    if len(STREAMS) >= max(1, get_settings().ui_terminal_max_sessions):
+        await websocket.close(code=4429, reason="Too many desktop streams")
+        return
+    protocols = [item.strip() for item in websocket.headers.get("sec-websocket-protocol", "").split(",")]
+    await websocket.accept(subprotocol=UI_SUBPROTOCOL if UI_SUBPROTOCOL in protocols else None)
+    STREAMS[stream.key] = stream
+    is_remote = machine != "local"
+    manager = None
+    live_credentials = _live_websocket_credentials(websocket)
+
+    async def emit(metadata: dict[str, Any], image: bytes) -> None:
+        await websocket.send_text(json.dumps({**metadata, "image": bool(image)}, separators=(",", ":")))
+        if image:
+            await websocket.send_bytes(image)
+
+    async def sender() -> None:
+        if is_remote:
+            await _remote_call(
+                machine, "gui_stream_start",
+                {"stream_id": stream.key, "secret": stream.secret, "window_id": window_id},
+                45,
+            )
+            await websocket.send_text('{"type":"ready"}')
+            while True:
+                try:
+                    metadata, image = await asyncio.wait_for(stream.frames.get(), timeout=10)
+                except TimeoutError:
+                    await websocket.send_text('{"type":"heartbeat"}')
+                    continue
+                await emit(metadata, image)
+                if metadata.get("type") == "error":
+                    return
+        else:
+            from .gui import get_gui_manager
+            nonlocal manager
+            manager = get_gui_manager()
+            await websocket.send_text('{"type":"ready"}')
+            focus_sensitive = (await manager.list_windows()).get("capabilities", {}).get("capture_requires_focus") is True
+            refresh_event = asyncio.Event()
+            refresh_event.set()
+            stream.refresh_event = refresh_event
+            recent: list[str] = []
+            last_digest: bytes | None = None
+            try:
+                while True:
+                    if focus_sensitive:
+                        try:
+                            await asyncio.wait_for(refresh_event.wait(), timeout=10)
+                        except TimeoutError:
+                            await websocket.send_text('{"type":"heartbeat"}')
+                            continue
+                        refresh_event.clear()
+                    started = time.monotonic()
+                    data, image = await capture_frame(manager, window_id)
+                    observation_id = data["observation_id"]
+                    recent.append(observation_id)
+                    if len(recent) > 16:
+                        await manager.discard_frame_observation(window_id, recent.pop(0))
+                    digest = hashlib.blake2s(image).digest()
+                    await emit(frame_metadata(data), image if digest != last_digest or stream.force_frame else b"")
+                    stream.force_frame = False
+                    last_digest = digest
+                    await asyncio.sleep(max(0.05, FRAME_INTERVAL_S - (time.monotonic() - started)))
+            finally:
+                for observation_id in recent:
+                    with contextlib.suppress(Exception):
+                        await manager.discard_frame_observation(window_id, observation_id)
+
+    async def receiver() -> None:
+        from .tools import GuiAction
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                return
+            if live_credentials is not None and get_live_channel_manager().authenticate(live_credentials[1]) is None:
+                await websocket.close(code=4401, reason="Live workspace credential expired")
+                return
+            raw = message.get("text")
+            if not isinstance(raw, str) or len(raw) > 16_384:
+                continue
+            try:
+                control = json.loads(raw)
+                if not isinstance(control, dict):
+                    continue
+                if control.get("type") == "refresh":
+                    stream.force_frame = True
+                    if not is_remote and hasattr(stream, "refresh_event"):
+                        stream.refresh_event.set()
+                    continue
+                if control.get("type") != "action":
+                    continue
+                action = GuiAction.model_validate(control.get("action")).model_dump(exclude_none=True)
+                observation_id = control["observation_id"]
+                bounds = control["bounds"]
+                if not isinstance(observation_id, str) or len(observation_id) > 128 or not isinstance(bounds, dict):
+                    raise ValueError("Invalid desktop observation")
+                entry = {"observation_id": observation_id, "bounds": bounds, "action": action}
+                if is_remote:
+                    if stream.actions.full():
+                        await websocket.send_text('{"type":"error","message":"Desktop input queue is full"}')
+                    else:
+                        stream.actions.put_nowait(entry)
+                else:
+                    assert manager is not None
+                    try:
+                        await manager.human_act(window_id, observation_id, bounds, [action])
+                        if hasattr(stream, "refresh_event"):
+                            stream.refresh_event.set()
+                    except Exception as exc:
+                        await websocket.send_text(json.dumps({"type": "error", "message": str(exc)[:240]}))
+            except (KeyError, TypeError, ValueError) as exc:
+                await websocket.send_text(json.dumps({"type": "error", "message": str(exc)[:240]}))
+
+    tasks = [asyncio.create_task(sender()), asyncio.create_task(receiver())]
+    try:
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        for task in done:
+            if not task.cancelled() and task.exception() is not None:
+                with contextlib.suppress(RuntimeError, WebSocketDisconnect):
+                    await websocket.send_text(json.dumps({"type": "error", "message": str(task.exception())[:240]}))
+    finally:
+        STREAMS.pop(stream.key, None)
+        if is_remote:
+            with contextlib.suppress(Exception):
+                await _remote_call(machine, "gui_stream_stop", {"stream_id": stream.key}, 15)
+        with contextlib.suppress(RuntimeError, WebSocketDisconnect):
+            await websocket.close()
+
+
 def ui_routes() -> list[Any]:
     settings = get_settings()
     if not settings.ui_enabled:
@@ -3004,6 +3168,7 @@ def ui_routes() -> list[Any]:
         Route(ui_path + "/assets/{path:path}", ui_asset, methods=["GET"]),
         WebSocketRoute(ui_path + "/ws", ui_terminal_websocket),
         WebSocketRoute(ui_path + "/ws/shell", ui_shell_websocket),
+        WebSocketRoute(ui_path + "/ws/desktop", ui_desktop_websocket),
         Route(UI_API_PREFIX + "/bootstrap", api_bootstrap, methods=["GET"]),
         Route(UI_API_PREFIX + "/dashboard", api_dashboard, methods=["GET"]),
         Route(UI_API_PREFIX + "/machines", api_machines, methods=["GET"]),
