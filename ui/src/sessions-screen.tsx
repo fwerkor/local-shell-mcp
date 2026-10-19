@@ -282,6 +282,9 @@ export function SessionsScreen({
         <Panel title="Cancelled" style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
           <text fg={theme.orange} attributes={1} content={loaded ? String(payload.counts.cancelled || 0) : "—"} />
         </Panel>
+        <Panel title="Stale" style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
+          <text fg={theme.muted} attributes={1} content={loaded ? String(payload.counts.stale || 0) : "—"} />
+        </Panel>
         <Panel title="Total" style={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}>
           <text fg={colors.accent} attributes={1} content={loaded ? String(payload.counts.total ?? sessions.length) : "—"} />
         </Panel>
