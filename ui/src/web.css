@@ -51,8 +51,6 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .nav-item.active { color: white; background: #232d42; box-shadow: inset 3px 0 #7567ef; }
 .nav-badge { min-width: 22px; padding: 2px 6px; color: #bfc7d5; background: rgba(255,255,255,.07); border-radius: 999px; font-size: 12px; text-align: center; }
 .nav-badge.warning { color: #ffd993; background: rgba(255,177,57,.13); }
-.sidebar-section-label { padding: 24px 11px 9px; color: #59647a; font-size: 11px; font-weight: 750; letter-spacing: .16em; }
-.tools-nav .external-icon { width: 13px; height: 13px; color: #5f6a7d; }
 .sidebar-spacer { flex: 1; }
 .controller-card { margin: 0 4px 13px; padding: 13px; background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.06); border-radius: 11px; }
 .controller-row { display: flex; gap: 10px; align-items: flex-start; }
@@ -352,7 +350,7 @@ button.nav-item.active { color: white; background: #232d42; box-shadow: inset 3p
   .app-shell { grid-template-columns: 78px minmax(0,1fr); }
   .sidebar { width: 78px; padding-inline: 9px; }
   .brand-block { justify-content: center; padding-inline: 0; }
-  .brand-block > div:last-child, .nav-item > span:nth-child(2), .nav-badge, .sidebar-section-label, .controller-card, .sidebar-footer > span:last-child, .interface-switch span { display: none; }
+  .brand-block > div:last-child, .nav-item > span:nth-child(2), .nav-badge, .controller-card, .sidebar-footer > span:last-child, .interface-switch span { display: none; }
   .nav-item { grid-template-columns: 1fr; justify-items: center; padding: 0; }
   .interface-switch { grid-template-columns: 1fr; margin-inline: 0; }
   .interface-switch button { grid-template-columns: 1fr; justify-items: center; padding: 8px 0; }
@@ -368,7 +366,7 @@ button.nav-item.active { color: white; background: #232d42; box-shadow: inset 3p
 @media (max-width: 720px) {
   .app-shell { display: block; }
   .sidebar { position: fixed; z-index: 20; inset: auto 0 0; width: 100%; height: 64px; flex-direction: row; padding: 6px; border-top: 1px solid #252f42; border-right: 0; }
-  .brand-block, .interface-switch, .sidebar-section-label, .tools-nav, .sidebar-spacer, .controller-card, .sidebar-footer { display: none; }
+  .brand-block, .interface-switch, .sidebar-spacer, .controller-card, .sidebar-footer { display: none; }
   .primary-nav { width: 100%; grid-template-columns: repeat(5,1fr); gap: 2px; }
   .nav-item { min-height: 52px; }
   .nav-item svg { width: 19px; height: 19px; }
