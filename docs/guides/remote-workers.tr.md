@@ -16,6 +16,8 @@ MCP client -> control server -> outbound polling worker -> remote machine
 5. `remote_transfer` ile izlenen controller-to-worker, worker-to-controller veya worker-to-worker dosya/dizin aktarımı başlatın. `job_list` ya da `job_tail` ile takip edin; `job_stop` veya `job_retry` ile durdurun ya da yeniden deneyin.
 6. `remote_manage(action="rename", ...)` veya `remote_manage(action="revoke", ...)` ile worker’ı yeniden adlandırın veya iptal edin.
 
+Bir davet varsayılan olarak bir worker kaydeder (`max_uses=1`). Aynı davetle birden çok worker kaydetmek için `max_uses` değerini artırın. Çok kullanımlı davetlerde `name` alanını boş bırakın. İsteğe bağlı `ttl_s` varsayılan olarak iki saattir (7200 saniye); en fazla yedi gün (604800 saniye) olabilir.
+
 Yalnızca worker yönetimi `remote_*` adlarını kullanır. Execution, shell, job, filesystem, patch ve browser işlemleri local ve remote aynı schema’yı paylaşır. Machine vermek ayrıca `remote:use` OAuth scope gerektirir.
 
 ## Kalıcı workers

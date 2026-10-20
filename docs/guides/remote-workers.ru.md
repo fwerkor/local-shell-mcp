@@ -16,6 +16,8 @@ MCP client -> control server -> outbound polling worker -> remote machine
 5. Используйте `remote_transfer` для запуска отслеживаемой передачи файла или каталога controller-to-worker, worker-to-controller или worker-to-worker. Затем используйте `job_list` или `job_tail`; остановить или повторить можно через `job_stop` или `job_retry`.
 6. Переименовывайте или отзывайте workers через `remote_manage(action="rename", ...)` или `remote_manage(action="revoke", ...)`.
 
+По умолчанию приглашение позволяет зарегистрировать одного worker (`max_uses=1`). Увеличьте `max_uses`, чтобы зарегистрировать несколько workers по одному приглашению. Для многократного приглашения оставьте `name` пустым. Необязательный параметр `ttl_s` по умолчанию равен двум часам (7200 секунд), максимум — семь дней (604800 секунд).
+
 Только администрирование workers использует имена `remote_*`. Операции execution, shell, job, filesystem, patch и browser используют одинаковую schema локально и удалённо. Указание machine дополнительно требует OAuth scope `remote:use`.
 
 ## Постоянные workers

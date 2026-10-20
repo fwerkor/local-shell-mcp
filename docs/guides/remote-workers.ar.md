@@ -16,6 +16,8 @@ MCP client -> control server -> outbound polling worker -> remote machine
 5. استخدم `remote_transfer` لبدء نقل متتبع controller-to-worker أو worker-to-controller أو worker-to-worker لملف أو مجلد. تابعه عبر `job_list` أو `job_tail`، وأوقفه أو أعده عبر `job_stop` أو `job_retry`.
 6. أعد تسمية workers أو ألغها عبر `remote_manage(action="rename", ...)` أو `remote_manage(action="revoke", ...)`.
 
+يتيح رمز الدعوة تسجيل عامل واحد افتراضيًا (`max_uses=1`)، ويمكن زيادة `max_uses` لتسجيل عدة عمال بالرمز نفسه. اترك `name` فارغًا عند استخدام الدعوة أكثر من مرة. المعامل الاختياري `ttl_s` يساوي افتراضيًا ساعتين (7200 ثانية)، وبحد أقصى سبعة أيام (604800 ثانية).
+
 إدارة workers فقط تستخدم أسماء `remote_*`. عمليات execution وshell وjob وfilesystem وpatch وbrowser تشترك في الـ schema نفسها محلياً وعن بُعد. تحديد machine يتطلب أيضاً OAuth scope ‏`remote:use`.
 
 ## Workers دائمة

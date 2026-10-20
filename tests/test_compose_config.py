@@ -74,3 +74,16 @@ def test_compose_cli_credential_rotation_rewrites_existing_assignments(tmp_path)
     assert 'KEEP=value' in lines
     if os.name != 'nt':
         assert env_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_remote_invite_ttl_defaults_are_consistent_across_compose_and_env() -> None:
+    from local_shell_mcp.settings import Settings
+
+    default_ttl_s = Settings.model_fields["remote_invite_ttl_s"].default
+    assert default_ttl_s == 7200
+    compose = Path("docker-compose.yml").read_text(encoding="utf-8")
+    example = Path(".env.example").read_text(encoding="utf-8")
+    assert (
+        f"LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S:-{default_ttl_s}" in compose
+    )
+    assert f"LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S={default_ttl_s}" in example

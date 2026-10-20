@@ -16,6 +16,8 @@ MCP client -> control server -> outbound polling worker -> remote machine
 5. Dùng `remote_transfer` để bắt đầu transfer tệp/thư mục được theo dõi controller-to-worker, worker-to-controller hoặc worker-to-worker. Theo dõi bằng `job_list` hoặc `job_tail`; dừng hoặc thử lại bằng `job_stop` hoặc `job_retry`.
 6. Đổi tên hoặc thu hồi worker bằng `remote_manage(action="rename", ...)` hoặc `remote_manage(action="revoke", ...)`.
 
+Theo mặc định, mỗi lời mời đăng ký một worker (`max_uses=1`). Tăng `max_uses` để đăng ký nhiều worker bằng cùng một lời mời. Để trống `name` khi dùng lời mời nhiều lần. Tham số tùy chọn `ttl_s` mặc định là hai giờ (7200 giây) và tối đa là bảy ngày (604800 giây).
+
 Chỉ phần quản trị worker dùng tên `remote_*`. Các thao tác execution, shell, job, filesystem, patch và browser dùng cùng schema ở local và remote. Khi truyền machine còn cần OAuth scope `remote:use`.
 
 ## Worker bền vững

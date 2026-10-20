@@ -16,6 +16,8 @@ MCP client -> control server -> outbound polling worker -> remote machine
 5. `remote_transfer` で controller-to-worker、worker-to-controller、worker-to-worker の追跡対象 file/directory transfer を開始します。その後 `job_list` または `job_tail` で確認し、`job_stop` または `job_retry` で停止・再試行します。
 6. `remote_manage(action="rename", ...)` または `remote_manage(action="revoke", ...)` で worker を rename/revoke します。
 
+招待コードは既定で 1 台の Worker の登録に使用できます（`max_uses=1`）。同じコードで複数台を登録するには `max_uses` を増やしてください。複数回使用する招待では `name` を空欄にします。省略可能な `ttl_s` の既定値は 2 時間（7200 秒）、上限は 7 日間（604800 秒）です。
+
 `remote_*` 名を使うのは worker administration だけです。execution、shell、job、filesystem、patch、browser 操作は local/remote で同じ schema を共有します。machine を指定する場合は追加で `remote:use` OAuth scope が必要です。
 
 ## 永続 worker

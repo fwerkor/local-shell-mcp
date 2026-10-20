@@ -16,6 +16,8 @@ MCP client -> control server -> outbound polling worker -> remote machine
 5. Gunakan `remote_transfer` untuk memulai transfer file/direktori yang dilacak controller-to-worker, worker-to-controller, atau worker-to-worker. Ikuti dengan `job_list` atau `job_tail`; hentikan atau ulangi dengan `job_stop` atau `job_retry`.
 6. Ubah nama atau cabut worker dengan `remote_manage(action="rename", ...)` atau `remote_manage(action="revoke", ...)`.
 
+Secara default, satu undangan mendaftarkan satu worker (`max_uses=1`). Tingkatkan `max_uses` untuk mendaftarkan beberapa worker dengan undangan yang sama. Kosongkan `name` untuk undangan yang dapat dipakai berkali-kali. Parameter opsional `ttl_s` memiliki nilai default dua jam (7200 detik) dan batas maksimum tujuh hari (604800 detik).
+
 Hanya administrasi worker yang memakai nama `remote_*`. Operasi execution, shell, job, filesystem, patch, dan browser berbagi schema yang sama secara lokal dan remote. Menentukan machine juga memerlukan OAuth scope `remote:use`.
 
 ## Worker persisten
