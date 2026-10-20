@@ -25,7 +25,10 @@ async def test_two_terminal_clients_switch_and_reattach_without_killing_sessions
 
     def tmux_run(*args):
         return subprocess.run(
-            [tmux, "-L", socket, *args], capture_output=True, text=True, timeout=5,
+            [tmux, "-L", socket, *args],
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
 
     monkeypatch.setattr(worker, "tmux_socket_name", lambda: socket)
@@ -51,7 +54,10 @@ async def test_two_terminal_clients_switch_and_reattach_without_killing_sessions
         b = worker._TmuxPtyAttachment(first, 90, 30)
         attachments.extend((a, b))
         async with asyncio.timeout(6):
-            while tmux_run("list-clients", "-F", "#{session_name}").stdout.splitlines().count(first) < 2:
+            while (
+                tmux_run("list-clients", "-F", "#{session_name}").stdout.splitlines().count(first)
+                < 2
+            ):
                 assert a.process.poll() is None and b.process.poll() is None
                 await asyncio.sleep(0.05)
 
@@ -69,7 +75,10 @@ async def test_two_terminal_clients_switch_and_reattach_without_killing_sessions
         second_marker = b"SWITCHED-" + uuid.uuid4().hex[:8].encode()
         await switched.write(b"printf '" + second_marker + b"\\n'\r")
         await contains(switched, second_marker)
-        assert tmux_run("list-sessions", "-F", "#{session_name}").stdout.splitlines() == [first, second]
+        assert tmux_run("list-sessions", "-F", "#{session_name}").stdout.splitlines() == [
+            first,
+            second,
+        ]
         assert b.process.poll() is None
 
         # Closing the remaining viewer does not kill its shell; a fresh PTY can
@@ -82,7 +91,10 @@ async def test_two_terminal_clients_switch_and_reattach_without_killing_sessions
         marker = b"REATTACHED-" + uuid.uuid4().hex[:8].encode()
         await reconnect.write(b"printf '" + marker + b"\\n'\r")
         await contains(reconnect, marker)
-        assert tmux_run("list-sessions", "-F", "#{session_name}").stdout.splitlines() == [first, second]
+        assert tmux_run("list-sessions", "-F", "#{session_name}").stdout.splitlines() == [
+            first,
+            second,
+        ]
     finally:
         for attachment in attachments:
             await attachment.close()
@@ -123,10 +135,16 @@ async def test_native_websocket_two_clients_switch_and_reconnect(tmp_path, monke
         listener.bind(("127.0.0.1", 0))
         listener.listen(128)
         port = listener.getsockname()[1]
-        server = uvicorn.Server(uvicorn.Config(
-            build_http_app(), host="127.0.0.1", port=port,
-            log_level="error", access_log=False, lifespan="off",
-        ))
+        server = uvicorn.Server(
+            uvicorn.Config(
+                build_http_app(),
+                host="127.0.0.1",
+                port=port,
+                log_level="error",
+                access_log=False,
+                lifespan="off",
+            )
+        )
         server_task = asyncio.create_task(server.serve(sockets=[listener]))
         async with asyncio.timeout(8):
             while not server.started:
@@ -148,8 +166,19 @@ async def test_native_websocket_two_clients_switch_and_reconnect(tmp_path, monke
                         output.extend(packet)
             return bytes(output)
 
+        async def expect_pty_ready(websocket):
+            # Binary terminal output proves that the PTY was attached and its
+            # server-side relay has started, not just the WebSocket handshake.
+            async with asyncio.timeout(8):
+                while True:
+                    packet = await websocket.recv()
+                    if isinstance(packet, bytes) and packet:
+                        assert b"Unable to attach terminal:" not in packet
+                        return
+
         async with connect(terminal_url(sessions[0]), subprotocols=["lsm-ui"]) as first:
             async with connect(terminal_url(sessions[0]), subprotocols=["lsm-ui"]) as second:
+                await asyncio.gather(expect_pty_ready(first), expect_pty_ready(second))
                 marker = b"WEB-MULTICLIENT-" + uuid.uuid4().hex[:8].encode()
                 await first.send(b"printf '" + marker + b"\\n'\r")
                 await asyncio.gather(expect_marker(first, marker), expect_marker(second, marker))
@@ -176,13 +205,24 @@ async def test_native_websocket_two_clients_switch_and_reconnect(tmp_path, monke
     finally:
         if server is not None:
             server.should_exit = True
-        if server_task is not None:
-            await asyncio.wait_for(server_task, timeout=10)
-        if listener is not None:
-            listener.close()
-        for session_id in sessions:
-            await kill_shell(session_id)
-        get_settings.cache_clear()
+        try:
+            if server_task is not None:
+                await asyncio.wait_for(server_task, timeout=10)
+        finally:
+            if server_task is not None and not server_task.done():
+                server_task.cancel()
+            if listener is not None:
+                listener.close()
+            try:
+                results = await asyncio.gather(
+                    *(kill_shell(session_id) for session_id in sessions),
+                    return_exceptions=True,
+                )
+                for result in results:
+                    if isinstance(result, BaseException):
+                        raise result
+            finally:
+                get_settings.cache_clear()
 
 
 @pytest.mark.skipif(os.name != "posix", reason="tmux PTYs require POSIX")
@@ -206,7 +246,37 @@ async def test_failed_second_tmux_session_does_not_leak_first(monkeypatch):
     with pytest.raises(AssertionError):
         await test_two_terminal_clients_switch_and_reattach_without_killing_sessions(monkeypatch)
     assert socket_name is not None, "the second session failure was not injected"
-    assert actual_run(
-        [tmux, "-L", socket_name, "list-sessions"],
-        capture_output=True, text=True, timeout=5,
-    ).returncode != 0, "the first session survived failed setup"
+    assert (
+        actual_run(
+            [tmux, "-L", socket_name, "list-sessions"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).returncode
+        != 0
+    ), "the first session survived failed setup"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="tmux PTYs require POSIX")
+@pytest.mark.asyncio
+async def test_native_websocket_server_failure_cleans_up_shells(tmp_path, monkeypatch):
+    """A failed server task must not skip PTY cleanup or leave stale settings."""
+    import uvicorn
+
+    from local_shell_mcp.settings import get_settings
+    from local_shell_mcp.shell_ops import list_shells
+
+    if shutil.which("tmux") is None:
+        pytest.skip("system tmux is not installed")
+    original_serve = uvicorn.Server.serve
+
+    async def fail_after_shutdown(server, *args, **kwargs):
+        await original_serve(server, *args, **kwargs)
+        raise RuntimeError("injected HTTP shutdown failure")
+
+    monkeypatch.setattr(uvicorn.Server, "serve", fail_after_shutdown)
+    with pytest.raises(RuntimeError, match="injected HTTP shutdown failure"):
+        await test_native_websocket_two_clients_switch_and_reconnect(tmp_path, monkeypatch)
+
+    assert get_settings.cache_info().currsize == 0
+    assert (await list_shells())["sessions"] == []
