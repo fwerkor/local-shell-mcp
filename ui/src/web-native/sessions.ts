@@ -13,7 +13,7 @@ import {
   type NativePageContext,
 } from "./common"
 
-const SESSION_STATUSES = ["all", "active", "completed", "cancelled"] as const
+const SESSION_STATUSES = ["all", "active", "completed", "cancelled", "stale"] as const
 
 type SessionFilter = (typeof SESSION_STATUSES)[number]
 type SessionLifecycleAction = "finish" | "cancel" | "delete"
@@ -63,7 +63,7 @@ function sessionDetailRevision(session: LogicalSession): string {
 
 export class SessionsController extends BaseController {
   private sessions: LogicalSession[] = []
-  private counts: LogicalSessionsPayload["counts"] = { active: 0, completed: 0, cancelled: 0, total: 0 }
+  private counts: LogicalSessionsPayload["counts"] = { active: 0, completed: 0, cancelled: 0, stale: 0, total: 0 }
   private selectedId: string | null = null
   private detail: LogicalSession | null = null
   private filter: SessionFilter = "all"
@@ -158,13 +158,14 @@ export class SessionsController extends BaseController {
   private renderSummary(): void {
     const summary = this.root.querySelector<HTMLElement>("[data-role=sessions-summary]")
     if (!summary) return
-    const revision = `${this.counts.active}|${this.counts.completed}|${this.counts.cancelled}|${this.counts.total}`
+    const revision = `${this.counts.active}|${this.counts.completed}|${this.counts.cancelled}|${this.counts.stale}|${this.counts.total}`
     if (revision === this.renderedSummaryRevision) return
     this.renderedSummaryRevision = revision
     summary.innerHTML = [
       ["Active", this.counts.active, "accent"],
       ["Completed", this.counts.completed, "success"],
       ["Cancelled", this.counts.cancelled, this.counts.cancelled ? "warning" : "neutral"],
+      ["Stale", this.counts.stale, "neutral"],
       ["Total", this.counts.total, "info"],
     ].map(([label, value, tone]) => `<article class="summary-card ${tone}"><span>${label}</span><strong>${value}</strong></article>`).join("")
   }
