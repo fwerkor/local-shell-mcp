@@ -37,7 +37,7 @@ from starlette.responses import (
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from . import __version__
+from . import __version__, hosted_chat
 from .audit import get_audit_entry, query_audit, suppress_audit
 from .auth import Principal, principal_scopes, require_scopes, verify_request
 from .fs_ops import (
@@ -797,6 +797,7 @@ async def api_bootstrap(request: Request) -> Response:
             "machines": machines,
             "features": {
                 "remote": settings.remote_enabled,
+                "hosted_chat": settings.hosted_chat_enabled,
                 "wallpaper": settings.ui_wallpaper,
             },
         }
@@ -3202,6 +3203,128 @@ async def ui_root_redirect(request: Request) -> RedirectResponse:  # noqa: ARG00
     return RedirectResponse(f"./{ui_path}/", status_code=307)
 
 
+async def api_hosted_chat(request: Request) -> Response:
+    """Durable Hosted Chat, using the caller's principal for all MCP operations."""
+    try:
+        if not get_settings().hosted_chat_enabled:
+            raise HTTPException(status_code=404, detail="Hosted Chat is disabled")
+        _require_ui_scopes(request, "shell:read")
+        from .hosted_chat_store import hosted_chat_runner, hosted_chat_store
+
+        subject = _logical_session_subject(request, create=True)
+        if not subject:
+            raise PermissionError("Hosted Chat requires an authenticated identity")
+        action = str(request.path_params.get("action") or "")
+        if request.method == "GET":
+            if action == "profiles":
+                result = await asyncio.to_thread(hosted_chat_store.profiles, subject)
+            elif action == "conversations":
+                result = await asyncio.to_thread(hosted_chat_store.conversations, subject)
+            elif action == "conversation":
+                conversation_id = str(request.query_params.get("id") or "")
+                result = await asyncio.to_thread(
+                    hosted_chat_runner.reconcile, subject, conversation_id
+                )
+            else:
+                raise HTTPException(status_code=404, detail="Unknown Hosted Chat action")
+            return _json_ok(result)
+
+        data = await request.json()
+        if not isinstance(data, dict):
+            raise ValueError("Expected a JSON object")
+        if action == "profile-save":
+            result = await asyncio.to_thread(hosted_chat_store.put_profile, subject, data)
+        elif action == "profile-delete":
+            await asyncio.to_thread(hosted_chat_store.delete_profile, subject, str(data["id"]))
+            result = {}
+        elif action == "conversation-create":
+            session_id = str(data.get("session_id") or "").strip() or None
+            if session_id:
+                await asyncio.to_thread(
+                    get_session_runtime_manager().get, session_id, subject=subject
+                )
+            result = await asyncio.to_thread(
+                hosted_chat_store.create_conversation, subject,
+                profile_id=str(data["profile_id"]), session_id=session_id,
+            )
+        elif action == "conversation-delete":
+            cid = str(data["id"])
+            current = hosted_chat_runner.reconcile(subject, cid)
+            if current["status"] == "running":
+                raise ValueError("Stop the active turn before deleting this conversation")
+            await asyncio.to_thread(hosted_chat_store.delete_conversation, subject, cid)
+            result = {}
+        elif action == "conversation-update":
+            def change(record: dict) -> dict:
+                if record["status"] == "running":
+                    raise ValueError("Cannot modify a running conversation")
+                if "title" in data:
+                    record["title"] = str(data["title"] or "").strip()[:180] or "New chat"
+                if "profile_id" in data:
+                    new_profile_id = str(data["profile_id"] or "")
+                    hosted_chat_store.profile(subject, new_profile_id)
+                    record["profile_id"] = new_profile_id
+                if "session_id" in data:
+                    session_id = str(data["session_id"] or "").strip() or None
+                    if session_id:
+                        get_session_runtime_manager().get(session_id, subject=subject)
+                    record["session_id"] = session_id
+                return record
+            result = await asyncio.to_thread(
+                hosted_chat_store.update_conversation, subject, str(data["id"]),
+                updater=change,
+            )
+        elif action == "send":
+            bearer = str(request.headers.get("authorization") or "")
+            if get_settings().auth_mode != "none" and not bearer.startswith("Bearer "):
+                raise HTTPException(status_code=401, detail="OAuth bearer token required")
+            settings = get_settings()
+            host = "127.0.0.1" if settings.host in {"0.0.0.0", "::", "[::]"} else settings.host
+            if ":" in host and not host.startswith("["):
+                host = f"[{host}]"
+            result = await hosted_chat_runner.start(
+                subject, str(data["id"]), str(data.get("text") or ""),
+                f"http://{host}:{settings.port}", bearer,
+            )
+        elif action == "stop":
+            hosted_chat_runner.stop(subject, str(data["id"]))
+            result = {}
+        elif action in {"tool", "resource"}:
+            bearer = str(request.headers.get("authorization") or "")
+            if get_settings().auth_mode != "none" and not bearer.startswith("Bearer "):
+                raise HTTPException(status_code=401, detail="OAuth bearer token required")
+            settings = get_settings()
+            host = "127.0.0.1" if settings.host in {"0.0.0.0", "::", "[::]"} else settings.host
+            if ":" in host and not host.startswith("["):
+                host = f"[{host}]"
+            base_url = f"http://{host}:{settings.port}"
+            if action == "tool":
+                if str(data.get("name") or "") not in {"workspace_open", "live_workspace_reconnect"}:
+                    raise PermissionError("Only Workspace app tools are available to the host bridge")
+                if not isinstance(data.get("arguments"), dict):
+                    raise ValueError("Tool arguments must be an object")
+                result = await hosted_chat.call_mcp(
+                    base_url, bearer, str(data["name"]), data["arguments"]
+                )
+            else:
+                uri = str(data.get("uri") or "")
+                if not uri.startswith("ui://local-shell-mcp/live-workspace"):
+                    raise PermissionError("Unknown MCP App resource")
+                result = await hosted_chat.read_mcp_resource(base_url, bearer, uri)
+        else:
+            raise HTTPException(status_code=404, detail="Unknown Hosted Chat action")
+        return _json_ok(result)
+    except HTTPException as exc:
+        return _json_error(exc)
+    except (ValueError, TypeError, PermissionError, KeyError) as exc:
+        return _json_error(exc, status_code=403 if isinstance(exc, PermissionError) else 400)
+    except Exception:
+        _LOGGER.exception("Hosted Chat request failed")
+        return _json_error(
+            HTTPException(status_code=502, detail="Hosted Chat storage or MCP request failed")
+        )
+
+
 def ui_routes() -> list[Any]:
     settings = get_settings()
     if not settings.ui_enabled:
@@ -3216,6 +3339,7 @@ def ui_routes() -> list[Any]:
         Route(ui_path + "/assets/{path:path}", ui_asset, methods=["GET"]),
         WebSocketRoute(ui_path + "/ws", ui_terminal_websocket),
         WebSocketRoute(ui_path + "/ws/shell", ui_shell_websocket),
+        Route(UI_API_PREFIX + "/hosted-chat/{action}", api_hosted_chat, methods=["GET", "POST"]),
         Route(UI_API_PREFIX + "/bootstrap", api_bootstrap, methods=["GET"]),
         Route(UI_API_PREFIX + "/dashboard", api_dashboard, methods=["GET"]),
         Route(UI_API_PREFIX + "/machines", api_machines, methods=["GET"]),

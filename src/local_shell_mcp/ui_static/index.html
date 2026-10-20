@@ -45,6 +45,11 @@
           </button>
         </div>
 
+        <button class="hosted-chat-entry" type="button" data-interface-mode="chat" aria-pressed="false" hidden>
+          <svg viewBox="0 0 24 24"><path d="M4 5h16v12H8l-4 3V5zM8 9h8M8 13h5"/></svg>
+          <span><strong>Hosted Chat</strong><small>BYOK · MCP Apps</small></span>
+        </button>
+
         <nav class="primary-nav" aria-label="Primary navigation">
           <button class="nav-item active" type="button" data-view="overview">
             <svg viewBox="0 0 24 24"><path d="M4 13h6V4H4zm10 7h6v-9h-6zM4 20h6v-3H4zm10-13h6V4h-6z"/></svg>
@@ -98,6 +103,7 @@
             <p id="page-description">System health across your local and remote machines.</p>
           </div>
           <div class="topbar-actions">
+            <button class="button secondary" type="button" data-interface-mode="chat" hidden>Hosted Chat</button>
             <div class="live-pill" id="live-pill"><span></span><strong>Live</strong><small id="updated-at">· waiting for data</small></div>
             <button class="button secondary" id="refresh-button" type="button">
               <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66L20 8.68M20 4v4.68h-4.68"/></svg>Refresh

@@ -1,0 +1,52 @@
+# Hosted Chat (optional)
+
+Hosted Chat is a self-hosted, BYOK chat and MCP Apps client integrated into LSM's human interface. It is **not** a Logical Session mode: conversations have independent identities and can optionally attach an existing LSM Logical Session. ChatGPT and other external clients continue working with the same LSM Sessions and tools.
+
+## Enable
+
+Hosted Chat is disabled by default. Set:
+
+```env
+LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED=true
+```
+
+Restart the Controller and open **Hosted Chat** immediately beneath the Web UI / TUI selector. The feature also has a mobile top-bar entry. The chat host uses the existing LSM OAuth identity and scopes. The same controller operates the MCP server used by the model's tool loop; Workers cannot initiate execution.
+
+## Model profiles
+
+Choose **Model profiles** to create/edit a profile with a name, HTTPS OpenAI-compatible API base URL, model ID and optional API Key. Multiple profiles can coexist and conversations can switch models.
+
+Profiles, conversations, complete message history and tool-call results are **saved on the server** via the configured LSM state backend. Their scope is tied to the authenticated principal. The API Key is encrypted with AES-GCM and is never returned from profile-list or profile-detail endpoints. It is not stored in browser storage, sent to the model as a prompt, or included in audit logs. The chat host passes it only to the chosen model API.
+
+The first file-backed deployment creates `hosted-chat-encryption-key` in the state directory with mode 0600. **Back up this file alongside the state data. Without it, saved API Keys cannot be decrypted.** If the Controller uses Redis, multiple replicas, or another non-file state backend, configure a stable, shared 32-byte URL-safe-base64 key:
+
+```env
+LOCAL_SHELL_MCP_HOSTED_CHAT_ENCRYPTION_KEY=<base64url-encoded 32 random bytes>
+```
+
+Do not rotate this setting without migrating the encrypted profiles. Do not use in-memory state storage when durable conversations are required.
+
+By default, only HTTPS model endpoints with DNS hostnames are accepted; local/private endpoints and HTTP are refused to reduce server-side request forgery risk. Administrators deliberately hosting a trusted private model gateway can opt in:
+
+```env
+LOCAL_SHELL_MCP_HOSTED_CHAT_ALLOW_PRIVATE_ENDPOINTS=true
+```
+
+Do not enable this on an untrusted multi-user Controller unless users are authorized to contact internal services.
+
+## Conversations and MCP Apps
+
+Create a conversation using a saved model profile. Each submitted turn becomes a server-owned background task; closing the browser does not cancel the task. Completed text and tool calls are checkpointed durably between model/tool steps. Stop explicitly to interrupt. On Controller restart, interrupted runs are marked as such and can be continued in a new turn, but **unknown-outcome tool calls are never automatically replayed**.
+
+The conversation's entire message history is retained in storage. Only a bounded recent window is sent to the model at once to control context size. Tool calls are sent through LSM's authenticated MCP endpoint, preserving all ordinary tool permissions and audit/preflight behavior.
+
+Open **Live Workspace** to render LSM's existing `workspace_open` MCP Apps resource inside an embedded view. The host uses the `@modelcontextprotocol/ext-apps` bridge for app lifecycle, credential renewal, tool calls and human-to-agent actions. No second file manager, terminal, audit or job UI is implemented.
+
+The optional attached `session_id` lets Hosted Chat use and display an existing Logical Session; it does not reclassify the Session or give Hosted Chat ownership of it. Chat conversation identifiers and Logical Session identifiers are separate.
+
+## Boundaries
+
+- Model requests use OpenAI-compatible Chat Completions with tool calling; other provider protocols require an adapter.
+- Per-turn safeguards cap model iterations and tool calls. Longer tasks may be continued in a new turn using the durable history.
+- Chat conversation deletion is explicit. No automatic history eviction is performed.
+- The Controller must be network-reachable by its own MCP client and the browser must be authorized for the LSM Live Workspace API.

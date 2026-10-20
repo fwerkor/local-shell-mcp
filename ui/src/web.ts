@@ -114,7 +114,7 @@ consoleWallpaper.style.backgroundImage =
   `linear-gradient(145deg, rgba(2, 7, 17, 0.16), rgba(2, 7, 17, 0.52)), url("${UI_PATH}/wallpaper")`
 
 let activeView: WebViewName = "overview"
-let lastWebView: Exclude<WebViewName, "console"> = "overview"
+let lastWebView: WebViewName = "overview"
 let authenticated = false
 let bootstrapData: BootstrapData | null = null
 let dashboardData: DashboardData | null = null
@@ -608,6 +608,7 @@ function activityTemplate(data: DashboardData): string {
 
 
 const PAGE_COPY: Record<Exclude<WebViewName, "console">, { name: string; title: string; description: string }> = {
+  "hosted-chat": { name: "Hosted Chat", title: "Hosted Chat", description: "Bring your own model · MCP tools and Live Workspace." },
   overview: { name: "Overview", title: "Control plane overview", description: "System health across your local and remote machines." },
   files: { name: "Files", title: "File manager", description: "Browse, preview, edit, and organize files on local or remote machines." },
   terminals: { name: "Terminals", title: "Persistent terminals", description: "Low-latency interactive shells with session, machine, and mobile controls." },
@@ -693,7 +694,7 @@ function showView(
 ): void {
   activeView = view
   document.body.classList.toggle("native-view-active", view !== "console" && isNativeView(view))
-  if (view !== "console") lastWebView = view
+  if (interfaceModeForView(view) === "web") lastWebView = view
   document.querySelectorAll<HTMLButtonElement>(".nav-item[data-view]").forEach((button) => {
     button.classList.toggle("active", button.dataset.view === view)
   })
@@ -752,6 +753,12 @@ async function refreshAll(manual = false): Promise<void> {
       apiGet<DashboardData>("/dashboard"),
     ])
     bootstrapData = bootstrap
+    document.querySelectorAll<HTMLElement>('[data-interface-mode="chat"]').forEach((entry) => {
+      entry.hidden = bootstrap.features?.hosted_chat !== true
+    })
+    if (activeView === "hosted-chat" && bootstrap.features?.hosted_chat !== true) {
+      showView("overview")
+    }
     dashboardData = dashboard
     syncChrome(dashboard)
     const mountedController = nativeController && nativeControllerView === activeView
@@ -1199,7 +1206,8 @@ document.querySelectorAll<HTMLButtonElement>(".nav-item[data-view]").forEach((bu
 })
 interfaceButtons.forEach((button) => {
   button.addEventListener("click", () => {
-    showView(button.dataset.interfaceMode === "tui" ? "console" : lastWebView)
+    const mode = button.dataset.interfaceMode
+    showView(mode === "tui" ? "console" : mode === "chat" ? "hosted-chat" : lastWebView)
   })
 })
 loginButton.addEventListener("click", () => void startOAuth("console"))
