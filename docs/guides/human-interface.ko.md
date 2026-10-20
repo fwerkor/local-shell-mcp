@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5f07217e742810704f1919224f6cf68bf7b4f5ecf635fadd5ec4d21b072ce6b2 -->
+<!-- i18n-source-sha256: d4016e996b7de27eb0d52bc7b076277fd976b12906ce5f44d04c1d1d229bf85c -->
 # 사용자 인터페이스
 
 `local-shell-mcp`는 동일한 service API, workspace, persistent terminal registry, remote-worker registry, MCP audit log 위에 호환되는 두 가지 human interface를 제공합니다.
@@ -150,7 +150,7 @@ Dashboard는 OpenTUI 운영 개요입니다. 넓은 터미널에서는 node, wor
 
 ### Files
 
-Files는 로컬 및 원격 머신을 위한 LSM 네이티브 3패널 파일 관리자입니다. 생성, 편집, 이름 변경, 복사, 이동, 붙여넣기, 삭제, 숨김 파일 토글, 새로 고침, 텍스트 미리보기, 바이너리 미리보기 및 제한된 이미지 썸네일을 제공합니다.
+Files는 로컬 및 원격 컴퓨터를 위한 웹 기반 파일 탐색기입니다. 폴더 트리, 목록 및 그리드 보기, 폴더 내 검색, 오른쪽 클릭 메뉴, 다중 선택 및 폴더 지연 로딩을 지원합니다. 브라우저에서 파일을 직접 업로드하거나, 공유 링크 없이 읽기 권한을 확인한 단기 다운로드 티켓으로 다운로드할 수 있습니다. 바이너리 업로드는 Base64 JSON 대신 트랜잭션 스트림 전송을 사용합니다. 텍스트 편집, 생성, 이름 변경, 복사, 이동, 삭제 및 숨김 파일 표시도 지원합니다.
 
 ### Terminals
 

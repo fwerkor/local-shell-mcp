@@ -1,183 +1,151 @@
 import { describe, expect, test } from "bun:test"
-import { FilesController, fileBreadcrumbRows, filterAndSortFileEntries } from "./files"
+import { fileBreadcrumbRows, fileParentPath, fileTreeEntries, fileTreeId, FilesController } from "./files"
 
-describe("Native WebUI file breadcrumbs", () => {
-  test("preserves Windows UNC share roots", () => {
-    expect(fileBreadcrumbRows("\\\\server\\share\\dir\\file")).toEqual([
+describe("Native Files browser path isolation", () => {
+  test("keeps UNC and Windows drive roots navigable", () => {
+    expect(fileBreadcrumbRows("\\\\server\\share\\dir")).toEqual([
       { label: "\\\\server\\share", path: "\\\\server\\share" },
       { label: "dir", path: "\\\\server\\share\\dir" },
-      { label: "file", path: "\\\\server\\share\\dir\\file" },
     ])
-  })
-
-  test("preserves drive and POSIX roots", () => {
     expect(fileBreadcrumbRows("C:\\work\\repo")[0]).toEqual({ label: "C:", path: "C:\\" })
     expect(fileBreadcrumbRows("/srv/app")[0]).toEqual({ label: "/", path: "/" })
+    expect(fileParentPath("/")).toBe("/")
+    expect(fileParentPath("C:\\")).toBe("C:\\")
+    expect(fileParentPath("\\\\server\\share")).toBe("\\\\server\\share")
+    expect(fileParentPath("/srv/app")).toBe("/srv")
+    expect(fileParentPath("subdir")).toBe(".")
   })
 
-  test("filters case-insensitively and keeps directories before files", () => {
+  test("uses browser-only ids independent of remote platform", () => {
+    expect(fileTreeId("/", "A B#? %.txt")).toBe("/A%20B%23%3F%20%25.txt")
+    expect(fileTreeId("/Models", "weights.safetensors")).toBe("/Models/weights.safetensors")
     const entries = [
-      { path: "src/app.ts", name: "app.ts", type: "file", size: 20, modified: 3 },
-      { path: "src/App", name: "App", type: "dir", size: 0, modified: 1 },
-      { path: "notes.md", name: "notes.md", type: "file", size: 2, modified: 2 },
+      { name: "data", path: "C:\\work\\data", type: "dir", hidden: false, modified: 20 },
+      { name: "file.bin", path: "C:\\work\\file.bin", type: "file", size: 42, modified: 5 },
+      { name: ".env", path: "C:\\work\\.env", type: "file", hidden: true },
     ]
-    expect(filterAndSortFileEntries(entries, "APP", "name", "asc").map((entry) => entry.path)).toEqual(["src/App", "src/app.ts"])
-  })
-
-  test("sorts file metadata in either direction", () => {
-    const entries = [
-      { path: "large", name: "large", type: "file", size: 20, modified: 1 },
-      { path: "small", name: "small", type: "file", size: 2, modified: 3 },
-    ]
-    expect(filterAndSortFileEntries(entries, "", "size", "asc").map((entry) => entry.name)).toEqual(["small", "large"])
-    expect(filterAndSortFileEntries(entries, "", "modified", "desc").map((entry) => entry.name)).toEqual(["small", "large"])
+    expect(fileTreeEntries(entries, "/", false).map((x) => x.id)).toEqual(["/data", "/file.bin"])
+    expect(fileTreeEntries(entries, "/", true)).toHaveLength(3)
+    expect(fileTreeEntries(entries, "/", true)[0]).toMatchObject({ type: "folder", lazy: true, name: "data" })
   })
 })
 
-describe("Native WebUI file actions", () => {
-  test("keeps the Workspace shortcut at the logical workspace root", () => {
-    const navigated: string[] = []
-    const controller = {
-      machine: "local",
-      machines: () => [{ name: "local", status: "online", workdir: "/workspace" }],
-      navigate: (path: string) => navigated.push(path),
-    }
-    const event = {
-      target: {
-        closest: (selector: string) => selector === "[data-action]" ? { dataset: { action: "home-location" } } : null,
-      },
-    }
-
-    ;(FilesController.prototype as any).onClick.call(controller, event)
-
-    expect(navigated).toEqual(["."])
+describe("Native Files async scope", () => {
+  test("preserves the navigated folder across refreshes", () => {
+    const location = { value: "" }
+    const controller: any = new FilesController({ notify: () => {} } as any)
+    controller.root = { querySelector: () => location }
+    controller.paths = new Map([["/", "."], ["/nested", "/work/nested"]])
+    controller.selectFolder("/nested")
+    expect(controller.location).toBe("/work/nested")
+    expect(controller.selectedFolder).toBe("/nested")
+    expect(location.value).toBe("/work/nested")
   })
 
-  test("keeps every file in an upload batch on its initial machine and path", async () => {
-    const writes: Array<{ machine: string; path: string }> = []
-    const controller: any = {
-      machine: "local",
-      path: "uploads",
-      context: {
-        api: {
-          send: async (_endpoint: string, _method: string, body: { machine: string; path: string }) => {
-            writes.push({ machine: body.machine, path: body.path })
-            controller.machine = "remote"
-            controller.path = "elsewhere"
-          },
-        },
-        notify: () => {},
-      },
-      refresh: async () => {},
-    }
-    const files = ["first.txt", "second.txt"].map((name) => ({
-      name,
-      arrayBuffer: async () => Uint8Array.from([1, 2, 3]).buffer,
-    }))
+  test("refreshes an open folder without rebuilding the explorer tree", async () => {
+    const requests: string[] = []
+    const provided: object[] = []
+    const controller: any = new FilesController({
+      machines: () => [{ name: "local", status: "online" }],
+      api: { get: async (path: string) => { requests.push(path); return { entries: [] } } },
+      notify: () => {},
+    } as any)
+    controller.machine = "local"
+    controller.renderedMachine = "local"
+    controller.generation = 3
+    controller.selectedFolder = "/nested"
+    controller.location = "/work/nested"
+    controller.paths = new Map([["/", "/work"], ["/nested", "/work/nested"]])
+    controller.api = { exec: async (_: string, args: object) => { provided.push(args) } }
+    controller.renderExplorer = () => { throw new Error("explorer should not remount") }
+    await controller.refresh()
+    expect(controller.generation).toBe(3)
+    expect(requests[0]).toContain("path=%2Fwork%2Fnested")
+    expect(provided).toHaveLength(1)
+  })
 
-    await (FilesController.prototype as any).upload.call(controller, files)
+  test("recovers when the selected remote disappears", async () => {
+    const requests: string[] = []
+    const controller: any = new FilesController({
+      machines: () => [{ name: "local", status: "online" }],
+      api: { get: async (path: string) => { requests.push(path); return { entries: [] } } },
+      notify: () => {},
+    } as any)
+    controller.root = { querySelector: () => ({ value: "", setAttribute: () => {}, removeAttribute: () => {} }) }
+    controller.machine = "removed-worker"
+    controller.location = "/old-remote-path"
+    controller.renderExplorer = () => {}
+    await controller.refresh()
+    expect(controller.machine).toBe("local")
+    expect(controller.location).toBe(".")
+    expect(requests[0]).toContain("machine=local")
+    expect(requests[0]).not.toContain("old-remote-path")
+  })
 
+  test("queues separate SVAR upload callbacks instead of dropping files", async () => {
+    const originalFetch = globalThis.fetch
+    const uploads: string[] = []
+    const notices: string[] = []
+    const controller: any = new FilesController({
+      apiPrefix: "/api/ui", accessToken: () => "token", notify: (msg: string) => notices.push(msg),
+    } as any)
+    controller.machine = "worker-a"
+    controller.generation = 1
+    controller.root = { querySelector: () => ({ hidden: true, textContent: "" }) }
+    controller.reloadCurrent = async () => {}
+    globalThis.fetch = (async (url: string) => {
+      uploads.push(String(url))
+      return Response.json({ ok: true })
+    }) as typeof fetch
+    try {
+      await Promise.all([
+        controller.uploadFiles([new File(["a"], "one.txt")], "/data"),
+        controller.uploadFiles([new File(["b"], "two.txt")], "/data"),
+      ])
+      expect(uploads).toHaveLength(2)
+      expect(uploads[0]).toContain("one.txt")
+      expect(uploads[1]).toContain("two.txt")
+      expect(notices).not.toContain("A file upload is already running")
+    } finally { globalThis.fetch = originalFetch }
+  })
+
+  test("ignores late lazy directory results after machine change", async () => {
+    let resolve!: (value: unknown) => void
+    const requested: string[] = []
+    const controller: any = new FilesController({
+      api: { get: (path: string) => { requested.push(path); return new Promise((r) => { resolve = r }) } },
+      notify: () => {},
+    } as any)
+    controller.machine = "alpha"
+    controller.paths = new Map([["/data", "/srv/data"]])
+    controller.generation = 1
+    controller.api = { exec: () => { throw new Error("should not render old machine data") } }
+    const loading = controller.loadFolder("/data", 1)
+    controller.machine = "beta"
+    controller.generation = 2
+    resolve({ entries: [{ name: "secret", path: "/srv/data/secret", type: "file" }] })
+    await loading
+    expect(requested[0]).toContain("machine=alpha")
+    expect(controller.paths.has("/data/secret")).toBe(false)
+  })
+
+  test("batches file deletes using selected machine and original paths", async () => {
+    const writes: unknown[] = []
+    const controller: any = new FilesController({
+      api: { send: async (endpoint: string, method: string, data: object) => { writes.push({ endpoint, ...data }) } },
+      notify: () => {},
+    } as any)
+    controller.machine = "worker-a"
+    controller.paths = new Map([["/a", "C:\\dir\\a"], ["/b", "C:\\dir\\b"]])
+    controller.generation = 1
+    controller.reloadCurrent = async () => {}
+    await controller.relocate(["/a", "/b"], "/", "copy", 1)
+    expect(writes).toHaveLength(0)
+    controller.paths.set("/", "C:\\new")
+    await controller.relocate(["/a", "/b"], "/", "copy", 1)
     expect(writes).toEqual([
-      { machine: "local", path: "uploads/first.txt" },
-      { machine: "local", path: "uploads/second.txt" },
+      { endpoint: "/files/copy", machine: "worker-a", path: "C:\\dir\\a", destination: "C:\\new\\a" },
+      { endpoint: "/files/copy", machine: "worker-a", path: "C:\\dir\\b", destination: "C:\\new\\b" },
     ])
-  })
-})
-
-
-describe("Native WebUI file performance", () => {
-  test("reuses the derived directory entries until payload or filters change", () => {
-    const controller: any = new FilesController({} as any)
-    controller.payload = {
-      machine: "local",
-      path: ".",
-      parent: ".",
-      entries: [
-        { path: "b", name: "b", type: "file", size: 2, modified: 2 },
-        { path: "a", name: "a", type: "file", size: 1, modified: 1 },
-      ],
-      parent_entries: [],
-    }
-
-    const first = controller.entries()
-    const second = controller.entries()
-    expect(second).toBe(first)
-
-    controller.query = "a"
-    const filtered = controller.entries()
-    expect(filtered).not.toBe(first)
-    expect(filtered.map((entry: { path: string }) => entry.path)).toEqual(["a"])
-  })
-
-  test("does not refetch an unchanged selected preview", async () => {
-    let requests = 0
-    const controller: any = new FilesController({
-      api: {
-        get: async () => { requests += 1; return { kind: "text", content: "hello" } },
-      },
-    } as any)
-    controller.machine = "local"
-    controller.payload = {
-      machine: "local",
-      path: ".",
-      parent: ".",
-      entries: [{ path: "a.txt", name: "a.txt", type: "file", size: 5, modified: 1 }],
-      parent_entries: [],
-    }
-    controller.selectedPath = "a.txt"
-    controller.root = { querySelector: () => null }
-    controller.renderPreview = () => undefined
-
-    await controller.loadPreview()
-    await controller.loadPreview()
-
-    expect(requests).toBe(1)
-  })
-
-  test("coalesces a forced preview refresh with the same request already in flight", async () => {
-    let requests = 0
-    let resolvePreview!: (value: unknown) => void
-    const controller: any = new FilesController({
-      api: {
-        get: async () => {
-          requests += 1
-          return new Promise((resolve) => { resolvePreview = resolve })
-        },
-      },
-    } as any)
-    controller.machine = "local"
-    controller.payload = {
-      machine: "local", path: ".", parent: ".",
-      entries: [{ path: "a.txt", name: "a.txt", type: "file", size: 5, modified: 1 }],
-      parent_entries: [],
-    }
-    controller.selectedPath = "a.txt"
-    controller.root = { querySelector: () => null }
-    controller.renderPreview = () => undefined
-
-    const first = controller.loadPreview()
-    const forced = controller.loadPreview(true)
-    expect(requests).toBe(1)
-    resolvePreview({ kind: "text", content: "hello" })
-    await Promise.all([first, forced])
-    expect(requests).toBe(1)
-  })
-
-  test("changes file selection without rebuilding the directory table", () => {
-    const controller: any = new FilesController({} as any)
-    controller.selectedPath = "a"
-    controller.preview = { kind: "text", content: "old" }
-    let selectionUpdates = 0
-    let directoryRenders = 0
-    controller.updateDirectorySelection = () => { selectionUpdates += 1 }
-    controller.renderDirectory = () => { directoryRenders += 1 }
-    controller.focusEntry = () => undefined
-    controller.loadPreview = async () => undefined
-
-    controller.select("b")
-
-    expect(controller.selectedPath).toBe("b")
-    expect(selectionUpdates).toBe(1)
-    expect(directoryRenders).toBe(0)
   })
 })

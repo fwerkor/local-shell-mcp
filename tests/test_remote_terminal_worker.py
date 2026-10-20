@@ -159,17 +159,28 @@ async def test_real_tmux_attached_pty_preserves_ansi_and_detach(monkeypatch):
     attachment = None
     try:
         attachment = worker._TmuxPtyAttachment(session_name, 80, 24)
-        await asyncio.sleep(0.1)
+        for _ in range(100):
+            if session_name in command("list-clients", "-F", "#{session_name}").stdout:
+                break
+            if attachment.process.poll() is not None:
+                pytest.fail("tmux attach exited before establishing a PTY client")
+            await asyncio.sleep(0.1)
+        else:
+            pytest.fail("tmux attach did not register a client")
         await attachment.write(b"printf '\\033[31mREAL-PTY\\033[0m\\n'\r")
         output = bytearray()
-        for _ in range(25):
-            output.extend(await asyncio.wait_for(attachment.read(), 2))
-            if b"\x1b[31mREAL-PTY" in output:
-                break
-        assert b"\x1b[31mREAL-PTY" in output
+        async with asyncio.timeout(8):
+            while b"\x1b[31mREAL-PTY" not in output:
+                chunk = await attachment.read()
+                assert chunk, "tmux PTY closed before terminal output"
+                output.extend(chunk)
         attachment.resize(101, 38)
-        await asyncio.sleep(0.15)
-        assert "101x38" in command("list-clients", "-F", "#{client_width}x#{client_height}").stdout
+        for _ in range(50):
+            if "101x38" in command("list-clients", "-F", "#{client_width}x#{client_height}").stdout:
+                break
+            await asyncio.sleep(0.1)
+        else:
+            pytest.fail("tmux client did not accept the resized PTY")
         await attachment.close()
         attachment = None
         assert session_name in command("list-sessions", "-F", "#{session_name}").stdout

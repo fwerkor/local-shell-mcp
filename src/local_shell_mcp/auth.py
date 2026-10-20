@@ -51,6 +51,7 @@ def _is_public_path(path: str) -> bool:
         or path.startswith("/.well-known/")
         or path.startswith("/oauth/")
         or path.startswith("/download/")
+        or path.startswith("/api/ui/files/download/")
         or path in {ui_path, ui_path + "/", ui_path + "/callback", ui_path + "/wallpaper"}
         or path.startswith(ui_path + "/assets/")
     )
@@ -569,7 +570,8 @@ class RequestBodyLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        if scope.get("path", "").startswith("/remote/transfer/upload/"):
+        if (scope.get("path", "").startswith("/remote/transfer/upload/")
+                or scope.get("path", "") == "/api/ui/files/upload"):
             # Upload tickets validate an exact byte count and SHA-256 while streaming.
             # Buffering here would turn the transfer back into a memory-bound request.
             await self.app(scope, receive, send)

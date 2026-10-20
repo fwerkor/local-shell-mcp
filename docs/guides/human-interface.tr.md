@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5f07217e742810704f1919224f6cf68bf7b4f5ecf635fadd5ec4d21b072ce6b2 -->
+<!-- i18n-source-sha256: d4016e996b7de27eb0d52bc7b076277fd976b12906ce5f44d04c1d1d229bf85c -->
 # Kullanıcı arayüzü
 
 `local-shell-mcp`, aynı service API, workspace, persistent terminal registry, remote-worker registry ve MCP audit log üzerinde iki uyumlu human interface sunar:
@@ -150,7 +150,7 @@ Dashboard, OpenTUI operasyonel görünümüdür. Geniş terminaller node, worklo
 
 ### Files
 
-Files, yerel ve uzak makineler için LSM'ye özgü üç panelli dosya yöneticisidir. Oluşturma, düzenleme, yeniden adlandırma, kopyalama, taşıma, yapıştırma, silme, gizli dosya geçişi, yenileme, metin önizleme, ikili önizleme ve sınırlı resim küçük resimleri sağlar.
+Files, yerel ve uzak makineler için web tabanlı bir dosya gezginidir. Klasör ağacı, liste ve ızgara görünümleri, klasör içinde arama, sağ tık menüleri, çoklu seçim ve isteğe bağlı dizin yükleme sağlar. Dosyalar tarayıcıdan doğrudan yüklenebilir; genel paylaşım bağlantısı oluşturmadan, okuma yetkisi doğrulanan kısa ömürlü indirme biletleriyle indirilebilir. İkili yüklemeler Base64 JSON yerine işlemsel akış aktarımı kullanır. Metin düzenleme, oluşturma, yeniden adlandırma, kopyalama, taşıma, silme ve gizli dosyaları görüntüleme de desteklenir.
 
 ### Terminals
 

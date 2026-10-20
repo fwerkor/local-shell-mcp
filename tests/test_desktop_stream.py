@@ -1125,3 +1125,30 @@ def test_remote_desktop_failed_gui_ack_does_not_publish_live_activity(monkeypatc
             "type": "action-ack", "request_id": 15, "ok": False, "refresh": True, "message": "stale",
         }
         assert not events
+
+
+def test_worker_frame_overwrites_pending_image_with_new_keyframe():
+    stream = stream_module.DesktopStream('node', 'win')
+    first = {'type': 'frame', 'observation_id': 'old', 'bounds': {}}
+    stream.enqueue_frame(first, b'\xff\xd8\xffold')
+    stream.enqueue_frame({**first, 'observation_id': 'new'}, b'\xff\xd8\xffnew')
+    assert stream.frames.qsize() == 1
+    metadata, image = stream.frames.get_nowait()
+    assert metadata['observation_id'] == 'new'
+    assert image == b'\xff\xd8\xffnew'
+    assert isinstance(metadata['_queued_at'], float)
+
+
+def test_worker_frame_ignores_non_string_error_messages():
+    stream = stream_module.DesktopStream('node', 'win')
+    stream_module.STREAMS[stream.key] = stream
+    metadata = {'type': 'frame', 'observation_id': 'o1', 'bounds': {}}
+    stream_module.worker_frame(stream.key, stream.secret, 'node', {
+        'frame': metadata, 'errors': [{'private': 'do-not-reflect'}],
+    })
+    received, _ = stream.frames.get_nowait()
+    assert received.get('warning') is None
+    stream_module.worker_frame(stream.key, stream.secret, 'node', {
+        'errors': [False],
+    })
+    assert stream.frames.empty()

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5f07217e742810704f1919224f6cf68bf7b4f5ecf635fadd5ec4d21b072ce6b2 -->
+<!-- i18n-source-sha256: d4016e996b7de27eb0d52bc7b076277fd976b12906ce5f44d04c1d1d229bf85c -->
 # Giao diện người dùng
 
 `local-shell-mcp` cung cấp hai human interface tương thích trên cùng service API, workspace, persistent terminal registry, remote-worker registry và MCP audit log:
@@ -150,7 +150,7 @@ Dashboard là tổng quan vận hành của OpenTUI. Terminal rộng hiển th�
 
 ### Files
 
-Files là trình quản lý file ba pane native của LSM cho máy cục bộ và từ xa. Nó hỗ trợ tạo, sửa, đổi tên, copy, move, paste, xóa, bật/tắt file ẩn, refresh, preview text, preview binary và thumbnail ảnh có giới hạn.
+Files là trình khám phá tệp Web cho máy cục bộ và từ xa. Giao diện hỗ trợ cây thư mục, chế độ danh sách và lưới, tìm kiếm trong thư mục, menu chuột phải, chọn nhiều tệp và tải thư mục theo yêu cầu. Có thể tải lên trực tiếp từ trình duyệt và tải xuống bằng vé ngắn hạn có quyền đọc mà không cần liên kết chia sẻ công khai. Tải lên nhị phân dùng luồng giao dịch thay vì JSON Base64. Các thao tác chỉnh sửa văn bản, tạo, đổi tên, sao chép, di chuyển, xóa và hiện tệp ẩn cũng được hỗ trợ.
 
 ### Terminals
 

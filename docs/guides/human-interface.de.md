@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5f07217e742810704f1919224f6cf68bf7b4f5ecf635fadd5ec4d21b072ce6b2 -->
+<!-- i18n-source-sha256: d4016e996b7de27eb0d52bc7b076277fd976b12906ce5f44d04c1d1d229bf85c -->
 # Benutzeroberfläche
 
 `local-shell-mcp` bietet zwei kompatible Benutzerschnittstellen über derselben Service-API, demselben Workspace, Persistent-Terminal-Register, Remote-Worker-Register und MCP-Audit-Log:
@@ -150,7 +150,7 @@ Dashboard ist die Betriebsübersicht von OpenTUI. Breite Terminals zeigen getren
 
 ### Files
 
-Files ist ein LSM-nativer Dateimanager mit drei Bereichen für lokale und entfernte Maschinen. Er unterstützt Erstellen, Bearbeiten, Umbenennen, Kopieren, Verschieben, Einfügen, Löschen, Umschalten versteckter Dateien, Aktualisieren, Textvorschau, Binärvorschau und begrenzte Bildminiaturen.
+Files ist ein webnativer Dateiexplorer für lokale und entfernte Maschinen. Er bietet Ordnerbaum, Listen- und Rasteransicht, Ordnersuche, Kontextmenüs, Mehrfachauswahl und bedarfsgesteuertes Laden. Dateien lassen sich direkt im Browser hochladen und über kurzlebige, leseberechtigte Download-Tickets herunterladen, ohne öffentliche Freigabelinks zu erzeugen. Binär-Uploads erfolgen als transaktionaler Stream statt Base64-JSON. Textbearbeitung, Erstellen, Umbenennen, Kopieren, Verschieben, Löschen und Anzeigen versteckter Dateien werden unterstützt.
 
 ### Terminals
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5f07217e742810704f1919224f6cf68bf7b4f5ecf635fadd5ec4d21b072ce6b2 -->
+<!-- i18n-source-sha256: d4016e996b7de27eb0d52bc7b076277fd976b12906ce5f44d04c1d1d229bf85c -->
 # Antarmuka pengguna
 
 `local-shell-mcp` menyediakan dua human interface yang kompatibel di atas service API, workspace, persistent terminal registry, remote-worker registry, dan MCP audit log yang sama:
@@ -150,7 +150,7 @@ Dashboard adalah ringkasan operasional OpenTUI. Terminal lebar menampilkan regio
 
 ### Files
 
-Files adalah file manager tiga panel native LSM untuk mesin lokal dan jarak jauh. Fitur mencakup buat, edit, rename, copy, move, paste, delete, toggle file tersembunyi, refresh, preview teks, preview biner, dan thumbnail gambar terbatas.
+Files adalah penjelajah berkas Web untuk mesin lokal dan jarak jauh. Tersedia pohon folder, tampilan daftar atau kisi, pencarian per folder, menu konteks, pemilihan banyak berkas, dan pemuatan folder sesuai kebutuhan. Berkas dapat diunggah langsung dari browser dan diunduh melalui tiket berumur pendek dengan izin baca, tanpa tautan berbagi publik. Unggahan biner menggunakan streaming transaksional, bukan JSON Base64. Penyuntingan teks, pembuatan, penggantian nama, penyalinan, pemindahan, penghapusan, dan tampilan berkas tersembunyi juga didukung.
 
 ### Terminals
 
