@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 
 import pytest
 
@@ -157,7 +159,7 @@ async def test_registration_replay_survives_expiry_and_revoke_blocks_identity(
     assert (await remote.RemoteManager().register_worker(payload))["token"] == registered["token"]
     fresh = remote.RemoteManager()
     fresh.revoke("first")
-    with pytest.raises(ValueError, match="invalid invite"):
+    with pytest.raises(ValueError, match="enrollment has been revoked"):
         await remote.RemoteManager().register_worker(payload)
 
 
@@ -197,3 +199,170 @@ async def test_lost_http_response_is_retried_without_duplicate_registration(
     assert attempts[0] == attempts[1] == returned["data"]
     assert len(manager.workers) == 1
     assert manager.invites[invite["code"]].used_count == 1
+
+
+@pytest.mark.asyncio
+async def test_revoked_enrollment_cannot_retry_into_available_invite(isolated_remote):
+    creator = remote.RemoteManager()
+    invite = await creator.create_invite(max_uses=3)
+    original = {
+        "invite": invite["code"],
+        "enrollment_id": "lost-response-from-revoked-worker",
+        "info": {"user": "tester", "hostname": "shared-host"},
+    }
+    registered = await creator.register_worker(original)
+    controller = remote.RemoteManager()
+    assert controller.revoke(registered["name"])["revoked"]
+    key = hashlib.sha256(
+        (invite["code"] + "\0" + original["enrollment_id"]).encode()
+    ).hexdigest()
+    assert controller.revoked_registrations[key] > remote._utc()
+    assert registered["name"] not in controller.workers
+
+    # A new controller process must reject the same retry even while unused
+    # slots remain. The revoked worker's original token remains unusable.
+    after_restart = remote.RemoteManager()
+    with pytest.raises(ValueError, match="enrollment has been revoked"):
+        await after_restart.register_worker(original)
+    with pytest.raises(PermissionError, match="invalid worker identity"):
+        await after_restart.resume_worker(registered["token"], {})
+    assert after_restart.invites[invite["code"]].used_count == 1
+    assert not after_restart.workers
+
+    # The revoke only invalidates this particular enrollment, not the invite.
+    another = await after_restart.register_worker(
+        {**original, "enrollment_id": "another-device"}
+    )
+    assert another["token"] != registered["token"]
+    assert after_restart.invites[invite["code"]].used_count == 2
+
+    # Rejected retries must not consume that last remaining slot.
+    for _ in range(2):
+        with pytest.raises(ValueError, match="enrollment has been revoked"):
+            await remote.RemoteManager().register_worker(original)
+    assert remote.RemoteManager().list_machines()["counts"]["total"] == 1
+    final = await remote.RemoteManager().register_worker(
+        {**original, "enrollment_id": "third-device"}
+    )
+    assert final["token"] not in {registered["token"], another["token"]}
+
+
+@pytest.mark.asyncio
+async def test_revoked_enrollment_tombstone_expires_and_is_pruned(isolated_remote, monkeypatch):
+    now = remote._utc()
+    monkeypatch.setattr(remote, "_utc", lambda: now)
+    manager = remote.RemoteManager()
+    invite = await manager.create_invite(max_uses=2, ttl_s=604800)
+    payload = {"invite": invite["code"], "name": "worker", "enrollment_id": "revoked"}
+    await manager.register_worker(payload)
+    manager.revoke("worker")
+    assert len(manager.revoked_registrations) == 1
+
+    monkeypatch.setattr(remote, "_utc", lambda: now + remote.MAX_REMOTE_INVITE_TTL_S - 1)
+    with pytest.raises(ValueError, match="enrollment has been revoked"):
+        await remote.RemoteManager().register_worker(payload)
+
+    monkeypatch.setattr(remote, "_utc", lambda: now + remote.MAX_REMOTE_INVITE_TTL_S + 1)
+    fresh = remote.RemoteManager()
+    fresh.list_machines()
+    assert fresh.revoked_registrations == {}
+    # The original invite has also expired by now; cleanup cannot re-enable it.
+    with pytest.raises(ValueError, match="invalid invite"):
+        await fresh.register_worker(payload)
+    fresh.flush_registry()
+    assert remote.RemoteManager._read_registry(fresh._registry_path())[
+        "revoked_registrations"
+    ] == {}
+
+
+@pytest.mark.asyncio
+async def test_revoke_registry_write_failure_rolls_back_tombstone(
+    isolated_remote, monkeypatch
+):
+    manager = remote.RemoteManager()
+    code = (await manager.create_invite(max_uses=2))["code"]
+    worker = await manager.register_worker(
+        {"invite": code, "name": "rollback", "enrollment_id": "retry"}
+    )
+    original_save = manager._save_registry_unlocked
+
+    def fail_save():
+        raise OSError("simulated registry write failure")
+
+    monkeypatch.setattr(manager, "_save_registry_unlocked", fail_save)
+    with pytest.raises(OSError, match="simulated registry"):
+        manager.revoke("rollback")
+    assert "rollback" in manager.workers
+    assert manager.tokens[worker["token"]] == "rollback"
+    assert manager.revoked_registrations == {}
+    monkeypatch.setattr(manager, "_save_registry_unlocked", original_save)
+
+    after_restart = remote.RemoteManager()
+    assert (
+        await after_restart.register_worker(
+            {"invite": code, "name": "rollback", "enrollment_id": "retry"}
+        )
+    ) == worker
+
+
+@pytest.mark.parametrize(
+    "revoked",
+    [
+        [],
+        {"short-hash": 123},
+        {"a" * 64: "tomorrow"},
+        {"a" * 64: float("nan")},
+        {"a" * 64: True},
+        {"a" * 64: -1},
+    ],
+)
+def test_registry_rejects_invalid_revoked_enrollment_records(revoked):
+    raw = json.dumps({
+        "version": 1,
+        "workers": [],
+        "invites": [],
+        "revoked_registrations": revoked,
+    }).encode()
+    with pytest.raises(ValueError, match="revoked registrations"):
+        remote.RemoteManager._read_registry(raw)
+
+    # Backwards-compatible v1 registries do not have tombstone fields.
+    old_registry = remote.RemoteManager._read_registry(
+        b'{"version":1,"workers":[],"invites":[]}'
+    )
+    assert old_registry["revoked_registrations"] == {}
+
+
+@pytest.mark.asyncio
+async def test_http_retry_after_revocation_does_not_resurrect_worker(
+    isolated_remote, monkeypatch
+):
+    manager = remote.RemoteManager()
+    invite = await manager.create_invite(max_uses=2)
+    payload = {
+        "invite": invite["code"],
+        "enrollment_id": "revoke-between-network-attempts",
+    }
+    attempts = 0
+
+    def network_post(url, request, headers, timeout):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            registered = asyncio.run(manager.register_worker(request))
+            remote.RemoteManager().revoke(registered["name"])
+            raise ConnectionError("registration response lost")
+        result = asyncio.run(remote.RemoteManager().register_worker(request))
+        return {"ok": True, "data": result}
+
+    monkeypatch.setattr(remote, "_worker_post_json", network_post)
+    monkeypatch.setattr(remote, "_worker_retry_delay", lambda attempt: 0)
+    with pytest.raises(ValueError, match="enrollment has been revoked"):
+        await remote._worker_post_json_forever(
+            "https://controller.test/remote/register", payload, operation="register"
+        )
+    assert attempts == 2
+    fresh = remote.RemoteManager()
+    fresh.list_machines()
+    assert not fresh.workers
+    assert fresh.invites[invite["code"]].used_count == 1

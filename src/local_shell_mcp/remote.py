@@ -122,6 +122,7 @@ REMOTE_WORKER_REGISTRY_BACKUP_FILE_NAME = "remote-workers.json.bak"
 REMOTE_WORKER_REGISTRY_GENERATION_FILE_NAME = "remote-workers.generation"
 REMOTE_WORKER_IDENTITY_FILE_NAME = "identity.json"
 MAX_REMOTE_INVITES = 1_024
+MAX_REMOTE_INVITE_TTL_S = 7 * 24 * 3600
 MAX_REMOTE_MACHINE_NAME_LENGTH = 128
 REMOTE_WORKER_INTERACTIVE_LANE = "interactive"
 REMOTE_WORKER_TRANSFER_LANE = "transfer"
@@ -674,6 +675,7 @@ def _merge_worker_resource_usage(worker: RemoteWorker, payload: dict[str, Any]) 
 class RemoteManager:
     def __init__(self) -> None:
         self.invites: dict[str, RemoteInvite] = {}
+        self.revoked_registrations: dict[str, float] = {}
         self.workers: dict[str, RemoteWorker] = {}
         self.tokens: dict[str, str] = {}
         self.pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
@@ -730,6 +732,17 @@ class RemoteManager:
                 or not 0 <= used_count <= max_uses
             ):
                 raise ValueError(f"remote worker registry invite usage is invalid: {source}")
+        revoked_registrations = data.get("revoked_registrations", {})
+        if not isinstance(revoked_registrations, dict) or any(
+            not isinstance(key, str)
+            or re.fullmatch(r"[0-9a-f]{64}", key) is None
+            or isinstance(expires, bool)
+            or not isinstance(expires, (int, float))
+            or not math.isfinite(expires)
+            or expires <= 0
+            for key, expires in revoked_registrations.items()
+        ):
+            raise ValueError(f"remote worker registry revoked registrations are invalid: {source}")
         generation = data.get("generation")
         if generation is not None and (not isinstance(generation, str) or not generation.strip()):
             raise ValueError(f"remote worker registry generation is invalid: {source}")
@@ -737,6 +750,7 @@ class RemoteManager:
             "generation": generation,
             "workers": [item for item in workers if isinstance(item, dict)],
             "invites": invite_rows,
+            "revoked_registrations": revoked_registrations,
         }
 
     def _load_registry_unlocked(self, *, force: bool = False) -> None:
@@ -875,6 +889,11 @@ class RemoteManager:
         self.workers = workers
         self.tokens = tokens
         self.invites = invites
+        self.revoked_registrations = {
+            key: expires
+            for key, expires in registry["revoked_registrations"].items()
+            if expires > now
+        }
         self._registry_loaded = True
         if recovered_from_backup:
             self._save_registry_unlocked()
@@ -906,6 +925,11 @@ class RemoteManager:
                 }
                 for worker in sorted(self.workers.values(), key=lambda item: item.name)
             ],
+            "revoked_registrations": {
+                key: expires
+                for key, expires in self.revoked_registrations.items()
+                if expires > now
+            },
             "invites": [
                 {
                     "code": invite.code,
@@ -970,7 +994,7 @@ class RemoteManager:
         max_uses: int = 1,
     ) -> dict[str, Any]:
         settings = get_settings()
-        ttl = max(60, min(int(settings.remote_invite_ttl_s if ttl_s is None else ttl_s), 7 * 24 * 3600))
+        ttl = max(60, min(int(settings.remote_invite_ttl_s if ttl_s is None else ttl_s), MAX_REMOTE_INVITE_TTL_S))
         if isinstance(max_uses, bool) or not isinstance(max_uses, int) or max_uses < 1:
             raise ValueError("max_uses must be a positive integer")
         normalized_name = _validate_machine_name(name) if name else None
@@ -1050,6 +1074,8 @@ class RemoteManager:
         async with self._lock:
             with self._state_lock, self._registry_transaction_unlocked():
                 if registration_key:
+                    if registration_key in self.revoked_registrations:
+                        raise ValueError("worker enrollment has been revoked")
                     for registered in self.workers.values():
                         if registered.registration_key == registration_key:
                             return self._registration_response(registered)
@@ -1712,6 +1738,20 @@ class RemoteManager:
             if not worker:
                 raise ValueError(f"unknown remote machine: {machine}")
             self.tokens.pop(worker.token, None)
+            if worker.registration_key:
+                # Invites live at most seven days. Keeping the enrollment key
+                # for that long after revocation blocks lost-response retries.
+                self.revoked_registrations[worker.registration_key] = (
+                    _utc() + MAX_REMOTE_INVITE_TTL_S
+                )
+            try:
+                self._save_registry_unlocked()
+            except Exception:
+                self.workers[machine] = worker
+                self.tokens[worker.token] = machine
+                if worker.registration_key:
+                    self.revoked_registrations.pop(worker.registration_key, None)
+                raise
             for job_id, pending_machine in list(self.pending_machines.items()):
                 if pending_machine == machine:
                     self._cancel_job(job_id)
@@ -1720,7 +1760,6 @@ class RemoteManager:
                     with contextlib.suppress(asyncio.QueueEmpty):
                         queued = queue.get_nowait()
                         self.cancelled_jobs.pop(str(queued.get("id") or ""), None)
-            self._save_registry_unlocked()
         return {"machine": machine, "revoked": True}
 
     def rename(self, machine: str, new_name: str) -> dict[str, Any]:
