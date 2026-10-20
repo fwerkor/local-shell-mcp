@@ -190,7 +190,15 @@ describe("Desktop WebSocket transport", () => {
     expect(c.pendingActions).toBe(0)
     expect(c.frameInputEnabled).toBe(false)
     expect(c.awaitingFreshFrame).toBe(true)
+    expect(c.waitingForKeyframe).toBe(true)
     expect(sent.at(-1)).toEqual({ type: "refresh" })
+    c.handleControl(JSON.stringify({
+      type: "frame", observation_id: "old-stale-obs", ttl_s: 20,
+      coordinate_input: true, bounds: { x: 20, y: 30, width: 200, height: 100 }, image: false,
+    }))
+    await c.imageQueue
+    expect(c.frameInputEnabled).toBe(false)
+    expect(c.frameObservationId).toBe("obs-active")
     c.handleControl(JSON.stringify({
       type: "action-ack", request_id: 1, ok: false, refresh: true, message: "observation stale",
     }))

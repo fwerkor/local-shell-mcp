@@ -429,6 +429,7 @@ export class DesktopController extends BaseController {
         if (message.refresh === true && !this.awaitingFreshFrame) {
           this.frameInputEnabled = false
           this.awaitingFreshFrame = true
+          this.waitingForKeyframe = true
           this.refreshFrame()
         }
       }
