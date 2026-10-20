@@ -152,6 +152,7 @@ async def test_real_tmux_attached_pty_preserves_ansi_and_detach(monkeypatch):
     if started.returncode:
         pytest.skip("tmux cannot create isolated test server")
     monkeypatch.setattr(worker, "tmux_socket_name", lambda: socket_name)
+    monkeypatch.setattr(worker, "resolve_tmux", lambda: SimpleNamespace(path=tmux))
     # This PTY test does not require a configured LSM workspace directory.
     # CI runners cannot create the default /workspace path.
     monkeypatch.setattr(worker, "subprocess_env", lambda: os.environ.copy())
@@ -272,6 +273,7 @@ async def test_native_pty_process_creation_error_closes_descriptors(monkeypatch)
         raise OSError("tmux startup rejected")
 
     monkeypatch.setattr(worker, "resolve_tmux", lambda: SimpleNamespace(path="/usr/bin/tmux"))
+    monkeypatch.setattr(worker, "tmux_socket_name", lambda: "isolated-test")
     monkeypatch.setattr(worker, "subprocess_env", lambda: os.environ.copy())
     monkeypatch.setattr(subprocess, "Popen", cannot_start)
     with pytest.raises(OSError, match="tmux startup rejected"):
