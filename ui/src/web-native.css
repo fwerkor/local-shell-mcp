@@ -245,7 +245,7 @@ button.summary-card { cursor: pointer; }
 .invite-command code { overflow: auto; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-all; }
 
 /* Logical Sessions — durable task list + checkpoint/plan/activity detail */
-.sessions-summary { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 9px; }
+.sessions-summary { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 9px; }
 .sessions-controls { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .sessions-filter { display: flex; align-items: center; gap: 7px; color: #7f8898; font-size: 12px; font-weight: 650; }
 .sessions-filter select { height: 32px; min-width: 140px; padding: 0 9px; color: #394255; background: #fff; border: 1px solid #dfe3eb; border-radius: 8px; outline: none; font-size: 12px; }

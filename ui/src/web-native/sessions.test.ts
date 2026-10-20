@@ -27,6 +27,7 @@ describe("Native WebUI logical session performance", () => {
         active: session.status === "active" ? 1 : 0,
         completed: session.status === "completed" ? 1 : 0,
         cancelled: 0,
+        stale: 0,
         total: 1,
       },
     })
