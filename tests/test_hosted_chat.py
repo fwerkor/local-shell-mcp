@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
@@ -54,7 +55,8 @@ def test_profiles_are_encrypted_durable_and_scoped(chat_store, tmp_path):
     assert reloaded.profiles("bob") == []
     with pytest.raises(ValueError):
         reloaded.profile("bob", profile["id"])
-    assert (tmp_path / "state" / "hosted-chat-encryption-key").stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert (tmp_path / "state" / "hosted-chat-encryption-key").stat().st_mode & 0o777 == 0o600
     reloaded.put_profile("alice", {**profile, "name": "Renamed", "api_key": ""})
     assert (
         reloaded.profile("alice", profile["id"], with_secret=True)["api_key"]
