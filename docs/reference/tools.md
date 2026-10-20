@@ -99,7 +99,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-Manage one durable Logical Session. Start creates a new task and returns its session_id. Resume continues only the explicit session_id supplied by the user or already present in this conversation. All non-start actions require session_id. Actions: start, resume, get, report, finish, cancel, delete. report accepts summary/findings/next/blockers/objective/label. delete requires a terminal Session.
+Manage one durable Logical Session. Start creates a new task and returns its session_id. Resume continues only the explicit session_id supplied by the user or already present in this conversation. All non-start actions require session_id. Actions: start, resume, get, report, finish, cancel, delete. report accepts summary/findings/next/blockers/objective/label. delete requires a terminal Session. Active Sessions idle for 24 hours become stale on access/list/start (unless a tool call is in flight); stale Sessions are resumable and eligible for oldest-first history pruning.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -765,7 +765,7 @@ When `machine` is supplied, the call additionally requires `remote:use` and runs
 
 ### `remote_manage`
 
-Manage remote workers with action=invite, list, reset, revoke, or rename. invite accepts name/workdir/ttl_s; reset/revoke require machine; rename requires machine and new_name. reset clears queued and safely cancellable active control-plane requests without disconnecting the worker; already-started protected mutations and persistent-process starts are preserved.
+Manage remote workers with action=invite, list, reset, revoke, or rename. invite accepts name/workdir/ttl_s/max_uses (default 1); reset/revoke require machine; rename requires machine and new_name. reset clears queued and safely cancellable active control-plane requests without disconnecting the worker; already-started protected mutations and persistent-process starts are preserved.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -773,6 +773,7 @@ Manage remote workers with action=invite, list, reset, revoke, or rename. invite
 | `name` | `string \| null` | `null` |  |
 | `workdir` | `string \| null` | `null` |  |
 | `ttl_s` | `integer \| null` | `null` |  |
+| `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session for this tool call. Pass the session_id returned by session_manage while working in that task. Use null only when no Logical Session is active. This is the same durable session_id used by session_manage. |

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: b174a1b427ca9b618c63375702f4a652941f83c6b1e1abaee1a99d1ab278deab -->
+<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
 # 配置
 
 仓库提供一个可直接复制的起始文件：[`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example)。Docker Compose 会自动读取由此生成的 `.env`，其他 runtime 也可以使用相同的 `LOCAL_SHELL_MCP_` 环境变量。YAML 仍是 binary 或源码部署的可选高级输入；需要显式创建配置文件，并通过 `LOCAL_SHELL_MCP_CONFIG` 或 `--config` 选择。环境变量会覆盖 YAML，因此除非确实需要覆盖，否则不要在两处重复定义同一设置。YAML key 使用下表所列字段名。
@@ -102,7 +102,7 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-long-random-secret
 | YAML key | 环境变量 | 默认值 | 说明 |
 |---|---|---|---|
 | `remote_enabled` | `LOCAL_SHELL_MCP_REMOTE_ENABLED` | `True` | 控制 `/join`、`/remote/*` 与 `remote_*` MCP tools。 |
-| `remote_invite_ttl_s` | `LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S` | `600` |  |
+| `remote_invite_ttl_s` | `LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S` | `7200` |  |
 | `remote_poll_timeout_s` | `LOCAL_SHELL_MCP_REMOTE_POLL_TIMEOUT_S` | `25` |  |
 | `remote_job_timeout_s` | `LOCAL_SHELL_MCP_REMOTE_JOB_TIMEOUT_S` | `3600` |  |
 | `remote_max_pending_jobs` | `LOCAL_SHELL_MCP_REMOTE_MAX_PENDING_JOBS` | `256` | 每个 worker 最多 queued/pending jobs。 |

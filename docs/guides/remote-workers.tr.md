@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 52e5f445beaf4c30bd298c59399005f01fe5563591b8a0285c97b46243f342fe -->
+<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
 # Uzak workers
 
 Remote workers, `local-shell-mcp`’nin dışarıya HTTP(S) isteği gönderebilen ancak gelen SSH bağlantısı kabul edemeyen makineleri kontrol etmesini sağlar.
@@ -9,12 +9,14 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 ## Temel workflow
 
-1. `remote_manage(action="invite", ...)` ile tek kullanımlık davet oluşturun.
+1. `remote_manage(action="invite", ...)` ile davet oluşturun.
 2. Oluşturulan komutu uzak makinede çalıştırın.
 3. `remote_manage(action="list")` ile kaydı doğrulayın.
 4. `machine="<worker-name>"` ile normal araçları çağırın; örneğin `environment_get`, `run_shell`, `file_read` veya `browser_run_script`.
 5. `remote_transfer` ile izlenen controller-to-worker, worker-to-controller veya worker-to-worker dosya/dizin aktarımı başlatın. `job_list` ya da `job_tail` ile takip edin; `job_stop` veya `job_retry` ile durdurun ya da yeniden deneyin.
 6. `remote_manage(action="rename", ...)` veya `remote_manage(action="revoke", ...)` ile worker’ı yeniden adlandırın veya iptal edin.
+
+Bir davet varsayılan olarak bir worker kaydeder (`max_uses=1`). Aynı davetle birden çok worker kaydetmek için `max_uses` değerini artırın. Çok kullanımlı davetlerde `name` alanını boş bırakın. İsteğe bağlı `ttl_s` varsayılan olarak iki saattir (7200 saniye); en fazla yedi gün (604800 saniye) olabilir.
 
 Yalnızca worker yönetimi `remote_*` adlarını kullanır. Execution, shell, job, filesystem, patch ve browser işlemleri local ve remote aynı schema’yı paylaşır. Machine vermek ayrıca `remote:use` OAuth scope gerektirir.
 

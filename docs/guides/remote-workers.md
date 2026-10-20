@@ -8,12 +8,14 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 ## Basic workflow
 
-1. Create a one-time invite with `remote_manage(action="invite", ...)`.
+1. Create an invite with `remote_manage(action="invite", ...)`.
 2. Run the generated command on the remote machine.
 3. Confirm registration with `remote_manage(action="list")`.
 4. Call normal tools with `machine="<worker-name>"`, for example `environment_get`, `run_shell`, `file_read`, or `browser_run_script`.
 5. Use `remote_transfer` to start a tracked controller-to-worker, worker-to-controller, or worker-to-worker file or directory transfer. Follow it with `job_list` or `job_tail`; stop or retry it with `job_stop` or `job_retry`.
 6. Rename or revoke workers with `remote_manage(action="rename", ...)` or `remote_manage(action="revoke", ...)`.
+
+An invite can enroll one worker by default (`max_uses=1`), or multiple workers when `max_uses` is increased. Leave `name` empty for multi-use invites. The optional `ttl_s` defaults to two hours (7200 seconds), and can be set up to seven days (604800 seconds).
 
 Only worker administration uses `remote_*` names. Execution, shell, job, filesystem, patch, and browser operations share the same schema locally and remotely. Supplying a machine additionally requires the `remote:use` OAuth scope.
 

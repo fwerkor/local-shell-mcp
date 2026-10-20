@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: b174a1b427ca9b618c63375702f4a652941f83c6b1e1abaee1a99d1ab278deab -->
+<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
 # 設定
 
 Repository にはコピー可能な starter file [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example) が含まれます。Docker Compose は作成した `.env` を自動的に読み取り、他の runtime でも同じ `LOCAL_SHELL_MCP_` environment variables を使用できます。YAML は binary/source deployment 向けの optional advanced input です。File を明示的に作成し、`LOCAL_SHELL_MCP_CONFIG` または `--config` で選択します。Environment variables は YAML values を override するため、意図的な override でない限り同じ setting を両方に定義しないでください。YAML keys は以下の field names を使います。
@@ -102,7 +102,7 @@ Local-only testing では `auth_bypass_localhost` が default で有効です。
 | YAML key | Environment variable | Default | Notes |
 |---|---|---|---|
 | `remote_enabled` | `LOCAL_SHELL_MCP_REMOTE_ENABLED` | `True` | `/join`、`/remote/*`、`remote_*` MCP tools を制御します。 |
-| `remote_invite_ttl_s` | `LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S` | `600` |  |
+| `remote_invite_ttl_s` | `LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S` | `7200` |  |
 | `remote_poll_timeout_s` | `LOCAL_SHELL_MCP_REMOTE_POLL_TIMEOUT_S` | `25` |  |
 | `remote_job_timeout_s` | `LOCAL_SHELL_MCP_REMOTE_JOB_TIMEOUT_S` | `3600` |  |
 | `remote_max_pending_jobs` | `LOCAL_SHELL_MCP_REMOTE_MAX_PENDING_JOBS` | `256` | Worker ごとの queued/pending jobs 上限。 |

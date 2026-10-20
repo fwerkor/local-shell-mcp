@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 52e5f445beaf4c30bd298c59399005f01fe5563591b8a0285c97b46243f342fe -->
+<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
 # Remote Worker
 
 Remote Worker ermöglichen `local-shell-mcp` die Steuerung von Maschinen, die ausgehende HTTP(S)-Anfragen senden können, aber keine eingehenden SSH-Verbindungen akzeptieren können.
@@ -9,12 +9,14 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 ## Grundablauf
 
-1. Erstellen Sie mit `remote_manage(action="invite", ...)` eine einmalige Einladung.
+1. Erstellen Sie mit `remote_manage(action="invite", ...)` eine Einladung.
 2. Führen Sie den erzeugten Befehl auf der Remote-Maschine aus.
 3. Bestätigen Sie die Registrierung mit `remote_manage(action="list")`.
 4. Rufen Sie normale Tools mit `machine="<worker-name>"` auf, zum Beispiel `environment_get`, `run_shell`, `file_read` oder `browser_run_script`.
 5. Starten Sie mit `remote_transfer` einen verfolgten controller-to-worker-, worker-to-controller- oder worker-to-worker-Datei-/Verzeichnistransfer. Beobachten Sie ihn mit `job_list` oder `job_tail`; stoppen oder wiederholen Sie ihn mit `job_stop` bzw. `job_retry`.
 6. Benennen Sie Worker mit `remote_manage(action="rename", ...)` um oder widerrufen Sie sie mit `remote_manage(action="revoke", ...)`.
+
+Eine Einladung registriert standardmäßig einen Worker (`max_uses=1`). Erhöhen Sie `max_uses`, um mehrere Worker mit derselben Einladung zu registrieren. Lassen Sie `name` bei mehrfach verwendbaren Einladungen leer. Der optionale Wert `ttl_s` beträgt standardmäßig zwei Stunden (7200 Sekunden) und kann auf höchstens sieben Tage (604800 Sekunden) gesetzt werden.
 
 Nur die Worker-Administration verwendet `remote_*`-Namen. Execution-, Shell-, Job-, Filesystem-, Patch- und Browser-Operationen nutzen lokal und remote dasselbe Schema. Die Angabe einer Machine erfordert zusätzlich den OAuth-Scope `remote:use`.
 

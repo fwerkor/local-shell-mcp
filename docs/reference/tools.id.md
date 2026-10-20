@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
+<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
 # Referensi tools
 
 Page ini dibangun dari MCP tool schemas yang sebenarnya. Jalankan `python scripts/generate-tools-reference.py` setelah mengubah public tool surface untuk memperbarui English reference.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-Kelola satu Logical Session durable. start membuat task baru dan mengembalikan session_id-nya. resume hanya melanjutkan session_id eksplisit yang diberikan pengguna atau yang sudah ada dalam percakapan ini. Semua action selain start memerlukan session_id. Action: start, resume, get, report, finish, cancel, delete. report menerima summary/findings/next/blockers/objective/label; delete memerlukan Session terminal.
+Kelola satu Logical Session durable. start membuat task baru dan mengembalikan session_id-nya. resume hanya melanjutkan session_id eksplisit yang diberikan pengguna atau yang sudah ada dalam percakapan ini. Semua action selain start memerlukan session_id. Action: start, resume, get, report, finish, cancel, delete. report menerima summary/findings/next/blockers/objective/label; delete memerlukan Session terminal. Setelah 24 jam tidak aktif, Sessions aktif menjadi stale saat diakses, dicantumkan, atau dimulai, kecuali jika panggilan tool masih berlangsung. Sessions stale dapat dilanjutkan atau dihapus dari riwayat mulai dari yang terlama.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -770,7 +770,7 @@ Ketika `machine` diberikan, panggilan tersebut juga memerlukan `remote:use` dan 
 
 ### `remote_manage`
 
-Mengelola remote workers dengan action=invite, list, revoke, atau rename. invite menerima name/workdir/ttl_s; revoke memerlukan machine; rename memerlukan machine dan new_name.
+Mengelola remote workers dengan action=invite, list, reset, revoke, atau rename. invite menerima name/workdir/ttl_s/max_uses; revoke memerlukan machine; rename memerlukan machine dan new_name. max_uses memiliki nilai default 1. reset memerlukan machine dan menghapus permintaan kontrol dalam antrean atau yang aktif namun aman dibatalkan tanpa memutus worker; operasi terlindungi yang telah dimulai tetap dipertahankan.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -778,6 +778,7 @@ Mengelola remote workers dengan action=invite, list, revoke, atau rename. invite
 | `name` | `string \| null` | `null` |  |
 | `workdir` | `string \| null` | `null` |  |
 | `ttl_s` | `integer \| null` | `null` |  |
+| `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |

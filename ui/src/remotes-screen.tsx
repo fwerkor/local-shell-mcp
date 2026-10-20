@@ -62,10 +62,60 @@ export function RemoteInviteResultDialog({
       <text
         style={{ height: 1, flexShrink: 0 }}
         fg={theme.faint}
-        content={`Expires ${new Date(invite.expires_at * 1000).toLocaleTimeString()} · Enter/Esc close`}
+        content={`Expires ${new Date(invite.expires_at * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })} · Enter/Esc close`}
       />
     </Modal>
   )
+}
+
+export function parseRemoteInviteInput(value: string): {
+  name?: string
+  workdir?: string
+  max_uses?: number
+  ttl_s?: number
+} {
+  const opts: { max_uses?: number; ttl_s?: number; workdir?: string } = {}
+  const tokens: string[] = []
+  let token = ""
+  let started = false
+  let quote: "'" | '"' | null = null
+  for (let i = 0; i < value.length; i += 1) {
+    const char = value[i]
+    const next = value[i + 1]
+    if (char === "\\" && next && (next === quote || (!quote && (/\s/.test(next) || next === "'" || next === '"' || next === "\\")) || (quote === '"' && next === "\\"))) {
+      token += next
+      started = true
+      i += 1
+    } else if ((char === "'" || char === '"') && (quote === null || quote === char)) {
+      quote = quote === null ? char : null
+      started = true
+    } else if (!quote && /\s/.test(char)) {
+      if (started) tokens.push(token)
+      token = ""
+      started = false
+    } else {
+      token += char
+      started = true
+    }
+  }
+  if (started) tokens.push(token)
+
+  const positionals: string[] = []
+  const flags = new Set(["--max-uses", "--ttl-s", "--workdir"])
+  for (let i = 0; i < tokens.length; i += 1) {
+    const part = tokens[i]
+    if (part === "--max-uses" || part === "--ttl-s") {
+      opts[part === "--max-uses" ? "max_uses" : "ttl_s"] = Number(tokens[++i])
+    } else if (part === "--workdir") {
+      const path: string[] = []
+      while (i + 1 < tokens.length && !flags.has(tokens[i + 1])) path.push(tokens[++i])
+      opts.workdir = path.join(" ")
+    } else {
+      positionals.push(part)
+    }
+  }
+  const [name, ...workdirParts] = positionals
+  return { name: name || undefined, workdir: opts.workdir || workdirParts.join(" ") || undefined, max_uses: opts.max_uses, ttl_s: opts.ttl_s }
 }
 
 export function RemotesScreen({
@@ -155,12 +205,8 @@ export function RemotesScreen({
   }, [dialog])
 
   const createInvite = async (value: string) => {
-    const [name, ...workdirParts] = value.trim().split(/\s+/)
     try {
-      const invite = await api.invite({
-        name: name || undefined,
-        workdir: workdirParts.join(" ") || undefined,
-      })
+      const invite = await api.invite(parseRemoteInviteInput(value))
       setDialog({ type: "invite-result", invite })
     } catch (error) {
       setStatus(`Invite: ${formatError(error)}`)
@@ -401,11 +447,11 @@ export function RemotesScreen({
       />
       {dialog.type === "invite" && (
         <Modal title="Create remote invite" height={9}>
-          <text style={{ height: 1, flexShrink: 0 }} fg={theme.muted} content="Enter: optional-name [optional-workdir]" />
+          <text style={{ height: 1, flexShrink: 0 }} fg={theme.muted} content="name [workdir] [--max-uses N] [--ttl-s N] [--workdir PATH]" />
           <box style={{ height: 3, flexShrink: 0, border: true, borderColor: theme.borderBright, paddingLeft: 1, paddingRight: 1 }}>
             <input focused placeholder="build-host /workspace" onSubmit={(value: unknown) => void createInvite(typeof value === "string" ? value : "")} />
           </box>
-          <text style={{ height: 1, flexShrink: 0 }} fg={theme.faint} content="Invite expires automatically · Enter create · Esc cancel" />
+          <text style={{ height: 1, flexShrink: 0 }} fg={theme.faint} content="Default: 1 use, 2 hours · Max lifetime: 7 days · Enter create" />
         </Modal>
       )}
       {dialog.type === "invite-result" && (
