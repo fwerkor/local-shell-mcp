@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
+<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
 # 工具參考
 
 本頁由實際 MCP tool schema 產生。公開工具介面變更後，執行 `python scripts/generate-tools-reference.py` 更新 English 參考頁。
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-管理單一持久 Logical Session。start 建立新任務並回傳其 session_id。resume 只會繼續使用者明確提供、或本對話中已經存在的 session_id。除 start 外的所有 action 都必須提供 session_id。Action：start、resume、get、report、finish、cancel、delete。report 接受 summary/findings/next/blockers/objective/label；delete 需要 terminal Session。
+管理單一持久 Logical Session。start 建立新任務並回傳其 session_id。resume 只會繼續使用者明確提供、或本對話中已經存在的 session_id。除 start 外的所有 action 都必須提供 session_id。Action：start、resume、get、report、finish、cancel、delete。report 接受 summary/findings/next/blockers/objective/label；delete 需要 terminal Session。閒置 24 小時的 Active Sessions 會在存取、列出或開始時變為 stale，但有工具呼叫正在執行時除外。stale Sessions 仍可恢復，清理歷史記錄時會依最舊優先的順序刪除。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
@@ -769,7 +769,7 @@ OAuth scope：`shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `remote_manage`
 
-使用 action=invite、list、revoke 或 rename 管理 remote workers。invite 接受 name/workdir/ttl_s；revoke 需要 machine；rename 需要 machine 與 new_name。
+使用 action=invite、list、reset、revoke 或 rename 管理 remote workers。invite 接受 name/workdir/ttl_s/max_uses；revoke 需要 machine；rename 需要 machine 與 new_name。max_uses 預設為 1。reset 需要 machine，會在不斷開 worker 連線的情況下清除排隊中與可安全取消的執行中控制請求；已開始的受保護操作會保留。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
@@ -777,6 +777,7 @@ OAuth scope：`shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `name` | `string \| null` | `null` |  |
 | `workdir` | `string \| null` | `null` |  |
 | `ttl_s` | `integer \| null` | `null` |  |
+| `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |

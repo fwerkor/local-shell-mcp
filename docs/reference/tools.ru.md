@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
+<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
 # Справочник tools
 
 Эта страница строится из фактических MCP tool schemas. После изменения public tool surface запустите `python scripts/generate-tools-reference.py`, чтобы обновить English reference.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-Управляет одной долговечной Logical Session. start создаёт новую задачу и возвращает её session_id. resume продолжает только явный session_id, переданный пользователем или уже присутствующий в этом разговоре. Все действия, кроме start, требуют session_id. Действия: start, resume, get, report, finish, cancel, delete. report принимает summary/findings/next/blockers/objective/label; delete требует terminal Session.
+Управляет одной долговечной Logical Session. start создаёт новую задачу и возвращает её session_id. resume продолжает только явный session_id, переданный пользователем или уже присутствующий в этом разговоре. Все действия, кроме start, требуют session_id. Действия: start, resume, get, report, finish, cancel, delete. report принимает summary/findings/next/blockers/objective/label; delete требует terminal Session. После 24 часов бездействия активные Sessions становятся stale при обращении, просмотре списка или запуске, если не выполняется вызов инструмента. Sessions stale можно возобновить либо удалить из истории начиная с самых старых.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -769,7 +769,7 @@ OAuth scope: `shell:read, shell:write, shell:execute, browser:use, file:share, r
 
 ### `remote_manage`
 
-Управляет remote workers через action=invite, list, revoke или rename. invite принимает name/workdir/ttl_s; revoke требует machine; rename требует machine и new_name.
+Управляет remote workers через action=invite, list, reset, revoke или rename. invite принимает name/workdir/ttl_s/max_uses; revoke требует machine; rename требует machine и new_name. Значение max_uses по умолчанию — 1. reset требует machine и очищает ожидающие или безопасно отменяемые активные запросы управления, не отключая worker; уже начатые защищённые операции сохраняются.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -777,6 +777,7 @@ OAuth scope: `shell:read, shell:write, shell:execute, browser:use, file:share, r
 | `name` | `string \| null` | `null` |  |
 | `workdir` | `string \| null` | `null` |  |
 | `ttl_s` | `integer \| null` | `null` |  |
+| `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session для этого вызова инструмента. Во время работы над задачей передавайте session_id, возвращённый session_manage. Используйте null только когда активной Logical Session нет. |

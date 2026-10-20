@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
+<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
 # Tools reference
 
 このページは実際の MCP tool schema から構成されます。Public tool surface を変更した後は `python scripts/generate-tools-reference.py` を実行して English reference を更新します。
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-1 つの durable Logical Session を管理します。start は新しい task を作成して session_id を返します。resume は user が明示的に指定した、またはこの conversation にすでに存在する session_id だけを継続します。start 以外の全 action には session_id が必要です。Action: start, resume, get, report, finish, cancel, delete。report は summary/findings/next/blockers/objective/label を受け取り、delete には terminal Session が必要です。
+1 つの durable Logical Session を管理します。start は新しい task を作成して session_id を返します。resume は user が明示的に指定した、またはこの conversation にすでに存在する session_id だけを継続します。start 以外の全 action には session_id が必要です。Action: start, resume, get, report, finish, cancel, delete。report は summary/findings/next/blockers/objective/label を受け取り、delete には terminal Session が必要です。 24 時間操作のない Active Sessions は、アクセス・一覧表示・新規開始時に stale になります。ただし tool call の実行中は除きます。stale Sessions は再開でき、履歴整理時には古い順に削除されます。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -769,7 +769,7 @@ OAuth スコープ: `shell:read, shell:write, shell:execute, browser:use, file:s
 
 ### `remote_manage`
 
-action=invite、list、revoke、rename で remote workers を管理します。invite は name/workdir/ttl_s、revoke は machine、rename は machine と new_name が必要です。
+action=invite、list、reset、revoke、rename で remote workers を管理します。invite は name/workdir/ttl_s/max_uses、revoke は machine、rename は machine と new_name が必要です。 max_uses の既定値は 1 です。reset には machine が必要で、worker を切断せずに待機中および安全にキャンセルできる実行中の制御リクエストを消去します。開始済みの保護対象操作は維持されます。
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -777,6 +777,7 @@ action=invite、list、revoke、rename で remote workers を管理します。i
 | `name` | `string \| null` | `null` |  |
 | `workdir` | `string \| null` | `null` |  |
 | `ttl_s` | `integer \| null` | `null` |  |
+| `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | この tool call に属する Logical Session です。task を処理している間は session_manage が返した session_id を渡します。active な Logical Session がない場合だけ null を使います。 |

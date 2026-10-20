@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
+<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
 # 工具参考
 
 本页由实际 MCP tool schema 生成。公开工具接口变更后，运行 `python scripts/generate-tools-reference.py` 更新 English 参考页。
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-管理单一持久 Logical Session。start 创建新任务并返回其 session_id。resume 只会继续用户明确提供、或本对话中已经存在的 session_id。除 start 外的所有 action 都必须提供 session_id。Action：start、resume、get、report、finish、cancel、delete。report 接受 summary/findings/next/blockers/objective/label；delete 需要 terminal Session。
+管理单一持久 Logical Session。start 创建新任务并返回其 session_id。resume 只会继续用户明确提供、或本对话中已经存在的 session_id。除 start 外的所有 action 都必须提供 session_id。Action：start、resume、get、report、finish、cancel、delete。report 接受 summary/findings/next/blockers/objective/label；delete 需要 terminal Session。闲置 24 小时的 Active Sessions 会在访问、列出或开始时变为 stale，但有工具调用正在执行时除外。stale Sessions 仍可恢复，清理历史记录时会按最旧优先的顺序删除。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
@@ -769,7 +769,7 @@ OAuth scope：`shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `remote_manage`
 
-使用 action=invite、list、revoke 或 rename 管理 remote workers。invite 接受 name/workdir/ttl_s；revoke 需要 machine；rename 需要 machine 与 new_name。
+使用 action=invite、list、reset、revoke 或 rename 管理 remote workers。invite 接受 name/workdir/ttl_s/max_uses；revoke 需要 machine；rename 需要 machine 与 new_name。max_uses 默认 1。reset 需要 machine，会在不断开 worker 连接的情况下清除队列中及可安全取消的执行中控制请求；已开始的受保护操作会保留。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
@@ -777,6 +777,7 @@ OAuth scope：`shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `name` | `string \| null` | `null` |  |
 | `workdir` | `string \| null` | `null` |  |
 | `ttl_s` | `integer \| null` | `null` |  |
+| `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |

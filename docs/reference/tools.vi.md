@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
+<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
 # Tham chiếu tools
 
 Page này được xây từ MCP tool schemas thực tế. Chạy `python scripts/generate-tools-reference.py` sau khi thay đổi public tool surface để cập nhật English reference.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-Quản lý một Logical Session bền vững. start tạo task mới và trả về session_id của nó. resume chỉ tiếp tục session_id được người dùng cung cấp rõ ràng hoặc đã có trong conversation này. Mọi action ngoài start đều yêu cầu session_id. Action: start, resume, get, report, finish, cancel, delete. report nhận summary/findings/next/blockers/objective/label; delete yêu cầu Session ở trạng thái terminal.
+Quản lý một Logical Session bền vững. start tạo task mới và trả về session_id của nó. resume chỉ tiếp tục session_id được người dùng cung cấp rõ ràng hoặc đã có trong conversation này. Mọi action ngoài start đều yêu cầu session_id. Action: start, resume, get, report, finish, cancel, delete. report nhận summary/findings/next/blockers/objective/label; delete yêu cầu Session ở trạng thái terminal. Sau 24 giờ không hoạt động, Sessions đang hoạt động sẽ chuyển thành stale khi truy cập, liệt kê hoặc bắt đầu, trừ khi có lời gọi tool đang thực hiện. Sessions stale có thể tiếp tục hoặc được xóa khỏi lịch sử từ cũ nhất trước.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -769,7 +769,7 @@ Khi cung cấp `machine`, lời gọi cũng yêu cầu `remote:use` và chạy q
 
 ### `remote_manage`
 
-Quản lý remote workers bằng action=invite, list, revoke hoặc rename. invite nhận name/workdir/ttl_s; revoke cần machine; rename cần machine và new_name.
+Quản lý remote workers bằng action=invite, list, reset, revoke hoặc rename. invite nhận name/workdir/ttl_s/max_uses; revoke cần machine; rename cần machine và new_name. max_uses có giá trị mặc định là 1. reset cần machine và xóa các yêu cầu điều khiển đang chờ hoặc đang chạy có thể hủy an toàn mà không ngắt kết nối worker; các thao tác được bảo vệ đã bắt đầu vẫn được giữ nguyên.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -777,6 +777,7 @@ Quản lý remote workers bằng action=invite, list, revoke hoặc rename. invi
 | `name` | `string \| null` | `null` |  |
 | `workdir` | `string \| null` | `null` |  |
 | `ttl_s` | `integer \| null` | `null` |  |
+| `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
