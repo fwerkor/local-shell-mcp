@@ -113,3 +113,87 @@ async def test_failed_registry_write_does_not_consume_slot(isolated_remote, monk
     assert fresh.workers == {}
     await fresh.register_worker({"invite": code, "name": "test"})
     assert fresh.invites[code].used_count == 1
+
+
+@pytest.mark.asyncio
+async def test_replayed_registration_returns_original_identity_without_spending_uses(
+    isolated_remote,
+):
+    creator = remote.RemoteManager()
+    code = (await creator.create_invite(max_uses=2))["code"]
+    payload = {
+        "invite": code,
+        "enrollment_id": "random-retry-identifier",
+        "info": {"user": "a", "hostname": "host"},
+    }
+    first = await creator.register_worker(payload)
+    reloaded = remote.RemoteManager()
+    assert await reloaded.register_worker(payload) == first
+    assert reloaded.invites[code].used_count == 1
+    assert len(reloaded.workers) == 1
+
+    another = {**payload, "enrollment_id": "different-worker-identifier"}
+    second = await reloaded.register_worker(another)
+    assert second["token"] != first["token"]
+    assert second["name"] != first["name"]
+    after_quota = remote.RemoteManager()
+    assert code not in after_quota.invites
+    assert await after_quota.register_worker(payload) == first
+    assert await after_quota.register_worker(another) == second
+    assert len(after_quota.workers) == 2
+    with pytest.raises(ValueError, match="invalid invite"):
+        await after_quota.register_worker({**payload, "enrollment_id": "third-worker"})
+
+
+@pytest.mark.asyncio
+async def test_registration_replay_survives_expiry_and_revoke_blocks_identity(
+    isolated_remote, monkeypatch
+):
+    manager = remote.RemoteManager()
+    invite = await manager.create_invite(max_uses=2, ttl_s=60)
+    payload = {"invite": invite["code"], "name": "first", "enrollment_id": "stable-attempt"}
+    registered = await manager.register_worker(payload)
+    monkeypatch.setattr(remote, "_utc", lambda: invite["expires_at"] + 1)
+    assert (await remote.RemoteManager().register_worker(payload))["token"] == registered["token"]
+    fresh = remote.RemoteManager()
+    fresh.revoke("first")
+    with pytest.raises(ValueError, match="invalid invite"):
+        await remote.RemoteManager().register_worker(payload)
+
+
+@pytest.mark.asyncio
+async def test_registration_enrollment_id_validation(isolated_remote):
+    manager = remote.RemoteManager()
+    code = (await manager.create_invite(max_uses=2))["code"]
+    for invalid in ("", True, 100, "x" * 129):
+        with pytest.raises(ValueError, match="enrollment_id"):
+            await manager.register_worker({"invite": code, "enrollment_id": invalid})
+    assert manager.invites[code].used_count == 0
+
+
+@pytest.mark.asyncio
+async def test_lost_http_response_is_retried_without_duplicate_registration(
+    isolated_remote, monkeypatch
+):
+    manager = remote.RemoteManager()
+    invite = await manager.create_invite(max_uses=2)
+    request = {"invite": invite["code"], "enrollment_id": "stable-across-network-retries"}
+    attempts = []
+
+    def network_post(url, payload, headers, timeout):
+        assert url.endswith("/remote/register")
+        result = asyncio.run(manager.register_worker(payload))
+        attempts.append(result)
+        if len(attempts) == 1:
+            raise ConnectionError("response lost after server committed")
+        return {"ok": True, "data": result}
+
+    monkeypatch.setattr(remote, "_worker_post_json", network_post)
+    monkeypatch.setattr(remote, "_worker_retry_delay", lambda attempt: 0)
+    returned = await remote._worker_post_json_forever(
+        "https://controller.test/remote/register", request, operation="register"
+    )
+    assert len(attempts) == 2
+    assert attempts[0] == attempts[1] == returned["data"]
+    assert len(manager.workers) == 1
+    assert manager.invites[invite["code"]].used_count == 1

@@ -129,13 +129,16 @@ describe("RemotesScreen reset confirmation", () => {
 
 describe("Remote invite input", () => {
   test("preserves legacy names and workdirs while allowing batch use and TTL flags", () => {
-    expect(parseRemoteInviteInput("")).toEqual({ name: undefined, workdir: undefined })
-    expect(parseRemoteInviteInput("host /srv/work")).toEqual({ name: "host", workdir: "/srv/work" })
+    expect(parseRemoteInviteInput("")).toEqual({ name: undefined, workdir: undefined, max_uses: undefined, ttl_s: undefined })
+    expect(parseRemoteInviteInput("host /srv/work")).toEqual({ name: "host", workdir: "/srv/work", max_uses: undefined, ttl_s: undefined })
     expect(parseRemoteInviteInput("--max-uses 50 --ttl-s 604800")).toEqual({
       name: undefined, workdir: undefined, max_uses: 50, ttl_s: 604800,
     })
     expect(parseRemoteInviteInput("host /srv/work --ttl-s 7200")).toEqual({
-      name: "host", workdir: "/srv/work", ttl_s: 7200,
+      name: "host", workdir: "/srv/work", max_uses: undefined, ttl_s: 7200,
+    })
+    expect(parseRemoteInviteInput("--workdir /srv/work --max-uses 5")).toEqual({
+      name: undefined, workdir: "/srv/work", max_uses: 5, ttl_s: undefined,
     })
   })
 })

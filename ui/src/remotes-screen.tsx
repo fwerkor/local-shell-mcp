@@ -74,13 +74,14 @@ export function parseRemoteInviteInput(value: string): {
   max_uses?: number
   ttl_s?: number
 } {
-  const opts: { max_uses?: number; ttl_s?: number } = {}
-  const remainder = value.replace(/(?:^|\s)--(max-uses|ttl-s)\s+(\S+)/g, (_match, key: string, raw: string) => {
-    opts[key === "max-uses" ? "max_uses" : "ttl_s"] = Number(raw)
+  const opts: { max_uses?: number; ttl_s?: number; workdir?: string } = {}
+  const remainder = value.replace(/(?:^|\s)--(max-uses|ttl-s|workdir)\s+(\S+)/g, (_match, key: string, raw: string) => {
+    if (key === "workdir") opts.workdir = raw
+    else opts[key === "max-uses" ? "max_uses" : "ttl_s"] = Number(raw)
     return ""
   })
   const [name, ...workdirParts] = remainder.trim().split(/\s+/)
-  return { name: name || undefined, workdir: workdirParts.join(" ") || undefined, ...opts }
+  return { name: name || undefined, workdir: opts.workdir || workdirParts.join(" ") || undefined, max_uses: opts.max_uses, ttl_s: opts.ttl_s }
 }
 
 export function RemotesScreen({
@@ -412,7 +413,7 @@ export function RemotesScreen({
       />
       {dialog.type === "invite" && (
         <Modal title="Create remote invite" height={9}>
-          <text style={{ height: 1, flexShrink: 0 }} fg={theme.muted} content="name [workdir] [--max-uses N] [--ttl-s N]" />
+          <text style={{ height: 1, flexShrink: 0 }} fg={theme.muted} content="name [workdir] [--max-uses N] [--ttl-s N] [--workdir PATH]" />
           <box style={{ height: 3, flexShrink: 0, border: true, borderColor: theme.borderBright, paddingLeft: 1, paddingRight: 1 }}>
             <input focused placeholder="build-host /workspace" onSubmit={(value: unknown) => void createInvite(typeof value === "string" ? value : "")} />
           </box>

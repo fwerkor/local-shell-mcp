@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 52e5f445beaf4c30bd298c59399005f01fe5563591b8a0285c97b46243f342fe -->
+<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
 # リモート workers
 
 Remote worker を使うと、外向き HTTP(S) request は送信できるものの、受信 SSH 接続を受け付けられないマシンを `local-shell-mcp` から制御できます。
@@ -9,7 +9,7 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 ## 基本ワークフロー
 
-1. `remote_manage(action="invite", ...)` で一回限りの招待を作成します。
+1. `remote_manage(action="invite", ...)` で招待を作成します。
 2. 生成された command を remote machine で実行します。
 3. `remote_manage(action="list")` で登録を確認します。
 4. `machine="<worker-name>"` を付けて通常のツールを呼び出します。例：`environment_get`、`run_shell`、`file_read`、`browser_run_script`。

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 52e5f445beaf4c30bd298c59399005f01fe5563591b8a0285c97b46243f342fe -->
+<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
 # 远程 workers
 
 Remote worker 让 `local-shell-mcp` 可以控制只能发起出站 HTTP(S) 请求、但无法接受入站 SSH 连接的机器。
@@ -9,12 +9,14 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 ## 基本工作流
 
-1. 使用 `remote_manage(action="invite", ...)` 创建一次性邀请。
+1. 使用 `remote_manage(action="invite", ...)` 创建邀请。
 2. 在远程机器上运行生成的命令。
 3. 使用 `remote_manage(action="list")` 确认注册。
 4. 调用普通工具并指定 `machine="<worker-name>"`，例如 `environment_get`、`run_shell`、`file_read` 或 `browser_run_script`。
 5. 使用 `remote_transfer` 启动受跟踪的 controller-to-worker、worker-to-controller 或 worker-to-worker 文件/目录传输。随后使用 `job_list` 或 `job_tail` 查看进度，并用 `job_stop` 或 `job_retry` 停止或重试。
 6. 使用 `remote_manage(action="rename", ...)` 或 `remote_manage(action="revoke", ...)` 重命名或撤销 worker。
+
+邀请码默认仅能注册一台 Worker（`max_uses=1`），增加 `max_uses` 可用于批量注册。多次使用时须留空 `name`。可选参数 `ttl_s` 默认两小时（7200 秒），最长七天（604800 秒）。
 
 只有 worker 管理使用 `remote_*` 名称。执行、shell、job、filesystem、patch 和 browser 操作在本地和远程使用相同 schema。指定 machine 时还需要 `remote:use` OAuth scope。
 

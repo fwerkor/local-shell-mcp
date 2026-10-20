@@ -590,6 +590,7 @@ class RemoteWorker:
     queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
     transfer_queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
     reset_generation: int = 0
+    registration_key: str = ""
 
 
 def _merge_worker_resource_usage(worker: RemoteWorker, payload: dict[str, Any]) -> None:
@@ -847,6 +848,7 @@ class RemoteManager:
             worker.created_at = float(item.get("created_at") or _utc())
             worker.capabilities = list(item.get("capabilities") or [])
             worker.info = dict(item.get("info") or {})
+            worker.registration_key = str(item.get("registration_key") or "")
             try:
                 worker.reset_generation = max(0, int(item.get("reset_generation") or 0))
             except (TypeError, ValueError):
@@ -899,6 +901,7 @@ class RemoteManager:
                     "capabilities": worker.capabilities,
                     "info": worker.info,
                     "reset_generation": worker.reset_generation,
+                    "registration_key": worker.registration_key,
                 }
                 for worker in sorted(self.workers.values(), key=lambda item: item.name)
             ],
@@ -1033,8 +1036,22 @@ class RemoteManager:
     async def register_worker(self, payload: dict[str, Any]) -> dict[str, Any]:
         code = str(payload.get("invite") or "")
         requested_name = str(payload.get("name") or "").strip() or None
+        enrollment_id = payload.get("enrollment_id")
+        if enrollment_id is not None and (
+            not isinstance(enrollment_id, str) or not 1 <= len(enrollment_id) <= 128
+        ):
+            raise ValueError("enrollment_id must be a nonempty string of at most 128 characters")
+        registration_key = (
+            hashlib.sha256((code + "\0" + enrollment_id).encode("utf-8")).hexdigest()
+            if enrollment_id is not None
+            else ""
+        )
         async with self._lock:
             with self._state_lock, self._registry_transaction_unlocked():
+                if registration_key:
+                    for registered in self.workers.values():
+                        if registered.registration_key == registration_key:
+                            return self._registration_response(registered)
                 invite = self.invites.get(code)
                 if not invite:
                     raise ValueError("invalid invite code")
@@ -1056,6 +1073,7 @@ class RemoteManager:
                     workdir=str(payload.get("workdir") or invite.workdir or ""),
                     capabilities=list(payload.get("capabilities") or []),
                     info=dict(payload.get("info") or {}),
+                    registration_key=registration_key,
                 )
                 self.workers[name] = worker
                 self.tokens[token] = name
@@ -1072,9 +1090,13 @@ class RemoteManager:
                     raise
         with contextlib.suppress(Exception):
             audit("remote_worker_registered", machine=name)
+        return self._registration_response(worker)
+
+    @staticmethod
+    def _registration_response(worker: RemoteWorker) -> dict[str, Any]:
         return {
-            "token": token,
-            "name": name,
+            "token": worker.token,
+            "name": worker.name,
             "poll_interval_s": 0,
             "poll_timeout_s": get_settings().remote_poll_timeout_s,
             "heartbeat_interval_s": _remote_heartbeat_interval_s(),
@@ -4272,6 +4294,7 @@ async def _run_worker_locked(
     worker_details = await asyncio.to_thread(worker_info, workdir)
     register_payload = {
         "invite": invite,
+        "enrollment_id": secrets.token_urlsafe(24),
         "name": name,
         "workdir": workdir,
         "capabilities": worker_capabilities(),

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 52e5f445beaf4c30bd298c59399005f01fe5563591b8a0285c97b46243f342fe -->
+<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
 # Worker remoti
 
 I remote worker consentono a `local-shell-mcp` di controllare macchine che possono effettuare richieste HTTP(S) in uscita ma non accettare connessioni SSH in ingresso.
@@ -9,7 +9,7 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 ## Workflow di base
 
-1. Crea un invito monouso con `remote_manage(action="invite", ...)`.
+1. Crea un invito con `remote_manage(action="invite", ...)`.
 2. Esegui il comando generato sulla macchina remota.
 3. Conferma la registrazione con `remote_manage(action="list")`.
 4. Chiama gli strumenti normali con `machine="<worker-name>"`, per esempio `environment_get`, `run_shell`, `file_read` o `browser_run_script`.

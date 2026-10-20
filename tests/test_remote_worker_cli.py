@@ -343,6 +343,7 @@ async def test_enroll_worker_registers_and_persists(tmp_path, monkeypatch):
     async def fake_post(url, payload, headers=None, timeout=None, operation="request"):
         assert url.endswith("/remote/register")
         assert payload["invite"] == "invite"
+        assert isinstance(payload["enrollment_id"], str) and len(payload["enrollment_id"]) >= 24
         return {"ok": True, "data": {"token": "access", "name": "worker-a"}}
 
     monkeypatch.setattr(cli.remote, "_worker_post_json_forever", fake_post)

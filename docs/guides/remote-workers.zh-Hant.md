@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 52e5f445beaf4c30bd298c59399005f01fe5563591b8a0285c97b46243f342fe -->
+<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
 # 遠端 workers
 
 Remote worker 讓 `local-shell-mcp` 可以控制只能發出對外 HTTP(S) 請求、但無法接受入站 SSH 連線的機器。
@@ -9,12 +9,14 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 ## 基本工作流程
 
-1. 使用 `remote_manage(action="invite", ...)` 建立一次性邀請。
+1. 使用 `remote_manage(action="invite", ...)` 建立邀請。
 2. 在遠端機器上執行產生的命令。
 3. 使用 `remote_manage(action="list")` 確認註冊。
 4. 呼叫一般工具並指定 `machine="<worker-name>"`，例如 `environment_get`、`run_shell`、`file_read` 或 `browser_run_script`。
 5. 使用 `remote_transfer` 啟動受追蹤的 controller-to-worker、worker-to-controller 或 worker-to-worker 檔案/目錄傳輸。接著用 `job_list` 或 `job_tail` 查看進度，並用 `job_stop` 或 `job_retry` 停止或重試。
 6. 使用 `remote_manage(action="rename", ...)` 或 `remote_manage(action="revoke", ...)` 重新命名或撤銷 worker。
+
+邀請碼預設只能註冊一台 Worker（`max_uses=1`），提高 `max_uses` 可供批次註冊。多次使用時須留空 `name`。選用參數 `ttl_s` 預設兩小時（7200 秒），最長七天（604800 秒）。
 
 只有 worker 管理使用 `remote_*` 名稱。執行、shell、job、filesystem、patch 與 browser 操作在本地和遠端共用相同 schema。指定 machine 時還需要 `remote:use` OAuth scope。
 
