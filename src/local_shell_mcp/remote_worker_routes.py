@@ -32,6 +32,8 @@ _WORKER_PYTHON_FILES = {
     "playwright_ops.py",
     "process_utils.py",
     "remote.py",
+    "remote_terminal_worker.py",
+    "remote_terminal_ws_client.py",
     "remote_worker.py",
     "remote_worker_cli.py",
     "remote_worker_installer.py",
@@ -411,7 +413,9 @@ try {
 
 
 def remote_routes() -> list[Any]:
-    from starlette.routing import Route
+    from starlette.routing import Route, WebSocketRoute
+
+    from .remote_terminal_stream import remote_terminal_websocket
 
     return [
         Route(remote.REMOTE_JOIN_PATH, join_script, methods=["GET"]),
@@ -423,5 +427,6 @@ def remote_routes() -> list[Any]:
         Route(f"{remote.REMOTE_API_PREFIX}/poll", remote.poll_endpoint, methods=["POST"]),
         Route(f"{remote.REMOTE_API_PREFIX}/heartbeat", remote.heartbeat_endpoint, methods=["POST"]),
         Route(f"{remote.REMOTE_API_PREFIX}/result", remote.result_endpoint, methods=["POST"]),
+        WebSocketRoute("/remote/terminal/ws", remote_terminal_websocket),
         *remote_transfer_routes(),
     ]

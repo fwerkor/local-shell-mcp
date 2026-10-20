@@ -281,6 +281,10 @@ async def test_poll_requires_upgrade_before_dequeuing_jobs(tmp_path, monkeypatch
     }
     assert worker.queue.qsize() == 1
 
+    # Same-package-version workers at protocol 5 lack the PTY relay.
+    # Require their automatic runtime refresh on the next poll.
+    assert remote.REMOTE_WORKER_TERMINAL_PROTOCOL_VERSION == 6
+    assert remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION - 1 == 5
     stale_protocol = await manager.poll(
         worker.token,
         {
@@ -1879,6 +1883,7 @@ async def test_worker_result_submission_stops_when_reset_generation_changes(monk
 async def test_worker_result_submission_preserves_started_mutation_across_reset(monkeypatch):
     result_attempts = 0
     heartbeat_calls = 0
+    heartbeat_observed = threading.Event()
     result = {
         "job_id": "job-write",
         "ok": True,
@@ -1894,11 +1899,15 @@ async def test_worker_result_submission_preserves_started_mutation_across_reset(
             result_attempts += 1
             if result_attempts < 3:
                 raise RuntimeError("slow result upload")
+            # Keep the upload in flight long enough for the heartbeat scheduler
+            # even on heavily loaded macOS runners.
+            heartbeat_observed.wait(2)
             return {"ok": True, "data": {"accepted": True}}
         assert url.endswith("/heartbeat")
         assert timeout == 30
         assert payload == {"job_id": "job-write", "resources": payload["resources"]}
         heartbeat_calls += 1
+        heartbeat_observed.set()
         return {"ok": True, "data": {"accepted": True, "reset_generation": 4}}
 
     monkeypatch.setattr(remote, "_worker_post_json", fake_post)
