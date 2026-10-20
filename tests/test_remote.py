@@ -1883,6 +1883,7 @@ async def test_worker_result_submission_stops_when_reset_generation_changes(monk
 async def test_worker_result_submission_preserves_started_mutation_across_reset(monkeypatch):
     result_attempts = 0
     heartbeat_calls = 0
+    heartbeat_observed = threading.Event()
     result = {
         "job_id": "job-write",
         "ok": True,
@@ -1898,11 +1899,15 @@ async def test_worker_result_submission_preserves_started_mutation_across_reset(
             result_attempts += 1
             if result_attempts < 3:
                 raise RuntimeError("slow result upload")
+            # Keep the upload in flight long enough for the heartbeat scheduler
+            # even on heavily loaded macOS runners.
+            heartbeat_observed.wait(2)
             return {"ok": True, "data": {"accepted": True}}
         assert url.endswith("/heartbeat")
         assert timeout == 30
         assert payload == {"job_id": "job-write", "resources": payload["resources"]}
         heartbeat_calls += 1
+        heartbeat_observed.set()
         return {"ok": True, "data": {"accepted": True, "reset_generation": 4}}
 
     monkeypatch.setattr(remote, "_worker_post_json", fake_post)

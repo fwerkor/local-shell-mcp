@@ -1689,6 +1689,14 @@ class RemoteManager:
             self._save_registry_unlocked()
         return {"old_name": machine, "new_name": new_name}
 
+    def _worker_token(self, machine: str) -> str:
+        with self._state_lock:
+            self._load_registry_unlocked()
+            worker = self.workers.get(machine)
+            if worker is None:
+                raise ValueError(f"unknown remote machine: {machine}")
+            return worker.token
+
     def _worker_by_token(self, token: str) -> RemoteWorker:
         with self._state_lock:
             self._load_registry_unlocked()

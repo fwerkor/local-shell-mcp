@@ -18,7 +18,7 @@ _LOGGER = logging.getLogger(__name__)
 
 @dataclass
 class _PendingTerminal:
-    machine: str
+    worker_token: str
     future: asyncio.Future[WebSocket]
     released: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -63,11 +63,12 @@ async def open_remote_terminal(
     machine: str, session_id: str, cols: int, rows: int
 ) -> RemoteTerminalProcess:
     ticket = secrets.token_urlsafe(32)
-    pending = _PendingTerminal(machine, asyncio.get_running_loop().create_future())
+    manager = remote_manager()
+    pending = _PendingTerminal(manager._worker_token(machine), asyncio.get_running_loop().create_future())
     _PENDING[ticket] = pending
     attached = False
     try:
-        result = await remote_manager().call(
+        result = await manager.call(
             machine,
             "ui_terminal_stream_start",
             {"session_id": session_id, "cols": cols, "rows": rows, "ticket": ticket},
@@ -95,13 +96,22 @@ async def remote_terminal_websocket(websocket: WebSocket) -> None:
     except (PermissionError, ValueError):
         await websocket.close(code=4403)
         return
-    if worker.name != pending.machine or _PENDING.pop(ticket, None) is not pending:
+    if worker.token != pending.worker_token or _PENDING.pop(ticket, None) is not pending:
         await websocket.close(code=4403)
         return
     try:
         await websocket.accept()
         pending.future.set_result(websocket)
-        await pending.released.wait()
+        while not pending.released.is_set():
+            try:
+                await asyncio.wait_for(pending.released.wait(), timeout=1)
+            except TimeoutError:
+                try:
+                    current = remote_manager()._worker_by_token(pending.worker_token)
+                    if current.token != pending.worker_token:
+                        break
+                except (PermissionError, ValueError):
+                    break
     except Exception as exc:
         if not pending.future.done():
             pending.future.set_exception(exc)

@@ -101,11 +101,13 @@ class _TmuxPtyAttachment:
         if process is not None and process.poll() is None:
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGTERM)
+            waiter = asyncio.create_task(asyncio.to_thread(process.wait))
             try:
-                await asyncio.wait_for(asyncio.to_thread(process.wait), timeout=2)
+                await asyncio.wait_for(asyncio.shield(waiter), timeout=2)
             except TimeoutError:
                 with contextlib.suppress(ProcessLookupError):
                     os.killpg(process.pid, signal.SIGKILL)
+                await waiter
 
 
 def _bridge_url(server: str, ticket: str) -> str:

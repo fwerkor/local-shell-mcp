@@ -230,3 +230,89 @@ async def test_websocket_iterator_yields_raw_bytes():
     client.reader = asyncio.StreamReader()
     client.reader.feed_data(b"\x82\x03raw")
     assert await client.__anext__() == b"raw"
+
+
+@pytest.mark.asyncio
+async def test_websocket_proxy_connect_auth_and_repeated_upgrade_headers(monkeypatch):
+    from local_shell_mcp import remote_terminal_ws_client as client
+
+    requests = []
+
+    async def proxy(reader, writer):
+        connect = await reader.readuntil(b"\r\n\r\n")
+        requests.append(connect)
+        writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+        await writer.drain()
+        request = await reader.readuntil(b"\r\n\r\n")
+        requests.append(request)
+        key = next(
+            line.split(b": ", 1)[1]
+            for line in request.split(b"\r\n")
+            if line.startswith(b"Sec-WebSocket-Key:")
+        )
+        accept = base64.b64encode(
+            hashlib.sha1(key + b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest()
+        )
+        writer.write(
+            b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+            b"Connection: Upgrade\r\nConnection: keep-alive\r\nSec-WebSocket-Accept: "
+            + accept
+            + b"\r\n\r\n\x82\x02ok"
+        )
+        await writer.drain()
+        await reader.read()
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(proxy, "127.0.0.1", 0)
+    try:
+        port = server.sockets[0].getsockname()[1]
+        monkeypatch.setattr(
+            client, "getproxies", lambda: {"http": f"http://user:pass@127.0.0.1:{port}"}
+        )
+        monkeypatch.setattr(client, "proxy_bypass", lambda _host: False)
+        async with TerminalWebSocket("ws://controller.invalid:1234/remote/ws", "secret") as ws:
+            assert await ws.receive() == b"ok"
+        assert b"CONNECT controller.invalid:1234 HTTP/1.1\r\n" in requests[0]
+        assert b"Proxy-Authorization: Basic dXNlcjpwYXNz\r\n" in requests[0]
+        assert b"Authorization: Bearer secret\r\n" not in requests[0]
+        assert b"GET /remote/ws HTTP/1.1\r\n" in requests[1]
+        assert b"Authorization: Bearer secret\r\n" in requests[1]
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_websocket_proxy_respects_no_proxy_and_rejects_connect_failure(monkeypatch):
+    from local_shell_mcp import remote_terminal_ws_client as client
+
+    async def proxy(reader, writer):
+        try:
+            await reader.readuntil(b"\r\n\r\n")
+        except asyncio.IncompleteReadError:
+            writer.close()
+            await writer.wait_closed()
+            return
+        writer.write(b"HTTP/1.1 407 Proxy Authentication Required\r\n\r\n")
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(proxy, "127.0.0.1", 0)
+    try:
+        port = server.sockets[0].getsockname()[1]
+        monkeypatch.setattr(client, "getproxies", lambda: {"http": f"http://127.0.0.1:{port}"})
+        monkeypatch.setattr(client, "proxy_bypass", lambda _host: False)
+        with pytest.raises(ConnectionError, match="proxy CONNECT rejected"):
+            async with TerminalWebSocket("ws://controller.invalid:1234/", "token"):
+                pass
+        monkeypatch.setattr(client, "proxy_bypass", lambda _host: True)
+        reader, writer = await client._dial_websocket("127.0.0.1", port, False)
+        # A NO_PROXY match must bypass CONNECT and communicate with the origin directly.
+        writer.close()
+        await writer.wait_closed()
+        assert reader is not None
+    finally:
+        server.close()
+        await server.wait_closed()

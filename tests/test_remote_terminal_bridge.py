@@ -12,16 +12,16 @@ from local_shell_mcp import remote_terminal_worker as worker
 
 @pytest.mark.asyncio
 async def test_controller_broker_rejects_unauthorized_and_consumes_ticket_once(monkeypatch):
-    pending = stream._PendingTerminal("worker-a", asyncio.get_running_loop().create_future())
+    pending = stream._PendingTerminal("valid", asyncio.get_running_loop().create_future())
     stream._PENDING["test-ticket"] = pending
     monkeypatch.setattr(
         stream,
         "remote_manager",
         lambda: SimpleNamespace(
             _worker_by_token=lambda token: (
-                SimpleNamespace(name="worker-a")
+                SimpleNamespace(name="worker-a", token="valid")
                 if token == "valid"
-                else SimpleNamespace(name="worker-b")
+                else SimpleNamespace(name="worker-b", token="invalid")
             )
         ),
     )
@@ -83,7 +83,11 @@ async def test_controller_open_stream_transfers_binary_keyboard_and_resize(monke
         stream._PENDING[args["ticket"]].future.set_result(socket)
         return {"ok": True}
 
-    monkeypatch.setattr(stream, "remote_manager", lambda: SimpleNamespace(call=remote_call))
+    monkeypatch.setattr(
+        stream,
+        "remote_manager",
+        lambda: SimpleNamespace(call=remote_call, _worker_token=lambda _machine: "valid"),
+    )
     process = await stream.open_remote_terminal("worker-a", "known", 90, 30)
     assert await process.read() == b"\x1b[31mred\x1b[0m"
     await process.write(b"pwd\r")
@@ -102,7 +106,11 @@ async def test_controller_cleans_ticket_when_worker_fails(monkeypatch):
     async def fail(*_args, **_kwargs):
         return {"ok": False, "message": "unsupported worker tool"}
 
-    monkeypatch.setattr(stream, "remote_manager", lambda: SimpleNamespace(call=fail))
+    monkeypatch.setattr(
+        stream,
+        "remote_manager",
+        lambda: SimpleNamespace(call=fail, _worker_token=lambda _machine: "valid"),
+    )
     with pytest.raises(RuntimeError, match="unsupported worker tool"):
         await stream.open_remote_terminal("worker-a", "known", 90, 30)
     assert not stream._PENDING
@@ -157,7 +165,9 @@ async def test_controller_broker_rejects_unknown_ticket_and_accept_error(monkeyp
     monkeypatch.setattr(
         stream,
         "remote_manager",
-        lambda: SimpleNamespace(_worker_by_token=lambda _token: SimpleNamespace(name="worker-a")),
+        lambda: SimpleNamespace(
+            _worker_by_token=lambda _token: SimpleNamespace(name="worker-a", token="valid")
+        ),
     )
 
     class Socket:
@@ -174,7 +184,7 @@ async def test_controller_broker_rejects_unknown_ticket_and_accept_error(monkeyp
     socket = Socket()
     await stream.remote_terminal_websocket(socket)
     assert socket.closed == [4403]
-    pending = stream._PendingTerminal("worker-a", asyncio.get_running_loop().create_future())
+    pending = stream._PendingTerminal("valid", asyncio.get_running_loop().create_future())
     stream._PENDING["ticket"] = pending
     socket.query_params = {"ticket": "ticket"}
     await stream.remote_terminal_websocket(socket)
@@ -217,7 +227,7 @@ async def test_remote_broker_invalid_worker_token_keeps_ticket(monkeypatch):
     monkeypatch.setattr(
         stream, "remote_manager", lambda: SimpleNamespace(_worker_by_token=unauthorized)
     )
-    pending = stream._PendingTerminal("worker-a", asyncio.get_running_loop().create_future())
+    pending = stream._PendingTerminal("valid", asyncio.get_running_loop().create_future())
     stream._PENDING["ticket"] = pending
 
     class Socket:
@@ -235,3 +245,78 @@ async def test_remote_broker_invalid_worker_token_keeps_ticket(monkeypatch):
         assert "ticket" in stream._PENDING
     finally:
         stream._PENDING.clear()
+
+
+@pytest.mark.asyncio
+async def test_pending_relay_survives_worker_rename_and_revocation_closes_active_stream(
+    monkeypatch,
+):
+    active = True
+    renamed = False
+    accepted = asyncio.Event()
+
+    def by_token(token):
+        if not active or token != "stable-token":
+            raise PermissionError("revoked")
+        return SimpleNamespace(token=token, name="renamed" if renamed else "original")
+
+    monkeypatch.setattr(
+        stream, "remote_manager", lambda: SimpleNamespace(_worker_by_token=by_token)
+    )
+    pending = stream._PendingTerminal("stable-token", asyncio.get_running_loop().create_future())
+    stream._PENDING["rename-ticket"] = pending
+
+    class Socket:
+        query_params = {"ticket": "rename-ticket"}
+        headers = {"authorization": "Bearer stable-token"}
+
+        def __init__(self):
+            self.closed = []
+
+        async def accept(self):
+            accepted.set()
+
+        async def close(self, code=1000):
+            self.closed.append(code)
+
+    socket = Socket()
+    task = None
+    try:
+        renamed = True
+        task = asyncio.create_task(stream.remote_terminal_websocket(socket))
+        await asyncio.wait_for(accepted.wait(), 1)
+        assert await pending.future is socket
+        active = False
+        await asyncio.wait_for(task, 2)
+        assert pending.released.is_set()
+        assert socket.closed == [1000]
+    finally:
+        pending.released.set()
+        if task is not None:
+            await task
+        stream._PENDING.clear()
+
+
+@pytest.mark.asyncio
+async def test_worker_token_lookup_stays_stable_after_rename(tmp_path, monkeypatch):
+    from local_shell_mcp import remote
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".state"))
+    get_settings.cache_clear()
+    manager = remote.RemoteManager()
+    manager._registry_loaded = True
+    remote_worker = remote.RemoteWorker(name="original", token="stable-token")
+    manager.workers = {"original": remote_worker}
+    manager.tokens = {"stable-token": "original"}
+    try:
+        assert manager._worker_token("original") == "stable-token"
+        manager.rename("original", "renamed")
+        assert manager._worker_token("renamed") == "stable-token"
+        assert manager._worker_by_token("stable-token") is remote_worker
+        manager.revoke("renamed")
+        with pytest.raises(PermissionError):
+            manager._worker_by_token("stable-token")
+    finally:
+        get_settings.cache_clear()

@@ -11,7 +11,59 @@ import base64
 import hashlib
 import os
 import ssl
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
+from urllib.request import getproxies, proxy_bypass
+
+
+async def _dial_websocket(
+    host: str, port: int, secure: bool
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    proxies = getproxies()
+    proxy_url = proxies.get("https" if secure else "http") or proxies.get("all")
+    if not proxy_url or proxy_bypass(host):
+        return await asyncio.wait_for(
+            asyncio.open_connection(
+                host, port, ssl=ssl.create_default_context() if secure else None
+            ),
+            10,
+        )
+
+    proxy = urlsplit(proxy_url)
+    if proxy.scheme not in {"http", "https"} or not proxy.hostname:
+        raise ValueError("invalid terminal websocket proxy URL")
+    reader, writer = await asyncio.wait_for(
+        asyncio.open_connection(
+            proxy.hostname,
+            proxy.port or (443 if proxy.scheme == "https" else 80),
+            ssl=ssl.create_default_context() if proxy.scheme == "https" else None,
+        ),
+        10,
+    )
+    try:
+        authority = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+        authorization = ""
+        if proxy.username is not None:
+            credentials = f"{unquote(proxy.username)}:{unquote(proxy.password or '')}"
+            encoded = base64.b64encode(credentials.encode("utf-8")).decode("ascii")
+            authorization = f"Proxy-Authorization: Basic {encoded}\r\n"
+        writer.write(
+            (f"CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n{authorization}\r\n").encode(
+                "ascii"
+            )
+        )
+        await writer.drain()
+        response = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 10)
+        if len(response) > 16_384 or response.split(b"\r\n", 1)[0].split()[1:2] != [b"200"]:
+            raise ConnectionError("remote terminal websocket proxy CONNECT rejected")
+        if secure:
+            await asyncio.wait_for(
+                writer.start_tls(ssl.create_default_context(), server_hostname=host), 10
+            )
+        return reader, writer
+    except BaseException:
+        writer.close()
+        await writer.wait_closed()
+        raise
 
 
 class TerminalWebSocket:
@@ -32,13 +84,8 @@ class TerminalWebSocket:
         ):
             raise ValueError("invalid terminal websocket URL")
         secure = parsed.scheme == "wss"
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(
-                parsed.hostname,
-                parsed.port or (443 if secure else 80),
-                ssl=ssl.create_default_context() if secure else None,
-            ),
-            10,
+        reader, writer = await _dial_websocket(
+            parsed.hostname, parsed.port or (443 if secure else 80), secure
         )
         self.reader, self.writer = reader, writer
         try:
@@ -57,8 +104,14 @@ class TerminalWebSocket:
             if len(headers) > 16_384:
                 raise ValueError("terminal websocket response headers too large")
             lines = headers.decode("latin-1").split("\r\n")
-            values = dict(line.split(":", 1) for line in lines[1:] if ":" in line)
-            values = {name.lower(): value.strip() for name, value in values.items()}
+            values: dict[str, str] = {}
+            for line in lines[1:]:
+                if ":" in line:
+                    name, value = line.split(":", 1)
+                    name = name.lower()
+                    values[name] = (
+                        f"{values[name]}, {value.strip()}" if name in values else value.strip()
+                    )
             accept = base64.b64encode(
                 hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()
             ).decode("ascii")  # noqa: S324
