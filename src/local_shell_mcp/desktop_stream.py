@@ -278,6 +278,8 @@ async def _worker_stream_loop(stream_id: str, secret: str, window_id: str) -> No
                         else:
                             pending_errors.append(str(exc)[:240])
                     else:
+                        if focus_sensitive:
+                            force_frame = True
                         if isinstance(entry.get("request_id"), int):
                             pending_acks.append({"request_id": entry["request_id"], "ok": True})
             finally:

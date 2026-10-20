@@ -274,6 +274,31 @@ describe("Desktop WebSocket transport", () => {
     expect(c.frameObservationId).toBe("")
     expect(c.frameInputEnabled).toBe(false)
   })
+  test("reconnecting decodes the new stream without waiting for the prior socket image", async () => {
+    const { c } = harness()
+    let finishOldDecode!: () => void
+    c.imageQueue = new Promise<void>((resolve) => { finishOldDecode = resolve })
+    ;(globalThis as any).location = { protocol: "https:", host: "example.test" }
+    ;(globalThis as any).WebSocket = class {
+      static OPEN = 1
+      binaryType = ""
+      readyState = 1
+      constructor(_url: URL) {}
+      close() {}
+    }
+    URL.revokeObjectURL = () => undefined
+    c.displayImage = async (_socket: WebSocket, metadata: unknown) => c.publishFrame(metadata)
+    c.connect()
+    const newSocket = c.socket
+    newSocket.onmessage({ data: JSON.stringify({
+      type: "frame", observation_id: "new-stream-obs", ttl_s: 20,
+      coordinate_input: true, bounds: { x: 0, y: 0, width: 80, height: 40 }, image: true,
+    }) })
+    newSocket.onmessage({ data: new ArrayBuffer(3) })
+    await c.imageQueue
+    expect(c.frameObservationId).toBe("new-stream-obs")
+    finishOldDecode()
+  })
   test("connect uses authenticated websocket endpoint, not HTTP polling", () => {
     const { c } = harness()
     let uri = ""

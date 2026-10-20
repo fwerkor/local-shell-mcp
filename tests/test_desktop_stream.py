@@ -335,6 +335,53 @@ async def test_worker_stream_action_errors_and_focus_sensitive_heartbeat(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_focus_sensitive_action_in_frame_response_triggers_next_capture(monkeypatch):
+    import local_shell_mcp.gui as native_gui
+
+    manager = FakeManager(Path("/tmp"))
+
+    async def listing():
+        return {"capabilities": {"capture_requires_focus": True}}
+
+    manager.list_windows = listing
+    monkeypatch.setattr(native_gui, "get_gui_manager", lambda: manager)
+    monkeypatch.setattr(stream_module, "FRAME_INTERVAL_S", 0.005)
+    stream_module.configure_worker_stream("https://controller", {"Authorization": "Bearer worker"})
+    captures = 0
+    posts = []
+
+    async def capture(*_):
+        nonlocal captures
+        captures += 1
+        return {
+            "window": {"bounds": {}}, "observation_id": f"o{captures}",
+            "observation_ttl_s": 20, "capabilities": {"coordinate_input": True},
+        }, b"\xff\xd8\xffsame"
+
+    def post(url, payload, secret):
+        posts.append(payload)
+        if len(posts) == 1:
+            return {"actions": [{"request_id": 7, "observation_id": "o1", "bounds": {},
+                                 "action": {"type": "click", "x": 1, "y": 1}}], "refresh": False}
+        return {"actions": [], "refresh": False}
+
+    monkeypatch.setattr(stream_module, "capture_frame", capture)
+    monkeypatch.setattr(stream_module, "_post_frame", post)
+    task = asyncio.create_task(stream_module._worker_stream_loop("focus-action", "secret", "win"))
+    for _ in range(50):
+        if len(posts) >= 3:
+            break
+        await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert captures == 2
+    assert posts[1]["frame"]["observation_id"] == "o2"
+    assert posts[1]["acks"] == [{"request_id": 7, "ok": True}]
+    assert len(manager.actions) == 1
+
+
+@pytest.mark.asyncio
 async def test_worker_stream_start_stop_replaces_existing_task(monkeypatch):
     import local_shell_mcp.gui as native_gui
 

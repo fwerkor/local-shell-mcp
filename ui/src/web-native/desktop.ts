@@ -521,6 +521,7 @@ export class DesktopController extends BaseController {
       socket.close()
     }
     this.pendingFrame = null
+    this.imageQueue = Promise.resolve()
     this.waitingForKeyframe = false
     this.pendingRequestIds.clear()
     this.pendingActions = 0
