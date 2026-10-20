@@ -24,6 +24,12 @@ export function fileBreadcrumbRows(path: string): Array<{ label: string; path: s
   return rows
 }
 
+export function fileParentPath(path: string): string {
+  const rows = fileBreadcrumbRows(path)
+  if (rows.length > 1) return rows[rows.length - 2]!.path
+  return /^\/|^[A-Za-z]:|^\\\\/.test(path) ? rows[0]!.path : "."
+}
+
 // IDs belong to the browser tree; never use them as real machine paths.
 export function fileTreeId(parent: string, name: string): string {
   return `${parent === "/" ? "" : parent}/${encodeURIComponent(name)}`
@@ -61,6 +67,7 @@ export class FilesController implements NativePageController {
   private root!: HTMLElement
   private reactRoot: Root | null = null
   private api: IApi | null = null
+  private renderedMachine = ""
   private machine = "local"
   private location = "."
   private selectedFolder = "/"
@@ -71,6 +78,7 @@ export class FilesController implements NativePageController {
   private showHidden = false
   private data: IEntity[] = []
   private busy = false
+  private uploadQueue: Array<{ file: File; directory: string; machine: string; generation: number }> = []
 
   constructor(private readonly context: NativePageContext) {}
 
@@ -114,10 +122,11 @@ export class FilesController implements NativePageController {
     if (action === "upload") this.root.querySelector<HTMLInputElement>("[data-role=upload-files]")?.click()
     if (action === "up") {
       const current = this.paths.get(this.selectedFolder) || this.location
-      const parts = fileBreadcrumbRows(current)
-      const parent = parts.length > 1 ? parts[parts.length - 2]!.path : "."
-      this.location = parent
-      void this.refresh()
+      const parent = fileParentPath(current)
+      if (parent !== current) {
+        this.location = parent
+        void this.refresh()
+      }
     }
   }
 
@@ -158,6 +167,15 @@ export class FilesController implements NativePageController {
   }
 
   async refresh(): Promise<void> {
+    const machines = this.context.machines()
+    if (!machines.some((item) => item.name === this.machine)) {
+      this.machine = machines.find((item) => item.name === "local")?.name || machines[0]?.name || "local"
+      this.location = "."
+    }
+    if (this.api && this.renderedMachine === this.machine && this.paths.get(this.selectedFolder) === this.location) {
+      await this.loadFolder(this.selectedFolder, this.generation)
+      return
+    }
     const generation = ++this.generation
     const machine = this.machine
     const location = this.location
@@ -174,6 +192,7 @@ export class FilesController implements NativePageController {
       const response = await this.context.api.get<FilesPayload>(`/files${queryString({ machine, path: location, include_parent: false, max_entries: 5000 })}`)
       if (generation !== this.generation || this.destroyed) return
       this.data = this.addEntries(response.entries, "/")
+      this.renderedMachine = machine
       if (response.truncated) this.context.notify("Directory listing reached its configured limit; additional entries may be hidden", "warning")
       this.renderExplorer(generation)
     } catch (error) {
@@ -206,9 +225,7 @@ export class FilesController implements NativePageController {
       onRequestData: ({ id }: { id: string }) => { void this.loadFolder(id, generation) },
       onSetPath: ({ id }: { id: string }) => {
         if (generation !== this.generation) return
-        this.selectedFolder = id
-        const path = this.paths.get(id)
-        if (path) this.root.querySelector<HTMLInputElement>("[data-role=location]")!.value = path
+        this.selectFolder(id)
       },
       onDownloadFile: ({ id }: { id: string }) => { void this.download(id, generation) },
       onOpenFile: ({ id }: { id: string }) => { void this.editFile(id, generation) },
@@ -218,6 +235,14 @@ export class FilesController implements NativePageController {
       onCopyFiles: ({ ids, target }: { ids: string[]; target: string }) => { void this.relocate(ids, target, "copy", generation) },
       onCreateFile: ({ file, parent }: { file: IFile; parent: string }) => { void this.create(file, parent, generation) },
     })))
+  }
+
+  private selectFolder(id: string): void {
+    const path = this.paths.get(id)
+    if (!path) return
+    this.selectedFolder = id
+    this.location = path
+    this.root.querySelector<HTMLInputElement>("[data-role=location]")!.value = path
   }
 
   private async loadFolder(id: string, generation: number): Promise<void> {
@@ -235,7 +260,7 @@ export class FilesController implements NativePageController {
   }
 
   private async reloadCurrent(): Promise<void> {
-    if (!this.api || this.selectedFolder === "/") { await this.refresh(); return }
+    if (!this.api) { await this.refresh(); return }
     await this.loadFolder(this.selectedFolder, this.generation)
   }
 
@@ -325,27 +350,38 @@ export class FilesController implements NativePageController {
   }
 
   private async uploadFiles(files: File[], directory: string): Promise<void> {
-    if (this.busy) { this.context.notify("A file upload is already running", "warning"); return }
-    const machine = this.machine
-    const generation = this.generation
+    this.uploadQueue.push(...files.map((file) => ({ file, directory, machine: this.machine, generation: this.generation })))
+    if (this.busy) return
     const progress = this.root.querySelector<HTMLElement>("[data-role=progress]")!
     this.busy = true
     progress.hidden = false
+    let uploaded = 0
     try {
-      for (let index = 0; index < files.length; index++) {
-        const file = files[index]!
-        progress.textContent = `Uploading ${file.name} (${index + 1}/${files.length}, ${(file.size / 1024 / 1024).toFixed(1)} MiB)`
-        const token = this.context.accessToken()
-        const response = await fetch(`${this.context.apiPrefix || "/api/ui"}/files/upload${queryString({ machine, path: joinPath(directory, file.name) })}`, {
-          method: "POST", body: file, headers: { "Content-Type": "application/octet-stream", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-          credentials: "same-origin", redirect: "error",
-        })
-        const result = await response.json() as { ok: boolean; message?: string }
-        if (!response.ok || !result.ok) throw new Error(result.message || `HTTP ${response.status}`)
+      while (this.uploadQueue.length) {
+        const { file, directory: target, machine, generation } = this.uploadQueue.shift()!
+        progress.textContent = `Uploading ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MiB)`
+        try {
+          const token = this.context.accessToken()
+          const response = await fetch(`${this.context.apiPrefix || "/api/ui"}/files/upload${queryString({ machine, path: joinPath(target, file.name) })}`, {
+            method: "POST", body: file, headers: { "Content-Type": "application/octet-stream", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+            credentials: "same-origin", redirect: "error",
+          })
+          const result = await response.json() as { ok: boolean; message?: string }
+          if (!response.ok || !result.ok) throw new Error(result.message || `HTTP ${response.status}`)
+          uploaded++
+        } catch (error) {
+          if (!this.destroyed && generation === this.generation) this.context.notify(`Upload ${file.name}: ${String(error)}`, "error")
+        }
       }
-      if (generation === this.generation) { this.context.notify(`Uploaded ${files.length} file(s)`, "success"); await this.reloadCurrent() }
-    } catch (error) { this.report(error, "Upload", generation) }
-    finally { progress.hidden = true; progress.textContent = ""; this.busy = false }
+    } finally {
+      progress.hidden = true
+      progress.textContent = ""
+      this.busy = false
+      if (uploaded && !this.destroyed) {
+        this.context.notify(`Uploaded ${uploaded} file(s)`, "success")
+        await this.reloadCurrent()
+      }
+    }
   }
 
   destroy(): void {

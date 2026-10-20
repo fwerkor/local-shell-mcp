@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { fileBreadcrumbRows, fileTreeEntries, fileTreeId, FilesController } from "./files"
+import { fileBreadcrumbRows, fileParentPath, fileTreeEntries, fileTreeId, FilesController } from "./files"
 
 describe("Native Files browser path isolation", () => {
   test("keeps UNC and Windows drive roots navigable", () => {
@@ -9,6 +9,11 @@ describe("Native Files browser path isolation", () => {
     ])
     expect(fileBreadcrumbRows("C:\\work\\repo")[0]).toEqual({ label: "C:", path: "C:\\" })
     expect(fileBreadcrumbRows("/srv/app")[0]).toEqual({ label: "/", path: "/" })
+    expect(fileParentPath("/")).toBe("/")
+    expect(fileParentPath("C:\\")).toBe("C:\\")
+    expect(fileParentPath("\\\\server\\share")).toBe("\\\\server\\share")
+    expect(fileParentPath("/srv/app")).toBe("/srv")
+    expect(fileParentPath("subdir")).toBe(".")
   })
 
   test("uses browser-only ids independent of remote platform", () => {
@@ -26,6 +31,84 @@ describe("Native Files browser path isolation", () => {
 })
 
 describe("Native Files async scope", () => {
+  test("preserves the navigated folder across refreshes", () => {
+    const location = { value: "" }
+    const controller: any = new FilesController({ notify: () => {} } as any)
+    controller.root = { querySelector: () => location }
+    controller.paths = new Map([["/", "."], ["/nested", "/work/nested"]])
+    controller.selectFolder("/nested")
+    expect(controller.location).toBe("/work/nested")
+    expect(controller.selectedFolder).toBe("/nested")
+    expect(location.value).toBe("/work/nested")
+  })
+
+  test("refreshes an open folder without rebuilding the explorer tree", async () => {
+    const requests: string[] = []
+    const provided: object[] = []
+    const controller: any = new FilesController({
+      machines: () => [{ name: "local", status: "online" }],
+      api: { get: async (path: string) => { requests.push(path); return { entries: [] } } },
+      notify: () => {},
+    } as any)
+    controller.machine = "local"
+    controller.renderedMachine = "local"
+    controller.generation = 3
+    controller.selectedFolder = "/nested"
+    controller.location = "/work/nested"
+    controller.paths = new Map([["/", "/work"], ["/nested", "/work/nested"]])
+    controller.api = { exec: async (_: string, args: object) => { provided.push(args) } }
+    controller.renderExplorer = () => { throw new Error("explorer should not remount") }
+    await controller.refresh()
+    expect(controller.generation).toBe(3)
+    expect(requests[0]).toContain("path=%2Fwork%2Fnested")
+    expect(provided).toHaveLength(1)
+  })
+
+  test("recovers when the selected remote disappears", async () => {
+    const requests: string[] = []
+    const controller: any = new FilesController({
+      machines: () => [{ name: "local", status: "online" }],
+      api: { get: async (path: string) => { requests.push(path); return { entries: [] } } },
+      notify: () => {},
+    } as any)
+    controller.root = { querySelector: () => ({ value: "", setAttribute: () => {}, removeAttribute: () => {} }) }
+    controller.machine = "removed-worker"
+    controller.location = "/old-remote-path"
+    controller.renderExplorer = () => {}
+    await controller.refresh()
+    expect(controller.machine).toBe("local")
+    expect(controller.location).toBe(".")
+    expect(requests[0]).toContain("machine=local")
+    expect(requests[0]).not.toContain("old-remote-path")
+  })
+
+  test("queues separate SVAR upload callbacks instead of dropping files", async () => {
+    const originalFetch = globalThis.fetch
+    const uploads: string[] = []
+    const notices: string[] = []
+    const controller: any = new FilesController({
+      apiPrefix: "/api/ui", accessToken: () => "token", notify: (msg: string) => notices.push(msg),
+    } as any)
+    controller.machine = "worker-a"
+    controller.generation = 1
+    controller.root = { querySelector: () => ({ hidden: true, textContent: "" }) }
+    controller.reloadCurrent = async () => {}
+    globalThis.fetch = (async (url: string) => {
+      uploads.push(String(url))
+      return Response.json({ ok: true })
+    }) as typeof fetch
+    try {
+      await Promise.all([
+        controller.uploadFiles([new File(["a"], "one.txt")], "/data"),
+        controller.uploadFiles([new File(["b"], "two.txt")], "/data"),
+      ])
+      expect(uploads).toHaveLength(2)
+      expect(uploads[0]).toContain("one.txt")
+      expect(uploads[1]).toContain("two.txt")
+      expect(notices).not.toContain("A file upload is already running")
+    } finally { globalThis.fetch = originalFetch }
+  })
+
   test("ignores late lazy directory results after machine change", async () => {
     let resolve!: (value: unknown) => void
     const requested: string[] = []

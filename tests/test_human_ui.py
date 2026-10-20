@@ -1679,9 +1679,12 @@ def test_native_remote_file_download_grant_and_range(tmp_path, monkeypatch):
         assert operation == "transfer_stat"
         return {"type": "file", "size": len(payload), "path": args["path"]}
 
+    remote_reads = []
+
     async def remote(machine, operation, args):
         assert machine == "remote-a"
         assert operation == "transfer_read_chunk"
+        remote_reads.append(args["offset"])
         start = args["offset"]
         chunk = payload[start : start + args["chunk_size"]]
         return {
@@ -1696,6 +1699,15 @@ def test_native_remote_file_download_grant_and_range(tmp_path, monkeypatch):
     grant = client.post("/api/ui/files/download-ticket", json={"machine": "remote-a", "path": "data.bin"})
     assert grant.status_code == 200, grant.text
     url = grant.json()["data"]["url"]
+    head = client.head(url)
+    assert head.status_code == 200
+    assert head.headers["Content-Length"] == str(len(payload))
+    assert head.headers["Accept-Ranges"] == "bytes"
+    assert remote_reads == []
+    head_range = client.head(url, headers={"Range": "bytes=10-31"})
+    assert head_range.status_code == 206
+    assert head_range.headers["Content-Range"] == f"bytes 10-31/{len(payload)}"
+    assert remote_reads == []
     full = client.get(url)
     assert full.status_code == 200
     assert full.content == payload

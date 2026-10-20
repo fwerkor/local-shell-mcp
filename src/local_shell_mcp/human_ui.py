@@ -1187,6 +1187,11 @@ async def api_file_download(request: Request) -> Response:
         if file_range:
             headers["Content-Range"] = f"bytes {start}-{end}/{size}"
         headers["Content-Length"] = str(max(0, end - start + 1))
+        if request.method == "HEAD":
+            return Response(
+                status_code=206 if file_range else 200,
+                headers=headers, media_type="application/octet-stream",
+            )
         return StreamingResponse(
             _remote_ui_file_chunks(machine, path, size, start, end),
             status_code=206 if file_range else 200,
