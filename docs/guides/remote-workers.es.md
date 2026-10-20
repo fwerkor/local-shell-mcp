@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 52e5f445beaf4c30bd298c59399005f01fe5563591b8a0285c97b46243f342fe -->
+<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
 # Workers remotos
 
 Los remote workers permiten que `local-shell-mcp` controle máquinas que pueden realizar solicitudes HTTP(S) salientes pero no aceptar conexiones SSH entrantes.
@@ -9,12 +9,14 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 ## Flujo básico
 
-1. Cree una invitación de un solo uso con `remote_manage(action="invite", ...)`.
+1. Cree una invitación con `remote_manage(action="invite", ...)`.
 2. Ejecute el comando generado en la máquina remota.
 3. Confirme el registro con `remote_manage(action="list")`.
 4. Llame a herramientas normales con `machine="<worker-name>"`, por ejemplo `environment_get`, `run_shell`, `file_read` o `browser_run_script`.
 5. Use `remote_transfer` para iniciar una transferencia rastreada controller-to-worker, worker-to-controller o worker-to-worker de archivos o directorios. Siga con `job_list` o `job_tail`; detenga o reintente con `job_stop` o `job_retry`.
 6. Cambie el nombre o revoque workers con `remote_manage(action="rename", ...)` o `remote_manage(action="revoke", ...)`.
+
+De forma predeterminada, cada invitación registra un solo worker (`max_uses=1`). Aumente `max_uses` para registrar varios workers con la misma invitación. Deje `name` vacío si la invitación se usa varias veces. El parámetro opcional `ttl_s` tiene un valor predeterminado de dos horas (7200 segundos) y un máximo de siete días (604800 segundos).
 
 Solo la administración de workers usa nombres `remote_*`. Las operaciones de execution, shell, job, filesystem, patch y browser comparten el mismo schema local y remotamente. Especificar una machine requiere además el OAuth scope `remote:use`.
 

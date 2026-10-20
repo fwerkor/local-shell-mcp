@@ -4664,16 +4664,17 @@ def _register_remote_admin_tools(mcp: FastMCP) -> None:
         name: str | None = None,
         workdir: str | None = None,
         ttl_s: int | None = None,
+        max_uses: int = 1,
         machine: str | None = None,
         new_name: str | None = None,
     ) -> ToolResult:
-        """Manage remote workers with action=invite, list, reset, revoke, or rename. invite accepts name/workdir/ttl_s; reset/revoke require machine; rename requires machine and new_name. reset clears queued and safely cancellable active control-plane requests without disconnecting the worker; already-started protected mutations and persistent-process starts are preserved."""
+        """Manage remote workers with action=invite, list, reset, revoke, or rename. invite accepts name/workdir/ttl_s/max_uses (default 1); reset/revoke require machine; rename requires machine and new_name. reset clears queued and safely cancellable active control-plane requests without disconnecting the worker; already-started protected mutations and persistent-process starts are preserved."""
 
         async def run() -> Any:
             manager = remote_manager()
             normalized = action.strip().lower()
             if normalized == "invite":
-                return await manager.create_invite(name, workdir, ttl_s)
+                return await manager.create_invite(name, workdir, ttl_s, max_uses=max_uses)
             if normalized == "list":
                 return manager.list_machines()
             if normalized == "reset":

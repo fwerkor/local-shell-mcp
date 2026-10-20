@@ -170,6 +170,8 @@ export interface InvitePayload {
   workdir?: string | null
   expires_at: number
   ttl_s: number
+  max_uses?: number
+  used_count?: number
   join_url: string
   command: string
 }

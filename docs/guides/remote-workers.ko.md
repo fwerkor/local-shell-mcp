@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 52e5f445beaf4c30bd298c59399005f01fe5563591b8a0285c97b46243f342fe -->
+<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
 # 원격 workers
 
 Remote worker를 사용하면 outbound HTTP(S) 요청은 보낼 수 있지만 inbound SSH 연결은 받을 수 없는 머신을 `local-shell-mcp`가 제어할 수 있습니다.
@@ -9,12 +9,14 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 ## 기본 워크플로
 
-1. `remote_manage(action="invite", ...)`로 일회성 초대를 만듭니다.
+1. `remote_manage(action="invite", ...)`로 초대를 만듭니다.
 2. 생성된 command를 remote machine에서 실행합니다.
 3. `remote_manage(action="list")`로 등록을 확인합니다.
 4. `machine="<worker-name>"`을 지정하여 일반 tool을 호출합니다. 예: `environment_get`, `run_shell`, `file_read`, `browser_run_script`.
 5. `remote_transfer`로 controller-to-worker, worker-to-controller 또는 worker-to-worker의 추적되는 file/directory transfer를 시작합니다. `job_list` 또는 `job_tail`로 확인하고 `job_stop` 또는 `job_retry`로 중지하거나 재시도합니다.
 6. `remote_manage(action="rename", ...)` 또는 `remote_manage(action="revoke", ...)`로 worker를 rename/revoke합니다.
+
+초대 코드는 기본적으로 Worker 한 대를 등록합니다(`max_uses=1`). 동일한 코드로 여러 Worker를 등록하려면 `max_uses`를 늘리세요. 여러 번 사용하는 초대에서는 `name`을 비워 두어야 합니다. 선택적 `ttl_s`의 기본값은 2시간(7200초)이며 최대 7일(604800초)까지 설정할 수 있습니다.
 
 worker administration만 `remote_*` 이름을 사용합니다. execution, shell, job, filesystem, patch, browser 작업은 local과 remote에서 동일한 schema를 공유합니다. machine을 지정하면 추가로 `remote:use` OAuth scope가 필요합니다.
 

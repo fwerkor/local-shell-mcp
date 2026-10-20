@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d4016e996b7de27eb0d52bc7b076277fd976b12906ce5f44d04c1d1d229bf85c -->
+<!-- i18n-source-sha256: c1206f28e9661a542c4c26bae628647a355f6ed1b12ca740574add7374666d57 -->
 # 사용자 인터페이스
 
 `local-shell-mcp`는 동일한 service API, workspace, persistent terminal registry, remote-worker registry, MCP audit log 위에 호환되는 두 가지 human interface를 제공합니다.
@@ -38,6 +38,8 @@ workspace_open(session_id=...)
 `session_id`가 유일한 지속 task identity입니다. Agent는 다른 conversation의 Session을 list하거나 추론하거나 자동 선택해서는 안 됩니다. 새 conversation에서 작업을 계속하려면 사용자가 기존 `session_id`를 명시적으로 전달합니다. Agent는 start/resume 직후, 의미 있는 progress checkpoint, 그리고 turn을 끝내기 전에 현재 사용 중인 `session_id`를 사용자에게 알려 수동 handoff가 가능하게 해야 합니다. Session은 machine이나 working directory에 묶이지 않으며 일반 tool parameter가 계속 local/remote target과 path를 선택합니다.
 
 선택적 `plan_manage` Plan은 Session의 Goal mode를 활성화합니다. Plan이 active이고 15분 동안 agent activity가 없으면 연결된 Live Workspace가 ChatGPT에 continuation을 요청할 수 있습니다. continuation은 동일한 명시적 `session_id`를 resume하며 accepted/rejected 여부와 관계없이 최대 10회로 제한됩니다. blocked, completed, cancelled Plan은 자동 continuation되지 않습니다. 모든 step이 completed/skipped인 active Plan은 resumed agent가 Plan을 정식으로 finish할 수 있도록 cleanup continuation 대상에 남습니다. 사람의 pause/resume/cancel control은 임시 Live Workspace state가 아니라 Session 소유 Plan을 갱신합니다.
+
+선택적 자체 호스팅 모델 호스트 및 MCP 앱 클라이언트에 대해서는 [Hosted Chat](hosted-chat.md)을 참조하세요.
 
 ## 브라우저 인터페이스
 

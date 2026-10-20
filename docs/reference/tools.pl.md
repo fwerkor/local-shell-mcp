@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
+<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
 # Referencja tools
 
 Ta page jest budowana z rzeczywistych MCP tool schemas. Po zmianie public tool surface uruchom `python scripts/generate-tools-reference.py`, aby zaktualizować English reference.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-Zarządza jedną trwałą Logical Session. start tworzy nowe zadanie i zwraca jego session_id. resume kontynuuje wyłącznie jawny session_id podany przez użytkownika lub już obecny w tej rozmowie. Wszystkie akcje poza start wymagają session_id. Akcje: start, resume, get, report, finish, cancel, delete. report przyjmuje summary/findings/next/blockers/objective/label; delete wymaga terminalnej Session.
+Zarządza jedną trwałą Logical Session. start tworzy nowe zadanie i zwraca jego session_id. resume kontynuuje wyłącznie jawny session_id podany przez użytkownika lub już obecny w tej rozmowie. Wszystkie akcje poza start wymagają session_id. Akcje: start, resume, get, report, finish, cancel, delete. report przyjmuje summary/findings/next/blockers/objective/label; delete wymaga terminalnej Session. Po 24 godzinach bezczynności aktywne Sessions stają się stale przy dostępie, listowaniu lub uruchomieniu, chyba że trwa wywołanie narzędzia. Sessions stale można wznowić lub usuwać z historii od najstarszych.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -769,7 +769,7 @@ Po podaniu `machine` wywołanie wymaga także `remote:use` i przechodzi przez pr
 
 ### `remote_manage`
 
-Zarządza remote workers przez action=invite, list, revoke lub rename. invite przyjmuje name/workdir/ttl_s; revoke wymaga machine; rename wymaga machine i new_name.
+Zarządza remote workers przez action=invite, list, reset, revoke lub rename. invite przyjmuje name/workdir/ttl_s/max_uses; revoke wymaga machine; rename wymaga machine i new_name. Domyślne max_uses wynosi 1. reset wymaga machine i usuwa oczekujące lub aktywne żądania sterowania, które można bezpiecznie anulować, bez rozłączania workera; już rozpoczęte operacje chronione pozostają zachowane.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -777,6 +777,7 @@ Zarządza remote workers przez action=invite, list, revoke lub rename. invite pr
 | `name` | `string \| null` | `null` |  |
 | `workdir` | `string \| null` | `null` |  |
 | `ttl_s` | `integer \| null` | `null` |  |
+| `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session dla tego wywołania narzędzia. Podczas pracy nad zadaniem przekazuj session_id zwrócony przez session_manage. Używaj null tylko wtedy, gdy nie ma aktywnej Logical Session. |

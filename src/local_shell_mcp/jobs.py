@@ -22,6 +22,7 @@ from typing import Any, BinaryIO
 
 from .audit import audit
 from .fs_ops import resolve_path
+from .job_runner_entry import runner_error_path
 from .process_utils import managed_process_kwargs
 from .settings import get_settings
 from .shell_environment import filtered_subprocess_env
@@ -247,7 +248,8 @@ def _load_store() -> dict[str, Any]:
 def _remove_attempt_paths(paths: dict[str, Path] | None) -> None:
     if not paths:
         return
-    for path in paths.values():
+    status = paths.get("status")
+    for path in (*paths.values(), *([runner_error_path(status)] if status else [])):
         with contextlib.suppress(OSError):
             path.unlink(missing_ok=True)
 
@@ -622,6 +624,7 @@ def _prepare_attempt(
     _private_write_text(paths["command"], command)
     paths["log"].unlink(missing_ok=True)
     paths["status"].unlink(missing_ok=True)
+    runner_error_path(paths["status"]).unlink(missing_ok=True)
     argv = _runner_argv(paths, resolved_cwd)
     return paths, _runner_command(argv, get_settings().shell_executable)
 
@@ -631,9 +634,40 @@ def _read_status_path(raw_path: Any) -> dict[str, Any] | None:
         return None
     try:
         payload = json.loads(Path(str(raw_path)).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _completion_receipt_state(raw_path: Any) -> str:
+    """Classify an absent completion receipt without reading its content into audit."""
+    if not raw_path:
+        return "no_path"
+    try:
+        raw = Path(str(raw_path)).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return "missing"
+    except UnicodeError:
+        return "invalid_encoding"
+    except OSError:
+        return "unreadable"
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return "invalid_json"
+    return "valid" if isinstance(payload, dict) else "invalid_shape"
+
+
+def _audit_missing_completion_receipt(job: dict[str, Any]) -> None:
+    # A failed audit write must never prevent status reconciliation.
+    with contextlib.suppress(Exception):
+        audit(
+            "job_completion_receipt_unavailable",
+            job_id=job.get("job_id"),
+            session=job.get("session_id"),
+            attempt=job.get("attempts"),
+            receipt_state=_completion_receipt_state(job.get("status_path")),
+        )
 
 
 def _read_status(job: dict[str, Any]) -> dict[str, Any] | None:
@@ -1010,6 +1044,7 @@ def _refresh_job_status(
 
     if session_id in active_sessions:
         return job
+    _audit_missing_completion_receipt(job)
     job.update(
         {
             "status": "lost",

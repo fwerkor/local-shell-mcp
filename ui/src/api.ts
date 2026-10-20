@@ -162,7 +162,7 @@ export const api = {
   remotes(signal?: AbortSignal): Promise<MachinePayload> {
     return request("/remotes", { signal })
   },
-  invite(body: { name?: string; workdir?: string; ttl_s?: number }): Promise<InvitePayload> {
+  invite(body: { name?: string; workdir?: string; ttl_s?: number; max_uses?: number }): Promise<InvitePayload> {
     return request("/remotes", {
       method: "POST",
       body: JSON.stringify(body),

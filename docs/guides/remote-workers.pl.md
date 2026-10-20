@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 52e5f445beaf4c30bd298c59399005f01fe5563591b8a0285c97b46243f342fe -->
+<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
 # Zdalne workers
 
 Remote workers pozwalają `local-shell-mcp` kontrolować maszyny, które mogą wykonywać wychodzące żądania HTTP(S), ale nie mogą przyjmować przychodzących połączeń SSH.
@@ -9,12 +9,14 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 ## Podstawowy workflow
 
-1. Utwórz jednorazowe zaproszenie przez `remote_manage(action="invite", ...)`.
+1. Utwórz zaproszenie przez `remote_manage(action="invite", ...)`.
 2. Uruchom wygenerowane polecenie na zdalnej maszynie.
 3. Potwierdź rejestrację przez `remote_manage(action="list")`.
 4. Wywołuj zwykłe narzędzia z `machine="<worker-name>"`, np. `environment_get`, `run_shell`, `file_read` lub `browser_run_script`.
 5. Użyj `remote_transfer`, aby rozpocząć śledzony transfer pliku/katalogu controller-to-worker, worker-to-controller lub worker-to-worker. Śledź go przez `job_list` lub `job_tail`; zatrzymaj lub ponów przez `job_stop` albo `job_retry`.
 6. Zmieniaj nazwę lub unieważniaj workers przez `remote_manage(action="rename", ...)` lub `remote_manage(action="revoke", ...)`.
+
+Domyślnie zaproszenie pozwala zarejestrować jednego workera (`max_uses=1`). Zwiększ `max_uses`, aby zarejestrować wielu workerów za pomocą tego samego zaproszenia. Dla zaproszeń wielokrotnego użytku pozostaw `name` puste. Opcjonalny parametr `ttl_s` domyślnie wynosi dwie godziny (7200 sekund), a maksymalnie siedem dni (604800 sekund).
 
 Tylko administracja workers używa nazw `remote_*`. Operacje execution, shell, job, filesystem, patch i browser współdzielą ten sam schema lokalnie i zdalnie. Podanie machine wymaga dodatkowo OAuth scope `remote:use`.
 

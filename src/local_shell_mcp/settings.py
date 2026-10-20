@@ -407,7 +407,7 @@ class _SettingsFields:
     # Remote worker mode is enabled by default. Remote machines join with one-time
     # invites, poll for jobs over outbound HTTP(S), and expose near-parity tools.
     remote_enabled: bool = True
-    remote_invite_ttl_s: int = 600
+    remote_invite_ttl_s: int = 7200
     remote_poll_timeout_s: int = 25
     remote_job_timeout_s: int = 3600
     remote_max_pending_jobs: int = 256

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 52e5f445beaf4c30bd298c59399005f01fe5563591b8a0285c97b46243f342fe -->
+<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
 # Remote worker
 
 Remote worker memungkinkan `local-shell-mcp` mengontrol mesin yang dapat membuat permintaan HTTP(S) keluar tetapi tidak dapat menerima koneksi SSH masuk.
@@ -9,12 +9,14 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 ## Workflow dasar
 
-1. Buat undangan sekali pakai dengan `remote_manage(action="invite", ...)`.
+1. Buat undangan dengan `remote_manage(action="invite", ...)`.
 2. Jalankan perintah yang dibuat di mesin remote.
 3. Konfirmasikan pendaftaran dengan `remote_manage(action="list")`.
 4. Panggil tool biasa dengan `machine="<worker-name>"`, misalnya `environment_get`, `run_shell`, `file_read`, atau `browser_run_script`.
 5. Gunakan `remote_transfer` untuk memulai transfer file/direktori yang dilacak controller-to-worker, worker-to-controller, atau worker-to-worker. Ikuti dengan `job_list` atau `job_tail`; hentikan atau ulangi dengan `job_stop` atau `job_retry`.
 6. Ubah nama atau cabut worker dengan `remote_manage(action="rename", ...)` atau `remote_manage(action="revoke", ...)`.
+
+Secara default, satu undangan mendaftarkan satu worker (`max_uses=1`). Tingkatkan `max_uses` untuk mendaftarkan beberapa worker dengan undangan yang sama. Kosongkan `name` untuk undangan yang dapat dipakai berkali-kali. Parameter opsional `ttl_s` memiliki nilai default dua jam (7200 detik) dan batas maksimum tujuh hari (604800 detik).
 
 Hanya administrasi worker yang memakai nama `remote_*`. Operasi execution, shell, job, filesystem, patch, dan browser berbagi schema yang sama secara lokal dan remote. Menentukan machine juga memerlukan OAuth scope `remote:use`.
 

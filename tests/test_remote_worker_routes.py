@@ -29,6 +29,7 @@ async def test_worker_bundle_and_manifest_are_stable(tmp_path, monkeypatch):
     with tarfile.open(fileobj=io.BytesIO(first), mode="r:gz") as archive:
         names = set(archive.getnames())
         assert "local_shell_mcp/remote_worker.py" in names
+        assert "local_shell_mcp/job_runner_entry.py" in names
         assert archive.extractfile("local_shell_mcp/main.py").read() == (
             routes._LEGACY_WORKER_MAIN  # noqa: SLF001
         )

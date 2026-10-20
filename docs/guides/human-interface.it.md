@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d4016e996b7de27eb0d52bc7b076277fd976b12906ce5f44d04c1d1d229bf85c -->
+<!-- i18n-source-sha256: c1206f28e9661a542c4c26bae628647a355f6ed1b12ca740574add7374666d57 -->
 # Interfaccia umana
 
 `local-shell-mcp` offre due interfacce umane compatibili sopra la stessa API del servizio, workspace, registro dei terminali persistenti, registro dei worker remoti e log di audit MCP:
@@ -38,6 +38,8 @@ workspace_open(session_id=...)
 `session_id` è l’unica identità persistente del task. Un agent non deve elencare, dedurre o selezionare automaticamente una Session di un’altra conversazione. Per continuare il lavoro in una nuova conversazione, l’utente passa esplicitamente il `session_id` esistente. L’agent deve comunicare il `session_id` attivo dopo start/resume, ai checkpoint di avanzamento significativi e prima di terminare un turn, così da consentire l’handoff manuale. Le Session non sono legate a una machine o a una working directory; i normali parametri dei tool continuano a scegliere target locali/remoti e path.
 
 Un Plan `plan_manage` opzionale abilita il Goal mode della Session. Se il Plan è active e non vi è agent activity per 15 minuti, un Live Workspace associato può chiedere a ChatGPT di continuare. La continuation riprende lo stesso `session_id` esplicito ed è limitata a 10 tentativi, accettati o rifiutati. I Plan blocked, completed e cancelled non vengono continuati automaticamente; un Plan active con tutti gli steps completed o skipped resta idoneo a una continuation di chiusura affinché l’agent ripreso possa terminare il Plan. I controlli umani pause/resume/cancel aggiornano il Plan posseduto dalla Session, non uno stato effimero del Live Workspace.
+
+Consulta [Hosted Chat](hosted-chat.md) per l'host del modello self-hosted opzionale e il client MCP Apps.
 
 ## Interfaccia browser
 

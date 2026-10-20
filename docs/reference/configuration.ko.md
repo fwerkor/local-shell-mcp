@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: b174a1b427ca9b618c63375702f4a652941f83c6b1e1abaee1a99d1ab278deab -->
+<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
 # 구성
 
 Repository에는 복사 가능한 시작 파일 [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example)이 포함됩니다. Docker Compose는 생성된 `.env`를 자동으로 읽고, 다른 runtime도 동일한 `LOCAL_SHELL_MCP_` environment variables를 사용할 수 있습니다. YAML은 binary 또는 source deployment를 위한 optional advanced input입니다. 파일을 명시적으로 만들고 `LOCAL_SHELL_MCP_CONFIG` 또는 `--config`로 선택합니다. Environment variables가 YAML values를 override하므로 의도적인 override가 아니라면 같은 setting을 두 곳에 정의하지 마십시오. YAML keys는 아래 field names를 사용합니다.
@@ -102,7 +102,7 @@ Local-only testing에서는 `auth_bypass_localhost`가 기본 활성화됩니다
 | YAML key | Environment variable | Default | Notes |
 |---|---|---|---|
 | `remote_enabled` | `LOCAL_SHELL_MCP_REMOTE_ENABLED` | `True` | `/join`, `/remote/*`, `remote_*` MCP tools를 제어합니다. |
-| `remote_invite_ttl_s` | `LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S` | `600` |  |
+| `remote_invite_ttl_s` | `LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S` | `7200` |  |
 | `remote_poll_timeout_s` | `LOCAL_SHELL_MCP_REMOTE_POLL_TIMEOUT_S` | `25` |  |
 | `remote_job_timeout_s` | `LOCAL_SHELL_MCP_REMOTE_JOB_TIMEOUT_S` | `3600` |  |
 | `remote_max_pending_jobs` | `LOCAL_SHELL_MCP_REMOTE_MAX_PENDING_JOBS` | `256` | Worker당 queued/pending jobs 최대치. |

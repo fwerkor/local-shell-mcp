@@ -12,6 +12,14 @@ from local_shell_mcp.hosted_chat_store import HostedChatRunner, HostedChatStore
 from local_shell_mcp.settings import get_settings
 
 
+@pytest.fixture(autouse=True)
+def isolated_workspace(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @pytest.fixture
 def chat_store(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / "state"))

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: b174a1b427ca9b618c63375702f4a652941f83c6b1e1abaee1a99d1ab278deab -->
+<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
 # Yapılandırma
 
 Repository tek bir kopyalanabilir başlangıç dosyası sağlar: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose oluşan `.env` dosyasını otomatik okur; diğer runtimes da aynı `LOCAL_SHELL_MCP_` environment variables değerlerini kullanabilir. YAML binary/source deployments için optional advanced input olarak kalır; dosyayı explicit oluşturup `LOCAL_SHELL_MCP_CONFIG` veya `--config` ile seçin. Environment variables YAML values değerlerini override eder; override bilinçli değilse aynı setting’i iki yerde tanımlamayın. YAML keys aşağıdaki field names değerlerini kullanır.
@@ -102,7 +102,7 @@ Local-only testing için `auth_bypass_localhost` default etkin. Public network �
 | YAML key | Environment variable | Default | Notlar |
 |---|---|---|---|
 | `remote_enabled` | `LOCAL_SHELL_MCP_REMOTE_ENABLED` | `True` | `/join`, `/remote/*` ve MCP tools `remote_*` kontrol eder. |
-| `remote_invite_ttl_s` | `LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S` | `600` |  |
+| `remote_invite_ttl_s` | `LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S` | `7200` |  |
 | `remote_poll_timeout_s` | `LOCAL_SHELL_MCP_REMOTE_POLL_TIMEOUT_S` | `25` |  |
 | `remote_job_timeout_s` | `LOCAL_SHELL_MCP_REMOTE_JOB_TIMEOUT_S` | `3600` |  |
 | `remote_max_pending_jobs` | `LOCAL_SHELL_MCP_REMOTE_MAX_PENDING_JOBS` | `256` | Worker başına maximum queued/pending jobs. |

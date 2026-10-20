@@ -46,6 +46,7 @@ def _is_public_path(path: str) -> bool:
     return (
         path == "/"
         or path in PUBLIC_PATHS
+        or path.startswith("/remote/gui/stream/")
         or path.startswith(_REMOTE_TRANSFER_PREFIX)
         or path.startswith("/.well-known/")
         or path.startswith("/oauth/")
