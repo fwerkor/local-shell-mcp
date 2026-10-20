@@ -123,8 +123,9 @@ async def test_worker_validates_session_before_start(monkeypatch):
         await worker.start_remote_terminal_stream("demo", 80, 24, "x" * 40, "https://test", "token")
 
 
+@pytest.mark.parametrize("shell_delay", [0, 0.5])
 @pytest.mark.asyncio
-async def test_real_tmux_attached_pty_preserves_ansi_and_detach(monkeypatch):
+async def test_real_tmux_attached_pty_preserves_ansi_and_detach(monkeypatch, shell_delay):
     import shutil
     import subprocess
     import uuid
@@ -138,17 +139,10 @@ async def test_real_tmux_attached_pty_preserves_ansi_and_detach(monkeypatch):
     def command(*args):
         return subprocess.run([tmux, "-L", socket_name, *args], capture_output=True, text=True)
 
-    started = command(
-        "new-session",
-        "-d",
-        "-s",
-        session_name,
-        "-x",
-        "80",
-        "-y",
-        "24",
-        "bash --noprofile --norc -i",
-    )
+    startup = "env PS1='LSM-PTY-READY> ' bash --noprofile --norc -i"
+    if shell_delay:
+        startup = f'sh -c "sleep {shell_delay}; exec {startup}"'
+    started = command("new-session", "-d", "-s", session_name, "-x", "80", "-y", "24", startup)
     if started.returncode:
         pytest.skip("tmux cannot create isolated test server")
     monkeypatch.setattr(worker, "tmux_socket_name", lambda: socket_name)
@@ -159,26 +153,40 @@ async def test_real_tmux_attached_pty_preserves_ansi_and_detach(monkeypatch):
     attachment = None
     try:
         attachment = worker._TmuxPtyAttachment(session_name, 80, 24)
-        for _ in range(100):
-            if session_name in command("list-clients", "-F", "#{session_name}").stdout:
-                break
-            if attachment.process.poll() is not None:
-                pytest.fail("tmux attach exited before establishing a PTY client")
-            await asyncio.sleep(0.1)
-        else:
-            pytest.fail("tmux attach did not register a client")
+
+        async def read_until(marker, stage):
+            output = bytearray()
+            try:
+                async with asyncio.timeout(10):
+                    while marker not in output:
+                        chunk = await attachment.read()
+                        if not chunk:
+                            pytest.fail(f"tmux PTY closed while waiting for {stage}")
+                        output.extend(chunk)
+            except TimeoutError:
+                pytest.fail(
+                    f"tmux PTY timed out waiting for {stage}; "
+                    f"client_exit={attachment.process.poll()}, "
+                    f"clients={command('list-clients', '-F', '#{session_name}').stdout!r}, "
+                    f"pane={command('capture-pane', '-pt', session_name).stdout!r}, "
+                    f"received={bytes(output[-512:])!r}"
+                )
+            return output
+
+        # A registered tmux client is not sufficient: the interactive shell may
+        # still be starting, so writing here can lose the command on some runners.
+        await read_until(b"LSM-PTY-READY> ", "interactive shell readiness")
+        assert session_name in command("list-clients", "-F", "#{session_name}").stdout
         await attachment.write(b"printf '\\033[31mREAL-PTY\\033[0m\\n'\r")
-        output = bytearray()
-        async with asyncio.timeout(8):
-            while b"\x1b[31mREAL-PTY" not in output:
-                chunk = await attachment.read()
-                assert chunk, "tmux PTY closed before terminal output"
-                output.extend(chunk)
+        await read_until(b"\x1b[31mREAL-PTY", "ANSI command output")
+
         attachment.resize(101, 38)
-        for _ in range(50):
+        for _ in range(100):
             if "101x38" in command("list-clients", "-F", "#{client_width}x#{client_height}").stdout:
                 break
-            await asyncio.sleep(0.1)
+            if attachment.process.poll() is not None:
+                pytest.fail("tmux client exited before the PTY resize completed")
+            await asyncio.sleep(0.05)
         else:
             pytest.fail("tmux client did not accept the resized PTY")
         await attachment.close()
