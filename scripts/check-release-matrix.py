@@ -20,6 +20,10 @@ EXPECTED_BINARY_ARTIFACTS = {
 EXPECTED_PYTHON_ARTIFACTS = EXPECTED_BINARY_ARTIFACTS
 EXPECTED_SNAP_ARTIFACTS = {"linux-x86_64", "linux-aarch64"}
 EXPECTED_DOCKER_PLATFORMS = {"linux/amd64", "linux/arm64"}
+EXPECTED_SNAP_ACTION_PINS = {
+    "snapcore/action-build": "3bdaa03e1ba6bf59a65f84a751d943d549a54e79",  # v1
+    "snapcore/action-publish": "214b86e5ca036ead1668c79afb81e550e6c54d40",  # v1
+}
 
 
 def matrix_values(job: dict, key: str) -> set[str]:
@@ -32,6 +36,11 @@ def step_script(job: dict, name: str) -> str:
         if step.get("name") == name:
             return str(step.get("run") or "")
     return ""
+
+
+def pinned_action(step: dict, action: str) -> bool:
+    sha = EXPECTED_SNAP_ACTION_PINS.get(action)
+    return sha is not None and step.get("uses") == f"{action}@{sha}"
 
 
 def main() -> int:
@@ -164,8 +173,8 @@ def main() -> int:
         (step for step in snap_job.get("steps", []) if step.get("name") == "Build Snap package"),
         {},
     )
-    if snap_build_step.get("uses") != "snapcore/action-build@v1":
-        print("Release workflow must build snaps with snapcore/action-build@v1.")
+    if not pinned_action(snap_build_step, "snapcore/action-build"):
+        print("Release workflow must build snaps with a SHA-pinned snapcore/action-build.")
         return 1
 
     github_release_job = jobs.get("github-release", {})
@@ -210,8 +219,8 @@ def main() -> int:
         (step for step in snap_publish_job.get("steps", []) if step.get("name") == "Publish Snap package"),
         {},
     )
-    if snap_publish_step.get("uses") != "snapcore/action-publish@v1":
-        print("Release workflow must publish snaps with snapcore/action-publish@v1.")
+    if not pinned_action(snap_publish_step, "snapcore/action-publish"):
+        print("Release workflow must publish snaps with a SHA-pinned snapcore/action-publish.")
         return 1
     snap_release = str(snap_publish_step.get("with", {}).get("release", ""))
     if "edge" not in snap_release or "stable" not in snap_release or "prerelease" not in snap_release:
