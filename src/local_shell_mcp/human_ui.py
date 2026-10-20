@@ -2101,6 +2101,13 @@ async def _spawn_shell_process(machine: str, session_id: str, cols: int, rows: i
             )
             process._tmux_session_id = session_id
             return process
+    if machine != "local" and backend.startswith("tmux-") and not _machine_uses_windows_paths(machine):
+        from .remote_terminal_stream import open_remote_terminal
+
+        try:
+            return await open_remote_terminal(machine, session_id, cols, rows)
+        except Exception:
+            _LOGGER.debug("Remote PTY transport unavailable, using snapshot compatibility mode", exc_info=True)
     return _PollingShellProcess(machine, session_id, cols, rows)
 
 

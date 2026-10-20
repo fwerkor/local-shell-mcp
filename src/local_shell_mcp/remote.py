@@ -101,6 +101,9 @@ from .transfer_ops import (
 )
 from .version import version_info as get_version_info
 
+_WORKER_TERMINAL_SERVER = ""
+_WORKER_TERMINAL_TOKEN = ""
+
 REMOTE_JOIN_PATH = "/join"
 REMOTE_POWERSHELL_JOIN_PATH = REMOTE_JOIN_PATH + ".ps1"
 REMOTE_API_PREFIX = "/remote"
@@ -108,7 +111,8 @@ REMOTE_WORKER_BUNDLE_PATH = "/remote/worker-bundle.tgz"
 REMOTE_WORKER_LANE_PROTOCOL_VERSION = 3
 REMOTE_WORKER_RESET_PROTOCOL_VERSION = 4
 REMOTE_WORKER_RESOURCE_PROTOCOL_VERSION = 5
-REMOTE_WORKER_POLL_PROTOCOL_VERSION = REMOTE_WORKER_RESOURCE_PROTOCOL_VERSION
+REMOTE_WORKER_TERMINAL_PROTOCOL_VERSION = 6
+REMOTE_WORKER_POLL_PROTOCOL_VERSION = REMOTE_WORKER_TERMINAL_PROTOCOL_VERSION
 _WORKER_CONNECT_TIMEOUT_S = 10.0
 _WORKER_POLL_TIMEOUT_GRACE_S = 10.0
 _WORKER_TRANSFER_LEASE_REFRESH_INTERVAL_S = 60.0
@@ -1685,6 +1689,14 @@ class RemoteManager:
             self._save_registry_unlocked()
         return {"old_name": machine, "new_name": new_name}
 
+    def _worker_token(self, machine: str) -> str:
+        with self._state_lock:
+            self._load_registry_unlocked()
+            worker = self.workers.get(machine)
+            if worker is None:
+                raise ValueError(f"unknown remote machine: {machine}")
+            return worker.token
+
     def _worker_by_token(self, token: str) -> RemoteWorker:
         with self._state_lock:
             self._load_registry_unlocked()
@@ -1890,6 +1902,7 @@ WORKER_COMMAND_TOOLS = frozenset(
 )
 WORKER_SHELL_TOOLS = frozenset(
     {
+        "ui_terminal_stream_start",
         "shell_start",
         "shell_send",
         "shell_read",
@@ -2729,6 +2742,14 @@ async def _execute_command_worker_tool(tool: str, args: dict[str, Any]) -> Any:
 
 
 async def _execute_shell_worker_tool(tool: str, args: dict[str, Any]) -> Any:
+    if tool == "ui_terminal_stream_start":
+        from .remote_terminal_worker import start_remote_terminal_stream
+
+        return await start_remote_terminal_stream(
+            args["session_id"], args["cols"], args["rows"], args["ticket"],
+            _WORKER_TERMINAL_SERVER, _WORKER_TERMINAL_TOKEN,
+        )
+
     if tool == "shell_start":
         return await start_shell(
             args.get("cwd", "."), args.get("name"), args.get("command"), args.get("idempotency_key")
@@ -4272,6 +4293,8 @@ async def _run_worker_locked(
         flush=True,
     )
     headers = {"Author" + "ization": "B" + "earer " + access}
+    global _WORKER_TERMINAL_SERVER, _WORKER_TERMINAL_TOKEN
+    _WORKER_TERMINAL_SERVER, _WORKER_TERMINAL_TOKEN = server, access
     lane_state = _WorkerLaneState()
     lane_state_changed = asyncio.Event()
     upgrade_lock = asyncio.Lock()
