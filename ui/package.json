@@ -14,16 +14,19 @@
     "@modelcontextprotocol/ext-apps": "^1.7.5",
     "@opentui/core": "0.4.3",
     "@opentui/react": "0.4.3",
+    "@svar-ui/react-filemanager": "2.6.0",
     "@xterm/addon-fit": "0.10.0",
     "@xterm/addon-image": "0.8.0",
     "@xterm/xterm": "5.5.0",
     "react": "19.2.0",
+    "react-dom": "19.2.0",
     "react-reconciler": "0.33.0"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.0",
+    "@types/react-dom": "19",
     "typescript": "^5.9.3"
   }
 }

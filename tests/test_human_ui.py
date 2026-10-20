@@ -339,8 +339,9 @@ def test_webui_visual_regressions_are_packaged():
     dark_mode = "@media (prefers-color-scheme:dark)"
     assert dark_mode in css
     assert css.rindex(dark_mode) > css.rindex(".alert-card{display:grid")
-    assert ".files-layout{" in css
-    assert ".file-parent-panel" in css
+    assert ".explorer-host{" in css
+    assert ".wx-willow-theme" in css
+    assert "cdn.svar.dev" not in css
     assert ".terminal-touchbar{" in css
     assert ".terminal-scrollbar{" in css
     assert ".terminal-scrollbar-spacer{" in css
@@ -1538,3 +1539,229 @@ def test_webui_gui_remote_human_action_dispatch(tmp_path, monkeypatch):
             30,
         ),
     ]
+
+
+def test_native_file_download_ticket_is_short_lived_and_binary_safe(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    from local_shell_mcp import human_ui
+
+    data = bytes(range(256)) * 4000
+    (tmp_path / "test weights.bin").write_bytes(data)
+    client = TestClient(build_http_app())
+    grant = client.post("/api/ui/files/download-ticket", json={
+        "machine": "local", "path": "test weights.bin",
+    })
+    assert grant.status_code == 200, grant.text
+    url = grant.json()["data"]["url"]
+    response = client.get(url)
+    assert response.status_code == 200, response.text
+    assert response.content == data
+    assert "attachment" in response.headers["content-disposition"]
+    assert client.get(url, headers={"Range": "bytes=10-20"}).content == data[10:21]
+    assert client.get("/api/ui/files/download/not-a-token").status_code == 404
+    assert client.post("/api/ui/files/download-ticket", json={"machine": "local"}).status_code == 400
+    (tmp_path / "directory").mkdir()
+    assert client.post("/api/ui/files/download-ticket", json={
+        "machine": "local", "path": "directory",
+    }).status_code == 400
+    (tmp_path / "test weights.bin").write_bytes(b"changed")
+    assert client.get(url).status_code == 416
+
+    ticket = url.rsplit("/", 1)[-1]
+    with human_ui._UI_DOWNLOAD_LOCK:
+        expires, machine, path, size, name = human_ui._UI_DOWNLOAD_GRANTS[ticket]
+        human_ui._UI_DOWNLOAD_GRANTS[ticket] = (0, machine, path, size, name)
+    assert client.get(url).status_code == 404
+
+
+def test_file_upload_streams_binary_larger_than_http_json_limit(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_HTTP_REQUEST_BYTES", "1024")
+    get_settings.cache_clear()
+    client = TestClient(build_http_app())
+    data = bytes(range(256)) * 16000
+    response = client.post(
+        "/api/ui/files/upload", params={"machine": "local", "path": "large.bin"},
+        content=data, headers={"content-type": "application/octet-stream"},
+    )
+    assert response.status_code == 200, response.text
+    assert (tmp_path / "large.bin").read_bytes() == data
+    again = client.post(
+        "/api/ui/files/upload", params={"machine": "local", "path": "large.bin"},
+        content=b"different", headers={"content-type": "application/octet-stream"},
+    )
+    assert again.status_code == 409
+    assert (tmp_path / "large.bin").read_bytes() == data
+    assert not list(tmp_path.glob(".large.bin.local-shell-mcp-transfer-*.tmp"))
+
+
+def test_native_file_download_ticket_enforces_machine_permissions(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    (tmp_path / "readable.txt").write_text("ok")
+    from local_shell_mcp import human_ui
+
+    read_only = Principal(email=None, subject="read", claims={"auth": "oauth", "scope": "shell:read"})
+    deny = Principal(email=None, subject="none", claims={"auth": "oauth", "scope": ""})
+
+    async def check(principal, machine):
+        request = Request({"type": "http", "method": "POST", "path": "/api/ui/files/download-ticket", "headers": [], "query_string": b""},
+                          receive=_read_request_body({"machine": machine, "path": "readable.txt"}))
+        request.state.principal = principal
+        return await human_ui.api_file_download_ticket(request)
+
+    def build_body(data):
+        payload = json.dumps(data).encode()
+        emitted = False
+        async def receive():
+            nonlocal emitted
+            if not emitted:
+                emitted = True
+                return {"type": "http.request", "body": payload, "more_body": False}
+            return {"type": "http.disconnect"}
+        return receive
+
+    _read_request_body = build_body
+    import asyncio
+    assert asyncio.run(check(read_only, "local")).status_code == 200
+    assert asyncio.run(check(deny, "local")).status_code == 403
+    assert asyncio.run(check(read_only, "remote-a")).status_code == 403
+
+
+def test_remote_download_chunks_verify_integrity(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    import asyncio
+    import hashlib
+
+    from local_shell_mcp import human_ui
+
+    data = bytes(range(100)) * 400
+    async def remote(_machine, _tool, args):
+        start = args["offset"]
+        chunk = data[start: start + args["chunk_size"]]
+        return {"data_b64": base64.b64encode(chunk).decode(), "offset": start, "size": len(data),
+                "bytes": len(chunk), "sha256": hashlib.sha256(chunk).hexdigest()}
+    monkeypatch.setattr(human_ui, "_remote_call", remote)
+    async def read():
+        result = bytearray()
+        async for chunk in human_ui._remote_ui_file_chunks("worker-a", "path", len(data), 10, len(data) - 12):
+            result.extend(chunk)
+        return bytes(result)
+    assert asyncio.run(read()) == data[10:-11]
+
+
+def test_web_file_list_skips_unneeded_parent_rpc(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    (tmp_path / "parent").mkdir()
+    (tmp_path / "parent" / "child").mkdir()
+    client = TestClient(build_http_app())
+    result = client.get("/api/ui/files", params={
+        "machine": "local", "path": "parent/child", "include_parent": "false", "max_entries": 5000,
+    })
+    assert result.status_code == 200
+    assert result.json()["data"]["parent_entries"] == []
+    assert result.json()["data"]["truncated"] is False
+
+
+def test_web_file_list_marks_truncated_directories(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    for name in ("a.txt", "b.txt", "c.txt"):
+        (tmp_path / name).write_text(name)
+    client = TestClient(build_http_app())
+    result = client.get("/api/ui/files", params={
+        "machine": "local", "path": ".", "include_parent": "false", "max_entries": 2,
+    })
+    assert result.status_code == 200
+    assert result.json()["data"]["truncated"] is True
+
+
+def test_native_remote_file_download_grant_and_range(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    import hashlib
+
+    from local_shell_mcp import human_ui
+
+    payload = bytes(range(256)) * 200
+
+    async def dispatch(machine, local, operation, args):
+        assert machine == "remote-a"
+        assert operation == "transfer_stat"
+        return {"type": "file", "size": len(payload), "path": args["path"]}
+
+    remote_reads = []
+
+    async def remote(machine, operation, args):
+        assert machine == "remote-a"
+        assert operation == "transfer_read_chunk"
+        remote_reads.append(args["offset"])
+        start = args["offset"]
+        chunk = payload[start : start + args["chunk_size"]]
+        return {
+            "data_b64": base64.b64encode(chunk).decode(), "offset": start,
+            "size": len(payload), "bytes": len(chunk),
+            "sha256": hashlib.sha256(chunk).hexdigest(),
+        }
+
+    monkeypatch.setattr(human_ui, "_machine_dispatch", dispatch)
+    monkeypatch.setattr(human_ui, "_remote_call", remote)
+    client = TestClient(build_http_app())
+    grant = client.post("/api/ui/files/download-ticket", json={"machine": "remote-a", "path": "data.bin"})
+    assert grant.status_code == 200, grant.text
+    url = grant.json()["data"]["url"]
+    head = client.head(url)
+    assert head.status_code == 200
+    assert head.headers["Content-Length"] == str(len(payload))
+    assert head.headers["Accept-Ranges"] == "bytes"
+    assert remote_reads == []
+    head_range = client.head(url, headers={"Range": "bytes=10-31"})
+    assert head_range.status_code == 206
+    assert head_range.headers["Content-Range"] == f"bytes 10-31/{len(payload)}"
+    assert remote_reads == []
+    full = client.get(url)
+    assert full.status_code == 200
+    assert full.content == payload
+    partial = client.get(url, headers={"Range": "bytes=10-31"})
+    assert partial.status_code == 206
+    assert partial.content == payload[10:32]
+    assert partial.headers["Content-Range"] == f"bytes 10-31/{len(payload)}"
+    assert client.get(url, headers={"Range": "bytes=-11"}).content == payload[-11:]
+    assert client.get(url, headers={"Range": "bytes=0-999999"}).content == payload
+    for invalid_range in ("bytes=-0", "bytes=8-3", "bytes=--", "bytes=999999-"):
+        assert client.get(url, headers={"Range": invalid_range}).status_code == 416
+
+
+def test_native_remote_binary_upload_uses_bounded_chunks(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    from local_shell_mcp import human_ui
+
+    data = bytes(range(256)) * 9000
+    chunks = []
+    finishes = []
+
+    async def dispatch(machine, local, operation, args):
+        assert machine == "remote-a"
+        if operation == "transfer_begin_write":
+            assert args["overwrite"] is False
+            return {"transfer_id": "transfer-123"}
+        if operation == "transfer_finish_write":
+            finishes.append(args)
+            return {"completed": True}
+        raise AssertionError(operation)
+
+    async def remote(machine, operation, args):
+        assert machine == "remote-a"
+        assert operation == "transfer_write_chunk"
+        content = base64.b64decode(args["data_b64"])
+        assert len(content) <= human_ui._UI_FILE_CHUNK
+        chunks.append((args["offset"], content))
+        return {"bytes": len(content)}
+
+    monkeypatch.setattr(human_ui, "_machine_dispatch", dispatch)
+    monkeypatch.setattr(human_ui, "_remote_call", remote)
+    client = TestClient(build_http_app())
+    response = client.post("/api/ui/files/upload", params={
+        "machine": "remote-a", "path": "large.bin",
+    }, content=data, headers={"Content-Type": "application/octet-stream"})
+    assert response.status_code == 200, response.text
+    assert b"".join(content for _, content in chunks) == data
+    assert [offset for offset, _ in chunks] == [0, 1048576, 2097152]
+    assert finishes[0]["expected_sha256"] == __import__("hashlib").sha256(data).hexdigest()

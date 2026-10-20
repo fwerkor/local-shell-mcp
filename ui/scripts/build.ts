@@ -63,10 +63,12 @@ if (!liveResult.success) {
 const webCssPath = resolve(staticDir, "web.css")
 const nativeCssPath = resolve(staticDir, "web-native.css")
 const consoleCssPath = resolve(staticDir, "web-console-mobile.css")
-await Bun.write(
-  webCssPath,
-  `${await Bun.file(webCssPath).text()}\n${await Bun.file(nativeCssPath).text()}\n${await Bun.file(consoleCssPath).text()}`,
-)
+const bundledStyles = `${await Bun.file(webCssPath).text()}\n${await Bun.file(nativeCssPath).text()}\n${await Bun.file(consoleCssPath).text()}`
+// SVAR ships unused remote font declarations. Native Files uses system fonts
+// and embedded SVG icons, so remove those CDN references from the self-hosted bundle.
+await Bun.write(webCssPath, bundledStyles.replace(/@font-face\s*\{[^}]*cdn\.svar\.dev[^}]*\}/g, ""))
+const webScriptPath = resolve(staticDir, "web.js")
+await Bun.write(webScriptPath, (await Bun.file(webScriptPath).text()).replace(/[ \t]+$/gm, ""))
 await rm(nativeCssPath, { force: true })
 await rm(consoleCssPath, { force: true })
 for (const asset of ["index.html", "logo.svg", "favicon.svg"]) {

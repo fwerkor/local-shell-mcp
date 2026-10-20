@@ -4,10 +4,13 @@ import asyncio
 import base64
 import binascii
 import contextlib
+import hashlib
 import ipaddress
 import json
 import logging
 import os
+import re
+import secrets
 import select
 import shlex
 import shutil
@@ -23,7 +26,14 @@ from urllib.parse import urlsplit
 
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from starlette.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
@@ -65,6 +75,13 @@ from .shell_ops import (
     tmux,
 )
 from .tmux_helper import resolve_tmux, tmux_socket_name
+from .transfer_ops import (
+    transfer_abort_write,
+    transfer_begin_write,
+    transfer_finish_write,
+    transfer_stat,
+    transfer_write_bytes,
+)
 from .tui_runtime import materialize_embedded_tui
 from .ui_security import (
     CLI_LOCAL_TOKEN_ENV,
@@ -913,18 +930,23 @@ async def api_machines(request: Request) -> Response:
 async def api_files(request: Request) -> Response:
     machine = request.query_params.get("machine", "local")
     path = request.query_params.get("path", ".")
+    include_parent = request.query_params.get("include_parent", "true") != "false"
     try:
         _require_ui_scopes(request, "shell:read", machine=machine)
+        limit = min(
+            max(1, int(request.query_params.get("max_entries", "1000"))),
+            get_settings().max_directory_entries,
+        )
         entries = await _machine_dispatch(
             machine,
-            lambda: list_dir(path, False, 1_000),
+            lambda: list_dir(path, False, limit),
             "list_files",
-            {"path": path, "recursive": False, "max_entries": 1_000},
+            {"path": path, "recursive": False, "max_entries": limit},
         )
         windows_paths = _machine_uses_windows_paths(machine)
         parent = _parent_path(path, windows_paths)
         parent_entries: list[dict[str, Any]] = []
-        if parent != path:
+        if include_parent and parent != path:
             with contextlib.suppress(Exception):
                 parent_entries = await _machine_dispatch(
                     machine,
@@ -939,6 +961,7 @@ async def api_files(request: Request) -> Response:
                 "parent": parent,
                 "entries": _normalize_file_entries(list(entries or []), windows_paths),
                 "parent_entries": _normalize_file_entries(list(parent_entries or []), windows_paths),
+                "truncated": len(entries or []) >= limit,
             }
         )
     except Exception as exc:
@@ -1062,6 +1085,188 @@ async def api_file_content(request: Request) -> Response:
         return _json_ok({"kind": "text", **content})
     except Exception as exc:
         return _json_error(exc)
+
+
+
+
+# Short-lived, browser-only download grants. These do not create share links.
+_UI_DOWNLOAD_LOCK = threading.Lock()
+_UI_DOWNLOAD_GRANTS: dict[str, tuple[float, str, str, int, str]] = {}
+_UI_FILE_CHUNK = 1024 * 1024
+
+
+async def api_file_download_ticket(request: Request) -> Response:
+    try:
+        body = await request.json()
+        machine = str(body.get("machine") or "local")
+        path = str(body.get("path") or "")
+        if not path:
+            raise ValueError("path is required")
+        _require_ui_scopes(request, "shell:read", machine=machine)
+        info = await _machine_dispatch(
+            machine, lambda: transfer_stat(path, False), "transfer_stat",
+            {"path": path, "sha256": False},
+        )
+        if info.get("type") != "file":
+            raise ValueError("Only regular files can be downloaded")
+        name = _path_name(path, _machine_uses_windows_paths(machine))
+        token = secrets.token_urlsafe(32)
+        with _UI_DOWNLOAD_LOCK:
+            now = time.monotonic()
+            for key, value in list(_UI_DOWNLOAD_GRANTS.items()):
+                if value[0] <= now:
+                    _UI_DOWNLOAD_GRANTS.pop(key, None)
+            if len(_UI_DOWNLOAD_GRANTS) >= 1024:
+                oldest = min(_UI_DOWNLOAD_GRANTS, key=lambda key: _UI_DOWNLOAD_GRANTS[key][0])
+                _UI_DOWNLOAD_GRANTS.pop(oldest)
+            _UI_DOWNLOAD_GRANTS[token] = (now + 60, machine, path, int(info["size"]), name)
+        return _json_ok({"url": f"{UI_API_PREFIX}/files/download/{token}"})
+    except Exception as exc:
+        return _json_error(exc)
+
+
+def _file_download_range(value: str | None, size: int) -> tuple[int, int] | None:
+    if not value:
+        return None
+    match = re.fullmatch(r"bytes=(\d*)-(\d*)", value.strip())
+    if not match or not any(match.groups()) or not size:
+        raise ValueError("Invalid range")
+    first, last = match.groups()
+    if first:
+        start = int(first)
+        end = min(int(last), size - 1) if last else size - 1
+    else:
+        suffix = int(last)
+        if not suffix:
+            raise ValueError("Invalid range")
+        start, end = max(0, size - suffix), size - 1
+    if start >= size or end < start:
+        raise ValueError("Invalid range")
+    return start, end
+
+
+async def _remote_ui_file_chunks(machine: str, path: str, size: int, start: int, end: int):
+    offset = start
+    while offset <= end:
+        packet = await _remote_call(
+            machine, "transfer_read_chunk",
+            {"path": path, "offset": offset, "chunk_size": min(_UI_FILE_CHUNK, end - offset + 1)},
+        )
+        data = base64.b64decode(packet["data_b64"], validate=True)
+        if (not data or int(packet["offset"]) != offset or int(packet["size"]) != size
+                or int(packet["bytes"]) != len(data)
+                or hashlib.sha256(data).hexdigest() != packet["sha256"]):
+            raise OSError("Remote file changed or yielded an invalid chunk during download")
+        offset += len(data)
+        yield data
+
+
+async def api_file_download(request: Request) -> Response:
+    token = request.path_params["token"]
+    with _UI_DOWNLOAD_LOCK:
+        grant = _UI_DOWNLOAD_GRANTS.get(token)
+        if grant and grant[0] <= time.monotonic():
+            _UI_DOWNLOAD_GRANTS.pop(token, None)
+            grant = None
+    if grant is None:
+        return JSONResponse({"error": "Invalid or expired download"}, status_code=404)
+    _, machine, path, size, name = grant
+    try:
+        if machine == "local":
+            if get_settings().disable_local:
+                raise RuntimeError("Local access is disabled")
+            resolved = await asyncio.to_thread(resolve_path, path, must_exist=True)
+            if not resolved.is_file() or resolved.stat().st_size != size:
+                raise ValueError("Download source has changed")
+            return FileResponse(resolved, filename=name, media_type="application/octet-stream")
+        file_range = _file_download_range(request.headers.get("range"), size)
+        start, end = file_range if file_range else (0, size - 1)
+        from urllib.parse import quote
+        disposition = f"attachment; filename*=UTF-8''{quote(name, safe='')}"
+        headers = {"Content-Disposition": disposition, "Accept-Ranges": "bytes"}
+        if file_range:
+            headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        headers["Content-Length"] = str(max(0, end - start + 1))
+        if request.method == "HEAD":
+            return Response(
+                status_code=206 if file_range else 200,
+                headers=headers, media_type="application/octet-stream",
+            )
+        return StreamingResponse(
+            _remote_ui_file_chunks(machine, path, size, start, end),
+            status_code=206 if file_range else 200,
+            headers=headers, media_type="application/octet-stream",
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=416)
+    except Exception as exc:
+        return _json_error(exc)
+
+
+async def api_file_upload(request: Request) -> Response:
+    machine = request.query_params.get("machine", "local")
+    path = request.query_params.get("path", "")
+    transfer_id: str | None = None
+    try:
+        _require_ui_scopes(request, "shell:read", "shell:write", machine=machine)
+        live_id = _require_live_human_mutation(request)
+        if not path:
+            raise ValueError("path is required")
+        expected = int(request.headers.get("content-length", "-1"))
+        if expected < 0:
+            raise ValueError("Content-Length is required for binary upload")
+        begin = await _machine_dispatch(
+            machine, lambda: transfer_begin_write(path, False, expected),
+            "transfer_begin_write", {"path": path, "overwrite": False, "expected_bytes": expected},
+        )
+        transfer_id = str(begin["transfer_id"])
+        offset = 0
+        digest = hashlib.sha256()
+        buffer = bytearray()
+        async def write_chunk(chunk: bytes, at: int) -> None:
+            if machine == "local":
+                await asyncio.to_thread(transfer_write_bytes, path, transfer_id, at, chunk)
+            else:
+                await _remote_call(machine, "transfer_write_chunk", {
+                    "path": path, "transfer_id": transfer_id, "offset": at,
+                    "data_b64": base64.b64encode(chunk).decode("ascii"),
+                    "expected_sha256": hashlib.sha256(chunk).hexdigest(),
+                })
+        async for data in request.stream():
+            if offset + len(buffer) + len(data) > expected:
+                raise ValueError("Upload exceeds declared Content-Length")
+            buffer.extend(data)
+            while len(buffer) >= _UI_FILE_CHUNK:
+                chunk = bytes(buffer[:_UI_FILE_CHUNK])
+                del buffer[:_UI_FILE_CHUNK]
+                await write_chunk(chunk, offset)
+                digest.update(chunk)
+                offset += len(chunk)
+        if buffer:
+            chunk = bytes(buffer)
+            await write_chunk(chunk, offset)
+            digest.update(chunk)
+            offset += len(chunk)
+        if offset != expected:
+            raise ValueError("Incomplete upload")
+        result = await _machine_dispatch(
+            machine, lambda: transfer_finish_write(path, transfer_id, expected, digest.hexdigest()),
+            "transfer_finish_write", {"path": path, "transfer_id": transfer_id,
+                                     "expected_bytes": expected, "expected_sha256": digest.hexdigest()},
+        )
+        transfer_id = None
+        _record_live_human_action(live_id, "file.upload", machine=machine, path=path)
+        return _json_ok(result)
+    except BaseException as exc:
+        if transfer_id:
+            with contextlib.suppress(Exception):
+                await _machine_dispatch(
+                    machine, lambda: transfer_abort_write(path, transfer_id),
+                    "transfer_abort_write", {"path": path, "transfer_id": transfer_id},
+                )
+        if isinstance(exc, asyncio.CancelledError):
+            raise
+        return _json_error(exc, status_code=409 if isinstance(exc, FileExistsError) else 400)
 
 
 async def api_file_action(request: Request) -> Response:
@@ -3017,6 +3222,9 @@ def ui_routes() -> list[Any]:
         Route(UI_API_PREFIX + "/files", api_files, methods=["GET"]),
         Route(UI_API_PREFIX + "/files/preview", api_file_preview, methods=["GET"]),
         Route(UI_API_PREFIX + "/files/content", api_file_content, methods=["GET"]),
+        Route(UI_API_PREFIX + "/files/download-ticket", api_file_download_ticket, methods=["POST"]),
+        Route(UI_API_PREFIX + "/files/download/{token}", api_file_download, methods=["GET", "HEAD"]),
+        Route(UI_API_PREFIX + "/files/upload", api_file_upload, methods=["POST"]),
         Route(UI_API_PREFIX + "/files/{action}", api_file_action, methods=["POST"]),
         Route(UI_API_PREFIX + "/gui/windows", api_gui_windows, methods=["GET"]),
         Route(UI_API_PREFIX + "/gui/frame", api_gui_frame, methods=["GET"]),
