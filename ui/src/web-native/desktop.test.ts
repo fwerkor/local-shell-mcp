@@ -89,9 +89,14 @@ describe("Desktop WebSocket transport", () => {
     c.queueAction({ type: "type", text: "中文" })
     await c.actionQueue
     expect(sent).toEqual([
-      { type: "action", observation_id: "obs-active", bounds: { x: 20, y: 30, width: 200, height: 100 }, action: { type: "click", x: 10, y: 20 } },
-      { type: "action", observation_id: "obs-active", bounds: { x: 20, y: 30, width: 200, height: 100 }, action: { type: "type", text: "中文" } },
+      { type: "action", request_id: 1, observation_id: "obs-active", bounds: { x: 20, y: 30, width: 200, height: 100 }, action: { type: "click", x: 10, y: 20 } },
+      { type: "action", request_id: 2, observation_id: "obs-active", bounds: { x: 20, y: 30, width: 200, height: 100 }, action: { type: "type", text: "中文" } },
     ])
+    expect(c.pendingActions).toBe(2)
+    c.handleControl(JSON.stringify({ type: "action-ack", request_id: 1, ok: true }))
+    expect(c.pendingActions).toBe(1)
+    c.handleControl(JSON.stringify({ type: "action-ack", request_id: 2, ok: true }))
+    expect(c.pendingActions).toBe(0)
   })
   test("bounds pending input backlog", async () => {
     const { c, sent } = harness()
@@ -107,7 +112,8 @@ describe("Desktop WebSocket transport", () => {
     c.frameInputEnabled = false
     c.queueAction({ type: "key", keys: ["ENTER"] })
     await c.actionQueue
-    expect(sent).toHaveLength(0)
+    expect(sent).toEqual([{ type: "refresh" }])
+    expect(c.awaitingFreshFrame).toBe(true)
   })
   test("drops queued input after switching windows", async () => {
     const { c, sent } = harness()
@@ -132,6 +138,33 @@ describe("Desktop WebSocket transport", () => {
     const { c, sent } = harness()
     c.refreshFrame()
     expect(sent).toEqual([{ type: "refresh" }])
+  })
+  test("only remote acknowledgements free backlog capacity", async () => {
+    const { c, sent } = harness()
+    for (let i = 0; i < MAX_PENDING_DESKTOP_ACTIONS; i++) c.queueAction({ type: "click", x: i, y: 0 })
+    await c.actionQueue
+    expect(c.pendingActions).toBe(MAX_PENDING_DESKTOP_ACTIONS)
+    c.queueAction({ type: "click", x: 10, y: 0 })
+    await c.actionQueue
+    expect(sent).toHaveLength(MAX_PENDING_DESKTOP_ACTIONS)
+    c.handleControl(JSON.stringify({ type: "action-ack", request_id: 2, ok: true }))
+    c.queueAction({ type: "click", x: 11, y: 0 })
+    await c.actionQueue
+    expect(sent).toHaveLength(MAX_PENDING_DESKTOP_ACTIONS + 1)
+    c.handleControl(JSON.stringify({ type: "action-ack", request_id: 5, ok: false, message: "stale" }))
+    expect(c.pendingActions).toBe(MAX_PENDING_DESKTOP_ACTIONS - 1)
+  })
+  test("refreshes expired frames once and accepts input on fresh frames", async () => {
+    const { c, sent } = harness()
+    c.frameExpiresAt = 0
+    c.queueAction({ type: "click", x: 1, y: 1 })
+    c.queueAction({ type: "click", x: 2, y: 2 })
+    await c.actionQueue
+    expect(sent).toEqual([{ type: "refresh" }])
+    c.publishFrame({ x: 20, y: 30, width: 200, height: 100, observation_id: "obs-new", ttl_s: 20, coordinate_input: true })
+    c.queueAction({ type: "click", x: 3, y: 3 })
+    await c.actionQueue
+    expect(sent.at(-1)?.observation_id).toBe("obs-new")
   })
   test("disconnect closes the stream and clears frame state", () => {
     const { c, socket } = harness()

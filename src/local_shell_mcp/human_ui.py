@@ -85,6 +85,7 @@ UI_MIN_ROWS = 8
 UI_MAX_ROWS = 500
 UI_TUI_EXIT_CODE = 4410
 UI_SHELL_EXIT_CODE = 4411
+DESKTOP_CREDENTIAL_WATCH_INTERVAL_S = 5
 _ACTIVE_UI_TERMINALS: set[int] = set()
 _LOGGER = logging.getLogger(__name__)
 
@@ -3015,6 +3016,7 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
 
     from .desktop_stream import (
         FRAME_INTERVAL_S,
+        RETAINED_OBSERVATIONS,
         STREAMS,
         DesktopStream,
         capture_frame,
@@ -3025,17 +3027,45 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
     if len(STREAMS) >= max(1, get_settings().ui_terminal_max_sessions):
         await websocket.close(code=4429, reason="Too many desktop streams")
         return
-    protocols = [item.strip() for item in websocket.headers.get("sec-websocket-protocol", "").split(",")]
-    await websocket.accept(subprotocol=UI_SUBPROTOCOL if UI_SUBPROTOCOL in protocols else None)
+    live_credentials = _live_websocket_credentials(websocket)
+    # Reserve capacity before the websocket handshake yields.
     STREAMS[stream.key] = stream
+    protocols = [item.strip() for item in websocket.headers.get("sec-websocket-protocol", "").split(",")]
+    try:
+        await websocket.accept(subprotocol=UI_SUBPROTOCOL if UI_SUBPROTOCOL in protocols else None)
+    except BaseException:
+        STREAMS.pop(stream.key, None)
+        raise
     is_remote = machine != "local"
     manager = None
-    live_credentials = _live_websocket_credentials(websocket)
+    send_lock = asyncio.Lock()
+
+    def live_credential_valid() -> bool:
+        if live_credentials is None:
+            return True
+        channel = get_live_channel_manager().authenticate(live_credentials[1])
+        return channel is not None and channel.live_id == live_credentials[0]
+
+    async def send_control(control: dict[str, Any]) -> None:
+        async with send_lock:
+            await websocket.send_text(json.dumps(control, separators=(",", ":")))
 
     async def emit(metadata: dict[str, Any], image: bytes) -> None:
-        await websocket.send_text(json.dumps({**metadata, "image": bool(image)}, separators=(",", ":")))
-        if image:
-            await websocket.send_bytes(image)
+        async with send_lock:
+            await websocket.send_text(json.dumps({**metadata, "image": bool(image)}, separators=(",", ":")))
+            if image:
+                await websocket.send_bytes(image)
+
+    async def ack_sender() -> None:
+        while True:
+            await send_control(await stream.acknowledgements.get())
+
+    async def credential_watcher() -> None:
+        while True:
+            await asyncio.sleep(DESKTOP_CREDENTIAL_WATCH_INTERVAL_S)
+            if not live_credential_valid():
+                await websocket.close(code=4401, reason="Live workspace credential expired or rotated")
+                return
 
     async def sender() -> None:
         if is_remote:
@@ -3044,12 +3074,12 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
                 {"stream_id": stream.key, "secret": stream.secret, "window_id": window_id},
                 45,
             )
-            await websocket.send_text('{"type":"ready"}')
+            await send_control({"type": "ready"})
             while True:
                 try:
                     metadata, image = await asyncio.wait_for(stream.frames.get(), timeout=10)
                 except TimeoutError:
-                    await websocket.send_text('{"type":"heartbeat"}')
+                    await send_control({"type": "heartbeat"})
                     continue
                 await emit(metadata, image)
                 if metadata.get("type") == "error":
@@ -3058,7 +3088,7 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
             from .gui import get_gui_manager
             nonlocal manager
             manager = get_gui_manager()
-            await websocket.send_text('{"type":"ready"}')
+            await send_control({"type": "ready"})
             focus_sensitive = (await manager.list_windows()).get("capabilities", {}).get("capture_requires_focus") is True
             refresh_event = asyncio.Event()
             refresh_event.set()
@@ -3071,15 +3101,15 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
                         try:
                             await asyncio.wait_for(refresh_event.wait(), timeout=10)
                         except TimeoutError:
-                            await websocket.send_text('{"type":"heartbeat"}')
+                            await send_control({"type": "heartbeat"})
                             continue
                         refresh_event.clear()
                     started = time.monotonic()
+                    if len(recent) >= RETAINED_OBSERVATIONS:
+                        await manager.discard_frame_observation(window_id, recent.pop(0))
                     data, image = await capture_frame(manager, window_id)
                     observation_id = data["observation_id"]
                     recent.append(observation_id)
-                    if len(recent) > 16:
-                        await manager.discard_frame_observation(window_id, recent.pop(0))
                     digest = hashlib.blake2s(image).digest()
                     await emit(frame_metadata(data), image if digest != last_digest or stream.force_frame else b"")
                     stream.force_frame = False
@@ -3096,8 +3126,8 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
             message = await websocket.receive()
             if message["type"] == "websocket.disconnect":
                 return
-            if live_credentials is not None and get_live_channel_manager().authenticate(live_credentials[1]) is None:
-                await websocket.close(code=4401, reason="Live workspace credential expired")
+            if not live_credential_valid():
+                await websocket.close(code=4401, reason="Live workspace credential expired or rotated")
                 return
             raw = message.get("text")
             if not isinstance(raw, str) or len(raw) > 16_384:
@@ -3119,9 +3149,17 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
                 if not isinstance(observation_id, str) or len(observation_id) > 128 or not isinstance(bounds, dict):
                     raise ValueError("Invalid desktop observation")
                 entry = {"observation_id": observation_id, "bounds": bounds, "action": action}
+                request_id = control.get("request_id")
+                if isinstance(request_id, int) and not isinstance(request_id, bool) and 0 < request_id < 2**53:
+                    entry["request_id"] = request_id
+                else:
+                    request_id = None
                 if is_remote:
                     if stream.actions.full():
-                        await websocket.send_text('{"type":"error","message":"Desktop input queue is full"}')
+                        if request_id is not None:
+                            stream.acknowledgements.put_nowait({"type": "action-ack", "request_id": request_id, "ok": False, "message": "Desktop input queue is full"})
+                        else:
+                            await send_control({"type": "error", "message": "Desktop input queue is full"})
                     else:
                         stream.actions.put_nowait(entry)
                 else:
@@ -3131,11 +3169,24 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
                         if hasattr(stream, "refresh_event"):
                             stream.refresh_event.set()
                     except Exception as exc:
-                        await websocket.send_text(json.dumps({"type": "error", "message": str(exc)[:240]}))
+                        if request_id is not None:
+                            stream.acknowledgements.put_nowait({"type": "action-ack", "request_id": request_id, "ok": False, "message": str(exc)[:240]})
+                        else:
+                            await send_control({"type": "error", "message": str(exc)[:240]})
+                    else:
+                        if request_id is not None:
+                            stream.acknowledgements.put_nowait({"type": "action-ack", "request_id": request_id, "ok": True})
             except (KeyError, TypeError, ValueError) as exc:
-                await websocket.send_text(json.dumps({"type": "error", "message": str(exc)[:240]}))
+                request_id = control.get("request_id") if isinstance(control, dict) else None
+                if (isinstance(control, dict) and control.get("type") == "action"
+                        and isinstance(request_id, int) and not isinstance(request_id, bool)):
+                    await send_control({"type": "action-ack", "request_id": request_id, "ok": False, "message": str(exc)[:240]})
+                else:
+                    await send_control({"type": "error", "message": str(exc)[:240]})
 
-    tasks = [asyncio.create_task(sender()), asyncio.create_task(receiver())]
+    tasks = [asyncio.create_task(sender()), asyncio.create_task(receiver()), asyncio.create_task(ack_sender())]
+    if live_credentials is not None:
+        tasks.append(asyncio.create_task(credential_watcher()))
     try:
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in pending:

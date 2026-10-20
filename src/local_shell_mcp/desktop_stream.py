@@ -23,6 +23,7 @@ FRAME_WIDTH = 1280
 FRAME_HEIGHT = 800
 FRAME_QUALITY = 46
 STREAM_IDLE_S = 12.0
+RETAINED_OBSERVATIONS = 3
 
 
 def compress_frame(path: Path) -> bytes:
@@ -85,7 +86,10 @@ class DesktopStream:
     actions: asyncio.Queue[dict[str, Any]] = field(
         default_factory=lambda: asyncio.Queue(maxsize=8)
     )
-    last_contact: float = field(default_factory=time.monotonic)
+    acknowledgements: asyncio.Queue[dict[str, Any]] = field(
+        default_factory=lambda: asyncio.Queue(maxsize=32)
+    )
+    last_contact: float | None = None
     force_frame: bool = False
 
     def enqueue_frame(self, metadata: dict[str, Any], image: bytes) -> None:
@@ -111,7 +115,7 @@ def worker_frame(stream_id: str, secret: str, machine: str, body: dict[str, Any]
     if (stream is None or stream.machine != machine
             or not hmac.compare_digest(stream.secret, secret)):
         raise PermissionError("Unknown desktop stream")
-    if time.monotonic() - stream.last_contact > STREAM_IDLE_S:
+    if stream.last_contact is not None and time.monotonic() - stream.last_contact > STREAM_IDLE_S:
         STREAMS.pop(stream_id, None)
         raise PermissionError("Desktop stream expired")
     raw = body.get("image")
@@ -122,6 +126,17 @@ def worker_frame(stream_id: str, secret: str, machine: str, body: dict[str, Any]
         if not isinstance(metadata.get("observation_id"), str) or not isinstance(metadata.get("bounds"), dict):
             raise ValueError("Incomplete desktop observation")
     errors = body.get("errors")
+    acks = body.get("acks", [])
+    if not isinstance(acks, list) or len(acks) > 8:
+        raise ValueError("Invalid desktop acknowledgements")
+    for ack in acks:
+        if (not isinstance(ack, dict)
+                or not isinstance(ack.get("request_id"), int)
+                or isinstance(ack["request_id"], bool)
+                or not isinstance(ack.get("ok"), bool)):
+            raise ValueError("Invalid desktop acknowledgement")
+    if stream.acknowledgements.qsize() + len(acks) > stream.acknowledgements.maxsize:
+        raise ValueError("Desktop acknowledgement queue is full")
     if isinstance(metadata, dict) and isinstance(errors, list):
         for error in errors[:1]:
             if isinstance(error, str):
@@ -143,6 +158,13 @@ def worker_frame(stream_id: str, secret: str, machine: str, body: dict[str, Any]
             if isinstance(error, str):
                 stream.enqueue_frame({"type": "error", "message": error[:240]}, b"")
     stream.last_contact = time.monotonic()
+    for ack in acks:
+        stream.acknowledgements.put_nowait({
+            "type": "action-ack",
+            "request_id": ack["request_id"],
+            "ok": ack["ok"],
+            **({"message": str(ack["message"])[:240]} if not ack["ok"] and "message" in ack else {}),
+        })
     refresh = stream.force_frame
     stream.force_frame = False
     return {"actions": stream.drain_actions(), "refresh": refresh}
@@ -181,14 +203,21 @@ async def _worker_stream_loop(stream_id: str, secret: str, window_id: str) -> No
     observations: list[str] = []
     force_frame = True
     pending_errors: list[str] = []
+    pending_acks: list[dict[str, Any]] = []
     capabilities = (await manager.list_windows()).get("capabilities", {})
     focus_sensitive = capabilities.get("capture_requires_focus") is True
     try:
         while True:
             started = time.monotonic()
             if focus_sensitive and not force_frame:
-                result = await asyncio.to_thread(_post_frame, url, {"errors": pending_errors} if pending_errors else {}, secret)
+                payload = {}
+                if pending_errors:
+                    payload["errors"] = pending_errors
+                if pending_acks:
+                    payload["acks"] = pending_acks
+                result = await asyncio.to_thread(_post_frame, url, payload, secret)
                 pending_errors = []
+                pending_acks = []
                 for entry in result.get("actions", []):
                     if not isinstance(entry, dict):
                         continue
@@ -196,10 +225,18 @@ async def _worker_stream_loop(stream_id: str, secret: str, window_id: str) -> No
                         await manager.human_act(window_id, entry["observation_id"], entry["bounds"], [entry["action"]])
                         force_frame = True
                     except Exception as exc:
-                        pending_errors.append(str(exc)[:240])
+                        if isinstance(entry.get("request_id"), int):
+                            pending_acks.append({"request_id": entry["request_id"], "ok": False, "message": str(exc)[:240]})
+                        else:
+                            pending_errors.append(str(exc)[:240])
+                    else:
+                        if isinstance(entry.get("request_id"), int):
+                            pending_acks.append({"request_id": entry["request_id"], "ok": True})
                 force_frame = force_frame or bool(result.get("refresh"))
                 await asyncio.sleep(max(0.05, FRAME_INTERVAL_S - (time.monotonic() - started)))
                 continue
+            if len(observations) >= RETAINED_OBSERVATIONS:
+                await manager.discard_frame_observation(window_id, observations.pop(0))
             data, image = await capture_frame(manager, window_id)
             observation = data["observation_id"]
             changed = force_frame or hashlib.blake2s(image).digest() != previous_image
@@ -207,6 +244,9 @@ async def _worker_stream_loop(stream_id: str, secret: str, window_id: str) -> No
             if pending_errors:
                 payload["errors"] = pending_errors
                 pending_errors = []
+            if pending_acks:
+                payload["acks"] = pending_acks
+                pending_acks = []
             if changed:
                 payload["image"] = base64.b64encode(image).decode("ascii")
                 previous_image = hashlib.blake2s(image).digest()
@@ -220,11 +260,15 @@ async def _worker_stream_loop(stream_id: str, secret: str, window_id: str) -> No
                     try:
                         await manager.human_act(window_id, entry["observation_id"], entry["bounds"], [entry["action"]])
                     except Exception as exc:
-                        pending_errors.append(str(exc)[:240])
+                        if isinstance(entry.get("request_id"), int):
+                            pending_acks.append({"request_id": entry["request_id"], "ok": False, "message": str(exc)[:240]})
+                        else:
+                            pending_errors.append(str(exc)[:240])
+                    else:
+                        if isinstance(entry.get("request_id"), int):
+                            pending_acks.append({"request_id": entry["request_id"], "ok": True})
             finally:
                 observations.append(observation)
-                if len(observations) > 16:
-                    await manager.discard_frame_observation(window_id, observations.pop(0))
             await asyncio.sleep(max(0.05, FRAME_INTERVAL_S - (time.monotonic() - started)))
     except asyncio.CancelledError:
         raise

@@ -146,6 +146,9 @@ export class DesktopController extends BaseController {
   private actionTargetEpoch = 0
   private actionQueue: Promise<void> = Promise.resolve()
   private pendingActions = 0
+  private nextRequestId = 0
+  private pendingRequestIds = new Set<number>()
+  private awaitingFreshFrame = false
   private pointerStart: PointerStart | null = null
   private suppressClickUntil = 0
   private clickTimer: number | null = null
@@ -413,6 +416,14 @@ export class DesktopController extends BaseController {
       this.context.notify(String(message.message || "Desktop error"), "error")
       return
     }
+    if (message.type === "action-ack" && typeof message.request_id === "number") {
+      if (this.pendingRequestIds.delete(message.request_id)) {
+        this.pendingActions = this.pendingRequestIds.size
+        this.renderInputPulse()
+      }
+      if (message.ok === false) this.context.notify(String(message.message || "Desktop input failed"), "error")
+      return
+    }
     if (message.type !== "frame") return
     if (typeof message.warning === "string") this.context.notify(message.warning, "error")
     const bounds = message.bounds as GuiBounds | undefined
@@ -428,6 +439,7 @@ export class DesktopController extends BaseController {
   }
 
   private publishFrame(data: GuiBounds & { observation_id: string; ttl_s: number; coordinate_input: boolean }): void {
+    this.awaitingFreshFrame = false
     this.frameBounds = { x: data.x, y: data.y, width: data.width, height: data.height }
     this.frameObservationId = data.observation_id
     this.frameExpiresAt = Date.now() + Math.max(0, data.ttl_s * 1000 - 1000)
@@ -475,6 +487,9 @@ export class DesktopController extends BaseController {
       socket.close()
     }
     this.pendingFrame = null
+    this.pendingRequestIds.clear()
+    this.pendingActions = 0
+    this.awaitingFreshFrame = false
     this.cancelPendingPointerInput()
     this.frameBounds = null
     this.frameObservationId = ""
@@ -509,16 +524,36 @@ export class DesktopController extends BaseController {
     const bounds = observedBounds || this.frameBounds
     const observation_id = observedObservationId || this.frameObservationId
     if (!socket || socket.readyState !== WebSocket.OPEN || !bounds || !observation_id || !this.frameInputEnabled) return
-    if (Date.now() >= this.frameExpiresAt || this.pendingActions >= MAX_PENDING_DESKTOP_ACTIONS) return
-    this.pendingActions++
+    if (Date.now() >= this.frameExpiresAt) {
+      if (!this.awaitingFreshFrame) {
+        this.awaitingFreshFrame = true
+        this.refreshFrame()
+        this.context.notify("Desktop frame expired. Refreshing; retry input when the updated frame appears.", "error")
+      }
+      return
+    }
+    if (this.pendingRequestIds.size >= MAX_PENDING_DESKTOP_ACTIONS) {
+      this.context.notify("Desktop input is busy; wait for the previous actions to finish.", "error")
+      return
+    }
+    const request_id = ++this.nextRequestId
+    this.pendingRequestIds.add(request_id)
+    this.pendingActions = this.pendingRequestIds.size
     this.renderInputPulse()
     const run = () => {
+      let sent = false
       try {
         if (socket !== this.socket || epoch !== this.actionTargetEpoch) return
-        socket.send(JSON.stringify({ type: "action", observation_id, bounds, action }))
+        socket.send(JSON.stringify({ type: "action", request_id, observation_id, bounds, action }))
+        sent = true
+      } catch (error) {
+        this.context.notify(error instanceof Error ? error.message : String(error), "error")
       } finally {
-        this.pendingActions = Math.max(0, this.pendingActions - 1)
-        this.renderInputPulse()
+        if (!sent) {
+          this.pendingRequestIds.delete(request_id)
+          this.pendingActions = this.pendingRequestIds.size
+          this.renderInputPulse()
+        }
       }
     }
     this.actionQueue = this.actionQueue.then(run, run)
