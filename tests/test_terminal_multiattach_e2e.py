@@ -87,3 +87,95 @@ async def test_two_terminal_clients_switch_and_reattach_without_killing_sessions
         for attachment in attachments:
             await attachment.close()
         tmux_run("kill-server")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="tmux PTYs require POSIX")
+@pytest.mark.asyncio
+async def test_native_websocket_two_clients_switch_and_reconnect(tmp_path, monkeypatch):
+    """Exercise real HTTP upgrade, WebSocket relay, local PTY and tmux together."""
+    import socket
+
+    import uvicorn
+    from websockets.asyncio.client import connect
+
+    from local_shell_mcp.http_app import build_http_app
+    from local_shell_mcp.settings import get_settings
+    from local_shell_mcp.shell_ops import kill_shell, list_shells, start_shell
+
+    if shutil.which("tmux") is None:
+        pytest.skip("system tmux is not installed")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
+    get_settings.cache_clear()
+    sessions = []
+    server_task = None
+    server = None
+    try:
+        for name in ("ws-first", "ws-second"):
+            result = await start_shell(cwd=".", name=name)
+            assert str(result["backend"]).startswith("tmux-")
+            sessions.append(result["session_id"])
+
+        with socket.socket() as listen:
+            listen.bind(("127.0.0.1", 0))
+            port = listen.getsockname()[1]
+        server = uvicorn.Server(uvicorn.Config(
+            build_http_app(), host="127.0.0.1", port=port,
+            log_level="error", access_log=False, lifespan="off",
+        ))
+        server_task = asyncio.create_task(server.serve())
+        async with asyncio.timeout(8):
+            while not server.started:
+                assert not server_task.done(), "HTTP server terminated during startup"
+                await asyncio.sleep(0.05)
+
+        def terminal_url(session):
+            return (
+                f"ws://127.0.0.1:{port}/ui/ws/shell?machine=local"
+                f"&session_id={session}&cols=90&rows=30"
+            )
+
+        async def expect_marker(websocket, marker):
+            output = bytearray()
+            async with asyncio.timeout(8):
+                while marker not in output:
+                    packet = await websocket.recv()
+                    if isinstance(packet, bytes):
+                        output.extend(packet)
+            return bytes(output)
+
+        async with connect(terminal_url(sessions[0]), subprotocols=["lsm-ui"], proxy=None) as first:
+            async with connect(terminal_url(sessions[0]), subprotocols=["lsm-ui"], proxy=None) as second:
+                marker = b"WEB-MULTICLIENT-" + uuid.uuid4().hex[:8].encode()
+                await first.send(b"printf '" + marker + b"\\n'\r")
+                await asyncio.gather(expect_marker(first, marker), expect_marker(second, marker))
+
+                # The first viewer switches to a different shell while the
+                # second viewer remains attached to the original session.
+                await first.close()
+                async with connect(terminal_url(sessions[1]), subprotocols=["lsm-ui"], proxy=None) as switched:
+                    marker = b"WEB-SWITCH-" + uuid.uuid4().hex[:8].encode()
+                    await switched.send(b"printf '" + marker + b"\\n'\r")
+                    await expect_marker(switched, marker)
+                    original = b"ORIGINAL-STILL-OPEN-" + uuid.uuid4().hex[:8].encode()
+                    await second.send(b"printf '" + original + b"\\n'\r")
+                    await expect_marker(second, original)
+
+            # The browser can reconnect to an existing persistent shell even
+            # after its last viewer leaves; no shell ownership is transferred.
+            async with connect(terminal_url(sessions[0]), subprotocols=["lsm-ui"], proxy=None) as reattached:
+                marker = b"WEB-RECONNECTED-" + uuid.uuid4().hex[:8].encode()
+                await reattached.send(b"printf '" + marker + b"\\n'\r")
+                await expect_marker(reattached, marker)
+            active = {row["session_id"] for row in (await list_shells())["sessions"]}
+            assert set(sessions) <= active
+    finally:
+        if server is not None:
+            server.should_exit = True
+        if server_task is not None:
+            await asyncio.wait_for(server_task, timeout=10)
+        for session_id in sessions:
+            await kill_shell(session_id)
+        get_settings.cache_clear()
