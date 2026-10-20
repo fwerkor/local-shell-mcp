@@ -16,6 +16,7 @@ from local_shell_mcp.settings import get_settings
 def chat_store(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_BACKEND", "file")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
     monkeypatch.delenv("LOCAL_SHELL_MCP_HOSTED_CHAT_ENCRYPTION_KEY", raising=False)
     get_settings.cache_clear()
     yield HostedChatStore(prefix="hosted-chat-test")
@@ -224,3 +225,69 @@ async def test_background_runner_checkpoints_survive_restart(chat_store, monkeyp
     assert after["status"] == "idle"
     assert after["messages"][-1]["content"] == "persisted"
     assert after["messages"][0]["content"] == "Hello"
+
+
+def test_hosted_chat_http_api_persists_profiles_and_history(chat_store, monkeypatch):
+    from starlette.applications import Starlette
+    from starlette.testclient import TestClient
+
+    from local_shell_mcp.human_ui import ui_routes
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED", "true")
+    get_settings.cache_clear()
+    with TestClient(Starlette(routes=ui_routes())) as client:
+        profile = client.post(
+            "/api/ui/hosted-chat/profile-save",
+            json={
+                "name": "Secure profile",
+                "endpoint": "https://model.example.net/v1",
+                "model": "model-1",
+                "api_key": "private-key-not-exposed",
+            },
+        )
+        assert profile.status_code == 200, profile.text
+        public = profile.json()["data"]
+        assert public["name"] == "Secure profile"
+        assert "private-key-not-exposed" not in profile.text
+        assert "private-key-not-exposed" not in client.get("/api/ui/hosted-chat/profiles").text
+
+        chat = client.post(
+            "/api/ui/hosted-chat/conversation-create",
+            json={
+                "profile_id": public["id"],
+            },
+        )
+        assert chat.status_code == 200, chat.text
+        cid = chat.json()["data"]["id"]
+        details = client.get(f"/api/ui/hosted-chat/conversation?id={cid}")
+        assert details.json()["data"]["messages"] == []
+        response = client.post(
+            "/api/ui/hosted-chat/conversation-update",
+            json={
+                "id": cid,
+                "title": "Permanent conversation",
+            },
+        )
+        assert response.json()["data"]["title"] == "Permanent conversation"
+        listing = client.get("/api/ui/hosted-chat/conversations")
+        assert listing.json()["data"][0]["title"] == "Permanent conversation"
+        assert client.get("/api/ui/hosted-chat/conversation?id=c_notmine").status_code == 400
+        assert (
+            client.post("/api/ui/hosted-chat/conversation-delete", json={"id": cid}).status_code
+            == 200
+        )
+
+
+def test_hosted_chat_disabled_by_default_and_rejects_ephemeral_state(chat_store, monkeypatch):
+    from starlette.applications import Starlette
+    from starlette.testclient import TestClient
+
+    from local_shell_mcp.human_ui import ui_routes
+
+    with TestClient(Starlette(routes=ui_routes())) as client:
+        assert client.get("/api/ui/hosted-chat/profiles").status_code == 404
+    monkeypatch.setenv("LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED", "true")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_BACKEND", "memory")
+    get_settings.cache_clear()
+    with TestClient(Starlette(routes=ui_routes())) as client:
+        assert client.get("/api/ui/hosted-chat/profiles").status_code == 503

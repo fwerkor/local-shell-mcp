@@ -3206,8 +3206,11 @@ async def ui_root_redirect(request: Request) -> RedirectResponse:  # noqa: ARG00
 async def api_hosted_chat(request: Request) -> Response:
     """Durable Hosted Chat, using the caller's principal for all MCP operations."""
     try:
-        if not get_settings().hosted_chat_enabled:
+        settings = get_settings()
+        if not settings.hosted_chat_enabled:
             raise HTTPException(status_code=404, detail="Hosted Chat is disabled")
+        if settings.state_backend == "memory":
+            raise HTTPException(status_code=503, detail="Hosted Chat requires persistent file or Redis state storage")
         _require_ui_scopes(request, "shell:read")
         from .hosted_chat_store import hosted_chat_runner, hosted_chat_store
 
