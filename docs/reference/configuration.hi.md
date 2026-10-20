@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: b174a1b427ca9b618c63375702f4a652941f83c6b1e1abaee1a99d1ab278deab -->
+<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
 # Configuration
 
 Repository एक copyable starter file देता है: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example)। Docker Compose उससे बने `.env` को automatically पढ़ता है, और अन्य runtimes वही `LOCAL_SHELL_MCP_` environment variables उपयोग कर सकते हैं। YAML binary/source deployments के लिए optional advanced input रहता है; file explicitly बनाएँ और `LOCAL_SHELL_MCP_CONFIG` या `--config` से चुनें। Environment variables YAML values को override करती हैं, इसलिए intentional override के अलावा वही setting दोनों जगह define न करें। YAML keys नीचे दिखाए field names उपयोग करती हैं।
@@ -102,7 +102,7 @@ Local-only testing के लिए `auth_bypass_localhost` default enabled ह�
 | YAML key | Environment variable | Default | Notes |
 |---|---|---|---|
 | `remote_enabled` | `LOCAL_SHELL_MCP_REMOTE_ENABLED` | `True` | `/join`, `/remote/*` और MCP tools `remote_*` control करता है। |
-| `remote_invite_ttl_s` | `LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S` | `600` |  |
+| `remote_invite_ttl_s` | `LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S` | `7200` |  |
 | `remote_poll_timeout_s` | `LOCAL_SHELL_MCP_REMOTE_POLL_TIMEOUT_S` | `25` |  |
 | `remote_job_timeout_s` | `LOCAL_SHELL_MCP_REMOTE_JOB_TIMEOUT_S` | `3600` |  |
 | `remote_max_pending_jobs` | `LOCAL_SHELL_MCP_REMOTE_MAX_PENDING_JOBS` | `256` | हर worker पर maximum queued/pending jobs। |

@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import os
+import secrets
 import sys
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,7 @@ def _read_invite(args: argparse.Namespace) -> str:
 def _worker_payload(name: str | None, workdir: str, invite: str) -> dict[str, Any]:
     return {
         "invite": invite,
+        "enrollment_id": secrets.token_urlsafe(24),
         "name": name,
         "workdir": workdir,
         "capabilities": remote.worker_capabilities(),

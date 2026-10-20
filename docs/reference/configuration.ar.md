@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: b174a1b427ca9b618c63375702f4a652941f83c6b1e1abaee1a99d1ab278deab -->
+<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
 # الإعدادات
 
 يوفر repository ملف بدء واحدًا قابلًا للنسخ: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). يقرأ Docker Compose ملف `.env` الناتج تلقائيًا، ويمكن لبقية runtimes استخدام environment variables نفسها ذات prefix `LOCAL_SHELL_MCP_`. يبقى YAML input متقدمًا اختياريًا لـ binary/source deployments؛ أنشئ ملفًا صراحة واختره عبر `LOCAL_SHELL_MCP_CONFIG` أو `--config`. تتغلب environment variables على قيم YAML، لذا تجنب تعريف setting نفسه في الاثنين إلا إذا كان override مقصودًا. تستخدم YAML keys أسماء fields المبينة أدناه.
@@ -102,7 +102,7 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-long-random-secret
 | YAML key | Environment variable | Default | ملاحظات |
 |---|---|---|---|
 | `remote_enabled` | `LOCAL_SHELL_MCP_REMOTE_ENABLED` | `True` | يتحكم في `/join` و`/remote/*` وMCP tools `remote_*`. |
-| `remote_invite_ttl_s` | `LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S` | `600` |  |
+| `remote_invite_ttl_s` | `LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S` | `7200` |  |
 | `remote_poll_timeout_s` | `LOCAL_SHELL_MCP_REMOTE_POLL_TIMEOUT_S` | `25` |  |
 | `remote_job_timeout_s` | `LOCAL_SHELL_MCP_REMOTE_JOB_TIMEOUT_S` | `3600` |  |
 | `remote_max_pending_jobs` | `LOCAL_SHELL_MCP_REMOTE_MAX_PENDING_JOBS` | `256` | الحد الأقصى لـ queued/pending jobs لكل worker. |

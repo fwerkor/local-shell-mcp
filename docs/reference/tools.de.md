@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
+<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
 # Tool-Referenz
 
 Diese Seite wird aus den tatsächlichen MCP-Tool-Schemas aufgebaut. Führen Sie nach Änderungen an der öffentlichen Tool-Oberfläche `python scripts/generate-tools-reference.py` aus, um die English-Referenz zu aktualisieren.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-Verwaltet genau eine dauerhafte Logical Session. start erstellt eine neue Task und gibt deren session_id zurück. resume setzt nur die explizite session_id fort, die der Benutzer angegeben hat oder die bereits in dieser Unterhaltung vorhanden ist. Alle Aktionen außer start benötigen session_id. Aktionen: start, resume, get, report, finish, cancel, delete. report akzeptiert summary/findings/next/blockers/objective/label; delete erfordert eine terminale Session.
+Verwaltet genau eine dauerhafte Logical Session. start erstellt eine neue Task und gibt deren session_id zurück. resume setzt nur die explizite session_id fort, die der Benutzer angegeben hat oder die bereits in dieser Unterhaltung vorhanden ist. Alle Aktionen außer start benötigen session_id. Aktionen: start, resume, get, report, finish, cancel, delete. report akzeptiert summary/findings/next/blockers/objective/label; delete erfordert eine terminale Session. Nach 24 Stunden Inaktivität werden aktive Sessions beim Zugriff, Auflisten oder Starten als stale markiert, sofern kein Toolaufruf läuft. Stale Sessions bleiben fortsetzbar und können bei der Verlaufsbereinigung nach Alter entfernt werden.
 
 | Parameter | Typ | Erforderlich/default | Beschreibung |
 |---|---|---|---|
@@ -770,7 +770,7 @@ Wenn `machine` angegeben wird, erfordert der Aufruf zusätzlich `remote:use` und
 
 ### `remote_manage`
 
-Verwaltet Remote Workers mit action=invite, list, revoke oder rename. invite akzeptiert name/workdir/ttl_s; revoke benötigt machine; rename benötigt machine und new_name.
+Verwaltet Remote Workers mit action=invite, list, reset, revoke oder rename. invite akzeptiert name/workdir/ttl_s/max_uses; revoke benötigt machine; rename benötigt machine und new_name. max_uses hat den Standardwert 1. reset erfordert machine und entfernt wartende oder sicher abbrechbare aktive Steuerungsanfragen, ohne den Worker zu trennen; bereits gestartete geschützte Vorgänge bleiben erhalten.
 
 | Parameter | Typ | Erforderlich/default | Beschreibung |
 |---|---|---|---|
@@ -778,6 +778,7 @@ Verwaltet Remote Workers mit action=invite, list, revoke oder rename. invite akz
 | `name` | `string \| null` | `null` |  |
 | `workdir` | `string \| null` | `null` |  |
 | `ttl_s` | `integer \| null` | `null` |  |
+| `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session für diesen Tool-Aufruf. Übergeben Sie während der Arbeit an der Task die von session_manage zurückgegebene session_id. Verwenden Sie null nur, wenn keine Logical Session aktiv ist. |

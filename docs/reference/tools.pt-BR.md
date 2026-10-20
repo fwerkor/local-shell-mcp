@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
+<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
 # Referência de ferramentas
 
 Esta página é construída a partir dos schemas MCP reais. Execute `python scripts/generate-tools-reference.py` após alterar a superfície pública de tools para atualizar a referência English.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-Gerencia uma única Logical Session durável. start cria uma nova tarefa e retorna seu session_id. resume continua somente o session_id explícito fornecido pelo usuário ou já presente nesta conversa. Todas as ações, exceto start, exigem session_id. Ações: start, resume, get, report, finish, cancel, delete. report aceita summary/findings/next/blockers/objective/label; delete exige uma Session terminal.
+Gerencia uma única Logical Session durável. start cria uma nova tarefa e retorna seu session_id. resume continua somente o session_id explícito fornecido pelo usuário ou já presente nesta conversa. Todas as ações, exceto start, exigem session_id. Ações: start, resume, get, report, finish, cancel, delete. report aceita summary/findings/next/blockers/objective/label; delete exige uma Session terminal. Após 24 horas de inatividade, Sessions ativas tornam-se stale ao acessar, listar ou iniciar, exceto quando há uma chamada de ferramenta em andamento. Sessions stale podem ser retomadas ou removidas do histórico a partir das mais antigas.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
@@ -769,7 +769,7 @@ Quando `machine` é informado, a chamada também exige `remote:use` e é executa
 
 ### `remote_manage`
 
-Gerencia remote workers com action=invite, list, revoke ou rename. invite aceita name/workdir/ttl_s; revoke exige machine; rename exige machine e new_name.
+Gerencia remote workers com action=invite, list, reset, revoke ou rename. invite aceita name/workdir/ttl_s/max_uses; revoke exige machine; rename exige machine e new_name. max_uses tem valor padrão 1. reset exige machine e limpa solicitações de controle na fila ou ativas que podem ser canceladas com segurança, sem desconectar o worker; operações protegidas já iniciadas são preservadas.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
@@ -777,6 +777,7 @@ Gerencia remote workers com action=invite, list, revoke ou rename. invite aceita
 | `name` | `string \| null` | `null` |  |
 | `workdir` | `string \| null` | `null` |  |
 | `ttl_s` | `integer \| null` | `null` |  |
+| `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session desta chamada de tool. Enquanto trabalha na tarefa, passe o session_id retornado por session_manage. Use null somente quando não houver Logical Session ativa. |

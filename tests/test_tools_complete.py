@@ -180,8 +180,8 @@ class FakeRemoteManager:
         self.calls.append((machine, tool, args, timeout_s if timeout_s is not None else rpc_timeout_s))
         return {"ok": True, "message": "", "data": {"tool": tool}}
 
-    async def create_invite(self, name=None, workdir=None, ttl_s=None):
-        return {"name": name, "workdir": workdir, "ttl_s": ttl_s}
+    async def create_invite(self, name=None, workdir=None, ttl_s=None, max_uses=1):
+        return {"name": name, "workdir": workdir, "ttl_s": ttl_s, "max_uses": max_uses}
 
     def list_machines(self):
         return {"machines": [{"name": "node"}]}
@@ -343,10 +343,10 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
         assert result is not None, name
 
     invite = await _raw_tool(mcp, "remote_manage")(
-        action="invite", name="node", workdir="/workspace", ttl_s=120
+        action="invite", name="node", workdir="/workspace", ttl_s=120, max_uses=1
     )
     assert invite["ok"] is True
-    assert invite["data"] == {"name": "node", "workdir": "/workspace", "ttl_s": 120}
+    assert invite["data"] == {"name": "node", "workdir": "/workspace", "ttl_s": 120, "max_uses": 1}
     renamed = await _raw_tool(mcp, "remote_manage")(
         action="rename", machine="node", new_name="renamed"
     )

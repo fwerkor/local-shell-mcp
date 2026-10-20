@@ -1832,6 +1832,7 @@ async def api_remotes(request: Request) -> Response:
             body.get("workdir"),
             body.get("ttl_s"),
             base_url=public_base_url(request),
+            max_uses=body.get("max_uses", 1),
         )
         _record_live_human_action(live_id, "remote.invite", name=body.get("name"))
         return _json_ok(result)

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/react/test-utils"
 import { act } from "react"
-import { RemoteInviteResultDialog, RemotesScreen } from "./remotes-screen"
+import { RemoteInviteResultDialog, RemotesScreen, parseRemoteInviteInput } from "./remotes-screen"
 
 const originalFetch = globalThis.fetch
 const renderers: Array<{ destroy: () => void }> = []
@@ -69,6 +69,7 @@ describe("RemoteInviteResultDialog", () => {
     expect(instructionLine).toBe(inviteLine + 1)
     expect(tailLine).toBeGreaterThan(instructionLine)
     expect(expiryLine).toBeGreaterThan(tailLine)
+    expect(lines[expiryLine]).toContain(String(new Date(1_800_000_000 * 1000).getFullYear()))
     expect(lines[tailLine]).not.toContain("└")
   })
 })
@@ -124,5 +125,38 @@ describe("RemotesScreen reset confirmation", () => {
     expect(resetCalls).toBe(1)
     resolveReset?.(success({ cancelled_jobs: 1, preserved_jobs: 0 }))
     await renderUntil(setup, () => !setup.captureCharFrame().includes("Reset worker-a?"))
+  })
+})
+
+describe("Remote invite input", () => {
+  test("preserves legacy names and workdirs while allowing batch use and TTL flags", () => {
+    expect(parseRemoteInviteInput("")).toEqual({ name: undefined, workdir: undefined, max_uses: undefined, ttl_s: undefined })
+    expect(parseRemoteInviteInput("host /srv/work")).toEqual({ name: "host", workdir: "/srv/work", max_uses: undefined, ttl_s: undefined })
+    expect(parseRemoteInviteInput("--max-uses 50 --ttl-s 604800")).toEqual({
+      name: undefined, workdir: undefined, max_uses: 50, ttl_s: 604800,
+    })
+    expect(parseRemoteInviteInput("host /srv/work --ttl-s 7200")).toEqual({
+      name: "host", workdir: "/srv/work", max_uses: undefined, ttl_s: 7200,
+    })
+    expect(parseRemoteInviteInput("--workdir /srv/work --max-uses 5")).toEqual({
+      name: undefined, workdir: "/srv/work", max_uses: 5, ttl_s: undefined,
+    })
+    for (const input of [
+      "--workdir /srv/My Projects --max-uses 5",
+      '--workdir "/srv/My Projects" --max-uses 5',
+      "--workdir '/srv/My Projects' --max-uses 5",
+      "--workdir /srv/My\\ Projects --max-uses 5",
+      "--max-uses 5 --workdir /srv/My Projects",
+    ]) {
+      expect(parseRemoteInviteInput(input)).toEqual({
+        name: undefined, workdir: "/srv/My Projects", max_uses: 5, ttl_s: undefined,
+      })
+    }
+    expect(parseRemoteInviteInput('host --workdir "/srv/My Projects" --ttl-s 7200')).toEqual({
+      name: "host", workdir: "/srv/My Projects", max_uses: undefined, ttl_s: 7200,
+    })
+    expect(parseRemoteInviteInput('host "/srv/My Projects" --max-uses 1')).toEqual({
+      name: "host", workdir: "/srv/My Projects", max_uses: 1, ttl_s: undefined,
+    })
   })
 })

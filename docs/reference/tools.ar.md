@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
+<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
 # مرجع الأدوات
 
 تُبنى هذه الصفحة من MCP tool schemas الفعلية. شغّل `python scripts/generate-tools-reference.py` بعد تغيير public tool surface لتحديث English reference.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-أدر Logical Session دائمة واحدة. ينشئ start مهمة جديدة ويعيد session_id الخاص بها. يتابع resume فقط session_id الصريح الذي قدّمه المستخدم أو الموجود بالفعل في هذه المحادثة. تتطلب كل الإجراءات عدا start قيمة session_id. الإجراءات: start, resume, get, report, finish, cancel, delete. يقبل report الحقول summary/findings/next/blockers/objective/label، ويتطلب delete Session نهائية.
+أدر Logical Session دائمة واحدة. ينشئ start مهمة جديدة ويعيد session_id الخاص بها. يتابع resume فقط session_id الصريح الذي قدّمه المستخدم أو الموجود بالفعل في هذه المحادثة. تتطلب كل الإجراءات عدا start قيمة session_id. الإجراءات: start, resume, get, report, finish, cancel, delete. يقبل report الحقول summary/findings/next/blockers/objective/label، ويتطلب delete Session نهائية. تصبح الجلسات النشطة الخاملة لمدة 24 ساعة stale عند الوصول أو العرض أو البدء، ما لم يكن هناك استدعاء أداة قيد التنفيذ. يمكن استئناف الجلسات stale وتنظيفها من السجل بدءًا بالأقدم.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
@@ -769,7 +769,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `remote_manage`
 
-يدير remote workers عبر action=invite أو list أو revoke أو rename. invite يقبل name/workdir/ttl_s؛ revoke يحتاج machine؛ rename يحتاج machine وnew_name.
+يدير remote workers عبر action=invite أو list أو reset أو revoke أو rename. invite يقبل name/workdir/ttl_s/max_uses؛ revoke يحتاج machine؛ rename يحتاج machine وnew_name. القيمة الافتراضية لـ max_uses هي 1. يتطلب reset المعامل machine، ويمسح طلبات التحكم المنتظرة والقابلة للإلغاء بأمان دون فصل العامل؛ وتبقى العمليات المحمية التي بدأت بالفعل كما هي.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
@@ -777,6 +777,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 | `name` | `string \| null` | `null` |  |
 | `workdir` | `string \| null` | `null` |  |
 | `ttl_s` | `integer \| null` | `null` |  |
+| `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
