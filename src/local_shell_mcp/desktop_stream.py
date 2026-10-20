@@ -46,6 +46,7 @@ def compress_frame(path: Path) -> bytes:
 
 async def capture_frame(manager: Any, window_id: str) -> tuple[dict[str, Any], bytes]:
     data = await manager.frame(window_id)
+    started = time.monotonic()
     path = Path(str(data["screenshot_path"])).expanduser()
     if not path.is_absolute():
         path = workspace_root() / path
@@ -55,6 +56,9 @@ async def capture_frame(manager: Any, window_id: str) -> tuple[dict[str, Any], b
         raise ValueError("Desktop frame is not an internal GUI screenshot")
     try:
         image = await asyncio.to_thread(compress_frame, path)
+        data["observation_ttl_s"] = max(
+            0.0, float(data["observation_ttl_s"]) - (time.monotonic() - started)
+        )
         return data, image
     except BaseException:
         with contextlib.suppress(Exception):
@@ -90,10 +94,13 @@ class DesktopStream:
     acknowledgements: asyncio.Queue[dict[str, Any]] = field(
         default_factory=lambda: asyncio.Queue(maxsize=32)
     )
+    pending_live_actions: dict[int, str] = field(default_factory=dict)
     last_contact: float | None = None
     force_frame: bool = False
 
     def enqueue_frame(self, metadata: dict[str, Any], image: bytes) -> None:
+        if metadata.get("type") == "frame":
+            metadata = {**metadata, "_queued_at": time.monotonic()}
         if self.frames.full():
             _, queued_image = self.frames.get_nowait()
             if not image and metadata.get("type") == "frame":
@@ -165,6 +172,7 @@ def worker_frame(stream_id: str, secret: str, machine: str, body: dict[str, Any]
             "request_id": ack["request_id"],
             "ok": ack["ok"],
             **({"message": str(ack["message"])[:240]} if not ack["ok"] and "message" in ack else {}),
+            **({"refresh": True} if ack.get("refresh") is True else {}),
         })
     refresh = stream.force_frame
     stream.force_frame = False
@@ -231,7 +239,7 @@ async def _worker_stream_loop(stream_id: str, secret: str, window_id: str) -> No
                         force_frame = True
                     except Exception as exc:
                         if isinstance(entry.get("request_id"), int):
-                            pending_acks.append({"request_id": entry["request_id"], "ok": False, "message": str(exc)[:240]})
+                            pending_acks.append({"request_id": entry["request_id"], "ok": False, "refresh": True, "message": str(exc)[:240]})
                         else:
                             pending_errors.append(str(exc)[:240])
                     else:
@@ -266,7 +274,7 @@ async def _worker_stream_loop(stream_id: str, secret: str, window_id: str) -> No
                         await manager.human_act(window_id, entry["observation_id"], entry["bounds"], [entry["action"]])
                     except Exception as exc:
                         if isinstance(entry.get("request_id"), int):
-                            pending_acks.append({"request_id": entry["request_id"], "ok": False, "message": str(exc)[:240]})
+                            pending_acks.append({"request_id": entry["request_id"], "ok": False, "refresh": True, "message": str(exc)[:240]})
                         else:
                             pending_errors.append(str(exc)[:240])
                     else:

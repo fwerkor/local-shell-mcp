@@ -766,7 +766,7 @@ async def test_worker_acknowledges_completed_and_failed_focus_sensitive_actions(
     acks = [ack for entry in sent for ack in entry.get("acks", [])]
     assert acks == [
         {"request_id": 1, "ok": True},
-        {"request_id": 2, "ok": False, "message": "outdated frame"},
+        {"request_id": 2, "ok": False, "refresh": True, "message": "outdated frame"},
     ]
     assert all("errors" not in entry for entry in sent)
 
@@ -791,7 +791,7 @@ def test_desktop_local_failing_action_returns_negative_ack(tmp_path, monkeypatch
                 ws.receive_bytes()
             if result.get("type") == "action-ack":
                 assert result == {"type": "action-ack", "request_id": 9, "ok": False,
-                                  "message": "observation expired"}
+                                  "refresh": True, "message": "observation expired"}
                 break
         ws.send_json({"type": "action", "request_id": 10, "bounds": {}, "action": {"type": "bad"}})
         while True:
@@ -852,7 +852,7 @@ async def test_worker_regular_mode_reports_failed_input_without_killing_stream(m
     with pytest.raises(asyncio.CancelledError):
         await task
     assert posts[1]["acks"] == [
-        {"request_id": 17, "ok": False, "message": "observation mismatch"},
+        {"request_id": 17, "ok": False, "refresh": True, "message": "observation mismatch"},
     ]
     assert all("errors" not in entry for entry in posts)
     assert len(manager.discarded) >= 2
@@ -981,3 +981,147 @@ def test_remote_stream_idle_timeout_allows_valid_long_running_gui_operations():
         "actions": [], "refresh": False,
     }
     assert stream.key in stream_module.STREAMS
+
+
+def test_worker_disconnect_is_reported_and_stream_is_released(monkeypatch):
+    from starlette.websockets import WebSocketDisconnect
+
+    async def remote_call(machine, tool, args, timeout_s=None):
+        return {"started": True}
+
+    monkeypatch.setattr(human_ui, "_remote_call", remote_call)
+    monkeypatch.setattr(human_ui, "DESKTOP_FRAME_WAIT_S", 0.02)
+    with (TestClient(Starlette(routes=human_ui.ui_routes())) as client,
+          client.websocket_connect("/ui/ws/desktop?machine=node&window_id=win") as ws):
+        assert ws.receive_json() == {"type": "ready"}
+        stream = next(iter(stream_module.STREAMS.values()))
+        stream.last_contact = time.monotonic() - stream_module.STREAM_IDLE_S - 1
+        assert ws.receive_json() == {
+            "type": "error", "message": "Remote desktop worker stopped responding",
+        }
+        with pytest.raises(WebSocketDisconnect):
+            ws.receive_json()
+    assert stream.key not in stream_module.STREAMS
+
+
+def test_stream_reports_remaining_ttl_after_compression(tmp_path, monkeypatch):
+    manager = FakeManager(tmp_path)
+    monkeypatch.setattr(stream_module, "temp_dir", lambda: tmp_path)
+    compress = stream_module.compress_frame
+
+    def slow_compress(path):
+        time.sleep(0.035)
+        return compress(path)
+
+    monkeypatch.setattr(stream_module, "compress_frame", slow_compress)
+    data, image = asyncio.run(stream_module.capture_frame(manager, "win"))
+    assert image.startswith(b"\xff\xd8\xff")
+    assert 24.0 < data["observation_ttl_s"] < 24.98
+
+
+def test_remote_queued_frame_ttl_does_not_restart_on_delivery(monkeypatch):
+    async def remote_call(machine, tool, args, timeout_s=None):
+        return {"started": True}
+
+    monkeypatch.setattr(human_ui, "_remote_call", remote_call)
+    with (TestClient(Starlette(routes=human_ui.ui_routes())) as client,
+          client.websocket_connect("/ui/ws/desktop?machine=node&window_id=win") as ws):
+        assert ws.receive_json() == {"type": "ready"}
+        stream = next(iter(stream_module.STREAMS.values()))
+        stream.enqueue_frame({
+            "type": "frame", "bounds": {"x": 0, "y": 0, "width": 20, "height": 10},
+            "observation_id": "one", "ttl_s": 8, "coordinate_input": True,
+        }, b"\xff\xd8\xfftest")
+        # Simulate two seconds of controller-side queueing.
+        stream.frames._queue[0][0]["_queued_at"] -= 2
+        delivered = ws.receive_json()
+        assert 5.0 < delivered["ttl_s"] < 6.1
+        assert "_queued_at" not in delivered
+        ws.receive_bytes()
+
+
+@pytest.mark.parametrize("machine", ["local", "node"])
+def test_desktop_live_channel_records_only_successful_gui_actions(tmp_path, monkeypatch, machine):
+    events = []
+    channel = SimpleNamespace(
+        authenticate=lambda _: SimpleNamespace(live_id="live-1"),
+        publish_channel=lambda *args, **kwargs: events.append((args, kwargs)),
+    )
+    monkeypatch.setattr(human_ui, "_live_websocket_credentials", lambda _: ("live-1", "token"))
+    monkeypatch.setattr(human_ui, "get_live_channel_manager", lambda: channel)
+    monkeypatch.setattr(stream_module, "temp_dir", lambda: tmp_path)
+    monkeypatch.setattr(gui, "get_gui_manager", lambda: FakeManager(tmp_path))
+    async def remote_call(machine, tool, args, timeout_s=None):
+        return {"started": True}
+    monkeypatch.setattr(human_ui, "_remote_call", remote_call)
+
+    with (TestClient(Starlette(routes=human_ui.ui_routes())) as client,
+          client.websocket_connect(f"/ui/ws/desktop?machine={machine}&window_id=win") as ws):
+        assert ws.receive_json() == {"type": "ready"}
+        if machine == "local":
+            frame = ws.receive_json()
+            if frame.get("image"):
+                ws.receive_bytes()
+        else:
+            frame = {"observation_id": "obs", "bounds": {}}
+        ws.send_json({"type": "action", "request_id": 12,
+                      "observation_id": frame["observation_id"],
+                      "bounds": frame["bounds"], "action": {"type": "click", "x": 1, "y": 1}})
+        if machine == "node":
+            stream = next(iter(stream_module.STREAMS.values()))
+            for _ in range(200):
+                if not stream.actions.empty():
+                    break
+                time.sleep(0.005)
+            assert stream_module.worker_frame(stream.key, stream.secret, machine, {})["actions"][0]["request_id"] == 12
+            stream_module.worker_frame(stream.key, stream.secret, machine, {
+                "acks": [{"request_id": 12, "ok": True}],
+            })
+        for _ in range(6):
+            ack = ws.receive_json()
+            if ack.get("image"):
+                ws.receive_bytes()
+            if ack.get("type") == "action-ack":
+                assert ack["request_id"] == 12 and ack["ok"] is True
+                break
+        else:
+            pytest.fail("Expected action acknowledgement")
+        assert events
+        assert events[-1] == (
+            ("live-1", "human.action"),
+            {"actor": "human", "data": {
+                "action": "gui.action", "machine": machine, "window_id": "win", "actions": ["click"],
+            }},
+        )
+
+
+def test_remote_desktop_failed_gui_ack_does_not_publish_live_activity(monkeypatch):
+    events = []
+    channel = SimpleNamespace(
+        authenticate=lambda _: SimpleNamespace(live_id="live-1"),
+        publish_channel=lambda *a, **k: events.append((a, k)),
+    )
+    monkeypatch.setattr(human_ui, "_live_websocket_credentials", lambda _: ("live-1", "token"))
+    monkeypatch.setattr(human_ui, "get_live_channel_manager", lambda: channel)
+    async def remote_call(machine, tool, args, timeout_s=None):
+        return {"started": True}
+    monkeypatch.setattr(human_ui, "_remote_call", remote_call)
+    with (TestClient(Starlette(routes=human_ui.ui_routes())) as client,
+          client.websocket_connect("/ui/ws/desktop?machine=node&window_id=win") as ws):
+        assert ws.receive_json() == {"type": "ready"}
+        ws.send_json({"type": "action", "request_id": 15,
+                      "observation_id": "obs", "bounds": {},
+                      "action": {"type": "key", "keys": ["ENTER"]}})
+        stream = next(iter(stream_module.STREAMS.values()))
+        for _ in range(200):
+            if not stream.actions.empty():
+                break
+            time.sleep(0.005)
+        assert stream_module.worker_frame(stream.key, stream.secret, "node", {})["actions"][0]["request_id"] == 15
+        stream_module.worker_frame(stream.key, stream.secret, "node", {
+            "acks": [{"request_id": 15, "ok": False, "refresh": True, "message": "stale"}],
+        })
+        assert ws.receive_json() == {
+            "type": "action-ack", "request_id": 15, "ok": False, "refresh": True, "message": "stale",
+        }
+        assert not events

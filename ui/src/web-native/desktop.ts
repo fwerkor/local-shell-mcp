@@ -128,6 +128,8 @@ export function wheelScrollAmount(deltaY: number): number {
   return -Math.sign(deltaY) * Math.max(1, Math.min(12, Math.round(Math.abs(deltaY) / 60)))
 }
 
+type StreamFrame = GuiBounds & { observation_id: string; ttl_s: number; coordinate_input: boolean; expiresAtMs?: number }
+
 export class DesktopController extends BaseController {
   private machine = "local"
   private windows: GuiWindow[] = []
@@ -149,6 +151,7 @@ export class DesktopController extends BaseController {
   private nextRequestId = 0
   private pendingRequestIds = new Set<number>()
   private awaitingFreshFrame = false
+  private waitingForKeyframe = false
   private pointerStart: PointerStart | null = null
   private suppressClickUntil = 0
   private clickTimer: number | null = null
@@ -158,7 +161,7 @@ export class DesktopController extends BaseController {
   private wheelBounds: GuiBounds | null = null
   private wheelObservationId = ""
   private imageQueue: Promise<void> = Promise.resolve()
-  private pendingFrame: (GuiBounds & { observation_id: string; ttl_s: number; coordinate_input: boolean }) | null = null
+  private pendingFrame: StreamFrame | null = null
 
   constructor(context: NativePageContext) {
     super(context)
@@ -390,8 +393,8 @@ export class DesktopController extends BaseController {
         this.pendingFrame = null
         if (!metadata) return
         this.imageQueue = this.imageQueue.then(
-          () => this.displayImage(socket, metadata, event.data as Blob | ArrayBuffer),
-          () => this.displayImage(socket, metadata, event.data as Blob | ArrayBuffer),
+          () => this.decodeImage(socket, metadata, event.data as Blob | ArrayBuffer),
+          () => this.decodeImage(socket, metadata, event.data as Blob | ArrayBuffer),
         )
       }
     }
@@ -421,7 +424,14 @@ export class DesktopController extends BaseController {
         this.pendingActions = this.pendingRequestIds.size
         this.renderInputPulse()
       }
-      if (message.ok === false) this.context.notify(String(message.message || "Desktop input failed"), "error")
+      if (message.ok === false) {
+        this.context.notify(String(message.message || "Desktop input failed"), "error")
+        if (message.refresh === true && !this.awaitingFreshFrame) {
+          this.frameInputEnabled = false
+          this.awaitingFreshFrame = true
+          this.refreshFrame()
+        }
+      }
       return
     }
     if (message.type !== "frame") return
@@ -430,28 +440,47 @@ export class DesktopController extends BaseController {
     const observationId = message.observation_id
     const ttl = message.ttl_s
     if (!bounds || !bounds.width || !bounds.height || typeof observationId !== "string" || typeof ttl !== "number") return
-    const metadata = { ...bounds, observation_id: observationId, ttl_s: ttl, coordinate_input: message.coordinate_input === true }
+    const metadata = { ...bounds, observation_id: observationId, ttl_s: ttl,
+      coordinate_input: message.coordinate_input === true,
+      expiresAtMs: Date.now() + Math.max(0, ttl * 1000 - 1000) }
     if (message.image) {
       this.pendingFrame = metadata
     } else if (this.frameUrl) {
       const socket = this.socket
       const publish = () => {
-        if (socket === this.socket && this.frameUrl) this.publishFrame(metadata)
+        if (socket === this.socket && this.frameUrl && !this.waitingForKeyframe) this.publishFrame(metadata)
       }
-      this.imageQueue = this.imageQueue.then(publish, () => undefined)
+      this.imageQueue = this.imageQueue.then(publish, () => {
+        this.waitingForKeyframe = true
+        this.frameInputEnabled = false
+        this.refreshFrame()
+      })
     }
   }
 
-  private publishFrame(data: GuiBounds & { observation_id: string; ttl_s: number; coordinate_input: boolean }): void {
+  private publishFrame(data: StreamFrame): void {
     this.awaitingFreshFrame = false
     this.frameBounds = { x: data.x, y: data.y, width: data.width, height: data.height }
     this.frameObservationId = data.observation_id
-    this.frameExpiresAt = Date.now() + Math.max(0, data.ttl_s * 1000 - 1000)
+    this.frameExpiresAt = data.expiresAtMs ?? Date.now() + Math.max(0, data.ttl_s * 1000 - 1000)
     this.frameInputEnabled = data.coordinate_input
     this.renderStatus()
   }
 
-  private async displayImage(socket: WebSocket, metadata: GuiBounds & { observation_id: string; ttl_s: number; coordinate_input: boolean }, data: Blob | ArrayBuffer): Promise<void> {
+  private async decodeImage(socket: WebSocket, metadata: StreamFrame, data: Blob | ArrayBuffer): Promise<void> {
+    try {
+      await this.displayImage(socket, metadata, data)
+      if (socket === this.socket) this.waitingForKeyframe = false
+    } catch {
+      if (socket !== this.socket) return
+      this.waitingForKeyframe = true
+      this.frameInputEnabled = false
+      this.refreshFrame()
+      this.context.notify("Desktop frame decode failed; requesting a fresh image.", "error")
+    }
+  }
+
+  private async displayImage(socket: WebSocket, metadata: StreamFrame, data: Blob | ArrayBuffer): Promise<void> {
     const blob = data instanceof Blob ? data : new Blob([data], { type: "image/jpeg" })
     const url = URL.createObjectURL(blob)
     try {
@@ -491,6 +520,7 @@ export class DesktopController extends BaseController {
       socket.close()
     }
     this.pendingFrame = null
+    this.waitingForKeyframe = false
     this.pendingRequestIds.clear()
     this.pendingActions = 0
     this.awaitingFreshFrame = false

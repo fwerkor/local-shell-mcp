@@ -157,6 +157,66 @@ describe("Desktop WebSocket transport", () => {
     await c.imageQueue
     expect(c.frameObservationId).toBe("obs-active")
   })
+  test("failed JPEG decode disables input and ignores every unchanged frame until a successful keyframe", async () => {
+    const { c, sent } = harness()
+    c.displayImage = async () => { throw new Error("decode failed") }
+    const frame = { x: 20, y: 30, width: 200, height: 100,
+      observation_id: "bad-keyframe", ttl_s: 20, coordinate_input: true }
+    await c.decodeImage(c.socket, frame, new ArrayBuffer(0))
+    expect(c.waitingForKeyframe).toBe(true)
+    expect(c.frameInputEnabled).toBe(false)
+    expect(sent).toEqual([{ type: "refresh" }])
+    for (let i = 0; i < 2; i++) {
+      c.handleControl(JSON.stringify({
+        type: "frame", observation_id: `after-bad-${i}`, ttl_s: 20,
+        coordinate_input: true, bounds: { x: 20, y: 30, width: 200, height: 100 }, image: false,
+      }))
+      await c.imageQueue
+    }
+    expect(c.frameObservationId).toBe("obs-active")
+    c.displayImage = async (_socket: unknown, metadata: unknown) => c.publishFrame(metadata)
+    await c.decodeImage(c.socket, { ...frame, observation_id: "fresh-keyframe" }, new ArrayBuffer(0))
+    expect(c.waitingForKeyframe).toBe(false)
+    expect(c.frameObservationId).toBe("fresh-keyframe")
+    expect(c.frameInputEnabled).toBe(true)
+  })
+  test("failed action acknowledgement disables stale input and triggers one frame refresh", async () => {
+    const { c, sent } = harness()
+    c.queueAction({ type: "click", x: 1, y: 2 })
+    await c.actionQueue
+    c.handleControl(JSON.stringify({
+      type: "action-ack", request_id: 1, ok: false, refresh: true, message: "observation stale",
+    }))
+    expect(c.pendingActions).toBe(0)
+    expect(c.frameInputEnabled).toBe(false)
+    expect(c.awaitingFreshFrame).toBe(true)
+    expect(sent.at(-1)).toEqual({ type: "refresh" })
+    c.handleControl(JSON.stringify({
+      type: "action-ack", request_id: 1, ok: false, refresh: true, message: "observation stale",
+    }))
+    expect(sent.filter((item: { type: string }) => item.type === "refresh")).toHaveLength(1)
+    c.queueAction({ type: "click", x: 1, y: 2 })
+    await c.actionQueue
+    expect(sent.filter((item: { type: string }) => item.type === "action")).toHaveLength(1)
+  })
+  test("input expiry is anchored to metadata arrival, not a later delayed decode", async () => {
+    const { c } = harness()
+    const now = Date.now
+    try {
+      let current = 5_000
+      Date.now = () => current
+      c.handleControl(JSON.stringify({
+        type: "frame", observation_id: "new-obs", ttl_s: 5,
+        coordinate_input: true, bounds: { x: 20, y: 30, width: 200, height: 100 }, image: false,
+      }))
+      current += 2_000
+      await c.imageQueue
+      expect(c.frameExpiresAt).toBe(9_000)
+      expect(c.frameObservationId).toBe("new-obs")
+    } finally {
+      Date.now = now
+    }
+  })
   test("new image metadata is not published before decode", () => {
     const { c } = harness()
     c.handleControl(JSON.stringify({ type: "frame", observation_id: "obs-next", ttl_s: 15, coordinate_input: true, bounds: { x: 0, y: 0, width: 80, height: 40 }, image: true }))

@@ -86,6 +86,7 @@ UI_MAX_ROWS = 500
 UI_TUI_EXIT_CODE = 4410
 UI_SHELL_EXIT_CODE = 4411
 DESKTOP_CREDENTIAL_WATCH_INTERVAL_S = 5
+DESKTOP_FRAME_WAIT_S = 10
 _ACTIVE_UI_TERMINALS: set[int] = set()
 _LOGGER = logging.getLogger(__name__)
 
@@ -3024,6 +3025,7 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
     from .desktop_stream import (
         FRAME_INTERVAL_S,
         RETAINED_OBSERVATIONS,
+        STREAM_IDLE_S,
         STREAMS,
         DesktopStream,
         capture_frame,
@@ -3059,13 +3061,24 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
 
     async def emit(metadata: dict[str, Any], image: bytes) -> None:
         async with send_lock:
+            if metadata.get("type") == "frame" and isinstance(metadata.get("ttl_s"), (int, float)):
+                metadata = dict(metadata)
+                queued_at = metadata.pop("_queued_at", time.monotonic())
+                metadata["ttl_s"] = max(0.0, metadata["ttl_s"] - (time.monotonic() - queued_at))
             await websocket.send_text(json.dumps({**metadata, "image": bool(image)}, separators=(",", ":")))
             if image:
                 await websocket.send_bytes(image)
 
     async def ack_sender() -> None:
         while True:
-            await send_control(await stream.acknowledgements.get())
+            ack = await stream.acknowledgements.get()
+            action_type = stream.pending_live_actions.pop(ack.get("request_id"), None)
+            if ack.get("ok") is True and action_type and live_credentials is not None:
+                _record_live_human_action(
+                    live_credentials[0], "gui.action",
+                    machine=machine, window_id=window_id, actions=[action_type],
+                )
+            await send_control(ack)
 
     async def credential_watcher() -> None:
         while True:
@@ -3084,8 +3097,11 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
             await send_control({"type": "ready"})
             while True:
                 try:
-                    metadata, image = await asyncio.wait_for(stream.frames.get(), timeout=10)
+                    metadata, image = await asyncio.wait_for(stream.frames.get(), timeout=DESKTOP_FRAME_WAIT_S)
                 except TimeoutError:
+                    if stream.last_contact is not None and time.monotonic() - stream.last_contact > STREAM_IDLE_S:
+                        await send_control({"type": "error", "message": "Remote desktop worker stopped responding"})
+                        return
                     await send_control({"type": "heartbeat"})
                     continue
                 await emit(metadata, image)
@@ -3169,6 +3185,8 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
                             await send_control({"type": "error", "message": "Desktop input queue is full"})
                     else:
                         stream.actions.put_nowait(entry)
+                        if request_id is not None and live_credentials is not None:
+                            stream.pending_live_actions[request_id] = str(action.get("type") or "")
                 else:
                     assert manager is not None
                     try:
@@ -3177,10 +3195,15 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
                             stream.refresh_event.set()
                     except Exception as exc:
                         if request_id is not None:
-                            stream.acknowledgements.put_nowait({"type": "action-ack", "request_id": request_id, "ok": False, "message": str(exc)[:240]})
+                            stream.acknowledgements.put_nowait({"type": "action-ack", "request_id": request_id, "ok": False, "refresh": True, "message": str(exc)[:240]})
                         else:
                             await send_control({"type": "error", "message": str(exc)[:240]})
                     else:
+                        _record_live_human_action(
+                            live_credentials[0] if live_credentials is not None else None,
+                            "gui.action", machine=machine, window_id=window_id,
+                            actions=[str(action.get("type") or "")],
+                        )
                         if request_id is not None:
                             stream.acknowledgements.put_nowait({"type": "action-ack", "request_id": request_id, "ok": True})
             except (KeyError, TypeError, ValueError) as exc:
