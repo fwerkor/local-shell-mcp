@@ -1391,3 +1391,49 @@ def test_continuation_validation_rechecks_session_expiry(tmp_path):
     assert result["valid"] is False
     assert result["plan"]["continuation_due"] is False
     assert manager.get(session_id)["status"] == "stale"
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+def test_continuation_report_expires_session_before_touching_activity(tmp_path, accepted):
+    manager = SessionRuntimeManager(tmp_path / ".state")
+    session_id = manager.manage("user", action="start")["session_id"]
+    manager.manage_plan(session_id, action="start", objective="Work", steps=[{"id": "one", "text": "Do it"}])
+    logical = manager._sessions[session_id]
+    assert logical.plan is not None
+    logical.plan.last_agent_activity -= PLAN_EXECUTION_LEASE_S + 1
+    manager._save_locked(logical)
+    claim = manager.claim_plan_continuation(session_id)
+    assert claim is not None
+    if accepted:
+        assert manager.validate_plan_continuation(session_id, claim["claim_id"])["valid"] is True
+
+    logical.updated_at -= SESSION_STALE_AFTER_S + 1
+    manager._save_locked(logical)
+    with pytest.raises(ValueError, match="No plan continuation is pending"):
+        manager.report_plan_continuation(
+            session_id, accepted=accepted, claim_id=claim["claim_id"]
+        )
+
+    state = SessionRuntimeManager(tmp_path / ".state").get(session_id)
+    assert state["status"] == "stale"
+    assert state["plan"]["continuation_pending"] is False
+    assert state["plan"]["continuation_reserved"] is False
+    assert state["plan"]["continuation_count"] == int(accepted)
+    assert state["recent_activity"][-1]["type"] == "session.stale"
+
+
+def test_continuation_abandon_expires_idle_session(tmp_path):
+    manager = SessionRuntimeManager(tmp_path / ".state")
+    session_id = manager.manage("user", action="start")["session_id"]
+    manager.manage_plan(session_id, action="start", objective="Work", steps=[{"id": "one", "text": "Do it"}])
+    logical = manager._sessions[session_id]
+    assert logical.plan is not None
+    logical.plan.last_agent_activity -= PLAN_EXECUTION_LEASE_S + 1
+    manager._save_locked(logical)
+    claim = manager.claim_plan_continuation(session_id)
+    assert claim is not None
+    logical.updated_at -= SESSION_STALE_AFTER_S + 1
+    manager._save_locked(logical)
+
+    assert manager.abandon_plan_continuation(session_id, claim["claim_id"]) is False
+    assert manager.get(session_id)["status"] == "stale"

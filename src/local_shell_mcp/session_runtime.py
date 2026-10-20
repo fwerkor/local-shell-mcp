@@ -1667,6 +1667,7 @@ class SessionRuntimeManager:
                         _state_lock_held=True,
                     )
             logical = self._require_session_locked(session_id, subject)
+            self._mark_stale_locked(logical, time.time())
             plan = logical.plan
             if plan is None:
                 raise ValueError("No plan exists in this logical session")
@@ -1733,6 +1734,7 @@ class SessionRuntimeManager:
                         _state_lock_held=True,
                     )
             logical = self._require_session_locked(session_id, subject)
+            self._mark_stale_locked(logical, time.time())
             plan = logical.plan
             if (
                 plan is None
