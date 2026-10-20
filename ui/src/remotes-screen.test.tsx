@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/react/test-utils"
 import { act } from "react"
-import { RemoteInviteResultDialog, RemotesScreen } from "./remotes-screen"
+import { RemoteInviteResultDialog, RemotesScreen, parseRemoteInviteInput } from "./remotes-screen"
 
 const originalFetch = globalThis.fetch
 const renderers: Array<{ destroy: () => void }> = []
@@ -124,5 +124,18 @@ describe("RemotesScreen reset confirmation", () => {
     expect(resetCalls).toBe(1)
     resolveReset?.(success({ cancelled_jobs: 1, preserved_jobs: 0 }))
     await renderUntil(setup, () => !setup.captureCharFrame().includes("Reset worker-a?"))
+  })
+})
+
+describe("Remote invite input", () => {
+  test("preserves legacy names and workdirs while allowing batch use and TTL flags", () => {
+    expect(parseRemoteInviteInput("")).toEqual({ name: undefined, workdir: undefined })
+    expect(parseRemoteInviteInput("host /srv/work")).toEqual({ name: "host", workdir: "/srv/work" })
+    expect(parseRemoteInviteInput("--max-uses 50 --ttl-s 604800")).toEqual({
+      name: undefined, workdir: undefined, max_uses: 50, ttl_s: 604800,
+    })
+    expect(parseRemoteInviteInput("host /srv/work --ttl-s 7200")).toEqual({
+      name: "host", workdir: "/srv/work", ttl_s: 7200,
+    })
   })
 })

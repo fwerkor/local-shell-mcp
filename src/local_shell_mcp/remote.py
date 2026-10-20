@@ -573,6 +573,8 @@ class RemoteInvite:
     workdir: str | None
     expires_at: float
     used: bool = False
+    max_uses: int = 1
+    used_count: int = 0
 
 
 @dataclass
@@ -715,6 +717,17 @@ class RemoteManager:
                 raise ValueError(
                     f"remote worker registry invite expires_at is invalid: {source}"
                 ) from exc
+            max_uses = item.get("max_uses", 1)
+            used_count = item.get("used_count", 0)
+            if (
+                not isinstance(max_uses, int)
+                or isinstance(max_uses, bool)
+                or max_uses < 1
+                or not isinstance(used_count, int)
+                or isinstance(used_count, bool)
+                or not 0 <= used_count <= max_uses
+            ):
+                raise ValueError(f"remote worker registry invite usage is invalid: {source}")
         generation = data.get("generation")
         if generation is not None and (not isinstance(generation, str) or not generation.strip()):
             raise ValueError(f"remote worker registry generation is invalid: {source}")
@@ -844,13 +857,17 @@ class RemoteManager:
         for item in registry["invites"]:
             code = str(item.get("code") or "").strip()
             expires_at = float(item.get("expires_at") or 0)
-            if not code or expires_at < now or bool(item.get("used")):
+            max_uses = int(item.get("max_uses", 1))
+            used_count = int(item.get("used_count", 0))
+            if not code or expires_at < now or bool(item.get("used")) or used_count >= max_uses:
                 continue
             invites[code] = RemoteInvite(
                 code=code,
                 name=str(item["name"]) if item.get("name") is not None else None,
                 workdir=str(item["workdir"]) if item.get("workdir") is not None else None,
                 expires_at=expires_at,
+                max_uses=max_uses,
+                used_count=used_count,
             )
         self.workers = workers
         self.tokens = tokens
@@ -891,9 +908,11 @@ class RemoteManager:
                     "name": invite.name,
                     "workdir": invite.workdir,
                     "expires_at": invite.expires_at,
+                    "max_uses": invite.max_uses,
+                    "used_count": invite.used_count,
                 }
                 for invite in sorted(self.invites.values(), key=lambda item: item.code)
-                if not invite.used and invite.expires_at >= now
+                if not invite.used and invite.used_count < invite.max_uses and invite.expires_at >= now
             ],
         }
         payload = json.dumps(data, indent=2, sort_keys=True).encode("utf-8")
@@ -944,10 +963,15 @@ class RemoteManager:
         workdir: str | None = None,
         ttl_s: int | None = None,
         base_url: str | None = None,
+        max_uses: int = 1,
     ) -> dict[str, Any]:
         settings = get_settings()
-        ttl = max(60, min(int(ttl_s or settings.remote_invite_ttl_s), 24 * 3600))
+        ttl = max(60, min(int(settings.remote_invite_ttl_s if ttl_s is None else ttl_s), 7 * 24 * 3600))
+        if isinstance(max_uses, bool) or not isinstance(max_uses, int) or max_uses < 1:
+            raise ValueError("max_uses must be a positive integer")
         normalized_name = _validate_machine_name(name) if name else None
+        if max_uses > 1 and normalized_name:
+            raise ValueError("name must be omitted when max_uses > 1")
         expires_at = _utc() + ttl
         code = "lsmcp_inv_" + secrets.token_urlsafe(24)
         invite = RemoteInvite(
@@ -955,6 +979,7 @@ class RemoteManager:
             name=normalized_name,
             workdir=workdir,
             expires_at=expires_at,
+            max_uses=max_uses,
         )
         async with self._lock:
             with self._state_lock, self._registry_transaction_unlocked():
@@ -962,7 +987,7 @@ class RemoteManager:
                 self.invites = {
                     invite_code: item
                     for invite_code, item in self.invites.items()
-                    if not item.used and item.expires_at >= now
+                    if not item.used and item.used_count < item.max_uses and item.expires_at >= now
                 }
                 if len(self.invites) >= MAX_REMOTE_INVITES:
                     raise RuntimeError("Too many pending remote invites")
@@ -994,6 +1019,8 @@ class RemoteManager:
             "workdir": workdir,
             "expires_at": invite.expires_at,
             "ttl_s": ttl,
+            "max_uses": max_uses,
+            "used_count": 0,
             "join_url": join_url,
             "command": command,
             "persistent_command": command
@@ -1011,7 +1038,7 @@ class RemoteManager:
                 invite = self.invites.get(code)
                 if not invite:
                     raise ValueError("invalid invite code")
-                if invite.used:
+                if invite.used or invite.used_count >= invite.max_uses:
                     raise ValueError("invite code has already been used")
                 if invite.expires_at < _utc():
                     raise ValueError("invite code has expired")
@@ -1032,14 +1059,15 @@ class RemoteManager:
                 )
                 self.workers[name] = worker
                 self.tokens[token] = name
-                invite.used = True
-                self.invites.pop(code, None)
+                invite.used_count += 1
+                if invite.used_count >= invite.max_uses:
+                    self.invites.pop(code, None)
                 try:
                     self._save_registry_unlocked()
                 except Exception:
                     self.workers.pop(name, None)
                     self.tokens.pop(token, None)
-                    invite.used = False
+                    invite.used_count -= 1
                     self.invites[code] = invite
                     raise
         with contextlib.suppress(Exception):

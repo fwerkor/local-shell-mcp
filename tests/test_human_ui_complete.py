@@ -111,8 +111,8 @@ class FakeRemoteManager:
     def list_machines(self):
         return self.machines
 
-    async def create_invite(self, name=None, workdir=None, ttl_s=None, base_url=None):
-        return {"name": name, "workdir": workdir, "ttl_s": ttl_s, "base_url": base_url}
+    async def create_invite(self, name=None, workdir=None, ttl_s=None, base_url=None, max_uses=1):
+        return {"name": name, "workdir": workdir, "ttl_s": ttl_s, "base_url": base_url, "max_uses": max_uses}
 
     def rename(self, machine, new_name):
         return {"old_name": machine, "new_name": new_name}

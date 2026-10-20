@@ -1395,9 +1395,13 @@ async function refreshRemotes(): Promise<void> {
 }
 
 async function createRemoteInvite(): Promise<void> {
-  const name = await promptValue("Invite remote machine", "Machine name (optional)", "", "A one-time join command will be generated.")
+  const name = await promptValue("Invite remote machine", "Machine name (optional; leave empty for multiple uses)")
   if (name === null) return
-  const result = await api<JsonRecord>("/api/ui/remotes", { method: "POST", body: JSON.stringify({ name: name || null }) })
+  const uses = await promptValue("Invite remote machine", "Maximum uses", "1")
+  if (uses === null) return
+  const ttl = await promptValue("Invite remote machine", "Lifetime in seconds (empty = 2 hours, max = 604800)", "")
+  if (ttl === null) return
+  const result = await api<JsonRecord>("/api/ui/remotes", { method: "POST", body: JSON.stringify({ name: name || null, max_uses: Number(uses), ttl_s: ttl.trim() ? Number(ttl) : null }) })
   const command = String(result.command || result.join_command || result.invite || "")
   if (command) {
     await navigator.clipboard.writeText(command)
