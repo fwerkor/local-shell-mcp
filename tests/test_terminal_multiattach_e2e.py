@@ -28,9 +28,6 @@ async def test_two_terminal_clients_switch_and_reattach_without_killing_sessions
             [tmux, "-L", socket, *args], capture_output=True, text=True, timeout=5,
         )
 
-    if tmux_run("new-session", "-d", "-s", first, "-x", "90", "-y", "30").returncode:
-        pytest.skip("isolated tmux server could not start")
-    assert tmux_run("new-session", "-d", "-s", second, "-x", "90", "-y", "30").returncode == 0
     monkeypatch.setattr(worker, "tmux_socket_name", lambda: socket)
     monkeypatch.setattr(worker, "resolve_tmux", lambda: type("Selection", (), {"path": tmux})())
     monkeypatch.setattr(worker, "subprocess_env", lambda: os.environ.copy())
@@ -47,6 +44,9 @@ async def test_two_terminal_clients_switch_and_reattach_without_killing_sessions
 
     a = b = switched = reconnect = None
     try:
+        if tmux_run("new-session", "-d", "-s", first, "-x", "90", "-y", "30").returncode:
+            pytest.skip("isolated tmux server could not start")
+        assert tmux_run("new-session", "-d", "-s", second, "-x", "90", "-y", "30").returncode == 0
         a = worker._TmuxPtyAttachment(first, 90, 30)
         b = worker._TmuxPtyAttachment(first, 90, 30)
         attachments.extend((a, b))
@@ -96,7 +96,7 @@ async def test_native_websocket_two_clients_switch_and_reconnect(tmp_path, monke
     import socket
 
     import uvicorn
-    from websockets.asyncio.client import connect
+    from websockets.legacy.client import connect
 
     from local_shell_mcp.http_app import build_http_app
     from local_shell_mcp.settings import get_settings
@@ -112,20 +112,22 @@ async def test_native_websocket_two_clients_switch_and_reconnect(tmp_path, monke
     sessions = []
     server_task = None
     server = None
+    listener = None
     try:
         for name in ("ws-first", "ws-second"):
             result = await start_shell(cwd=".", name=name)
             assert str(result["backend"]).startswith("tmux-")
             sessions.append(result["session_id"])
 
-        with socket.socket() as listen:
-            listen.bind(("127.0.0.1", 0))
-            port = listen.getsockname()[1]
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(128)
+        port = listener.getsockname()[1]
         server = uvicorn.Server(uvicorn.Config(
             build_http_app(), host="127.0.0.1", port=port,
             log_level="error", access_log=False, lifespan="off",
         ))
-        server_task = asyncio.create_task(server.serve())
+        server_task = asyncio.create_task(server.serve(sockets=[listener]))
         async with asyncio.timeout(8):
             while not server.started:
                 assert not server_task.done(), "HTTP server terminated during startup"
@@ -146,8 +148,8 @@ async def test_native_websocket_two_clients_switch_and_reconnect(tmp_path, monke
                         output.extend(packet)
             return bytes(output)
 
-        async with connect(terminal_url(sessions[0]), subprotocols=["lsm-ui"], proxy=None) as first:
-            async with connect(terminal_url(sessions[0]), subprotocols=["lsm-ui"], proxy=None) as second:
+        async with connect(terminal_url(sessions[0]), subprotocols=["lsm-ui"]) as first:
+            async with connect(terminal_url(sessions[0]), subprotocols=["lsm-ui"]) as second:
                 marker = b"WEB-MULTICLIENT-" + uuid.uuid4().hex[:8].encode()
                 await first.send(b"printf '" + marker + b"\\n'\r")
                 await asyncio.gather(expect_marker(first, marker), expect_marker(second, marker))
@@ -155,7 +157,7 @@ async def test_native_websocket_two_clients_switch_and_reconnect(tmp_path, monke
                 # The first viewer switches to a different shell while the
                 # second viewer remains attached to the original session.
                 await first.close()
-                async with connect(terminal_url(sessions[1]), subprotocols=["lsm-ui"], proxy=None) as switched:
+                async with connect(terminal_url(sessions[1]), subprotocols=["lsm-ui"]) as switched:
                     marker = b"WEB-SWITCH-" + uuid.uuid4().hex[:8].encode()
                     await switched.send(b"printf '" + marker + b"\\n'\r")
                     await expect_marker(switched, marker)
@@ -165,7 +167,7 @@ async def test_native_websocket_two_clients_switch_and_reconnect(tmp_path, monke
 
             # The browser can reconnect to an existing persistent shell even
             # after its last viewer leaves; no shell ownership is transferred.
-            async with connect(terminal_url(sessions[0]), subprotocols=["lsm-ui"], proxy=None) as reattached:
+            async with connect(terminal_url(sessions[0]), subprotocols=["lsm-ui"]) as reattached:
                 marker = b"WEB-RECONNECTED-" + uuid.uuid4().hex[:8].encode()
                 await reattached.send(b"printf '" + marker + b"\\n'\r")
                 await expect_marker(reattached, marker)
@@ -176,6 +178,35 @@ async def test_native_websocket_two_clients_switch_and_reconnect(tmp_path, monke
             server.should_exit = True
         if server_task is not None:
             await asyncio.wait_for(server_task, timeout=10)
+        if listener is not None:
+            listener.close()
         for session_id in sessions:
             await kill_shell(session_id)
         get_settings.cache_clear()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="tmux PTYs require POSIX")
+@pytest.mark.asyncio
+async def test_failed_second_tmux_session_does_not_leak_first(monkeypatch):
+    tmux = shutil.which("tmux")
+    if tmux is None:
+        pytest.skip("tmux is not installed")
+
+    actual_run = subprocess.run
+    socket_name = None
+
+    def fail_second_session(command, *args, **kwargs):
+        nonlocal socket_name
+        if "new-session" in command and any(arg.startswith("e2e-second-") for arg in command):
+            socket_name = command[2]
+            return subprocess.CompletedProcess(command, returncode=1, stdout="", stderr="injected")
+        return actual_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", fail_second_session)
+    with pytest.raises(AssertionError):
+        await test_two_terminal_clients_switch_and_reattach_without_killing_sessions(monkeypatch)
+    assert socket_name is not None, "the second session failure was not injected"
+    assert actual_run(
+        [tmux, "-L", socket_name, "list-sessions"],
+        capture_output=True, text=True, timeout=5,
+    ).returncode != 0, "the first session survived failed setup"
