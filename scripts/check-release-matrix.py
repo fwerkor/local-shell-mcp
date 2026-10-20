@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import yaml
@@ -21,6 +20,10 @@ EXPECTED_BINARY_ARTIFACTS = {
 EXPECTED_PYTHON_ARTIFACTS = EXPECTED_BINARY_ARTIFACTS
 EXPECTED_SNAP_ARTIFACTS = {"linux-x86_64", "linux-aarch64"}
 EXPECTED_DOCKER_PLATFORMS = {"linux/amd64", "linux/arm64"}
+EXPECTED_SNAP_ACTION_PINS = {
+    "snapcore/action-build": "3bdaa03e1ba6bf59a65f84a751d943d549a54e79",  # v1
+    "snapcore/action-publish": "214b86e5ca036ead1668c79afb81e550e6c54d40",  # v1
+}
 
 
 def matrix_values(job: dict, key: str) -> set[str]:
@@ -36,8 +39,8 @@ def step_script(job: dict, name: str) -> str:
 
 
 def pinned_action(step: dict, action: str) -> bool:
-    ref = str(step.get("uses") or "")
-    return re.fullmatch(rf"{re.escape(action)}@[0-9a-f]{{40}}", ref) is not None
+    sha = EXPECTED_SNAP_ACTION_PINS.get(action)
+    return sha is not None and step.get("uses") == f"{action}@{sha}"
 
 
 def main() -> int:
