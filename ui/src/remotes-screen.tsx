@@ -62,7 +62,7 @@ export function RemoteInviteResultDialog({
       <text
         style={{ height: 1, flexShrink: 0 }}
         fg={theme.faint}
-        content={`Expires ${new Date(invite.expires_at * 1000).toLocaleTimeString()} · Enter/Esc close`}
+        content={`Expires ${new Date(invite.expires_at * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })} · Enter/Esc close`}
       />
     </Modal>
   )
@@ -75,12 +75,46 @@ export function parseRemoteInviteInput(value: string): {
   ttl_s?: number
 } {
   const opts: { max_uses?: number; ttl_s?: number; workdir?: string } = {}
-  const remainder = value.replace(/(?:^|\s)--(max-uses|ttl-s|workdir)\s+(\S+)/g, (_match, key: string, raw: string) => {
-    if (key === "workdir") opts.workdir = raw
-    else opts[key === "max-uses" ? "max_uses" : "ttl_s"] = Number(raw)
-    return ""
-  })
-  const [name, ...workdirParts] = remainder.trim().split(/\s+/)
+  const tokens: string[] = []
+  let token = ""
+  let started = false
+  let quote: "'" | '"' | null = null
+  for (let i = 0; i < value.length; i += 1) {
+    const char = value[i]
+    const next = value[i + 1]
+    if (char === "\\" && next && (next === quote || (!quote && (/\s/.test(next) || next === "'" || next === '"' || next === "\\")) || (quote === '"' && next === "\\"))) {
+      token += next
+      started = true
+      i += 1
+    } else if ((char === "'" || char === '"') && (quote === null || quote === char)) {
+      quote = quote === null ? char : null
+      started = true
+    } else if (!quote && /\s/.test(char)) {
+      if (started) tokens.push(token)
+      token = ""
+      started = false
+    } else {
+      token += char
+      started = true
+    }
+  }
+  if (started) tokens.push(token)
+
+  const positionals: string[] = []
+  const flags = new Set(["--max-uses", "--ttl-s", "--workdir"])
+  for (let i = 0; i < tokens.length; i += 1) {
+    const part = tokens[i]
+    if (part === "--max-uses" || part === "--ttl-s") {
+      opts[part === "--max-uses" ? "max_uses" : "ttl_s"] = Number(tokens[++i])
+    } else if (part === "--workdir") {
+      const path: string[] = []
+      while (i + 1 < tokens.length && !flags.has(tokens[i + 1])) path.push(tokens[++i])
+      opts.workdir = path.join(" ")
+    } else {
+      positionals.push(part)
+    }
+  }
+  const [name, ...workdirParts] = positionals
   return { name: name || undefined, workdir: opts.workdir || workdirParts.join(" ") || undefined, max_uses: opts.max_uses, ttl_s: opts.ttl_s }
 }
 

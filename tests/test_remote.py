@@ -281,10 +281,11 @@ async def test_poll_requires_upgrade_before_dequeuing_jobs(tmp_path, monkeypatch
     }
     assert worker.queue.qsize() == 1
 
-    # Same-package-version workers at protocol 5 lack the PTY relay.
+    # Same-package-version workers at protocol 6 have PTY relay, but no GUI stream.
     # Require their automatic runtime refresh on the next poll.
     assert remote.REMOTE_WORKER_TERMINAL_PROTOCOL_VERSION == 6
-    assert remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION - 1 == 5
+    assert remote.REMOTE_WORKER_DESKTOP_STREAM_PROTOCOL_VERSION == 7
+    assert remote.REMOTE_WORKER_POLL_PROTOCOL_VERSION - 1 == 6
     stale_protocol = await manager.poll(
         worker.token,
         {

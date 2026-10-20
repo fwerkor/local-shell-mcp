@@ -69,6 +69,7 @@ describe("RemoteInviteResultDialog", () => {
     expect(instructionLine).toBe(inviteLine + 1)
     expect(tailLine).toBeGreaterThan(instructionLine)
     expect(expiryLine).toBeGreaterThan(tailLine)
+    expect(lines[expiryLine]).toContain(String(new Date(1_800_000_000 * 1000).getFullYear()))
     expect(lines[tailLine]).not.toContain("└")
   })
 })
@@ -139,6 +140,23 @@ describe("Remote invite input", () => {
     })
     expect(parseRemoteInviteInput("--workdir /srv/work --max-uses 5")).toEqual({
       name: undefined, workdir: "/srv/work", max_uses: 5, ttl_s: undefined,
+    })
+    for (const input of [
+      "--workdir /srv/My Projects --max-uses 5",
+      '--workdir "/srv/My Projects" --max-uses 5',
+      "--workdir '/srv/My Projects' --max-uses 5",
+      "--workdir /srv/My\\ Projects --max-uses 5",
+      "--max-uses 5 --workdir /srv/My Projects",
+    ]) {
+      expect(parseRemoteInviteInput(input)).toEqual({
+        name: undefined, workdir: "/srv/My Projects", max_uses: 5, ttl_s: undefined,
+      })
+    }
+    expect(parseRemoteInviteInput('host --workdir "/srv/My Projects" --ttl-s 7200')).toEqual({
+      name: "host", workdir: "/srv/My Projects", max_uses: undefined, ttl_s: 7200,
+    })
+    expect(parseRemoteInviteInput('host "/srv/My Projects" --max-uses 1')).toEqual({
+      name: "host", workdir: "/srv/My Projects", max_uses: 1, ttl_s: undefined,
     })
   })
 })
