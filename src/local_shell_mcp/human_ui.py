@@ -3338,8 +3338,9 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
                     observation_id = data["observation_id"]
                     recent.append(observation_id)
                     digest = hashlib.blake2s(image).digest()
-                    await emit(frame_metadata(data), image if digest != last_digest or stream.force_frame else b"")
+                    force_frame = stream.force_frame
                     stream.force_frame = False
+                    await emit(frame_metadata(data), image if digest != last_digest or force_frame else b"")
                     last_digest = digest
                     await asyncio.sleep(max(0.05, FRAME_INTERVAL_S - (time.monotonic() - started)))
             finally:

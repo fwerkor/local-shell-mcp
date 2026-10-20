@@ -945,6 +945,85 @@ def test_local_focus_sensitive_stream_only_refreshes_on_demand(tmp_path, monkeyp
     assert len(manager.discarded) == 2
 
 
+@pytest.mark.asyncio
+async def test_local_refresh_during_frame_send_is_not_lost(monkeypatch, tmp_path):
+    manager = FakeManager(tmp_path)
+    monkeypatch.setattr(gui, "get_gui_manager", lambda: manager)
+    monkeypatch.setattr(human_ui, "_websocket_principal", lambda _: object())
+    monkeypatch.setattr(human_ui, "require_scopes", lambda *_: None)
+    monkeypatch.setattr(stream_module, "FRAME_INTERVAL_S", 0.005)
+    captured = 0
+
+    async def capture(*_):
+        nonlocal captured
+        captured += 1
+        return {
+            "window": {"bounds": {"x": 0, "y": 0, "width": 20, "height": 10}},
+            "observation_id": f"obs-{captured}", "observation_ttl_s": 20,
+            "capabilities": {"coordinate_input": True},
+        }, b"\xff\xd8\xffunchanged"
+
+    monkeypatch.setattr(stream_module, "capture_frame", capture)
+
+    class PausedSocket:
+        query_params = {"machine": "local", "window_id": "win"}
+        headers = {}
+
+        def __init__(self):
+            self.incoming = asyncio.Queue()
+            self.frames = []
+            self.second_started = asyncio.Event()
+            self.release_second = asyncio.Event()
+            self.third_sent = asyncio.Event()
+
+        async def accept(self, **_):
+            pass
+
+        async def send_text(self, raw):
+            packet = json.loads(raw)
+            if packet["type"] != "frame":
+                return
+            self.frames.append(packet)
+            if len(self.frames) == 2:
+                self.second_started.set()
+                await self.release_second.wait()
+            if len(self.frames) == 3:
+                self.third_sent.set()
+
+        async def send_bytes(self, data):
+            pass
+
+        async def receive(self):
+            return await self.incoming.get()
+
+        async def close(self, **_):
+            pass
+
+    socket = PausedSocket()
+    task = asyncio.create_task(human_ui.ui_desktop_websocket(socket))
+    try:
+        await asyncio.wait_for(socket.second_started.wait(), timeout=2)
+        assert socket.frames[0]["image"] is True
+        assert socket.frames[1]["image"] is False
+        stream = next(iter(stream_module.STREAMS.values()))
+        socket.incoming.put_nowait({"type": "websocket.receive", "text": '{"type":"refresh"}'})
+        for _ in range(100):
+            if stream.force_frame:
+                break
+            await asyncio.sleep(0.002)
+        assert stream.force_frame is True
+        socket.release_second.set()
+        await asyncio.wait_for(socket.third_sent.wait(), timeout=2)
+        assert socket.frames[2]["image"] is True
+        socket.incoming.put_nowait({"type": "websocket.disconnect"})
+        await asyncio.wait_for(task, timeout=2)
+    finally:
+        socket.release_second.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
 def test_desktop_local_disabled_by_settings(monkeypatch):
     from starlette.websockets import WebSocketDisconnect
 
