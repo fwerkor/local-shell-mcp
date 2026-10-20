@@ -1558,6 +1558,13 @@ def test_native_file_download_ticket_is_short_lived_and_binary_safe(tmp_path, mo
     assert "attachment" in response.headers["content-disposition"]
     assert client.get(url, headers={"Range": "bytes=10-20"}).content == data[10:21]
     assert client.get("/api/ui/files/download/not-a-token").status_code == 404
+    assert client.post("/api/ui/files/download-ticket", json={"machine": "local"}).status_code == 400
+    (tmp_path / "directory").mkdir()
+    assert client.post("/api/ui/files/download-ticket", json={
+        "machine": "local", "path": "directory",
+    }).status_code == 400
+    (tmp_path / "test weights.bin").write_bytes(b"changed")
+    assert client.get(url).status_code == 416
 
     ticket = url.rsplit("/", 1)[-1]
     with human_ui._UI_DOWNLOAD_LOCK:
@@ -1715,7 +1722,10 @@ def test_native_remote_file_download_grant_and_range(tmp_path, monkeypatch):
     assert partial.status_code == 206
     assert partial.content == payload[10:32]
     assert partial.headers["Content-Range"] == f"bytes 10-31/{len(payload)}"
-    assert client.get(url, headers={"Range": "bytes=999999-"}).status_code == 416
+    assert client.get(url, headers={"Range": "bytes=-11"}).content == payload[-11:]
+    assert client.get(url, headers={"Range": "bytes=0-999999"}).content == payload
+    for invalid_range in ("bytes=-0", "bytes=8-3", "bytes=--", "bytes=999999-"):
+        assert client.get(url, headers={"Range": invalid_range}).status_code == 416
 
 
 def test_native_remote_binary_upload_uses_bounded_chunks(tmp_path, monkeypatch):

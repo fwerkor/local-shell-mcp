@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5f07217e742810704f1919224f6cf68bf7b4f5ecf635fadd5ec4d21b072ce6b2 -->
+<!-- i18n-source-sha256: d4016e996b7de27eb0d52bc7b076277fd976b12906ce5f44d04c1d1d229bf85c -->
 # 사용자 인터페이스
 
 `local-shell-mcp`는 동일한 service API, workspace, persistent terminal registry, remote-worker registry, MCP audit log 위에 호환되는 두 가지 human interface를 제공합니다.

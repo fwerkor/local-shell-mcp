@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5f07217e742810704f1919224f6cf68bf7b4f5ecf635fadd5ec4d21b072ce6b2 -->
+<!-- i18n-source-sha256: d4016e996b7de27eb0d52bc7b076277fd976b12906ce5f44d04c1d1d229bf85c -->
 # मानव इंटरफ़ेस
 
 `local-shell-mcp` एक ही service API, workspace, persistent terminal registry, remote-worker registry और MCP audit log पर दो compatible human interfaces देता है:
