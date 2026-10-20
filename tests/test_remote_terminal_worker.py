@@ -173,9 +173,10 @@ async def test_real_tmux_attached_pty_preserves_ansi_and_detach(monkeypatch, she
                 )
             return output
 
-        # A registered tmux client is not sufficient: the interactive shell may
-        # still be starting, so writing here can lose the command on some runners.
-        await read_until(b"LSM-PTY-READY> ", "interactive shell readiness")
+        # A registered tmux client is not sufficient: the shell may still be
+        # starting. Match the prompt text, not its trailing blank: tmux may
+        # erase that cell with an ANSI EL sequence (ESC[K) when redrawing.
+        await read_until(b"LSM-PTY-READY>", "interactive shell readiness")
         assert session_name in command("list-clients", "-F", "#{session_name}").stdout
         await attachment.write(b"printf '\\033[31mREAL-PTY\\033[0m\\n'\r")
         await read_until(b"\x1b[31mREAL-PTY", "ANSI command output")

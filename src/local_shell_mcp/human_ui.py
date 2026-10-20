@@ -101,6 +101,8 @@ UI_MIN_ROWS = 8
 UI_MAX_ROWS = 500
 UI_TUI_EXIT_CODE = 4410
 UI_SHELL_EXIT_CODE = 4411
+DESKTOP_CREDENTIAL_WATCH_INTERVAL_S = 5
+DESKTOP_FRAME_WAIT_S = 10
 _ACTIVE_UI_TERMINALS: set[int] = set()
 _LOGGER = logging.getLogger(__name__)
 
@@ -3202,6 +3204,242 @@ async def ui_root_redirect(request: Request) -> RedirectResponse:  # noqa: ARG00
     return RedirectResponse(f"./{ui_path}/", status_code=307)
 
 
+
+async def ui_desktop_websocket(websocket: WebSocket) -> None:
+    """Dedicated human control channel; frames/actions are not tool calls."""
+    principal = _websocket_principal(websocket)
+    if principal is None:
+        await websocket.close(code=4401, reason="Authentication required")
+        return
+    machine = str(websocket.query_params.get("machine") or "local")
+    window_id = str(websocket.query_params.get("window_id") or "")
+    try:
+        require_scopes(
+            principal,
+            ["shell:read", "shell:execute", *(["remote:use"] if machine != "local" else [])],
+        )
+        if not window_id or len(window_id.encode()) > 1024:
+            raise ValueError("A valid window_id is required")
+        if machine == "local" and get_settings().disable_local:
+            raise PermissionError("Local access is disabled")
+    except Exception as exc:
+        await websocket.close(code=4403, reason=str(exc)[:120])
+        return
+
+    from .desktop_stream import (
+        FRAME_INTERVAL_S,
+        RETAINED_OBSERVATIONS,
+        STREAM_IDLE_S,
+        STREAMS,
+        DesktopStream,
+        capture_frame,
+        frame_metadata,
+    )
+
+    stream = DesktopStream(machine, window_id)
+    if len(STREAMS) >= max(1, get_settings().ui_terminal_max_sessions):
+        await websocket.close(code=4429, reason="Too many desktop streams")
+        return
+    live_credentials = _live_websocket_credentials(websocket)
+    # Reserve capacity before the websocket handshake yields.
+    STREAMS[stream.key] = stream
+    protocols = [item.strip() for item in websocket.headers.get("sec-websocket-protocol", "").split(",")]
+    try:
+        await websocket.accept(subprotocol=UI_SUBPROTOCOL if UI_SUBPROTOCOL in protocols else None)
+    except BaseException:
+        STREAMS.pop(stream.key, None)
+        raise
+    is_remote = machine != "local"
+    manager = None
+    send_lock = asyncio.Lock()
+
+    def live_credential_valid() -> bool:
+        if live_credentials is None:
+            return True
+        channel = get_live_channel_manager().authenticate(live_credentials[1])
+        return channel is not None and channel.live_id == live_credentials[0]
+
+    async def send_control(control: dict[str, Any]) -> None:
+        async with send_lock:
+            await websocket.send_text(json.dumps(control, separators=(",", ":")))
+
+    async def emit(metadata: dict[str, Any], image: bytes) -> None:
+        async with send_lock:
+            if metadata.get("type") == "frame" and isinstance(metadata.get("ttl_s"), (int, float)):
+                metadata = dict(metadata)
+                queued_at = metadata.pop("_queued_at", time.monotonic())
+                metadata["ttl_s"] = max(0.0, metadata["ttl_s"] - (time.monotonic() - queued_at))
+            await websocket.send_text(json.dumps({**metadata, "image": bool(image)}, separators=(",", ":")))
+            if image:
+                await websocket.send_bytes(image)
+
+    async def ack_sender() -> None:
+        while True:
+            ack = await stream.acknowledgements.get()
+            action_type = stream.pending_live_actions.pop(ack.get("request_id"), None)
+            if ack.get("ok") is True and action_type and live_credentials is not None:
+                _record_live_human_action(
+                    live_credentials[0], "gui.action",
+                    machine=machine, window_id=window_id, actions=[action_type],
+                )
+            await send_control(ack)
+
+    async def credential_watcher() -> None:
+        while True:
+            await asyncio.sleep(DESKTOP_CREDENTIAL_WATCH_INTERVAL_S)
+            if not live_credential_valid():
+                await websocket.close(code=4401, reason="Live workspace credential expired or rotated")
+                return
+
+    async def sender() -> None:
+        if is_remote:
+            await _remote_call(
+                machine, "gui_stream_start",
+                {"stream_id": stream.key, "secret": stream.secret, "window_id": window_id},
+                int(REMOTE_QUEUE_TIMEOUT_S + 180 + REMOTE_RESULT_GRACE_S),
+            )
+            await send_control({"type": "ready"})
+            while True:
+                try:
+                    metadata, image = await asyncio.wait_for(stream.frames.get(), timeout=DESKTOP_FRAME_WAIT_S)
+                except TimeoutError:
+                    if stream.last_contact is not None and time.monotonic() - stream.last_contact > STREAM_IDLE_S:
+                        await send_control({"type": "error", "message": "Remote desktop worker stopped responding"})
+                        return
+                    await send_control({"type": "heartbeat"})
+                    continue
+                await emit(metadata, image)
+                if metadata.get("type") == "error":
+                    return
+        else:
+            from .gui import get_gui_manager
+            nonlocal manager
+            manager = get_gui_manager()
+            await send_control({"type": "ready"})
+            focus_sensitive = (await manager.list_windows()).get("capabilities", {}).get("capture_requires_focus") is True
+            refresh_event = asyncio.Event()
+            refresh_event.set()
+            stream.refresh_event = refresh_event
+            recent: list[str] = []
+            last_digest: bytes | None = None
+            try:
+                while True:
+                    if focus_sensitive:
+                        try:
+                            await asyncio.wait_for(refresh_event.wait(), timeout=10)
+                        except TimeoutError:
+                            await send_control({"type": "heartbeat"})
+                            continue
+                        refresh_event.clear()
+                    started = time.monotonic()
+                    if len(recent) >= RETAINED_OBSERVATIONS:
+                        await manager.discard_frame_observation(window_id, recent.pop(0))
+                    data, image = await capture_frame(manager, window_id)
+                    observation_id = data["observation_id"]
+                    recent.append(observation_id)
+                    digest = hashlib.blake2s(image).digest()
+                    force_frame = stream.force_frame
+                    stream.force_frame = False
+                    await emit(frame_metadata(data), image if digest != last_digest or force_frame else b"")
+                    last_digest = digest
+                    await asyncio.sleep(max(0.05, FRAME_INTERVAL_S - (time.monotonic() - started)))
+            finally:
+                for observation_id in recent:
+                    with contextlib.suppress(Exception):
+                        await manager.discard_frame_observation(window_id, observation_id)
+
+    async def receiver() -> None:
+        from .tools import GuiAction
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                return
+            if not live_credential_valid():
+                await websocket.close(code=4401, reason="Live workspace credential expired or rotated")
+                return
+            raw = message.get("text")
+            if not isinstance(raw, str) or len(raw) > 16_384:
+                continue
+            try:
+                control = json.loads(raw)
+                if not isinstance(control, dict):
+                    continue
+                if control.get("type") == "refresh":
+                    stream.force_frame = True
+                    if not is_remote and hasattr(stream, "refresh_event"):
+                        stream.refresh_event.set()
+                    continue
+                if control.get("type") != "action":
+                    continue
+                action = GuiAction.model_validate(control.get("action")).model_dump(exclude_none=True)
+                observation_id = control["observation_id"]
+                bounds = control["bounds"]
+                if not isinstance(observation_id, str) or len(observation_id) > 128 or not isinstance(bounds, dict):
+                    raise ValueError("Invalid desktop observation")
+                entry = {"observation_id": observation_id, "bounds": bounds, "action": action}
+                request_id = control.get("request_id")
+                if isinstance(request_id, int) and not isinstance(request_id, bool) and 0 < request_id < 2**53:
+                    entry["request_id"] = request_id
+                else:
+                    request_id = None
+                if is_remote:
+                    if stream.actions.full():
+                        if request_id is not None:
+                            stream.acknowledgements.put_nowait({"type": "action-ack", "request_id": request_id, "ok": False, "message": "Desktop input queue is full"})
+                        else:
+                            await send_control({"type": "error", "message": "Desktop input queue is full"})
+                    else:
+                        stream.actions.put_nowait(entry)
+                        if request_id is not None and live_credentials is not None:
+                            stream.pending_live_actions[request_id] = str(action.get("type") or "")
+                else:
+                    assert manager is not None
+                    try:
+                        await manager.human_act(window_id, observation_id, bounds, [action])
+                        if hasattr(stream, "refresh_event"):
+                            stream.refresh_event.set()
+                    except Exception as exc:
+                        if request_id is not None:
+                            stream.acknowledgements.put_nowait({"type": "action-ack", "request_id": request_id, "ok": False, "refresh": True, "message": str(exc)[:240]})
+                        else:
+                            await send_control({"type": "error", "message": str(exc)[:240]})
+                    else:
+                        _record_live_human_action(
+                            live_credentials[0] if live_credentials is not None else None,
+                            "gui.action", machine=machine, window_id=window_id,
+                            actions=[str(action.get("type") or "")],
+                        )
+                        if request_id is not None:
+                            stream.acknowledgements.put_nowait({"type": "action-ack", "request_id": request_id, "ok": True})
+            except (KeyError, TypeError, ValueError) as exc:
+                request_id = control.get("request_id") if isinstance(control, dict) else None
+                if (isinstance(control, dict) and control.get("type") == "action"
+                        and isinstance(request_id, int) and not isinstance(request_id, bool)):
+                    await send_control({"type": "action-ack", "request_id": request_id, "ok": False, "message": str(exc)[:240]})
+                else:
+                    await send_control({"type": "error", "message": str(exc)[:240]})
+
+    tasks = [asyncio.create_task(sender()), asyncio.create_task(receiver()), asyncio.create_task(ack_sender())]
+    if live_credentials is not None:
+        tasks.append(asyncio.create_task(credential_watcher()))
+    try:
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        for task in done:
+            if not task.cancelled() and task.exception() is not None:
+                with contextlib.suppress(RuntimeError, WebSocketDisconnect):
+                    await websocket.send_text(json.dumps({"type": "error", "message": str(task.exception())[:240]}))
+    finally:
+        STREAMS.pop(stream.key, None)
+        if is_remote:
+            with contextlib.suppress(Exception):
+                await _remote_call(machine, "gui_stream_stop", {"stream_id": stream.key}, 15)
+        with contextlib.suppress(RuntimeError, WebSocketDisconnect):
+            await websocket.close()
+
+
 def ui_routes() -> list[Any]:
     settings = get_settings()
     if not settings.ui_enabled:
@@ -3216,6 +3454,7 @@ def ui_routes() -> list[Any]:
         Route(ui_path + "/assets/{path:path}", ui_asset, methods=["GET"]),
         WebSocketRoute(ui_path + "/ws", ui_terminal_websocket),
         WebSocketRoute(ui_path + "/ws/shell", ui_shell_websocket),
+        WebSocketRoute(ui_path + "/ws/desktop", ui_desktop_websocket),
         Route(UI_API_PREFIX + "/bootstrap", api_bootstrap, methods=["GET"]),
         Route(UI_API_PREFIX + "/dashboard", api_dashboard, methods=["GET"]),
         Route(UI_API_PREFIX + "/machines", api_machines, methods=["GET"]),

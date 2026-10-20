@@ -49,6 +49,7 @@ _WORKER_PYTHON_FILES = {
     "transfer_ops.py",
     "version.py",
     "gui/__init__.py",
+    "desktop_stream.py",
     "gui/base.py",
     "gui/linux.py",
     "gui/linux_atspi_helper.py",
@@ -413,6 +414,29 @@ try {
     return PlainTextResponse(script, media_type="text/plain")
 
 
+async def desktop_stream_frame(request: Any):  # noqa: ANN201
+    from starlette.responses import JSONResponse
+
+    from .desktop_stream import worker_frame
+
+    try:
+        worker = remote.remote_manager()._worker_by_token(remote._bearer_token(request))
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("Invalid desktop frame")
+        result = worker_frame(
+            str(request.path_params["stream_id"]),
+            request.headers.get("x-lsm-desktop-secret", ""),
+            worker.name,
+            body,
+        )
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+    except PermissionError:
+        return JSONResponse({"error": "unauthorized"}, status_code=403)
+    except (ValueError, KeyError, TypeError):
+        return JSONResponse({"error": "invalid desktop frame"}, status_code=400)
+
+
 def remote_routes() -> list[Any]:
     from starlette.routing import Route, WebSocketRoute
 
@@ -428,6 +452,7 @@ def remote_routes() -> list[Any]:
         Route(f"{remote.REMOTE_API_PREFIX}/poll", remote.poll_endpoint, methods=["POST"]),
         Route(f"{remote.REMOTE_API_PREFIX}/heartbeat", remote.heartbeat_endpoint, methods=["POST"]),
         Route(f"{remote.REMOTE_API_PREFIX}/result", remote.result_endpoint, methods=["POST"]),
+        Route("/remote/gui/stream/{stream_id}", desktop_stream_frame, methods=["POST"]),
         WebSocketRoute("/remote/terminal/ws", remote_terminal_websocket),
         *remote_transfer_routes(),
     ]
