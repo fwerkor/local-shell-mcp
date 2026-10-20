@@ -1661,7 +1661,7 @@ async def api_logical_sessions(request: Request) -> Response:
             get_session_runtime_manager().list_sessions,
             subject=subject,
         )
-        counts = {"active": 0, "completed": 0, "cancelled": 0, "total": len(sessions)}
+        counts = {"active": 0, "completed": 0, "cancelled": 0, "stale": 0, "total": len(sessions)}
         for session in sessions:
             status = str(session.get("status") or "")
             if status in counts:

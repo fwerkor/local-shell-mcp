@@ -127,6 +127,7 @@ def test_webui_logical_sessions_api_ignores_unknown_status_in_counts(tmp_path, m
         "active": 0,
         "completed": 0,
         "cancelled": 0,
+        "stale": 0,
         "total": 1,
     }
 
@@ -153,7 +154,7 @@ def test_webui_logical_sessions_api_is_principal_scoped(tmp_path, monkeypatch):
 
     assert listing.status_code == 200
     payload = listing.json()["data"]
-    assert payload["counts"] == {"active": 1, "completed": 0, "cancelled": 0, "total": 1}
+    assert payload["counts"] == {"active": 1, "completed": 0, "cancelled": 0, "stale": 0, "total": 1}
     assert [item["session_id"] for item in payload["sessions"]] == [own["session_id"]]
     assert payload["sessions"][0]["recent_activity"] == []
 

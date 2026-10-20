@@ -159,6 +159,7 @@ export interface LogicalSessionsPayload {
     active: number
     completed: number
     cancelled: number
+    stale: number
     total: number
   }
 }
