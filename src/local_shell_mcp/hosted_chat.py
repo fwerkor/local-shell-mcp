@@ -241,7 +241,17 @@ async def complete_turn(
                     result = await session.call_tool(
                         name, arguments, read_timeout_seconds=timedelta(seconds=120)
                     )
-                    events.append({"type": "tool", "name": name, "error": bool(result.isError)})
+                    event_record = result.model_dump(by_alias=True, exclude_none=True)
+                    event_record.pop("_meta", None)
+                    events.append(
+                        {
+                            "type": "tool",
+                            "name": name,
+                            "error": bool(result.isError),
+                            "call_id": tool_call["id"],
+                            "result": event_record,
+                        }
+                    )
                     request_messages.append(
                         {
                             "role": "tool",

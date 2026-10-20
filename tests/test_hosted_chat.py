@@ -189,6 +189,7 @@ async def test_tool_call_loop_preserves_results_but_not_private_metadata(monkeyp
     )
     assert result["messages"][-1]["content"] == "Done"
     assert calls == [("run_shell", {"command": "echo hi", "logical_session_id": "s_123"})]
+    assert result["events"][0]["result"]["content"][0]["text"] == "hi"
     assert "sensitive-live-token" not in json.dumps(result)
     assert "sensitive-live-token" not in json.dumps(checkpoints)
     assert checkpoints[-1][0][-1]["content"] == "Done"
