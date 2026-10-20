@@ -15,9 +15,16 @@ afterEach(() => {
 })
 function harness() {
   ;(globalThis as any).window = globalThis
-  ;(globalThis as any).WebSocket = { OPEN: 1 }
+  ;(globalThis as any).WebSocket = { OPEN: 1, CLOSED: 3 }
   const sent: any[] = []
-  const socket = { readyState: 1, send: (raw: string) => sent.push(JSON.parse(raw)), close: () => undefined }
+  const closeListeners: Array<() => void> = []
+  const socket = {
+    readyState: 1,
+    send: (raw: string) => sent.push(JSON.parse(raw)),
+    addEventListener: (_name: string, listener: () => void) => closeListeners.push(listener),
+    close: () => { socket.readyState = 2 },
+    finishClose: () => { socket.readyState = 3; closeListeners.forEach((listener) => listener()) },
+  }
   const c: any = new DesktopController(context())
   const image = { hidden: false, removeAttribute: (_name: string) => undefined, getBoundingClientRect: () => ({ left: 0, top: 0, right: 100, bottom: 50, width: 100, height: 50 }) }
   c.root = { querySelector: (selector: string) => selector === "[data-role=desktop-frame]" ? image : selector === "[data-role=desktop-stage]" ? { focus: () => undefined } : null }
@@ -129,33 +136,69 @@ describe("Desktop WebSocket transport", () => {
     expect(c.frameObservationId).toBe("obs-new")
     expect(c.frameBounds).toEqual({ x: 50, y: 60, width: 300, height: 150 })
   })
-  test("unchanged frame metadata waits until the previous keyframe finishes decoding", async () => {
+  test("unchanged metadata waits for the preceding keyframe decode", async () => {
     const { c } = harness()
-    let decode!: () => void
-    const decoding = new Promise<void>((resolve) => { decode = resolve })
-    c.imageQueue = decoding.then(() => c.publishFrame({
+    let finishDecode!: () => void
+    const decoding = new Promise<void>((resolve) => { finishDecode = resolve })
+    c.displayImage = async (_socket: WebSocket, metadata: unknown) => {
+      await decoding
+      c.publishFrame(metadata)
+    }
+    c.queuedImage = { socket: c.socket, metadata: {
       x: 20, y: 30, width: 200, height: 100, observation_id: "keyframe",
       ttl_s: 20, coordinate_input: true,
-    }))
+    }, data: new ArrayBuffer(3) }
+    c.drainFrames()
     c.handleControl(JSON.stringify({
       type: "frame", observation_id: "newest", ttl_s: 20, coordinate_input: true,
       bounds: { x: 50, y: 60, width: 300, height: 150 }, image: false,
     }))
     expect(c.frameObservationId).toBe("obs-active")
-    decode()
+    finishDecode()
     await c.imageQueue
     expect(c.frameObservationId).toBe("newest")
     expect(c.frameBounds).toEqual({ x: 50, y: 60, width: 300, height: 150 })
   })
-  test("does not publish metadata for a keyframe that failed decoding", async () => {
-    const { c } = harness()
-    c.imageQueue = Promise.reject(new Error("image decoding failed"))
+  test("does not publish unchanged metadata following a failed keyframe decode", async () => {
+    const { c, sent } = harness()
+    c.displayImage = async () => { throw new Error("image decoding failed") }
+    c.queuedImage = { socket: c.socket, metadata: {
+      x: 20, y: 30, width: 200, height: 100, observation_id: "bad",
+      ttl_s: 20, coordinate_input: true,
+    }, data: new ArrayBuffer(3) }
+    c.drainFrames()
     c.handleControl(JSON.stringify({
       type: "frame", observation_id: "newest", ttl_s: 20, coordinate_input: true,
       bounds: { x: 50, y: 60, width: 300, height: 150 }, image: false,
     }))
     await c.imageQueue
     expect(c.frameObservationId).toBe("obs-active")
+    expect(c.waitingForKeyframe).toBe(true)
+    expect(sent.at(-1)).toEqual({ type: "refresh" })
+  })
+  test("coalesces slow JPEG decode backlog to one pending image", async () => {
+    const { c } = harness()
+    let finishDecode!: () => void
+    const blocked = new Promise<void>((resolve) => { finishDecode = resolve })
+    const decoded: string[] = []
+    c.displayImage = async (_socket: WebSocket, metadata: { observation_id: string }) => {
+      decoded.push(metadata.observation_id)
+      if (decoded.length === 1) await blocked
+      c.publishFrame(metadata)
+    }
+    for (let i = 0; i < 30; i++) {
+      c.queuedImage = { socket: c.socket, metadata: {
+        x: 20, y: 30, width: 200, height: 100,
+        observation_id: `keyframe-${i}`, ttl_s: 20, coordinate_input: true,
+      }, data: new ArrayBuffer(1024) }
+      c.drainFrames()
+    }
+    expect(decoded).toEqual(["keyframe-0"])
+    expect(c.queuedImage.metadata.observation_id).toBe("keyframe-29")
+    finishDecode()
+    await c.imageQueue
+    expect(decoded).toEqual(["keyframe-0", "keyframe-29"])
+    expect(c.frameObservationId).toBe("keyframe-29")
   })
   test("failed JPEG decode disables input and ignores every unchanged frame until a successful keyframe", async () => {
     const { c, sent } = harness()
@@ -274,21 +317,28 @@ describe("Desktop WebSocket transport", () => {
     expect(c.frameObservationId).toBe("")
     expect(c.frameInputEnabled).toBe(false)
   })
-  test("reconnecting decodes the new stream without waiting for the prior socket image", async () => {
-    const { c } = harness()
+  test("reconnect waits for previous socket close, but not its old image decode", async () => {
+    const { c, socket: oldSocket } = harness()
     let finishOldDecode!: () => void
     c.imageQueue = new Promise<void>((resolve) => { finishOldDecode = resolve })
+    const urls: string[] = []
     ;(globalThis as any).location = { protocol: "https:", host: "example.test" }
     ;(globalThis as any).WebSocket = class {
       static OPEN = 1
+      static CLOSED = 3
       binaryType = ""
-      readyState = 1
-      constructor(_url: URL) {}
+      constructor(url: URL) { urls.push(String(url)) }
       close() {}
     }
     URL.revokeObjectURL = () => undefined
     c.displayImage = async (_socket: WebSocket, metadata: unknown) => c.publishFrame(metadata)
     c.connect()
+    expect(urls).toHaveLength(0)
+    expect(c.socket).toBeNull()
+    oldSocket.finishClose()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(urls).toHaveLength(1)
     const newSocket = c.socket
     newSocket.onmessage({ data: JSON.stringify({
       type: "frame", observation_id: "new-stream-obs", ttl_s: 20,
@@ -299,8 +349,32 @@ describe("Desktop WebSocket transport", () => {
     expect(c.frameObservationId).toBe("new-stream-obs")
     finishOldDecode()
   })
-  test("connect uses authenticated websocket endpoint, not HTTP polling", () => {
-    const { c } = harness()
+  test("rapid window switches open only the final stream after old socket close", async () => {
+    const { c, socket: oldSocket } = harness()
+    const opened: string[] = []
+    ;(globalThis as any).location = { protocol: "https:", host: "example.test" }
+    ;(globalThis as any).WebSocket = class {
+      static OPEN = 1
+      static CLOSED = 3
+      binaryType = ""
+      constructor(url: URL) { opened.push(String(url)) }
+      close() {}
+    }
+    URL.revokeObjectURL = () => undefined
+    c.connect()
+    c.selectedWindowId = "window:2"
+    c.connect()
+    c.selectedWindowId = "window:3"
+    c.connect()
+    expect(opened).toHaveLength(0)
+    oldSocket.finishClose()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(opened).toHaveLength(1)
+    expect(opened[0]).toContain("window_id=window%3A3")
+  })
+  test("connect uses authenticated websocket endpoint, not HTTP polling", async () => {
+    const { c, socket: oldSocket } = harness()
     let uri = ""
     ;(globalThis as any).location = { protocol: "https:", host: "example.test" }
     ;(globalThis as any).WebSocket = class {
@@ -311,6 +385,10 @@ describe("Desktop WebSocket transport", () => {
     }
     URL.revokeObjectURL = () => undefined
     c.connect()
+    expect(uri).toBe("")
+    oldSocket.finishClose()
+    await Promise.resolve()
+    await Promise.resolve()
     expect(uri).toContain("wss://example.test/ui/ws/desktop?")
     expect(uri).toContain("machine=local")
     expect(uri).toContain("window_id=window%3A1")

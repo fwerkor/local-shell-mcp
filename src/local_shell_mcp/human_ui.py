@@ -3296,7 +3296,7 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
             await _remote_call(
                 machine, "gui_stream_start",
                 {"stream_id": stream.key, "secret": stream.secret, "window_id": window_id},
-                45,
+                int(REMOTE_QUEUE_TIMEOUT_S + 180 + REMOTE_RESULT_GRACE_S),
             )
             await send_control({"type": "ready"})
             while True:

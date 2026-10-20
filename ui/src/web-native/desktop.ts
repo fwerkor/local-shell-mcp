@@ -129,6 +129,7 @@ export function wheelScrollAmount(deltaY: number): number {
 }
 
 type StreamFrame = GuiBounds & { observation_id: string; ttl_s: number; coordinate_input: boolean; expiresAtMs?: number }
+type EncodedFrame = { socket: WebSocket; metadata: StreamFrame; data: Blob | ArrayBuffer }
 
 export class DesktopController extends BaseController {
   private machine = "local"
@@ -161,7 +162,13 @@ export class DesktopController extends BaseController {
   private wheelBounds: GuiBounds | null = null
   private wheelObservationId = ""
   private imageQueue: Promise<void> = Promise.resolve()
+  private imageQueueRunning = false
+  private imageGeneration = 0
+  private queuedImage: EncodedFrame | null = null
+  private queuedMetadata: StreamFrame | null = null
   private pendingFrame: StreamFrame | null = null
+  private connectGeneration = 0
+  private closingSocket: Promise<void> | null = null
 
   constructor(context: NativePageContext) {
     super(context)
@@ -376,6 +383,20 @@ export class DesktopController extends BaseController {
   private connect(): void {
     if (!this.selectedWindowId) return
     this.disconnect()
+    const generation = this.connectGeneration
+    const open = () => {
+      if (generation === this.connectGeneration && !this.destroyed && this.selectedWindowId) this.openSocket()
+    }
+    // The server only releases the old stream slot on websocket teardown.
+    if (this.closingSocket) {
+      this.renderStatus("Reconnecting to desktop…")
+      void this.closingSocket.then(open)
+    } else {
+      open()
+    }
+  }
+
+  private openSocket(): void {
     const scheme = location.protocol === "https:" ? "wss:" : "ws:"
     const url = new URL(`${scheme}//${location.host}${this.context.uiPath}/ws/desktop`)
     url.searchParams.set("machine", this.machine)
@@ -392,10 +413,10 @@ export class DesktopController extends BaseController {
         const metadata = this.pendingFrame
         this.pendingFrame = null
         if (!metadata) return
-        this.imageQueue = this.imageQueue.then(
-          () => this.decodeImage(socket, metadata, event.data as Blob | ArrayBuffer),
-          () => this.decodeImage(socket, metadata, event.data as Blob | ArrayBuffer),
-        )
+        this.queuedImage = { socket, metadata, data: event.data as Blob | ArrayBuffer }
+        // Keep only the latest waiting JPEG; never retain an unbounded decode backlog.
+        this.queuedMetadata = null
+        this.drainFrames()
       }
     }
     socket.onerror = () => {
@@ -446,17 +467,34 @@ export class DesktopController extends BaseController {
       expiresAtMs: Date.now() + Math.max(0, ttl * 1000 - 1000) }
     if (message.image) {
       this.pendingFrame = metadata
-    } else if (this.frameUrl) {
-      const socket = this.socket
-      const publish = () => {
-        if (socket === this.socket && this.frameUrl && !this.waitingForKeyframe) this.publishFrame(metadata)
-      }
-      this.imageQueue = this.imageQueue.then(publish, () => {
-        this.waitingForKeyframe = true
-        this.frameInputEnabled = false
-        this.refreshFrame()
-      })
+    } else if (this.frameUrl || this.imageQueueRunning || this.queuedImage) {
+      this.queuedMetadata = metadata
+      this.drainFrames()
     }
+  }
+
+  private drainFrames(): void {
+    if (this.imageQueueRunning) return
+    const generation = this.imageGeneration
+    this.imageQueueRunning = true
+    this.imageQueue = (async () => {
+      while (generation === this.imageGeneration) {
+        const next = this.queuedImage
+        if (next) {
+          this.queuedImage = null
+          await this.decodeImage(next.socket, next.metadata, next.data)
+          continue
+        }
+        const metadata = this.queuedMetadata
+        if (!metadata) break
+        this.queuedMetadata = null
+        if (this.frameUrl && !this.waitingForKeyframe) this.publishFrame(metadata)
+      }
+    })().finally(() => {
+      if (generation !== this.imageGeneration) return
+      this.imageQueueRunning = false
+      if (this.queuedImage || this.queuedMetadata) this.drainFrames()
+    })
   }
 
   private publishFrame(data: StreamFrame): void {
@@ -514,14 +552,26 @@ export class DesktopController extends BaseController {
   }
 
   private disconnect(): void {
+    this.connectGeneration++
     const socket = this.socket
     this.socket = null
     if (socket) {
       socket.onclose = null
+      if (socket.readyState !== WebSocket.CLOSED) {
+        const closing = new Promise<void>((resolve) => {
+          socket.addEventListener("close", () => resolve(), { once: true })
+        })
+        this.closingSocket = closing
+        void closing.then(() => { if (this.closingSocket === closing) this.closingSocket = null })
+      }
       socket.close()
     }
     this.pendingFrame = null
+    this.imageGeneration++
     this.imageQueue = Promise.resolve()
+    this.imageQueueRunning = false
+    this.queuedImage = null
+    this.queuedMetadata = null
     this.waitingForKeyframe = false
     this.pendingRequestIds.clear()
     this.pendingActions = 0

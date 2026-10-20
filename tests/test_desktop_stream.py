@@ -160,6 +160,9 @@ def test_remote_websocket_uses_only_start_stop_rpc(monkeypatch):
     async def fake_remote_call(machine, tool, args, timeout_s=None):
         calls.append((machine, tool))
         if tool == "gui_stream_start":
+            assert timeout_s >= (
+                human_ui.REMOTE_QUEUE_TIMEOUT_S + 180 + human_ui.REMOTE_RESULT_GRACE_S
+            )
             return {"started": True}
         assert tool == "gui_stream_stop"
         return {"stopped": True}
