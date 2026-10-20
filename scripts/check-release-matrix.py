@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -32,6 +33,11 @@ def step_script(job: dict, name: str) -> str:
         if step.get("name") == name:
             return str(step.get("run") or "")
     return ""
+
+
+def pinned_action(step: dict, action: str) -> bool:
+    ref = str(step.get("uses") or "")
+    return re.fullmatch(rf"{re.escape(action)}@[0-9a-f]{{40}}", ref) is not None
 
 
 def main() -> int:
@@ -164,8 +170,8 @@ def main() -> int:
         (step for step in snap_job.get("steps", []) if step.get("name") == "Build Snap package"),
         {},
     )
-    if snap_build_step.get("uses") != "snapcore/action-build@v1":
-        print("Release workflow must build snaps with snapcore/action-build@v1.")
+    if not pinned_action(snap_build_step, "snapcore/action-build"):
+        print("Release workflow must build snaps with a SHA-pinned snapcore/action-build.")
         return 1
 
     github_release_job = jobs.get("github-release", {})
@@ -210,8 +216,8 @@ def main() -> int:
         (step for step in snap_publish_job.get("steps", []) if step.get("name") == "Publish Snap package"),
         {},
     )
-    if snap_publish_step.get("uses") != "snapcore/action-publish@v1":
-        print("Release workflow must publish snaps with snapcore/action-publish@v1.")
+    if not pinned_action(snap_publish_step, "snapcore/action-publish"):
+        print("Release workflow must publish snaps with a SHA-pinned snapcore/action-publish.")
         return 1
     snap_release = str(snap_publish_step.get("with", {}).get("release", ""))
     if "edge" not in snap_release or "stable" not in snap_release or "prerelease" not in snap_release:
