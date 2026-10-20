@@ -122,11 +122,40 @@ describe("Desktop WebSocket transport", () => {
     await c.actionQueue
     expect(sent).toHaveLength(0)
   })
-  test("updates metadata on unchanged frames without a new image", () => {
+  test("updates metadata on unchanged frames without a new image", async () => {
     const { c } = harness()
     c.handleControl(JSON.stringify({ type: "frame", observation_id: "obs-new", ttl_s: 20, coordinate_input: true, bounds: { x: 50, y: 60, width: 300, height: 150 }, image: false }))
+    await c.imageQueue
     expect(c.frameObservationId).toBe("obs-new")
     expect(c.frameBounds).toEqual({ x: 50, y: 60, width: 300, height: 150 })
+  })
+  test("unchanged frame metadata waits until the previous keyframe finishes decoding", async () => {
+    const { c } = harness()
+    let decode!: () => void
+    const decoding = new Promise<void>((resolve) => { decode = resolve })
+    c.imageQueue = decoding.then(() => c.publishFrame({
+      x: 20, y: 30, width: 200, height: 100, observation_id: "keyframe",
+      ttl_s: 20, coordinate_input: true,
+    }))
+    c.handleControl(JSON.stringify({
+      type: "frame", observation_id: "newest", ttl_s: 20, coordinate_input: true,
+      bounds: { x: 50, y: 60, width: 300, height: 150 }, image: false,
+    }))
+    expect(c.frameObservationId).toBe("obs-active")
+    decode()
+    await c.imageQueue
+    expect(c.frameObservationId).toBe("newest")
+    expect(c.frameBounds).toEqual({ x: 50, y: 60, width: 300, height: 150 })
+  })
+  test("does not publish metadata for a keyframe that failed decoding", async () => {
+    const { c } = harness()
+    c.imageQueue = Promise.reject(new Error("image decoding failed"))
+    c.handleControl(JSON.stringify({
+      type: "frame", observation_id: "newest", ttl_s: 20, coordinate_input: true,
+      bounds: { x: 50, y: 60, width: 300, height: 150 }, image: false,
+    }))
+    await c.imageQueue
+    expect(c.frameObservationId).toBe("obs-active")
   })
   test("new image metadata is not published before decode", () => {
     const { c } = harness()

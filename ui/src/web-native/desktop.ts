@@ -434,7 +434,11 @@ export class DesktopController extends BaseController {
     if (message.image) {
       this.pendingFrame = metadata
     } else if (this.frameUrl) {
-      this.publishFrame(metadata)
+      const socket = this.socket
+      const publish = () => {
+        if (socket === this.socket && this.frameUrl) this.publishFrame(metadata)
+      }
+      this.imageQueue = this.imageQueue.then(publish, () => undefined)
     }
   }
 

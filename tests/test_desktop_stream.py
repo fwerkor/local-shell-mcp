@@ -217,7 +217,7 @@ def test_post_frame_serialization_and_rejects_wrong_response(monkeypatch):
             pass
 
         def read(self, size):
-            assert size == 16 * 1024
+            assert size == stream_module.MAX_WORKER_ACTION_RESPONSE_BYTES + 1
             return self.body
 
     def fake_open(request, timeout):
@@ -910,3 +910,74 @@ def test_desktop_local_disabled_by_settings(monkeypatch):
               client.websocket_connect("/ui/ws/desktop?machine=local&window_id=win") as ws):
             ws.receive_json()
         assert denied.value.code == 4403
+
+
+def test_remote_worker_action_response_supports_four_max_length_text_inputs(monkeypatch):
+    import urllib.request
+
+    actions = [{"request_id": i, "observation_id": "observation",
+                "bounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+                "action": {"type": "type", "text": "x" * 4096}} for i in range(4)]
+    data = json.dumps({"actions": actions}).encode()
+    assert len(data) > 16 * 1024
+
+    class Response:
+        def __init__(self, body):
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+        def read(self, size):
+            assert size == stream_module.MAX_WORKER_ACTION_RESPONSE_BYTES + 1
+            return self.body[:size]
+
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda *args, **kwargs: Response(data))
+    assert stream_module._post_frame("https://controller/remote/gui/stream/id", {}, "secret") == {
+        "actions": actions,
+    }
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda *args, **kwargs: Response(b"x" * (stream_module.MAX_WORKER_ACTION_RESPONSE_BYTES + 1)))
+    with pytest.raises(ValueError, match="response is too large"):
+        stream_module._post_frame("https://controller/remote/gui/stream/id", {}, "secret")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_stage", ["manager", "discovery"])
+async def test_worker_reports_initial_gui_discovery_failure_and_cleans_task(monkeypatch, failure_stage):
+    manager = FakeManager(Path("/tmp"))
+    async def fail_listing():
+        raise RuntimeError("GUI permission denied")
+    manager.list_windows = fail_listing
+
+    def manager_factory():
+        if failure_stage == "manager":
+            raise RuntimeError("GUI setup unavailable")
+        return manager
+
+    monkeypatch.setattr(gui, "get_gui_manager", manager_factory)
+    stream_module.configure_worker_stream("https://controller", {"Authorization": "Bearer worker"})
+    posts = []
+    def post(url, payload, secret):
+        posts.append(payload)
+        return {"actions": [], "refresh": False}
+    monkeypatch.setattr(stream_module, "_post_frame", post)
+    stream_module.start_worker_stream("initial-error", "secret", "win")
+    task = stream_module._WORKER_STREAM_TASKS["initial-error"]
+    await asyncio.wait_for(task, timeout=2)
+    assert posts == [{"errors": ["GUI setup unavailable" if failure_stage == "manager" else "GUI permission denied"]}]
+    assert "initial-error" not in stream_module._WORKER_STREAM_TASKS
+
+
+def test_remote_stream_idle_timeout_allows_valid_long_running_gui_operations():
+    stream = stream_module.DesktopStream("node", "win")
+    stream_module.STREAMS[stream.key] = stream
+    stream.last_contact = time.monotonic() - 45
+    assert stream_module.worker_frame(stream.key, stream.secret, "node", {}) == {
+        "actions": [], "refresh": False,
+    }
+    assert stream.key in stream_module.STREAMS

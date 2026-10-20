@@ -22,8 +22,9 @@ FRAME_INTERVAL_S = 0.9
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 800
 FRAME_QUALITY = 46
-STREAM_IDLE_S = 12.0
+STREAM_IDLE_S = 120.0
 RETAINED_OBSERVATIONS = 3
+MAX_WORKER_ACTION_RESPONSE_BYTES = 512 * 1024
 
 
 def compress_frame(path: Path) -> bytes:
@@ -188,7 +189,10 @@ def _post_frame(url: str, payload: dict[str, Any], secret: str) -> dict[str, Any
         headers={"Content-Type": "application/json", "X-LSM-Desktop-Secret": secret, **_WORKER_HEADERS},
     )
     with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310 - worker's enrolled controller
-        value = json.loads(response.read(16 * 1024))
+        payload = response.read(MAX_WORKER_ACTION_RESPONSE_BYTES + 1)
+        if len(payload) > MAX_WORKER_ACTION_RESPONSE_BYTES:
+            raise ValueError("Desktop controller response is too large")
+        value = json.loads(payload)
         if not isinstance(value, dict):
             raise ValueError("Invalid desktop controller response")
         return value
@@ -197,16 +201,17 @@ def _post_frame(url: str, payload: dict[str, Any], secret: str) -> dict[str, Any
 async def _worker_stream_loop(stream_id: str, secret: str, window_id: str) -> None:
     from .gui import get_gui_manager
 
-    manager = get_gui_manager()
+    manager = None
     url = f"{_WORKER_SERVER}/remote/gui/stream/{stream_id}"
     previous_image = b""
     observations: list[str] = []
     force_frame = True
     pending_errors: list[str] = []
     pending_acks: list[dict[str, Any]] = []
-    capabilities = (await manager.list_windows()).get("capabilities", {})
-    focus_sensitive = capabilities.get("capture_requires_focus") is True
     try:
+        manager = get_gui_manager()
+        capabilities = (await manager.list_windows()).get("capabilities", {})
+        focus_sensitive = capabilities.get("capture_requires_focus") is True
         while True:
             started = time.monotonic()
             if focus_sensitive and not force_frame:
@@ -276,9 +281,10 @@ async def _worker_stream_loop(stream_id: str, secret: str, window_id: str) -> No
         with contextlib.suppress(Exception):
             await asyncio.to_thread(_post_frame, url, {"errors": [str(exc)[:240]]}, secret)
     finally:
-        for observation_id in observations:
-            with contextlib.suppress(Exception):
-                await manager.discard_frame_observation(window_id, observation_id)
+        if manager is not None:
+            for observation_id in observations:
+                with contextlib.suppress(Exception):
+                    await manager.discard_frame_observation(window_id, observation_id)
         if _WORKER_STREAM_TASKS.get(stream_id) is asyncio.current_task():
             _WORKER_STREAM_TASKS.pop(stream_id, None)
 
