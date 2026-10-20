@@ -111,3 +111,87 @@ async def test_job_get_rejects_unknown_job_and_no_local_shell_access(tmp_path, m
         await jobs.get_job("hidden")
     with pytest.raises(KeyError, match="job not found"):
         await jobs.get_job("missing")
+
+
+@pytest.mark.asyncio
+async def test_job_list_preserves_bounded_alerts_with_surrogate_escaped_text(tmp_path, monkeypatch):
+    import time
+
+    from local_shell_mcp.human_ui import _dashboard_alerts
+
+    state_dir = tmp_path / ".state"
+    state_dir.mkdir()
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_DISABLE_LOCAL", "false")
+    get_settings.cache_clear()
+
+    now = time.time()
+    details = [
+        {
+            "job_id": "failed-with-surrogate",
+            "kind": "shell",
+            "name": "worker-\udcff" * 90,
+            "status": "failed",
+            "command": "printf '\udcfe'" * 120,
+            "cwd": "/tmp/bad-\udcff-path" * 100,
+            "session_id": "session-\udcff",
+            "backend": "tmux-\udcff",
+            "error": "OOM: allocation failed, invalid path \udcff; " + "日志" * 1_000,
+            "created_at": now,
+            "updated_at": now,
+        },
+        {
+            "job_id": "lost-with-surrogate",
+            "status": "lost",
+            "command": "echo \udcff",
+            "error": "completion receipt missing \udcfe",
+            "created_at": now - 1,
+            "updated_at": now,
+        },
+        {
+            "job_id": "succeeded-with-surrogate",
+            "status": "succeeded",
+            "command": "echo \udcff",
+            "cwd": "\udcff",
+            "created_at": now - 2,
+            "updated_at": now,
+        },
+    ]
+    (state_dir / jobs.JOB_STORE_FILE_NAME).write_text(
+        json.dumps({"version": jobs.JOB_STORE_VERSION, "jobs": details}), encoding="utf-8"
+    )
+
+    async def no_sessions():
+        return {"sessions": []}
+
+    monkeypatch.setattr(jobs, "list_shells", no_sessions)
+    page = await jobs.list_jobs(limit=1000)
+    assert page["returned"] == 3
+    assert len(json.dumps(page, ensure_ascii=True).encode()) <= jobs.JOB_LIST_MAX_RESPONSE_BYTES
+    # No unpaired surrogate may escape into an ordinary UTF-8 JSON client.
+    json.dumps(page, ensure_ascii=False).encode("utf-8")
+
+    failed, lost, succeeded = page["jobs"]
+    assert failed["job_id"] == "failed-with-surrogate"
+    assert failed["command_truncated"] is True
+    assert failed["error"].startswith("OOM: allocation failed")
+    assert failed["error"].endswith("…")
+    assert len(failed["error"].encode("utf-8")) <= 256
+    assert len(failed["name"].encode("utf-8")) <= 160
+    assert len(failed["cwd"].encode("utf-8")) <= 256
+    assert "?" in failed["command"]
+    assert lost["error"] == "completion receipt missing ?"
+    assert succeeded["command"] == "echo ?"
+    assert succeeded["command_truncated"] is False
+    assert "error" not in succeeded
+
+    alerts = _dashboard_alerts([], {}, page["jobs"], [], "test")
+    assert (
+        next(item for item in alerts if item["title"].endswith("failed"))["detail"]
+        == failed["error"]
+    )
+    assert (
+        next(item for item in alerts if item["title"].endswith("lost"))["detail"] == lost["error"]
+    )
+    assert (await jobs.get_job("failed-with-surrogate"))["job"]["error"] == details[0]["error"]

@@ -1086,21 +1086,23 @@ def _job_list_text(value: Any, max_bytes: int) -> str | None:
     if value is None:
         return None
     text = str(value)
-    encoded = text.encode("utf-8")
+    # Store paths can contain surrogate-escaped filesystem bytes. Replace them
+    # before truncating so list responses remain valid UTF-8.
+    encoded = text.encode("utf-8", errors="replace")
     if len(encoded) <= max_bytes:
-        return text
+        return encoded.decode("utf-8")
     return encoded[: max_bytes - 3].decode("utf-8", errors="ignore") + "…"
 
 
 def _job_list_summary(job: dict[str, Any]) -> dict[str, Any]:
     command = str(job.get("command") or "")
-    return {
+    summary = {
         "job_id": _job_list_text(job.get("job_id"), 128),
         "kind": _job_list_text(job.get("kind", "shell"), 32),
         "name": _job_list_text(job.get("name"), 160),
         "status": _job_list_text(job.get("status"), 32),
         "command": _job_list_text(command, 192),
-        "command_truncated": len(command.encode("utf-8")) > 192,
+        "command_truncated": len(command.encode("utf-8", errors="replace")) > 192,
         "cwd": _job_list_text(job.get("cwd"), 256),
         "session_id": _job_list_text(job.get("session_id"), 128),
         "backend": _job_list_text(job.get("backend"), 64),
@@ -1112,6 +1114,9 @@ def _job_list_summary(job: dict[str, Any]) -> dict[str, Any]:
         "log_truncated": bool(job.get("log_truncated", False)),
         "output_bytes": int(job.get("output_bytes") or 0),
     }
+    if job.get("status") in {"failed", "lost"}:
+        summary["error"] = _job_list_text(job.get("error"), 256)
+    return summary
 
 
 def _find_job(store: dict[str, Any], job_id: str) -> dict[str, Any]:
