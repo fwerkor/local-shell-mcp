@@ -1,5 +1,6 @@
 """Missing completion receipts should retain bounded, non-sensitive diagnostics."""
 
+import builtins
 from pathlib import Path
 
 import pytest
@@ -73,8 +74,12 @@ def test_healthy_or_active_jobs_do_not_emit_missing_receipt(monkeypatch):
     assert row["status"] == "running" and not recorded
 
 
-def test_runner_startup_failure_keeps_private_diagnostic(tmp_path, monkeypatch):
+@pytest.mark.parametrize("entrypoint", ["worker", "frozen"])
+def test_runner_startup_failure_keeps_private_diagnostic(tmp_path, monkeypatch, entrypoint):
+    from local_shell_mcp import main as controller_main
     from local_shell_mcp import remote_worker
+
+    dispatch = remote_worker.main if entrypoint == "worker" else controller_main.main
 
     receipt = tmp_path / "job.status.json"
 
@@ -83,7 +88,7 @@ def test_runner_startup_failure_keeps_private_diagnostic(tmp_path, monkeypatch):
 
     monkeypatch.setattr(jobs, "run_job_runner_cli", broken_runner)
     with pytest.raises(RuntimeError, match="TOKEN_SHOULD_NOT_BE_LOGGED"):
-        remote_worker.main(["job-runner", "--status-file", str(receipt)])
+        dispatch(["job-runner", "--status-file", str(receipt)])
     path = tmp_path / "job.status.json.runner-error.json"
     evidence = path.read_text()
     assert "RuntimeError" in evidence
@@ -95,7 +100,7 @@ def test_runner_startup_failure_keeps_private_diagnostic(tmp_path, monkeypatch):
     receipt.write_text('{"exit_code":1}')
     path.unlink()
     with pytest.raises(RuntimeError):
-        remote_worker.main(["job-runner", "--status-file", str(receipt)])
+        dispatch(["job-runner", "--status-file", str(receipt)])
     assert not path.exists()
 
 
@@ -124,3 +129,64 @@ def test_non_utf8_completion_receipt_becomes_lost_with_diagnostics(tmp_path, mon
     }
     assert jobs._refresh_job_status(row, set(), now=10)["status"] == "lost"
     assert recorded[0][1]["receipt_state"] == "invalid_encoding"
+
+
+@pytest.mark.parametrize("entrypoint", ["worker", "frozen"])
+def test_runner_import_time_failure_is_recorded(tmp_path, monkeypatch, entrypoint):
+    from local_shell_mcp import main as controller_main
+    from local_shell_mcp import remote_worker
+
+    dispatch = remote_worker.main if entrypoint == "worker" else controller_main.main
+    receipt = tmp_path / "crashed.status.json"
+    original_import = builtins.__import__
+
+    def fail_dependency(name, globals=None, locals=None, fromlist=(), level=0):
+        if level == 1 and name == "jobs" and "run_job_runner_cli" in (fromlist or ()):
+            raise ImportError("startup secret should stay private")
+        if level == 1 and name == "remote_worker_cli":
+            raise AssertionError("worker CLI imported before Job dispatch")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fail_dependency)
+    with pytest.raises(ImportError, match="startup secret"):
+        dispatch(["job-runner", "--status-file", str(receipt)])
+
+    sidecar = tmp_path / "crashed.status.json.runner-error.json"
+    evidence = sidecar.read_text()
+    assert "ImportError" in evidence
+    assert "startup secret" not in evidence
+
+
+def test_abandoned_retry_attempt_removes_completion_and_diagnostic_files(tmp_path):
+    status = tmp_path / "job_123-attempt-2.status.json"
+    paths = {
+        "command": tmp_path / "job_123-attempt-2.command",
+        "log": tmp_path / "job_123-attempt-2.log",
+        "status": status,
+    }
+    for item in paths.values():
+        item.write_text("existing")
+    sidecar = status.with_name(status.name + ".runner-error.json")
+    sidecar.write_text("diagnostic")
+    jobs._remove_attempt_paths(paths)
+    assert all(not item.exists() for item in paths.values())
+    assert not sidecar.exists()
+
+
+def test_attempt_restart_removes_stale_runner_evidence(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(jobs, "get_settings", lambda: SimpleNamespace(
+        state_dir=tmp_path, shell_executable="bash", max_job_log_bytes=4096,
+        shell_env_blocklist=[], shell_env_blocked_prefixes=[],
+    ))
+    monkeypatch.setattr(jobs, "check_command_policy", lambda _cmd: None)
+    monkeypatch.setattr(jobs, "resolve_path", lambda _cwd, must_exist=False: tmp_path)
+    status = tmp_path / "jobs" / "job123-attempt-1.status.json"
+    status.parent.mkdir(parents=True)
+    sidecar = status.with_name(status.name + ".runner-error.json")
+    sidecar.write_text("stale evidence")
+    paths, _command = jobs._prepare_attempt("job123", 1, "true", ".")
+    assert paths["status"] == status
+    assert not sidecar.exists()
+    jobs._remove_attempt_paths(paths)

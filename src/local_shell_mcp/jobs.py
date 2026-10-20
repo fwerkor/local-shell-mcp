@@ -22,6 +22,7 @@ from typing import Any, BinaryIO
 
 from .audit import audit
 from .fs_ops import resolve_path
+from .job_runner_entry import runner_error_path
 from .process_utils import managed_process_kwargs
 from .settings import get_settings
 from .shell_environment import filtered_subprocess_env
@@ -247,7 +248,8 @@ def _load_store() -> dict[str, Any]:
 def _remove_attempt_paths(paths: dict[str, Path] | None) -> None:
     if not paths:
         return
-    for path in paths.values():
+    status = paths.get("status")
+    for path in (*paths.values(), *([runner_error_path(status)] if status else [])):
         with contextlib.suppress(OSError):
             path.unlink(missing_ok=True)
 
@@ -622,6 +624,7 @@ def _prepare_attempt(
     _private_write_text(paths["command"], command)
     paths["log"].unlink(missing_ok=True)
     paths["status"].unlink(missing_ok=True)
+    runner_error_path(paths["status"]).unlink(missing_ok=True)
     argv = _runner_argv(paths, resolved_cwd)
     return paths, _runner_command(argv, get_settings().shell_executable)
 

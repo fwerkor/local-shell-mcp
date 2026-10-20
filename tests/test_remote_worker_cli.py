@@ -37,13 +37,14 @@ assert "local_shell_mcp.audit_archive_codec" not in sys.modules
 
 def test_worker_entrypoint_only_dispatches_worker_management(monkeypatch, capsys):
     calls = []
-    monkeypatch.setattr(remote_worker, "run_worker_cli", lambda args: calls.append(args))
+    original = cli.run_worker_cli
+    monkeypatch.setattr(cli, "run_worker_cli", lambda args: calls.append(args))
 
     remote_worker.main(["worker", "status"])
     remote_worker.main(["status"])
     assert calls == [["status"], ["status"]]
 
-    monkeypatch.setattr(remote_worker, "run_worker_cli", cli.run_worker_cli)
+    monkeypatch.setattr(cli, "run_worker_cli", original)
     with pytest.raises(SystemExit) as exc:
         remote_worker.main(["worker", "call", "run_shell", "--direct"])
     assert exc.value.code == 2

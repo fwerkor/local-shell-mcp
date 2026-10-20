@@ -26,6 +26,7 @@ _WORKER_PYTHON_FILES = {
     "errors.py",
     "fs_ops.py",
     "jobs.py",
+    "job_runner_entry.py",
     "models.py",
     "patch_ops.py",
     "peer_transfer.py",
