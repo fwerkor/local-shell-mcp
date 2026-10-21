@@ -1125,7 +1125,13 @@ def test_worker_disconnect_is_reported_and_stream_is_released(monkeypatch):
         assert ws.receive_json() == {"type": "ready"}
         stream = next(iter(stream_module.STREAMS.values()))
         stream.last_contact = time.monotonic() - stream_module.STREAM_IDLE_S - 1
-        assert ws.receive_json() == {
+        # The sender may have queued a heartbeat before the stale timestamp was set.
+        # Only an error after that point proves the worker timeout is detected.
+        for _ in range(20):
+            message = ws.receive_json()
+            if message.get("type") != "heartbeat":
+                break
+        assert message == {
             "type": "error", "message": "Remote desktop worker stopped responding",
         }
         with pytest.raises(WebSocketDisconnect):
