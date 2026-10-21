@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # Tool-Referenz
 
 Diese Seite wird aus den tatsächlichen MCP-Tool-Schemas aufgebaut. Führen Sie nach Änderungen an der öffentlichen Tool-Oberfläche `python scripts/generate-tools-reference.py` aus, um die English-Referenz zu aktualisieren.
@@ -288,12 +288,27 @@ Wenn `machine` angegeben ist, benötigt der Aufruf zusätzlich `remote:use` und 
 
 ### `job_list`
 
-Listet getrackte Jobs lokal oder auf einer Remote-Maschine. Aktive Jobs werden zuerst zurückgegeben; `limit` wird auf 1-1000 begrenzt.
+Kompakte Auftragsübersicht, aktive Aufträge zuerst. Mit next_offset blättern; die Daten sind auf 32 KiB begrenzt.
 
 | Parameter | Typ | Erforderlich/default | Beschreibung |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session für diesen Tool-Aufruf. Übergeben Sie während der Arbeit an der Task die von session_manage zurückgegebene session_id. Verwenden Sie null nur, wenn keine Logical Session aktiv ist. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Wenn `machine` angegeben ist, benötigt der Aufruf zusätzlich `remote:use` und läuft über das Remote-Worker-Protokoll.
+
+### `job_get`
+
+Vollständige Details eines Auftrags abrufen, einschließlich Befehl, Fortschritt und Ergebnis.
+
+| Parameter | Typ | Erforderlich/default | Beschreibung |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session für diesen Tool-Aufruf. Übergeben Sie während der Arbeit an der Task die von session_manage zurückgegebene session_id. Verwenden Sie null nur, wenn keine Logical Session aktiv ist. |
 

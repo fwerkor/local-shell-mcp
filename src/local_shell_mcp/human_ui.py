@@ -836,9 +836,9 @@ async def api_dashboard(request: Request) -> Response:
         try:
             jobs_payload = await _machine_dispatch(
                 machine,
-                lambda: list_jobs(include_finished=True),
+                lambda: list_jobs(include_finished=True, include_recent_failures=True),
                 "job_list",
-                {"include_finished": True},
+                {"include_finished": True, "include_recent_failures": True},
             )
         except Exception as exc:
             _LOGGER.debug("Dashboard job snapshot failed", exc_info=True)
@@ -882,8 +882,10 @@ async def api_dashboard(request: Request) -> Response:
     audit_entries = list(audit_payload.get("entries") or [])
     version = version_info()
     current_version = str(version.get("version") or "unknown")
+    # The first page is active-first; failed jobs may fall outside it entirely.
+    alert_jobs = jobs_payload.get("recent_failures", jobs)
     alerts = [
-        *_dashboard_alerts(machine_rows, system, jobs, audit_entries, current_version),
+        *_dashboard_alerts(machine_rows, system, alert_jobs, audit_entries, current_version),
         *source_alerts,
     ]
     active_statuses = {"starting", "running", "stopping", "retrying"}
