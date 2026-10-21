@@ -195,3 +195,85 @@ async def test_job_list_preserves_bounded_alerts_with_surrogate_escaped_text(tmp
         next(item for item in alerts if item["title"].endswith("lost"))["detail"] == lost["error"]
     )
     assert (await jobs.get_job("failed-with-surrogate"))["job"]["error"] == details[0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_job_list_dashboard_failures_are_independent_of_active_first_page(
+    tmp_path, monkeypatch
+):
+    import time
+
+    state_dir = tmp_path / ".state"
+    state_dir.mkdir()
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_DISABLE_LOCAL", "false")
+    get_settings.cache_clear()
+
+    now = time.time()
+    active = [
+        {
+            "job_id": f"active-{i}",
+            "kind": "shell",
+            "status": "running",
+            "session_id": f"session-{i}",
+            "command": "run",
+            "created_at": now - i,
+            "updated_at": now,
+        }
+        for i in range(40)
+    ]
+    failures = [
+        {
+            "job_id": f"failed-{i}",
+            "status": "lost" if i == 1 else "failed",
+            "command": "run",
+            "error": "OOM " + "错误" * 1_000,
+            "created_at": now - 100_000 - i,
+            "updated_at": now - i * 10 if i != 3 else now - 90_000,
+        }
+        for i in range(4)
+    ]
+    (state_dir / jobs.JOB_STORE_FILE_NAME).write_text(
+        json.dumps({"version": jobs.JOB_STORE_VERSION, "jobs": [*active, *failures]}),
+        encoding="utf-8",
+    )
+
+    async def active_sessions():
+        return {"sessions": [{"session_id": row["session_id"]} for row in active]}
+
+    monkeypatch.setattr(jobs, "list_shells", active_sessions)
+    default_page = await jobs.list_jobs()
+    assert default_page["returned"] == 25
+    assert default_page["counts"]["failed"] == 3
+    assert default_page["counts"]["lost"] == 1
+    assert all(row["status"] == "running" for row in default_page["jobs"])
+    assert "recent_failures" not in default_page
+
+    dashboard_page = await jobs.list_jobs(include_recent_failures=True)
+    assert [row["job_id"] for row in dashboard_page["recent_failures"]] == [
+        "failed-0",
+        "failed-1",
+        "failed-2",
+    ]
+    assert all(
+        len(row["error"].encode("utf-8")) <= 256 for row in dashboard_page["recent_failures"]
+    )
+    assert (
+        len(json.dumps(dashboard_page, ensure_ascii=True).encode())
+        <= jobs.JOB_LIST_MAX_RESPONSE_BYTES
+    )
+    assert dashboard_page["next_offset"] is not None
+
+    last_page = await jobs.list_jobs(offset=10_000, include_recent_failures=True)
+    assert last_page["jobs"] == []
+    assert len(last_page["recent_failures"]) == 3
+
+    from local_shell_mcp.remote import _execute_job_worker_tool
+
+    remote_page = await _execute_job_worker_tool(
+        "job_list", {"limit": 1, "include_recent_failures": True}
+    )
+    assert [row["job_id"] for row in remote_page["recent_failures"]] == [
+        "failed-0", "failed-1", "failed-2"
+    ]

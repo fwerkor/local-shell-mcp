@@ -2879,6 +2879,7 @@ async def _execute_job_worker_tool(tool: str, args: dict[str, Any]) -> Any:
             args.get("include_finished", True),
             args.get("limit", JOB_LIST_DEFAULT_LIMIT),
             args.get("offset", 0),
+            include_recent_failures=args.get("include_recent_failures", False),
         )
 
     if tool == "job_get":

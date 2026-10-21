@@ -1635,6 +1635,8 @@ async def list_jobs(
     include_finished: bool = True,
     limit: int = JOB_LIST_DEFAULT_LIMIT,
     offset: int = 0,
+    *,
+    include_recent_failures: bool = False,
 ) -> dict[str, Any]:
     limit = max(1, min(int(limit), JOB_LIST_MAX_LIMIT))
     offset = max(0, int(offset))
@@ -1674,6 +1676,23 @@ async def list_jobs(
             status = status if status in known_statuses else "unknown"
             counts[status] = counts.get(status, 0) + 1
 
+        recent_failures = (
+            [
+                _job_list_summary(job)
+                for job in sorted(
+                    (
+                        job for job in visible_jobs
+                        if job.get("status") in {"failed", "lost"}
+                        and now - float(job.get("updated_at") or job.get("created_at") or 0) <= 86_400
+                    ),
+                    key=lambda job: float(job.get("updated_at") or job.get("created_at") or 0),
+                    reverse=True,
+                )[:3]
+            ]
+            if include_recent_failures
+            else None
+        )
+        extra = {"recent_failures": recent_failures} if recent_failures is not None else {}
         rows: list[dict[str, Any]] = []
         page_start = min(offset, total)
         for job in candidates[page_start : page_start + limit]:
@@ -1688,6 +1707,7 @@ async def list_jobs(
                 "offset": page_start,
                 "next_offset": next_offset if next_offset < total else None,
                 "truncated": next_offset < total,
+                **extra,
             }
             if len(json.dumps(candidate_response, ensure_ascii=True).encode("utf-8")) > JOB_LIST_MAX_RESPONSE_BYTES:
                 break
@@ -1703,6 +1723,7 @@ async def list_jobs(
         "offset": page_start,
         "next_offset": next_offset if next_offset < total else None,
         "truncated": next_offset < total,
+        **extra,
     }
 
 
