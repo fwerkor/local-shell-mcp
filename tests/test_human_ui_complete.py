@@ -2675,7 +2675,7 @@ async def test_dashboard_dispatches_workloads_to_selected_remote(tmp_path, monke
 
     assert calls == [
         ("worker", "shell_list", {}),
-        ("worker", "job_list", {"include_finished": True}),
+        ("worker", "job_list", {"include_finished": True, "include_recent_failures": True}),
     ]
     assert payload["selected_machine"] == "worker"
     assert payload["jobs"][0]["machine"] == "worker"
