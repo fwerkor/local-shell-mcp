@@ -22,6 +22,8 @@
 .native-panel > header { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; border-bottom: 1px solid #eceef2; }
 .native-panel > header h3 { margin: 0; color: #222b3e; font-size: 15px; }
 .native-panel > header p { margin: 3px 0 0; color: #929aaa; font-size: 12px; }
+.detail-actions, .detail-header-tools { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.detail-header-tools .status-chip { flex: none; }
 .native-panel > header > span { display: grid; min-width: 24px; height: 24px; place-items: center; padding: 0 6px; color: #6759e7; background: #efedff; border-radius: 7px; font-size: 12px; font-weight: 700; }
 .native-loading, .native-empty, .native-error { display: grid; min-height: 120px; place-items: center; align-content: center; gap: 5px; padding: 16px; color: #929aaa; font-size: 13px; text-align: center; }
 .native-empty strong { color: #596274; font-size: 14px; }
@@ -146,7 +148,8 @@
 .terminal-stage-panel > header { grid-column: 1 / -1; min-height: 58px; flex-wrap: wrap; color: #e7edf8; background: #111a2a; border-color: #263249; }
 .terminal-stage-panel > header h3 { color: #e7edf8; }
 .terminal-stage-panel > header p { color: #78869c; }
-.terminal-stage-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; flex-wrap: wrap; }
+.terminal-stage-actions, .terminal-connection-actions, .terminal-view-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; flex-wrap: wrap; }
+.terminal-connection-actions { padding-right: 8px; margin-right: 3px; border-right: 1px solid #33415a; }
 .persistent-terminal { grid-row: 2; grid-column: 1; min-width: 0; min-height: 0; padding: 9px 10px 5px; overflow: hidden; }
 .persistent-terminal .xterm { height: 100%; }
 .persistent-terminal .xterm-viewport { overflow-y: scroll !important; scrollbar-width: auto; scrollbar-color: #4a5872 #0b1220; }
@@ -191,6 +194,9 @@ button.summary-card { cursor: pointer; }
 .summary-card.active { border-color: #9d94ed; box-shadow: 0 0 0 3px rgba(103,89,231,.08); }
 .remotes-layout { display: grid; grid-template-columns: minmax(560px,1.65fr) minmax(310px,.75fr); gap: 10px; min-height: 540px; height: calc(100vh - 260px); }
 .remote-list-panel, .remote-detail-panel { display: grid; grid-template-rows: auto minmax(0,1fr); }
+.remote-detail-panel > header, .sessions-detail-panel > header { flex-wrap: wrap; }
+.remote-detail-panel > header > div:first-child, .sessions-detail-panel > header > div:first-child { min-width: 0; }
+.remote-detail-panel > header p, .sessions-detail-panel > header p { overflow-wrap: anywhere; }
 .remote-list-panel > div, .remote-detail { min-height: 0; overflow: auto; }
 .remote-table th:nth-child(1) { width: 13%; }
 .remote-table th:nth-child(2) { width: 20%; }
@@ -347,6 +353,9 @@ button.summary-card { cursor: pointer; }
   .native-page { gap: 8px; }
   .native-toolbar { border-radius: 9px; }
   .native-button { height: 31px; padding: 0 8px; }
+  .remote-detail-panel > header, .sessions-detail-panel > header, .desktop-panel > header { align-items: flex-start; flex-direction: column; }
+  .remote-detail-panel .detail-actions, .sessions-detail-panel .detail-header-tools { width: 100%; justify-content: flex-start; }
+  .terminal-connection-actions { margin-right: 0; padding-right: 0; border-right: 0; }
   .sessions-list-panel > header { align-items: flex-start; flex-direction: column; }
   .session-bulk-actions { width: 100%; justify-content: flex-start; }
   .remote-summary, .sessions-summary { grid-template-columns: repeat(2,minmax(0,1fr)); }
@@ -442,6 +451,9 @@ button.summary-card { cursor: pointer; }
 .desktop-panel > header { color: #dce4f0; background: #121a28; border-color: #263249; }
 .desktop-panel > header h3 { color: #edf2f9; }
 .desktop-panel > header p { color: #8290a5; }
+.desktop-frame-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.desktop-frame-actions > span { color: #a7b2c4; font-size: 12px; }
+.desktop-panel > header .native-button { color: #cbd4e1; background: #1a2638; border-color: #34435c; }
 .desktop-panel > header > span { color: #a7b2c4; background: #202b3d; }
 .desktop-stage-wrap { min-height: 0; padding: 11px; overflow: auto; background: radial-gradient(circle at 50% 35%, #182234 0, #0c121d 55%, #080d15 100%); scrollbar-color: #41506a #0b111b; }
 .desktop-stage { position: relative; display: grid; width: max-content; min-width: 100%; min-height: 100%; place-items: center; margin: auto; outline: 0; border-radius: 8px; }
