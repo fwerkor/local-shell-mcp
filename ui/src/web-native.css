@@ -29,8 +29,8 @@
 .native-empty strong { color: #596274; font-size: 14px; }
 .native-empty span { color: #9aa2b0; }
 .native-error { color: #a13f49; background: #fff7f7; }
-.native-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.native-table th { height: 32px; padding: 0 10px; color: #929aaa; background: #fafbfc; border-bottom: 1px solid #eceef2; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-align: left; text-transform: uppercase; }
+.native-table { width: 100%; min-width: 0; border-collapse: collapse; table-layout: fixed; }
+.native-table th { height: 32px; padding: 0 10px; overflow: hidden; color: #929aaa; background: #fafbfc; border-bottom: 1px solid #eceef2; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-align: left; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
 .native-table td { height: 43px; padding: 6px 10px; color: #667085; border-bottom: 1px solid #eff1f4; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .native-table tbody tr { cursor: pointer; }
 .native-table tbody tr:focus-visible { outline: 2px solid #8f84ed; outline-offset: -2px; }
@@ -39,7 +39,7 @@
 .native-table td strong { color: #30384a; font-size: 13px; }
 .native-table td small { display: block; margin-top: 2px; overflow: hidden; color: #949cab; font-size: 12px; text-overflow: ellipsis; }
 .native-table code { color: #70798a; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
-.status-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 54px; padding: 4px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .03em; }
+.status-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 54px; max-width: 100%; overflow: hidden; padding: 4px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .03em; text-overflow: ellipsis; white-space: nowrap; }
 .status-chip.success { color: #147c57; background: #e7f7ef; }
 .status-chip.error { color: #a13f49; background: #ffebed; }
 .status-chip.warning { color: #9d6117; background: #fff2da; }
@@ -89,9 +89,9 @@
   .audit-page .audit-advanced { grid-template-columns: minmax(0,1fr); }
   .audit-page .audit-details { grid-template-rows: minmax(180px,.4fr) minmax(260px,1fr); }
   .audit-page .audit-detail-panel { height: 650px; min-height: 0; }
-  .audit-page .audit-table th:first-child { width: 25%; }
-  .audit-page .audit-table th:nth-child(4) { width: 50%; }
-  .audit-page .audit-table th:last-child { width: 25%; }
+  .audit-page .audit-table th:first-child { width: 90px; }
+  .audit-page .audit-table th:nth-child(4) { width: auto; }
+  .audit-page .audit-table th:last-child { width: 84px; }
 }
 
 /* Files */
@@ -203,6 +203,8 @@ button.summary-card { cursor: pointer; }
 .remote-table th:nth-child(3) { width: 16%; }
 .remote-table th:nth-child(4) { width: 31%; }
 .remote-table th:nth-child(5) { width: 20%; }
+.remote-table .remote-mobile-meta { display: none; }
+.sessions-table .session-mobile-updated, .audit-table .audit-mobile-time { display: none; }
 .remote-detail { padding: 15px; }
 .remote-title { display: flex; align-items: center; gap: 11px; padding-bottom: 14px; border-bottom: 1px solid #eceef2; }
 .remote-title h2 { margin: 0; color: #283044; font-size: 17px; }
@@ -358,6 +360,7 @@ button.summary-card { cursor: pointer; }
 
 @media (max-width: 720px) {
   .native-page { gap: 8px; }
+  .native-table th, .native-table td { padding-left: 8px; padding-right: 8px; }
   .native-toolbar { border-radius: 9px; }
   .native-button { height: 31px; padding: 0 8px; }
   .remote-detail-panel > header, .sessions-detail-panel > header, .desktop-panel > header { align-items: flex-start; flex-direction: column; }
@@ -375,25 +378,29 @@ button.summary-card { cursor: pointer; }
   .command-dock { min-height: 40px; }
   .terminal-search { position: absolute; z-index: 6; top: 8px; right: 8px; left: 8px; padding: 5px; background: #111a2a; border: 1px solid #33415a; border-radius: 8px; }
   .terminal-search input { flex: 1; width: auto; min-width: 0; }
-  .remote-table th:nth-child(3), .remote-table td:nth-child(3), .remote-table th:nth-child(4), .remote-table td:nth-child(4) { display: none; }
-  .remote-table th:nth-child(1) { width: 24%; }
-  .remote-table th:nth-child(2) { width: 42%; }
-  .remote-table th:nth-child(5) { width: 34%; }
+  .remote-table th:nth-child(3), .remote-table td:nth-child(3), .remote-table th:nth-child(4), .remote-table td:nth-child(4), .remote-table th:nth-child(5), .remote-table td:nth-child(5) { display: none; }
+  .remote-table th:nth-child(1) { width: 88px; }
+  .remote-table th:nth-child(2) { width: auto; }
+  .remote-table .remote-mobile-meta { display: block; }
   .sessions-table th:nth-child(4), .sessions-table td:nth-child(4) { display: none; }
-  .sessions-table th:nth-child(2) { width: 25%; }
-  .sessions-table th:nth-child(3) { width: 50%; }
-  .sessions-table th:nth-child(5) { width: 25%; }
+  .sessions-table .session-select-column { width: 34px; padding-left: 7px; padding-right: 3px; }
+  .sessions-table th:nth-child(2) { width: 104px; }
+  .sessions-table th:nth-child(3) { width: auto; }
+  .sessions-table th:nth-child(5) { width: 75px; }
   .session-progress-grid { grid-template-columns: 1fr; }
   .session-activity-row > div { align-items: flex-start; flex-direction: column; }
   .audit-list-panel { height: 390px; }
   .audit-table th:nth-child(2), .audit-table td:nth-child(2), .audit-table th:nth-child(3), .audit-table td:nth-child(3) { display: none; }
-  .audit-table th:nth-child(1) { width: 23%; }
-  .audit-table th:nth-child(4) { width: 52%; }
-  .audit-table th:nth-child(5) { width: 25%; }
   .native-dialog-overlay { padding: 8px; }
   .native-dialog { max-height: calc(100dvh - 16px); }
   .native-dialog-body { max-height: calc(100dvh - 160px); }
   .native-field textarea { min-height: 50vh; }
+}
+
+@media (max-width: 480px) {
+  .sessions-table th:nth-child(5), .sessions-table td:nth-child(5),
+  .audit-table th:first-child, .audit-table td:first-child { display: none; }
+  .sessions-table .session-mobile-updated, .audit-table .audit-mobile-time { display: block; }
 }
 
 @media (prefers-color-scheme: dark) {
