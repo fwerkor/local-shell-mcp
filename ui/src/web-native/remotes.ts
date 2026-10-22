@@ -80,6 +80,45 @@ export function renderRemoteDetail(machine: Machine): string {
     </details>`
 }
 
+/** Keep the focused disclosure and its scrollable JSON pane mounted across telemetry updates. */
+export function updateRemoteDetail(detail: HTMLElement, machine: Machine, sameWorker: boolean): void {
+  const markup = renderRemoteDetail(machine)
+  const diagnostics = sameWorker
+    ? detail.querySelector<HTMLDetailsElement>(":scope > [data-role=remote-diagnostics]")
+    : null
+  if (!diagnostics) {
+    detail.innerHTML = markup
+    return
+  }
+
+  const incoming = document.createElement("div")
+  incoming.innerHTML = markup
+  const oldPre = diagnostics.querySelector("pre")
+  const newPre = incoming.querySelector("[data-role=remote-diagnostics] pre")
+  const oldReset = diagnostics.querySelector(".detail-grid dd")
+  const newReset = incoming.querySelector("[data-role=remote-diagnostics] .detail-grid dd")
+  if (!oldPre || !newPre || !oldReset || !newReset) {
+    detail.innerHTML = markup
+    return
+  }
+
+  const detailScrollTop = detail.scrollTop
+  const detailScrollLeft = detail.scrollLeft
+  const preScrollTop = oldPre.scrollTop
+  const preScrollLeft = oldPre.scrollLeft
+  for (const selector of [":scope > .remote-title", ":scope > dl.detail-grid", ":scope > .remote-resources"]) {
+    const existing = detail.querySelector(selector)
+    const replacement = incoming.querySelector(selector)
+    if (existing && replacement) existing.replaceWith(replacement)
+  }
+  oldReset.textContent = newReset.textContent
+  if (oldPre.innerHTML !== newPre.innerHTML) oldPre.innerHTML = newPre.innerHTML
+  oldPre.scrollTop = preScrollTop
+  oldPre.scrollLeft = preScrollLeft
+  detail.scrollTop = detailScrollTop
+  detail.scrollLeft = detailScrollLeft
+}
+
 export class RemotesController extends BaseController {
   private machines: Machine[] = []
   private selected = 0
@@ -148,15 +187,10 @@ export class RemotesController extends BaseController {
     if (detail) {
       const revision = current ? remoteDetailRevision(current) : "empty"
       if (revision !== this.renderedDetailRevision) {
-        const keepDiagnosticsOpen = current?.name === this.renderedDetailName
-          && detail.querySelector<HTMLDetailsElement>("[data-role=remote-diagnostics]")?.open === true
+        if (current) updateRemoteDetail(detail, current, current.name === this.renderedDetailName)
+        else detail.innerHTML = '<div class="native-empty">No node selected</div>'
         this.renderedDetailRevision = revision
         this.renderedDetailName = current?.name || ""
-        detail.innerHTML = current ? renderRemoteDetail(current) : '<div class="native-empty">No node selected</div>'
-        if (keepDiagnosticsOpen) {
-          const diagnostics = detail.querySelector<HTMLDetailsElement>("[data-role=remote-diagnostics]")
-          if (diagnostics) diagnostics.open = true
-        }
       }
       const lastSeen = detail.querySelector<HTMLElement>("[data-role=remote-last-seen]")
       if (lastSeen && current) lastSeen.textContent = remoteLastSeen(current)
