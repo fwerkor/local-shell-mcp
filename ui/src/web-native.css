@@ -624,6 +624,10 @@ button.summary-card { cursor: pointer; }
 .hosted-message-body { white-space:normal; }
 .hosted-running { color:#6657c4; font-size:12px; }
 .hosted-error { background:#ffefef; color:#ad3434; border-radius:8px; padding:10px; font-size:12px; }
+.hosted-tool-activity { max-width:780px; border-top:1px solid #e2e5ee; padding-top:12px; font-size:12px; color:#596276; }
+.hosted-tool-event { margin:6px 0; border:1px solid #e1e5ed; border-radius:7px; padding:7px 10px; overflow-wrap:anywhere; }
+.hosted-tool-event summary { cursor:pointer; }
+.hosted-tool-event pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:240px; overflow:auto; }
 .hosted-composer { padding:16px max(18px,9%); border-top:1px solid #edeff4; }
 .hosted-composer textarea { width:100%; resize:vertical; min-height:66px; max-height:35vh; padding:13px 15px; border:1px solid #dbe0ed; border-radius:12px; outline-color:#7a6aea; font:13px/1.55 inherit; }
 .hosted-composer-bottom { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:9px; }

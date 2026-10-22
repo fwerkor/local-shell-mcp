@@ -5,7 +5,7 @@ type Profile = { id: string; name: string; model: string; endpoint: string; has_
 type Message = { role: "user" | "assistant" | "tool"; content?: string | null; tool_calls?: unknown[] }
 type Conversation = {
   id: string; title: string; profile_id: string; session_id?: string | null;
-  status: string; error?: string | null; messages: Message[]; events: { type: string; name?: string; error?: boolean }[]
+  status: string; error?: string | null; messages: Message[]; events: { type: string; name?: string; error?: boolean; call_id?: string; result?: { content?: { type?: string; text?: string }[] } }[]
 }
 type Summary = Pick<Conversation, "id" | "title" | "profile_id" | "session_id" | "status">
 
@@ -15,6 +15,7 @@ export class HostedChatController extends BaseController {
   private active: Conversation | null = null
   private bridge: AppBridge | null = null
   private frame: HTMLIFrameElement | null = null
+  private workspaceEpoch = 0
   private modelContext = ""
   private polling = false
   private busy = false
@@ -91,6 +92,7 @@ export class HostedChatController extends BaseController {
       void this.saveProfile()
     })
     this.listen(root.querySelector<HTMLSelectElement>("[data-profile-existing]")!, "change", () => this.populateProfileForm())
+    this.root.querySelector<HTMLButtonElement>('[data-chat-action="workspace"]')!.hidden = this.context.liveWorkspaceEnabled === false
     void this.reload()
   }
 
@@ -142,9 +144,15 @@ export class HostedChatController extends BaseController {
       messages.innerHTML = '<div class="hosted-welcome"><h2>Hosted Chat</h2><p>Configure your model profile, then start a conversation. LSM tools are available through MCP.</p></div>'
     } else {
       const visible = active.messages.filter((m) => m.role !== "tool" && (!m.tool_calls?.length || m.content))
+      const activity = active.events.map((event) => {
+        const output = (event.result?.content || []).filter((item) => item.type === "text")
+          .map((item) => item.text || "").join("\n").slice(0, 2000)
+        return `<details class="hosted-tool-event"><summary>${event.error ? "Failed" : "Tool"}: ${escapeHtml(event.name || "unknown")}</summary>` +
+          `<pre>${escapeHtml(output || (event.error ? "Tool failed" : "No text output"))}</pre></details>`
+      }).join("")
       messages.innerHTML = visible.map((m) =>
         `<article class="hosted-message ${m.role}"><div class="hosted-message-label">${m.role === "user" ? "You" : "Assistant"}</div><div class="hosted-message-body">${escapeHtml(m.content || "").replaceAll("\n", "<br>")}</div></article>`
-      ).join("") +
+      ).join("") + (activity ? `<section class="hosted-tool-activity" aria-label="Tool activity"><strong>Tool activity (${active.events.length})</strong>${activity}</section>` : "") +
         (active.status === "running" ? '<div class="hosted-running">Agent running · waiting for model or tools…</div>' : "") +
         (active.error ? `<p class="hosted-error">${escapeHtml(active.error)}</p>` : "")
     }
@@ -162,7 +170,7 @@ export class HostedChatController extends BaseController {
     try {
       const data = await this.get<Conversation>("conversation", `?id=${encodeURIComponent(id)}`)
       if (this.destroyed) return
-      if (this.active?.id !== id) await this.closeWorkspace()
+      if (this.active?.id !== id) { this.modelContext = ""; await this.closeWorkspace() }
       this.active = data
       this.renderList()
       this.renderConversation()
@@ -174,19 +182,28 @@ export class HostedChatController extends BaseController {
     if (this.polling || this.destroyed || this.active?.status !== "running") return
     this.polling = true
     const tick = async () => {
+      let failures = 0
       try {
         while (!this.destroyed && this.active?.status === "running") {
-          await new Promise((resolve) => setTimeout(resolve, 1200))
+          await new Promise((resolve) => setTimeout(resolve, failures ? Math.min(15000, 1200 * 2 ** failures) : 1200))
           if (!this.active || this.destroyed) break
           const id = this.active.id
-          const record = await this.get<Conversation>("conversation", `?id=${encodeURIComponent(id)}`)
-          if (!this.active || this.active.id !== id || this.destroyed) break
-          this.active = record
-          this.renderConversation()
-          if (record.status !== "running") await this.reload()
+          try {
+            const record = await this.get<Conversation>("conversation", `?id=${encodeURIComponent(id)}`)
+            if (!this.active || this.active.id !== id || this.destroyed) break
+            this.active = record
+            failures = 0
+            this.renderConversation()
+            if (record.status !== "running") await this.reload()
+          } catch (error) {
+            failures++
+            if (failures === 1) this.notifyError(error)
+          }
         }
-      } catch (error) { this.notifyError(error) }
-      finally { this.polling = false }
+      } finally {
+        this.polling = false
+        if (!this.destroyed && this.active?.status === "running") this.startPolling()
+      }
     }
     void tick()
   }
@@ -199,11 +216,12 @@ export class HostedChatController extends BaseController {
     this.busy = true
     this.renderConversation()
     try {
+      const id = this.active.id
       const message = this.modelContext ? `${this.modelContext}\n\n${content}` : content
-      await this.post("send", { id: this.active.id, text: message })
+      await this.post("send", { id, text: message })
       this.modelContext = ""
       input.value = ""
-      await this.select(this.active.id)
+      if (this.active?.id === id) await this.select(id)
     } catch (error) { this.notifyError(error) }
     finally { this.busy = false; this.renderConversation() }
   }
@@ -215,6 +233,7 @@ export class HostedChatController extends BaseController {
       if (action === "profile-close") { this.root.querySelector<HTMLDialogElement>("[data-chat-profile-dialog]")?.close(); return }
       if (action === "profile-delete") { await this.deleteProfile(); return }
       if (action === "new") {
+        this.modelContext = ""
         if (!this.profiles.length) { this.profileDialog(); return }
         const profileId = this.active?.profile_id || this.profiles[0].id
         const conversation = await this.post<Conversation>("conversation-create", { profile_id: profileId })
@@ -303,6 +322,9 @@ export class HostedChatController extends BaseController {
 
   private async openWorkspace(): Promise<void> {
     if (!this.active || this.bridge) return
+    if (this.context.liveWorkspaceEnabled === false) throw new Error("Live Workspace is disabled")
+    const conversationId = this.active.id
+    const epoch = this.workspaceEpoch
     const args = { session_id: this.active.session_id || null }
     const result = await this.post<Record<string, unknown>>("tool", { name: "workspace_open", arguments: args })
     if (result.isError) throw new Error("Unable to open LSM Live Workspace")
@@ -310,14 +332,14 @@ export class HostedChatController extends BaseController {
     const resource = await this.post<{ contents: { text?: string }[] }>("resource", { uri })
     const html = resource.contents?.[0]?.text
     if (!html) throw new Error("No workspace UI resource was returned")
+    if (this.destroyed || epoch !== this.workspaceEpoch || this.active?.id !== conversationId) return
     const holder = this.root.querySelector<HTMLElement>("[data-chat-workspace]")!
     const target = this.root.querySelector<HTMLElement>("[data-chat-app]")!
     holder.hidden = false
     const frame = document.createElement("iframe")
     frame.title = "LSM Live Workspace"
     frame.className = "hosted-app-frame"
-    frame.setAttribute("sandbox", "allow-scripts allow-forms allow-same-origin")
-    frame.srcdoc = html
+    frame.setAttribute("sandbox", "allow-scripts allow-forms")
     target.replaceChildren(frame)
     this.frame = frame
     if (!frame.contentWindow || this.destroyed) return
@@ -336,6 +358,7 @@ export class HostedChatController extends BaseController {
       return {}
     }
     bridge.onupdatemodelcontext = async (params) => {
+      if (this.bridge !== bridge) return {}
       this.modelContext = (params.content || []).filter((part) => part.type === "text")
         .map((part) => part.type === "text" ? part.text : "").join("\n\n")
       return {}
@@ -352,9 +375,12 @@ export class HostedChatController extends BaseController {
       })()
     }
     await bridge.connect(new PostMessageTransport(frame.contentWindow, frame.contentWindow))
+    if (!this.destroyed && this.bridge === bridge && epoch === this.workspaceEpoch && this.active?.id === conversationId) frame.srcdoc = html
   }
 
   private async closeWorkspace(): Promise<void> {
+    this.workspaceEpoch++
+    this.modelContext = ""
     await this.bridge?.close().catch(() => undefined)
     this.bridge = null
     this.frame?.remove()
@@ -366,7 +392,7 @@ export class HostedChatController extends BaseController {
   }
 
   refresh(): void {
-    // The chat state is updated after operations and independently polled only while running.
+    this.startPolling()
   }
 
   override destroy(): void {

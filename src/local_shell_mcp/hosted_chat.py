@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import socket
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -17,6 +19,7 @@ MAX_MESSAGES = 64
 MAX_STEPS = 8
 MAX_CALLS = 24
 MAX_TEXT = 40_000
+MAX_MODEL_RESPONSE_BYTES = 4 * 1024 * 1024
 
 
 def validate_endpoint(endpoint: str) -> str:
@@ -50,6 +53,58 @@ def validate_endpoint(endpoint: str) -> str:
         if not allow_private:
             raise ValueError("Use a DNS name for the model API endpoint")
     return endpoint.strip().rstrip("/")
+
+
+async def model_request_target(endpoint: str) -> tuple[str, dict[str, str], dict]:
+    """Resolve and pin the HTTPS peer, without a second unvalidated DNS lookup.
+
+    Host and SNI remain the original hostname for certificate verification.
+    Disabling environment proxies prevents bypassing the pinned peer.
+    """
+    from .settings import get_settings
+
+    original = urlsplit(endpoint)
+    if get_settings().hosted_chat_allow_private_endpoints:
+        return endpoint + "/chat/completions", {}, {}
+    hostname = original.hostname or ""
+    port = original.port or 443
+    try:
+        addresses = await asyncio.wait_for(
+            asyncio.to_thread(socket.getaddrinfo, hostname, port, type=socket.SOCK_STREAM),
+            timeout=15,
+        )
+    except socket.gaierror as exc:
+        raise ValueError("Model endpoint DNS lookup failed") from exc
+    if not addresses:
+        raise ValueError("Model endpoint DNS lookup returned no addresses")
+    resolved = [ip_address(item[4][0]) for item in addresses]
+    if any(not address.is_global for address in resolved):
+        raise ValueError("Model endpoint resolves to a non-public address")
+    # Connecting to the checked literal address, not the DNS name, prevents
+    # rebinding between the safety check and the actual TCP connection.
+    selected = resolved[0]
+    peer = f"[{selected}]" if selected.version == 6 else str(selected)
+    host_header = hostname if port == 443 else f"{hostname}:{port}"
+    target = original._replace(netloc=f"{peer}:{port}").geturl() + "/chat/completions"
+    return target, {"Host": host_header}, {"sni_hostname": hostname}
+
+
+async def model_response_json(
+    http: httpx.AsyncClient, url: str, headers: dict, extensions: dict, payload: dict
+) -> dict:
+    async with http.stream(
+        "POST", url, headers=headers, extensions=extensions, json=payload
+    ) as response:
+        if response.status_code >= 400:
+            raise ValueError(f"Model API returned HTTP {response.status_code}")
+        if response.headers.get("content-encoding", "identity").lower() != "identity":
+            raise ValueError("Compressed model responses are not supported")
+        chunks = bytearray()
+        async for chunk in response.aiter_raw(chunk_size=min(65536, MAX_MODEL_RESPONSE_BYTES)):
+            if len(chunks) + len(chunk) > MAX_MODEL_RESPONSE_BYTES:
+                raise ValueError("Model API response exceeds the size limit")
+            chunks.extend(chunk)
+        return json.loads(chunks)
 
 
 def normalize_messages(messages: object) -> list[dict]:
@@ -188,21 +243,23 @@ async def complete_turn(
             schemas = [tool_schema(tool) for tool in listed]
             known_tools = {s["function"]["name"] for s in schemas}
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(120, connect=15), follow_redirects=False
+            timeout=httpx.Timeout(120, connect=15), follow_redirects=False, trust_env=False
         ) as model_http:
             for _step in range(MAX_STEPS):
                 payload = {"model": model, "messages": request_messages, "stream": False}
                 if schemas:
                     payload["tools"] = schemas
                     payload["tool_choice"] = "auto"
-                response = await model_http.post(
-                    endpoint + "/chat/completions",
-                    headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
-                    json=payload,
-                )
-                if response.status_code >= 400:
-                    raise ValueError(f"Model API returned HTTP {response.status_code}")
-                answer = response.json()["choices"][0]["message"]
+                url, host_headers, extensions = await model_request_target(endpoint)
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept-Encoding": "identity",
+                    **host_headers,
+                }
+                if key:
+                    headers["Authorization"] = "Bearer " + key
+                result = await model_response_json(model_http, url, headers, extensions, payload)
+                answer = result["choices"][0]["message"]
                 content = answer.get("content") or ""
                 requested = answer.get("tool_calls") or []
                 if not requested:

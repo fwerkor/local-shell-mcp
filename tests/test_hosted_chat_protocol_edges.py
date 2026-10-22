@@ -163,6 +163,15 @@ async def test_model_tool_call_protocol_errors(monkeypatch, mode, pattern):
                 calls = [tool_call(raw="[]")]
             return SimpleNamespace(status_code=200, json=lambda: {"choices": [{"message": {"tool_calls": calls}}]})
 
+    async def fake_target(endpoint):
+        return endpoint + "/chat/completions", {}, {}
+    async def fake_response(http, url, headers, extensions, payload):
+        response = await http.post(url, headers=headers, json=payload)
+        if response.status_code >= 400:
+            raise ValueError(f"Model API returned HTTP {response.status_code}")
+        return response.json()
+    monkeypatch.setattr(hosted_chat, "model_request_target", fake_target)
+    monkeypatch.setattr(hosted_chat, "model_response_json", fake_response)
     monkeypatch.setattr(hosted_chat.httpx, "AsyncClient", lambda **_: FakeHttp())
     if mode == "limit-calls":
         monkeypatch.setattr(hosted_chat, "MAX_CALLS", 0)
@@ -206,6 +215,15 @@ async def test_turn_bounds_model_key_and_history(monkeypatch):
             requests.append(deepcopy(kwargs["json"]))
             return SimpleNamespace(status_code=200, json=lambda: {"choices": [{"message": {"content": "ok"}}]})
 
+    async def fake_target(endpoint):
+        return endpoint + "/chat/completions", {}, {}
+    async def fake_response(http, url, headers, extensions, payload):
+        response = await http.post(url, headers=headers, json=payload)
+        if response.status_code >= 400:
+            raise ValueError(f"Model API returned HTTP {response.status_code}")
+        return response.json()
+    monkeypatch.setattr(hosted_chat, "model_request_target", fake_target)
+    monkeypatch.setattr(hosted_chat, "model_response_json", fake_response)
     monkeypatch.setattr(hosted_chat.httpx, "AsyncClient", lambda **_: FakeHttp())
     history = [{"role": "user", "content": str(i)} for i in range(100)]
     result = await hosted_chat.complete_turn(

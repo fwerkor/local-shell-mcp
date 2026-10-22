@@ -799,7 +799,8 @@ async def api_bootstrap(request: Request) -> Response:
             "machines": machines,
             "features": {
                 "remote": settings.remote_enabled,
-                "hosted_chat": settings.hosted_chat_enabled,
+                "hosted_chat": settings.hosted_chat_enabled and settings.mode != "http",
+                "live_workspace": settings.live_workspace_enabled,
                 "wallpaper": settings.ui_wallpaper,
             },
         }
@@ -3212,8 +3213,8 @@ async def api_hosted_chat(request: Request) -> Response:
     """Durable Hosted Chat, using the caller's principal for all MCP operations."""
     try:
         settings = get_settings()
-        if not settings.hosted_chat_enabled:
-            raise HTTPException(status_code=404, detail="Hosted Chat is disabled")
+        if not settings.hosted_chat_enabled or settings.mode == "http":
+            raise HTTPException(status_code=404, detail="Hosted Chat requires an MCP-enabled controller")
         if settings.state_backend == "memory":
             raise HTTPException(status_code=503, detail="Hosted Chat requires persistent file or Redis state storage")
         _require_ui_scopes(request, "shell:read")
@@ -3298,6 +3299,8 @@ async def api_hosted_chat(request: Request) -> Response:
             hosted_chat_runner.stop(subject, str(data["id"]))
             result = {}
         elif action in {"tool", "resource"}:
+            if not settings.live_workspace_enabled:
+                raise HTTPException(status_code=404, detail="Live Workspace is disabled")
             bearer = str(request.headers.get("authorization") or "")
             if get_settings().auth_mode != "none" and not bearer.startswith("Bearer "):
                 raise HTTPException(status_code=401, detail="OAuth bearer token required")

@@ -203,3 +203,27 @@ def test_http_rejects_session_update_when_session_unknown(api, monkeypatch):
     })
     assert response.status_code == 400
     assert "Unknown LSM Session" in response.text
+
+
+def test_hosted_chat_disabled_in_http_only_mode(api, monkeypatch):
+    client, *_ = api
+    settings = get_settings().model_copy(update={"mode": "http"})
+    monkeypatch.setattr(human_ui, "get_settings", lambda: settings)
+    response = client.get("/api/ui/bootstrap")
+    assert response.status_code == 200
+    assert response.json()["data"]["features"]["hosted_chat"] is False
+    assert client.get("/api/ui/hosted-chat/profiles").status_code == 404
+
+
+def test_workspace_actions_disabled_when_workspace_feature_off(api, monkeypatch):
+    client, *_ = api
+    settings = get_settings().model_copy(update={"live_workspace_enabled": False})
+    monkeypatch.setattr(human_ui, "get_settings", lambda: settings)
+    response = client.get("/api/ui/bootstrap")
+    assert response.json()["data"]["features"]["live_workspace"] is False
+    assert client.post("/api/ui/hosted-chat/tool", json={
+        "name": "workspace_open", "arguments": {},
+    }).status_code == 404
+    assert client.post("/api/ui/hosted-chat/resource", json={
+        "uri": "ui://local-shell-mcp/live-workspace.html",
+    }).status_code == 404

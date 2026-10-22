@@ -11,6 +11,7 @@ export interface NativeApi {
 export interface NativePageContext {
   api: NativeApi
   uiPath: string
+  liveWorkspaceEnabled?: boolean
   apiPrefix?: string
   accessToken: () => string | null
   machines: () => Machine[]

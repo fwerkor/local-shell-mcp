@@ -50,9 +50,13 @@ def test_encryption_key_requires_stable_secret_when_state_not_file(monkeypatch, 
     key = _encryption_key()
     assert len(key) == 32
     assert _encryption_key() == key
-    monkeypatch.setenv("LOCAL_SHELL_MCP_HOSTED_CHAT_ENCRYPTION_KEY", base64.urlsafe_b64encode(b"a" * 32).decode())
+    monkeypatch.setenv(
+        "LOCAL_SHELL_MCP_HOSTED_CHAT_ENCRYPTION_KEY", base64.urlsafe_b64encode(b"a" * 32).decode()
+    )
     assert _encryption_key() == b"a" * 32
-    monkeypatch.setenv("LOCAL_SHELL_MCP_HOSTED_CHAT_ENCRYPTION_KEY", base64.urlsafe_b64encode(b"short").decode())
+    monkeypatch.setenv(
+        "LOCAL_SHELL_MCP_HOSTED_CHAT_ENCRYPTION_KEY", base64.urlsafe_b64encode(b"short").decode()
+    )
     with pytest.raises(ValueError, match="32 bytes"):
         _encryption_key()
     monkeypatch.delenv("LOCAL_SHELL_MCP_HOSTED_CHAT_ENCRYPTION_KEY")
@@ -108,6 +112,10 @@ def test_store_conversation_lifecycle_and_records_filter(store):
     prefix = f"{store.prefix}/{module._owner_key('alice')}/conversations/"
     get_state_store().write_bytes(prefix + "ignored.txt", b"ignored")
     assert len(store.conversations("alice")) == 1
+    store.update_conversation("alice", record["id"], updater=lambda r: {**r, "status": "running"})
+    with pytest.raises(ValueError, match="Stop the active"):
+        store.delete_conversation("alice", record["id"])
+    store.update_conversation("alice", record["id"], updater=lambda r: {**r, "status": "idle"})
     store.delete_conversation("alice", record["id"])
     with pytest.raises(ValueError, match="Unknown"):
         store.delete_conversation("alice", record["id"])
@@ -177,3 +185,99 @@ async def test_runner_rejects_duplicate_turn_and_can_cancel(store, monkeypatch):
     assert store.conversation("alice", record["id"])["status"] == "interrupted"
     with pytest.raises(ValueError, match="No active"):
         runner.stop("alice", record["id"])
+
+
+@pytest.mark.asyncio
+async def test_replica_preserves_foreign_run_and_fences_stale_owner(store, monkeypatch):
+    import time
+
+    profile_id = store.put_profile("alice", profile_values())["id"]
+    chat = store.create_conversation("alice", profile_id=profile_id)
+    first_started, second_started = asyncio.Event(), asyncio.Event()
+    first_release, second_release = asyncio.Event(), asyncio.Event()
+    lost_ownership = []
+
+    async def fake_turn(*, messages, checkpoint, **_):
+        if messages[-1]["content"] == "first":
+            first_started.set()
+            await first_release.wait()
+            try:
+                await checkpoint([*messages, {"role": "assistant", "content": "old writer"}], [])
+            except ValueError as exc:
+                lost_ownership.append(str(exc))
+        else:
+            second_started.set()
+            await second_release.wait()
+            await checkpoint([*messages, {"role": "assistant", "content": "new writer"}], [])
+
+    monkeypatch.setattr(hosted_chat, "complete_turn", fake_turn)
+    replica_a, replica_b = HostedChatRunner(), HostedChatRunner()
+    await replica_a.start("alice", chat["id"], "first", "http://controller", "")
+    await asyncio.wait_for(first_started.wait(), 2)
+    assert replica_b.reconcile("alice", chat["id"])["status"] == "running"
+    with pytest.raises(ValueError, match="interrupted turn"):
+        await replica_b.start("alice", chat["id"], "second", "http://controller", "")
+
+    store.update_conversation(
+        "alice", chat["id"], updater=lambda r: {**r, "lease_until": time.time() - 1}
+    )
+    assert replica_b.reconcile("alice", chat["id"])["status"] == "interrupted"
+    await replica_b.start("alice", chat["id"], "second", "http://controller", "")
+    await asyncio.wait_for(second_started.wait(), 2)
+    first_release.set()
+    await asyncio.sleep(0.1)
+    assert lost_ownership and "ownership" in lost_ownership[0]
+    assert store.conversation("alice", chat["id"])["status"] == "running"
+    second_release.set()
+    await asyncio.sleep(0.15)
+    result = store.conversation("alice", chat["id"])
+    assert result["status"] == "idle"
+    assert result["messages"][-1]["content"] == "new writer"
+
+
+@pytest.mark.asyncio
+async def test_runner_renews_durable_lease_while_model_waits(store, monkeypatch):
+    profile_id = store.put_profile("alice", profile_values())["id"]
+    chat = store.create_conversation("alice", profile_id=profile_id)
+    monkeypatch.setattr(module, "RUN_HEARTBEAT_SECONDS", 0.04)
+    monkeypatch.setattr(module, "RUN_LEASE_SECONDS", 0.5)
+    started = asyncio.Event()
+
+    async def fake_turn(**_):
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(hosted_chat, "complete_turn", fake_turn)
+    runner = HostedChatRunner()
+    record = await runner.start("alice", chat["id"], "wait", "http://controller", "")
+    await asyncio.wait_for(started.wait(), 2)
+    initial = record["lease_until"]
+    await asyncio.sleep(0.16)
+    assert store.conversation("alice", chat["id"])["lease_until"] > initial
+    runner.stop("alice", chat["id"])
+    await asyncio.sleep(0.1)
+    assert store.conversation("alice", chat["id"])["status"] == "interrupted"
+
+
+@pytest.mark.asyncio
+async def test_remote_replica_can_request_stop_using_durable_state(store, monkeypatch):
+    profile_id = store.put_profile("alice", profile_values())["id"]
+    chat = store.create_conversation("alice", profile_id=profile_id)
+    monkeypatch.setattr(module, "RUN_HEARTBEAT_SECONDS", 0.03)
+    started = asyncio.Event()
+
+    async def running_turn(**_):
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(hosted_chat, "complete_turn", running_turn)
+    owner, observer = HostedChatRunner(), HostedChatRunner()
+    await owner.start("alice", chat["id"], "test", "http://controller", "")
+    await asyncio.wait_for(started.wait(), 2)
+    observer.stop("alice", chat["id"])
+    assert store.conversation("alice", chat["id"])["cancel_requested"] is True
+    for _ in range(30):
+        if store.conversation("alice", chat["id"])["status"] == "interrupted":
+            break
+        await asyncio.sleep(0.02)
+    assert store.conversation("alice", chat["id"])["status"] == "interrupted"

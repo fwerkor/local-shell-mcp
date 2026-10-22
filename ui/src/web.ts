@@ -676,6 +676,7 @@ function renderActiveView(): void {
   nativeController = createNativePage(activeView, {
     api: { get: apiGet, send: apiSend },
     uiPath: UI_PATH,
+    liveWorkspaceEnabled: bootstrapData?.features?.live_workspace === true,
     apiPrefix: API_PREFIX,
     accessToken,
     machines: uiMachines,

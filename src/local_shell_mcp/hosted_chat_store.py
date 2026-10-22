@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import json
 import os
@@ -10,6 +11,7 @@ import secrets
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -77,6 +79,41 @@ class HostedChatStore:
         self.prefix = prefix
         self._guard = threading.RLock()
 
+    @contextmanager
+    def _record_lock(self, key: str):
+        # Redis provides a distributed lock. File state must also serialize
+        # separate server processes sharing the same state directory.
+        with self._guard, get_state_store().lock(key):
+            if get_settings().state_backend != "file":
+                yield
+                return
+            lock_dir = Path(get_settings().state_dir) / ".hosted-chat-locks"
+            lock_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            lock_path = lock_dir / (hashlib.sha256(key.encode()).hexdigest() + ".lock")
+            with lock_path.open("a+b") as handle:
+                if os.name == "nt":  # pragma: no cover - exercised in Windows matrix
+                    import msvcrt
+
+                    handle.seek(0, os.SEEK_END)
+                    if handle.tell() == 0:
+                        handle.write(b"\x00")
+                        handle.flush()
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                    try:
+                        yield
+                    finally:
+                        handle.seek(0)
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                    try:
+                        yield
+                    finally:
+                        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
     def _key(self, subject: str, kind: str, uid: str) -> str:
         return f"{self.prefix}/{_owner_key(subject)}/{kind}/{uid}.json"
 
@@ -124,7 +161,7 @@ class HostedChatStore:
         profile_id = _identifier(str(values.get("id") or f"p_{uuid.uuid4().hex}"))
         key = self._key(subject, "profiles", profile_id)
         now = time.time()
-        with self._guard, get_state_store().lock(key):
+        with self._record_lock(key):
             try:
                 previous = self._read(key)
             except ValueError:
@@ -139,10 +176,8 @@ class HostedChatStore:
                 if len(secret) > 8192:
                     raise ValueError("API key is too long")
                 encrypted = _encrypt(secret, f"{subject}:{profile_id}")
-            elif previous:
-                encrypted = previous["encrypted_key"]
             else:
-                raise ValueError("API key is required for new profiles")
+                encrypted = previous["encrypted_key"]
             item = {
                 "id": profile_id,
                 "name": name,
@@ -162,7 +197,7 @@ class HostedChatStore:
 
     def delete_profile(self, subject: str, profile_id: str) -> None:
         key = self._key(subject, "profiles", _identifier(profile_id))
-        with self._guard, get_state_store().lock(key):
+        with self._record_lock(key):
             self._read(key)
             get_state_store().delete(key)
 
@@ -205,7 +240,7 @@ class HostedChatStore:
 
     def update_conversation(self, subject: str, conversation_id: str, *, updater) -> dict:  # noqa: ANN001
         key = self._key(subject, "conversations", _identifier(conversation_id))
-        with self._guard, get_state_store().lock(key):
+        with self._record_lock(key):
             record = self._read(key)
             updated = updater(record)
             updated["updated_at"] = time.time()
@@ -214,8 +249,9 @@ class HostedChatStore:
 
     def delete_conversation(self, subject: str, conversation_id: str) -> None:
         key = self._key(subject, "conversations", _identifier(conversation_id))
-        with self._guard, get_state_store().lock(key):
-            self._read(key)
+        with self._record_lock(key):
+            if self._read(key)["status"] == "running":
+                raise ValueError("Stop the active turn before deleting this conversation")
             get_state_store().delete(key)
 
 
@@ -230,6 +266,9 @@ def _identifier(value: str) -> str:
 
 
 hosted_chat_store = HostedChatStore()
+
+RUN_LEASE_SECONDS = 90
+RUN_HEARTBEAT_SECONDS = 15
 
 
 def _close_unknown_tool_calls(messages: list[dict]) -> None:
@@ -271,6 +310,7 @@ class HostedChatRunner:
         if not text.strip() or len(text) > 40_000:
             raise ValueError("Message must contain 1–40000 characters")
         key = (subject, conversation_id)
+        run_id = uuid.uuid4().hex
         with self._lock:
             task = self._tasks.get(key)
             if task and not task.done():
@@ -282,6 +322,9 @@ class HostedChatRunner:
                 _close_unknown_tool_calls(record["messages"])
                 record["messages"].append({"role": "user", "content": text.strip()})
                 record["status"] = "running"
+                record["run_id"] = run_id
+                record["cancel_requested"] = False
+                record["lease_until"] = time.time() + RUN_LEASE_SECONDS
                 record["error"] = None
                 if record["title"] == "New chat":
                     record["title"] = text.strip()[:100]
@@ -291,7 +334,32 @@ class HostedChatRunner:
                 subject, conversation_id, updater=prepare
             )
 
+            def owned_update(updater):
+                def guarded(record: dict) -> dict:
+                    if record.get("status") != "running" or record.get("run_id") != run_id:
+                        raise ValueError("Hosted Chat run ownership was lost")
+                    return updater(record)
+
+                return hosted_chat_store.update_conversation(
+                    subject, conversation_id, updater=guarded
+                )
+
+            async def heartbeat(run_task) -> None:
+                while True:
+                    await asyncio.sleep(RUN_HEARTBEAT_SECONDS)
+                    record = await asyncio.to_thread(
+                        owned_update,
+                        lambda r: {
+                            **r,
+                            "lease_until": time.time() + RUN_LEASE_SECONDS,
+                        },
+                    )
+                    if record.get("cancel_requested"):
+                        run_task.cancel()
+                        return
+
             async def execute() -> None:
+                heartbeat_task = asyncio.create_task(heartbeat(asyncio.current_task()))
                 try:
                     profile = hosted_chat_store.profile(
                         subject, current["profile_id"], with_secret=True
@@ -308,12 +376,7 @@ class HostedChatRunner:
                             record["events"].extend(events[previous_events:])
                             return record
 
-                        await asyncio.to_thread(
-                            hosted_chat_store.update_conversation,
-                            subject,
-                            conversation_id,
-                            updater=save,
-                        )
+                        await asyncio.to_thread(owned_update, save)
                         previous_events = len(events)
 
                     await complete_turn(
@@ -329,63 +392,90 @@ class HostedChatRunner:
                     )
                 except asyncio.CancelledError:
                     # Retain tool results; never auto-replay a possibly non-idempotent tool.
-                    await asyncio.to_thread(
-                        hosted_chat_store.update_conversation,
-                        subject,
-                        conversation_id,
-                        updater=lambda r: {
-                            **r,
-                            "status": "interrupted",
-                            "error": "Turn interrupted",
-                        },
-                    )
+                    with contextlib.suppress(ValueError):
+                        await asyncio.to_thread(
+                            owned_update,
+                            lambda r: {
+                                **r,
+                                "status": "interrupted",
+                                "error": "Turn interrupted",
+                                "run_id": None,
+                                "lease_until": None,
+                            },
+                        )
                     raise
                 except Exception as exc:
                     error = f"{type(exc).__name__}: {exc}"[:400]
-                    await asyncio.to_thread(
-                        hosted_chat_store.update_conversation,
-                        subject,
-                        conversation_id,
-                        updater=lambda r: {**r, "status": "failed", "error": error},
-                    )
+                    with contextlib.suppress(ValueError):
+                        await asyncio.to_thread(
+                            owned_update,
+                            lambda r: {
+                                **r,
+                                "status": "failed",
+                                "error": error,
+                                "run_id": None,
+                                "lease_until": None,
+                            },
+                        )
                 else:
-                    await asyncio.to_thread(
-                        hosted_chat_store.update_conversation,
-                        subject,
-                        conversation_id,
-                        updater=lambda r: {**r, "status": "idle", "error": None},
-                    )
+                    with contextlib.suppress(ValueError):
+                        await asyncio.to_thread(
+                            owned_update,
+                            lambda r: {
+                                **r,
+                                "status": "idle",
+                                "error": None,
+                                "run_id": None,
+                                "lease_until": None,
+                            },
+                        )
+                finally:
+                    heartbeat_task.cancel()
+                    await asyncio.gather(heartbeat_task, return_exceptions=True)
 
             run = asyncio.create_task(execute(), name=f"hosted-chat-{conversation_id}")
             self._tasks[key] = run
-            run.add_done_callback(lambda _: self._tasks.pop(key, None))
+
+            def cleanup(done_task):
+                with self._lock:
+                    if self._tasks.get(key) is done_task:
+                        self._tasks.pop(key, None)
+
+            run.add_done_callback(cleanup)
             return hosted_chat_store._summary(current)
 
     def stop(self, subject: str, conversation_id: str) -> None:
+        def request_stop(record: dict) -> dict:
+            if record["status"] != "running":
+                raise ValueError("No active Hosted Chat turn")
+            record["cancel_requested"] = True
+            return record
+
+        hosted_chat_store.update_conversation(subject, conversation_id, updater=request_stop)
+        # A different replica observes the durable stop request on heartbeat.
         with self._lock:
             task = self._tasks.get((subject, conversation_id))
             if task and not task.done():
                 task.cancel()
-            else:
-                raise ValueError("No active Hosted Chat turn")
 
     @staticmethod
     def reconcile(subject: str, conversation_id: str) -> dict:
+        def reconcile_locked(record: dict) -> dict:
+            # A remote replica's task is not in this process. Only an expired
+            # durable lease is evidence of interruption, under the store lock.
+            if record["status"] == "running" and (record.get("lease_until") or 0) <= time.time():
+                record["status"] = "interrupted"
+                record["error"] = "Agent Run lease expired; inspect tool effects before retrying"
+                record["run_id"] = None
+                record["lease_until"] = None
+            return record
+
         current = hosted_chat_store.conversation(subject, conversation_id)
-        if current["status"] == "running":
-            with hosted_chat_runner._lock:
-                task = hosted_chat_runner._tasks.get((subject, conversation_id))
-            if task is None or task.done():
-                current = hosted_chat_store.update_conversation(
-                    subject,
-                    conversation_id,
-                    updater=lambda r: {
-                        **r,
-                        "status": "interrupted",
-                        "error": "Controller restarted or the Agent Run was interrupted",
-                    },
-                )
-        return current
+        if current["status"] != "running" or (current.get("lease_until") or 0) > time.time():
+            return current
+        return hosted_chat_store.update_conversation(
+            subject, conversation_id, updater=reconcile_locked
+        )
 
 
 hosted_chat_runner = HostedChatRunner()
