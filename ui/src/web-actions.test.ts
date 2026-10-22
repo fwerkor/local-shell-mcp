@@ -169,14 +169,21 @@ describe("Native WebUI actions", () => {
     expect(files).toContain("Filemanager")
   })
 
-  test("keeps the mobile terminal height override after desktop refinements", async () => {
+  test("keeps mobile session controls visible without shrinking the terminal after desktop refinements", async () => {
     const styles = await Bun.file(new URL("./web-native.css", import.meta.url)).text()
     const desktopRule = styles.lastIndexOf(".terminal-layout { grid-template-columns: 240px minmax(0,1fr)")
+    const stackedRule = styles.lastIndexOf("@media (max-width: 850px)")
     const mobileRule = styles.lastIndexOf("@media (max-width: 720px)")
-    const mobileStyles = styles.slice(mobileRule)
+    const stackedStyles = styles.slice(stackedRule, mobileRule)
 
-    expect(mobileRule).toBeGreaterThan(desktopRule)
-    expect(mobileStyles).toContain(".terminal-layout { height: calc(100dvh - 319px); min-height: 420px; }")
+    expect(stackedRule).toBeGreaterThan(desktopRule)
+    expect(stackedStyles).toContain(".terminal-layout.sidebar-hidden, .terminal-layout { display: flex; flex-direction: column; height: auto; min-height: 0; }")
+    expect(stackedStyles).toContain(".terminal-sessions { display: grid; grid-template-rows: auto auto minmax(0,1fr); flex: 0 0 184px; max-height: none; }")
+    expect(stackedStyles).toContain(".terminal-sessions .session-list { display: flex; align-items: flex-start;")
+    expect(stackedStyles).toContain(".terminal-sessions .native-empty, .terminal-sessions .native-loading, .terminal-sessions .native-error { min-height: 0; }")
+    expect(stackedStyles).toContain("overflow-x: auto; overflow-y: auto;")
+    expect(stackedStyles).toContain(".terminal-stage-panel { flex: none; height: max(480px, calc(100dvh - 285px)); }")
+    expect(styles.slice(mobileRule)).toContain(".terminal-stage-panel { height: max(420px, calc(100dvh - 319px)); }")
   })
 
   test("keeps narrow native tables compact without discarding timestamps", async () => {

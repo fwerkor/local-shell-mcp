@@ -55,6 +55,8 @@ export class TerminalsController extends BaseController {
   private sidebarVisible = true
   private fontSize = 14
   private renderedSessionsRevision = ""
+  private renderedSessionQuery = ""
+  private renderedSelectedSessionId: string | null = null
 
   mount(root: HTMLElement): void {
     this.root = root
@@ -196,6 +198,8 @@ export class TerminalsController extends BaseController {
     const subtitle = this.root.querySelector<HTMLElement>("[data-role=terminal-subtitle]")
     if (list) list.innerHTML = '<div class="native-loading">Loading terminals…</div>'
     this.renderedSessionsRevision = ""
+    this.renderedSessionQuery = ""
+    this.renderedSelectedSessionId = null
     if (summary) summary.textContent = "Loading…"
     if (title) title.textContent = "Persistent terminal"
     if (subtitle) subtitle.textContent = "Loading terminals…"
@@ -238,8 +242,10 @@ export class TerminalsController extends BaseController {
       this.sessions.length,
       ...visibleSessions.map(terminalSessionRevision),
     ].join("\u0001")
+    const filterChanged = this.sessionQuery !== this.renderedSessionQuery
     if (revision !== this.renderedSessionsRevision) {
       this.renderedSessionsRevision = revision
+      this.renderedSessionQuery = this.sessionQuery
       if (!visibleSessions.length) {
         list.innerHTML = this.sessions.length
           ? '<div class="native-empty"><strong>No matches</strong><span>Try a different session filter.</span></div>'
@@ -248,19 +254,30 @@ export class TerminalsController extends BaseController {
         list.innerHTML = visibleSessions.map((session) => `<button type="button" class="session-row" data-session="${escapeHtml(session.session_id)}"><span class="session-state"></span><span><strong>${escapeHtml(session.session_id)}</strong><small>${escapeHtml(session.backend || "persistent shell")} · attached ${escapeHtml(String(session.attached ?? "—"))}</small></span></button>`).join("")
       }
     }
-    this.updateSessionSelection()
+    this.updateSessionSelection(filterChanged)
     this.updateTerminalHeader()
   }
 
-  private updateSessionSelection(): void {
+  private updateSessionSelection(filterChanged = false): void {
     const list = this.root.querySelector<HTMLElement>("[data-role=sessions]")
     if (!list) return
+    const selectionChanged = this.selectedSessionId !== this.renderedSelectedSessionId
+    this.renderedSelectedSessionId = this.selectedSessionId
     const active = list.querySelector<HTMLElement>(".session-row.active")
     const selected = this.selectedSessionId
       ? list.querySelector<HTMLElement>(`.session-row[data-session="${CSS.escape(this.selectedSessionId)}"]`)
       : null
     if (active && active !== selected) active.classList.remove("active")
-    if (selected) selected.classList.add("active")
+    if (!selected) return
+    if (selected !== active) selected.classList.add("active")
+    if (!selectionChanged && !filterChanged) return
+    // Scroll the rail, not the page: previous/next can select an off-screen card.
+    const viewport = list.getBoundingClientRect()
+    const card = selected.getBoundingClientRect()
+    if (card.left < viewport.left) list.scrollLeft += card.left - viewport.left
+    else if (card.right > viewport.right) list.scrollLeft += card.right - viewport.right
+    if (card.top < viewport.top) list.scrollTop += card.top - viewport.top
+    else if (card.bottom > viewport.bottom) list.scrollTop += card.bottom - viewport.bottom
   }
 
   private updateTerminalHeader(): void {
