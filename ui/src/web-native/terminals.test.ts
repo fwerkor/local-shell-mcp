@@ -261,6 +261,33 @@ describe("Native WebUI terminal rendering", () => {
     }
   })
 
+  test("reveals an off-screen active card when clearing a session filter", () => {
+    const previousCss = (globalThis as any).CSS
+    ;(globalThis as any).CSS = { escape: (value: string) => value }
+    try {
+      const selected: any = {
+        classList: { add: () => {} },
+        getBoundingClientRect: () => ({ left: 500, right: 650, top: 90, bottom: 130 }),
+      }
+      const list: any = {
+        scrollLeft: 0,
+        scrollTop: 0,
+        getBoundingClientRect: () => ({ left: 100, right: 380, top: 80, bottom: 150 }),
+        querySelector: (selector: string) => selector === ".session-row.active" ? null : selected,
+      }
+      const controller: any = {
+        selectedSessionId: "late",
+        renderedSelectedSessionId: "late",
+        root: { querySelector: () => list },
+      }
+      ;(TerminalsController.prototype as any).updateSessionSelection.call(controller, true)
+      expect(list.scrollLeft).toBe(270)
+      expect(controller.renderedSelectedSessionId).toBe("late")
+    } finally {
+      ;(globalThis as any).CSS = previousCss
+    }
+  })
+
   test("switches terminal selection without rebuilding the session sidebar", () => {
     const controller: any = {
       selectedSessionId: "a",
