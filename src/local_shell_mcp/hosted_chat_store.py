@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import secrets
+import tempfile
 import threading
 import time
 import uuid
@@ -36,16 +37,23 @@ def _encryption_key() -> bytes:
         )
     path = Path(settings.state_dir) / "hosted-chat-encryption-key"
     path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temp_path = tempfile.mkstemp(prefix=".hosted-chat-key-", dir=path.parent)
     try:
-        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError:
-        key = path.read_bytes()
-    else:
         with os.fdopen(descriptor, "wb") as handle:
-            key = secrets.token_bytes(32)
-            handle.write(key)
+            generated = secrets.token_bytes(32)
+            handle.write(generated)
             handle.flush()
             os.fsync(handle.fileno())
+        # Hard-link publication is atomic and create-if-absent: no reader can
+        # observe a partially written key, and competing writers never replace it.
+        try:
+            os.link(temp_path, path)
+        except FileExistsError:
+            key = path.read_bytes()
+        else:
+            key = generated
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
     if len(key) != 32:
         raise RuntimeError("Invalid Hosted Chat encryption key; cannot decrypt existing profiles")
     return key
@@ -301,7 +309,8 @@ class HostedChatRunner:
         self._lock = threading.RLock()
 
     async def start(
-        self, subject: str, conversation_id: str, text: str, base_url: str, bearer: str
+        self, subject: str, conversation_id: str, text: str, base_url: str, bearer: str,
+        public_origin: str | None = None,
     ) -> dict:
         import asyncio
 
@@ -330,8 +339,9 @@ class HostedChatRunner:
                     record["title"] = text.strip()[:100]
                 return record
 
-            current = hosted_chat_store.update_conversation(
-                subject, conversation_id, updater=prepare
+            current = await asyncio.to_thread(
+                hosted_chat_store.update_conversation,
+                subject, conversation_id, updater=prepare,
             )
 
             def owned_update(updater):
@@ -347,13 +357,21 @@ class HostedChatRunner:
             async def heartbeat(run_task) -> None:
                 while True:
                     await asyncio.sleep(RUN_HEARTBEAT_SECONDS)
-                    record = await asyncio.to_thread(
-                        owned_update,
-                        lambda r: {
-                            **r,
-                            "lease_until": time.time() + RUN_LEASE_SECONDS,
-                        },
-                    )
+                    try:
+                        record = await asyncio.to_thread(
+                            owned_update,
+                            lambda r: {
+                                **r,
+                                "lease_until": time.time() + RUN_LEASE_SECONDS,
+                            },
+                        )
+                    except ValueError:
+                        # Ownership was revoked; do not continue making tool calls.
+                        run_task.cancel()
+                        return
+                    except Exception:
+                        # Transient storage failures must not permanently stop renewals.
+                        continue
                     if record.get("cancel_requested"):
                         run_task.cancel()
                         return
@@ -389,6 +407,7 @@ class HostedChatRunner:
                         tools_enabled=True,
                         session_id=current.get("session_id"),
                         checkpoint=checkpoint,
+                        **({"public_origin": public_origin} if public_origin else {}),
                     )
                 except asyncio.CancelledError:
                     # Retain tool results; never auto-replay a possibly non-idempotent tool.

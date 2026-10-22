@@ -254,9 +254,15 @@ export class HostedChatController extends BaseController {
       } else if (action === "session") {
         const response = window.prompt("LSM Logical Session ID (leave empty to detach)", this.active.session_id || "")
         if (response === null) return
+        const previousSessionId = this.active.session_id || null
         this.active = await this.post<Conversation>("conversation-update", {
           id: this.active.id, session_id: response.trim(),
         })
+        if ((this.active.session_id || null) !== previousSessionId) {
+          const reopen = !!this.bridge || !!this.frame
+          await this.closeWorkspace()
+          if (reopen) await this.openWorkspace()
+        }
         this.renderConversation()
       } else if (action === "workspace") {
         await this.openWorkspace()

@@ -281,3 +281,47 @@ async def test_remote_replica_can_request_stop_using_durable_state(store, monkey
             break
         await asyncio.sleep(0.02)
     assert store.conversation("alice", chat["id"])["status"] == "interrupted"
+
+
+def test_encryption_key_concurrent_initialization_is_atomic():
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        keys = list(executor.map(lambda _: _encryption_key(), range(24)))
+    assert len(set(keys)) == 1
+    assert len(keys[0]) == 32
+
+
+@pytest.mark.asyncio
+async def test_runner_lease_recovers_after_transient_store_error(store, monkeypatch):
+    profile_id = store.put_profile("alice", profile_values())["id"]
+    chat = store.create_conversation("alice", profile_id=profile_id)
+    monkeypatch.setattr(module, "RUN_HEARTBEAT_SECONDS", 0.03)
+    monkeypatch.setattr(module, "RUN_LEASE_SECONDS", 0.4)
+    started = asyncio.Event()
+
+    async def suspended_turn(**_kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(hosted_chat, "complete_turn", suspended_turn)
+    original = store.update_conversation
+    calls = 0
+
+    def flaky_update(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise TimeoutError("temporary backend outage")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(store, "update_conversation", flaky_update)
+    runner = HostedChatRunner()
+    record = await runner.start("alice", chat["id"], "wait", "http://controller", "")
+    await asyncio.wait_for(started.wait(), 2)
+    await asyncio.sleep(0.15)
+    assert calls >= 3
+    assert store.conversation("alice", chat["id"])["lease_until"] > record["lease_until"]
+    runner.stop("alice", chat["id"])
+    await asyncio.sleep(0.1)
+    assert store.conversation("alice", chat["id"])["status"] == "interrupted"

@@ -15,6 +15,8 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
+from .settings import get_settings
+
 MAX_MESSAGES = 64
 MAX_STEPS = 8
 MAX_CALLS = 24
@@ -23,8 +25,6 @@ MAX_MODEL_RESPONSE_BYTES = 4 * 1024 * 1024
 
 
 def validate_endpoint(endpoint: str) -> str:
-    from .settings import get_settings
-
     url = urlsplit(endpoint.strip())
     allow_private = get_settings().hosted_chat_allow_private_endpoints
     if (
@@ -55,17 +55,15 @@ def validate_endpoint(endpoint: str) -> str:
     return endpoint.strip().rstrip("/")
 
 
-async def model_request_target(endpoint: str) -> tuple[str, dict[str, str], dict]:
+async def model_request_targets(endpoint: str) -> list[tuple[str, dict[str, str], dict]]:
     """Resolve and pin the HTTPS peer, without a second unvalidated DNS lookup.
 
     Host and SNI remain the original hostname for certificate verification.
     Disabling environment proxies prevents bypassing the pinned peer.
     """
-    from .settings import get_settings
-
     original = urlsplit(endpoint)
     if get_settings().hosted_chat_allow_private_endpoints:
-        return endpoint + "/chat/completions", {}, {}
+        return [(endpoint + "/chat/completions", {}, {})]
     hostname = original.hostname or ""
     port = original.port or 443
     try:
@@ -80,14 +78,21 @@ async def model_request_target(endpoint: str) -> tuple[str, dict[str, str], dict
     resolved = [ip_address(item[4][0]) for item in addresses]
     if any(not address.is_global for address in resolved):
         raise ValueError("Model endpoint resolves to a non-public address")
-    # Connecting to the checked literal address, not the DNS name, prevents
-    # rebinding between the safety check and the actual TCP connection.
-    selected = resolved[0]
-    peer = f"[{selected}]" if selected.version == 6 else str(selected)
+    # Pin every validated candidate from this single DNS answer. Trying each
+    # directly avoids resolver-order changes and private-address rebinding.
+    peers = list(dict.fromkeys(resolved))
     host_header = hostname if port == 443 else f"{hostname}:{port}"
-    target = original._replace(netloc=f"{peer}:{port}").geturl() + "/chat/completions"
-    return target, {"Host": host_header}, {"sni_hostname": hostname}
+    targets = []
+    for peer_ip in peers:
+        peer = f"[{peer_ip}]" if peer_ip.version == 6 else str(peer_ip)
+        url = original._replace(netloc=f"{peer}:{port}").geturl() + "/chat/completions"
+        targets.append((url, {"Host": host_header}, {"sni_hostname": hostname}))
+    return targets
 
+
+async def model_request_target(endpoint: str) -> tuple[str, dict[str, str], dict]:
+    """Return the first validated target for callers that need one peer."""
+    return (await model_request_targets(endpoint))[0]
 
 async def model_response_json(
     http: httpx.AsyncClient, url: str, headers: dict, extensions: dict, payload: dict
@@ -135,8 +140,17 @@ def normalize_messages(messages: object) -> list[dict]:
 
 
 @asynccontextmanager
-async def mcp_session(base_url: str, bearer: str):
+async def mcp_session(base_url: str, bearer: str, *, public_origin: str | None = None):
     headers = {"Authorization": bearer} if bearer else {}
+    if public_origin:
+        origin = urlsplit(public_origin)
+        if origin.scheme not in {"http", "https"} or not origin.netloc:
+            raise ValueError("Invalid MCP OAuth origin")
+        headers.update({
+            "Host": origin.netloc,
+            "X-Forwarded-Host": origin.netloc,
+            "X-Forwarded-Proto": origin.scheme,
+        })
     async with (
         httpx.AsyncClient(headers=headers, timeout=120, follow_redirects=False) as http,
         streamable_http_client(base_url.rstrip("/") + "/mcp", http_client=http) as (
@@ -180,18 +194,25 @@ def safe_tool_message(result: object) -> str:
     return json.dumps(data, ensure_ascii=False)[:MAX_TEXT]
 
 
-async def call_mcp(base_url: str, bearer: str, name: str, arguments: dict) -> dict:
-    async with mcp_session(base_url, bearer) as session:
+async def call_mcp(
+    base_url: str, bearer: str, name: str, arguments: dict,
+    *, public_origin: str | None = None,
+) -> dict:
+    context = mcp_session(base_url, bearer, **({"public_origin": public_origin} if public_origin else {}))
+    async with context as session:
         result = await session.call_tool(
             name, arguments, read_timeout_seconds=timedelta(seconds=120)
         )
         return result.model_dump(by_alias=True, exclude_none=True)
 
 
-async def read_mcp_resource(base_url: str, bearer: str, uri: str) -> dict:
+async def read_mcp_resource(
+    base_url: str, bearer: str, uri: str, *, public_origin: str | None = None,
+) -> dict:
     if not uri.startswith("ui://"):
         raise ValueError("Only MCP App UI resources may be rendered")
-    async with mcp_session(base_url, bearer) as session:
+    context = mcp_session(base_url, bearer, **({"public_origin": public_origin} if public_origin else {}))
+    async with context as session:
         result = await session.read_resource(uri)
         return result.model_dump(by_alias=True, exclude_none=True)
 
@@ -207,6 +228,7 @@ async def complete_turn(
     tools_enabled: bool,
     session_id: str | None = None,
     checkpoint: Callable[[list[dict], list[dict]], Awaitable[None]] | None = None,
+    public_origin: str | None = None,
 ) -> dict:
     endpoint = validate_endpoint(endpoint)
     if len(key) > 8_192 or not 0 < len(model) <= 256:
@@ -237,7 +259,8 @@ async def complete_turn(
         if checkpoint is not None:
             await checkpoint([*all_messages[:index], *request_messages[1:]], events)
 
-    async with mcp_session(base_url, bearer) as session:
+    context = mcp_session(base_url, bearer, **({"public_origin": public_origin} if public_origin else {}))
+    async with context as session:
         if tools_enabled:
             listed = visible_tools((await session.list_tools()).tools)
             schemas = [tool_schema(tool) for tool in listed]
@@ -250,17 +273,32 @@ async def complete_turn(
                 if schemas:
                     payload["tools"] = schemas
                     payload["tool_choice"] = "auto"
-                url, host_headers, extensions = await model_request_target(endpoint)
-                headers = {
-                    "Content-Type": "application/json",
-                    "Accept-Encoding": "identity",
-                    **host_headers,
-                }
-                if key:
-                    headers["Authorization"] = "Bearer " + key
-                result = await model_response_json(model_http, url, headers, extensions, payload)
+                connect_error: Exception | None = None
+                for url, host_headers, extensions in await model_request_targets(endpoint):
+                    headers = {
+                        "Content-Type": "application/json",
+                        "Accept-Encoding": "identity",
+                        **host_headers,
+                    }
+                    if key:
+                        headers["Authorization"] = "Bearer " + key
+                    try:
+                        result = await model_response_json(
+                            model_http, url, headers, extensions, payload
+                        )
+                        break
+                    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                        connect_error = exc
+                else:
+                    if connect_error is not None:
+                        raise connect_error
+                    raise ValueError("No validated model endpoint addresses")
                 answer = result["choices"][0]["message"]
-                content = answer.get("content") or ""
+                content = answer.get("content")
+                if content is None:
+                    content = ""
+                if not isinstance(content, str) or len(content) > MAX_TEXT:
+                    raise ValueError("Model returned unsupported assistant content")
                 requested = answer.get("tool_calls") or []
                 if not requested:
                     request_messages.append({"role": "assistant", "content": content})

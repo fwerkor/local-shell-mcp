@@ -3291,9 +3291,12 @@ async def api_hosted_chat(request: Request) -> Response:
             host = "127.0.0.1" if settings.host in {"0.0.0.0", "::", "[::]"} else settings.host
             if ":" in host and not host.startswith("["):
                 host = f"[{host}]"
+            from .oauth import public_base_url
+
             result = await hosted_chat_runner.start(
                 subject, str(data["id"]), str(data.get("text") or ""),
                 f"http://{host}:{settings.port}", bearer,
+                public_origin=public_base_url(request) if settings.auth_mode == "oauth" else None,
             )
         elif action == "stop":
             hosted_chat_runner.stop(subject, str(data["id"]))
@@ -3309,19 +3312,27 @@ async def api_hosted_chat(request: Request) -> Response:
             if ":" in host and not host.startswith("["):
                 host = f"[{host}]"
             base_url = f"http://{host}:{settings.port}"
+            from .oauth import public_base_url
+
+            origin_arg = (
+                {"public_origin": public_base_url(request)}
+                if settings.auth_mode == "oauth" else {}
+            )
             if action == "tool":
                 if str(data.get("name") or "") not in {"workspace_open", "live_workspace_reconnect"}:
                     raise PermissionError("Only Workspace app tools are available to the host bridge")
                 if not isinstance(data.get("arguments"), dict):
                     raise ValueError("Tool arguments must be an object")
                 result = await hosted_chat.call_mcp(
-                    base_url, bearer, str(data["name"]), data["arguments"]
+                    base_url, bearer, str(data["name"]), data["arguments"], **origin_arg,
                 )
             else:
                 uri = str(data.get("uri") or "")
                 if not uri.startswith("ui://local-shell-mcp/live-workspace"):
                     raise PermissionError("Unknown MCP App resource")
-                result = await hosted_chat.read_mcp_resource(base_url, bearer, uri)
+                result = await hosted_chat.read_mcp_resource(
+                    base_url, bearer, uri, **origin_arg
+                )
         else:
             raise HTTPException(status_code=404, detail="Unknown Hosted Chat action")
         return _json_ok(result)

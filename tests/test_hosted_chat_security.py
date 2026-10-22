@@ -135,6 +135,9 @@ async def test_optional_api_key_does_not_send_bearer(monkeypatch):
 
     monkeypatch.setattr(hosted_chat, "mcp_session", mcp)
     monkeypatch.setattr(hosted_chat, "model_request_target", model_target)
+    async def candidates(endpoint):
+        return [await model_target(endpoint)]
+    monkeypatch.setattr(hosted_chat, "model_request_targets", candidates)
     monkeypatch.setattr(hosted_chat, "model_response_json", model_response)
     for key in ("", "token"):
         await hosted_chat.complete_turn(
@@ -175,3 +178,115 @@ async def test_rejects_compressed_model_response():
     async with httpx.AsyncClient(transport=httpx.MockTransport(compressed)) as client:
         with pytest.raises(ValueError, match="Compressed"):
             await hosted_chat.model_response_json(client, "https://test.example/v1", {}, {}, {})
+
+
+@pytest.mark.asyncio
+async def test_model_falls_back_to_second_public_dns_peer(monkeypatch):
+    monkeypatch.setattr(
+        hosted_chat.socket, "getaddrinfo",
+        lambda *_a, **_k: fake_dns(["2606:4700:4700::1111", "93.184.216.34"]),
+    )
+    attempted = []
+
+    @asynccontextmanager
+    async def mcp(*_args, **_kwargs):
+        yield object()
+
+    async def respond(_http, url, _headers, _extensions, _payload):
+        attempted.append(url)
+        if len(attempted) == 1:
+            raise httpx.ConnectError("IPv6 unavailable")
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(hosted_chat, "mcp_session", mcp)
+    monkeypatch.setattr(hosted_chat, "model_response_json", respond)
+    result = await hosted_chat.complete_turn(
+        base_url="http://controller", bearer="", endpoint="https://example.org/v1",
+        key="", model="unit", messages=[{"role": "user", "content": "hello"}],
+        tools_enabled=False,
+    )
+    assert attempted[0].startswith("https://[2606:4700:4700::1111]")
+    assert attempted[1].startswith("https://93.184.216.34")
+    assert result["messages"][-1]["content"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_model_rejects_structured_assistant_content_before_checkpoint(monkeypatch):
+    checkpoints = []
+
+    @asynccontextmanager
+    async def mcp(*_args, **_kwargs):
+        yield object()
+
+    async def target(endpoint):
+        return endpoint + "/chat/completions", {}, {}
+
+    async def respond(*_args):
+        return {"choices": [{"message": {"content": [{"type": "text", "text": "hi"}]}}]}
+
+    monkeypatch.setattr(hosted_chat, "mcp_session", mcp)
+    monkeypatch.setattr(hosted_chat, "model_request_target", target)
+    async def candidates(endpoint):
+        return [await target(endpoint)]
+    monkeypatch.setattr(hosted_chat, "model_request_targets", candidates)
+    monkeypatch.setattr(hosted_chat, "model_response_json", respond)
+
+    async def checkpoint(messages, events):
+        checkpoints.append((messages, events))
+
+    with pytest.raises(ValueError, match="unsupported assistant content"):
+        await hosted_chat.complete_turn(
+            base_url="http://controller", bearer="", endpoint="https://example.org/v1",
+            key="", model="unit", messages=[{"role": "user", "content": "hello"}],
+            tools_enabled=False, checkpoint=checkpoint,
+        )
+    assert checkpoints == []
+
+
+@pytest.mark.asyncio
+async def test_mcp_client_preserves_public_oauth_resource_origin(monkeypatch):
+    seen = []
+
+    class FakeHttp:
+        def __init__(self, **options):
+            seen.append(options)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    @asynccontextmanager
+    async def fake_stream(url, *, http_client):
+        assert url == "http://127.0.0.1:8765/mcp"
+        assert http_client is not None
+        yield object(), object(), None
+
+    class FakeSession:
+        def __init__(self, *_args):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def initialize(self):
+            return None
+
+    monkeypatch.setattr(hosted_chat.httpx, "AsyncClient", FakeHttp)
+    monkeypatch.setattr(hosted_chat, "streamable_http_client", fake_stream)
+    monkeypatch.setattr(hosted_chat, "ClientSession", FakeSession)
+    async with hosted_chat.mcp_session(
+        "http://127.0.0.1:8765", "Bearer valid",
+        public_origin="https://chat.example.com:8443",
+    ):
+        pass
+    assert seen[0]["headers"] == {
+        "Authorization": "Bearer valid",
+        "Host": "chat.example.com:8443",
+        "X-Forwarded-Host": "chat.example.com:8443",
+        "X-Forwarded-Proto": "https",
+    }

@@ -171,6 +171,9 @@ async def test_model_tool_call_protocol_errors(monkeypatch, mode, pattern):
             raise ValueError(f"Model API returned HTTP {response.status_code}")
         return response.json()
     monkeypatch.setattr(hosted_chat, "model_request_target", fake_target)
+    async def candidates(endpoint):
+        return [await fake_target(endpoint)]
+    monkeypatch.setattr(hosted_chat, "model_request_targets", candidates)
     monkeypatch.setattr(hosted_chat, "model_response_json", fake_response)
     monkeypatch.setattr(hosted_chat.httpx, "AsyncClient", lambda **_: FakeHttp())
     if mode == "limit-calls":
@@ -223,6 +226,9 @@ async def test_turn_bounds_model_key_and_history(monkeypatch):
             raise ValueError(f"Model API returned HTTP {response.status_code}")
         return response.json()
     monkeypatch.setattr(hosted_chat, "model_request_target", fake_target)
+    async def candidates(endpoint):
+        return [await fake_target(endpoint)]
+    monkeypatch.setattr(hosted_chat, "model_request_targets", candidates)
     monkeypatch.setattr(hosted_chat, "model_response_json", fake_response)
     monkeypatch.setattr(hosted_chat.httpx, "AsyncClient", lambda **_: FakeHttp())
     history = [{"role": "user", "content": str(i)} for i in range(100)]

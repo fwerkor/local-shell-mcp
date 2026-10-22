@@ -108,7 +108,8 @@ class _TmuxPtyAttachment:
                     with contextlib.suppress(ProcessLookupError):
                         process.send_signal(sig)
                 except ProcessLookupError:
-                    pass
+                    with contextlib.suppress(ProcessLookupError):
+                        process.send_signal(sig)
 
             signal_process(signal.SIGTERM)
             waiter = asyncio.create_task(asyncio.to_thread(process.wait))
