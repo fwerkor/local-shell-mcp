@@ -373,8 +373,8 @@ button.nav-item.active { color: white; background: #232d42; box-shadow: inset 3p
   .nav-item svg { width: 19px; height: 19px; }
   .main-content { padding: 16px 14px calc(84px + env(safe-area-inset-bottom, 0px)); }
   body.native-view-active .main-content { padding: 16px 14px calc(84px + env(safe-area-inset-bottom, 0px)); }
-  .console-content { height: calc(100dvh - 64px - env(safe-area-inset-bottom, 0px)); padding: 16px 14px; }
-  .console-content .terminal-card { height: calc(100dvh - 144px - env(safe-area-inset-bottom, 0px)); }
+  .console-content { height: calc(100vh - 64px - env(safe-area-inset-bottom, 0px)); height: calc(100dvh - 64px - env(safe-area-inset-bottom, 0px)); padding: 16px 14px; }
+  .console-content .terminal-card { height: calc(100vh - 144px - env(safe-area-inset-bottom, 0px)); height: calc(100dvh - 144px - env(safe-area-inset-bottom, 0px)); }
   .topbar { align-items: flex-start; }
   .topbar-actions .live-pill, .button.secondary { display: none; }
   body.native-view-active #refresh-button { display: inline-flex; }
