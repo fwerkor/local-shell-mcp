@@ -382,7 +382,7 @@ button.nav-item.active { color: white; background: #232d42; box-shadow: inset 3p
   .status-stats { grid-template-columns: repeat(2,1fr); }
   .metric-grid { grid-template-columns: 1fr; }
   .machines-panel .table-wrap { overflow-x: auto; }
-  table { min-width: 700px; }
+  .machines-panel .table-wrap table { min-width: 700px; }
   .workload-row { grid-template-columns: 28px 1fr auto; }
   .workload-node, .workload-time { display: none; }
   .touchbar { display: grid; }

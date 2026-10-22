@@ -180,11 +180,15 @@ describe("Native WebUI actions", () => {
   })
 
   test("keeps narrow native tables compact without discarding timestamps", async () => {
+    const dashboardStyles = await Bun.file(new URL("./web.css", import.meta.url)).text()
     const styles = await Bun.file(new URL("./web-native.css", import.meta.url)).text()
     const remotes = await Bun.file(new URL("./web-native/remotes.ts", import.meta.url)).text()
     const sessions = await Bun.file(new URL("./web-native/sessions.ts", import.meta.url)).text()
     const audit = await Bun.file(new URL("./web-native/audit.ts", import.meta.url)).text()
 
+    expect(dashboardStyles).toContain(".machines-panel .table-wrap table { min-width: 700px; }")
+    expect(dashboardStyles).not.toContain("  table { min-width: 700px; }")
+    expect(styles).toContain(".native-table { width: 100%; min-width: 0;")
     expect(styles).toContain(".remote-table th:nth-child(1) { width: 88px; }")
     expect(styles).toContain(".remote-table th:nth-child(2) { width: auto; }")
     expect(styles).toContain(".sessions-table th:nth-child(3) { width: auto; }")

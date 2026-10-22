@@ -27,7 +27,7 @@
 .native-empty strong { color: #596274; font-size: 14px; }
 .native-empty span { color: #9aa2b0; }
 .native-error { color: #a13f49; background: #fff7f7; }
-.native-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.native-table { width: 100%; min-width: 0; border-collapse: collapse; table-layout: fixed; }
 .native-table th { height: 32px; padding: 0 10px; overflow: hidden; color: #929aaa; background: #fafbfc; border-bottom: 1px solid #eceef2; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-align: left; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
 .native-table td { height: 43px; padding: 6px 10px; color: #667085; border-bottom: 1px solid #eff1f4; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .native-table tbody tr { cursor: pointer; }
