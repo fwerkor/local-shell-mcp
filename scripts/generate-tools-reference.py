@@ -41,6 +41,7 @@ GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "shell_list",
             "job_start",
             "job_list",
+            "job_get",
             "job_tail",
             "job_stop",
             "job_retry",

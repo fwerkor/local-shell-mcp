@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # Tools referansı
 
 Bu page gerçek MCP tool schemas üzerinden oluşturulur. Public tool surface değiştiğinde English reference güncellemek için `python scripts/generate-tools-reference.py` çalıştırın.
@@ -288,12 +288,27 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_list`
 
-Local veya remote machine üzerinde tracked jobs listeler. Active joblar önce döndürülür; `limit` 1-1000 aralığıyla sınırlandırılır.
+Etkin işlerin önce geldiği özet iş listesi. next_offset ile sayfalayın; veriler 32 KiB ile sınırlıdır.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+`machine` sağlandığında çağrı ayrıca `remote:use` gerektirir ve remote worker protocol üzerinden çalışır.
+
+### `job_get`
+
+Bir işin tam komut, ilerleme ve sonuç dahil tüm ayrıntılarını getirir.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 

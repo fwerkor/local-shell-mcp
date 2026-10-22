@@ -1293,7 +1293,7 @@ _TOOL_OPERATION_GROUPS: dict[str, frozenset[str]] = {
             "shell_kill",
         }
     ),
-    "jobs": frozenset({"job_start", "job_list", "job_tail", "job_stop", "job_retry"}),
+    "jobs": frozenset({"job_start", "job_list", "job_get", "job_tail", "job_stop", "job_retry"}),
     "browser": frozenset(
         {
             "browser_session",

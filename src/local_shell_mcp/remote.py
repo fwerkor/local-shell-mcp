@@ -52,6 +52,7 @@ from .fs_ops import (
 from .jobs import (
     JOB_LIST_DEFAULT_LIMIT,
     discard_unreferenced_python_script,
+    get_job,
     list_jobs,
     retry_job,
     run_job_with_timeout,
@@ -2005,6 +2006,7 @@ WORKER_JOB_TOOLS = frozenset(
     {
         "job_start",
         "job_list",
+        "job_get",
         "job_tail",
         "job_stop",
         "job_retry",
@@ -2876,7 +2878,12 @@ async def _execute_job_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         return await list_jobs(
             args.get("include_finished", True),
             args.get("limit", JOB_LIST_DEFAULT_LIMIT),
+            args.get("offset", 0),
+            include_recent_failures=args.get("include_recent_failures", False),
         )
+
+    if tool == "job_get":
+        return await get_job(args["job_id"])
 
     if tool == "job_tail":
         return await tail_job(args["job_id"], args.get("lines", 200))

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # Tools reference
 
 यह page वास्तविक MCP tool schemas से बनती है। Public tool surface बदलने के बाद English reference update करने के लिए `python scripts/generate-tools-reference.py` चलाएँ।
@@ -288,12 +288,27 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_list`
 
-Local या remote machine पर tracked jobs सूचीबद्ध करती है। Active jobs पहले लौटाए जाते हैं; `limit` को 1-1000 के बीच सीमित किया जाता है।
+सक्रिय कार्य पहले दिखाने वाली संक्षिप्त सूची। next_offset से अगले पृष्ठ पर जाएँ; डेटा 32 KiB तक सीमित है।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+`machine` देने पर call को अतिरिक्त `remote:use` चाहिए और वह remote worker protocol के जरिए चलता है।
+
+### `job_get`
+
+किसी कार्य का पूरा विवरण प्राप्त करें, जिसमें आदेश, प्रगति और परिणाम शामिल हैं।
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 

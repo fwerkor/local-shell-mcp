@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # Referência de ferramentas
 
 Esta página é construída a partir dos schemas MCP reais. Execute `python scripts/generate-tools-reference.py` após alterar a superfície pública de tools para atualizar a referência English.
@@ -288,12 +288,27 @@ Quando `machine` é fornecido, a chamada também exige `remote:use` e é executa
 
 ### `job_list`
 
-Lista jobs trackeados localmente ou em máquina remota. Jobs ativos são retornados primeiro; `limit` é limitado ao intervalo de 1-1000.
+Lista resumida de tarefas, com as ativas primeiro. Paginação por next_offset; dados limitados a 32 KiB.
 
 | Parâmetro | Tipo | Obrigatório/default | Descrição |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session desta chamada de tool. Enquanto trabalha na tarefa, passe o session_id retornado por session_manage. Use null somente quando não houver Logical Session ativa. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Quando `machine` é fornecido, a chamada também exige `remote:use` e é executada pelo protocolo de remote worker.
+
+### `job_get`
+
+Obtém os detalhes completos da tarefa, incluindo comando, progresso e resultado.
+
+| Parâmetro | Tipo | Obrigatório/default | Descrição |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session desta chamada de tool. Enquanto trabalha na tarefa, passe o session_id retornado por session_manage. Use null somente quando não houver Logical Session ativa. |
 
