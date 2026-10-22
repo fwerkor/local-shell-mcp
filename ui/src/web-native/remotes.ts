@@ -19,13 +19,65 @@ function remoteDetailRevision(machine: Machine): string {
     machine.workdir,
     machine.queue_depth,
     machine.reset_generation,
-    machine.capabilities,
     machine.info,
   ])
 }
 
 function remoteLastSeen(machine: Machine): string {
   return machine.status === "online" ? "Now" : formatAge(machine.last_seen, machine.last_seen_age_s)
+}
+
+function reportedNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+function reportedPercent(value: unknown): string | null {
+  const number = reportedNumber(value)
+  return number !== null && number <= 100 ? `${Number(number.toFixed(1))}%` : null
+}
+
+function byteSize(value: unknown): string | null {
+  let number = reportedNumber(value)
+  if (number === null) return null
+  const units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]
+  let unit = 0
+  while (number >= 1024 && unit < units.length - 1) {
+    number /= 1024
+    unit++
+  }
+  return `${Number(number.toFixed(1))} ${units[unit]}`
+}
+
+export function renderRemoteDetail(machine: Machine): string {
+  const info = machine.info || {}
+  const cpuCount = reportedNumber(info.cpu_count)
+  const cpuPercent = reportedPercent(info.cpu_percent)
+  const cpu = [cpuCount !== null && Number.isInteger(cpuCount) && cpuCount > 0 ? `${cpuCount} logical CPUs` : null, cpuPercent]
+    .filter(Boolean).join(" · ")
+  const used = byteSize(info.memory_used_bytes)
+  const total = byteSize(info.memory_total_bytes)
+  const memoryPercent = reportedPercent(info.memory_percent)
+  const memory = [used && total ? `${used} / ${total}` : used ? `${used} used` : total ? `${total} total` : null, memoryPercent]
+    .filter(Boolean).join(" · ")
+  const resources = [["CPU", cpu], ["Memory", memory]].filter(([, value]) => value)
+  const platform = typeof info.platform === "string" ? ({ linux: "Linux", win32: "Windows", darwin: "macOS" } as Record<string, string>)[info.platform] || info.platform : null
+  const resourceMarkup = resources.length
+    ? `<dl class="detail-grid">${resources.map(([label, value]) => `<div><dt>${label}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`
+    : `<p class="remote-resources-empty">No resource data reported</p>`
+
+  return `<div class="remote-title"><span class="status-dot ${machine.status === "online" ? "online" : "offline"}"></span><div><h2>${escapeHtml(machine.name)}</h2><p>${escapeHtml(machine.status)}</p></div></div>
+    <dl class="detail-grid">
+      <div><dt>LSM version</dt><dd>${escapeHtml(String(info.version || info.lsm_version || "unknown"))}</dd></div>
+      <div><dt>Last seen</dt><dd data-role="remote-last-seen">${remoteLastSeen(machine)}</dd></div>
+      <div><dt>Workdir</dt><dd><code>${escapeHtml(machine.workdir || "—")}</code></dd></div>
+      <div><dt>Queue</dt><dd>${escapeHtml(String(machine.queue_depth ?? 0))}</dd></div>
+      ${platform ? `<div><dt>Platform</dt><dd>${escapeHtml(platform)}</dd></div>` : ""}
+    </dl>
+    <section class="remote-resources"><h4>${machine.status === "online" ? "Resources" : "Last reported resources"}</h4>${resourceMarkup}</section>
+    <details class="detail-json" data-role="remote-diagnostics"><summary>Advanced diagnostics</summary>
+      <div class="remote-diagnostics-body"><dl class="detail-grid"><div><dt>Reset generation</dt><dd>${escapeHtml(String(machine.reset_generation ?? 0))}</dd></div></dl>
+      <h4>Raw system information</h4><pre>${highlightedHtml(JSON.stringify(info, null, 2), "info.json")}</pre></div>
+    </details>`
 }
 
 export class RemotesController extends BaseController {
@@ -35,10 +87,11 @@ export class RemotesController extends BaseController {
   private loading = false
   private resetRequestInFlight = false
   private renderedDetailRevision = ""
+  private renderedDetailName = ""
 
   mount(root: HTMLElement): void {
     this.root = root
-    this.root.innerHTML = `<section class="native-page remotes-page"><div class="remote-summary" data-role="remote-summary"></div><div class="native-toolbar"><div><strong>Remote workers</strong><span class="toolbar-detail">Persistent worker identities and invitations</span></div><div class="toolbar-actions">${button("New invite", "invite", { icon: "+", primary: true })}${button("Rename", "rename", { disabled: true })}${button("Reset queue", "reset", { disabled: true })}${button("Revoke", "revoke", { danger: true, disabled: true })}</div></div><div class="remotes-layout"><section class="native-panel remote-list-panel"><header><div><h3>Remote nodes</h3><p data-role="remote-count">Loading…</p></div></header><div data-role="remote-list"><div class="native-loading">Loading remote nodes…</div></div></section><section class="native-panel remote-detail-panel"><header><div><h3>Node details</h3><p>Version, workdir, capabilities, and system information</p></div></header><div class="remote-detail" data-role="remote-detail"><div class="native-empty">No node selected</div></div></section></div></section>`
+    this.root.innerHTML = `<section class="native-page remotes-page"><div class="remote-summary" data-role="remote-summary"></div><div class="native-toolbar"><div><strong>Remote workers</strong><span class="toolbar-detail">Persistent worker identities and invitations</span></div><div class="toolbar-actions">${button("New invite", "invite", { icon: "+", primary: true })}${button("Rename", "rename", { disabled: true })}${button("Reset queue", "reset", { disabled: true })}${button("Revoke", "revoke", { danger: true, disabled: true })}</div></div><div class="remotes-layout"><section class="native-panel remote-list-panel"><header><div><h3>Remote nodes</h3><p data-role="remote-count">Loading…</p></div></header><div data-role="remote-list"><div class="native-loading">Loading remote nodes…</div></div></section><section class="native-panel remote-detail-panel"><header><div><h3>Node details</h3><p>Status, version, resources, and diagnostics</p></div></header><div class="remote-detail" data-role="remote-detail"><div class="native-empty">No node selected</div></div></section></div></section>`
     this.listen(root, "click", (event) => this.onClick(event))
     this.listen(root, "keydown", (event) => this.onListKeyDown(event as KeyboardEvent))
     void this.refresh()
@@ -95,8 +148,15 @@ export class RemotesController extends BaseController {
     if (detail) {
       const revision = current ? remoteDetailRevision(current) : "empty"
       if (revision !== this.renderedDetailRevision) {
+        const keepDiagnosticsOpen = current?.name === this.renderedDetailName
+          && detail.querySelector<HTMLDetailsElement>("[data-role=remote-diagnostics]")?.open === true
         this.renderedDetailRevision = revision
-        detail.innerHTML = current ? `<div class="remote-title"><span class="status-dot ${current.status === "online" ? "online" : "offline"}"></span><div><h2>${escapeHtml(current.name)}</h2><p>${escapeHtml(current.status)}</p></div></div><dl class="detail-grid"><div><dt>LSM version</dt><dd>${escapeHtml(String(current.info?.version || current.info?.lsm_version || "unknown"))}</dd></div><div><dt>Last seen</dt><dd data-role="remote-last-seen"></dd></div><div><dt>Workdir</dt><dd><code>${escapeHtml(current.workdir || "—")}</code></dd></div><div><dt>Queue</dt><dd>${escapeHtml(String(current.queue_depth ?? 0))}</dd></div><div><dt>Reset generation</dt><dd>${escapeHtml(String(current.reset_generation ?? 0))}</dd></div><div><dt>Capabilities</dt><dd>${(current.capabilities || []).map((item) => `<span class="tag">${escapeHtml(item)}</span>`).join("") || "—"}</dd></div></dl><section class="detail-json"><h4>System information</h4><pre>${highlightedHtml(JSON.stringify(current.info || {}, null, 2), "info.json")}</pre></section>` : '<div class="native-empty">No node selected</div>'
+        this.renderedDetailName = current?.name || ""
+        detail.innerHTML = current ? renderRemoteDetail(current) : '<div class="native-empty">No node selected</div>'
+        if (keepDiagnosticsOpen) {
+          const diagnostics = detail.querySelector<HTMLDetailsElement>("[data-role=remote-diagnostics]")
+          if (diagnostics) diagnostics.open = true
+        }
       }
       const lastSeen = detail.querySelector<HTMLElement>("[data-role=remote-last-seen]")
       if (lastSeen && current) lastSeen.textContent = remoteLastSeen(current)
