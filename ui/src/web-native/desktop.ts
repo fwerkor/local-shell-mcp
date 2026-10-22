@@ -190,7 +190,6 @@ export class DesktopController extends BaseController {
           </div>
           <div class="toolbar-actions">
             ${button("Refresh windows", "desktop-refresh-windows")}
-            ${button("Refresh frame", "desktop-refresh-frame", { primary: true })}
           </div>
         </div>
         <section class="native-panel desktop-panel">
@@ -199,7 +198,7 @@ export class DesktopController extends BaseController {
               <h3 data-role="desktop-title">Desktop window</h3>
               <p data-role="desktop-meta">Choose a window to begin.</p>
             </div>
-            <span data-role="desktop-scale">—</span>
+            <div class="desktop-frame-actions"><span data-role="desktop-scale">—</span>${button("Refresh frame", "desktop-refresh-frame")}</div>
           </header>
           <div class="desktop-stage-wrap">
             <div class="desktop-stage" data-role="desktop-stage" tabindex="0" aria-label="Interactive desktop window">
@@ -299,6 +298,7 @@ export class DesktopController extends BaseController {
     const scale = this.root.querySelector<HTMLElement>("[data-role=desktop-scale]")
     const text = this.root.querySelector<HTMLInputElement>("[data-role=desktop-text]")
     const submit = this.root.querySelector<HTMLButtonElement>("[data-role=desktop-text-form] button")
+    const refreshFrame = this.root.querySelector<HTMLButtonElement>("[data-action=desktop-refresh-frame]")
 
     if (title) title.textContent = current ? current.title || current.app || "Desktop window" : "Desktop window"
     if (meta) {
@@ -311,6 +311,7 @@ export class DesktopController extends BaseController {
       )
     }
     if (scale) scale.textContent = this.frameBounds ? "Window coordinates" : "—"
+    if (refreshFrame) refreshFrame.disabled = !current
     if (connection) {
       connection.classList.toggle("error", error)
       connection.classList.toggle("online", Boolean(current && this.frameBounds && !error))

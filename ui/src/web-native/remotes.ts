@@ -130,7 +130,7 @@ export class RemotesController extends BaseController {
 
   mount(root: HTMLElement): void {
     this.root = root
-    this.root.innerHTML = `<section class="native-page remotes-page"><div class="remote-summary" data-role="remote-summary"></div><div class="native-toolbar"><div><strong>Remote workers</strong><span class="toolbar-detail">Persistent worker identities and invitations</span></div><div class="toolbar-actions">${button("New invite", "invite", { icon: "+", primary: true })}${button("Rename", "rename", { disabled: true })}${button("Reset queue", "reset", { disabled: true })}${button("Revoke", "revoke", { danger: true, disabled: true })}</div></div><div class="remotes-layout"><section class="native-panel remote-list-panel"><header><div><h3>Remote nodes</h3><p data-role="remote-count">Loading…</p></div></header><div data-role="remote-list"><div class="native-loading">Loading remote nodes…</div></div></section><section class="native-panel remote-detail-panel"><header><div><h3>Node details</h3><p>Status, version, resources, and diagnostics</p></div></header><div class="remote-detail" data-role="remote-detail"><div class="native-empty">No node selected</div></div></section></div></section>`
+    this.root.innerHTML = `<section class="native-page remotes-page"><div class="remote-summary" data-role="remote-summary"></div><div class="native-toolbar"><div><strong>Remote workers</strong><span class="toolbar-detail">Persistent worker identities and invitations</span></div><div class="toolbar-actions">${button("New invite", "invite", { icon: "+", primary: true })}</div></div><div class="remotes-layout"><section class="native-panel remote-list-panel"><header><div><h3>Remote nodes</h3><p data-role="remote-count">Loading…</p></div></header><div data-role="remote-list"><div class="native-loading">Loading remote nodes…</div></div></section><section class="native-panel remote-detail-panel"><header><div><h3>Node details</h3><p data-role="remote-selection">Select a remote node</p></div><div class="detail-actions" role="group" aria-label="Selected remote actions">${button("Rename", "rename", { disabled: true })}${button("Reset queue", "reset", { disabled: true })}${button("Revoke", "revoke", { danger: true, disabled: true })}</div></header><div class="remote-detail" data-role="remote-detail"><div class="native-empty">No node selected</div></div></section></div></section>`
     this.listen(root, "click", (event) => this.onClick(event))
     this.listen(root, "keydown", (event) => this.onListKeyDown(event as KeyboardEvent))
     void this.refresh()
@@ -183,6 +183,8 @@ export class RemotesController extends BaseController {
       }
     }
     const current = this.current()
+    const selection = this.root.querySelector<HTMLElement>("[data-role=remote-selection]")
+    if (selection) selection.textContent = current ? `Selected: ${current.name}` : "Select a remote node"
     const detail = this.root.querySelector<HTMLElement>("[data-role=remote-detail]")
     if (detail) {
       const revision = current ? remoteDetailRevision(current) : "empty"
