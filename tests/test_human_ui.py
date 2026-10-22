@@ -343,6 +343,8 @@ def test_webui_visual_regressions_are_packaged():
     assert ".wx-willow-theme" in css
     assert "cdn.svar.dev" not in css
     assert ".terminal-touchbar{" in css
+    assert ".terminal-layout.sidebar-hidden,.terminal-layout{display:flex;flex-direction:column;height:auto;min-height:0}" in css
+    assert ".terminal-sessions{display:grid;grid-template-rows:auto auto minmax(0,1fr);flex:0 0 154px;max-height:none}" in css
     assert ".terminal-scrollbar{" in css
     assert ".terminal-scrollbar-spacer{" in css
     assert "overflow-y:scroll" in css
