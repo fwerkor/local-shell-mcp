@@ -84,7 +84,7 @@ export class SessionsController extends BaseController {
         <div><strong>Logical Sessions</strong><span class="toolbar-detail">Durable agent tasks handed off explicitly by session_id</span></div>
         <div class="sessions-controls">
           <label class="sessions-filter"><span>Status</span><select data-filter="status">${SESSION_STATUSES.map((status) => `<option value="${status}">${status === "all" ? "All sessions" : status}</option>`).join("")}</select></label>
-          <div class="toolbar-actions">${button("New", "new-session", { primary: true })}${button("Copy ID", "copy-id", { disabled: true })}${button("Finish", "finish", { disabled: true })}${button("Cancel", "cancel", { danger: true, disabled: true })}${button("Delete", "delete", { danger: true, disabled: true })}</div>
+          <div class="toolbar-actions">${button("New", "new-session", { primary: true })}</div>
         </div>
       </div>
       <div class="sessions-layout">
@@ -93,7 +93,7 @@ export class SessionsController extends BaseController {
           <div class="sessions-list" data-role="sessions-list"><div class="native-loading">Loading logical sessions…</div></div>
         </section>
         <section class="native-panel sessions-detail-panel">
-          <header><div><h3 data-role="session-title">Session details</h3><p data-role="session-meta">Select a session</p></div><span class="status-chip neutral" data-role="session-status">—</span></header>
+          <header><div><h3 data-role="session-title">Session details</h3><p data-role="session-meta">Select a session</p></div><div class="detail-header-tools"><span class="status-chip neutral" data-role="session-status">—</span><div class="detail-actions" role="group" aria-label="Selected session actions">${button("Copy ID", "copy-id", { disabled: true })}${button("Finish", "finish", { disabled: true })}${button("Cancel", "cancel", { danger: true, disabled: true })}${button("Delete", "delete", { danger: true, disabled: true })}</div></div></header>
           <div class="session-detail" data-role="session-detail"><div class="native-empty">No session selected</div></div>
         </section>
       </div>
