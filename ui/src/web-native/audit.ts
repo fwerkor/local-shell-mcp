@@ -208,7 +208,7 @@ export class AuditController extends BaseController {
       if (this.rowRevisions.get(key) !== revision) {
         const status = auditStatus(entry)
         const timestamp = new Date(entry.ts * 1000)
-        row.innerHTML = `<td title="${escapeHtml(timestamp.toLocaleString())}">${timestamp.toLocaleTimeString()}</td><td>${escapeHtml(entry.node)}</td><td><span class="operation-label">${escapeHtml(entry.operation)}</span></td><td><strong>${escapeHtml(entry.tool || entry.event)}</strong><small>${entry.command ? escapeHtml(entry.command.slice(0, 90)) : escapeHtml(entry.session || "")}</small></td><td><span class="status-chip ${statusClass(status)}">${escapeHtml(status)}</span></td>`
+        row.innerHTML = `<td title="${escapeHtml(timestamp.toLocaleString())}">${timestamp.toLocaleTimeString()}</td><td>${escapeHtml(entry.node)}</td><td><span class="operation-label">${escapeHtml(entry.operation)}</span></td><td><strong>${escapeHtml(entry.tool || entry.event)}</strong><small class="audit-mobile-time">${escapeHtml(timestamp.toLocaleTimeString())}</small><small>${entry.command ? escapeHtml(entry.command.slice(0, 90)) : escapeHtml(entry.session || "")}</small></td><td><span class="status-chip ${statusClass(status)}">${escapeHtml(status)}</span></td>`
         this.rowRevisions.set(key, revision)
       }
       row.dataset.auditIndex = String(index)
