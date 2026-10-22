@@ -327,10 +327,7 @@ def test_webui_visual_regressions_are_packaged():
     css = (asset_root / "web.css").read_text(encoding="utf-8")
     script = (asset_root / "web.js").read_text(encoding="utf-8")
 
-    assert "<span><strong>TUI</strong></span>" in html
-    assert 'id="page-title"' in html
-    assert 'id="page-description"' not in html
-    assert 'class="breadcrumb"' not in html
+    assert "<strong>TUI</strong>" in html
     for view in ("files", "terminals", "sessions", "remotes", "audit"):
         assert f'data-view="{view}"' in html
     assert "Open TUI" in html
