@@ -226,11 +226,14 @@ export class SessionsController extends BaseController {
           checkbox.setAttribute("aria-label", `Select ${session.label || session.session_id}`)
         }
         if (row.cells[1]) row.cells[1].innerHTML = `<span class="status-chip ${sessionTone(session.status)}">${escapeHtml(session.status)}</span>`
-        if (row.cells[2]) row.cells[2].innerHTML = `<strong>${escapeHtml(session.label || "Untitled session")}</strong><small>${escapeHtml(session.session_id)}</small>`
+        if (row.cells[2]) row.cells[2].innerHTML = `<strong>${escapeHtml(session.label || "Untitled session")}</strong><small class="session-mobile-updated"></small><small>${escapeHtml(session.session_id)}</small>`
         if (row.cells[3]) row.cells[3].textContent = session.objective || "—"
         this.rowRevisions.set(session.session_id, revision)
       }
-      if (row.cells[4]) row.cells[4].textContent = formatAge(session.updated_at)
+      const updated = formatAge(session.updated_at)
+      if (row.cells[4]) row.cells[4].textContent = updated
+      const mobileUpdated = row.cells[2]?.querySelector<HTMLElement>(".session-mobile-updated")
+      if (mobileUpdated) mobileUpdated.textContent = `Updated ${updated}`
       const current = body.rows[index]
       if (current !== row) body.insertBefore(row, current || null)
     })
