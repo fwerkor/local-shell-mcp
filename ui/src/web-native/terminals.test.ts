@@ -205,7 +205,8 @@ describe("Native WebUI terminal rendering", () => {
       expect(list.scrollLeft).toBe(275)
       expect(list.scrollTop).toBe(0)
 
-      // Returning to a card left of the rail scrolls back without touching page scroll.
+      // Returning to a different card left of the rail scrolls back without touching page scroll.
+      controller.selectedSessionId = "build-a"
       selected.getBoundingClientRect = () => ({ left: 70, right: 225, top: 85, bottom: 130 })
       ;(TerminalsController.prototype as any).updateSessionSelection.call(controller)
       expect(list.scrollLeft).toBe(245)
@@ -221,12 +222,40 @@ describe("Native WebUI terminal rendering", () => {
       querySelector: () => selected,
       getBoundingClientRect: () => { throw new Error("should not auto-scroll") },
     }
-    const controller: any = { selectedSessionId: "active", root: { querySelector: () => list } }
+    const controller: any = { selectedSessionId: "active", renderedSelectedSessionId: "active", root: { querySelector: () => list } }
     const previousCss = (globalThis as any).CSS
     ;(globalThis as any).CSS = { escape: (value: string) => value }
     try {
       ;(TerminalsController.prototype as any).updateSessionSelection.call(controller)
       expect(list.scrollLeft).toBe(100)
+    } finally {
+      ;(globalThis as any).CSS = previousCss
+    }
+  })
+
+  test("preserves manual rail position when metadata refresh rebuilds the selected card", () => {
+    const previousCss = (globalThis as any).CSS
+    ;(globalThis as any).CSS = { escape: (value: string) => value }
+    try {
+      let activated = false
+      const selected: any = {
+        classList: { add: () => { activated = true } },
+        getBoundingClientRect: () => { throw new Error("refresh should not auto-scroll") },
+      }
+      const list: any = {
+        scrollLeft: 220,
+        querySelector: (selector: string) => selector === ".session-row.active" ? null : selected,
+        getBoundingClientRect: () => { throw new Error("refresh should not measure rail") },
+      }
+      const controller: any = {
+        selectedSessionId: "build-a",
+        renderedSelectedSessionId: "build-a",
+        root: { querySelector: () => list },
+      }
+
+      ;(TerminalsController.prototype as any).updateSessionSelection.call(controller)
+      expect(activated).toBe(true)
+      expect(list.scrollLeft).toBe(220)
     } finally {
       ;(globalThis as any).CSS = previousCss
     }

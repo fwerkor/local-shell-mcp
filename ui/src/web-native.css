@@ -542,8 +542,9 @@ button.summary-card { cursor: pointer; }
   .terminal-layout.sidebar-hidden, .terminal-layout { display: flex; flex-direction: column; height: auto; min-height: 0; }
   .terminal-layout.sidebar-hidden .terminal-sessions { display: none; }
   .terminal-sessions { display: grid; grid-template-rows: auto auto minmax(0,1fr); flex: 0 0 184px; max-height: none; }
-  .terminal-sessions .session-list { display: flex; align-items: flex-start; gap: 5px; overflow-x: auto; overflow-y: hidden; }
-  .terminal-sessions .native-empty { min-height: 0; }
+  .terminal-sessions .session-list { display: flex; align-items: flex-start; gap: 5px; overflow-x: auto; overflow-y: auto; }
+  .terminal-sessions .native-empty, .terminal-sessions .native-loading, .terminal-sessions .native-error { min-height: 0; }
+  .terminal-sessions .native-error { overflow-wrap: anywhere; }
   .terminal-sessions .session-row { width: auto; min-width: 155px; flex: 0 0 155px; }
   .terminal-stage-panel { flex: none; height: max(480px, calc(100dvh - 285px)); }
   .terminal-layout:fullscreen { height: 100dvh; overflow-y: auto; }

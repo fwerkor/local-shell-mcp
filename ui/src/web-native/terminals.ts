@@ -55,6 +55,7 @@ export class TerminalsController extends BaseController {
   private sidebarVisible = true
   private fontSize = 14
   private renderedSessionsRevision = ""
+  private renderedSelectedSessionId: string | null = null
 
   mount(root: HTMLElement): void {
     this.root = root
@@ -196,6 +197,7 @@ export class TerminalsController extends BaseController {
     const subtitle = this.root.querySelector<HTMLElement>("[data-role=terminal-subtitle]")
     if (list) list.innerHTML = '<div class="native-loading">Loading terminals…</div>'
     this.renderedSessionsRevision = ""
+    this.renderedSelectedSessionId = null
     if (summary) summary.textContent = "Loading…"
     if (title) title.textContent = "Persistent terminal"
     if (subtitle) subtitle.textContent = "Loading terminals…"
@@ -255,13 +257,16 @@ export class TerminalsController extends BaseController {
   private updateSessionSelection(): void {
     const list = this.root.querySelector<HTMLElement>("[data-role=sessions]")
     if (!list) return
+    const selectionChanged = this.selectedSessionId !== this.renderedSelectedSessionId
+    this.renderedSelectedSessionId = this.selectedSessionId
     const active = list.querySelector<HTMLElement>(".session-row.active")
     const selected = this.selectedSessionId
       ? list.querySelector<HTMLElement>(`.session-row[data-session="${CSS.escape(this.selectedSessionId)}"]`)
       : null
     if (active && active !== selected) active.classList.remove("active")
-    if (!selected || selected === active) return
-    selected.classList.add("active")
+    if (!selected) return
+    if (selected !== active) selected.classList.add("active")
+    if (!selectionChanged) return
     // Scroll the rail, not the page: previous/next can select an off-screen card.
     const viewport = list.getBoundingClientRect()
     const card = selected.getBoundingClientRect()
