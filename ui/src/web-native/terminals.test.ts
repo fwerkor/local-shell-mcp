@@ -179,6 +179,59 @@ describe("Native WebUI terminal session filtering", () => {
 
 
 describe("Native WebUI terminal rendering", () => {
+  test("scrolls the selected session card into the visible part of the rail", () => {
+    const previousCss = (globalThis as any).CSS
+    ;(globalThis as any).CSS = { escape: (value: string) => value }
+    try {
+      const calls: string[] = []
+      const previous: any = { classList: { remove: () => calls.push("remove") } }
+      const selected: any = {
+        classList: { add: () => calls.push("add") },
+        getBoundingClientRect: () => ({ left: 500, right: 655, top: 85, bottom: 130 }),
+      }
+      const list: any = {
+        scrollLeft: 0,
+        scrollTop: 0,
+        getBoundingClientRect: () => ({ left: 100, right: 380, top: 80, bottom: 145 }),
+        querySelector: (selector: string) => selector === ".session-row.active" ? previous : selected,
+      }
+      const controller: any = {
+        selectedSessionId: "build-b",
+        root: { querySelector: () => list },
+      }
+
+      ;(TerminalsController.prototype as any).updateSessionSelection.call(controller)
+      expect(calls).toEqual(["remove", "add"])
+      expect(list.scrollLeft).toBe(275)
+      expect(list.scrollTop).toBe(0)
+
+      // Returning to a card left of the rail scrolls back without touching page scroll.
+      selected.getBoundingClientRect = () => ({ left: 70, right: 225, top: 85, bottom: 130 })
+      ;(TerminalsController.prototype as any).updateSessionSelection.call(controller)
+      expect(list.scrollLeft).toBe(245)
+    } finally {
+      ;(globalThis as any).CSS = previousCss
+    }
+  })
+
+  test("does not override manual rail scrolling when selection is unchanged", () => {
+    const selected: any = { classList: { add: () => { throw new Error("unchanged selection") } } }
+    const list: any = {
+      scrollLeft: 100,
+      querySelector: () => selected,
+      getBoundingClientRect: () => { throw new Error("should not auto-scroll") },
+    }
+    const controller: any = { selectedSessionId: "active", root: { querySelector: () => list } }
+    const previousCss = (globalThis as any).CSS
+    ;(globalThis as any).CSS = { escape: (value: string) => value }
+    try {
+      ;(TerminalsController.prototype as any).updateSessionSelection.call(controller)
+      expect(list.scrollLeft).toBe(100)
+    } finally {
+      ;(globalThis as any).CSS = previousCss
+    }
+  })
+
   test("switches terminal selection without rebuilding the session sidebar", () => {
     const controller: any = {
       selectedSessionId: "a",

@@ -178,7 +178,9 @@ describe("Native WebUI actions", () => {
 
     expect(stackedRule).toBeGreaterThan(desktopRule)
     expect(stackedStyles).toContain(".terminal-layout.sidebar-hidden, .terminal-layout { display: flex; flex-direction: column; height: auto; min-height: 0; }")
-    expect(stackedStyles).toContain(".terminal-sessions { display: grid; grid-template-rows: auto auto minmax(0,1fr); flex: 0 0 154px; max-height: none; }")
+    expect(stackedStyles).toContain(".terminal-sessions { display: grid; grid-template-rows: auto auto minmax(0,1fr); flex: 0 0 184px; max-height: none; }")
+    expect(stackedStyles).toContain(".terminal-sessions .session-list { display: flex; align-items: flex-start;")
+    expect(stackedStyles).toContain(".terminal-sessions .native-empty { min-height: 0; }")
     expect(stackedStyles).toContain(".terminal-stage-panel { flex: none; height: max(480px, calc(100dvh - 285px)); }")
     expect(styles.slice(mobileRule)).toContain(".terminal-stage-panel { height: max(420px, calc(100dvh - 319px)); }")
   })

@@ -260,7 +260,15 @@ export class TerminalsController extends BaseController {
       ? list.querySelector<HTMLElement>(`.session-row[data-session="${CSS.escape(this.selectedSessionId)}"]`)
       : null
     if (active && active !== selected) active.classList.remove("active")
-    if (selected) selected.classList.add("active")
+    if (!selected || selected === active) return
+    selected.classList.add("active")
+    // Scroll the rail, not the page: previous/next can select an off-screen card.
+    const viewport = list.getBoundingClientRect()
+    const card = selected.getBoundingClientRect()
+    if (card.left < viewport.left) list.scrollLeft += card.left - viewport.left
+    else if (card.right > viewport.right) list.scrollLeft += card.right - viewport.right
+    if (card.top < viewport.top) list.scrollTop += card.top - viewport.top
+    else if (card.bottom > viewport.bottom) list.scrollTop += card.bottom - viewport.bottom
   }
 
   private updateTerminalHeader(): void {
