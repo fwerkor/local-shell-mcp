@@ -213,6 +213,13 @@ button.summary-card { cursor: pointer; }
 .detail-grid dd { min-width: 0; margin: 0; color: #4f596a; font-size: 13px; word-break: break-word; }
 .detail-grid code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .tag { display: inline-block; margin: 0 3px 3px 0; padding: 3px 5px; color: #6255d7; background: #efedff; border-radius: 5px; font-size: 12px; }
+.remote-resources { padding: 11px 0 13px; border-top: 1px solid #eceef2; }
+.remote-resources h4 { margin: 0; color: #525c6e; font-size: 13px; }
+.remote-resources .detail-grid { margin: 10px 0 0; }
+.remote-resources-empty { margin: 10px 0 0; color: #929aaa; font-size: 12px; }
+.detail-json { padding-top: 11px; border-top: 1px solid #eceef2; }
+.detail-json summary { color: #525c6e; cursor: pointer; font-size: 13px; font-weight: 600; }
+.detail-json summary:focus-visible { outline: 2px solid #6759e7; outline-offset: 4px; border-radius: 3px; }
 .detail-json h4 { margin: 15px 0 6px; color: #525c6e; font-size: 13px; }
 .detail-json pre { max-height: 320px; margin: 0; padding: 10px; overflow: auto; color: #687184; background: #f7f8fa; border: 1px solid #eceef2; border-radius: 8px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .invite-command { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 10px; color: #dbe5f3; background: #0c1422; border: 1px solid #29364c; border-radius: 8px; }
@@ -397,7 +404,7 @@ button.summary-card { cursor: pointer; }
   .native-page { color: #b9c5d7; }
   .native-toolbar, .native-panel, .summary-card { background: #141d2b; border-color: #293449; }
   .native-toolbar strong, .native-panel > header h3, .native-table td strong, .file-name, .image-preview-meta strong, .directory-preview-head strong, .summary-card strong, .remote-title h2, .audit-detail-card h4 { color: #edf2fa; }
-  .native-panel > header, .remote-title, .image-preview-meta, .directory-preview-head { border-color: #293449; }
+  .native-panel > header, .remote-title, .remote-resources, .detail-json, .image-preview-meta, .directory-preview-head { border-color: #293449; }
   .native-toolbar select, .native-toolbar input, .sessions-filter select, .audit-filter-strip select, .audit-advanced input, .native-field input, .native-field textarea { color: #dce5f2; background: #0f1724; border-color: #344158; }
   .native-button { color: #c4cedd; background: #1b2637; border-color: #344158; }
   .native-button:hover:not(:disabled) { color: #dedaff; background: #29264b; border-color: #6f66bd; }
@@ -427,6 +434,7 @@ button.summary-card { cursor: pointer; }
   .audit-detail-card { background: #141d2b; border-color: #293449; }
   .audit-detail-card > header { border-color: #293449; }
   .audit-value pre { color: #b7c2d2; background: #0f1724; }
+  .remote-resources h4, .detail-json summary, .detail-json h4 { color: #c5cfdf; }
   .detail-json pre { color: #b7c2d2; background: #0f1724; border-color: #293449; }
   .native-dialog { color: #bdc7d7; background: #141d2b; border-color: #344158; }
   .native-dialog > header, .native-dialog > footer { border-color: #293449; }
