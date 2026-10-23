@@ -142,3 +142,26 @@ async def test_run_shell_spawn_uses_managed_process_kwargs(tmp_path, monkeypatch
     await ops._spawn_process("echo hidden", str(tmp_path))  # noqa: SLF001
 
     assert captured["creationflags"] == 0x08000000
+
+
+
+def test_managed_process_kwargs_also_hides_windows_via_startupinfo(monkeypatch):
+    from local_shell_mcp import process_utils
+
+    class FakeStartupInfo:
+        def __init__(self):
+            self.dwFlags = 0
+            self.wShowWindow = 5
+
+    monkeypatch.setattr(process_utils.sys, "platform", "win32")
+    monkeypatch.setattr(process_utils.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(process_utils.subprocess, "STARTUPINFO", FakeStartupInfo, raising=False)
+    monkeypatch.setattr(process_utils.subprocess, "STARTF_USESHOWWINDOW", 1, raising=False)
+    monkeypatch.setattr(process_utils.subprocess, "SW_HIDE", 0, raising=False)
+
+    kwargs = process_utils.managed_process_kwargs()
+
+    assert kwargs["creationflags"] == 0x08000000
+    assert isinstance(kwargs["startupinfo"], FakeStartupInfo)
+    assert kwargs["startupinfo"].dwFlags & 1
+    assert kwargs["startupinfo"].wShowWindow == 0
