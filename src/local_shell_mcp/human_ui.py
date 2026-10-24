@@ -3229,6 +3229,13 @@ async def api_hosted_chat(request: Request) -> Response:
                 result = await asyncio.to_thread(hosted_chat_store.profiles, subject)
             elif action == "conversations":
                 result = await asyncio.to_thread(hosted_chat_store.conversations, subject)
+            elif action == "archives":
+                result = await asyncio.to_thread(hosted_chat_store.archived_conversations, subject)
+            elif action == "archive":
+                result = await asyncio.to_thread(
+                    hosted_chat_store.archived_conversation, subject,
+                    str(request.query_params.get("id") or ""),
+                )
             elif action == "conversation":
                 conversation_id = str(request.query_params.get("id") or "")
                 result = await asyncio.to_thread(
@@ -3256,6 +3263,21 @@ async def api_hosted_chat(request: Request) -> Response:
                 hosted_chat_store.create_conversation, subject,
                 profile_id=str(data["profile_id"]), session_id=session_id,
             )
+        elif action == "conversation-archive":
+            cid = str(data["id"])
+            current = await asyncio.to_thread(hosted_chat_runner.reconcile, subject, cid)
+            if current["status"] == "running":
+                raise ValueError("Stop the active turn before archiving this conversation")
+            result = await asyncio.to_thread(hosted_chat_store.archive_conversation, subject, cid)
+        elif action == "conversation-restore":
+            result = await asyncio.to_thread(
+                hosted_chat_store.restore_conversation, subject, str(data["id"])
+            )
+        elif action == "archive-delete":
+            await asyncio.to_thread(
+                hosted_chat_store.delete_archived_conversation, subject, str(data["id"])
+            )
+            result = {}
         elif action == "conversation-delete":
             cid = str(data["id"])
             current = await asyncio.to_thread(hosted_chat_runner.reconcile, subject, cid)

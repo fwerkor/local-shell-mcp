@@ -362,3 +362,114 @@ def test_profile_rejects_invalid_authorization_key(store, api_key):
     with pytest.raises(ValueError, match="API key"):
         store.put_profile("alice", profile_values(api_key=api_key))
     assert store.profiles("alice") == []
+
+
+def test_archived_conversation_zstd_round_trip_and_principal_isolation(store):
+    from local_shell_mcp.audit_archive_codec import decompress_bytes
+
+    pid = store.put_profile("alice", profile_values())["id"]
+    chat = store.create_conversation("alice", profile_id=pid, title="Long research conversation")
+    messages = [{"role": "user", "content": "repeat " * 2000}]
+    store.update_conversation(
+        "alice", chat["id"], updater=lambda r: {**r, "messages": messages, "events": [{"name": "tool"}]}
+    )
+    original = store.conversation("alice", chat["id"])
+    archived = store.archive_conversation("alice", chat["id"])
+    assert archived["archived_at"] > 0
+    assert store.conversations("alice") == []
+    assert store.archived_conversations("alice")[0]["title"] == "Long research conversation"
+    assert "messages" not in store.archived_conversations("alice")[0]
+    assert store.archived_conversation("alice", chat["id"])["messages"] == messages
+    with pytest.raises(ValueError, match="Archived"):
+        store.conversation("alice", chat["id"])
+    with pytest.raises(ValueError, match="Archived"):
+        store.update_conversation("alice", chat["id"], updater=lambda record: record)
+    assert store.archived_conversations("bob") == []
+    with pytest.raises(ValueError):
+        store.archived_conversation("bob", chat["id"])
+    packed = get_state_store().read_bytes(store._archive_key("alice", chat["id"]))
+    assert packed.startswith(b"\x28\xb5\x2f\xfd")
+    assert len(packed) < len(decompress_bytes(packed))
+    assert get_state_store().read_bytes(store._key("alice", "conversations", chat["id"])) is None
+    # The separate archive retains the entire original record across instances.
+    reloaded = HostedChatStore(prefix=store.prefix)
+    assert reloaded.archived_conversation("alice", chat["id"])["events"] == [{"name": "tool"}]
+    restored = reloaded.restore_conversation("alice", chat["id"])
+    assert restored == original
+    assert reloaded.archived_conversations("alice") == []
+    assert reloaded.conversations("alice")[0]["id"] == chat["id"]
+    assert reloaded.conversation("alice", chat["id"])["messages"] == messages
+
+
+def test_archiving_running_chat_and_double_archive_are_rejected(store):
+    pid = store.put_profile("alice", profile_values())["id"]
+    chat = store.create_conversation("alice", profile_id=pid)
+    store.update_conversation("alice", chat["id"], updater=lambda r: {**r, "status": "running"})
+    with pytest.raises(ValueError, match="Stop"):
+        store.archive_conversation("alice", chat["id"])
+    assert store.archived_conversations("alice") == []
+    store.update_conversation("alice", chat["id"], updater=lambda r: {**r, "status": "interrupted"})
+    store.archive_conversation("alice", chat["id"])
+    with pytest.raises(ValueError, match="already archived"):
+        store.archive_conversation("alice", chat["id"])
+    store.delete_archived_conversation("alice", chat["id"])
+    assert store.archived_conversations("alice") == []
+    assert store.conversations("alice") == []
+    with pytest.raises(ValueError, match="Unknown"):
+        store.delete_archived_conversation("alice", chat["id"])
+
+
+def test_archive_write_failure_preserves_original_and_orphans_recoverable(store, monkeypatch):
+    pid = store.put_profile("alice", profile_values())["id"]
+    chat = store.create_conversation("alice", profile_id=pid)
+    backend = get_state_store()
+    original_write = backend.write_bytes
+    original_delete = backend.delete
+
+    def fail_archive_write(key, data):
+        if key.endswith(".json.zst"):
+            raise OSError("simulated archive storage outage")
+        original_write(key, data)
+
+    monkeypatch.setattr(backend, "write_bytes", fail_archive_write)
+    with pytest.raises(OSError):
+        store.archive_conversation("alice", chat["id"])
+    assert store.conversation("alice", chat["id"])["id"] == chat["id"]
+    assert store.archived_conversations("alice") == []
+    monkeypatch.setattr(backend, "write_bytes", original_write)
+
+    def fail_delete(key):
+        if "/conversations/" in key:
+            raise OSError("simulated failed cleanup")
+        original_delete(key)
+
+    monkeypatch.setattr(backend, "delete", fail_delete)
+    with pytest.raises(OSError):
+        store.archive_conversation("alice", chat["id"])
+    assert store.conversations("alice") == []
+    assert store.archived_conversation("alice", chat["id"])["id"] == chat["id"]
+    monkeypatch.setattr(backend, "delete", original_delete)
+    store.restore_conversation("alice", chat["id"])
+    assert len(store.conversations("alice")) == 1
+    assert store.archived_conversations("alice") == []
+
+
+def test_archive_metadata_write_failure_keeps_compressed_record_recoverable(store, monkeypatch):
+    pid = store.put_profile("alice", profile_values())["id"]
+    chat = store.create_conversation("alice", profile_id=pid)
+    backend = get_state_store()
+    original_write = backend.write_bytes
+
+    def fail_metadata_write(key, data):
+        if "/archive-metadata/" in key:
+            raise OSError("metadata write failure")
+        original_write(key, data)
+
+    monkeypatch.setattr(backend, "write_bytes", fail_metadata_write)
+    with pytest.raises(OSError):
+        store.archive_conversation("alice", chat["id"])
+    assert store.archived_conversations("alice")[0]["id"] == chat["id"]
+    assert store.conversations("alice") == []
+    monkeypatch.setattr(backend, "write_bytes", original_write)
+    store.restore_conversation("alice", chat["id"])
+    assert store.conversation("alice", chat["id"])["id"] == chat["id"]

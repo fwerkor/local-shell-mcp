@@ -208,15 +208,108 @@ class HostedChatStore:
             self._read(key)
             get_state_store().delete(key)
 
+    def _archive_key(self, subject: str, conversation_id: str) -> str:
+        return self._key(subject, "archives", _identifier(conversation_id)).removesuffix(".json") + ".json.zst"
+
+    def _archive_metadata_key(self, subject: str, conversation_id: str) -> str:
+        return self._key(subject, "archive-metadata", _identifier(conversation_id))
+
+    def _archive_ids(self, subject: str) -> set[str]:
+        prefix = f"{self.prefix}/{_owner_key(subject)}/archives/"
+        return {
+            key.removeprefix(prefix).removesuffix(".json.zst")
+            for key in get_state_store().list_keys(prefix)
+            if key.endswith(".json.zst")
+        }
+
     def conversations(self, subject: str) -> list[dict]:
-        return [self._summary(r) for r in self._records(subject, "conversations")]
+        # A partially completed archive move can leave both copies. Archive
+        # existence wins, so such conversations stay out of the normal index.
+        archived = self._archive_ids(subject)
+        return [
+            self._summary(record) for record in self._records(subject, "conversations")
+            if record["id"] not in archived
+        ]
 
     @staticmethod
     def _summary(record: dict) -> dict:
-        return {k: v for k, v in record.items() if k != "messages" and k != "events"}
+        return {k: v for k, v in record.items() if k not in {"messages", "events"}}
+
+    def archived_conversations(self, subject: str) -> list[dict]:
+        result = []
+        store = get_state_store()
+        for cid in self._archive_ids(subject):
+            key = self._archive_metadata_key(subject, cid)
+            metadata = store.read_bytes(key)
+            if metadata is not None:
+                result.append(json.loads(metadata))
+            else:
+                # An orphaned archive payload must remain discoverable and
+                # recoverable even if the metadata write was interrupted.
+                result.append(self._summary(self.archived_conversation(subject, cid)))
+        return sorted(result, key=lambda r: r["archived_at"], reverse=True)
+
+    def archived_conversation(self, subject: str, conversation_id: str) -> dict:
+        from .audit_archive_codec import decompress_bytes
+
+        content = get_state_store().read_bytes(self._archive_key(subject, conversation_id))
+        if content is None:
+            raise ValueError("Unknown archived conversation")
+        return json.loads(decompress_bytes(content))
+
+    def archive_conversation(self, subject: str, conversation_id: str) -> dict:
+        from .audit_archive_codec import compress_bytes
+
+        cid = _identifier(conversation_id)
+        key = self._key(subject, "conversations", cid)
+        archive_key = self._archive_key(subject, cid)
+        metadata_key = self._archive_metadata_key(subject, cid)
+        with self._record_lock(key):
+            store = get_state_store()
+            if store.read_bytes(archive_key) is not None:
+                raise ValueError("Conversation is already archived")
+            record = self._read(key)
+            if record["status"] == "running":
+                raise ValueError("Stop the active turn before archiving this conversation")
+            archived = {**record, "archived_at": time.time()}
+            payload = json.dumps(archived, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            # Publish compressed data first; never delete the only durable copy.
+            store.write_bytes(archive_key, compress_bytes(payload))
+            try:
+                store.write_bytes(
+                    metadata_key,
+                    json.dumps(self._summary(archived), ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
+                )
+            except Exception:
+                # Data is already safe as a compressed archive. Keep it available
+                # for recovery rather than risk data loss on failed rollback.
+                raise
+            store.delete(key)
+            return self._summary(archived)
+
+    def restore_conversation(self, subject: str, conversation_id: str) -> dict:
+        cid = _identifier(conversation_id)
+        key = self._key(subject, "conversations", cid)
+        archive_key = self._archive_key(subject, cid)
+        with self._record_lock(key):
+            archived = self.archived_conversation(subject, cid)
+            restored = {k: v for k, v in archived.items() if k != "archived_at"}
+            store = get_state_store()
+            existing = store.read_bytes(key)
+            if existing is not None and json.loads(existing) != restored:
+                raise ValueError("A conflicting live conversation already exists")
+            if existing is None:
+                self._save(key, restored)
+            # Archive data is deleted only after the restored record is written.
+            store.delete(archive_key)
+            store.delete(self._archive_metadata_key(subject, cid))
+            return restored
 
     def conversation(self, subject: str, conversation_id: str) -> dict:
-        return self._read(self._key(subject, "conversations", _identifier(conversation_id)))
+        cid = _identifier(conversation_id)
+        if get_state_store().read_bytes(self._archive_key(subject, cid)) is not None:
+            raise ValueError("Archived conversation must be restored before use")
+        return self._read(self._key(subject, "conversations", cid))
 
     def create_conversation(
         self,
@@ -248,6 +341,8 @@ class HostedChatStore:
     def update_conversation(self, subject: str, conversation_id: str, *, updater) -> dict:  # noqa: ANN001
         key = self._key(subject, "conversations", _identifier(conversation_id))
         with self._record_lock(key):
+            if get_state_store().read_bytes(self._archive_key(subject, conversation_id)) is not None:
+                raise ValueError("Archived conversation must be restored before use")
             record = self._read(key)
             updated = updater(record)
             updated["updated_at"] = time.time()
@@ -255,11 +350,28 @@ class HostedChatStore:
             return updated
 
     def delete_conversation(self, subject: str, conversation_id: str) -> None:
-        key = self._key(subject, "conversations", _identifier(conversation_id))
+        cid = _identifier(conversation_id)
+        key = self._key(subject, "conversations", cid)
         with self._record_lock(key):
+            if cid in self._archive_ids(subject):
+                raise ValueError("Use the archived-conversation delete action")
             if self._read(key)["status"] == "running":
                 raise ValueError("Stop the active turn before deleting this conversation")
             get_state_store().delete(key)
+
+    def delete_archived_conversation(self, subject: str, conversation_id: str) -> None:
+        cid = _identifier(conversation_id)
+        key = self._key(subject, "conversations", cid)
+        with self._record_lock(key):
+            archived = self.archived_conversation(subject, cid)
+            store = get_state_store()
+            existing = store.read_bytes(key)
+            if existing is not None:
+                restored = {k: v for k, v in archived.items() if k != "archived_at"}
+                if json.loads(existing) == restored:
+                    store.delete(key)
+            store.delete(self._archive_key(subject, cid))
+            store.delete(self._archive_metadata_key(subject, cid))
 
 
 def _identifier(value: str) -> str:

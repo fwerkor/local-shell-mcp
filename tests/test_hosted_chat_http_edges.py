@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -241,3 +242,53 @@ def test_workspace_actions_disabled_when_workspace_feature_off(api, monkeypatch)
     assert client.post("/api/ui/hosted-chat/resource", json={
         "uri": "ui://local-shell-mcp/live-workspace.html",
     }).status_code == 404
+
+
+def test_http_archived_conversations_are_separate_and_read_only(api, monkeypatch):
+    client, store, runner, _ = api
+    monkeypatch.setattr(human_ui, "_logical_session_subject", lambda *_args, **_kwargs: "alice")
+    pid = create_profile(client)
+    first = create_chat(client, pid)
+    other = create_chat(client, pid)
+    store.update_conversation(
+        "alice", first, updater=lambda r: {**r, "messages": [{"role": "user", "content": "Private notes"}]}
+    )
+    response = client.post("/api/ui/hosted-chat/conversation-archive", json={"id": first})
+    assert response.status_code == 200, response.text
+    live = client.get("/api/ui/hosted-chat/conversations").json()["data"]
+    assert [item["id"] for item in live] == [other]
+    archives = client.get("/api/ui/hosted-chat/archives").json()["data"]
+    assert [item["id"] for item in archives] == [first]
+    assert "messages" not in archives[0]
+    assert client.get(f"/api/ui/hosted-chat/conversation?id={first}").status_code == 400
+    assert client.get(f"/api/ui/hosted-chat/archive?id={first}").json()["data"]["messages"] == [
+        {"role": "user", "content": "Private notes"}
+    ]
+    for action, data in (
+        ("send", {"id": first, "text": "not allowed"}),
+        ("conversation-update", {"id": first, "title": "no"}),
+        ("conversation-delete", {"id": first}),
+    ):
+        assert client.post(f"/api/ui/hosted-chat/{action}", json=data).status_code == 400
+
+    monkeypatch.setattr(human_ui, "_logical_session_subject", lambda *_args, **_kwargs: "bob")
+    assert client.get("/api/ui/hosted-chat/archives").json()["data"] == []
+    assert client.get(f"/api/ui/hosted-chat/archive?id={first}").status_code == 400
+    assert client.post("/api/ui/hosted-chat/conversation-restore", json={"id": first}).status_code == 400
+    monkeypatch.setattr(human_ui, "_logical_session_subject", lambda *_args, **_kwargs: "alice")
+
+    assert client.post("/api/ui/hosted-chat/conversation-restore", json={"id": first}).status_code == 200
+    assert len(client.get("/api/ui/hosted-chat/conversations").json()["data"]) == 2
+    assert client.get("/api/ui/hosted-chat/archives").json()["data"] == []
+    assert client.post("/api/ui/hosted-chat/conversation-archive", json={"id": first}).status_code == 200
+    assert client.post("/api/ui/hosted-chat/archive-delete", json={"id": first}).status_code == 200
+    assert client.get("/api/ui/hosted-chat/archives").json()["data"] == []
+
+
+def test_http_cannot_archive_running_conversation(api, monkeypatch):
+    client, store, _runner, _ = api
+    monkeypatch.setattr(human_ui, "_logical_session_subject", lambda *_args, **_kwargs: "alice")
+    pid = create_profile(client)
+    cid = create_chat(client, pid)
+    store.update_conversation("alice", cid, updater=lambda r: {**r, "status": "running", "lease_until": time.time() + 60})
+    assert client.post("/api/ui/hosted-chat/conversation-archive", json={"id": cid}).status_code == 400

@@ -5,13 +5,16 @@ type Profile = { id: string; name: string; model: string; endpoint: string; has_
 type Message = { role: "user" | "assistant" | "tool"; content?: string | null; tool_calls?: unknown[] }
 type Conversation = {
   id: string; title: string; profile_id: string; session_id?: string | null;
-  status: string; error?: string | null; messages: Message[]; events: { type: string; name?: string; error?: boolean; call_id?: string; result?: { content?: { type?: string; text?: string }[] } }[]
+  status: string; archived_at?: number; error?: string | null; messages: Message[]; events: { type: string; name?: string; error?: boolean; call_id?: string; result?: { content?: { type?: string; text?: string }[] } }[]
 }
-type Summary = Pick<Conversation, "id" | "title" | "profile_id" | "session_id" | "status">
+type Summary = Pick<Conversation, "id" | "title" | "profile_id" | "session_id" | "status" | "archived_at">
 
 export class HostedChatController extends BaseController {
   private profiles: Profile[] = []
   private conversations: Summary[] = []
+  private archives: Summary[] = []
+  private showArchives = false
+  private archiveFilter = ""
   private active: Conversation | null = null
   private bridge: AppBridge | null = null
   private frame: HTMLIFrameElement | null = null
@@ -26,8 +29,10 @@ export class HostedChatController extends BaseController {
     this.root = root
     root.innerHTML = `<div class="hosted-chat">
       <aside class="hosted-chats">
-        <div class="hosted-chats-head"><strong>Conversations</strong><button type="button" data-chat-action="new">+ New</button></div>
+        <div class="hosted-chats-head"><strong data-chat-heading>Conversations</strong><button type="button" data-chat-action="new">+ New</button></div>
+        <input data-chat-archive-filter class="hosted-archive-filter" placeholder="Find archived conversations" aria-label="Filter archived conversations by title" hidden />
         <div data-chat-list class="hosted-chats-list"></div>
+        <button type="button" data-chat-action="archives" class="hosted-settings">Archived conversations</button>
         <button type="button" data-chat-action="profile" class="hosted-settings">Model profiles</button>
       </aside>
       <section class="hosted-main">
@@ -36,6 +41,8 @@ export class HostedChatController extends BaseController {
           <div class="hosted-toolbar-actions">
             <button type="button" data-chat-action="session">Attach LSM Session</button>
             <button type="button" data-chat-action="workspace">Live Workspace</button>
+            <button type="button" data-chat-action="archive">Archive</button>
+            <button type="button" data-chat-action="restore" hidden>Restore</button>
             <button type="button" data-chat-action="delete">Delete</button>
           </div>
         </div>
@@ -84,6 +91,10 @@ export class HostedChatController extends BaseController {
         void this.send()
       }
     })
+    this.listen(root.querySelector<HTMLInputElement>("[data-chat-archive-filter]")!, "input", (event) => {
+      this.archiveFilter = (event.target as HTMLInputElement).value
+      this.renderList()
+    })
     this.listen(root.querySelector<HTMLSelectElement>("[data-chat-model]")!, "change", (event) => {
       void this.changeModel((event.target as HTMLSelectElement).value)
     })
@@ -106,14 +117,18 @@ export class HostedChatController extends BaseController {
 
   private async reload(): Promise<void> {
     try {
-      const [profiles, conversations] = await Promise.all([
+      const viewArchives = this.showArchives
+      const [profiles, conversations, archives] = await Promise.all([
         this.get<Profile[]>("profiles"), this.get<Summary[]>("conversations"),
+        viewArchives ? this.get<Summary[]>("archives") : Promise.resolve([]),
       ])
-      if (this.destroyed) return
+      if (this.destroyed || this.showArchives !== viewArchives) return
       this.profiles = profiles
       this.conversations = conversations
+      if (viewArchives) this.archives = archives
       this.renderList()
-      if (!this.active && conversations.length) await this.select(conversations[0].id)
+      const available = viewArchives ? archives : conversations
+      if (!this.active && available.length) await this.select(available[0].id)
       else this.renderConversation()
     } catch (error) { this.notifyError(error) }
   }
@@ -124,11 +139,19 @@ export class HostedChatController extends BaseController {
 
   private renderList(): void {
     const list = this.root.querySelector<HTMLElement>("[data-chat-list]")!
-    list.innerHTML = this.conversations.length ? this.conversations.map((conversation) =>
+    const source = this.showArchives ? this.archives : this.conversations
+    const visible = this.showArchives && this.archiveFilter.trim()
+      ? source.filter((item) => item.title.toLocaleLowerCase().includes(this.archiveFilter.trim().toLocaleLowerCase()))
+      : source
+    list.innerHTML = visible.length ? visible.map((conversation) =>
       `<button type="button" data-chat-action="select" data-id="${escapeHtml(conversation.id)}"
        class="${conversation.id === this.active?.id ? "active" : ""}">
        <span>${escapeHtml(conversation.title || "New chat")}</span><small>${conversation.status === "running" ? "Running" : ""}</small></button>`
-    ).join("") : '<p class="hosted-empty">No conversations yet.</p>'
+    ).join("") : `<p class="hosted-empty">${this.showArchives ? "No matching archived conversations." : "No conversations yet."}</p>`
+    this.root.querySelector<HTMLElement>("[data-chat-heading]")!.textContent = this.showArchives ? "Archived" : "Conversations"
+    this.root.querySelector<HTMLButtonElement>('[data-chat-action="new"]')!.hidden = this.showArchives
+    this.root.querySelector<HTMLButtonElement>('[data-chat-action="archives"]')!.textContent = this.showArchives ? "Back to conversations" : "Archived conversations"
+    this.root.querySelector<HTMLInputElement>("[data-chat-archive-filter]")!.hidden = !this.showArchives
     const select = this.root.querySelector<HTMLSelectElement>("[data-chat-model]")!
     const selected = this.active?.profile_id || select.value
     select.innerHTML = this.profiles.map((p) =>
@@ -141,7 +164,9 @@ export class HostedChatController extends BaseController {
     const messages = this.root.querySelector<HTMLElement>("[data-chat-messages]")!
     const active = this.active
     if (!active) {
-      messages.innerHTML = '<div class="hosted-welcome"><h2>Hosted Chat</h2><p>Configure your model profile, then start a conversation. LSM tools are available through MCP.</p></div>'
+      messages.innerHTML = this.showArchives
+        ? '<div class="hosted-welcome"><h2>Archived conversations</h2><p>Select a conversation to read it, or restore it to continue.</p></div>'
+        : '<div class="hosted-welcome"><h2>Hosted Chat</h2><p>Configure your model profile, then start a conversation. LSM tools are available through MCP.</p></div>'
     } else {
       const visible = active.messages.filter((m) => m.role !== "tool" && (!m.tool_calls?.length || m.content))
       const activity = active.events.map((event) => {
@@ -153,23 +178,30 @@ export class HostedChatController extends BaseController {
       messages.innerHTML = visible.map((m) =>
         `<article class="hosted-message ${m.role}"><div class="hosted-message-label">${m.role === "user" ? "You" : "Assistant"}</div><div class="hosted-message-body">${escapeHtml(m.content || "").replaceAll("\n", "<br>")}</div></article>`
       ).join("") + (activity ? `<section class="hosted-tool-activity" aria-label="Tool activity"><strong>Tool activity (${active.events.length})</strong>${activity}</section>` : "") +
-        (active.status === "running" ? '<div class="hosted-running">Agent running · waiting for model or tools…</div>' : "") +
+        (this.showArchives ? '<p class="hosted-running">Archived · restore this conversation to continue.</p>' : active.status === "running" ? '<div class="hosted-running">Agent running · waiting for model or tools…</div>' : "") +
         (active.error ? `<p class="hosted-error">${escapeHtml(active.error)}</p>` : "")
     }
     const status = this.root.querySelector<HTMLElement>("[data-chat-status]")!
     status.textContent = active?.session_id ? `LSM: ${active.session_id}` : active?.status || "No session attached"
     const stop = this.root.querySelector<HTMLButtonElement>('[data-chat-action="stop"]')!
-    stop.hidden = active?.status !== "running"
-    this.root.querySelector<HTMLButtonElement>("[data-chat-send]")!.disabled = !active || active.status === "running" || this.busy
+    stop.hidden = this.showArchives || active?.status !== "running"
+    this.root.querySelector<HTMLButtonElement>('[data-chat-action="archive"]')!.hidden = this.showArchives || !active
+    this.root.querySelector<HTMLButtonElement>('[data-chat-action="archive"]')!.disabled = active?.status === "running"
+    this.root.querySelector<HTMLButtonElement>('[data-chat-action="restore"]')!.hidden = !this.showArchives || !active
+    this.root.querySelector<HTMLButtonElement>('[data-chat-action="session"]')!.hidden = this.showArchives
+    this.root.querySelector<HTMLButtonElement>('[data-chat-action="workspace"]')!.hidden = this.showArchives || this.context.liveWorkspaceEnabled !== true
+    this.root.querySelector<HTMLButtonElement>("[data-chat-send]")!.disabled = this.showArchives || !active || active.status === "running" || this.busy
+    this.root.querySelector<HTMLTextAreaElement>("[data-chat-input]")!.disabled = this.showArchives
     const selector = this.root.querySelector<HTMLSelectElement>("[data-chat-model]")!
-    selector.disabled = active?.status === "running"
+    selector.disabled = this.showArchives || active?.status === "running"
     if (active) selector.value = active.profile_id
   }
 
   private async select(id: string): Promise<void> {
     try {
-      const data = await this.get<Conversation>("conversation", `?id=${encodeURIComponent(id)}`)
-      if (this.destroyed) return
+      const viewArchives = this.showArchives
+      const data = await this.get<Conversation>(viewArchives ? "archive" : "conversation", `?id=${encodeURIComponent(id)}`)
+      if (this.destroyed || this.showArchives !== viewArchives) return
       if (this.active?.id !== id) { this.modelContext = ""; await this.closeWorkspace() }
       this.active = data
       this.renderList()
@@ -209,7 +241,7 @@ export class HostedChatController extends BaseController {
   }
 
   private async send(text?: string): Promise<boolean> {
-    if (this.busy || !this.active || this.active.status === "running") return false
+    if (this.busy || this.showArchives || !this.active || this.active.status === "running") return false
     const input = this.root.querySelector<HTMLTextAreaElement>("[data-chat-input]")!
     const content = text ?? input.value
     if (!content.trim()) return false
@@ -234,10 +266,17 @@ export class HostedChatController extends BaseController {
   private async action(action: string, id?: string): Promise<void> {
     try {
       if (action === "select" && id) { await this.select(id); return }
+      if (action === "archives") {
+        await this.closeWorkspace()
+        this.showArchives = !this.showArchives
+        this.active = null
+        await this.reload()
+        return
+      }
       if (action === "profile") { this.profileDialog(); return }
       if (action === "profile-close") { this.root.querySelector<HTMLDialogElement>("[data-chat-profile-dialog]")?.close(); return }
       if (action === "profile-delete") { await this.deleteProfile(); return }
-      if (action === "new") {
+      if (action === "new" && !this.showArchives) {
         this.modelContext = ""
         if (!this.profiles.length) { this.profileDialog(); return }
         const profileId = this.active?.profile_id || this.profiles[0].id
@@ -250,11 +289,24 @@ export class HostedChatController extends BaseController {
       if (!this.active) return
       if (action === "delete") {
         if (!window.confirm("Permanently delete this conversation and its history?")) return
-        await this.post("conversation-delete", { id: this.active.id })
+        await this.post(this.showArchives ? "archive-delete" : "conversation-delete", { id: this.active.id })
         await this.closeWorkspace()
         this.active = null
         await this.reload()
-      } else if (action === "stop") {
+      } else if (action === "archive" && !this.showArchives) {
+        const cid = this.active.id
+        await this.post("conversation-archive", { id: cid })
+        await this.closeWorkspace()
+        this.active = null
+        await this.reload()
+      } else if (action === "restore" && this.showArchives) {
+        const cid = this.active.id
+        await this.post("conversation-restore", { id: cid })
+        this.showArchives = false
+        this.active = null
+        await this.reload()
+        await this.select(cid)
+      } else if (action === "stop" && !this.showArchives) {
         await this.post("stop", { id: this.active.id })
       } else if (action === "session") {
         const response = window.prompt("LSM Logical Session ID (leave empty to detach)", this.active.session_id || "")
@@ -278,11 +330,11 @@ export class HostedChatController extends BaseController {
   }
 
   private async changeModel(profileId: string): Promise<void> {
-    if (!this.active || this.active.status === "running") return
+    if (!this.active || this.showArchives || this.active.status === "running") return
     try {
       const id = this.active.id
       const updated = await this.post<Conversation>("conversation-update", { id, profile_id: profileId })
-      if (this.destroyed || this.active?.id !== id) return
+      if (this.destroyed || this.showArchives || this.active?.id !== id) return
       this.active = updated
       this.renderConversation()
     } catch (error) { this.notifyError(error) }

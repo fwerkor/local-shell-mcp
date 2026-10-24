@@ -700,3 +700,8 @@ button.summary-card { cursor: pointer; }
 .hosted-dialog-actions button { border-radius:8px; padding:10px 16px; font-size:12px; background:#eaeef6; color:#4b5264; }
 .hosted-dialog-actions button:last-child { color:#fff; background:#6759e7; }
 .hosted-dialog-actions button[disabled] { opacity:.4; cursor:not-allowed; }
+
+/* Archived Hosted Chat conversations use an independent, read-only browser. */
+.hosted-archive-filter { width:calc(100% - 24px); min-width:0; margin:8px 12px; padding:9px 10px; border:1px solid #d7dceb; border-radius:8px; background:#fff; color:#253048; font-size:12px; }
+.hosted-archive-filter:focus { outline:2px solid #8075e7; outline-offset:1px; }
+.hosted-archive-filter[hidden] { display:none; }
