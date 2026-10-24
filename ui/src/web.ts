@@ -93,9 +93,7 @@ const viewRoot = document.querySelector<HTMLElement>("#view-root")!
 const webView = document.querySelector<HTMLElement>("#web-view")!
 const consoleView = document.querySelector<HTMLElement>("#console-view")!
 const consoleWallpaper = document.querySelector<HTMLElement>(".console-wallpaper")!
-const pageName = document.querySelector<HTMLElement>("#page-name")!
 const pageTitle = document.querySelector<HTMLElement>("#page-title")!
-const pageDescription = document.querySelector<HTMLElement>("#page-description")!
 const refreshButton = document.querySelector<HTMLButtonElement>("#refresh-button")!
 const openConsoleButton = document.querySelector<HTMLButtonElement>("#open-console-button")!
 const interfaceButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-interface-mode]"))
@@ -407,29 +405,22 @@ async function finishOAuthCallback(): Promise<boolean> {
   return true
 }
 
-function healthPresentation(health: Health, alerts: Alert[]): { eyebrow: string; title: string; detail: string; icon: string } {
+function healthPresentation(health: Health, alerts: Alert[]): { title: string; detail: string; icon: string } {
   if (health === "critical") {
     return {
-      eyebrow: "CRITICAL HEALTH",
       title: "Critical issue detected",
-      detail: alerts[0]?.detail || "A controller or worker condition requires immediate attention.",
+      detail: alerts[0]?.detail || "Check controller and worker alerts.",
       icon: ICONS.warning,
     }
   }
   if (health === "attention") {
     return {
-      eyebrow: "ATTENTION NEEDED",
-      title: "Some items need attention",
-      detail: alerts[0]?.detail || "The control plane is available, but one or more non-critical items should be reviewed.",
+      title: "Attention needed",
+      detail: alerts[0]?.detail || "Check controller and worker alerts.",
       icon: ICONS.warning,
     }
   }
-  return {
-    eyebrow: "SYSTEM HEALTH",
-    title: "All systems operational",
-    detail: "The controller and connected workers are healthy. No critical alerts require your attention.",
-    icon: ICONS.check,
-  }
+  return { title: "Healthy", detail: "", icon: ICONS.check }
 }
 
 function machinePlatform(machine: Machine): string {
@@ -568,8 +559,8 @@ function overviewTemplate(data: DashboardData): string {
   pushMetric(metricHistory.disk, system.disk_percent, 6)
 
   return `<section class="status-banner ${health}">
-    <div class="status-illustration"><div class="pulse-ring outer"></div><div class="pulse-ring inner"></div><div class="check-circle">${presentation.icon}</div></div>
-    <div class="status-copy"><div class="eyebrow"><span class="status-dot"></span>${presentation.eyebrow}</div><h2>${escapeHtml(presentation.title)}</h2><p>${escapeHtml(presentation.detail)}</p></div>
+    <div class="status-illustration" aria-hidden="true"><div class="pulse-ring outer"></div><div class="pulse-ring inner"></div><div class="check-circle">${presentation.icon}</div></div>
+    <div class="status-copy"><h2>${escapeHtml(presentation.title)}</h2>${presentation.detail ? `<p>${escapeHtml(presentation.detail)}</p>` : ""}</div>
     <div class="status-stats"><div><strong>${totalMachines}</strong><span>Machines</span></div><div><strong>${activeJobs}</strong><span>Active jobs</span></div><div><strong>${sessions}</strong><span>Sessions</span></div><div><strong>${data.audit_total_24h || 0}</strong><span>MCP calls · 24h</span></div></div>
   </section>
   <section class="metric-grid">
@@ -579,22 +570,22 @@ function overviewTemplate(data: DashboardData): string {
     <article class="metric-card network-card"><div class="metric-head"><div class="metric-icon green">${ICONS.network}</div><span class="trend positive">Live</span></div><div class="metric-label">Network throughput</div><div class="network-values"><div><span class="download-arrow">↓</span><strong>${escapeHtml(formatRate(system.network_rx_bps).replace("/s", ""))}</strong><small>received</small></div><div><span class="upload-arrow">↑</span><strong>${escapeHtml(formatRate(system.network_tx_bps).replace("/s", ""))}</strong><small>sent</small></div></div><div class="network-bar"><span style="width:70%"></span><i style="width:30%"></i></div><div class="metric-foot"><span>Downlink</span><span>Uplink</span></div></article>
   </section>
   <section class="dashboard-grid">
-    <article class="panel machines-panel"><div class="panel-header"><div><h3>Machines</h3><p>Controller and connected remote workers</p></div><button class="text-button" type="button" data-view="remotes">Manage remotes →</button></div>${machineTable(data)}</article>
-    <article class="panel attention-panel"><div class="panel-header compact"><div><h3>Needs attention</h3><p>Controller and worker alerts</p></div><span class="count-badge">${alerts.length}</span></div><div class="attention-list" role="region" aria-label="Current alerts" tabindex="0">${alertItems(alerts)}</div><button class="full-width-link" type="button" data-view="activity">View all alerts</button></article>
+    <article class="panel machines-panel"><div class="panel-header"><div><h3>Machines</h3></div><button class="text-button" type="button" data-view="remotes">Manage remotes →</button></div>${machineTable(data)}</article>
+    <article class="panel attention-panel"><div class="panel-header compact"><div><h3>Needs attention</h3></div><span class="count-badge">${alerts.length}</span></div><div class="attention-list" role="region" aria-label="Current alerts" tabindex="0">${alertItems(alerts)}</div><button class="full-width-link" type="button" data-view="activity">View all alerts</button></article>
   </section>
   <section class="dashboard-grid lower-grid">
-    <article class="panel workloads-panel"><div class="panel-header"><div><h3>Active workloads</h3><p>Tracked jobs and persistent shell sessions</p></div><button class="text-button" type="button" data-view="workloads">View all →</button></div><div class="workload-list">${workloadRows(data)}</div><button class="full-width-link" type="button" data-view="workloads">Manage ${activeWorkloads} active workloads</button></article>
-    <article class="panel activity-panel"><div class="panel-header compact"><div><h3>Recent activity</h3><p>Latest MCP calls across all nodes</p></div><span class="tag">${version}</span></div><div class="activity-list">${activityRows(data.activity || [])}</div><button class="full-width-link" type="button" data-view="audit">Open audit activity</button></article>
+    <article class="panel workloads-panel"><div class="panel-header"><div><h3>Active workloads</h3></div><button class="text-button" type="button" data-view="workloads">View all →</button></div><div class="workload-list">${workloadRows(data)}</div><button class="full-width-link" type="button" data-view="workloads">Manage ${activeWorkloads} active workloads</button></article>
+    <article class="panel activity-panel"><div class="panel-header compact"><div><h3>Recent activity</h3></div><span class="tag">${version}</span></div><div class="activity-list">${activityRows(data.activity || [])}</div><button class="full-width-link" type="button" data-view="audit">Open audit activity</button></article>
   </section>`
 }
 
 function machinesTemplate(data: DashboardData): string {
-  return `<section class="page-stack"><article class="panel page-panel"><div class="panel-header"><div><h3>All machines</h3><p>Controller and remote workers with live connectivity and capabilities</p></div><span class="count-badge">${data.machines?.counts?.total ?? data.machines?.machines?.length ?? 0}</span></div>${machineTable(data, true)}</article></section>`
+  return `<section class="page-stack"><article class="panel page-panel"><div class="panel-header"><div><h3>All machines</h3></div><span class="count-badge">${data.machines?.counts?.total ?? data.machines?.machines?.length ?? 0}</span></div>${machineTable(data, true)}</article></section>`
 }
 
 function workloadsTemplate(data: DashboardData): string {
   const count = visibleWorkloadCount(data)
-  return `<section class="page-stack"><article class="panel page-panel"><div class="panel-header"><div><h3>Active workloads</h3><p>Tracked jobs and persistent terminal sessions</p></div><div><span class="count-badge">${count}</span><button class="text-button" type="button" data-view="terminals">Open terminals →</button></div></div><div class="workload-list">${workloadRows(data, 100)}</div></article></section>`
+  return `<section class="page-stack"><article class="panel page-panel"><div class="panel-header"><div><h3>Active workloads</h3></div><div><span class="count-badge">${count}</span><button class="text-button" type="button" data-view="terminals">Open terminals →</button></div></div><div class="workload-list">${workloadRows(data, 100)}</div></article></section>`
 }
 
 function activityTemplate(data: DashboardData): string {
@@ -603,21 +594,21 @@ function activityTemplate(data: DashboardData): string {
     const severity = stringValue(alert.severity, "info")
     return `<div class="alert-card ${escapeHtml(severity)}"><div class="attention-icon">${severity === "warning" || severity === "critical" ? ICONS.warning : ICONS.info}</div><div><strong>${escapeHtml(alert.title || "Notice")}</strong><p>${escapeHtml(alert.detail || "No additional detail")}</p></div><time>${relativeTime(undefined, alert.age_s)}</time></div>`
   }).join("") : '<div class="empty-state">No active alerts.</div>'
-  return `<section class="page-stack"><article class="panel"><div class="panel-header"><div><h3>Alerts</h3><p>Conditions reported by the controller and workers</p></div><span class="count-badge">${alerts.length}</span></div><div class="alert-list-full">${alertCards}</div></article><article class="panel page-panel"><div class="panel-header"><div><h3>Recent MCP activity</h3><p>${data.audit_total_24h || 0} calls matched in the last 24 hours</p></div><button class="text-button" type="button" data-view="audit">Open audit →</button></div><div class="activity-list">${activityRows(data.activity || [], 100)}</div></article></section>`
+  return `<section class="page-stack"><article class="panel"><div class="panel-header"><div><h3>Alerts</h3></div><span class="count-badge">${alerts.length}</span></div><div class="alert-list-full">${alertCards}</div></article><article class="panel page-panel"><div class="panel-header"><div><h3>Recent MCP activity</h3><p>${data.audit_total_24h || 0} calls matched in the last 24 hours</p></div><button class="text-button" type="button" data-view="audit">Open audit →</button></div><div class="activity-list">${activityRows(data.activity || [], 100)}</div></article></section>`
 }
 
 
-const PAGE_COPY: Record<Exclude<WebViewName, "console">, { name: string; title: string; description: string }> = {
-  "hosted-chat": { name: "Hosted Chat", title: "Hosted Chat", description: "Bring your own model · MCP tools and Live Workspace." },
-  overview: { name: "Overview", title: "Control plane overview", description: "System health across your local and remote machines." },
-  files: { name: "Files", title: "File manager", description: "Browse, preview, edit, and organize files on local or remote machines." },
-  terminals: { name: "Terminals", title: "Persistent terminals", description: "Low-latency interactive shells with session, machine, and mobile controls." },
-  desktop: { name: "Desktop", title: "Desktop control", description: "View and control native application windows on local or remote machines." },
-  sessions: { name: "Sessions", title: "Logical Sessions", description: "Create, inspect, hand off, and close durable agent tasks by explicit session_id." },
-  remotes: { name: "Remotes", title: "Remote workers", description: "Create invitations and manage persistent remote worker identities." },
-  audit: { name: "Audit", title: "Audit records", description: "Filter MCP calls and inspect call results and inputs in a TUI-aligned layout." },
-  workloads: { name: "Workloads", title: "Active workloads", description: "Inspect all tracked jobs and persistent shell sessions." },
-  activity: { name: "Activity", title: "Alerts and activity", description: "Review all active alerts and recent MCP activity." },
+const PAGE_TITLES: Record<Exclude<WebViewName, "console">, string> = {
+  "hosted-chat": "Hosted Chat",
+  overview: "Overview",
+  files: "Files",
+  terminals: "Terminals",
+  desktop: "Desktop",
+  sessions: "Sessions",
+  remotes: "Remotes",
+  audit: "Audit",
+  workloads: "Workloads",
+  activity: "Alerts and activity",
 }
 
 let nativeController: NativePageController | null = null
@@ -641,10 +632,7 @@ function bindRenderedActions(): void {
 
 function renderActiveView(): void {
   if (activeView === "console") return
-  const copy = PAGE_COPY[activeView]
-  pageName.textContent = copy.name
-  pageTitle.textContent = copy.title
-  pageDescription.textContent = copy.description
+  pageTitle.textContent = PAGE_TITLES[activeView]
   if (["overview", "workloads", "activity"].includes(activeView) && !dashboardData) {
     viewRoot.innerHTML = '<div class="loading-state"><span></span><strong>Loading control plane…</strong></div>'
     return

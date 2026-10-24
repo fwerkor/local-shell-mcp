@@ -13,7 +13,6 @@
     <section class="auth-gate" id="auth-gate" hidden>
       <div class="auth-card">
         <div class="auth-mark" aria-hidden="true"><img src="__LSM_UI_PATH__/assets/logo.svg?v=__LSM_UI_ASSET_VERSION__" alt="" /></div>
-        <p class="auth-eyebrow">Protected control plane</p>
         <h1>Connect to local-shell-mcp</h1>
         <p>Authenticate with the same OAuth service used by MCP. Credentials remain in this browser session.</p>
         <div class="auth-actions">
@@ -30,18 +29,17 @@
           <div class="brand-mark" aria-hidden="true"><img src="__LSM_UI_PATH__/assets/logo.svg?v=__LSM_UI_ASSET_VERSION__" alt="" /></div>
           <div>
             <div class="brand-name">local-shell-mcp</div>
-            <div class="brand-subtitle">Control plane</div>
           </div>
         </div>
 
         <div class="interface-switch" role="group" aria-label="Interface mode">
           <button class="active" type="button" data-interface-mode="web" aria-pressed="true">
             <svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 9h16M8 5v4"/></svg>
-            <span><strong>Web UI</strong><small>Native dashboard</small></span>
+            <span><strong>Web UI</strong></span>
           </button>
           <button type="button" data-interface-mode="tui" aria-pressed="false">
             <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg>
-            <span><strong>TUI</strong><small>Terminal interface</small></span>
+            <span><strong>TUI</strong></span>
           </button>
         </div>
 
@@ -89,18 +87,12 @@
           </div>
           <div class="controller-meta"><span id="controller-version">—</span><span id="controller-origin">—</span></div>
         </div>
-        <div class="sidebar-footer">
-          <span class="avatar">LS</span>
-          <span><strong>Administrator</strong><small>OAuth session</small></span>
-        </div>
       </aside>
 
       <main class="main-content" id="web-view">
         <header class="topbar">
           <div>
-            <div class="breadcrumb"><span>Control plane</span><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg><strong id="page-name">Overview</strong></div>
             <h1 id="page-title">Overview</h1>
-            <p id="page-description">System health across your local and remote machines.</p>
           </div>
           <div class="topbar-actions">
             <button class="button secondary" type="button" data-interface-mode="chat" hidden>Hosted Chat</button>
@@ -120,7 +112,7 @@
       <main class="console-content shell" id="console-view" hidden>
         <div class="console-wallpaper" aria-hidden="true"></div>
         <header class="console-header">
-          <div><p>Terminal interface</p><h1>TUI</h1></div>
+          <h1>TUI</h1>
           <div class="console-actions">
             <div class="connection" id="connection-state"><span></span><strong>Not started</strong></div>
             <button class="button secondary" id="reconnect-button" type="button">Reconnect</button>
