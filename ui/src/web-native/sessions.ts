@@ -84,7 +84,7 @@ export class SessionsController extends BaseController {
         <div><strong>Logical Sessions</strong></div>
         <div class="sessions-controls">
           <label class="sessions-filter"><span>Status</span><select data-filter="status">${SESSION_STATUSES.map((status) => `<option value="${status}">${status === "all" ? "All sessions" : status}</option>`).join("")}</select></label>
-          <div class="toolbar-actions">${button("New", "new-session", { primary: true })}${button("Copy ID", "copy-id", { disabled: true })}${button("Finish", "finish", { disabled: true })}${button("Cancel", "cancel", { danger: true, disabled: true })}${button("Delete", "delete", { danger: true, disabled: true })}</div>
+          <div class="toolbar-actions">${button("New", "new-session", { primary: true })}</div>
         </div>
       </div>
       <div class="sessions-layout">
@@ -93,7 +93,7 @@ export class SessionsController extends BaseController {
           <div class="sessions-list" data-role="sessions-list"><div class="native-loading">Loading logical sessions…</div></div>
         </section>
         <section class="native-panel sessions-detail-panel">
-          <header><div><h3 data-role="session-title">Session details</h3><p data-role="session-meta">Select a session</p></div><span class="status-chip neutral" data-role="session-status">—</span></header>
+          <header><div><h3 data-role="session-title">Session details</h3><p data-role="session-meta">Select a session</p></div><div class="detail-header-tools"><span class="status-chip neutral" data-role="session-status">—</span><div class="detail-actions" role="group" aria-label="Selected session actions">${button("Copy ID", "copy-id", { disabled: true })}${button("Finish", "finish", { disabled: true })}${button("Cancel", "cancel", { danger: true, disabled: true })}${button("Delete", "delete", { danger: true, disabled: true })}</div></div></header>
           <div class="session-detail" data-role="session-detail"><div class="native-empty">No session selected</div></div>
         </section>
       </div>
@@ -226,11 +226,14 @@ export class SessionsController extends BaseController {
           checkbox.setAttribute("aria-label", `Select ${session.label || session.session_id}`)
         }
         if (row.cells[1]) row.cells[1].innerHTML = `<span class="status-chip ${sessionTone(session.status)}">${escapeHtml(session.status)}</span>`
-        if (row.cells[2]) row.cells[2].innerHTML = `<strong>${escapeHtml(session.label || "Untitled session")}</strong><small>${escapeHtml(session.session_id)}</small>`
+        if (row.cells[2]) row.cells[2].innerHTML = `<strong>${escapeHtml(session.label || "Untitled session")}</strong><small class="session-mobile-updated"></small><small>${escapeHtml(session.session_id)}</small>`
         if (row.cells[3]) row.cells[3].textContent = session.objective || "—"
         this.rowRevisions.set(session.session_id, revision)
       }
-      if (row.cells[4]) row.cells[4].textContent = formatAge(session.updated_at)
+      const updated = formatAge(session.updated_at)
+      if (row.cells[4]) row.cells[4].textContent = updated
+      const mobileUpdated = row.cells[2]?.querySelector<HTMLElement>(".session-mobile-updated")
+      if (mobileUpdated) mobileUpdated.textContent = `Updated ${updated}`
       const current = body.rows[index]
       if (current !== row) body.insertBefore(row, current || null)
     })

@@ -55,6 +55,8 @@ export class TerminalsController extends BaseController {
   private sidebarVisible = true
   private fontSize = 14
   private renderedSessionsRevision = ""
+  private renderedSessionQuery = ""
+  private renderedSelectedSessionId: string | null = null
 
   mount(root: HTMLElement): void {
     this.root = root
@@ -62,11 +64,11 @@ export class TerminalsController extends BaseController {
     this.root.innerHTML = `<section class="native-page terminals-page">
       <div class="native-toolbar terminal-toolbar">
         <div class="toolbar-group"><label>Machine<select data-role="terminal-machine"></select></label><span class="connection-pill connecting" data-role="connection"><i></i><strong>Loading…</strong></span><span class="terminal-dimensions" data-role="dimensions">—</span></div>
-        <div class="toolbar-actions">${button("New", "new-session", { icon: "+", primary: true })}${button("Kill", "kill-session", { danger: true, disabled: true })}${button("Reconnect", "reconnect", { icon: "↻" })}${button("Sessions", "toggle-sidebar")}${button("A−", "font-down")}${button("A+", "font-up")}</div>
+        <div class="toolbar-actions">${button("New", "new-session", { icon: "+", primary: true })}${button("Sessions", "toggle-sidebar")}</div>
       </div>
       <div class="terminal-layout" data-role="terminal-workspace">
         <aside class="native-panel terminal-sessions"><header><div><h3>Sessions</h3><p data-role="session-summary">Loading…</p></div><div class="terminal-session-switch"><button type="button" data-action="previous-session" aria-label="Previous session">‹</button><button type="button" data-action="next-session" aria-label="Next session">›</button></div></header><label class="terminal-session-search"><span>⌕</span><input data-role="session-search" type="search" placeholder="Filter sessions"/></label><div class="session-list" data-role="sessions"></div></aside>
-        <section class="native-panel terminal-stage-panel"><header><div><h3 data-role="terminal-title">Persistent terminal</h3><p data-role="terminal-subtitle">Loading terminals…</p></div><div class="terminal-stage-actions">${button("Copy", "copy")}${button("Paste", "paste")}${button("Find", "search")}${button("Clear", "clear")}${button("Fullscreen", "fullscreen")}<div class="terminal-search" data-role="search-box" hidden><input data-role="search-input" placeholder="Find in terminal"/><button type="button" data-action="search-prev">Previous</button><button type="button" data-action="search-next">Next</button><button type="button" data-action="search-close">Close</button></div></div></header><div class="persistent-terminal" data-role="terminal"></div><div class="terminal-scrollbar unsupported" data-role="scrollbar" role="scrollbar" tabindex="0" aria-label="Terminal scrollback" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><div class="terminal-scrollbar-spacer"></div></div><div class="terminal-overlay" data-role="terminal-overlay">Loading terminals…</div><nav class="terminal-touchbar"><button type="button" data-sequence="\u001b">Esc</button><button type="button" data-sequence="\t">Tab</button><button type="button" data-sequence="\u001b[D">←</button><button type="button" data-sequence="\u001b[A">↑</button><button type="button" data-sequence="\u001b[B">↓</button><button type="button" data-sequence="\u001b[C">→</button><button type="button" data-sequence="\r">Enter</button><button type="button" data-sequence="\u0003">Ctrl-C</button></nav><form class="command-dock" data-role="command-form"><div class="command-signals"><button type="button" data-sequence="\u0003" title="Interrupt">^C</button><button type="button" data-sequence="\u0004" title="End of input">^D</button><button type="button" data-sequence="\u001a" title="Suspend">^Z</button></div><input data-role="command-input" autocomplete="off" placeholder="Send a command to the attached session"/><button class="native-button primary" type="submit">Send</button></form></section>
+        <section class="native-panel terminal-stage-panel"><header><div><h3 data-role="terminal-title">Persistent terminal</h3><p data-role="terminal-subtitle">Loading terminals…</p></div><div class="terminal-stage-actions"><div class="terminal-connection-actions" role="group" aria-label="Current terminal session">${button("Reconnect", "reconnect", { icon: "↻" })}${button("Kill", "kill-session", { danger: true, disabled: true })}</div><div class="terminal-view-actions" role="group" aria-label="Terminal view">${button("Copy", "copy")}${button("Paste", "paste")}${button("Find", "search")}${button("Clear", "clear")}${button("Fullscreen", "fullscreen")}${button("A−", "font-down")}${button("A+", "font-up")}</div><div class="terminal-search" data-role="search-box" hidden><input data-role="search-input" placeholder="Find in terminal"/><button type="button" data-action="search-prev">Previous</button><button type="button" data-action="search-next">Next</button><button type="button" data-action="search-close">Close</button></div></div></header><div class="persistent-terminal" data-role="terminal"></div><div class="terminal-scrollbar unsupported" data-role="scrollbar" role="scrollbar" tabindex="0" aria-label="Terminal scrollback" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><div class="terminal-scrollbar-spacer"></div></div><div class="terminal-overlay" data-role="terminal-overlay">Loading terminals…</div><nav class="terminal-touchbar"><button type="button" data-sequence="\u001b">Esc</button><button type="button" data-sequence="\t">Tab</button><button type="button" data-sequence="\u001b[D">←</button><button type="button" data-sequence="\u001b[A">↑</button><button type="button" data-sequence="\u001b[B">↓</button><button type="button" data-sequence="\u001b[C">→</button><button type="button" data-sequence="\r">Enter</button><button type="button" data-sequence="\u0003">Ctrl-C</button></nav><form class="command-dock" data-role="command-form"><div class="command-signals"><button type="button" data-sequence="\u0003" title="Interrupt">^C</button><button type="button" data-sequence="\u0004" title="End of input">^D</button><button type="button" data-sequence="\u001a" title="Suspend">^Z</button></div><input data-role="command-input" autocomplete="off" placeholder="Send a command to the attached session"/><button class="native-button primary" type="submit">Send</button></form></section>
       </div>
     </section>`
     this.renderMachineSelect()
@@ -196,6 +198,8 @@ export class TerminalsController extends BaseController {
     const subtitle = this.root.querySelector<HTMLElement>("[data-role=terminal-subtitle]")
     if (list) list.innerHTML = '<div class="native-loading">Loading terminals…</div>'
     this.renderedSessionsRevision = ""
+    this.renderedSessionQuery = ""
+    this.renderedSelectedSessionId = null
     if (summary) summary.textContent = "Loading…"
     if (title) title.textContent = "Persistent terminal"
     if (subtitle) subtitle.textContent = "Loading terminals…"
@@ -238,8 +242,10 @@ export class TerminalsController extends BaseController {
       this.sessions.length,
       ...visibleSessions.map(terminalSessionRevision),
     ].join("\u0001")
+    const filterChanged = this.sessionQuery !== this.renderedSessionQuery
     if (revision !== this.renderedSessionsRevision) {
       this.renderedSessionsRevision = revision
+      this.renderedSessionQuery = this.sessionQuery
       if (!visibleSessions.length) {
         list.innerHTML = this.sessions.length
           ? '<div class="native-empty"><strong>No matches</strong><span>Try a different session filter.</span></div>'
@@ -248,19 +254,30 @@ export class TerminalsController extends BaseController {
         list.innerHTML = visibleSessions.map((session) => `<button type="button" class="session-row" data-session="${escapeHtml(session.session_id)}"><span class="session-state"></span><span><strong>${escapeHtml(session.session_id)}</strong><small>${escapeHtml(session.backend || "persistent shell")} · attached ${escapeHtml(String(session.attached ?? "—"))}</small></span></button>`).join("")
       }
     }
-    this.updateSessionSelection()
+    this.updateSessionSelection(filterChanged)
     this.updateTerminalHeader()
   }
 
-  private updateSessionSelection(): void {
+  private updateSessionSelection(filterChanged = false): void {
     const list = this.root.querySelector<HTMLElement>("[data-role=sessions]")
     if (!list) return
+    const selectionChanged = this.selectedSessionId !== this.renderedSelectedSessionId
+    this.renderedSelectedSessionId = this.selectedSessionId
     const active = list.querySelector<HTMLElement>(".session-row.active")
     const selected = this.selectedSessionId
       ? list.querySelector<HTMLElement>(`.session-row[data-session="${CSS.escape(this.selectedSessionId)}"]`)
       : null
     if (active && active !== selected) active.classList.remove("active")
-    if (selected) selected.classList.add("active")
+    if (!selected) return
+    if (selected !== active) selected.classList.add("active")
+    if (!selectionChanged && !filterChanged) return
+    // Scroll the rail, not the page: previous/next can select an off-screen card.
+    const viewport = list.getBoundingClientRect()
+    const card = selected.getBoundingClientRect()
+    if (card.left < viewport.left) list.scrollLeft += card.left - viewport.left
+    else if (card.right > viewport.right) list.scrollLeft += card.right - viewport.right
+    if (card.top < viewport.top) list.scrollTop += card.top - viewport.top
+    else if (card.bottom > viewport.bottom) list.scrollTop += card.bottom - viewport.bottom
   }
 
   private updateTerminalHeader(): void {
