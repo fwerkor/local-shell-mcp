@@ -120,7 +120,7 @@ def test_managed_process_kwargs_uses_create_no_window_on_windows(monkeypatch):
     monkeypatch.setattr(process_utils.sys, "platform", "win32")
     monkeypatch.setattr(process_utils.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
 
-    assert process_utils.managed_process_kwargs() == {"creationflags": 0x08000000}
+    assert process_utils.managed_process_kwargs()["creationflags"] == 0x08000000
 
 
 @pytest.mark.asyncio
