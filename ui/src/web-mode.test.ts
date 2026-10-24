@@ -13,6 +13,7 @@ describe("WebUI mode routing", () => {
     expect(viewFromHash("#/workloads")).toBe("workloads")
     expect(viewFromHash("#/activity")).toBe("activity")
     expect(viewFromHash("#/console/")).toBe("console")
+    expect(viewFromHash("#/hosted-chat")).toBe("hosted-chat")
   })
 
   test("supports explicit interface aliases", () => {
@@ -33,6 +34,7 @@ describe("WebUI mode routing", () => {
     expect(interfaceModeForView("overview")).toBe("web")
     expect(interfaceModeForView("audit")).toBe("web")
     expect(interfaceModeForView("console")).toBe("tui")
+    expect(interfaceModeForView("hosted-chat")).toBe("chat")
   })
 
   test("preserves compatible bookmarks without overriding an explicit interface choice", () => {

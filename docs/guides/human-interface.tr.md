@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d4016e996b7de27eb0d52bc7b076277fd976b12906ce5f44d04c1d1d229bf85c -->
+<!-- i18n-source-sha256: c1206f28e9661a542c4c26bae628647a355f6ed1b12ca740574add7374666d57 -->
 # Kullanıcı arayüzü
 
 `local-shell-mcp`, aynı service API, workspace, persistent terminal registry, remote-worker registry ve MCP audit log üzerinde iki uyumlu human interface sunar:
@@ -38,6 +38,8 @@ workspace_open(session_id=...)
 `session_id` tek kalıcı görev kimliğidir. Agent başka bir konuşmadaki Sessionı listelememeli, tahmin etmemeli veya otomatik seçmemelidir. Çalışmaya yeni bir konuşmada devam etmek için kullanıcı mevcut `session_id` değerini açıkça iletir. Agent start/resume sonrasında, anlamlı ilerleme checkpointlerinde ve turn bitmeden önce aktif `session_id` değerini kullanıcıya bildirmelidir; böylece elle handoff yapılabilir. Sessions machine veya working directory ile bağlı değildir; normal tool parametreleri local/remote targetları ve pathleri seçmeye devam eder.
 
 İsteğe bağlı bir `plan_manage` Planı Session için Goal modeu etkinleştirir. Plan active durumdaysa ve 15 dakika agent activity olmazsa ilişkili Live Workspace ChatGPT’den devam etmesini isteyebilir. Continuation aynı açık `session_id` değerini resume eder ve kabul veya ret durumuna bakılmaksızın 10 denemeyle sınırlıdır. blocked, completed ve cancelled Planlar otomatik devam ettirilmez; tüm steps değerleri completed veya skipped olan active bir Plan, resumed agentın Planı bitirebilmesi için kapanış continuationına uygun kalır. İnsan pause/resume/cancel kontrolleri geçici Live Workspace state yerine Sessionın sahip olduğu Planı günceller.
+
+İsteğe bağlı kendi kendine barındırılan model ana bilgisayar ve MCP Uygulama istemcisi için [Hosted Chat](hosted-chat.md) konusuna bakın.
 
 ## Tarayıcı arayüzü
 

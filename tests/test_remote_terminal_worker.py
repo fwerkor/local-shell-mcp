@@ -327,3 +327,34 @@ async def test_pty_close_force_kills_unresponsive_attach(monkeypatch):
     assert ("fd", 42) in signals
     assert (1234, worker.signal.SIGTERM) in signals
     assert (1234, worker.signal.SIGKILL) in signals
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process groups only")
+@pytest.mark.asyncio
+async def test_pty_close_falls_back_when_process_group_signal_is_forbidden(monkeypatch):
+    import signal
+
+    read_fd, write_fd = os.pipe()
+    monkeypatch.setattr(worker.os, "killpg", lambda *_: (_ for _ in ()).throw(PermissionError()))
+    signals = []
+
+    class Child:
+        pid = 12345
+
+        def poll(self):
+            return None
+
+        def send_signal(self, sig):
+            signals.append(sig)
+
+        def wait(self):
+            return 0
+
+    attachment = object.__new__(worker._TmuxPtyAttachment)
+    attachment.fd = write_fd
+    attachment.process = Child()
+    try:
+        await attachment.close()
+        assert signals == [signal.SIGTERM]
+    finally:
+        os.close(read_fd)

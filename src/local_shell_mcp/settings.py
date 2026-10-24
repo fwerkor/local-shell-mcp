@@ -378,6 +378,10 @@ class _SettingsFields:
 
     # Durable Logical Sessions and optional Goal plans exposed through MCP.
     logical_sessions_enabled: bool = True
+    # Optional self-hosted BYOK chat/MCP Apps host (no model provider configured by default).
+    hosted_chat_enabled: bool = False
+    # Explicit administrator opt-in for loopback/private HTTP(S) model APIs.
+    hosted_chat_allow_private_endpoints: bool = False
 
     # Human-facing OpenTUI/WebUI. The browser interface is mounted on the same
     # ASGI service and launches the exact same TUI executable as the local CLI.

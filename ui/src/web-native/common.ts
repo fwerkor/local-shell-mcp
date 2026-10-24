@@ -1,6 +1,6 @@
 import type { FileEntry, FilePreview, Machine } from "../types"
 
-export type NativeViewName = "files" | "terminals" | "desktop" | "sessions" | "remotes" | "audit"
+export type NativeViewName = "files" | "terminals" | "desktop" | "sessions" | "remotes" | "audit" | "hosted-chat"
 export type NoticeTone = "info" | "success" | "warning" | "error"
 
 export interface NativeApi {
@@ -11,6 +11,7 @@ export interface NativeApi {
 export interface NativePageContext {
   api: NativeApi
   uiPath: string
+  liveWorkspaceEnabled?: boolean
   apiPrefix?: string
   accessToken: () => string | null
   machines: () => Machine[]

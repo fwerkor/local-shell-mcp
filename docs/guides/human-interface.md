@@ -38,6 +38,8 @@ workspace_open(session_id=...)
 
 An optional `plan_manage` Plan enables Goal mode for the Session. If the Plan is active and no agent activity occurs for 15 minutes, an attached Live Workspace can ask ChatGPT to continue. The continuation resumes the same explicit `session_id` and is limited to 10 continuation attempts (accepted or rejected). Blocked, completed, and cancelled Plan statuses are not auto-continued; an active Plan whose steps are all completed or skipped remains eligible for cleanup continuation so the resumed agent can finish the Plan. Human pause/resume/cancel controls update the Session-owned Plan rather than ephemeral Live Workspace state.
 
+See [Hosted Chat](hosted-chat.md) for the optional self-hosted model host and MCP Apps client.
+
 ## Browser interface
 
 Open:

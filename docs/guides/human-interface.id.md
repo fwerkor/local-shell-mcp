@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d4016e996b7de27eb0d52bc7b076277fd976b12906ce5f44d04c1d1d229bf85c -->
+<!-- i18n-source-sha256: c1206f28e9661a542c4c26bae628647a355f6ed1b12ca740574add7374666d57 -->
 # Antarmuka pengguna
 
 `local-shell-mcp` menyediakan dua human interface yang kompatibel di atas service API, workspace, persistent terminal registry, remote-worker registry, dan MCP audit log yang sama:
@@ -38,6 +38,8 @@ workspace_open(session_id=...)
 `session_id` adalah satu-satunya identitas task yang durable. Agent tidak boleh membuat daftar, menyimpulkan, atau otomatis memilih Session dari percakapan lain. Untuk melanjutkan pekerjaan di percakapan baru, pengguna memberikan `session_id` yang sudah ada secara eksplisit. Agent harus menyebutkan `session_id` aktif setelah start/resume, pada checkpoint progres yang bermakna, dan sebelum mengakhiri turn agar handoff manual dapat dilakukan. Session tidak terikat pada machine atau working directory; parameter tool biasa tetap memilih target local/remote dan path.
 
 Plan `plan_manage` opsional mengaktifkan Goal mode untuk Session. Jika Plan active dan tidak ada agent activity selama 15 menit, Live Workspace yang terkait dapat meminta ChatGPT melanjutkan. Continuation me-resume `session_id` eksplisit yang sama dan dibatasi 10 percobaan, baik diterima maupun ditolak. Plan blocked, completed, dan cancelled tidak dilanjutkan otomatis; Plan active dengan semua steps completed atau skipped tetap memenuhi syarat untuk continuation penutup agar agent yang di-resume dapat menyelesaikan Plan. Kontrol manusia pause/resume/cancel memperbarui Plan milik Session, bukan state Live Workspace yang sementara.
+
+Lihat [Hosted Chat](hosted-chat.md) untuk host model opsional yang dihosting sendiri dan klien Aplikasi MCP.
 
 ## Antarmuka browser
 

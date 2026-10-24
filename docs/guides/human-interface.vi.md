@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d4016e996b7de27eb0d52bc7b076277fd976b12906ce5f44d04c1d1d229bf85c -->
+<!-- i18n-source-sha256: c1206f28e9661a542c4c26bae628647a355f6ed1b12ca740574add7374666d57 -->
 # Giao diện người dùng
 
 `local-shell-mcp` cung cấp hai human interface tương thích trên cùng service API, workspace, persistent terminal registry, remote-worker registry và MCP audit log:
@@ -38,6 +38,8 @@ workspace_open(session_id=...)
 `session_id` là danh tính task bền vững duy nhất. Agent không được liệt kê, suy đoán hoặc tự động chọn Session từ cuộc trò chuyện khác. Để tiếp tục công việc trong cuộc trò chuyện mới, người dùng truyền `session_id` hiện có một cách rõ ràng. Agent nên báo `session_id` đang dùng sau start/resume, tại các checkpoint tiến độ quan trọng và trước khi kết thúc turn để có thể handoff thủ công. Session không gắn với machine hay working directory; parameter tool thông thường vẫn chọn target local/remote và path.
 
 Plan `plan_manage` tùy chọn bật Goal mode cho Session. Nếu Plan active và không có agent activity trong 15 phút, Live Workspace liên kết có thể yêu cầu ChatGPT tiếp tục. Continuation resume cùng `session_id` rõ ràng đó và giới hạn ở 10 lần thử, dù được chấp nhận hay từ chối. Plan blocked, completed và cancelled không được tự động tiếp tục; Plan active có mọi steps completed hoặc skipped vẫn đủ điều kiện cho continuation kết thúc để agent được resume có thể hoàn tất Plan. Điều khiển pause/resume/cancel của con người cập nhật Plan thuộc Session thay vì state tạm thời của Live Workspace.
+
+Xem [Hosted Chat](hosted-chat.md) để biết máy chủ mô hình tự lưu trữ và ứng dụng khách Ứng dụng MCP tùy chọn.
 
 ## Giao diện trình duyệt
 

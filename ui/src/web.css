@@ -41,6 +41,15 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .interface-switch button > span { min-width: 0; }
 .interface-switch strong, .interface-switch small { display: block; }
 .interface-switch strong { font-size: 12px; font-weight: 650; white-space: nowrap; }
+.interface-switch small { margin-top: 2px; color: #69758b; font-size: 9px; line-height: 1.2; white-space: normal; }
+.interface-switch button.active small { color: #9fa9bc; }
+.hosted-chat-entry { display:flex; align-items:center; width:calc(100% - 8px); gap:10px; margin:-9px 4px 17px; padding:11px 13px; color:#c1bcff; border:1px solid rgba(133,119,242,.28); border-radius:10px; background:rgba(111,91,232,.10); cursor:pointer; text-align:left; }
+.hosted-chat-entry:hover, .hosted-chat-entry.active { background:rgba(111,91,232,.25); color:white; }
+.hosted-chat-entry svg { flex:0 0 20px; width:20px; height:20px; }
+.hosted-chat-entry strong,.hosted-chat-entry small { display:block; }
+.hosted-chat-entry strong { font-size:13px; }
+.hosted-chat-entry small { margin-top:3px; font-size:10px; opacity:.72; }
+.hosted-chat-entry[hidden] { display:none; }
 .primary-nav { display: grid; gap: 4px; }
 .nav-item { display: grid; grid-template-columns: 22px minmax(0,1fr) auto; align-items: center; min-height: 42px; padding: 0 11px; border-radius: 9px; color: #9fa9bc; font-size: 13px; font-weight: 540; transition: .16s ease; }
 .nav-item svg { width: 18px; height: 18px; }
@@ -439,3 +448,10 @@ button.nav-item.active { color: white; background: #232d42; box-shadow: inset 3p
   .alert-card.info { background: #17263b; border-color: #29415f; }
   .priority-chip.high { color: #f0bd73; background: #3c2c18; }
 }
+
+@media(max-width:1100px) and (min-width:761px){ .hosted-chat-entry span { display:none; } .hosted-chat-entry { justify-content:center; } }
+@media(max-width:760px){ .hosted-chat-entry { display:none; } }
+.topbar-actions [data-interface-mode="chat"][hidden]{display:none;}
+.topbar-actions [data-interface-mode="chat"].active{background:#ebe8ff;color:#5f4ec7;}
+
+@media(max-width:720px){ .topbar-actions [data-interface-mode="chat"]:not([hidden]){ display:inline-flex!important; } }
