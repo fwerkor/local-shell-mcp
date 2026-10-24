@@ -192,7 +192,7 @@ button.summary-card { cursor: pointer; }
 .summary-card.accent strong { color: #6759e7; }
 .summary-card.info strong { color: #3475c7; font-size: 13px; }
 .summary-card.active { border-color: #9d94ed; box-shadow: 0 0 0 3px rgba(103,89,231,.08); }
-.remotes-layout { display: grid; grid-template-columns: minmax(560px,1.65fr) minmax(310px,.75fr); gap: 10px; min-height: 540px; height: calc(100vh - 260px); }
+.remotes-layout { display: grid; grid-template-columns: minmax(560px,1.65fr) minmax(310px,.75fr); gap: 10px; min-height: 540px; height: calc(100vh - 225px); }
 .remote-list-panel, .remote-detail-panel { display: grid; grid-template-rows: auto minmax(0,1fr); }
 .remote-detail-panel > header, .sessions-detail-panel > header { flex-wrap: wrap; }
 .remote-detail-panel > header > div:first-child, .sessions-detail-panel > header > div:first-child { min-width: 0; }
@@ -236,7 +236,7 @@ button.summary-card { cursor: pointer; }
 .session-bulk-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; flex-wrap: wrap; }
 .session-bulk-actions > span { margin-right: 2px; color: #929aaa; font-size: 11px; font-weight: 650; white-space: nowrap; }
 .session-bulk-actions .native-button { height: 28px; padding: 0 8px; }
-.sessions-layout { display: grid; grid-template-columns: minmax(520px,.95fr) minmax(470px,1.05fr); gap: 10px; min-height: 590px; height: calc(100vh - 260px); }
+.sessions-layout { display: grid; grid-template-columns: minmax(520px,.95fr) minmax(470px,1.05fr); gap: 10px; min-height: 590px; height: calc(100vh - 225px); }
 .sessions-list-panel, .sessions-detail-panel { display: grid; grid-template-rows: auto minmax(0,1fr); }
 .sessions-list, .session-detail { min-height: 0; overflow: auto; }
 .sessions-table .session-select-column { width: 38px; padding-left: 11px; padding-right: 5px; text-align: center; }
@@ -280,7 +280,7 @@ button.summary-card { cursor: pointer; }
 .audit-advanced[hidden] { display: none; }
 .audit-advanced label { display: grid; gap: 5px; color: #7c8596; font-size: 12px; }
 .audit-advanced input { width: 100%; }
-.audit-layout { display: grid; grid-template-columns: minmax(0,.95fr) minmax(0,1.05fr); gap: 10px; min-height: 360px; height: calc(100dvh - 290px); }
+.audit-layout { display: grid; grid-template-columns: minmax(0,.95fr) minmax(0,1.05fr); gap: 10px; min-height: 360px; height: calc(100dvh - 255px); }
 .audit-list-panel, .audit-detail-panel { display: grid; grid-template-rows: auto minmax(0,1fr); }
 .audit-list, .audit-details { min-height: 0; overflow: auto; }
 .audit-table th:nth-child(1) { width: 15%; }
@@ -458,7 +458,7 @@ button.summary-card { cursor: pointer; }
 .desktop-connection.online i { background: #2db181; box-shadow: 0 0 0 3px rgba(45,177,129,.11); }
 .desktop-connection.error { color: #a13f49; background: #fff0f1; border-color: #f0d7da; }
 .desktop-connection.error i { background: #d85b69; }
-.desktop-panel { display: grid; grid-template-rows: auto minmax(0,1fr) auto; height: calc(100vh - 180px); min-height: 560px; overflow: hidden; background: #0b1019; border-color: #222d40; }
+.desktop-panel { display: grid; grid-template-rows: auto minmax(0,1fr) auto; height: calc(100vh - 145px); min-height: 560px; overflow: hidden; background: #0b1019; border-color: #222d40; }
 .desktop-panel > header { color: #dce4f0; background: #121a28; border-color: #263249; }
 .desktop-panel > header h3 { color: #edf2f9; }
 .desktop-panel > header p { color: #8290a5; }
@@ -524,7 +524,7 @@ button.summary-card { cursor: pointer; }
 .native-button { transition: color .14s ease, background .14s ease, border-color .14s ease, transform .14s ease; }
 .native-button:active:not(:disabled) { transform: translateY(1px); }
 .native-button.icon-only { width: 32px; padding: 0; font-size: 15px; }
-.terminal-layout { grid-template-columns: 240px minmax(0,1fr); gap: 8px; height: calc(100vh - 178px); min-height: 560px; }
+.terminal-layout { grid-template-columns: 240px minmax(0,1fr); gap: 8px; height: calc(100vh - 148px); min-height: 560px; }
 .terminal-layout.sidebar-hidden { grid-template-columns: minmax(0,1fr); }
 .terminal-layout.sidebar-hidden .terminal-sessions { display: none; }
 .terminal-session-search { display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; gap: 6px; margin: 8px 8px 0; padding: 0 8px; color: #65728a; background: #0b1220; border: 1px solid #2c3950; border-radius: 7px; }

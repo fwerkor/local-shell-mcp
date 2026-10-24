@@ -81,7 +81,7 @@ export class SessionsController extends BaseController {
     this.root.innerHTML = `<section class="native-page sessions-page">
       <div class="sessions-summary" data-role="sessions-summary"></div>
       <div class="native-toolbar sessions-toolbar">
-        <div><strong>Logical Sessions</strong><span class="toolbar-detail">Durable agent tasks handed off explicitly by session_id</span></div>
+        <div><strong>Logical Sessions</strong></div>
         <div class="sessions-controls">
           <label class="sessions-filter"><span>Status</span><select data-filter="status">${SESSION_STATUSES.map((status) => `<option value="${status}">${status === "all" ? "All sessions" : status}</option>`).join("")}</select></label>
           <div class="toolbar-actions">${button("New", "new-session", { primary: true })}</div>
