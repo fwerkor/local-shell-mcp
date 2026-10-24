@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .process_utils import managed_process_kwargs
 from .remote_worker_state import (
     read_worker_config,
     update_runtime_metadata,
@@ -141,6 +142,7 @@ def ensure_platform_dependencies() -> dict[str, Any]:
             text=True,
             check=False,
             timeout=60,
+            **managed_process_kwargs(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return {
@@ -244,6 +246,7 @@ def _ensure_gui_dependencies_unlocked(
             text=True,
             check=False,
             timeout=180,
+            **managed_process_kwargs(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         result = {
