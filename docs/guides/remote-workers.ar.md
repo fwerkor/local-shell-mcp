@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 52e5f445beaf4c30bd298c59399005f01fe5563591b8a0285c97b46243f342fe -->
+<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
 # Workers بعيدة
 
 تسمح remote workers لـ `local-shell-mcp` بالتحكم في أجهزة تستطيع إرسال طلبات HTTP(S) صادرة لكنها لا تستطيع قبول اتصالات SSH واردة.
@@ -9,12 +9,14 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 ## workflow أساسي
 
-1. أنشئ دعوة لمرة واحدة باستخدام `remote_manage(action="invite", ...)`.
+1. أنشئ دعوة باستخدام `remote_manage(action="invite", ...)`.
 2. شغّل الأمر المُنشأ على الجهاز البعيد.
 3. أكد التسجيل باستخدام `remote_manage(action="list")`.
 4. استدعِ الأدوات العادية مع `machine="<worker-name>"`، مثل `environment_get` أو `run_shell` أو `file_read` أو `browser_run_script`.
 5. استخدم `remote_transfer` لبدء نقل متتبع controller-to-worker أو worker-to-controller أو worker-to-worker لملف أو مجلد. تابعه عبر `job_list` أو `job_tail`، وأوقفه أو أعده عبر `job_stop` أو `job_retry`.
 6. أعد تسمية workers أو ألغها عبر `remote_manage(action="rename", ...)` أو `remote_manage(action="revoke", ...)`.
+
+يتيح رمز الدعوة تسجيل عامل واحد افتراضيًا (`max_uses=1`)، ويمكن زيادة `max_uses` لتسجيل عدة عمال بالرمز نفسه. اترك `name` فارغًا عند استخدام الدعوة أكثر من مرة. المعامل الاختياري `ttl_s` يساوي افتراضيًا ساعتين (7200 ثانية)، وبحد أقصى سبعة أيام (604800 ثانية).
 
 إدارة workers فقط تستخدم أسماء `remote_*`. عمليات execution وshell وjob وfilesystem وpatch وbrowser تشترك في الـ schema نفسها محلياً وعن بُعد. تحديد machine يتطلب أيضاً OAuth scope ‏`remote:use`.
 

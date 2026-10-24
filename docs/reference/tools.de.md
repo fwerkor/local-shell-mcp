@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # Tool-Referenz
 
 Diese Seite wird aus den tatsächlichen MCP-Tool-Schemas aufgebaut. Führen Sie nach Änderungen an der öffentlichen Tool-Oberfläche `python scripts/generate-tools-reference.py` aus, um die English-Referenz zu aktualisieren.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-Verwaltet genau eine dauerhafte Logical Session. start erstellt eine neue Task und gibt deren session_id zurück. resume setzt nur die explizite session_id fort, die der Benutzer angegeben hat oder die bereits in dieser Unterhaltung vorhanden ist. Alle Aktionen außer start benötigen session_id. Aktionen: start, resume, get, report, finish, cancel, delete. report akzeptiert summary/findings/next/blockers/objective/label; delete erfordert eine terminale Session.
+Verwaltet genau eine dauerhafte Logical Session. start erstellt eine neue Task und gibt deren session_id zurück. resume setzt nur die explizite session_id fort, die der Benutzer angegeben hat oder die bereits in dieser Unterhaltung vorhanden ist. Alle Aktionen außer start benötigen session_id. Aktionen: start, resume, get, report, finish, cancel, delete. report akzeptiert summary/findings/next/blockers/objective/label; delete erfordert eine terminale Session. Nach 24 Stunden Inaktivität werden aktive Sessions beim Zugriff, Auflisten oder Starten als stale markiert, sofern kein Toolaufruf läuft. Stale Sessions bleiben fortsetzbar und können bei der Verlaufsbereinigung nach Alter entfernt werden.
 
 | Parameter | Typ | Erforderlich/default | Beschreibung |
 |---|---|---|---|
@@ -288,12 +288,27 @@ Wenn `machine` angegeben ist, benötigt der Aufruf zusätzlich `remote:use` und 
 
 ### `job_list`
 
-Listet getrackte Jobs lokal oder auf einer Remote-Maschine. Aktive Jobs werden zuerst zurückgegeben; `limit` wird auf 1-1000 begrenzt.
+Kompakte Auftragsübersicht, aktive Aufträge zuerst. Mit next_offset blättern; die Daten sind auf 32 KiB begrenzt.
 
 | Parameter | Typ | Erforderlich/default | Beschreibung |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session für diesen Tool-Aufruf. Übergeben Sie während der Arbeit an der Task die von session_manage zurückgegebene session_id. Verwenden Sie null nur, wenn keine Logical Session aktiv ist. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Wenn `machine` angegeben ist, benötigt der Aufruf zusätzlich `remote:use` und läuft über das Remote-Worker-Protokoll.
+
+### `job_get`
+
+Vollständige Details eines Auftrags abrufen, einschließlich Befehl, Fortschritt und Ergebnis.
+
+| Parameter | Typ | Erforderlich/default | Beschreibung |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session für diesen Tool-Aufruf. Übergeben Sie während der Arbeit an der Task die von session_manage zurückgegebene session_id. Verwenden Sie null nur, wenn keine Logical Session aktiv ist. |
 
@@ -770,7 +785,7 @@ Wenn `machine` angegeben wird, erfordert der Aufruf zusätzlich `remote:use` und
 
 ### `remote_manage`
 
-Verwaltet Remote Workers mit action=invite, list, revoke oder rename. invite akzeptiert name/workdir/ttl_s; revoke benötigt machine; rename benötigt machine und new_name.
+Verwaltet Remote Workers mit action=invite, list, reset, revoke oder rename. invite akzeptiert name/workdir/ttl_s/max_uses; revoke benötigt machine; rename benötigt machine und new_name. max_uses hat den Standardwert 1. reset erfordert machine und entfernt wartende oder sicher abbrechbare aktive Steuerungsanfragen, ohne den Worker zu trennen; bereits gestartete geschützte Vorgänge bleiben erhalten.
 
 | Parameter | Typ | Erforderlich/default | Beschreibung |
 |---|---|---|---|
@@ -778,6 +793,7 @@ Verwaltet Remote Workers mit action=invite, list, revoke oder rename. invite akz
 | `name` | `string \| null` | `null` |  |
 | `workdir` | `string \| null` | `null` |  |
 | `ttl_s` | `integer \| null` | `null` |  |
+| `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session für diesen Tool-Aufruf. Übergeben Sie während der Arbeit an der Task die von session_manage zurückgegebene session_id. Verwenden Sie null nur, wenn keine Logical Session aktiv ist. |

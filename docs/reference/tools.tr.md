@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # Tools referansı
 
 Bu page gerçek MCP tool schemas üzerinden oluşturulur. Public tool surface değiştiğinde English reference güncellemek için `python scripts/generate-tools-reference.py` çalıştırın.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-Tek bir kalıcı Logical Sessionı yönetir. start yeni bir görev oluşturur ve session_id değerini döndürür. resume yalnızca kullanıcının açıkça verdiği veya bu konuşmada zaten bulunan session_id değerini sürdürür. start dışındaki tüm actionlar session_id gerektirir. Actionlar: start, resume, get, report, finish, cancel, delete. report summary/findings/next/blockers/objective/label kabul eder; delete terminal bir Session gerektirir.
+Tek bir kalıcı Logical Sessionı yönetir. start yeni bir görev oluşturur ve session_id değerini döndürür. resume yalnızca kullanıcının açıkça verdiği veya bu konuşmada zaten bulunan session_id değerini sürdürür. start dışındaki tüm actionlar session_id gerektirir. Actionlar: start, resume, get, report, finish, cancel, delete. report summary/findings/next/blockers/objective/label kabul eder; delete terminal bir Session gerektirir. 24 saat hareketsiz kalan Active Sessions, erişim, listeleme veya başlatma sırasında stale olur; sürmekte olan tool call varsa olmaz. stale Sessions yeniden sürdürülebilir ve geçmişten en eskiden başlayarak silinebilir.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -288,12 +288,27 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_list`
 
-Local veya remote machine üzerinde tracked jobs listeler. Active joblar önce döndürülür; `limit` 1-1000 aralığıyla sınırlandırılır.
+Etkin işlerin önce geldiği özet iş listesi. next_offset ile sayfalayın; veriler 32 KiB ile sınırlıdır.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+`machine` sağlandığında çağrı ayrıca `remote:use` gerektirir ve remote worker protocol üzerinden çalışır.
+
+### `job_get`
+
+Bir işin tam komut, ilerleme ve sonuç dahil tüm ayrıntılarını getirir.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |
 
@@ -769,7 +784,7 @@ OAuth kapsamları: `shell:read, shell:write, shell:execute, browser:use, file:sh
 
 ### `remote_manage`
 
-action=invite, list, revoke veya rename ile remote workers yönetir. invite name/workdir/ttl_s kabul eder; revoke machine gerektirir; rename machine ve new_name gerektirir.
+action=invite, list, reset, revoke veya rename ile remote workers yönetir. invite name/workdir/ttl_s/max_uses kabul eder; revoke machine gerektirir; rename machine ve new_name gerektirir. max_uses varsayılan olarak 1'dir. reset için machine gerekir; worker bağlantısını kesmeden sıradaki veya güvenle iptal edilebilir etkin kontrol isteklerini temizler, başlamış korumalı işlemler korunur.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -777,6 +792,7 @@ action=invite, list, revoke veya rename ile remote workers yönetir. invite name
 | `name` | `string \| null` | `null` |  |
 | `workdir` | `string \| null` | `null` |  |
 | `ttl_s` | `integer \| null` | `null` |  |
+| `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Bu tool çağrısının Logical Sessionı. Görev üzerinde çalışırken session_manage tarafından döndürülen session_id değerini iletin. null yalnızca etkin Logical Session yokken kullanılmalıdır. |

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # Tools reference
 
 यह page वास्तविक MCP tool schemas से बनती है। Public tool surface बदलने के बाद English reference update करने के लिए `python scripts/generate-tools-reference.py` चलाएँ।
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-एक durable Logical Session को प्रबंधित करें। start नई task बनाता है और उसका session_id लौटाता है। resume केवल उसी explicit session_id को जारी रखता है जो user ने दिया हो या इस conversation में पहले से मौजूद हो। start के अलावा हर action में session_id आवश्यक है। Actions: start, resume, get, report, finish, cancel, delete. report summary/findings/next/blockers/objective/label स्वीकार करता है; delete के लिए terminal Session आवश्यक है।
+एक durable Logical Session को प्रबंधित करें। start नई task बनाता है और उसका session_id लौटाता है। resume केवल उसी explicit session_id को जारी रखता है जो user ने दिया हो या इस conversation में पहले से मौजूद हो। start के अलावा हर action में session_id आवश्यक है। Actions: start, resume, get, report, finish, cancel, delete. report summary/findings/next/blockers/objective/label स्वीकार करता है; delete के लिए terminal Session आवश्यक है। 24 घंटे निष्क्रिय रहने वाले Active Sessions, access/list/start के समय stale होते हैं, यदि कोई tool call चल रही हो तो यह बदलाव नहीं होता। stale Sessions दोबारा शुरू किए जा सकते हैं और history से सबसे पुराने पहले हटाए जा सकते हैं।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -288,12 +288,27 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_list`
 
-Local या remote machine पर tracked jobs सूचीबद्ध करती है। Active jobs पहले लौटाए जाते हैं; `limit` को 1-1000 के बीच सीमित किया जाता है।
+सक्रिय कार्य पहले दिखाने वाली संक्षिप्त सूची। next_offset से अगले पृष्ठ पर जाएँ; डेटा 32 KiB तक सीमित है।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+`machine` देने पर call को अतिरिक्त `remote:use` चाहिए और वह remote worker protocol के जरिए चलता है।
+
+### `job_get`
+
+किसी कार्य का पूरा विवरण प्राप्त करें, जिसमें आदेश, प्रगति और परिणाम शामिल हैं।
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |
 
@@ -770,7 +785,7 @@ OAuth क्षेत्र: `shell:read, shell:write, shell:execute, browser:us
 
 ### `remote_manage`
 
-action=invite, list, revoke या rename से remote workers manage करती है। invite name/workdir/ttl_s स्वीकार करता है; revoke को machine; rename को machine और new_name चाहिए।
+action=invite, list, reset, revoke या rename से remote workers manage करती है। invite name/workdir/ttl_s/max_uses स्वीकार करता है; revoke को machine; rename को machine और new_name चाहिए। max_uses का डिफ़ॉल्ट मान 1 है। reset के लिए machine आवश्यक है; यह worker को डिस्कनेक्ट किए बिना queued और सुरक्षित रूप से रद्द किए जा सकने वाले सक्रिय control requests हटाता है, जबकि शुरू हो चुके protected operations सुरक्षित रहते हैं।
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -778,6 +793,7 @@ action=invite, list, revoke या rename से remote workers manage करत
 | `name` | `string \| null` | `null` |  |
 | `workdir` | `string \| null` | `null` |  |
 | `ttl_s` | `integer \| null` | `null` |  |
+| `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | इस tool call के लिए Logical Session। task पर काम करते समय session_manage से मिला session_id दें। null केवल तब दें जब कोई Logical Session सक्रिय न हो। |

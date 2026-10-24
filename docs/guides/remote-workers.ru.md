@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 52e5f445beaf4c30bd298c59399005f01fe5563591b8a0285c97b46243f342fe -->
+<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
 # Удалённые workers
 
 Remote workers позволяют `local-shell-mcp` управлять машинами, которые могут отправлять исходящие HTTP(S)-запросы, но не могут принимать входящие SSH-соединения.
@@ -9,12 +9,14 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 ## Базовый процесс
 
-1. Создайте одноразовое приглашение через `remote_manage(action="invite", ...)`.
+1. Создайте приглашение через `remote_manage(action="invite", ...)`.
 2. Выполните созданную команду на удалённой машине.
 3. Подтвердите регистрацию с помощью `remote_manage(action="list")`.
 4. Вызывайте обычные инструменты с `machine="<worker-name>"`, например `environment_get`, `run_shell`, `file_read` или `browser_run_script`.
 5. Используйте `remote_transfer` для запуска отслеживаемой передачи файла или каталога controller-to-worker, worker-to-controller или worker-to-worker. Затем используйте `job_list` или `job_tail`; остановить или повторить можно через `job_stop` или `job_retry`.
 6. Переименовывайте или отзывайте workers через `remote_manage(action="rename", ...)` или `remote_manage(action="revoke", ...)`.
+
+По умолчанию приглашение позволяет зарегистрировать одного worker (`max_uses=1`). Увеличьте `max_uses`, чтобы зарегистрировать несколько workers по одному приглашению. Для многократного приглашения оставьте `name` пустым. Необязательный параметр `ttl_s` по умолчанию равен двум часам (7200 секунд), максимум — семь дней (604800 секунд).
 
 Только администрирование workers использует имена `remote_*`. Операции execution, shell, job, filesystem, patch и browser используют одинаковую schema локально и удалённо. Указание machine дополнительно требует OAuth scope `remote:use`.
 

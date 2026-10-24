@@ -314,6 +314,7 @@ async def test_every_worker_tool_dispatch_branch(monkeypatch, tmp_path):
         "list_shells",
         "start_job",
         "list_jobs",
+        "get_job",
         "tail_job",
         "stop_job",
         "retry_job",
@@ -357,7 +358,8 @@ async def test_every_worker_tool_dispatch_branch(monkeypatch, tmp_path):
         "shell_kill": {"session_id": "s"},
         "shell_list": {},
         "job_start": {"command": "true"},
-        "job_list": {"include_finished": False, "limit": 7},
+        "job_list": {"include_finished": False, "limit": 7, "offset": 3},
+        "job_get": {"job_id": "j"},
         "job_tail": {"job_id": "j"},
         "job_stop": {"job_id": "j"},
         "job_retry": {"job_id": "j"},
@@ -391,7 +393,9 @@ async def test_every_worker_tool_dispatch_branch(monkeypatch, tmp_path):
         result = await remote.execute_worker_tool(tool, {**args, "_human": True})
         assert result is not None, tool
         if tool == "job_list":
-            assert result["args"] == [False, 7]
+            assert result["args"] == [False, 7, 3]
+        if tool == "job_get":
+            assert result["args"] == ["j"]
 
     with pytest.raises(ValueError, match="unsupported"):
         await remote.execute_worker_tool("unknown", {})

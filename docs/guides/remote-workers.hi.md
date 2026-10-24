@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 52e5f445beaf4c30bd298c59399005f01fe5563591b8a0285c97b46243f342fe -->
+<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
 # Remote workers
 
 Remote workers `local-shell-mcp` को उन machines को control करने देते हैं जो outbound HTTP(S) requests कर सकती हैं लेकिन inbound SSH connections स्वीकार नहीं कर सकतीं।
@@ -9,12 +9,14 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 ## Basic workflow
 
-1. `remote_manage(action="invite", ...)` से one-time invite बनाएँ।
+1. `remote_manage(action="invite", ...)` से invite बनाएँ।
 2. Generated command remote machine पर चलाएँ।
 3. `remote_manage(action="list")` से registration confirm करें।
 4. `machine="<worker-name>"` के साथ सामान्य tools call करें, जैसे `environment_get`, `run_shell`, `file_read` या `browser_run_script`।
 5. `remote_transfer` से tracked controller-to-worker, worker-to-controller या worker-to-worker file/directory transfer शुरू करें। `job_list` या `job_tail` से follow करें; `job_stop` या `job_retry` से stop/retry करें।
 6. `remote_manage(action="rename", ...)` या `remote_manage(action="revoke", ...)` से workers rename या revoke करें।
+
+डिफ़ॉल्ट रूप से एक आमंत्रण से केवल एक worker पंजीकृत होता है (`max_uses=1`)। एक ही आमंत्रण से कई workers पंजीकृत करने के लिए `max_uses` बढ़ाएँ। कई बार उपयोग होने वाले आमंत्रण के लिए `name` खाली रखें। वैकल्पिक `ttl_s` का डिफ़ॉल्ट मान दो घंटे (7200 सेकंड) है और अधिकतम सात दिन (604800 सेकंड) हो सकता है।
 
 केवल worker administration `remote_*` names उपयोग करता है। Execution, shell, job, filesystem, patch और browser operations local और remote दोनों में वही schema share करते हैं। Machine देने पर अतिरिक्त `remote:use` OAuth scope चाहिए।
 

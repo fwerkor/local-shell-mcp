@@ -149,7 +149,7 @@ Dashboard is the OpenTUI operational overview. Wide terminals show separate node
 
 ### Files
 
-Files is an LSM-native three-pane file manager for local and remote machines. It provides create, edit, rename, copy, move, paste, delete, hidden-file toggle, refresh, text preview, binary preview, and bounded image thumbnails.
+Files is a web-native file explorer for local and remote machines. Browse with the folder tree, use table or grid view, search within a directory, and manage items with right-click menus and multi-selection. Upload files directly from the browser, or download files with short-lived, read-authorized download tickets (no share link required). Binary uploads stream through transactional transfers instead of Base64 JSON bodies. Folder navigation loads directories on demand. Editing text, creating files and folders, renaming, copying, moving, deleting, and showing hidden files are supported.
 
 ### Terminals
 

@@ -161,7 +161,7 @@ def test_dashboard_api_returns_macro_snapshot(tmp_path, monkeypatch):
             ]
         }
 
-    async def fake_jobs(include_finished=True):  # noqa: ARG001
+    async def fake_jobs(include_finished=True, *, include_recent_failures=False):  # noqa: ARG001
         return {
             "jobs": [
                 {
@@ -291,3 +291,101 @@ def test_native_file_write_accepts_base64_uploads(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert (tmp_path / "upload.bin").read_bytes() == payload
+
+
+def test_dashboard_api_alerts_include_failures_outside_active_job_page(tmp_path, monkeypatch):
+    import json
+    import time
+
+    import local_shell_mcp.jobs as jobs
+
+    _configure(tmp_path, monkeypatch)
+    state_dir = tmp_path / ".state"
+    state_dir.mkdir()
+    now = time.time()
+    active = [
+        {
+            "job_id": f"active-{i}",
+            "kind": "shell",
+            "status": "running",
+            "session_id": f"session-{i}",
+            "created_at": now - i,
+            "updated_at": now,
+        }
+        for i in range(30)
+    ]
+    failure = {
+        "job_id": "failed-old-start",
+        "status": "failed",
+        "command": "python train.py",
+        "error": "GPU out of memory",
+        "created_at": now - 100_000,
+        "updated_at": now - 10,
+    }
+    (state_dir / jobs.JOB_STORE_FILE_NAME).write_text(
+        json.dumps({"version": jobs.JOB_STORE_VERSION, "jobs": [*active, failure]}),
+        encoding="utf-8",
+    )
+
+    async def fake_shells():
+        return {"sessions": [{"session_id": row["session_id"]} for row in active]}
+
+    monkeypatch.setattr(jobs, "list_shells", fake_shells)
+    monkeypatch.setattr(ui, "list_shells", fake_shells)
+    monkeypatch.setattr(ui, "_machine_rows", lambda: {"machines": [], "counts": {}})
+    monkeypatch.setattr(ui, "_local_system_snapshot", lambda: {"disk_percent": 10})
+    monkeypatch.setattr(ui, "query_audit", lambda **kwargs: {"entries": [], "total_matched": 0})
+
+    payload = TestClient(Starlette(routes=ui.ui_routes())).get("/api/ui/dashboard").json()["data"]
+    assert payload["job_counts"]["running"] == 30
+    assert payload["job_counts"]["failed"] == 1
+    assert len(payload["jobs"]) == 12
+    assert all(row["status"] == "running" for row in payload["jobs"])
+    assert payload["health"] == "attention"
+    assert any(
+        alert["title"] == "Job failed-old-start failed" and alert["detail"] == "GPU out of memory"
+        for alert in payload["alerts"]
+    )
+
+
+def test_remote_dashboard_requests_bounded_failure_summaries(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "true")
+    get_settings.cache_clear()
+    monkeypatch.setattr(ui, "_machine_rows", lambda: {"machines": [], "counts": {}})
+    monkeypatch.setattr(ui, "_local_system_snapshot", lambda: {"disk_percent": 10})
+    monkeypatch.setattr(ui, "query_audit", lambda **kwargs: {"entries": [], "total_matched": 0})
+    seen = []
+
+    async def dispatch(machine, local_call, remote_tool, remote_args):  # noqa: ARG001
+        seen.append((machine, remote_tool, remote_args))
+        if remote_tool == "job_list":
+            return {
+                "jobs": [{"job_id": "active", "status": "running"}],
+                "recent_failures": [
+                    {
+                        "job_id": "failed",
+                        "status": "failed",
+                        "error": "OOM",
+                        "updated_at": ui.time.time(),
+                    }
+                ],
+                "counts": {"running": 30, "failed": 1},
+            }
+        return {"sessions": []}
+
+    monkeypatch.setattr(ui, "_machine_dispatch", dispatch)
+    payload = (
+        TestClient(Starlette(routes=ui.ui_routes()))
+        .get("/api/ui/dashboard?machine=node1")
+        .json()["data"]
+    )
+    assert (
+        "node1",
+        "job_list",
+        {"include_finished": True, "include_recent_failures": True},
+    ) in seen
+    assert any(
+        alert["title"] == "Job failed failed" and alert["detail"] == "OOM"
+        for alert in payload["alerts"]
+    )

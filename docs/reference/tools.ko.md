@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # Tools reference
 
 이 페이지는 실제 MCP tool schema에서 구성됩니다. Public tool surface를 변경한 뒤 `python scripts/generate-tools-reference.py`를 실행해 English reference를 갱신하십시오.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-하나의 durable Logical Session을 관리합니다. start는 새 task를 만들고 session_id를 반환합니다. resume은 사용자가 명시적으로 제공했거나 이 conversation에 이미 있는 session_id만 계속. start 이외의 모든 action에는 session_id가 필요합니다. Action: start, resume, get, report, finish, cancel, delete. report는 summary/findings/next/blockers/objective/label을 받고, delete에는 terminal Session이 필요합니다.
+하나의 durable Logical Session을 관리합니다. start는 새 task를 만들고 session_id를 반환합니다. resume은 사용자가 명시적으로 제공했거나 이 conversation에 이미 있는 session_id만 계속. start 이외의 모든 action에는 session_id가 필요합니다. Action: start, resume, get, report, finish, cancel, delete. report는 summary/findings/next/blockers/objective/label을 받고, delete에는 terminal Session이 필요합니다. 24시간 활동이 없는 Active Sessions는 접근, 목록 조회 또는 새 Session 시작 시 stale 상태가 됩니다. 단, tool call이 진행 중이면 제외합니다. stale Sessions는 재개할 수 있고 오래된 순서로 기록에서 삭제할 수 있습니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -288,12 +288,27 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_list`
 
-Local 또는 remote machine의 tracked jobs를 나열합니다. Active job을 먼저 반환하며 `limit`은 1-1000 범위로 제한됩니다.
+활성 작업을 우선 표시하는 간략한 작업 목록입니다. next_offset으로 페이지를 이동하며 데이터는 32 KiB로 제한됩니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+`machine`을 지정하면 이 call에는 추가로 `remote:use`가 필요하며 remote worker protocol을 통해 실행됩니다.
+
+### `job_get`
+
+전체 명령어, 진행 상태 및 결과를 포함한 작업 세부 정보를 가져옵니다.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 
@@ -769,7 +784,7 @@ OAuth 범위: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `remote_manage`
 
-action=invite, list, revoke, rename으로 remote workers를 관리합니다. invite는 name/workdir/ttl_s, revoke는 machine, rename은 machine과 new_name이 필요합니다.
+action=invite, list, reset, revoke, rename으로 remote workers를 관리합니다. invite는 name/workdir/ttl_s/max_uses, revoke는 machine, rename은 machine과 new_name이 필요합니다. max_uses 기본값은 1입니다. reset에는 machine이 필요하며 worker 연결을 끊지 않고 대기 중이거나 안전하게 취소 가능한 실행 중 제어 요청을 지웁니다. 이미 시작된 보호 대상 작업은 유지됩니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -777,6 +792,7 @@ action=invite, list, revoke, rename으로 remote workers를 관리합니다. inv
 | `name` | `string \| null` | `null` |  |
 | `workdir` | `string \| null` | `null` |  |
 | `ttl_s` | `integer \| null` | `null` |  |
+| `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |

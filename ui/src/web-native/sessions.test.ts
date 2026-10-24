@@ -27,6 +27,7 @@ describe("Native WebUI logical session performance", () => {
         active: session.status === "active" ? 1 : 0,
         completed: session.status === "completed" ? 1 : 0,
         cancelled: 0,
+        stale: 0,
         total: 1,
       },
     })
@@ -142,6 +143,7 @@ describe("Native WebUI logical session performance", () => {
   })
 
   test("updates session row content without replacing its checkbox", () => {
+    const mobileUpdated: any = { textContent: "" }
     const checkbox: any = {
       dataset: { sessionSelect: "s1" },
       ariaLabel: "Select Task",
@@ -158,7 +160,7 @@ describe("Native WebUI logical session performance", () => {
     const cells: any[] = [
       checkboxCell,
       { innerHTML: "" },
-      { innerHTML: "" },
+      { innerHTML: "", querySelector: () => mobileUpdated },
       { textContent: "" },
       { textContent: "" },
     ]
@@ -180,6 +182,7 @@ describe("Native WebUI logical session performance", () => {
     expect(checkbox.dataset.sessionSelect).toBe("s1")
     expect(checkbox.ariaLabel).toBe("Select Renamed")
     expect(cells[2].innerHTML).toContain("Renamed")
+    expect(mobileUpdated.textContent).toStartWith("Updated ")
   })
 
   test("batch lifecycle actions only target eligible selected sessions", () => {

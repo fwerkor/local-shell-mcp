@@ -26,6 +26,7 @@ def test_remote_worker_allowlist_covers_core_capabilities():
         "write_file",
         "job_start",
         "job_list",
+        "job_get",
         "transfer_read_chunk",
         "transfer_write_chunk",
         "browser_run_script",

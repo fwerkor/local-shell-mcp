@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # Riferimento strumenti
 
 Questa pagina è costruita dagli effettivi schema MCP. Esegui `python scripts/generate-tools-reference.py` dopo modifiche alla superficie pubblica degli strumenti per aggiornare il riferimento English.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-Gestisce una sola Logical Session persistente. start crea un nuovo task e ne restituisce il session_id. resume continua solo il session_id esplicito fornito dall’utente o già presente in questa conversazione. Tutte le azioni tranne start richiedono session_id. Azioni: start, resume, get, report, finish, cancel, delete. report accetta summary/findings/next/blockers/objective/label; delete richiede una Session terminale.
+Gestisce una sola Logical Session persistente. start crea un nuovo task e ne restituisce il session_id. resume continua solo il session_id esplicito fornito dall’utente o già presente in questa conversazione. Tutte le azioni tranne start richiedono session_id. Azioni: start, resume, get, report, finish, cancel, delete. report accetta summary/findings/next/blockers/objective/label; delete richiede una Session terminale. Dopo 24 ore di inattività, le Sessions attive diventano stale quando vengono aperte, elencate o avviate, salvo chiamate a tool in corso. Le Sessions stale possono essere riprese o rimosse dalla cronologia partendo dalle più vecchie.
 
 | Parametro | Tipo | Obbligatorio/default | Descrizione |
 |---|---|---|---|
@@ -288,12 +288,27 @@ Quando viene fornito `machine`, la chiamata richiede anche `remote:use` e viene 
 
 ### `job_list`
 
-Elenca job tracciati localmente o su macchina remota. I job attivi vengono restituiti per primi; `limit` è limitato all’intervallo 1-1000.
+Elenco sintetico dei job, con quelli attivi per primi. Paginazione con next_offset; dati limitati a 32 KiB.
 
 | Parametro | Tipo | Obbligatorio/default | Descrizione |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session per questa chiamata tool. Durante il lavoro sul task, passa il session_id restituito da session_manage. Usa null solo quando non è attiva alcuna Logical Session. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Quando viene fornito `machine`, la chiamata richiede anche `remote:use` e viene eseguita tramite il protocollo remote worker.
+
+### `job_get`
+
+Mostra i dettagli completi di un job, inclusi comando, avanzamento e risultato.
+
+| Parametro | Tipo | Obbligatorio/default | Descrizione |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session per questa chiamata tool. Durante il lavoro sul task, passa il session_id restituito da session_manage. Usa null solo quando non è attiva alcuna Logical Session. |
 
@@ -769,7 +784,7 @@ Quando viene fornito `machine`, la chiamata richiede inoltre `remote:use` e pass
 
 ### `remote_manage`
 
-Gestisce remote worker con action=invite, list, revoke o rename. invite accetta name/workdir/ttl_s; revoke richiede machine; rename richiede machine e new_name.
+Gestisce remote worker con action=invite, list, reset, revoke o rename. invite accetta name/workdir/ttl_s/max_uses; revoke richiede machine; rename richiede machine e new_name. max_uses ha valore predefinito 1. reset richiede machine e rimuove le richieste di controllo in coda o attive annullabili in sicurezza senza disconnettere il worker; le operazioni protette già avviate restano inalterate.
 
 | Parametro | Tipo | Obbligatorio/default | Descrizione |
 |---|---|---|---|
@@ -777,6 +792,7 @@ Gestisce remote worker con action=invite, list, revoke o rename. invite accetta 
 | `name` | `string \| null` | `null` |  |
 | `workdir` | `string \| null` | `null` |  |
 | `ttl_s` | `integer \| null` | `null` |  |
+| `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session per questa chiamata tool. Durante il lavoro sul task, passa il session_id restituito da session_manage. Usa null solo quando non è attiva alcuna Logical Session. |

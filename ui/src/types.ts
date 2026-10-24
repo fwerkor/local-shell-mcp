@@ -35,6 +35,7 @@ export interface FilesPayload {
   parent: string
   entries: FileEntry[]
   parent_entries: FileEntry[]
+  truncated?: boolean
 }
 
 export interface FilePreview {
@@ -158,6 +159,7 @@ export interface LogicalSessionsPayload {
     active: number
     completed: number
     cancelled: number
+    stale: number
     total: number
   }
 }
@@ -168,6 +170,8 @@ export interface InvitePayload {
   workdir?: string | null
   expires_at: number
   ttl_s: number
+  max_uses?: number
+  used_count?: number
   join_url: string
   command: string
 }

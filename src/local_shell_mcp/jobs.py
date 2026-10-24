@@ -22,6 +22,7 @@ from typing import Any, BinaryIO
 
 from .audit import audit
 from .fs_ops import resolve_path
+from .job_runner_entry import runner_error_path
 from .process_utils import managed_process_kwargs
 from .settings import get_settings
 from .shell_environment import filtered_subprocess_env
@@ -42,8 +43,9 @@ JOB_STORE_VERSION = 2
 JOB_STORE_LEGACY_VERSIONS = {1}
 JOB_STORE_LOCK_TIMEOUT_S = 2.0
 JOB_STORE_LOCK_RETRY_INTERVAL_S = 0.05
-JOB_LIST_DEFAULT_LIMIT = 100
+JOB_LIST_DEFAULT_LIMIT = 25
 JOB_LIST_MAX_LIMIT = 1_000
+JOB_LIST_MAX_RESPONSE_BYTES = 32_768
 MANAGED_JOB_STORE_RETRY_ATTEMPTS = 2
 MANAGED_DEFERRED_UPDATE_VERSION = 1
 MANAGED_DEFERRED_APPLIED_KEY = "managed_deferred_update_ids"
@@ -247,7 +249,8 @@ def _load_store() -> dict[str, Any]:
 def _remove_attempt_paths(paths: dict[str, Path] | None) -> None:
     if not paths:
         return
-    for path in paths.values():
+    status = paths.get("status")
+    for path in (*paths.values(), *([runner_error_path(status)] if status else [])):
         with contextlib.suppress(OSError):
             path.unlink(missing_ok=True)
 
@@ -622,6 +625,7 @@ def _prepare_attempt(
     _private_write_text(paths["command"], command)
     paths["log"].unlink(missing_ok=True)
     paths["status"].unlink(missing_ok=True)
+    runner_error_path(paths["status"]).unlink(missing_ok=True)
     argv = _runner_argv(paths, resolved_cwd)
     return paths, _runner_command(argv, get_settings().shell_executable)
 
@@ -631,9 +635,40 @@ def _read_status_path(raw_path: Any) -> dict[str, Any] | None:
         return None
     try:
         payload = json.loads(Path(str(raw_path)).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _completion_receipt_state(raw_path: Any) -> str:
+    """Classify an absent completion receipt without reading its content into audit."""
+    if not raw_path:
+        return "no_path"
+    try:
+        raw = Path(str(raw_path)).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return "missing"
+    except UnicodeError:
+        return "invalid_encoding"
+    except OSError:
+        return "unreadable"
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return "invalid_json"
+    return "valid" if isinstance(payload, dict) else "invalid_shape"
+
+
+def _audit_missing_completion_receipt(job: dict[str, Any]) -> None:
+    # A failed audit write must never prevent status reconciliation.
+    with contextlib.suppress(Exception):
+        audit(
+            "job_completion_receipt_unavailable",
+            job_id=job.get("job_id"),
+            session=job.get("session_id"),
+            attempt=job.get("attempts"),
+            receipt_state=_completion_receipt_state(job.get("status_path")),
+        )
 
 
 def _read_status(job: dict[str, Any]) -> dict[str, Any] | None:
@@ -1010,6 +1045,7 @@ def _refresh_job_status(
 
     if session_id in active_sessions:
         return job
+    _audit_missing_completion_receipt(job)
     job.update(
         {
             "status": "lost",
@@ -1044,6 +1080,43 @@ def _public_job(job: dict[str, Any]) -> dict[str, Any]:
         "progress": job.get("progress"),
         "result": job.get("result"),
     }
+
+
+def _job_list_text(value: Any, max_bytes: int) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    # Store paths can contain surrogate-escaped filesystem bytes. Replace them
+    # before truncating so list responses remain valid UTF-8.
+    encoded = text.encode("utf-8", errors="replace")
+    if len(encoded) <= max_bytes:
+        return encoded.decode("utf-8")
+    return encoded[: max_bytes - 3].decode("utf-8", errors="ignore") + "…"
+
+
+def _job_list_summary(job: dict[str, Any]) -> dict[str, Any]:
+    command = str(job.get("command") or "")
+    summary = {
+        "job_id": _job_list_text(job.get("job_id"), 128),
+        "kind": _job_list_text(job.get("kind", "shell"), 32),
+        "name": _job_list_text(job.get("name"), 160),
+        "status": _job_list_text(job.get("status"), 32),
+        "command": _job_list_text(command, 192),
+        "command_truncated": len(command.encode("utf-8", errors="replace")) > 192,
+        "cwd": _job_list_text(job.get("cwd"), 256),
+        "session_id": _job_list_text(job.get("session_id"), 128),
+        "backend": _job_list_text(job.get("backend"), 64),
+        "created_at": job.get("created_at"),
+        "updated_at": job.get("updated_at"),
+        "completed_at": job.get("completed_at"),
+        "exit_code": job.get("exit_code"),
+        "attempts": job.get("attempts", 1),
+        "log_truncated": bool(job.get("log_truncated", False)),
+        "output_bytes": int(job.get("output_bytes") or 0),
+    }
+    if job.get("status") in {"failed", "lost"}:
+        summary["error"] = _job_list_text(job.get("error"), 256)
+    return summary
 
 
 def _find_job(store: dict[str, Any], job_id: str) -> dict[str, Any]:
@@ -1561,8 +1634,12 @@ async def run_job_with_timeout(
 async def list_jobs(
     include_finished: bool = True,
     limit: int = JOB_LIST_DEFAULT_LIMIT,
+    offset: int = 0,
+    *,
+    include_recent_failures: bool = False,
 ) -> dict[str, Any]:
     limit = max(1, min(int(limit), JOB_LIST_MAX_LIMIT))
+    offset = max(0, int(offset))
     active = (
         set()
         if get_settings().disable_local
@@ -1592,19 +1669,75 @@ async def list_jobs(
             reverse=True,
         )
         total = len(candidates)
-        rows = [_public_job(job) for job in candidates[:limit]]
         counts: dict[str, int] = {}
+        known_statuses = TERMINAL_STATUSES | {"starting", "running", "stopping", "retrying"}
         for job in visible_jobs:
             status = str(job.get("status") or "unknown")
+            status = status if status in known_statuses else "unknown"
             counts[status] = counts.get(status, 0) + 1
+
+        recent_failures = (
+            [
+                _job_list_summary(job)
+                for job in sorted(
+                    (
+                        job for job in visible_jobs
+                        if job.get("status") in {"failed", "lost"}
+                        and now - float(job.get("updated_at") or job.get("created_at") or 0) <= 86_400
+                    ),
+                    key=lambda job: float(job.get("updated_at") or job.get("created_at") or 0),
+                    reverse=True,
+                )[:3]
+            ]
+            if include_recent_failures
+            else None
+        )
+        extra = {"recent_failures": recent_failures} if recent_failures is not None else {}
+        rows: list[dict[str, Any]] = []
+        page_start = min(offset, total)
+        for job in candidates[page_start : page_start + limit]:
+            row = _job_list_summary(job)
+            new_returned = len(rows) + 1
+            next_offset = page_start + new_returned
+            candidate_response = {
+                "jobs": [*rows, row],
+                "counts": counts,
+                "total": total,
+                "returned": new_returned,
+                "offset": page_start,
+                "next_offset": next_offset if next_offset < total else None,
+                "truncated": next_offset < total,
+                **extra,
+            }
+            if len(json.dumps(candidate_response, ensure_ascii=True).encode("utf-8")) > JOB_LIST_MAX_RESPONSE_BYTES:
+                break
+            rows.append(row)
+
     returned = len(rows)
+    next_offset = page_start + returned
     return {
         "jobs": rows,
         "counts": counts,
         "total": total,
         "returned": returned,
-        "truncated": returned < total,
+        "offset": page_start,
+        "next_offset": next_offset if next_offset < total else None,
+        "truncated": next_offset < total,
+        **extra,
     }
+
+
+async def get_job(job_id: str) -> dict[str, Any]:
+    active = (
+        set()
+        if get_settings().disable_local
+        else _active_session_ids(await list_shells())
+    )
+    with _store_transaction() as store:
+        job = _refresh_job_status(_find_job(store, job_id), active)
+        if get_settings().disable_local and job.get("kind") != "managed":
+            raise ValueError("local shell jobs are unavailable when local access is disabled")
+        return {"job": _public_job(job)}
 
 
 async def tail_job(job_id: str, lines: int = 200) -> dict[str, Any]:

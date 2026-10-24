@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: af025099e696ea85872f77e88135d41d859705ccba72919cd4adb62f1e494dad -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # Tham chiếu tools
 
 Page này được xây từ MCP tool schemas thực tế. Chạy `python scripts/generate-tools-reference.py` sau khi thay đổi public tool surface để cập nhật English reference.
@@ -100,7 +100,7 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `session_manage`
 
-Quản lý một Logical Session bền vững. start tạo task mới và trả về session_id của nó. resume chỉ tiếp tục session_id được người dùng cung cấp rõ ràng hoặc đã có trong conversation này. Mọi action ngoài start đều yêu cầu session_id. Action: start, resume, get, report, finish, cancel, delete. report nhận summary/findings/next/blockers/objective/label; delete yêu cầu Session ở trạng thái terminal.
+Quản lý một Logical Session bền vững. start tạo task mới và trả về session_id của nó. resume chỉ tiếp tục session_id được người dùng cung cấp rõ ràng hoặc đã có trong conversation này. Mọi action ngoài start đều yêu cầu session_id. Action: start, resume, get, report, finish, cancel, delete. report nhận summary/findings/next/blockers/objective/label; delete yêu cầu Session ở trạng thái terminal. Sau 24 giờ không hoạt động, Sessions đang hoạt động sẽ chuyển thành stale khi truy cập, liệt kê hoặc bắt đầu, trừ khi có lời gọi tool đang thực hiện. Sessions stale có thể tiếp tục hoặc được xóa khỏi lịch sử từ cũ nhất trước.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -288,12 +288,27 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 
 ### `job_list`
 
-Liệt kê tracked jobs local hoặc trên remote machine. Các job đang hoạt động được trả về trước; `limit` được giới hạn trong khoảng 1-1000.
+Danh sách công việc rút gọn, ưu tiên công việc đang chạy. Phân trang bằng next_offset; dữ liệu tối đa 32 KiB.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao thức remote worker.
+
+### `job_get`
+
+Lấy chi tiết đầy đủ của công việc, bao gồm lệnh, tiến độ và kết quả.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 
@@ -769,7 +784,7 @@ Khi cung cấp `machine`, lời gọi cũng yêu cầu `remote:use` và chạy q
 
 ### `remote_manage`
 
-Quản lý remote workers bằng action=invite, list, revoke hoặc rename. invite nhận name/workdir/ttl_s; revoke cần machine; rename cần machine và new_name.
+Quản lý remote workers bằng action=invite, list, reset, revoke hoặc rename. invite nhận name/workdir/ttl_s/max_uses; revoke cần machine; rename cần machine và new_name. max_uses có giá trị mặc định là 1. reset cần machine và xóa các yêu cầu điều khiển đang chờ hoặc đang chạy có thể hủy an toàn mà không ngắt kết nối worker; các thao tác được bảo vệ đã bắt đầu vẫn được giữ nguyên.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
@@ -777,6 +792,7 @@ Quản lý remote workers bằng action=invite, list, revoke hoặc rename. invi
 | `name` | `string \| null` | `null` |  |
 | `workdir` | `string \| null` | `null` |  |
 | `ttl_s` | `integer \| null` | `null` |  |
+| `max_uses` | `integer` | `1` |  |
 | `machine` | `string \| null` | `null` |  |
 | `new_name` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |

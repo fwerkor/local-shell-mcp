@@ -13,7 +13,7 @@ import {
   type NativePageContext,
 } from "./common"
 
-const SESSION_STATUSES = ["all", "active", "completed", "cancelled"] as const
+const SESSION_STATUSES = ["all", "active", "completed", "cancelled", "stale"] as const
 
 type SessionFilter = (typeof SESSION_STATUSES)[number]
 type SessionLifecycleAction = "finish" | "cancel" | "delete"
@@ -63,7 +63,7 @@ function sessionDetailRevision(session: LogicalSession): string {
 
 export class SessionsController extends BaseController {
   private sessions: LogicalSession[] = []
-  private counts: LogicalSessionsPayload["counts"] = { active: 0, completed: 0, cancelled: 0, total: 0 }
+  private counts: LogicalSessionsPayload["counts"] = { active: 0, completed: 0, cancelled: 0, stale: 0, total: 0 }
   private selectedId: string | null = null
   private detail: LogicalSession | null = null
   private filter: SessionFilter = "all"
@@ -84,7 +84,7 @@ export class SessionsController extends BaseController {
         <div><strong>Logical Sessions</strong><span class="toolbar-detail">Durable agent tasks handed off explicitly by session_id</span></div>
         <div class="sessions-controls">
           <label class="sessions-filter"><span>Status</span><select data-filter="status">${SESSION_STATUSES.map((status) => `<option value="${status}">${status === "all" ? "All sessions" : status}</option>`).join("")}</select></label>
-          <div class="toolbar-actions">${button("New", "new-session", { primary: true })}${button("Copy ID", "copy-id", { disabled: true })}${button("Finish", "finish", { disabled: true })}${button("Cancel", "cancel", { danger: true, disabled: true })}${button("Delete", "delete", { danger: true, disabled: true })}</div>
+          <div class="toolbar-actions">${button("New", "new-session", { primary: true })}</div>
         </div>
       </div>
       <div class="sessions-layout">
@@ -93,7 +93,7 @@ export class SessionsController extends BaseController {
           <div class="sessions-list" data-role="sessions-list"><div class="native-loading">Loading logical sessions…</div></div>
         </section>
         <section class="native-panel sessions-detail-panel">
-          <header><div><h3 data-role="session-title">Session details</h3><p data-role="session-meta">Select a session</p></div><span class="status-chip neutral" data-role="session-status">—</span></header>
+          <header><div><h3 data-role="session-title">Session details</h3><p data-role="session-meta">Select a session</p></div><div class="detail-header-tools"><span class="status-chip neutral" data-role="session-status">—</span><div class="detail-actions" role="group" aria-label="Selected session actions">${button("Copy ID", "copy-id", { disabled: true })}${button("Finish", "finish", { disabled: true })}${button("Cancel", "cancel", { danger: true, disabled: true })}${button("Delete", "delete", { danger: true, disabled: true })}</div></div></header>
           <div class="session-detail" data-role="session-detail"><div class="native-empty">No session selected</div></div>
         </section>
       </div>
@@ -158,13 +158,14 @@ export class SessionsController extends BaseController {
   private renderSummary(): void {
     const summary = this.root.querySelector<HTMLElement>("[data-role=sessions-summary]")
     if (!summary) return
-    const revision = `${this.counts.active}|${this.counts.completed}|${this.counts.cancelled}|${this.counts.total}`
+    const revision = `${this.counts.active}|${this.counts.completed}|${this.counts.cancelled}|${this.counts.stale}|${this.counts.total}`
     if (revision === this.renderedSummaryRevision) return
     this.renderedSummaryRevision = revision
     summary.innerHTML = [
       ["Active", this.counts.active, "accent"],
       ["Completed", this.counts.completed, "success"],
       ["Cancelled", this.counts.cancelled, this.counts.cancelled ? "warning" : "neutral"],
+      ["Stale", this.counts.stale, "neutral"],
       ["Total", this.counts.total, "info"],
     ].map(([label, value, tone]) => `<article class="summary-card ${tone}"><span>${label}</span><strong>${value}</strong></article>`).join("")
   }
@@ -225,11 +226,14 @@ export class SessionsController extends BaseController {
           checkbox.setAttribute("aria-label", `Select ${session.label || session.session_id}`)
         }
         if (row.cells[1]) row.cells[1].innerHTML = `<span class="status-chip ${sessionTone(session.status)}">${escapeHtml(session.status)}</span>`
-        if (row.cells[2]) row.cells[2].innerHTML = `<strong>${escapeHtml(session.label || "Untitled session")}</strong><small>${escapeHtml(session.session_id)}</small>`
+        if (row.cells[2]) row.cells[2].innerHTML = `<strong>${escapeHtml(session.label || "Untitled session")}</strong><small class="session-mobile-updated"></small><small>${escapeHtml(session.session_id)}</small>`
         if (row.cells[3]) row.cells[3].textContent = session.objective || "—"
         this.rowRevisions.set(session.session_id, revision)
       }
-      if (row.cells[4]) row.cells[4].textContent = formatAge(session.updated_at)
+      const updated = formatAge(session.updated_at)
+      if (row.cells[4]) row.cells[4].textContent = updated
+      const mobileUpdated = row.cells[2]?.querySelector<HTMLElement>(".session-mobile-updated")
+      if (mobileUpdated) mobileUpdated.textContent = `Updated ${updated}`
       const current = body.rows[index]
       if (current !== row) body.insertBefore(row, current || null)
     })

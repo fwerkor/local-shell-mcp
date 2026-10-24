@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 52e5f445beaf4c30bd298c59399005f01fe5563591b8a0285c97b46243f342fe -->
+<!-- i18n-source-sha256: d3c380d9a5d9a43019b0be2b5e9accc0d6e0c785d77226005db60c5721672ba6 -->
 # Remote workers
 
 Remote worker cho phép `local-shell-mcp` điều khiển các máy có thể gửi yêu cầu HTTP(S) đi ra nhưng không thể nhận kết nối SSH đi vào.
@@ -9,12 +9,14 @@ MCP client -> control server -> outbound polling worker -> remote machine
 
 ## Workflow cơ bản
 
-1. Tạo lời mời dùng một lần bằng `remote_manage(action="invite", ...)`.
+1. Tạo lời mời bằng `remote_manage(action="invite", ...)`.
 2. Chạy lệnh được tạo trên máy từ xa.
 3. Xác nhận đăng ký bằng `remote_manage(action="list")`.
 4. Gọi tool thông thường với `machine="<worker-name>"`, ví dụ `environment_get`, `run_shell`, `file_read` hoặc `browser_run_script`.
 5. Dùng `remote_transfer` để bắt đầu transfer tệp/thư mục được theo dõi controller-to-worker, worker-to-controller hoặc worker-to-worker. Theo dõi bằng `job_list` hoặc `job_tail`; dừng hoặc thử lại bằng `job_stop` hoặc `job_retry`.
 6. Đổi tên hoặc thu hồi worker bằng `remote_manage(action="rename", ...)` hoặc `remote_manage(action="revoke", ...)`.
+
+Theo mặc định, mỗi lời mời đăng ký một worker (`max_uses=1`). Tăng `max_uses` để đăng ký nhiều worker bằng cùng một lời mời. Để trống `name` khi dùng lời mời nhiều lần. Tham số tùy chọn `ttl_s` mặc định là hai giờ (7200 giây) và tối đa là bảy ngày (604800 giây).
 
 Chỉ phần quản trị worker dùng tên `remote_*`. Các thao tác execution, shell, job, filesystem, patch và browser dùng cùng schema ở local và remote. Khi truyền machine còn cần OAuth scope `remote:use`.
 

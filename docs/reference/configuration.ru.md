@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: b174a1b427ca9b618c63375702f4a652941f83c6b1e1abaee1a99d1ab278deab -->
+<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
 # Конфигурация
 
 Repository поставляет один копируемый стартовый файл: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose автоматически читает получившийся `.env`, а другие runtime могут использовать те же environment variables `LOCAL_SHELL_MCP_`. YAML остаётся optional advanced input для binary/source deployments; явно создайте файл и выберите его через `LOCAL_SHELL_MCP_CONFIG` или `--config`. Environment variables override YAML values, поэтому не определяйте одну настройку в обоих местах, если override не нужен намеренно. YAML keys используют field names ниже.
@@ -102,7 +102,7 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-long-random-secret
 | YAML key | Environment variable | Default | Примечания |
 |---|---|---|---|
 | `remote_enabled` | `LOCAL_SHELL_MCP_REMOTE_ENABLED` | `True` | Управляет `/join`, `/remote/*` и `remote_*` MCP tools. |
-| `remote_invite_ttl_s` | `LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S` | `600` |  |
+| `remote_invite_ttl_s` | `LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S` | `7200` |  |
 | `remote_poll_timeout_s` | `LOCAL_SHELL_MCP_REMOTE_POLL_TIMEOUT_S` | `25` |  |
 | `remote_job_timeout_s` | `LOCAL_SHELL_MCP_REMOTE_JOB_TIMEOUT_S` | `3600` |  |
 | `remote_max_pending_jobs` | `LOCAL_SHELL_MCP_REMOTE_MAX_PENDING_JOBS` | `256` | Максимум queued/pending jobs на worker. |

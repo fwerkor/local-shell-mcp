@@ -37,13 +37,14 @@ assert "local_shell_mcp.audit_archive_codec" not in sys.modules
 
 def test_worker_entrypoint_only_dispatches_worker_management(monkeypatch, capsys):
     calls = []
-    monkeypatch.setattr(remote_worker, "run_worker_cli", lambda args: calls.append(args))
+    original = cli.run_worker_cli
+    monkeypatch.setattr(cli, "run_worker_cli", lambda args: calls.append(args))
 
     remote_worker.main(["worker", "status"])
     remote_worker.main(["status"])
     assert calls == [["status"], ["status"]]
 
-    monkeypatch.setattr(remote_worker, "run_worker_cli", cli.run_worker_cli)
+    monkeypatch.setattr(cli, "run_worker_cli", original)
     with pytest.raises(SystemExit) as exc:
         remote_worker.main(["worker", "call", "run_shell", "--direct"])
     assert exc.value.code == 2
@@ -343,6 +344,7 @@ async def test_enroll_worker_registers_and_persists(tmp_path, monkeypatch):
     async def fake_post(url, payload, headers=None, timeout=None, operation="request"):
         assert url.endswith("/remote/register")
         assert payload["invite"] == "invite"
+        assert isinstance(payload["enrollment_id"], str) and len(payload["enrollment_id"]) >= 24
         return {"ok": True, "data": {"token": "access", "name": "worker-a"}}
 
     monkeypatch.setattr(cli.remote, "_worker_post_json_forever", fake_post)

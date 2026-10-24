@@ -10,6 +10,7 @@ import pytest
 
 import local_shell_mcp.jobs as jobs_module
 from local_shell_mcp.jobs import (
+    get_job,
     list_jobs,
     register_managed_job_handler,
     retry_job,
@@ -623,7 +624,7 @@ async def test_managed_jobs_track_tail_stop_and_retry(tmp_path, monkeypatch):
         if current["status"] != "running":
             break
     assert current["status"] == "succeeded"
-    assert current["result"] == {"value": 7}
+    assert (await get_job(job["job_id"]))["job"]["result"] == {"value": 7}
 
 
 def test_managed_job_validation_and_lost_recovery():
@@ -681,7 +682,7 @@ async def test_managed_job_failure_and_launch_cleanup(tmp_path, monkeypatch):
             break
     assert current["status"] == "failed"
     assert current["exit_code"] == 1
-    assert current["error"] == "RuntimeError: managed failure"
+    assert (await get_job(failed["job_id"]))["job"]["error"] == "RuntimeError: managed failure"
     assert "managed failure" in (await tail_job(failed["job_id"]))["output"]
 
     async def idle_handler(context, payload):  # noqa: ARG001
@@ -965,7 +966,7 @@ async def test_stop_failure_restores_retryable_job_state(tmp_path, monkeypatch):
 
     listed = await list_jobs()
     assert listed["jobs"][0]["status"] == "running"
-    assert "stop failed" in listed["jobs"][0]["error"]
+    assert "stop failed" in (await get_job(job["job_id"]))["job"]["error"]
 
 
 @pytest.mark.asyncio
@@ -1050,9 +1051,9 @@ async def test_job_list_recovers_interrupted_stopping_and_retrying_states(tmp_pa
 
     assert recovered["job_stop_gone"]["status"] == "stopped"
     assert recovered["job_stop_live"]["status"] == "running"
-    assert "interrupted stop" in recovered["job_stop_live"]["error"]
+    assert "interrupted stop" in (await get_job("job_stop_live"))["job"]["error"]
     assert recovered["job_retry_gone"]["status"] == "failed"
-    assert "retry was interrupted" in recovered["job_retry_gone"]["error"]
+    assert "retry was interrupted" in (await get_job("job_retry_gone"))["job"]["error"]
     assert recovered["job_retry_live"]["status"] == "running"
     assert recovered["job_retry_live"]["session_id"] == "live-retry-session"
     assert recovered["job_retry_live"]["attempts"] == 2
@@ -1274,9 +1275,9 @@ async def test_job_list_recovers_interrupted_start(tmp_path, monkeypatch):
     recovered = {job["job_id"]: job for job in listed["jobs"]}
 
     assert recovered["job_start_live"]["status"] == "running"
-    assert "recovered job start" in recovered["job_start_live"]["error"]
+    assert "recovered job start" in (await get_job("job_start_live"))["job"]["error"]
     assert recovered["job_start_missing"]["status"] == "failed"
-    assert "start was interrupted" in recovered["job_start_missing"]["error"]
+    assert "start was interrupted" in (await get_job("job_start_missing"))["job"]["error"]
     stored = json.loads((state_dir / jobs_module.JOB_STORE_FILE_NAME).read_text(encoding="utf-8"))
     assert all("operation_id" not in job for job in stored["jobs"])
 

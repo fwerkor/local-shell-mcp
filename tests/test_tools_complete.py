@@ -180,8 +180,8 @@ class FakeRemoteManager:
         self.calls.append((machine, tool, args, timeout_s if timeout_s is not None else rpc_timeout_s))
         return {"ok": True, "message": "", "data": {"tool": tool}}
 
-    async def create_invite(self, name=None, workdir=None, ttl_s=None):
-        return {"name": name, "workdir": workdir, "ttl_s": ttl_s}
+    async def create_invite(self, name=None, workdir=None, ttl_s=None, max_uses=1):
+        return {"name": name, "workdir": workdir, "ttl_s": ttl_s, "max_uses": max_uses}
 
     def list_machines(self):
         return {"machines": [{"name": "node"}]}
@@ -293,7 +293,8 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
         "shell_stop": {"session_id": "s"},
         "shell_list": {},
         "job_start": {"command": "true", "purpose": "test"},
-        "job_list": {"include_finished": False, "limit": 7},
+        "job_list": {"include_finished": False, "limit": 7, "offset": 3},
+        "job_get": {"job_id": "j"},
         "job_tail": {"job_id": "j"},
         "job_stop": {"job_id": "j"},
         "job_retry": {"job_id": "j", "purpose": "test"},
@@ -343,10 +344,10 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
         assert result is not None, name
 
     invite = await _raw_tool(mcp, "remote_manage")(
-        action="invite", name="node", workdir="/workspace", ttl_s=120
+        action="invite", name="node", workdir="/workspace", ttl_s=120, max_uses=1
     )
     assert invite["ok"] is True
-    assert invite["data"] == {"name": "node", "workdir": "/workspace", "ttl_s": 120}
+    assert invite["data"] == {"name": "node", "workdir": "/workspace", "ttl_s": 120, "max_uses": 1}
     renamed = await _raw_tool(mcp, "remote_manage")(
         action="rename", machine="node", new_name="renamed"
     )
@@ -375,7 +376,8 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
         "shell_stop": {"session_id": "s"},
         "shell_list": {},
         "job_start": {"command": "true"},
-        "job_list": {"include_finished": False, "limit": 7},
+        "job_list": {"include_finished": False, "limit": 7, "offset": 3},
+        "job_get": {"job_id": "j"},
         "job_tail": {"job_id": "j"},
         "job_stop": {"job_id": "j"},
         "job_retry": {"job_id": "j"},
@@ -407,7 +409,9 @@ async def test_all_public_tool_wrappers_local_and_remote(tmp_path, monkeypatch):
     assert len(fake_remote.calls) == len(remote_cases) - 2
     assert all(tool not in {"view_image", "gui_state"} for _, tool, _, _ in fake_remote.calls)
     job_list_call = next(call for call in fake_remote.calls if call[1] == "job_list")
-    assert job_list_call[2] == {"include_finished": False, "limit": 7}
+    assert job_list_call[2] == {"include_finished": False, "limit": 7, "offset": 3}
+    job_get_call = next(call for call in fake_remote.calls if call[1] == "job_get")
+    assert job_get_call[2] == {"job_id": "j"}
 
 
 @pytest.mark.asyncio

@@ -730,6 +730,8 @@ function syncChrome(data: DashboardData): void {
   const activeWorkloadCount = visibleWorkloadCount(data)
   machineNavCount.textContent = String(remoteMachineCount)
   workloadNavCount.textContent = String(activeWorkloadCount)
+  machineNavCount.parentElement?.setAttribute("aria-label", `Remotes, ${remoteMachineCount} remote ${remoteMachineCount === 1 ? "machine" : "machines"}`)
+  workloadNavCount.parentElement?.setAttribute("aria-label", `Terminals, ${activeWorkloadCount} ${activeWorkloadCount === 1 ? "workload" : "workloads"}`)
   const version = versionLabel(data.version)
   controllerVersion.textContent = version
   controllerOrigin.textContent = location.host

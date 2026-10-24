@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: b174a1b427ca9b618c63375702f4a652941f83c6b1e1abaee1a99d1ab278deab -->
+<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
 # Konfiguracja
 
 Repository dostarcza jeden kopiowalny starter file: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose automatycznie odczytuje wynikowy `.env`, a inne runtimes mogą używać tych samych `LOCAL_SHELL_MCP_` environment variables. YAML pozostaje optional advanced input dla binary/source deployments; utwórz file explicit i wybierz go przez `LOCAL_SHELL_MCP_CONFIG` lub `--config`. Environment variables override YAML values, więc nie definiuj tego samego setting w obu miejscach, chyba że override jest zamierzony. YAML keys używają field names poniżej.
@@ -102,7 +102,7 @@ Dla local-only testing `auth_bypass_localhost` jest default enabled. Nie expose 
 | YAML key | Environment variable | Default | Uwagi |
 |---|---|---|---|
 | `remote_enabled` | `LOCAL_SHELL_MCP_REMOTE_ENABLED` | `True` | Kontroluje `/join`, `/remote/*` i MCP tools `remote_*`. |
-| `remote_invite_ttl_s` | `LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S` | `600` |  |
+| `remote_invite_ttl_s` | `LOCAL_SHELL_MCP_REMOTE_INVITE_TTL_S` | `7200` |  |
 | `remote_poll_timeout_s` | `LOCAL_SHELL_MCP_REMOTE_POLL_TIMEOUT_S` | `25` |  |
 | `remote_job_timeout_s` | `LOCAL_SHELL_MCP_REMOTE_JOB_TIMEOUT_S` | `3600` |  |
 | `remote_max_pending_jobs` | `LOCAL_SHELL_MCP_REMOTE_MAX_PENDING_JOBS` | `256` | Maximum queued/pending jobs na worker. |

@@ -52,6 +52,7 @@ from .fs_ops import (
 from .jobs import (
     JOB_LIST_DEFAULT_LIMIT,
     discard_unreferenced_python_script,
+    get_job,
     list_jobs,
     retry_job,
     run_job_with_timeout,
@@ -101,6 +102,9 @@ from .transfer_ops import (
 )
 from .version import version_info as get_version_info
 
+_WORKER_TERMINAL_SERVER = ""
+_WORKER_TERMINAL_TOKEN = ""
+
 REMOTE_JOIN_PATH = "/join"
 REMOTE_POWERSHELL_JOIN_PATH = REMOTE_JOIN_PATH + ".ps1"
 REMOTE_API_PREFIX = "/remote"
@@ -108,7 +112,9 @@ REMOTE_WORKER_BUNDLE_PATH = "/remote/worker-bundle.tgz"
 REMOTE_WORKER_LANE_PROTOCOL_VERSION = 3
 REMOTE_WORKER_RESET_PROTOCOL_VERSION = 4
 REMOTE_WORKER_RESOURCE_PROTOCOL_VERSION = 5
-REMOTE_WORKER_POLL_PROTOCOL_VERSION = REMOTE_WORKER_RESOURCE_PROTOCOL_VERSION
+REMOTE_WORKER_TERMINAL_PROTOCOL_VERSION = 6
+REMOTE_WORKER_DESKTOP_STREAM_PROTOCOL_VERSION = 7
+REMOTE_WORKER_POLL_PROTOCOL_VERSION = REMOTE_WORKER_DESKTOP_STREAM_PROTOCOL_VERSION
 _WORKER_CONNECT_TIMEOUT_S = 10.0
 _WORKER_POLL_TIMEOUT_GRACE_S = 10.0
 _WORKER_TRANSFER_LEASE_REFRESH_INTERVAL_S = 60.0
@@ -117,6 +123,7 @@ REMOTE_WORKER_REGISTRY_BACKUP_FILE_NAME = "remote-workers.json.bak"
 REMOTE_WORKER_REGISTRY_GENERATION_FILE_NAME = "remote-workers.generation"
 REMOTE_WORKER_IDENTITY_FILE_NAME = "identity.json"
 MAX_REMOTE_INVITES = 1_024
+MAX_REMOTE_INVITE_TTL_S = 7 * 24 * 3600
 MAX_REMOTE_MACHINE_NAME_LENGTH = 128
 REMOTE_WORKER_INTERACTIVE_LANE = "interactive"
 REMOTE_WORKER_TRANSFER_LANE = "transfer"
@@ -569,6 +576,8 @@ class RemoteInvite:
     workdir: str | None
     expires_at: float
     used: bool = False
+    max_uses: int = 1
+    used_count: int = 0
 
 
 @dataclass
@@ -584,6 +593,7 @@ class RemoteWorker:
     queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
     transfer_queue: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
     reset_generation: int = 0
+    registration_key: str = ""
 
 
 def _merge_worker_resource_usage(worker: RemoteWorker, payload: dict[str, Any]) -> None:
@@ -666,6 +676,7 @@ def _merge_worker_resource_usage(worker: RemoteWorker, payload: dict[str, Any]) 
 class RemoteManager:
     def __init__(self) -> None:
         self.invites: dict[str, RemoteInvite] = {}
+        self.revoked_registrations: dict[str, float] = {}
         self.workers: dict[str, RemoteWorker] = {}
         self.tokens: dict[str, str] = {}
         self.pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
@@ -711,6 +722,28 @@ class RemoteManager:
                 raise ValueError(
                     f"remote worker registry invite expires_at is invalid: {source}"
                 ) from exc
+            max_uses = item.get("max_uses", 1)
+            used_count = item.get("used_count", 0)
+            if (
+                not isinstance(max_uses, int)
+                or isinstance(max_uses, bool)
+                or max_uses < 1
+                or not isinstance(used_count, int)
+                or isinstance(used_count, bool)
+                or not 0 <= used_count <= max_uses
+            ):
+                raise ValueError(f"remote worker registry invite usage is invalid: {source}")
+        revoked_registrations = data.get("revoked_registrations", {})
+        if not isinstance(revoked_registrations, dict) or any(
+            not isinstance(key, str)
+            or re.fullmatch(r"[0-9a-f]{64}", key) is None
+            or isinstance(expires, bool)
+            or not isinstance(expires, (int, float))
+            or not math.isfinite(expires)
+            or expires <= 0
+            for key, expires in revoked_registrations.items()
+        ):
+            raise ValueError(f"remote worker registry revoked registrations are invalid: {source}")
         generation = data.get("generation")
         if generation is not None and (not isinstance(generation, str) or not generation.strip()):
             raise ValueError(f"remote worker registry generation is invalid: {source}")
@@ -718,6 +751,7 @@ class RemoteManager:
             "generation": generation,
             "workers": [item for item in workers if isinstance(item, dict)],
             "invites": invite_rows,
+            "revoked_registrations": revoked_registrations,
         }
 
     def _load_registry_unlocked(self, *, force: bool = False) -> None:
@@ -830,6 +864,7 @@ class RemoteManager:
             worker.created_at = float(item.get("created_at") or _utc())
             worker.capabilities = list(item.get("capabilities") or [])
             worker.info = dict(item.get("info") or {})
+            worker.registration_key = str(item.get("registration_key") or "")
             try:
                 worker.reset_generation = max(0, int(item.get("reset_generation") or 0))
             except (TypeError, ValueError):
@@ -840,17 +875,26 @@ class RemoteManager:
         for item in registry["invites"]:
             code = str(item.get("code") or "").strip()
             expires_at = float(item.get("expires_at") or 0)
-            if not code or expires_at < now or bool(item.get("used")):
+            max_uses = int(item.get("max_uses", 1))
+            used_count = int(item.get("used_count", 0))
+            if not code or expires_at < now or bool(item.get("used")) or used_count >= max_uses:
                 continue
             invites[code] = RemoteInvite(
                 code=code,
                 name=str(item["name"]) if item.get("name") is not None else None,
                 workdir=str(item["workdir"]) if item.get("workdir") is not None else None,
                 expires_at=expires_at,
+                max_uses=max_uses,
+                used_count=used_count,
             )
         self.workers = workers
         self.tokens = tokens
         self.invites = invites
+        self.revoked_registrations = {
+            key: expires
+            for key, expires in registry["revoked_registrations"].items()
+            if expires > now
+        }
         self._registry_loaded = True
         if recovered_from_backup:
             self._save_registry_unlocked()
@@ -878,18 +922,26 @@ class RemoteManager:
                     "capabilities": worker.capabilities,
                     "info": worker.info,
                     "reset_generation": worker.reset_generation,
+                    "registration_key": worker.registration_key,
                 }
                 for worker in sorted(self.workers.values(), key=lambda item: item.name)
             ],
+            "revoked_registrations": {
+                key: expires
+                for key, expires in self.revoked_registrations.items()
+                if expires > now
+            },
             "invites": [
                 {
                     "code": invite.code,
                     "name": invite.name,
                     "workdir": invite.workdir,
                     "expires_at": invite.expires_at,
+                    "max_uses": invite.max_uses,
+                    "used_count": invite.used_count,
                 }
                 for invite in sorted(self.invites.values(), key=lambda item: item.code)
-                if not invite.used and invite.expires_at >= now
+                if not invite.used and invite.used_count < invite.max_uses and invite.expires_at >= now
             ],
         }
         payload = json.dumps(data, indent=2, sort_keys=True).encode("utf-8")
@@ -940,10 +992,15 @@ class RemoteManager:
         workdir: str | None = None,
         ttl_s: int | None = None,
         base_url: str | None = None,
+        max_uses: int = 1,
     ) -> dict[str, Any]:
         settings = get_settings()
-        ttl = max(60, min(int(ttl_s or settings.remote_invite_ttl_s), 24 * 3600))
+        ttl = max(60, min(int(settings.remote_invite_ttl_s if ttl_s is None else ttl_s), MAX_REMOTE_INVITE_TTL_S))
+        if isinstance(max_uses, bool) or not isinstance(max_uses, int) or max_uses < 1:
+            raise ValueError("max_uses must be a positive integer")
         normalized_name = _validate_machine_name(name) if name else None
+        if max_uses > 1 and normalized_name:
+            raise ValueError("name must be omitted when max_uses > 1")
         expires_at = _utc() + ttl
         code = "lsmcp_inv_" + secrets.token_urlsafe(24)
         invite = RemoteInvite(
@@ -951,6 +1008,7 @@ class RemoteManager:
             name=normalized_name,
             workdir=workdir,
             expires_at=expires_at,
+            max_uses=max_uses,
         )
         async with self._lock:
             with self._state_lock, self._registry_transaction_unlocked():
@@ -958,7 +1016,7 @@ class RemoteManager:
                 self.invites = {
                     invite_code: item
                     for invite_code, item in self.invites.items()
-                    if not item.used and item.expires_at >= now
+                    if not item.used and item.used_count < item.max_uses and item.expires_at >= now
                 }
                 if len(self.invites) >= MAX_REMOTE_INVITES:
                     raise RuntimeError("Too many pending remote invites")
@@ -990,6 +1048,8 @@ class RemoteManager:
             "workdir": workdir,
             "expires_at": invite.expires_at,
             "ttl_s": ttl,
+            "max_uses": max_uses,
+            "used_count": 0,
             "join_url": join_url,
             "command": command,
             "persistent_command": command
@@ -1002,12 +1062,28 @@ class RemoteManager:
     async def register_worker(self, payload: dict[str, Any]) -> dict[str, Any]:
         code = str(payload.get("invite") or "")
         requested_name = str(payload.get("name") or "").strip() or None
+        enrollment_id = payload.get("enrollment_id")
+        if enrollment_id is not None and (
+            not isinstance(enrollment_id, str) or not 1 <= len(enrollment_id) <= 128
+        ):
+            raise ValueError("enrollment_id must be a nonempty string of at most 128 characters")
+        registration_key = (
+            hashlib.sha256((code + "\0" + enrollment_id).encode("utf-8")).hexdigest()
+            if enrollment_id is not None
+            else ""
+        )
         async with self._lock:
             with self._state_lock, self._registry_transaction_unlocked():
+                if registration_key:
+                    if registration_key in self.revoked_registrations:
+                        raise ValueError("worker enrollment has been revoked")
+                    for registered in self.workers.values():
+                        if registered.registration_key == registration_key:
+                            return self._registration_response(registered)
                 invite = self.invites.get(code)
                 if not invite:
                     raise ValueError("invalid invite code")
-                if invite.used:
+                if invite.used or invite.used_count >= invite.max_uses:
                     raise ValueError("invite code has already been used")
                 if invite.expires_at < _utc():
                     raise ValueError("invite code has expired")
@@ -1025,24 +1101,30 @@ class RemoteManager:
                     workdir=str(payload.get("workdir") or invite.workdir or ""),
                     capabilities=list(payload.get("capabilities") or []),
                     info=dict(payload.get("info") or {}),
+                    registration_key=registration_key,
                 )
                 self.workers[name] = worker
                 self.tokens[token] = name
-                invite.used = True
-                self.invites.pop(code, None)
+                invite.used_count += 1
+                if invite.used_count >= invite.max_uses:
+                    self.invites.pop(code, None)
                 try:
                     self._save_registry_unlocked()
                 except Exception:
                     self.workers.pop(name, None)
                     self.tokens.pop(token, None)
-                    invite.used = False
+                    invite.used_count -= 1
                     self.invites[code] = invite
                     raise
         with contextlib.suppress(Exception):
             audit("remote_worker_registered", machine=name)
+        return self._registration_response(worker)
+
+    @staticmethod
+    def _registration_response(worker: RemoteWorker) -> dict[str, Any]:
         return {
-            "token": token,
-            "name": name,
+            "token": worker.token,
+            "name": worker.name,
             "poll_interval_s": 0,
             "poll_timeout_s": get_settings().remote_poll_timeout_s,
             "heartbeat_interval_s": _remote_heartbeat_interval_s(),
@@ -1657,6 +1739,20 @@ class RemoteManager:
             if not worker:
                 raise ValueError(f"unknown remote machine: {machine}")
             self.tokens.pop(worker.token, None)
+            if worker.registration_key:
+                # Invites live at most seven days. Keeping the enrollment key
+                # for that long after revocation blocks lost-response retries.
+                self.revoked_registrations[worker.registration_key] = (
+                    _utc() + MAX_REMOTE_INVITE_TTL_S
+                )
+            try:
+                self._save_registry_unlocked()
+            except Exception:
+                self.workers[machine] = worker
+                self.tokens[worker.token] = machine
+                if worker.registration_key:
+                    self.revoked_registrations.pop(worker.registration_key, None)
+                raise
             for job_id, pending_machine in list(self.pending_machines.items()):
                 if pending_machine == machine:
                     self._cancel_job(job_id)
@@ -1665,7 +1761,6 @@ class RemoteManager:
                     with contextlib.suppress(asyncio.QueueEmpty):
                         queued = queue.get_nowait()
                         self.cancelled_jobs.pop(str(queued.get("id") or ""), None)
-            self._save_registry_unlocked()
         return {"machine": machine, "revoked": True}
 
     def rename(self, machine: str, new_name: str) -> dict[str, Any]:
@@ -1684,6 +1779,14 @@ class RemoteManager:
                     self.pending_machines[job_id] = new_name
             self._save_registry_unlocked()
         return {"old_name": machine, "new_name": new_name}
+
+    def _worker_token(self, machine: str) -> str:
+        with self._state_lock:
+            self._load_registry_unlocked()
+            worker = self.workers.get(machine)
+            if worker is None:
+                raise ValueError(f"unknown remote machine: {machine}")
+            return worker.token
 
     def _worker_by_token(self, token: str) -> RemoteWorker:
         with self._state_lock:
@@ -1890,6 +1993,7 @@ WORKER_COMMAND_TOOLS = frozenset(
 )
 WORKER_SHELL_TOOLS = frozenset(
     {
+        "ui_terminal_stream_start",
         "shell_start",
         "shell_send",
         "shell_read",
@@ -1902,6 +2006,7 @@ WORKER_JOB_TOOLS = frozenset(
     {
         "job_start",
         "job_list",
+        "job_get",
         "job_tail",
         "job_stop",
         "job_retry",
@@ -1962,6 +2067,8 @@ WORKER_GUI_TOOLS = frozenset(
         "gui_frame_discard",
         "gui_human_action",
         "gui_action",
+        "gui_stream_start",
+        "gui_stream_stop",
     }
 )
 REMOTE_WORKER_TOOL_NAMES = frozenset().union(
@@ -2729,6 +2836,14 @@ async def _execute_command_worker_tool(tool: str, args: dict[str, Any]) -> Any:
 
 
 async def _execute_shell_worker_tool(tool: str, args: dict[str, Any]) -> Any:
+    if tool == "ui_terminal_stream_start":
+        from .remote_terminal_worker import start_remote_terminal_stream
+
+        return await start_remote_terminal_stream(
+            args["session_id"], args["cols"], args["rows"], args["ticket"],
+            _WORKER_TERMINAL_SERVER, _WORKER_TERMINAL_TOKEN,
+        )
+
     if tool == "shell_start":
         return await start_shell(
             args.get("cwd", "."), args.get("name"), args.get("command"), args.get("idempotency_key")
@@ -2763,7 +2878,12 @@ async def _execute_job_worker_tool(tool: str, args: dict[str, Any]) -> Any:
         return await list_jobs(
             args.get("include_finished", True),
             args.get("limit", JOB_LIST_DEFAULT_LIMIT),
+            args.get("offset", 0),
+            include_recent_failures=args.get("include_recent_failures", False),
         )
+
+    if tool == "job_get":
+        return await get_job(args["job_id"])
 
     if tool == "job_tail":
         return await tail_job(args["job_id"], args.get("lines", 200))
@@ -3079,6 +3199,10 @@ def _linux_gui_preflight_session_type() -> str:
 
 
 async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
+    from .desktop_stream import start_worker_stream, stop_worker_stream
+    if tool == "gui_stream_stop":
+        stop_worker_stream(args["stream_id"])
+        return {"stopped": True}
     from .gui import GuiUnavailableError, get_gui_manager
     from .remote_worker_installer import ensure_gui_dependencies
 
@@ -3107,7 +3231,7 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
             )
 
     allow_dependency_install = bool(args.pop("_allow_dependency_install", False))
-    if tool in {"gui_state", "gui_frame", "gui_human_action", "gui_action"}:
+    if tool in {"gui_state", "gui_frame", "gui_human_action", "gui_action", "gui_stream_start"}:
         allow_dependency_install = True
     dependency_check_required = tool not in {
         "gui_state_refresh",
@@ -3143,6 +3267,9 @@ async def _execute_gui_worker_tool(tool: str, args: dict[str, Any]) -> Any:
                 f"{dependency_status.get('error') or 'installation failed'}"
             )
 
+    if tool == "gui_stream_start":
+        start_worker_stream(args["stream_id"], args["secret"], args["window_id"])
+        return {"started": True}
     if tool == "gui_list":
         return await manager.list_windows()
     if tool == "gui_state":
@@ -4223,6 +4350,7 @@ async def _run_worker_locked(
     worker_details = await asyncio.to_thread(worker_info, workdir)
     register_payload = {
         "invite": invite,
+        "enrollment_id": secrets.token_urlsafe(24),
         "name": name,
         "workdir": workdir,
         "capabilities": worker_capabilities(),
@@ -4272,6 +4400,11 @@ async def _run_worker_locked(
         flush=True,
     )
     headers = {"Author" + "ization": "B" + "earer " + access}
+    from .desktop_stream import configure_worker_stream
+
+    configure_worker_stream(server, headers)
+    global _WORKER_TERMINAL_SERVER, _WORKER_TERMINAL_TOKEN
+    _WORKER_TERMINAL_SERVER, _WORKER_TERMINAL_TOKEN = server, access
     lane_state = _WorkerLaneState()
     lane_state_changed = asyncio.Event()
     upgrade_lock = asyncio.Lock()
