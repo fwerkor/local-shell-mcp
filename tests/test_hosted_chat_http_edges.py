@@ -99,6 +99,20 @@ def test_http_conversation_update_validates_attached_session_and_profile(api):
     assert client.post("/api/ui/hosted-chat/conversation-delete", json={"id": cid}).status_code == 200
 
 
+def test_bootstrap_hides_unavailable_hosted_chat(api, monkeypatch):
+    client, *_ = api
+    original = get_settings()
+    for settings, expected in (
+        (original.model_copy(update={"state_backend": "file", "mode": "mcp"}), True),
+        (original.model_copy(update={"state_backend": "memory", "mode": "mcp"}), False),
+        (original.model_copy(update={"state_backend": "file", "mode": "http"}), False),
+    ):
+        monkeypatch.setattr(human_ui, "get_settings", lambda settings=settings: settings)
+        response = client.get("/api/ui/bootstrap")
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["features"]["hosted_chat"] is expected
+
+
 def test_http_send_stop_and_app_bridge_are_allowlisted(api, monkeypatch):
     client, store, runner, _ = api
     pid = create_profile(client)

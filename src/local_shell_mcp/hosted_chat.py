@@ -139,6 +139,36 @@ def normalize_messages(messages: object) -> list[dict]:
     return cleaned
 
 
+def validate_tool_calls(requested: list, known_tools: set[str]) -> list[tuple[str, str, dict]]:
+    """Validate an entire model tool batch before saving or executing any calls."""
+    validated: list[tuple[str, str, dict]] = []
+    seen: set[str] = set()
+    for call in requested:
+        if not isinstance(call, dict):
+            raise ValueError("Invalid model tool call")
+        call_id = call.get("id")
+        function = call.get("function")
+        if not isinstance(call_id, str) or not call_id.strip() or call_id in seen:
+            raise ValueError("Model tool calls require unique nonempty IDs")
+        if not isinstance(function, dict):
+            raise ValueError("Invalid model tool function")
+        name = function.get("name")
+        if not isinstance(name, str) or name not in known_tools:
+            raise ValueError("Model requested an unknown or unauthorized tool")
+        raw = function.get("arguments") or "{}"
+        if not isinstance(raw, str):
+            raise ValueError("Model produced invalid tool arguments")
+        try:
+            arguments = json.loads(raw)
+        except (ValueError, TypeError) as exc:
+            raise ValueError("Model produced invalid tool arguments") from exc
+        if not isinstance(arguments, dict):
+            raise ValueError("Tool arguments must be a JSON object")
+        seen.add(call_id)
+        validated.append((call_id, name, arguments))
+    return validated
+
+
 @asynccontextmanager
 async def mcp_session(base_url: str, bearer: str, *, public_origin: str | None = None):
     headers = {"Authorization": bearer} if bearer else {}
@@ -306,26 +336,17 @@ async def complete_turn(
                     return {"messages": request_messages[1:], "events": events}
                 if not schemas or not isinstance(requested, list) or len(requested) > 8:
                     raise ValueError("Invalid model tool calls")
-                assistant = {
-                    "role": "assistant",
-                    "content": content,
-                    "tool_calls": requested,
-                }
-                request_messages.append(assistant)
+                # Reject the complete batch before checkpointing it or permitting
+                # the first side effect; otherwise malformed later calls are unsafe.
+                if calls + len(requested) > MAX_CALLS:
+                    raise ValueError("Agent tool call limit reached")
+                validated = validate_tool_calls(requested, known_tools)
+                request_messages.append({
+                    "role": "assistant", "content": content, "tool_calls": requested,
+                })
                 await save()
-                for tool_call in requested:
+                for call_id, name, arguments in validated:
                     calls += 1
-                    if calls > MAX_CALLS:
-                        raise ValueError("Agent tool call limit reached")
-                    name = tool_call.get("function", {}).get("name")
-                    if name not in known_tools:
-                        raise ValueError("Model requested an unknown or unauthorized tool")
-                    try:
-                        arguments = json.loads(tool_call["function"].get("arguments") or "{}")
-                    except (ValueError, TypeError) as exc:
-                        raise ValueError("Model produced invalid tool arguments") from exc
-                    if not isinstance(arguments, dict):
-                        raise ValueError("Tool arguments must be a JSON object")
                     if name not in {
                         "session_manage",
                         "plan_manage",
@@ -343,14 +364,14 @@ async def complete_turn(
                             "type": "tool",
                             "name": name,
                             "error": bool(result.isError),
-                            "call_id": tool_call["id"],
+                            "call_id": call_id,
                             "result": event_record,
                         }
                     )
                     request_messages.append(
                         {
                             "role": "tool",
-                            "tool_call_id": tool_call["id"],
+                            "tool_call_id": call_id,
                             "content": safe_tool_message(result),
                         }
                     )

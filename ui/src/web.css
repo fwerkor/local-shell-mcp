@@ -473,4 +473,4 @@ button.nav-item.active { color: white; background: #232d42; box-shadow: inset 3p
 .topbar-actions [data-interface-mode="chat"][hidden]{display:none;}
 .topbar-actions [data-interface-mode="chat"].active{background:#ebe8ff;color:#5f4ec7;}
 
-@media(max-width:720px){ .topbar-actions [data-interface-mode="chat"]{ display:inline-flex!important; } }
+@media(max-width:720px){ .topbar-actions [data-interface-mode="chat"]:not([hidden]){ display:inline-flex!important; } }

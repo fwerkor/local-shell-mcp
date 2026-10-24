@@ -92,7 +92,7 @@ export class HostedChatController extends BaseController {
       void this.saveProfile()
     })
     this.listen(root.querySelector<HTMLSelectElement>("[data-profile-existing]")!, "change", () => this.populateProfileForm())
-    this.root.querySelector<HTMLButtonElement>('[data-chat-action="workspace"]')!.hidden = this.context.liveWorkspaceEnabled === false
+    this.root.querySelector<HTMLButtonElement>('[data-chat-action="workspace"]')!.hidden = this.context.liveWorkspaceEnabled !== true
     void this.reload()
   }
 
@@ -208,22 +208,27 @@ export class HostedChatController extends BaseController {
     void tick()
   }
 
-  private async send(text?: string): Promise<void> {
-    if (this.busy || !this.active || this.active.status === "running") return
+  private async send(text?: string): Promise<boolean> {
+    if (this.busy || !this.active || this.active.status === "running") return false
     const input = this.root.querySelector<HTMLTextAreaElement>("[data-chat-input]")!
     const content = text ?? input.value
-    if (!content.trim()) return
+    if (!content.trim()) return false
     this.busy = true
     this.renderConversation()
     try {
       const id = this.active.id
       const message = this.modelContext ? `${this.modelContext}\n\n${content}` : content
       await this.post("send", { id, text: message })
-      this.modelContext = ""
-      input.value = ""
-      if (this.active?.id === id) await this.select(id)
-    } catch (error) { this.notifyError(error) }
-    finally { this.busy = false; this.renderConversation() }
+      if (this.active?.id === id) {
+        this.modelContext = ""
+        input.value = ""
+        await this.select(id)
+      }
+      return true
+    } catch (error) {
+      this.notifyError(error)
+      return false
+    } finally { this.busy = false; this.renderConversation() }
   }
 
   private async action(action: string, id?: string): Promise<void> {
@@ -328,7 +333,7 @@ export class HostedChatController extends BaseController {
 
   private async openWorkspace(): Promise<void> {
     if (!this.active || this.bridge) return
-    if (this.context.liveWorkspaceEnabled === false) throw new Error("Live Workspace is disabled")
+    if (this.context.liveWorkspaceEnabled !== true) throw new Error("Live Workspace is disabled")
     const conversationId = this.active.id
     const epoch = this.workspaceEpoch
     const args = { session_id: this.active.session_id || null }
@@ -360,7 +365,7 @@ export class HostedChatController extends BaseController {
     bridge.onmessage = async (params) => {
       const text = params.content.filter((block) => block.type === "text").map((block) =>
         block.type === "text" ? block.text : "").join("\n\n")
-      await this.send(text)
+      if (!await this.send(text)) throw new Error("Hosted Chat message was not accepted; retry after the current turn finishes")
       return {}
     }
     bridge.onupdatemodelcontext = async (params) => {

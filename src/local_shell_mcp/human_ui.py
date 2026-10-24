@@ -799,7 +799,7 @@ async def api_bootstrap(request: Request) -> Response:
             "machines": machines,
             "features": {
                 "remote": settings.remote_enabled,
-                "hosted_chat": settings.hosted_chat_enabled and settings.mode != "http",
+                "hosted_chat": (settings.hosted_chat_enabled and settings.mode != "http" and settings.state_backend != "memory"),
                 "live_workspace": settings.live_workspace_enabled,
                 "wallpaper": settings.ui_wallpaper,
             },
@@ -3258,7 +3258,7 @@ async def api_hosted_chat(request: Request) -> Response:
             )
         elif action == "conversation-delete":
             cid = str(data["id"])
-            current = hosted_chat_runner.reconcile(subject, cid)
+            current = await asyncio.to_thread(hosted_chat_runner.reconcile, subject, cid)
             if current["status"] == "running":
                 raise ValueError("Stop the active turn before deleting this conversation")
             await asyncio.to_thread(hosted_chat_store.delete_conversation, subject, cid)
@@ -3299,7 +3299,7 @@ async def api_hosted_chat(request: Request) -> Response:
                 public_origin=public_base_url(request) if settings.auth_mode == "oauth" else None,
             )
         elif action == "stop":
-            hosted_chat_runner.stop(subject, str(data["id"]))
+            await asyncio.to_thread(hosted_chat_runner.stop, subject, str(data["id"]))
             result = {}
         elif action in {"tool", "resource"}:
             if not settings.live_workspace_enabled:

@@ -189,6 +189,61 @@ async def test_model_tool_call_protocol_errors(monkeypatch, mode, pattern):
     assert not session.calls or mode in {"limit-steps"}
 
 
+@pytest.mark.parametrize("calls,pattern", [
+    ([{"function": {"name": "run_shell", "arguments": "{}"}}], "nonempty IDs"),
+    ([{"id": "", "function": {"name": "run_shell", "arguments": "{}"}}], "nonempty IDs"),
+    ([{"id": 123, "function": {"name": "run_shell", "arguments": "{}"}}], "nonempty IDs"),
+    ([
+        {"id": "duplicate", "function": {"name": "run_shell", "arguments": "{}"}},
+        {"id": "duplicate", "function": {"name": "run_shell", "arguments": "{}"}},
+    ], "unique nonempty IDs"),
+    ([
+        {"id": "good", "function": {"name": "run_shell", "arguments": "{}"}},
+        {"function": {"name": "run_shell", "arguments": "{}"}},
+    ], "nonempty IDs"),
+    ([
+        {"id": "good", "function": {"name": "run_shell", "arguments": "{}"}},
+        {"id": "bad", "function": {"name": "run_shell", "arguments": "{"}},
+    ], "invalid tool arguments"),
+    ([
+        {"id": "good", "function": {"name": "run_shell", "arguments": "{}"}},
+        {"id": "bad", "function": {"name": "not_allowed", "arguments": "{}"}},
+    ], "unknown or unauthorized"),
+])
+@pytest.mark.asyncio
+async def test_malformed_tool_batch_never_checkpointed_or_executed(monkeypatch, calls, pattern):
+    session = install_fake_mcp(monkeypatch)
+    checkpoints = []
+
+    class FakeHttp:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    async def candidates(endpoint):
+        return [(endpoint + "/chat/completions", {}, {})]
+
+    async def response(*_args):
+        return {"choices": [{"message": {"content": "", "tool_calls": calls}}]}
+
+    async def checkpoint(messages, events):
+        checkpoints.append((messages, events))
+
+    monkeypatch.setattr(hosted_chat.httpx, "AsyncClient", lambda **_: FakeHttp())
+    monkeypatch.setattr(hosted_chat, "model_request_targets", candidates)
+    monkeypatch.setattr(hosted_chat, "model_response_json", response)
+    with pytest.raises(ValueError, match=pattern):
+        await hosted_chat.complete_turn(
+            base_url="http://controller", bearer="", endpoint="https://example.org/v1",
+            key="key", model="unit-model", messages=[{"role": "user", "content": "hello"}],
+            tools_enabled=True, checkpoint=checkpoint,
+        )
+    assert session.calls == []
+    assert checkpoints == []
+
+
 @pytest.mark.asyncio
 async def test_turn_bounds_model_key_and_history(monkeypatch):
     for key, model, messages in [
