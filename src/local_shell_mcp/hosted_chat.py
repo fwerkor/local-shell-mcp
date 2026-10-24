@@ -22,6 +22,19 @@ MAX_STEPS = 8
 MAX_CALLS = 24
 MAX_TEXT = 40_000
 MAX_MODEL_RESPONSE_BYTES = 4 * 1024 * 1024
+# A long-running MCP tool can consume the controller's configured remote budget.
+MCP_TOOL_TIMEOUT_GRACE_S = 60
+
+
+def _mcp_tool_timeout_seconds() -> int:
+    settings = get_settings()
+    return max(3600, settings.remote_job_timeout_s, settings.remote_peer_transfer_timeout_s) + MCP_TOOL_TIMEOUT_GRACE_S
+
+
+def validate_api_key(key: str) -> None:
+    if len(key) > 8192 or any(not 33 <= ord(char) <= 126 for char in key):
+        raise ValueError("API key must be at most 8192 printable ASCII characters without whitespace")
+
 
 
 def validate_endpoint(endpoint: str) -> str:
@@ -182,7 +195,13 @@ async def mcp_session(base_url: str, bearer: str, *, public_origin: str | None =
             "X-Forwarded-Proto": origin.scheme,
         })
     async with (
-        httpx.AsyncClient(headers=headers, timeout=120, follow_redirects=False) as http,
+        httpx.AsyncClient(
+            headers=headers,
+            timeout=httpx.Timeout(
+                connect=15, read=_mcp_tool_timeout_seconds(), write=60, pool=30
+            ),
+            follow_redirects=False,
+        ) as http,
         streamable_http_client(base_url.rstrip("/") + "/mcp", http_client=http) as (
             reader,
             writer,
@@ -231,7 +250,7 @@ async def call_mcp(
     context = mcp_session(base_url, bearer, **({"public_origin": public_origin} if public_origin else {}))
     async with context as session:
         result = await session.call_tool(
-            name, arguments, read_timeout_seconds=timedelta(seconds=120)
+            name, arguments, read_timeout_seconds=timedelta(seconds=_mcp_tool_timeout_seconds())
         )
         return result.model_dump(by_alias=True, exclude_none=True)
 
@@ -261,8 +280,9 @@ async def complete_turn(
     public_origin: str | None = None,
 ) -> dict:
     endpoint = validate_endpoint(endpoint)
-    if len(key) > 8_192 or not 0 < len(model) <= 256:
-        raise ValueError("A model is required and API key must be at most 8192 characters")
+    validate_api_key(key)
+    if not 0 < len(model) <= 256:
+        raise ValueError("A model is required")
     all_messages = normalize_messages(messages)
     # Full history stays on the server. Bound only the model request context.
     index = max(0, len(all_messages) - MAX_MESSAGES)
@@ -355,7 +375,7 @@ async def complete_turn(
                     }:
                         arguments.setdefault("logical_session_id", session_id)
                     result = await session.call_tool(
-                        name, arguments, read_timeout_seconds=timedelta(seconds=120)
+                        name, arguments, read_timeout_seconds=timedelta(seconds=_mcp_tool_timeout_seconds())
                     )
                     event_record = result.model_dump(by_alias=True, exclude_none=True)
                     event_record.pop("_meta", None)

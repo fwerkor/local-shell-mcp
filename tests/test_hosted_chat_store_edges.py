@@ -152,7 +152,7 @@ async def test_runner_handles_failed_turn_and_restart_reconciliation(store, monk
     await asyncio.sleep(0.1)
     state = store.conversation("alice", record["id"])
     assert state["status"] == "failed"
-    assert "model unreachable" in state["error"]
+    assert state["error"] == "RuntimeError: Hosted Chat turn failed"
     with pytest.raises(ValueError, match="No active"):
         runner.stop("alice", record["id"])
     store.update_conversation("alice", record["id"], updater=lambda r: {**r, "status": "running"})
@@ -180,8 +180,14 @@ async def test_runner_rejects_duplicate_turn_and_can_cancel(store, monkeypatch):
     assert runner.reconcile("alice", record["id"])["status"] == "running"
     with pytest.raises(ValueError, match="already running"):
         await runner.start("alice", record["id"], "duplicate", "http://localhost", "")
-    runner.stop("alice", record["id"])
-    await asyncio.sleep(0.15)
+    loop = asyncio.get_running_loop()
+    was_debug = loop.get_debug()
+    loop.set_debug(True)
+    try:
+        await asyncio.to_thread(runner.stop, "alice", record["id"])
+        await asyncio.sleep(0.15)
+    finally:
+        loop.set_debug(was_debug)
     assert store.conversation("alice", record["id"])["status"] == "interrupted"
     with pytest.raises(ValueError, match="No active"):
         runner.stop("alice", record["id"])
@@ -325,3 +331,34 @@ async def test_runner_lease_recovers_after_transient_store_error(store, monkeypa
     runner.stop("alice", chat["id"])
     await asyncio.sleep(0.1)
     assert store.conversation("alice", chat["id"])["status"] == "interrupted"
+
+
+@pytest.mark.asyncio
+async def test_transport_exception_does_not_persist_authorization_header(store, monkeypatch):
+    import httpx
+
+    secret = "sk-sensitive-secret"
+    profile_id = store.put_profile("alice", profile_values(api_key=secret))["id"]
+    chat = store.create_conversation("alice", profile_id=profile_id)
+
+    async def fail_turn(**_):
+        raise httpx.LocalProtocolError(f"Illegal header value b'Bearer {secret}\\n'")
+
+    monkeypatch.setattr(hosted_chat, "complete_turn", fail_turn)
+    runner = HostedChatRunner()
+    await runner.start("alice", chat["id"], "go", "http://controller", "")
+    for _ in range(100):
+        record = store.conversation("alice", chat["id"])
+        if record["status"] == "failed":
+            break
+        await asyncio.sleep(0.01)
+    assert record["status"] == "failed"
+    assert secret not in str(record)
+    assert record["error"] == "LocalProtocolError: Hosted Chat turn failed"
+
+
+@pytest.mark.parametrize("api_key", ["secret\n", "line\rbreak", "bad\tkey", "bad key", "café", "x" * 8193])
+def test_profile_rejects_invalid_authorization_key(store, api_key):
+    with pytest.raises(ValueError, match="API key"):
+        store.put_profile("alice", profile_values(api_key=api_key))
+    assert store.profiles("alice") == []

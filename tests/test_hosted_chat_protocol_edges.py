@@ -86,11 +86,13 @@ class FakeSession:
     def __init__(self):
         self.calls = []
         self.resources = []
+        self.call_options = []
 
     async def list_tools(self):
         return SimpleNamespace(tools=[Tool(), Tool("app_only", hidden=True)])
 
-    async def call_tool(self, name, args, **_):
+    async def call_tool(self, name, args, **kwargs):
+        self.call_options.append(kwargs)
         self.calls.append((name, args))
         return Result()
 
@@ -125,6 +127,7 @@ async def test_mcp_bridge_rejects_non_app_resources(monkeypatch):
     assert (await hosted_chat.call_mcp("http://controller", "", "run_shell", {"command": "echo"}))["content"]
     assert (await hosted_chat.read_mcp_resource("http://controller", "", "ui://test/app"))["content"]
     assert session.calls == [("run_shell", {"command": "echo"})]
+    assert session.call_options[0]["read_timeout_seconds"].total_seconds() > 300
     assert session.resources == ["ui://test/app"]
 
 
@@ -296,3 +299,9 @@ async def test_turn_bounds_model_key_and_history(monkeypatch):
     assert len(requests[0]["messages"]) <= hosted_chat.MAX_MESSAGES + 1
     assert session.calls == []
     assert "tools" not in requests[0]
+
+
+def test_long_running_mcp_timeout_tracks_remote_budget(monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_JOB_TIMEOUT_S", "5400")
+    get_settings.cache_clear()
+    assert hosted_chat._mcp_tool_timeout_seconds() >= 5460

@@ -164,7 +164,7 @@ class HostedChatStore:
         return self._public_profile(p)
 
     def put_profile(self, subject: str, values: dict) -> dict:
-        from .hosted_chat import validate_endpoint
+        from .hosted_chat import validate_api_key, validate_endpoint
 
         profile_id = _identifier(str(values.get("id") or f"p_{uuid.uuid4().hex}"))
         key = self._key(subject, "profiles", profile_id)
@@ -181,8 +181,7 @@ class HostedChatStore:
                 raise ValueError("A profile name and model are required")
             secret = str(values.get("api_key") or "")
             if secret or not previous:
-                if len(secret) > 8192:
-                    raise ValueError("API key is too long")
+                validate_api_key(secret)
                 encrypted = _encrypt(secret, f"{subject}:{profile_id}")
             else:
                 encrypted = previous["encrypted_key"]
@@ -424,7 +423,12 @@ class HostedChatRunner:
                         )
                     raise
                 except Exception as exc:
-                    error = f"{type(exc).__name__}: {exc}"[:400]
+                    # Transport errors can include raw Authorization headers. Never
+                    # persist their exception text, even when profile keys are encrypted.
+                    error = (
+                        f"ValueError: {exc}"[:400] if type(exc) is ValueError
+                        else f"{type(exc).__name__}: Hosted Chat turn failed"
+                    )
                     with contextlib.suppress(ValueError):
                         await asyncio.to_thread(
                             owned_update,
@@ -475,7 +479,10 @@ class HostedChatRunner:
         with self._lock:
             task = self._tasks.get((subject, conversation_id))
             if task and not task.done():
-                task.cancel()
+                # HTTP routes call stop() via asyncio.to_thread; asyncio Task
+                # cancellation must run on the task's owning loop.
+                with contextlib.suppress(RuntimeError):
+                    task.get_loop().call_soon_threadsafe(task.cancel)
 
     @staticmethod
     def reconcile(subject: str, conversation_id: str) -> dict:

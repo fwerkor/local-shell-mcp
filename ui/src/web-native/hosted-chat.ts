@@ -280,7 +280,10 @@ export class HostedChatController extends BaseController {
   private async changeModel(profileId: string): Promise<void> {
     if (!this.active || this.active.status === "running") return
     try {
-      this.active = await this.post<Conversation>("conversation-update", { id: this.active.id, profile_id: profileId })
+      const id = this.active.id
+      const updated = await this.post<Conversation>("conversation-update", { id, profile_id: profileId })
+      if (this.destroyed || this.active?.id !== id) return
+      this.active = updated
       this.renderConversation()
     } catch (error) { this.notifyError(error) }
   }
