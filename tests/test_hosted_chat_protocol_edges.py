@@ -369,3 +369,55 @@ def test_large_escaped_structured_observation_stays_valid_and_bounded():
     result = hosted_chat.safe_tool_message(Result())
     assert len(result) <= hosted_chat.MAX_TEXT
     assert json.loads(result)["content"]
+
+
+def test_tool_observation_keeps_text_resources_and_omits_nontext_payloads():
+    import json
+
+    class MixedResult:
+        def model_dump(self, **_kwargs):
+            return {
+                "content": [
+                    None,
+                    {"type": "resource", "resource": {
+                        "uri": "ui://local-shell-mcp/state", "text": "accessible state data",
+                    }},
+                    {"type": "resource", "resource": "malformed content"},
+                    {"type": "audio", "data": "secret-binary" * 10000},
+                    {"type": "image", "mimeType": "image/jpeg", "data": "hidden-b64"},
+                    {"type": "text", "text": "button state_id=xyz"},
+                ],
+                "isError": True,
+            }
+
+    message = hosted_chat.safe_tool_message(MixedResult())
+    parsed = json.loads(message)
+    assert parsed["isError"] is True
+    assert parsed["content"][0] == {
+        "type": "resource", "uri": "ui://local-shell-mcp/state", "text": "accessible state data",
+    }
+    assert parsed["content"][1] == {"type": "audio", "note": "Non-text content omitted"}
+    assert parsed["content"][2]["type"] == "image"
+    assert "hidden-b64" not in message
+    assert "secret-binary" not in message
+    assert "state_id=xyz" in message
+
+
+def test_tool_message_accepts_empty_result_and_bounds_large_resource_text():
+    import json
+
+    class Result:
+        def __init__(self, content):
+            self.content = content
+
+        def model_dump(self, **_kwargs):
+            return {"content": self.content}
+
+    assert json.loads(hosted_chat.safe_tool_message(Result([]))) == {"content": []}
+    resource = {"type": "resource", "resource": {
+        "uri": "ui://test/resource", "text": "y" * 50000,
+    }}
+    message = hosted_chat.safe_tool_message(Result([resource]))
+    assert len(message) < hosted_chat.MAX_TEXT
+    assert "truncated" in message
+    assert "ui://test/resource" in message
