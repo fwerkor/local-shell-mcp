@@ -181,3 +181,40 @@ async def test_agent_loop_compacts_and_checkpoints_separately(monkeypatch):
     assert normal_requests[0]["messages"][-1]["content"] == "Next step"
     assert len(normal_requests[0]["messages"]) < len(full)
     assert result["messages"][-1]["content"] == "Final response"
+
+
+@pytest.mark.asyncio
+async def test_grown_multibyte_summary_cannot_be_saved_over_token_budget():
+    from copy import deepcopy
+
+    # Even a syntactically valid 8K-character recap can exceed the context
+    # budget after UTF-8 encoding, when the tail was sized for an empty recap.
+    messages = [
+        {"role": "user", "content": "older " * 1600},
+        {"role": "assistant", "content": "done"},
+        {"role": "user", "content": "latest " * 600},
+    ]
+    before = deepcopy(messages)
+    async def summarize(_old, _text):
+        return "语" * 8000
+
+    with pytest.raises(ValueError, match="Compacted context still exceeds"):
+        await compact_messages(messages, None, 8192, "system", [], summarize, force=True)
+    assert messages == before
+
+
+@pytest.mark.asyncio
+async def test_valid_new_summary_stays_within_budget_after_compacting():
+    from local_shell_mcp.hosted_chat_context import context_messages, estimate_tokens
+
+    messages = [
+        {"role": "user", "content": "old " * 1600},
+        {"role": "assistant", "content": "done"},
+        {"role": "user", "content": "latest " * 600},
+    ]
+    async def summarize(_old, _text):
+        return "Small summary /repo/project.py"
+
+    context = await compact_messages(messages, None, 8192, "system", [], summarize, force=True)
+    assert context
+    assert estimate_tokens({"messages": context_messages("system", messages, context), "tools": []}) <= int(8192 * 0.8)

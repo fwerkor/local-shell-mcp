@@ -122,4 +122,11 @@ async def compact_messages(
         group += serialized + "\n"
     if group:
         summary = await consume(group, summary)
-    return {"summary": summary, "through": cut}
+    updated = {"summary": summary, "through": cut}
+    # The new summary may be much larger (including multibyte text) than the
+    # previous one used to choose the cut. Never checkpoint an over-budget
+    # context and then send it to the provider.
+    actual = estimate_tokens({"messages": context_messages(prompt, messages, updated), "tools": tools})
+    if actual > budget:
+        raise ValueError("Compacted context still exceeds the configured context window; increase the model context window")
+    return updated

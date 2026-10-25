@@ -197,7 +197,7 @@ def test_http_requires_bearer_for_send_and_app_actions(api, monkeypatch):
         headers={"Authorization": "Bearer example"},
     )
     assert response.status_code == 200, response.text
-    assert start.await_args.args[-2].startswith("http://127.0.0.1:")
+    assert start.await_args.args[-2].startswith("http://[::1]:")
     settings = settings.model_copy(update={"host": "2001:db8::1"})
     monkeypatch.setattr(human_ui, "get_settings", lambda: settings)
     response = client.post(
@@ -318,3 +318,23 @@ def test_http_manual_compact_and_context_window_validation(api, monkeypatch):
     full = client.get(f"/api/ui/hosted-chat/conversation?id={cid}").json()["data"]
     assert full["context"]["summary"] == "New code summary"
     assert "context" not in client.get("/api/ui/hosted-chat/conversations").json()["data"][0]
+
+
+def test_ipv6_wildcard_uses_ipv6_loopback_for_workspace_tools(api, monkeypatch):
+    client, _store, _runner, _ = api
+    settings = get_settings().model_copy(update={"host": "[::]", "live_workspace_enabled": True})
+    monkeypatch.setattr(human_ui, "get_settings", lambda: settings)
+    call = AsyncMock(return_value={"content": []})
+    resource = AsyncMock(return_value={"contents": []})
+    monkeypatch.setattr(human_ui.hosted_chat, "call_mcp", call)
+    monkeypatch.setattr(human_ui.hosted_chat, "read_mcp_resource", resource)
+    result = client.post("/api/ui/hosted-chat/tool", json={
+        "name": "workspace_open", "arguments": {},
+    })
+    assert result.status_code == 200, result.text
+    assert call.await_args.args[0].startswith("http://[::1]:")
+    result = client.post("/api/ui/hosted-chat/resource", json={
+        "uri": "ui://local-shell-mcp/live-workspace.html",
+    })
+    assert result.status_code == 200, result.text
+    assert resource.await_args.args[0].startswith("http://[::1]:")

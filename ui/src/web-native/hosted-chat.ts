@@ -14,6 +14,7 @@ export class HostedChatController extends BaseController {
   private conversations: Summary[] = []
   private archives: Summary[] = []
   private showArchives = false
+  private selectionEpoch = 0
   private archiveFilter = ""
   private active: Conversation | null = null
   private bridge: AppBridge | null = null
@@ -122,6 +123,7 @@ export class HostedChatController extends BaseController {
   private async reload(): Promise<void> {
     try {
       const viewArchives = this.showArchives
+      const selectionEpoch = this.selectionEpoch
       const [profiles, conversations, archives] = await Promise.all([
         this.get<Profile[]>("profiles"), this.get<Summary[]>("conversations"),
         viewArchives ? this.get<Summary[]>("archives") : Promise.resolve([]),
@@ -132,7 +134,7 @@ export class HostedChatController extends BaseController {
       if (viewArchives) this.archives = archives
       this.renderList()
       const available = viewArchives ? archives : conversations
-      if (!this.active && available.length) await this.select(available[0].id)
+      if (!this.active && available.length && this.selectionEpoch === selectionEpoch) await this.select(available[0].id)
       else this.renderConversation()
     } catch (error) { this.notifyError(error) }
   }
@@ -214,11 +216,18 @@ export class HostedChatController extends BaseController {
   }
 
   private async select(id: string): Promise<void> {
+    const epoch = ++this.selectionEpoch
+    const viewArchives = this.showArchives
     try {
-      const viewArchives = this.showArchives
+      const switching = this.active?.id !== id
+      if (switching) { this.active = null; this.renderConversation() }
       const data = await this.get<Conversation>(viewArchives ? "archive" : "conversation", `?id=${encodeURIComponent(id)}`)
-      if (this.destroyed || this.showArchives !== viewArchives) return
-      if (this.active?.id !== id) { this.modelContext = ""; await this.closeWorkspace() }
+      if (this.destroyed || this.showArchives !== viewArchives || this.selectionEpoch !== epoch) return
+      if (switching) {
+        this.modelContext = ""
+        await this.closeWorkspace()
+        if (this.destroyed || this.showArchives !== viewArchives || this.selectionEpoch !== epoch) return
+      }
       this.active = data
       this.renderList()
       this.renderConversation()
@@ -283,6 +292,7 @@ export class HostedChatController extends BaseController {
     try {
       if (action === "select" && id) { await this.select(id); return }
       if (action === "archives") {
+        ++this.selectionEpoch
         await this.closeWorkspace()
         this.showArchives = !this.showArchives
         this.active = null
@@ -293,6 +303,7 @@ export class HostedChatController extends BaseController {
       if (action === "profile-close") { this.root.querySelector<HTMLDialogElement>("[data-chat-profile-dialog]")?.close(); return }
       if (action === "profile-delete") { await this.deleteProfile(); return }
       if (action === "new" && !this.showArchives) {
+        ++this.selectionEpoch
         this.modelContext = ""
         if (!this.profiles.length) { this.profileDialog(); return }
         const profileId = this.active?.profile_id || this.profiles[0].id
@@ -332,16 +343,21 @@ export class HostedChatController extends BaseController {
         await this.select(cid)
       } else if (action === "stop" && !this.showArchives) {
         await this.post("stop", { id: this.active.id })
-      } else if (action === "session") {
+      } else if (action === "session" && !this.showArchives) {
+        const id = this.active.id
+        const epoch = this.selectionEpoch
         const response = window.prompt("LSM Logical Session ID (leave empty to detach)", this.active.session_id || "")
         if (response === null) return
         const previousSessionId = this.active.session_id || null
-        this.active = await this.post<Conversation>("conversation-update", {
-          id: this.active.id, session_id: response.trim(),
+        const updated = await this.post<Conversation>("conversation-update", {
+          id, session_id: response.trim(),
         })
-        if ((this.active.session_id || null) !== previousSessionId) {
+        if (this.destroyed || this.showArchives || this.selectionEpoch !== epoch || this.active?.id !== id) return
+        this.active = updated
+        if ((updated.session_id || null) !== previousSessionId) {
           const reopen = !!this.bridge || !!this.frame
           await this.closeWorkspace()
+          if (this.destroyed || this.showArchives || this.selectionEpoch !== epoch || this.active?.id !== id) return
           if (reopen) await this.openWorkspace()
         }
         this.renderConversation()

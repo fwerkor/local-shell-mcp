@@ -236,10 +236,72 @@ def visible_tools(tools: object) -> list:
 
 
 def safe_tool_message(result: object) -> str:
+    """Keep actionable text/structured observations; never spend budget on base64 images.
+
+    Chat Completions tool messages are text-only. Large GUI screenshots are
+    retained in durable tool events, but opaque image bytes are not useful in
+    the model-facing tool string and can hide the state_id needed for gui_action.
+    """
     data = result.model_dump(by_alias=True, exclude_none=True)
-    # Never forward app tokens or host-only metadata to the model.
+    # MCP App metadata may contain authorization tokens.
     data.pop("_meta", None)
-    return json.dumps(data, ensure_ascii=False)[:MAX_TEXT]
+
+    def bounded(value: str, limit: int) -> str:
+        if len(value) <= limit:
+            return value
+        return value[:limit] + "\n[tool observation truncated; full event retained]"
+
+    # Reserve independent budgets for accessible text and structured state.
+    # Keep each segment JSON-valid rather than slicing an encoded response.
+    content = []
+    text_left = MAX_TEXT - 12_000
+    for item in data.get("content") or []:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("type")
+        if kind == "image":
+            content.append({
+                "type": "image", "mimeType": item.get("mimeType", ""),
+                "note": "Screenshot omitted from text-only context; tool event retains the image",
+            })
+        elif kind == "text":
+            value = str(item.get("text") or "")
+            allowance = max(0, text_left)
+            content.append({"type": "text", "text": bounded(value, allowance)})
+            text_left -= min(len(value), allowance)
+        elif kind == "resource":
+            resource = item.get("resource") or {}
+            if isinstance(resource, dict):
+                content.append({
+                    "type": "resource", "uri": resource.get("uri"),
+                    "text": bounded(str(resource.get("text") or ""), 4_000),
+                })
+        else:
+            content.append({"type": str(kind or "unknown"), "note": "Non-text content omitted"})
+    output = {"content": content}
+    if "isError" in data:
+        output["isError"] = data["isError"]
+    if "structuredContent" in data:
+        encoded = json.dumps(data["structuredContent"], ensure_ascii=False, default=str)
+        output["structuredContent"] = bounded(encoded, 10_000)
+
+    serialized = json.dumps(output, ensure_ascii=False)
+    # Account for JSON escaping and arbitrary numbers of content blocks.
+    # Reduce large values geometrically until the *serialized* result fits.
+    while len(serialized) > MAX_TEXT:
+        output["content"] = [
+            {**item, "text": bounded(item["text"], max(0, len(item["text"]) // 2))}
+            if item.get("type") == "text" and isinstance(item.get("text"), str)
+            else item
+            for item in output["content"][:16]
+        ]
+        if isinstance(output.get("structuredContent"), str):
+            previous = output["structuredContent"]
+            output["structuredContent"] = bounded(previous, len(previous) // 2)
+        if len(serialized) > MAX_TEXT and len(output["content"]) == 16:
+            output["content"] = output["content"][:8]
+        serialized = json.dumps(output, ensure_ascii=False)
+    return serialized
 
 
 async def call_mcp(

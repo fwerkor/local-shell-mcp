@@ -359,34 +359,47 @@ class HostedChatStore:
         from .hosted_chat import compact_history
         from .hosted_chat_context import DEFAULT_CONTEXT_WINDOW
 
-        key = self._key(subject, "conversations", _identifier(conversation_id))
+        cid = _identifier(conversation_id)
+        key = self._key(subject, "conversations", cid)
 
-        def work() -> dict:
-            # Hold the same cross-process record lock used by sends and deletes
-            # while obtaining the summary: no turn may race the summary cursor.
-            # File locks release on crash; Redis locks are actively renewed.
+        def snapshot() -> dict:
+            # Read under the normal cross-process record lock, but never hold
+            # it (or the store-wide guard) during a model network request.
             with self._record_lock(key):
-                if get_state_store().read_bytes(self._archive_key(subject, conversation_id)) is not None:
+                if get_state_store().read_bytes(self._archive_key(subject, cid)) is not None:
                     raise ValueError("Restore an archived conversation before compacting it")
                 record = self._read(key)
                 if record["status"] == "running":
                     raise ValueError("Stop the active turn before compacting")
-                profile = self.profile(subject, record["profile_id"], with_secret=True)
-                compacted = asyncio.run(compact_history(
-                    endpoint=profile["endpoint"], key=profile["api_key"],
-                    model=profile["model"], messages=record["messages"],
-                    context=record.get("context"),
-                    context_size=profile.get("context_window", DEFAULT_CONTEXT_WINDOW),
-                    session_id=record.get("session_id"), force=True,
-                ))
-                if compacted is None:
-                    raise ValueError("Not enough completed history to compact")
+                return record
+
+        before = await asyncio.to_thread(snapshot)
+        profile = await asyncio.to_thread(
+            self.profile, subject, before["profile_id"], with_secret=True
+        )
+        compacted = await compact_history(
+            endpoint=profile["endpoint"], key=profile["api_key"],
+            model=profile["model"], messages=before["messages"],
+            context=before.get("context"),
+            context_size=profile.get("context_window", DEFAULT_CONTEXT_WINDOW),
+            session_id=before.get("session_id"), force=True,
+        )
+        if compacted is None:
+            raise ValueError("Not enough completed history to compact")
+
+        def commit() -> dict:
+            with self._record_lock(key):
+                if get_state_store().read_bytes(self._archive_key(subject, cid)) is not None:
+                    raise ValueError("Conversation was archived during compact")
+                record = self._read(key)
+                if record != before:
+                    raise ValueError("Conversation changed during compact; please retry")
                 record["context"] = compacted
                 record["updated_at"] = time.time()
                 self._save(key, record)
                 return record
 
-        return await asyncio.to_thread(work)
+        return await asyncio.to_thread(commit)
 
     def delete_conversation(self, subject: str, conversation_id: str) -> None:
         cid = _identifier(conversation_id)
@@ -529,8 +542,8 @@ class HostedChatRunner:
             async def execute() -> None:
                 heartbeat_task = asyncio.create_task(heartbeat(asyncio.current_task()))
                 try:
-                    profile = hosted_chat_store.profile(
-                        subject, current["profile_id"], with_secret=True
+                    profile = await asyncio.to_thread(
+                        hosted_chat_store.profile, subject, current["profile_id"], with_secret=True
                     )
 
                     previous_events = 0

@@ -529,3 +529,72 @@ async def test_manual_compact_rejects_running_or_archived_and_preserves_context_
     store.archive_conversation("alice", chat["id"])
     with pytest.raises(ValueError, match="Restore"):
         await store.compact_conversation("alice", chat["id"])
+
+
+@pytest.mark.asyncio
+async def test_manual_compact_does_not_block_other_chats_or_overwrite_changed_record(store, monkeypatch):
+    from local_shell_mcp import hosted_chat
+
+    pid = store.put_profile("alice", profile_values())["id"]
+    first = store.create_conversation("alice", profile_id=pid)
+    second = store.create_conversation("alice", profile_id=pid)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_summary(**_kwargs):
+        started.set()
+        await release.wait()
+        return {"summary": "summary generated", "through": 1}
+
+    monkeypatch.setattr(hosted_chat, "compact_history", slow_summary)
+    pending = asyncio.create_task(store.compact_conversation("alice", first["id"]))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=2)
+        # A different conversation must still accept writes during a slow
+        # model request, including checkpoint and heartbeat writes.
+        changed_other = await asyncio.wait_for(asyncio.to_thread(
+            store.update_conversation, "alice", second["id"],
+            updater=lambda r: {**r, "title": "Updated concurrently"},
+        ), timeout=1)
+        assert changed_other["title"] == "Updated concurrently"
+        # An update to the compacted record itself must reject the stale recap.
+        await asyncio.to_thread(
+            store.update_conversation, "alice", first["id"],
+            updater=lambda r: {**r, "title": "A concurrent rename"},
+        )
+    finally:
+        release.set()
+    with pytest.raises(ValueError, match="changed during compact"):
+        await pending
+    assert store.conversation("alice", first["id"])["context"]["through"] == 0
+    assert store.conversation("alice", first["id"])["title"] == "A concurrent rename"
+
+
+@pytest.mark.asyncio
+async def test_runner_reads_profile_off_event_loop(store, monkeypatch):
+    import threading
+
+    profile_id = store.put_profile("alice", profile_values())["id"]
+    conversation = store.create_conversation("alice", profile_id=profile_id)
+    thread_id = threading.get_ident()
+    original_profile = store.profile
+    reads = []
+
+    def profile(subject, pid, **kwargs):
+        if kwargs.get("with_secret"):
+            reads.append(threading.get_ident())
+        return original_profile(subject, pid, **kwargs)
+
+    async def turn(**kwargs):
+        assert kwargs["model"] == "unit-model"
+
+    monkeypatch.setattr(store, "profile", profile)
+    monkeypatch.setattr(hosted_chat, "complete_turn", turn)
+    runner = HostedChatRunner()
+    await runner.start("alice", conversation["id"], "hello", "http://controller", "")
+    for _ in range(100):
+        if store.conversation("alice", conversation["id"])["status"] != "running":
+            break
+        await asyncio.sleep(0.01)
+    assert reads and reads[-1] != thread_id
+    assert store.conversation("alice", conversation["id"])["status"] == "idle"

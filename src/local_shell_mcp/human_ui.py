@@ -3312,7 +3312,7 @@ async def api_hosted_chat(request: Request) -> Response:
             if get_settings().auth_mode != "none" and not bearer.startswith("Bearer "):
                 raise HTTPException(status_code=401, detail="OAuth bearer token required")
             settings = get_settings()
-            host = "127.0.0.1" if settings.host in {"0.0.0.0", "::", "[::]"} else settings.host
+            host = "[::1]" if settings.host in {"::", "[::]"} else "127.0.0.1" if settings.host == "0.0.0.0" else settings.host
             if ":" in host and not host.startswith("["):
                 host = f"[{host}]"
             from .oauth import public_base_url
@@ -3332,7 +3332,7 @@ async def api_hosted_chat(request: Request) -> Response:
             if get_settings().auth_mode != "none" and not bearer.startswith("Bearer "):
                 raise HTTPException(status_code=401, detail="OAuth bearer token required")
             settings = get_settings()
-            host = "127.0.0.1" if settings.host in {"0.0.0.0", "::", "[::]"} else settings.host
+            host = "[::1]" if settings.host in {"::", "[::]"} else "127.0.0.1" if settings.host == "0.0.0.0" else settings.host
             if ":" in host and not host.startswith("["):
                 host = f"[{host}]"
             base_url = f"http://{host}:{settings.port}"

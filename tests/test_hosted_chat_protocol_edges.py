@@ -306,3 +306,66 @@ def test_long_running_mcp_timeout_tracks_remote_budget(monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_JOB_TIMEOUT_S", "5400")
     get_settings.cache_clear()
     assert hosted_chat._mcp_tool_timeout_seconds() >= 5460
+
+
+def test_gui_image_results_preserve_accessibility_state_and_valid_json():
+    import json
+
+    class GuiResult:
+        def model_dump(self, **_kwargs):
+            return {
+                "content": [
+                    {"type": "image", "mimeType": "image/png", "data": "ABCD" * 75000},
+                    {"type": "text", "text": 'state_id=state-123; button=Submit; role=button'},
+                ],
+                "structuredContent": {"state_id": "state-123", "elements": [{"role": "button", "name": "Submit"}]},
+                "_meta": {"ui": {"secret": "private oauth key"}},
+                "isError": False,
+            }
+
+    visible = hosted_chat.safe_tool_message(GuiResult())
+    assert len(visible) <= hosted_chat.MAX_TEXT
+    assert "state-123" in visible
+    assert "button=Submit" in visible
+    assert "private oauth key" not in visible
+    assert "ABCD" * 25 not in visible
+    parsed = json.loads(visible)
+    assert parsed["content"][0]["type"] == "image"
+    assert "data" not in parsed["content"][0]
+    assert "Screenshot omitted" in parsed["content"][0]["note"]
+
+
+def test_oversized_tool_text_preserves_bounded_observation_as_json():
+    import json
+
+    class VerboseResult:
+        def model_dump(self, **_kwargs):
+            return {
+                "content": [
+                    {"type": "text", "text": "first: state-id=a; " + "x" * 90000},
+                    {"type": "text", "text": "secondary"},
+                ],
+                "isError": False,
+            }
+
+    message = hosted_chat.safe_tool_message(VerboseResult())
+    assert len(message) <= hosted_chat.MAX_TEXT
+    parsed = json.loads(message)
+    assert "state-id=a" in parsed["content"][0]["text"]
+    assert "truncated" in parsed["content"][0]["text"]
+    assert parsed["content"][1]["type"] == "text"
+
+
+def test_large_escaped_structured_observation_stays_valid_and_bounded():
+    import json
+
+    class Result:
+        def model_dump(self, **_kwargs):
+            return {
+                "content": [{"type": "text", "text": "\\" * 100_000}] * 100,
+                "structuredContent": {"metadata": "\t" * 100_000},
+            }
+
+    result = hosted_chat.safe_tool_message(Result())
+    assert len(result) <= hosted_chat.MAX_TEXT
+    assert json.loads(result)["content"]

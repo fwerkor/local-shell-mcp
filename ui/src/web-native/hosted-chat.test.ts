@@ -102,3 +102,83 @@ test("manual compact invokes endpoint and reloads same conversation without chan
   await controller.action("compact")
   expect(events.length).toBe(before)
 })
+
+test("late session attachment response cannot reselect an earlier chat", async () => {
+  const controller: any = new HostedChatController({} as any)
+  const previousWindow = (globalThis as any).window
+  ;(globalThis as any).window = { prompt: () => "lsm-session-a" }
+  try {
+    controller.active = { id: "chat-a", session_id: "old", status: "idle" }
+    let finish!: (record: any) => void
+    controller.post = () => new Promise((resolve) => { finish = resolve })
+    controller.renderConversation = () => undefined
+    controller.closeWorkspace = async () => { throw new Error("late session response must not close workspace") }
+    const pending = controller.action("session")
+    controller.selectionEpoch++
+    controller.active = { id: "chat-b", session_id: "session-b", status: "idle" }
+    finish({ id: "chat-a", session_id: "lsm-session-a" })
+    await pending
+    expect(controller.active.id).toBe("chat-b")
+    expect(controller.active.session_id).toBe("session-b")
+  } finally { (globalThis as any).window = previousWindow }
+})
+
+test("conversation selection discards responses that arrive in reverse order", async () => {
+  const controller: any = new HostedChatController({} as any)
+  const replies = new Map<string, (value: any) => void>()
+  const rendered: string[] = []
+  controller.root = {} // Rendering methods are stubbed to test only selection ordering.
+  controller.get = (_action: string, query: string) => new Promise((resolve) => {
+    replies.set(new URLSearchParams(query.slice(1)).get("id")!, resolve)
+  })
+  controller.closeWorkspace = async () => undefined
+  controller.renderConversation = () => { rendered.push(controller.active?.id || "none") }
+  controller.renderList = () => undefined
+  controller.startPolling = () => undefined
+  const selectA = controller.select("chat-a")
+  const selectB = controller.select("chat-b")
+  replies.get("chat-b")!({ id: "chat-b", status: "idle" })
+  await selectB
+  replies.get("chat-a")!({ id: "chat-a", status: "idle" })
+  await selectA
+  expect(controller.active.id).toBe("chat-b")
+  expect(rendered.at(-1)).toBe("chat-b")
+})
+
+test("conversation selection rechecks freshness after workspace teardown", async () => {
+  const controller: any = new HostedChatController({} as any)
+  controller.active = { id: "old", status: "idle" }
+  let finishClose!: () => void
+  let closes = 0
+  controller.closeWorkspace = () => ++closes === 1
+    ? new Promise<void>((resolve) => { finishClose = resolve }) : Promise.resolve()
+  controller.get = async (_action: string, query: string) => ({ id: query.slice(4), status: "idle" })
+  controller.renderConversation = () => undefined
+  controller.renderList = () => undefined
+  controller.startPolling = () => undefined
+  const selectA = controller.select("chat-a")
+  await Promise.resolve()
+  const selectB = controller.select("chat-b")
+  await Promise.resolve()
+  finishClose()
+  await selectB
+  await selectA
+  expect(controller.active.id).toBe("chat-b")
+})
+
+test("late reload cannot steal an in-flight manual conversation selection", async () => {
+  const controller: any = new HostedChatController({} as any)
+  let release!: (value: any) => void
+  controller.get = async (action: string) => action === "profiles"
+    ? new Promise((resolve) => { release = resolve })
+    : action === "conversations" ? [{ id: "chat-a", title: "Old", status: "idle", profile_id: "p" }] : []
+  controller.renderList = () => undefined
+  controller.renderConversation = () => undefined
+  const selected: string[] = []
+  controller.select = async (id: string) => { selected.push(id) }
+  const reload = controller.reload()
+  ++controller.selectionEpoch  // The user selected another chat while reload was pending.
+  release([])
+  await reload
+  expect(selected).toEqual([])
+})
