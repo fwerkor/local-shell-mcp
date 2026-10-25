@@ -165,6 +165,7 @@ class HostedChatStore:
 
     def put_profile(self, subject: str, values: dict) -> dict:
         from .hosted_chat import validate_api_key, validate_endpoint
+        from .hosted_chat_context import DEFAULT_CONTEXT_WINDOW, context_window
 
         profile_id = _identifier(str(values.get("id") or f"p_{uuid.uuid4().hex}"))
         key = self._key(subject, "profiles", profile_id)
@@ -185,11 +186,13 @@ class HostedChatStore:
                 encrypted = _encrypt(secret, f"{subject}:{profile_id}")
             else:
                 encrypted = previous["encrypted_key"]
+            window = context_window(values.get("context_window", previous.get("context_window", DEFAULT_CONTEXT_WINDOW) if previous else DEFAULT_CONTEXT_WINDOW))
             item = {
                 "id": profile_id,
                 "name": name,
                 "model": model,
                 "endpoint": endpoint,
+                "context_window": window,
                 "encrypted_key": encrypted,
                 "created_at": previous["created_at"] if previous else now,
                 "updated_at": now,
@@ -233,7 +236,7 @@ class HostedChatStore:
 
     @staticmethod
     def _summary(record: dict) -> dict:
-        return {k: v for k, v in record.items() if k not in {"messages", "events"}}
+        return {k: v for k, v in record.items() if k not in {"messages", "events", "context"}}
 
     def archived_conversations(self, subject: str) -> list[dict]:
         result = []
@@ -329,6 +332,7 @@ class HostedChatStore:
             "session_id": session_id,
             "messages": [],
             "events": [],
+            "context": {"summary": "", "through": 0},
             "status": "idle",
             "error": None,
             "created_at": now,
@@ -348,6 +352,41 @@ class HostedChatStore:
             updated["updated_at"] = time.time()
             self._save(key, updated)
             return updated
+
+    async def compact_conversation(self, subject: str, conversation_id: str) -> dict:
+        import asyncio
+
+        from .hosted_chat import compact_history
+        from .hosted_chat_context import DEFAULT_CONTEXT_WINDOW
+
+        key = self._key(subject, "conversations", _identifier(conversation_id))
+
+        def work() -> dict:
+            # Hold the same cross-process record lock used by sends and deletes
+            # while obtaining the summary: no turn may race the summary cursor.
+            # File locks release on crash; Redis locks are actively renewed.
+            with self._record_lock(key):
+                if get_state_store().read_bytes(self._archive_key(subject, conversation_id)) is not None:
+                    raise ValueError("Restore an archived conversation before compacting it")
+                record = self._read(key)
+                if record["status"] == "running":
+                    raise ValueError("Stop the active turn before compacting")
+                profile = self.profile(subject, record["profile_id"], with_secret=True)
+                compacted = asyncio.run(compact_history(
+                    endpoint=profile["endpoint"], key=profile["api_key"],
+                    model=profile["model"], messages=record["messages"],
+                    context=record.get("context"),
+                    context_size=profile.get("context_window", DEFAULT_CONTEXT_WINDOW),
+                    session_id=record.get("session_id"), force=True,
+                ))
+                if compacted is None:
+                    raise ValueError("Not enough completed history to compact")
+                record["context"] = compacted
+                record["updated_at"] = time.time()
+                self._save(key, record)
+                return record
+
+        return await asyncio.to_thread(work)
 
     def delete_conversation(self, subject: str, conversation_id: str) -> None:
         cid = _identifier(conversation_id)
@@ -508,6 +547,13 @@ class HostedChatRunner:
                         await asyncio.to_thread(owned_update, save)
                         previous_events = len(events)
 
+                    async def save_context(compacted: dict) -> None:
+                        await asyncio.to_thread(
+                            owned_update, lambda r: {**r, "context": compacted}
+                        )
+
+                    from .hosted_chat_context import DEFAULT_CONTEXT_WINDOW
+
                     await complete_turn(
                         base_url=base_url,
                         bearer=bearer,
@@ -515,6 +561,9 @@ class HostedChatRunner:
                         key=profile["api_key"],
                         model=profile["model"],
                         messages=current["messages"],
+                        context=current.get("context"),
+                        context_size=profile.get("context_window", DEFAULT_CONTEXT_WINDOW),
+                        context_checkpoint=save_context,
                         tools_enabled=True,
                         session_id=current.get("session_id"),
                         checkpoint=checkpoint,

@@ -705,3 +705,9 @@ button.summary-card { cursor: pointer; }
 .hosted-archive-filter { width:calc(100% - 24px); min-width:0; margin:8px 12px; padding:9px 10px; border:1px solid #d7dceb; border-radius:8px; background:#fff; color:#253048; font-size:12px; }
 .hosted-archive-filter:focus { outline:2px solid #8075e7; outline-offset:1px; }
 .hosted-archive-filter[hidden] { display:none; }
+
+/* Hosted Chat compact checkpoints are stored separately from raw history. */
+.hosted-context-info { padding:7px 14px; border-bottom:1px solid #e3e7ef; color:#768096; font-size:11px; }
+.hosted-context-info[hidden] { display:none; }
+.hosted-context-info summary { cursor:pointer; }
+.hosted-context-info pre { max-height:220px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }

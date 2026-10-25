@@ -1,11 +1,11 @@
 import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/app-bridge"
 import { BaseController, escapeHtml, type NativePageContext } from "./common"
 
-type Profile = { id: string; name: string; model: string; endpoint: string; has_key: boolean }
+type Profile = { id: string; name: string; model: string; endpoint: string; has_key: boolean; context_window?: number }
 type Message = { role: "user" | "assistant" | "tool"; content?: string | null; tool_calls?: unknown[] }
 type Conversation = {
   id: string; title: string; profile_id: string; session_id?: string | null;
-  status: string; archived_at?: number; error?: string | null; messages: Message[]; events: { type: string; name?: string; error?: boolean; call_id?: string; result?: { content?: { type?: string; text?: string }[] } }[]
+  status: string; archived_at?: number; error?: string | null; context?: { summary: string; through: number }; messages: Message[]; events: { type: string; name?: string; error?: boolean; call_id?: string; result?: { content?: { type?: string; text?: string }[] } }[]
 }
 type Summary = Pick<Conversation, "id" | "title" | "profile_id" | "session_id" | "status" | "archived_at">
 
@@ -41,11 +41,13 @@ export class HostedChatController extends BaseController {
           <div class="hosted-toolbar-actions">
             <button type="button" data-chat-action="session">Attach LSM Session</button>
             <button type="button" data-chat-action="workspace">Live Workspace</button>
+            <button type="button" data-chat-action="compact">Compact</button>
             <button type="button" data-chat-action="archive">Archive</button>
             <button type="button" data-chat-action="restore" hidden>Restore</button>
             <button type="button" data-chat-action="delete">Delete</button>
           </div>
         </div>
+        <div class="hosted-context-info" data-chat-context-info hidden></div>
         <div class="hosted-messages" data-chat-messages aria-live="polite"></div>
         <form class="hosted-composer" data-chat-form>
           <textarea data-chat-input rows="3" placeholder="Ask anything or use LSM tools…"></textarea>
@@ -66,6 +68,8 @@ export class HostedChatController extends BaseController {
           <label>Profile name <input name="name" required maxlength="120" placeholder="My model"></label>
           <label>API endpoint <input name="endpoint" type="url" required placeholder="https://api.example.com/v1"></label>
           <label>Model ID <input name="model" required placeholder="model-name"></label>
+          <label>Context window (tokens) <input name="context_window" type="number" required min="8192" max="1000000" step="1" value="32768"></label>
+          <p>Context usage is conservatively estimated. Auto-compact starts near 80% of this window and preserves the full original history.</p>
           <label>API Key <input name="api_key" type="password" autocomplete="off" placeholder="Enter key or leave blank to retain"></label>
           <p>API keys are encrypted in server state; they are never returned to this browser.</p>
           <div class="hosted-dialog-actions">
@@ -181,10 +185,22 @@ export class HostedChatController extends BaseController {
         (this.showArchives ? '<p class="hosted-running">Archived · restore this conversation to continue.</p>' : active.status === "running" ? '<div class="hosted-running">Agent running · waiting for model or tools…</div>' : "") +
         (active.error ? `<p class="hosted-error">${escapeHtml(active.error)}</p>` : "")
     }
+    const contextInfo = this.root.querySelector<HTMLElement>("[data-chat-context-info]")!
+    contextInfo.hidden = !active || this.showArchives
+    if (active && !this.showArchives) {
+      const through = active.context?.through || 0
+      contextInfo.innerHTML = through
+        ? `<details><summary>Context compacted · ${through} older messages summarized</summary><pre>${escapeHtml(active.context?.summary || "")}</pre></details>`
+        : '<span>Context: full recent transcript · automatic compact enabled</span>'
+    }
     const status = this.root.querySelector<HTMLElement>("[data-chat-status]")!
     status.textContent = active?.session_id ? `LSM: ${active.session_id}` : active?.status || "No session attached"
     const stop = this.root.querySelector<HTMLButtonElement>('[data-chat-action="stop"]')!
     stop.hidden = this.showArchives || active?.status !== "running"
+    const compact = this.root.querySelector<HTMLButtonElement>('[data-chat-action="compact"]')!
+    compact.hidden = this.showArchives || !active
+    compact.disabled = this.busy || active?.status === "running"
+    compact.textContent = this.busy ? "Working…" : "Compact"
     this.root.querySelector<HTMLButtonElement>('[data-chat-action="archive"]')!.hidden = this.showArchives || !active
     this.root.querySelector<HTMLButtonElement>('[data-chat-action="archive"]')!.disabled = active?.status === "running"
     this.root.querySelector<HTMLButtonElement>('[data-chat-action="restore"]')!.hidden = !this.showArchives || !active
@@ -293,6 +309,14 @@ export class HostedChatController extends BaseController {
         await this.closeWorkspace()
         this.active = null
         await this.reload()
+      } else if (action === "compact" && !this.showArchives && !this.busy && this.active.status !== "running") {
+        const cid = this.active.id
+        this.busy = true
+        this.renderConversation()
+        try {
+          await this.post("conversation-compact", { id: cid })
+          if (this.active?.id === cid && !this.showArchives) await this.select(cid)
+        } finally { this.busy = false; this.renderConversation() }
       } else if (action === "archive" && !this.showArchives) {
         const cid = this.active.id
         await this.post("conversation-archive", { id: cid })
@@ -357,6 +381,7 @@ export class HostedChatController extends BaseController {
     for (const name of ["name", "model", "endpoint"] as const) {
       (form.elements.namedItem(name) as HTMLInputElement).value = profile?.[name] || ""
     }
+    (form.elements.namedItem("context_window") as HTMLInputElement).value = `${profile?.context_window ?? 32768}`;
     (form.elements.namedItem("api_key") as HTMLInputElement).value = "";
     (form.elements.namedItem("api_key") as HTMLInputElement).required = false;
     dialog.querySelector<HTMLButtonElement>('[data-chat-action="profile-delete"]')!.disabled = !profile
@@ -371,7 +396,8 @@ export class HostedChatController extends BaseController {
       payload[name] = (form.elements.namedItem(name) as HTMLInputElement).value.trim()
     }
     try {
-      await this.post("profile-save", { ...payload, ...(id ? { id } : {}) })
+      const windowSize = Number((form.elements.namedItem("context_window") as HTMLInputElement).value)
+      await this.post("profile-save", { ...payload, context_window: windowSize, ...(id ? { id } : {}) })
       dialog.close()
       await this.reload()
     } catch (error) { this.notifyError(error) }

@@ -294,9 +294,10 @@ async def test_turn_bounds_model_key_and_history(monkeypatch):
         base_url="http://controller", bearer="", endpoint="https://example.org/v1",
         key="key", model="model", messages=history, tools_enabled=False, checkpoint=checkpoint,
     )
-    assert len(result["messages"]) == hosted_chat.MAX_MESSAGES + 1
+    assert len(result["messages"]) == 101
     assert len(checkpoints[-1][0]) == 101
-    assert len(requests[0]["messages"]) <= hosted_chat.MAX_MESSAGES + 1
+    # A hard 64-message cap is no longer used; compact is token-budget driven.
+    assert len(requests[0]["messages"]) == 101
     assert session.calls == []
     assert "tools" not in requests[0]
 

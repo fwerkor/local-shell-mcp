@@ -473,3 +473,59 @@ def test_archive_metadata_write_failure_keeps_compressed_record_recoverable(stor
     monkeypatch.setattr(backend, "write_bytes", original_write)
     store.restore_conversation("alice", chat["id"])
     assert store.conversation("alice", chat["id"])["id"] == chat["id"]
+
+
+@pytest.mark.asyncio
+async def test_manual_compact_stores_cursor_without_modifying_original_history(store, monkeypatch):
+    from local_shell_mcp import hosted_chat
+
+    pid = store.put_profile("alice", profile_values(context_window=16384))["id"]
+    chat = store.create_conversation("alice", profile_id=pid)
+    original = [{"role": "user", "content": f"Task {i}"} for i in range(5)]
+    store.update_conversation("alice", chat["id"], updater=lambda r: {**r, "messages": original})
+    observed = []
+
+    async def compact_history(**kwargs):
+        observed.append(kwargs)
+        return {"summary": "Task status and paths", "through": 3}
+
+    monkeypatch.setattr(hosted_chat, "compact_history", compact_history)
+    result = await store.compact_conversation("alice", chat["id"])
+    assert result["messages"] == original
+    assert result["context"] == {"summary": "Task status and paths", "through": 3}
+    assert observed[0]["context_size"] == 16384
+    assert observed[0]["force"] is True
+    assert "api_key" not in store.profile("alice", pid)
+    loaded = HostedChatStore(prefix=store.prefix).conversation("alice", chat["id"])
+    assert loaded["context"] == result["context"]
+    assert "context" not in store.conversations("alice")[0]
+    # New tokens and model overrides still allow per-profile configuration.
+    saved = store.put_profile("alice", profile_values(id=pid, api_key="", context_window=65536))
+    assert saved["context_window"] == 65536
+    for value in (True, "32768", 8191, 1000001):
+        with pytest.raises(ValueError, match="Context window"):
+            store.put_profile("alice", profile_values(id=pid, api_key="", context_window=value))
+
+
+@pytest.mark.asyncio
+async def test_manual_compact_rejects_running_or_archived_and_preserves_context_on_error(store, monkeypatch):
+    from local_shell_mcp import hosted_chat
+
+    pid = store.put_profile("alice", profile_values())["id"]
+    chat = store.create_conversation("alice", profile_id=pid)
+    store.update_conversation("alice", chat["id"], updater=lambda r: {**r, "status": "running"})
+    with pytest.raises(ValueError, match="Stop"):
+        await store.compact_conversation("alice", chat["id"])
+    store.update_conversation("alice", chat["id"], updater=lambda r: {**r, "status": "idle"})
+
+    async def fail(**kwargs):
+        raise RuntimeError("model provider down")
+
+    monkeypatch.setattr(hosted_chat, "compact_history", fail)
+    baseline = store.conversation("alice", chat["id"])
+    with pytest.raises(RuntimeError):
+        await store.compact_conversation("alice", chat["id"])
+    assert store.conversation("alice", chat["id"]) == baseline
+    store.archive_conversation("alice", chat["id"])
+    with pytest.raises(ValueError, match="Restore"):
+        await store.compact_conversation("alice", chat["id"])

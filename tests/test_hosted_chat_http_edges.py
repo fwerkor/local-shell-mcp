@@ -292,3 +292,29 @@ def test_http_cannot_archive_running_conversation(api, monkeypatch):
     cid = create_chat(client, pid)
     store.update_conversation("alice", cid, updater=lambda r: {**r, "status": "running", "lease_until": time.time() + 60})
     assert client.post("/api/ui/hosted-chat/conversation-archive", json={"id": cid}).status_code == 400
+
+
+def test_http_manual_compact_and_context_window_validation(api, monkeypatch):
+    client, store, _runner, _ = api
+    monkeypatch.setattr(human_ui, "_logical_session_subject", lambda *_, **__: "alice")
+    pid = create_profile(client)
+    cid = create_chat(client, pid)
+    for invalid in (True, 4000, 1000001, "65536"):
+        response = client.post("/api/ui/hosted-chat/profile-save", json={
+            "id": pid, "name": "Example", "model": "model", "endpoint": "https://example.org/v1",
+            "api_key": "", "context_window": invalid,
+        })
+        assert response.status_code == 400, response.text
+
+    async def compact(subject, conversation_id):
+        assert subject == "alice" and conversation_id == cid
+        return store.update_conversation(
+            "alice", cid,
+            updater=lambda r: {**r, "context": {"summary": "New code summary", "through": 2}}
+        )
+    monkeypatch.setattr(store, "compact_conversation", compact)
+    response = client.post("/api/ui/hosted-chat/conversation-compact", json={"id": cid})
+    assert response.status_code == 200, response.text
+    full = client.get(f"/api/ui/hosted-chat/conversation?id={cid}").json()["data"]
+    assert full["context"]["summary"] == "New code summary"
+    assert "context" not in client.get("/api/ui/hosted-chat/conversations").json()["data"][0]

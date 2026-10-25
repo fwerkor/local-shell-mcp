@@ -3263,6 +3263,8 @@ async def api_hosted_chat(request: Request) -> Response:
                 hosted_chat_store.create_conversation, subject,
                 profile_id=str(data["profile_id"]), session_id=session_id,
             )
+        elif action == "conversation-compact":
+            result = await hosted_chat_store.compact_conversation(subject, str(data["id"]))
         elif action == "conversation-archive":
             cid = str(data["id"])
             current = await asyncio.to_thread(hosted_chat_runner.reconcile, subject, cid)

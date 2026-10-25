@@ -78,3 +78,27 @@ test("archive and restore actions use distinct endpoints and preserve conversati
   expect(controller.showArchives).toBe(false)
   expect(selected).toEqual(["chat-1"])
 })
+
+test("manual compact invokes endpoint and reloads same conversation without changing other selections", async () => {
+  const controller: any = new HostedChatController({} as any)
+  controller.active = { id: "chat-1", status: "idle", context: { summary: "", through: 0 } }
+  controller.showArchives = false
+  const events: string[] = []
+  controller.renderConversation = () => { events.push(`render:${controller.busy}`) }
+  controller.post = async (action: string, payload: { id: string }) => {
+    events.push(`${action}:${payload.id}`)
+    expect(action).toBe("conversation-compact")
+    expect(payload.id).toBe("chat-1")
+    return {}
+  }
+  controller.select = async (id: string) => { events.push(`select:${id}`) }
+  await controller.action("compact")
+  expect(events).toContain("conversation-compact:chat-1")
+  expect(events).toContain("select:chat-1")
+  expect(controller.busy).toBe(false)
+  expect(events).toContain("render:true")
+  controller.showArchives = true
+  const before = events.length
+  await controller.action("compact")
+  expect(events.length).toBe(before)
+})
