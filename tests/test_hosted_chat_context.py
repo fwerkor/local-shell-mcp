@@ -15,6 +15,19 @@ from local_shell_mcp.hosted_chat_context import (
     estimate_tokens,
     validate_context,
 )
+from local_shell_mcp.settings import get_settings
+
+
+@pytest.fixture(autouse=True)
+def isolated_settings(monkeypatch, tmp_path):
+    # CI runs as an unprivileged user; never create the default /workspace.
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path / "workspace"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_BACKEND", "file")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 def test_context_window_validation_and_estimator():
