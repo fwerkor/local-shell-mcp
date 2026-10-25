@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: f2dd1c4fffcc9783c739a12868fbcfa0023e0e3a783c8ba929f84107e3959e9a -->
+<!-- i18n-source-sha256: 53d1b81800534bc6d5334883b7de74660c988088c66f492ddbd68aced8797379 -->
 # Hostowany czat (opcjonalnie)
 
 Hosted Chat to hostowany samodzielnie klient czatu BYOK i aplikacji MCP zintegrowany z interfejsem LSM. Nie jest to **nie** tryb sesji logicznej: konwersacje mają niezależne tożsamości i opcjonalnie mogą dołączać istniejącą sesję logiczną LSM. ChatGPT i inni klienci zewnętrzni kontynuują pracę z tymi samymi sesjami i narzędziami LSM.
@@ -40,6 +40,14 @@ Nie włączaj tej opcji na niezaufanym kontrolerze wielu użytkowników, chyba �
 Utwórz rozmowę, korzystając z zapisanego profilu modelki. Każda przesłana tura staje się zadaniem w tle należącym do serwera; zamknięcie przeglądarki nie anuluje zadania. Ukończony tekst i wywołania narzędzi są trwale sprawdzane pomiędzy krokami modelu/narzędzia. Zatrzymaj się wyraźnie, aby przerwać. Po ponownym uruchomieniu kontrolera przerwane przebiegi są oznaczone jako takie i można je kontynuować w nowej turze, ale **wywołania narzędzi o nieznanym wyniku nigdy nie są automatycznie odtwarzane**.
 
 Cała historia wiadomości rozmowy jest przechowywana w pamięci. Do modelu wysyłane jest jednocześnie tylko ograniczone ostatnie okno, aby kontrolować rozmiar kontekstu. Wywołania narzędzi są wysyłane przez uwierzytelniony punkt końcowy MCP LSM, zachowując wszystkie zwykłe uprawnienia narzędzi i zachowanie audytu/weryfikacji wstępnej.
+
+Archiwizacja usuwa rozmowę ze zwykłej listy i zapisuje ją jako `.json.zst` przy użyciu istniejącego kodeka zstd z Audit. Archiwum nie trafia do normalnego indeksu wyszukiwania. W **Archived conversations** można szukać po tytule, czytać bez edycji, przywracać i usuwać trwale. Najpierw zapisywana jest nowa kopia, aby zapobiec utracie danych.
+
+### Długie rozmowy i kompresja kontekstu
+
+Pełna historia wiadomości i narzędzi pozostaje na serwerze. Okno kontekstu konfiguruje się w profilu modelu: domyślnie **32 768 tokenów**, zakres 8 192–1 000 000. Ostrożne oszacowanie na podstawie UTF-8 uwzględnia definicje narzędzi. Przy około **80%** tego limitu ten sam model podsumowuje starsze zakończone tury, zachowując cele, ograniczenia, decyzje, pliki, wyniki i zadania do wykonania. Podsumowanie jest przechowywane osobno, a model otrzymuje je wraz z niedawnymi oryginalnymi wiadomościami.
+
+Budżet jest sprawdzany także po użyciu narzędzi. **Compact** umożliwia ręczne skrócenie kontekstu poza aktywną turą. Błąd nie zmienia poprzedniego podsumowania ani historii. Liczba tokenów jest przybliżona; zbyt długa bieżąca tura zostanie odrzucona zamiast cicho ucięta.
 
 Otwórz **Live Workspace**, aby wyrenderować istniejący zasób aplikacji MCP `workspace_open` LSM w osadzonym widoku. Host korzysta z mostu `@modelcontextprotocol/ext-apps` na potrzeby cyklu życia aplikacji, odnawiania poświadczeń, wywołań narzędzi i działań między człowiekiem a agentem. Nie zaimplementowano drugiego menedżera plików, terminala, interfejsu audytu ani zadania.
 

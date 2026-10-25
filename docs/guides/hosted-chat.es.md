@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: f2dd1c4fffcc9783c739a12868fbcfa0023e0e3a783c8ba929f84107e3959e9a -->
+<!-- i18n-source-sha256: 53d1b81800534bc6d5334883b7de74660c988088c66f492ddbd68aced8797379 -->
 # Chat alojado (opcional)
 
 Hosted Chat es un cliente de aplicaciones MCP y chat BYOK autohospedado integrado en la interfaz humana de LSM. **No** es un modo de sesión lógica: las conversaciones tienen identidades independientes y, opcionalmente, pueden adjuntar una sesión lógica LSM existente. ChatGPT y otros clientes externos continúan trabajando con las mismas sesiones y herramientas de LSM.
@@ -40,6 +40,14 @@ No habilite esto en un controlador multiusuario que no sea de confianza a menos 
 Cree una conversación utilizando un perfil de modelo guardado. Cada turno enviado se convierte en una tarea en segundo plano propiedad del servidor; cerrar el navegador no cancela la tarea. El texto completo y las llamadas a herramientas se controlan de forma duradera entre los pasos del modelo/herramienta. Deténgase explícitamente para interrumpir. Al reiniciar el controlador, las ejecuciones interrumpidas se marcan como tales y pueden continuar en un nuevo turno, pero **las llamadas a herramientas con resultados desconocidos nunca se repiten automáticamente**.
 
 Todo el historial de mensajes de la conversación se conserva en el almacenamiento. Solo se envía al modelo una ventana reciente limitada a la vez para controlar el tamaño del contexto. Las llamadas a herramientas se envían a través del punto final MCP autenticado de LSM, preservando todos los permisos ordinarios de las herramientas y el comportamiento de auditoría/verificación previa.
+
+Archivar retira las conversaciones de la lista habitual y las guarda como `.json.zst` mediante el códec zstd ya usado por Audit. No aparecen en el índice de búsqueda normal. En **Archived conversations** se pueden localizar por título, consultar en modo de solo lectura, restaurar o borrar definitivamente. Primero se escribe la copia nueva para evitar pérdida de datos.
+
+### Conversaciones largas y compactación del contexto
+
+El historial completo de mensajes y herramientas permanece en el servidor. Cada perfil de modelo permite configurar la ventana de contexto: **32.768 tokens** por defecto, entre 8.192 y 1.000.000. Una estimación prudente basada en UTF-8 incluye las definiciones de herramientas; cerca del **80 %** se resume con el mismo modelo el historial de turnos completos anteriores. El resumen conserva objetivos, restricciones, decisiones, archivos, resultados y tareas pendientes, y se guarda separado del historial original. El modelo recibe el resumen y los mensajes recientes.
+
+El presupuesto vuelve a comprobarse después de las herramientas. **Compact** activa la compactación manual si no hay un turno en ejecución. Los errores dejan intactos el resumen anterior y todos los mensajes. El cálculo de tokens es aproximado; los turnos actuales demasiado grandes se rechazan sin truncamiento silencioso.
 
 Abra **Live Workspace** para representar el recurso de aplicaciones MCP `workspace_open` existente de LSM dentro de una vista incrustada. El host utiliza el puente `@modelcontextprotocol/ext-apps` para el ciclo de vida de la aplicación, la renovación de credenciales, las llamadas a herramientas y las acciones de persona a agente. No se implementa ningún segundo administrador de archivos, terminal, auditoría o interfaz de usuario de trabajo.
 

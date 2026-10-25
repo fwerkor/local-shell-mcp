@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: f2dd1c4fffcc9783c739a12868fbcfa0023e0e3a783c8ba929f84107e3959e9a -->
+<!-- i18n-source-sha256: 53d1b81800534bc6d5334883b7de74660c988088c66f492ddbd68aced8797379 -->
 # Bate-papo hospedado (opcional)
 
 O Hosted Chat é um cliente de bate-papo BYOK e aplicativos MCP auto-hospedado integrado à interface humana do LSM. **não** é um modo de Sessão Lógica: as conversas têm identidades independentes e podem opcionalmente anexar uma Sessão Lógica LSM existente. ChatGPT e outros clientes externos continuam trabalhando com as mesmas sessões e ferramentas LSM.
@@ -40,6 +40,14 @@ Não habilite isso em um controlador multiusuário não confiável, a menos que 
 Crie uma conversa usando um perfil de modelo salvo. Cada turno enviado torna-se uma tarefa em segundo plano de propriedade do servidor; fechar o navegador não cancela a tarefa. O texto concluído e as chamadas de ferramentas são verificados de forma duradoura entre as etapas do modelo/ferramenta. Pare explicitamente para interromper. Na reinicialização do controlador, as execuções interrompidas são marcadas como tal e podem ser continuadas em um novo turno, mas **as chamadas de ferramenta com resultado desconhecido nunca são reproduzidas automaticamente**.
 
 Todo o histórico de mensagens da conversa é mantido no armazenamento. Apenas uma janela recente limitada é enviada ao modelo de uma só vez para controlar o tamanho do contexto. As chamadas de ferramenta são enviadas através do endpoint MCP autenticado do LSM, preservando todas as permissões comuns da ferramenta e comportamento de auditoria/preflight.
+
+Arquivar remove conversas da lista normal e as grava como `.json.zst` com o zstd já usado pelo Audit. Elas ficam fora do índice de pesquisa convencional. Em **Archived conversations**, é possível procurar por título, ler sem editar, restaurar ou apagar permanentemente. A nova cópia é gravada antes de remover a anterior para evitar perda de dados.
+
+### Conversas longas e compactação do contexto
+
+Todo o histórico de mensagens e ferramentas permanece no servidor. O perfil do modelo permite configurar a janela de contexto: **32.768 tokens** por padrão, entre 8.192 e 1.000.000. A estimativa conservadora com UTF-8 inclui as definições de ferramentas. Perto de **80%** da janela, o mesmo modelo resume turnos anteriores concluídos, preservando metas, restrições, decisões, arquivos, resultados e pendências. O resumo fica salvo separadamente; o modelo recebe o resumo e as mensagens recentes.
+
+O orçamento é recalculado após o uso de ferramentas. **Compact** inicia a compactação manual fora de um turno em execução. Falhas não alteram o histórico nem o resumo anterior. A contagem de tokens é aproximada; turnos atuais grandes demais são recusados sem truncamento silencioso.
 
 Abra o **Live Workspace** para renderizar o recurso `workspace_open` MCP Apps existente do LSM dentro de uma visualização incorporada. O host usa a ponte `@modelcontextprotocol/ext-apps` para ciclo de vida do aplicativo, renovação de credenciais, chamadas de ferramentas e ações entre humanos e agentes. Nenhum segundo gerenciador de arquivos, terminal, auditoria ou UI de trabalho é implementado.
 

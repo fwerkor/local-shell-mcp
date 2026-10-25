@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: f2dd1c4fffcc9783c739a12868fbcfa0023e0e3a783c8ba929f84107e3959e9a -->
+<!-- i18n-source-sha256: 53d1b81800534bc6d5334883b7de74660c988088c66f492ddbd68aced8797379 -->
 # Trò chuyện được lưu trữ (tùy chọn)
 
 Trò chuyện được lưu trữ là ứng dụng trò chuyện BYOK và ứng dụng MCP Apps tự lưu trữ, được tích hợp vào giao diện con người của LSM. Đây **không phải** là chế độ Phiên logic: các cuộc hội thoại có danh tính độc lập và có thể tùy ý đính kèm Phiên logic LSM hiện có. ChatGPT và các ứng dụng khách bên ngoài khác tiếp tục làm việc với cùng các phiên và công cụ LSM.
@@ -40,6 +40,14 @@ Không bật tính năng này trên Bộ điều khiển nhiều người dùng 
 Tạo cuộc trò chuyện bằng hồ sơ mẫu đã lưu. Mỗi lượt được gửi sẽ trở thành một tác vụ nền do máy chủ sở hữu; đóng trình duyệt không hủy tác vụ. Các cuộc gọi văn bản và công cụ đã hoàn thành được kiểm tra lâu dài giữa các bước mô hình/công cụ. Dừng lại một cách rõ ràng để làm gián đoạn. Khi khởi động lại Bộ điều khiển, các lần chạy bị gián đoạn được đánh dấu như vậy và có thể được tiếp tục ở lượt mới, nhưng **các lệnh gọi công cụ không xác định kết quả sẽ không bao giờ được tự động phát lại**.
 
 Toàn bộ lịch sử tin nhắn của cuộc trò chuyện sẽ được lưu giữ trong bộ nhớ. Chỉ một cửa sổ giới hạn gần đây được gửi đến mô hình cùng một lúc để kiểm soát kích thước ngữ cảnh. Các lệnh gọi công cụ được gửi qua điểm cuối MCP đã được xác thực của LSM, duy trì tất cả các quyền của công cụ thông thường và hành vi kiểm tra/kiểm tra trước.
+
+Lưu trữ sẽ ẩn cuộc trò chuyện khỏi danh sách thông thường và lưu dưới dạng `.json.zst` bằng bộ nén zstd đã dùng trong Audit. Nội dung lưu trữ không được lập chỉ mục tìm kiếm thông thường. Tại **Archived conversations** có thể tìm theo tiêu đề, xem chỉ đọc, khôi phục hoặc xóa vĩnh viễn. Bản sao mới được ghi trước khi xóa bản cũ để tránh mất dữ liệu.
+
+### Hội thoại dài và nén ngữ cảnh
+
+Toàn bộ tin nhắn và kết quả công cụ vẫn được giữ trên máy chủ. Cửa sổ ngữ cảnh được cấu hình trong hồ sơ mô hình: mặc định **32.768 token**, từ 8.192 đến 1.000.000. Cách ước lượng thận trọng theo UTF-8 tính cả định nghĩa công cụ. Khi gần **80%** cửa sổ, cùng mô hình sẽ tóm tắt các lượt hoàn tất trước đó, giữ mục tiêu, giới hạn, quyết định, tệp, kết quả và việc còn lại. Bản tóm tắt được lưu riêng; mô hình chỉ nhận tóm tắt và các tin nhắn gốc mới nhất.
+
+Ngân sách được tính lại sau mỗi lần gọi công cụ. **Compact** cho phép nén thủ công khi không có lượt đang chạy. Nếu thất bại, bản tóm tắt cũ và lịch sử gốc không thay đổi. Số token chỉ là ước tính; lượt hiện tại quá lớn sẽ bị từ chối chứ không tự động cắt bỏ.
 
 Mở **Không gian làm việc trực tiếp** để hiển thị tài nguyên Ứng dụng `workspace_open` MCP hiện có của LSM bên trong chế độ xem được nhúng. Máy chủ sử dụng cầu nối `@modelcontextprotocol/ext-apps` cho vòng đời ứng dụng, gia hạn thông tin xác thực, lệnh gọi công cụ và hành động giữa con người với đại lý. Không có trình quản lý tệp, thiết bị đầu cuối, kiểm toán hoặc giao diện người dùng công việc thứ hai nào được triển khai.
 

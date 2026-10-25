@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: f2dd1c4fffcc9783c739a12868fbcfa0023e0e3a783c8ba929f84107e3959e9a -->
+<!-- i18n-source-sha256: 53d1b81800534bc6d5334883b7de74660c988088c66f492ddbd68aced8797379 -->
 # Obrolan yang Dihosting (opsional)
 
 Obrolan yang Dihosting adalah klien Aplikasi MCP dan obrolan BYOK yang dihosting sendiri dan terintegrasi ke dalam antarmuka manusia LSM. Ini **bukan** mode Sesi Logis: percakapan memiliki identitas independen dan secara opsional dapat melampirkan Sesi Logis LSM yang ada. ChatGPT dan klien eksternal lainnya terus bekerja dengan Sesi dan alat LSM yang sama.
@@ -40,6 +40,14 @@ Jangan aktifkan ini pada Pengontrol multi-pengguna yang tidak tepercaya kecuali 
 Buat percakapan menggunakan profil model yang disimpan. Setiap giliran yang dikirimkan menjadi tugas latar belakang milik server; menutup browser tidak membatalkan tugas. Panggilan teks dan alat yang telah selesai diperiksa secara tahan lama di antara langkah-langkah model/alat. Berhenti secara eksplisit untuk menyela. Saat Pengontrol dihidupkan ulang, proses yang terhenti akan ditandai seperti itu dan dapat dilanjutkan pada giliran baru, namun **panggilan alat dengan hasil yang tidak diketahui tidak pernah diputar ulang secara otomatis**.
 
 Seluruh riwayat pesan percakapan disimpan di penyimpanan. Hanya jendela terkini yang dibatasi yang dikirim ke model sekaligus untuk mengontrol ukuran konteks. Panggilan alat dikirim melalui titik akhir MCP yang diautentikasi LSM, menjaga semua izin alat biasa dan perilaku audit/preflight.
+
+Pengarsipan menghapus percakapan dari daftar biasa dan menyimpannya sebagai `.json.zst` dengan codec zstd yang sudah digunakan Audit. Arsip tidak masuk indeks pencarian normal. Melalui **Archived conversations**, arsip dapat dicari menurut judul, dibaca tanpa mengubah data, dipulihkan, atau dihapus permanen. Salinan baru selalu ditulis sebelum salinan lama dihapus untuk mencegah kehilangan data.
+
+### Percakapan panjang dan pemadatan konteks
+
+Semua pesan asli dan hasil alat tetap tersimpan di server. Jendela konteks dapat diatur untuk setiap profil model: bawaan **32.768 token**, rentang 8.192 hingga 1.000.000. Perkiraan konservatif berbasis UTF-8 memperhitungkan definisi alat. Mendekati **80%** jendela, model yang sama merangkum giliran terdahulu yang sudah selesai, termasuk tujuan, batasan, keputusan, berkas, hasil alat, dan pekerjaan tersisa. Ringkasan tersimpan terpisah; model menerima ringkasan bersama pesan asli terbaru.
+
+Anggaran dihitung ulang setelah penggunaan alat. **Compact** memicu pemadatan manual saat tidak ada giliran aktif. Kegagalan tidak mengubah ringkasan sebelumnya maupun riwayat lengkap. Jumlah token hanyalah perkiraan; giliran aktif yang terlalu besar ditolak tanpa pemotongan diam-diam.
 
 Buka **Live Workspace** untuk merender sumber daya Aplikasi MCP `workspace_open` LSM yang ada di dalam tampilan tersemat. Host menggunakan jembatan `@modelcontextprotocol/ext-apps` untuk siklus hidup aplikasi, pembaruan kredensial, panggilan alat, dan tindakan antar-agen. Tidak ada pengelola file, terminal, audit, atau UI pekerjaan kedua yang diterapkan.
 

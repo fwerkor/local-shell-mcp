@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: f2dd1c4fffcc9783c739a12868fbcfa0023e0e3a783c8ba929f84107e3959e9a -->
+<!-- i18n-source-sha256: 53d1b81800534bc6d5334883b7de74660c988088c66f492ddbd68aced8797379 -->
 # Gehosteter Chat (optional)
 
 Hosted Chat ist ein selbst gehosteter BYOK-Chat und ein MCP Apps-Client, der in die Benutzeroberfläche von LSM integriert ist. Es handelt sich **nicht** um einen logischen Sitzungsmodus: Konversationen haben unabhängige Identitäten und können optional eine vorhandene logische LSM-Sitzung anhängen. ChatGPT und andere externe Clients arbeiten weiterhin mit denselben LSM-Sitzungen und Tools.
@@ -40,6 +40,14 @@ Aktivieren Sie dies nicht auf einem nicht vertrauenswürdigen Mehrbenutzer-Contr
 Erstellen Sie eine Konversation mit einem gespeicherten Modellprofil. Jeder eingereichte Zug wird zu einer servereigenen Hintergrundaufgabe; Durch Schließen des Browsers wird die Aufgabe nicht abgebrochen. Abgeschlossene Text- und Werkzeugaufrufe werden zwischen Modell-/Werkzeugschritten dauerhaft mit Prüfpunkten versehen. Stoppen Sie explizit, um zu unterbrechen. Beim Neustart des Controllers werden unterbrochene Läufe als solche markiert und können in einer neuen Runde fortgesetzt werden, aber **Werkzeugaufrufe mit unbekanntem Ergebnis werden nie automatisch wiederholt**.
 
 Der gesamte Nachrichtenverlauf der Konversation bleibt im Speicher erhalten. Nur ein begrenztes aktuelles Fenster wird gleichzeitig an das Modell gesendet, um die Kontextgröße zu steuern. Tool-Aufrufe werden über den authentifizierten MCP-Endpunkt von LSM gesendet, wobei alle normalen Tool-Berechtigungen und das Audit-/Preflight-Verhalten erhalten bleiben.
+
+Archivieren entfernt Unterhaltungen aus der normalen Liste und speichert sie mit dem vorhandenen Audit-zstd-Codec als `.json.zst`. Archive werden nicht in den regulären Suchindex aufgenommen. Unter **Archived conversations** lassen sie sich nach Titel finden, schreibgeschützt lesen, wiederherstellen oder endgültig löschen. Sicheres Schreiben vor dem Löschen schützt vor Datenverlust.
+
+### Lange Unterhaltungen und Kontextkomprimierung
+
+Der vollständige Nachrichten- und Werkzeugverlauf bleibt auf dem Server erhalten. Pro Modellprofil ist ein Kontextfenster einstellbar: standardmäßig **32.768 Token**, zulässig 8.192 bis 1.000.000. Die vorsichtige UTF-8-Token-Schätzung berücksichtigt Werkzeugdefinitionen. Bei ungefähr **80 %** erstellt dasselbe Modell eine Zusammenfassung älterer abgeschlossener Runden mit Zielen, Einschränkungen, Entscheidungen, Dateipfaden, Ergebnissen und offenen Aufgaben. Zusammenfassung und Cursor werden separat gespeichert; das Modell erhält die Zusammenfassung und die jüngsten Originalnachrichten.
+
+Nach Werkzeugaufrufen wird das Budget erneut geprüft. **Compact** löst die Komprimierung manuell aus, nicht jedoch während einer laufenden Runde. Fehler verändern weder Verlauf noch vorhandene Zusammenfassung. Die Schätzung ist keine exakte Tokenzählung; eine zu große aktuelle Runde wird ausdrücklich abgewiesen.
 
 Öffnen Sie **Live Workspace**, um die vorhandene `workspace_open` MCP Apps-Ressource von LSM in einer eingebetteten Ansicht darzustellen. Der Host verwendet die `@modelcontextprotocol/ext-apps`-Brücke für den App-Lebenszyklus, die Erneuerung von Anmeldeinformationen, Toolaufrufe und Aktionen zwischen Mensch und Agent. Es ist kein zweiter Dateimanager, Terminal, Audit oder Job-UI implementiert.
 
