@@ -9,10 +9,12 @@ import pytest
 
 from local_shell_mcp import hosted_chat
 from local_shell_mcp.hosted_chat_context import (
+    abbreviate_summary_input,
     compact_messages,
     context_messages,
     context_window,
     estimate_tokens,
+    summary_tokens,
     validate_context,
 )
 from local_shell_mcp.settings import get_settings
@@ -198,7 +200,7 @@ async def test_grown_multibyte_summary_cannot_be_saved_over_token_budget():
     async def summarize(_old, _text):
         return "语" * 8000
 
-    with pytest.raises(ValueError, match="Compacted context still exceeds"):
+    with pytest.raises(ValueError, match="context window"):
         await compact_messages(messages, None, 8192, "system", [], summarize, force=True)
     assert messages == before
 
@@ -218,3 +220,46 @@ async def test_valid_new_summary_stays_within_budget_after_compacting():
     context = await compact_messages(messages, None, 8192, "system", [], summarize, force=True)
     assert context
     assert estimate_tokens({"messages": context_messages("system", messages, context), "tools": []}) <= int(8192 * 0.8)
+
+
+@pytest.mark.asyncio
+async def test_multibyte_recap_and_tool_output_fit_summarizer_request_budget():
+    old_recap = "😀" * 8000
+    messages = [
+        {"role": "user", "content": "previous turn"},
+        {"role": "assistant", "content": "done"},
+        {"role": "user", "content": "inspect screenshot"},
+        {"role": "tool", "content": "🧪" * 40000 + " state_id=abc123"},
+        {"role": "assistant", "content": "inspected"},
+        {"role": "user", "content": "next turn"},
+    ]
+    before = deepcopy(messages)
+    requests = []
+
+    async def summarize(previous, batch):
+        requests.append((previous, batch))
+        assert summary_tokens(previous, batch) <= int(32768 * 0.8)
+        return "recap with state_id=abc123"
+
+    updated = await compact_messages(
+        messages, {"summary": old_recap, "through": 2},
+        32768, "system", [], summarize, force=True,
+    )
+    assert updated and updated["through"] == 5
+    assert requests
+    assert any("[oversized message abbreviated for summary]" in batch for _, batch in requests)
+    assert any("state_id=abc123" in batch for _, batch in requests)
+    assert messages == before
+
+
+def test_abbreviated_summary_input_never_exceeds_utf8_budget():
+    recap = "😀" * 8000
+    text = "🧪" * 40000 + " final-marker"
+    budget = int(32768 * 0.8)
+    shortened = abbreviate_summary_input(recap, text, budget)
+    assert summary_tokens(recap, shortened) <= budget
+    assert shortened.startswith("🧪")
+    assert shortened.endswith("final-marker")
+    assert len(shortened) < len(text)
+    with pytest.raises(ValueError, match="summarizer context window"):
+        abbreviate_summary_input(recap, text, int(8192 * 0.8))
