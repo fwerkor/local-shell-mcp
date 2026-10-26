@@ -1,3 +1,4 @@
+import { actionButton, formDialog, type ActionOptions, type FormDialogOptions } from "../web-controls"
 import type { FileEntry, FilePreview, Machine } from "../types"
 
 export type NativeViewName = "files" | "terminals" | "desktop" | "sessions" | "remotes" | "audit"
@@ -108,11 +109,8 @@ export function statusClass(value: string): string {
   return "neutral"
 }
 
-export function button(label: string, action: string, options: { icon?: string; primary?: boolean; danger?: boolean; disabled?: boolean; title?: string } = {}): string {
-  const classes = ["native-button"]
-  if (options.primary) classes.push("primary")
-  if (options.danger) classes.push("danger")
-  return `<button class="${classes.join(" ")}" type="button" data-action="${escapeHtml(action)}"${options.disabled ? " disabled" : ""}${options.title ? ` title="${escapeHtml(options.title)}"` : ""}>${options.icon ? `<span aria-hidden="true">${options.icon}</span>` : ""}${escapeHtml(label)}</button>`
+export function button(label: string, action: string, options: ActionOptions = {}): string {
+  return actionButton(label, action, options)
 }
 
 export function highlightedHtml(text: string, filename = ""): string {
@@ -187,92 +185,8 @@ export async function copyText(value: string): Promise<boolean> {
   }
 }
 
-type DialogField = {
-  name: string
-  label: string
-  value?: string
-  placeholder?: string
-  type?: "text" | "number" | "textarea"
-  required?: boolean
-  help?: string
-}
-
-type DialogOptions = {
-  title: string
-  detail?: string
-  fields: DialogField[]
-  submitLabel?: string
-  danger?: boolean
-  wide?: boolean
-}
-
-export async function openFormDialog(options: DialogOptions): Promise<Record<string, string> | null> {
-  return new Promise((resolve) => {
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const overlay = document.createElement("div")
-    overlay.className = "native-dialog-overlay"
-    const fields = options.fields.map((field) => {
-      const control = field.type === "textarea"
-        ? `<textarea name="${escapeHtml(field.name)}" placeholder="${escapeHtml(field.placeholder || "")}"${field.required ? " required" : ""}>${escapeHtml(field.value || "")}</textarea>`
-        : `<input name="${escapeHtml(field.name)}" type="${field.type === "number" ? "number" : "text"}" value="${escapeHtml(field.value || "")}" placeholder="${escapeHtml(field.placeholder || "")}"${field.required ? " required" : ""}/>`
-      return `<label class="native-field"><span>${escapeHtml(field.label)}</span>${control}${field.help ? `<small>${escapeHtml(field.help)}</small>` : ""}</label>`
-    }).join("")
-    overlay.innerHTML = `<form class="native-dialog${options.wide ? " wide" : ""}" role="dialog" aria-modal="true" tabindex="-1">
-      <header><div><h2>${escapeHtml(options.title)}</h2>${options.detail ? `<p>${escapeHtml(options.detail)}</p>` : ""}</div><button type="button" data-dialog-cancel aria-label="Close">×</button></header>
-      <div class="native-dialog-body">${fields}</div>
-      <footer><button class="native-button" type="button" data-dialog-cancel>Cancel</button><button class="native-button ${options.danger ? "danger" : "primary"}" type="submit">${escapeHtml(options.submitLabel || "Save")}</button></footer>
-    </form>`
-    document.body.appendChild(overlay)
-    const form = overlay.querySelector<HTMLFormElement>("form")!
-    let closed = false
-    const close = (result: Record<string, string> | null) => {
-      if (closed) return
-      closed = true
-      overlay.remove()
-      if (previousFocus?.isConnected) previousFocus.focus()
-      resolve(result)
-    }
-    overlay.querySelectorAll<HTMLElement>("[data-dialog-cancel]").forEach((element) => element.addEventListener("click", () => close(null)))
-    overlay.addEventListener("mousedown", (event) => {
-      if (event.target === overlay) close(null)
-    })
-    overlay.addEventListener("keydown", (event) => {
-      event.stopPropagation()
-      if (event.key === "Escape") {
-        event.preventDefault()
-        close(null)
-        return
-      }
-      if (event.key !== "Tab") return
-      const focusable = Array.from(overlay.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'))
-        .filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true")
-      if (!focusable.length) {
-        event.preventDefault()
-        form.focus()
-        return
-      }
-      const first = focusable[0]!
-      const last = focusable.at(-1)!
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    })
-    form.addEventListener("submit", (event) => {
-      event.preventDefault()
-      const data = new FormData(form)
-      close(Object.fromEntries([...data.entries()].map(([key, value]) => [key, String(value)])))
-    })
-    window.requestAnimationFrame(() => {
-      const firstField = form.querySelector<HTMLElement>("input,textarea,select")
-      const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]')
-      const focusTarget = firstField || submit || form
-      focusTarget.focus()
-    })
-  })
+export function openFormDialog(options: FormDialogOptions): Promise<Record<string, string> | null> {
+  return formDialog(options)
 }
 
 export async function confirmDialog(title: string, detail: string, confirmLabel = "Confirm"): Promise<boolean> {

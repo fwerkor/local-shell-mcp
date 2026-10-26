@@ -91,7 +91,7 @@ export class TerminalsController extends BaseController {
   private initializeTerminal(): void {
     const host = this.root.querySelector<HTMLElement>("[data-role=terminal]")!
     this.terminal = new Terminal({
-      allowTransparency: true,
+      allowTransparency: false,
       convertEol: false,
       cursorBlink: true,
       cursorStyle: "bar",
@@ -101,7 +101,7 @@ export class TerminalsController extends BaseController {
       scrollback: 12_000,
       smoothScrollDuration: 70,
       theme: {
-        background: "rgba(0,0,0,0)", foreground: "#e7edf8", cursor: "#8b7cf6", selectionBackground: "#53648699",
+        background: "#111111", foreground: "#e7edf8", cursor: "#ffffff", selectionBackground: "#53648699",
         black: "#0b1020", red: "#f7768e", green: "#8bd49c", yellow: "#e0af68", blue: "#7aa2f7", magenta: "#bb9af7", cyan: "#65d1c5", white: "#e7edf8",
         brightBlack: "#6b7890", brightRed: "#ff9cab", brightGreen: "#a8e6b4", brightYellow: "#f3cc85", brightBlue: "#a4c2ff", brightMagenta: "#d5b9ff", brightCyan: "#92eee4", brightWhite: "#ffffff",
       },

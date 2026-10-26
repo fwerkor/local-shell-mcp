@@ -67,7 +67,7 @@ describe("Native WebUI action scopes", () => {
     const toolbar = section(html, '<div class="native-toolbar desktop-toolbar">', '<section class="native-panel desktop-panel">')
     const detail = section(html, '<section class="native-panel desktop-panel">', '<div class="desktop-stage-wrap">')
     expect(actions(toolbar)).toEqual(["desktop-refresh-windows"])
-    expect(actions(detail)).toEqual(["desktop-refresh-frame"])
+    expect(actions(detail)).toEqual(["desktop-scale-mode", "desktop-fullscreen", "desktop-refresh-frame"])
   })
 
   test("refreshing a desktop frame requires a selected window", () => {

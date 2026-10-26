@@ -252,6 +252,7 @@ def run_browser(port: int) -> None:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page.on("pageerror", lambda error: print(f"Browser error: {error}", flush=True))
         session_ids: list[str] = []
         try:
             page.goto(f"{origin}/ui", wait_until="networkidle")
@@ -271,11 +272,11 @@ def run_browser(port: int) -> None:
             wallpaper_background = page.locator(".console-wallpaper").evaluate(
                 "element => getComputedStyle(element).backgroundImage"
             )
-            assert "/ui/wallpaper" in wallpaper_background, wallpaper_background
+            assert wallpaper_background == "none", wallpaper_background
             terminal_background = page.locator("#terminal .xterm-viewport").evaluate(
                 "element => getComputedStyle(element).backgroundColor"
             )
-            assert terminal_background == "rgba(0, 0, 0, 0)", terminal_background
+            assert terminal_background == "rgb(17, 17, 17)", terminal_background
 
             bootstrap = api_request(page, "/api/ui/bootstrap")
             assert bootstrap["status"] == 200, bootstrap
@@ -287,6 +288,10 @@ def run_browser(port: int) -> None:
             dashboard = api_request(page, "/api/ui/dashboard")
             assert dashboard["status"] == 200, dashboard
             assert dashboard["body"]["data"]["health"] in {"healthy", "attention", "critical"}
+            import runpy
+
+            native_smoke = runpy.run_path(str(ROOT / "scripts/ui-native-smoke.py"))
+            native_smoke["check_native_webui"](page)
             click_tui_label(page, "Files")
             wait_for_terminal_text(page, "mouse-second.txt")
             click_until_terminal_text(
