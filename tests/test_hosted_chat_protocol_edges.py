@@ -421,3 +421,43 @@ def test_tool_message_accepts_empty_result_and_bounds_large_resource_text():
     assert len(message) < hosted_chat.MAX_TEXT
     assert "truncated" in message
     assert "ui://test/resource" in message
+
+
+def test_many_escaped_embedded_resources_converge_without_blocking():
+    import json
+
+    class Result:
+        def model_dump(self, **_kwargs):
+            return {"content": [
+                {"type": "resource", "resource": {
+                    "uri": f"ui://test/{index}", "text": "\n" * 4000,
+                }}
+                for index in range(8)
+            ]}
+
+    message = hosted_chat.safe_tool_message(Result())
+    assert len(message) <= hosted_chat.MAX_TEXT
+    resources = json.loads(message)["content"]
+    assert len(resources) == 8
+    assert all(item["type"] == "resource" for item in resources)
+    assert all("truncated" in item["text"] for item in resources)
+
+
+def test_unshrinkable_tool_metadata_returns_bounded_valid_json():
+    import json
+
+    class Result:
+        def model_dump(self, **_kwargs):
+            return {
+                "content": [{"type": "resource", "resource": {
+                    "uri": "ui://" + "x" * 50000,
+                    "text": "important but too small to shrink",
+                }}],
+                "isError": True,
+            }
+
+    message = hosted_chat.safe_tool_message(Result())
+    assert len(message) <= hosted_chat.MAX_TEXT
+    parsed = json.loads(message)
+    assert parsed["isError"] is True
+    assert "omitted" in parsed["content"][0]["text"]

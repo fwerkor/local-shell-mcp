@@ -288,10 +288,12 @@ def safe_tool_message(result: object) -> str:
     serialized = json.dumps(output, ensure_ascii=False)
     # Account for JSON escaping and arbitrary numbers of content blocks.
     # Reduce large values geometrically until the *serialized* result fits.
+    # Resource text also consumes the model budget; shrinking only regular
+    # text blocks can leave this loop stuck forever on embedded resources.
     while len(serialized) > MAX_TEXT:
         output["content"] = [
             {**item, "text": bounded(item["text"], max(0, len(item["text"]) // 2))}
-            if item.get("type") == "text" and isinstance(item.get("text"), str)
+            if item.get("type") in {"text", "resource"} and isinstance(item.get("text"), str)
             else item
             for item in output["content"][:16]
         ]
@@ -300,7 +302,17 @@ def safe_tool_message(result: object) -> str:
             output["structuredContent"] = bounded(previous, len(previous) // 2)
         if len(serialized) > MAX_TEXT and len(output["content"]) == 16:
             output["content"] = output["content"][:8]
-        serialized = json.dumps(output, ensure_ascii=False)
+        reduced = json.dumps(output, ensure_ascii=False)
+        if len(reduced) >= len(serialized):
+            # Malformed or unusually large resource URIs/metadata may be
+            # unshrinkable. Keep the tool loop responsive with valid JSON.
+            minimal = {"content": [{"type": "text", "text": (
+                "[tool observation omitted; full event retained]"
+            )}]}
+            if "isError" in output:
+                minimal["isError"] = output["isError"]
+            return json.dumps(minimal, ensure_ascii=False)
+        serialized = reduced
     return serialized
 
 
