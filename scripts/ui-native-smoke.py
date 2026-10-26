@@ -16,10 +16,15 @@ def check_native_webui(page: Page) -> None:
     page.on("pageerror", lambda error: errors.append(str(error)))
     artifacts = Path(os.getenv("LSM_UI_SCREENSHOTS", "/tmp/lsm-incus-ui-screenshots"))
     artifacts.mkdir(parents=True, exist_ok=True)
+
+    def capture(name: str) -> None:
+        expect(page.locator(".native-toast.visible")).to_have_count(0, timeout=7000)
+        page.evaluate("window.scrollTo(0, 0)")
+        page.screenshot(path=str(artifacts / name), full_page="dialog" not in name, animations="disabled")
     page.locator('[data-interface-mode="web"]').click()
     expect(page.locator(".overview-metrics")).to_be_visible()
     expect(page.locator("#page-title")).to_have_text("Overview")
-    page.screenshot(path=str(artifacts / "overview-desktop.png"), full_page=True)
+    capture("overview-desktop.png")
 
     # The isolated CI server has no graphical session. Exercise the browser's
     # real JPEG/WebSocket/input pipeline against a deterministic window fixture.
@@ -82,7 +87,7 @@ def check_native_webui(page: Page) -> None:
             expect(page.locator(selector)).to_be_visible()
             page.wait_for_timeout(200)
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), view
-            page.screenshot(path=str(artifacts / f"{view}-desktop.png"), full_page=True)
+            capture(f"{view}-desktop.png")
 
         page.locator('.nav-item[data-view="desktop"]').click()
         expect(page.locator('[data-role="desktop-frame"]')).to_be_visible()
@@ -101,7 +106,23 @@ def check_native_webui(page: Page) -> None:
         page.locator('[data-role="desktop-text"]').press("Enter")
         page.wait_for_timeout(100)
         assert any(item["action"].get("text") == "Desktop input test" for item in actions), actions
-        page.screenshot(path=str(artifacts / "desktop-connected.png"), full_page=True)
+        capture("desktop-connected.png")
+        page.locator('.nav-item[data-view="terminals"]').click()
+
+        page.locator('.nav-item[data-view="sessions"]').click()
+        page.locator('[data-action="new-session"]').click()
+        session_dialog = page.get_by_role("dialog")
+        session_dialog.get_by_label("Label", exact=True).fill("WebUI verification")
+        session_dialog.get_by_label("Prompt", exact=True).fill("Verify terminal interaction, inspect audit records, and check the responsive layouts.")
+        session_dialog.get_by_role("button", name="Create session", exact=True).click()
+        expect(page.locator('[data-role="session-title"]')).to_contain_text("WebUI verification")
+        capture("sessions-desktop.png")
+        page.locator('.nav-item[data-view="audit"]').click()
+        audit_record = page.locator(".audit-table tbody tr").filter(has_text="audit-new-tool").first
+        expect(audit_record).to_be_visible()
+        audit_record.click()
+        expect(page.locator(".audit-detail-panel")).to_contain_text("audit-new-detail")
+        capture("audit-desktop.png")
         page.locator('.nav-item[data-view="terminals"]').click()
 
         page.locator('[data-action="new-session"]').click()
@@ -118,14 +139,20 @@ def check_native_webui(page: Page) -> None:
         page.locator('[data-action="new-session"]').click()
         dialog = page.get_by_role("dialog")
         dialog.get_by_label("Name", exact=True).fill("native-react-smoke")
+        bounds = dialog.bounding_box()
+        assert bounds is not None
+        viewport = page.viewport_size
+        assert viewport is not None
+        assert abs(bounds["x"] + bounds["width"] / 2 - viewport["width"] / 2) < 2
+        capture("terminal-create-dialog.png")
         dialog.get_by_role("button", name="Start terminal", exact=True).click()
         expect(page.locator('[data-role="connection"]')).to_contain_text("Connected", timeout=15000)
-        page.locator('[data-role="command-input"]').fill("printf 'NATIVE-REACT-SMOKE\\n'")
+        page.locator('[data-role="command-input"]').fill("printf 'NATIVE-%s\\n' 'REACT-SMOKE'; pwd; ls -lah")
         page.locator('[data-role="command-form"]').press("Enter")
         expect(page.locator(".persistent-terminal .xterm-rows")).to_contain_text("NATIVE-REACT-SMOKE", timeout=10000)
+        capture("terminal-connected.png")
         page.locator('[data-action="reconnect"]').click()
         expect(page.locator('[data-role="connection"]')).to_contain_text("Connected", timeout=15000)
-        page.screenshot(path=str(artifacts / "terminal-connected.png"), full_page=True)
 
         for width in (768, 390):
             page.set_viewport_size({"width": width, "height": 844})
@@ -139,8 +166,10 @@ def check_native_webui(page: Page) -> None:
                 page.wait_for_timeout(150)
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (view, width)
                 if width == 390:
-                    page.screenshot(path=str(artifacts / f"{view}-mobile.png"), full_page=True)
+                    capture(f"{view}-mobile.png")
             page.locator(".navigation-toggle:visible").click()
+            if width == 390:
+                capture("navigation-mobile.png")
             page.keyboard.press("Escape")
             expect(page.locator("#navigation")).to_be_hidden()
             expect(page.locator(".navigation-toggle:visible")).to_be_focused()

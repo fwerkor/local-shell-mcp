@@ -11,6 +11,19 @@ const destinations = [
   ["sessions", "Sessions", "▤"], ["remotes", "Remotes", "▥"], ["audit", "Audit", "☷"],
 ] as const
 
+function NavigationIcon({ view }: { view: string }) {
+  const paths: Record<string, string> = {
+    overview: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z",
+    files: "M3 7V5h6l3 3h9v12H3z",
+    terminals: "m7 8 4 4-4 4M14 16h4M3 4h18v16H3z",
+    desktop: "M3 4h18v13H3zM8 21h8M12 17v4",
+    sessions: "M6 3h12v18H6zM9 7h6M9 11h6M9 15h4",
+    remotes: "M3 3h18v7H3zM3 14h18v7H3zM7 6.5h.01M7 17.5h.01M11 6.5h6M11 17.5h6",
+    audit: "M5 3h14v18H5zM8 7h8M8 11h8M8 15h5",
+  }
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={paths[view] || paths.terminals} /></svg>
+}
+
 export function ApplicationShell() {
   return <>
     <a className="skip-link" href="#view-root">Skip to content</a>
@@ -26,15 +39,15 @@ export function ApplicationShell() {
     </section>
     <div className="app-shell" id="app-shell" hidden>
       <aside className="sidebar" id="navigation">
-        <a href="#overview" className="brand-block"><span className="brand-symbol" aria-hidden="true">›_</span><strong>local-shell-mcp</strong></a>
+        <a href="#overview" className="brand-block"><span className="brand-symbol" aria-hidden="true"><NavigationIcon view="terminals" /></span><strong>local-shell-mcp</strong></a>
         <div className="interface-switch" role="group" aria-label="Interface mode">
           <Button className="active" data-interface-mode="web" aria-pressed="true">Web UI</Button>
           <Button data-interface-mode="tui" aria-pressed="false">TUI</Button>
         </div>
         <div className="navigation-label">Workspace</div>
         <nav className="primary-nav p-side-navigation" aria-label="Primary navigation">
-          {destinations.map(([view, label, icon]) => <button key={view} className={`nav-item${view === "overview" ? " active" : ""}`} type="button" data-view={view} aria-label={label}>
-            <span className="nav-icon" aria-hidden="true">{icon}</span><span>{label}</span>
+          {destinations.map(([view, label]) => <button key={view} className={`nav-item${view === "overview" ? " active" : ""}`} type="button" data-view={view} aria-label={label}>
+            <span className="nav-icon" aria-hidden="true"><NavigationIcon view={view} /></span><span>{label}</span>
             {view === "remotes" && <span className="nav-badge" id="machine-nav-count">—</span>}
             {view === "terminals" && <span className="nav-badge" id="workload-nav-count">—</span>}
           </button>)}
@@ -49,7 +62,7 @@ export function ApplicationShell() {
       <button className="navigation-scrim" type="button" aria-label="Close navigation" hidden />
       <main className="main-content" id="web-view">
         <header className="topbar">
-          <Button className="navigation-toggle" aria-label="Open navigation" aria-controls="navigation" aria-expanded="false">☰</Button>
+          <Button className="navigation-toggle" aria-label="Open navigation" aria-controls="navigation" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></Button>
           <div className="page-heading"><span className="page-context">Controller</span><h1 id="page-title">Overview</h1></div>
           <div className="topbar-actions">
             <span className="live-pill" id="live-pill"><i /><span id="updated-at">Waiting for data</span></span>
@@ -62,7 +75,7 @@ export function ApplicationShell() {
       <main className="console-content shell" id="console-view" hidden>
         <div className="console-wallpaper" aria-hidden="true" />
         <header className="console-header">
-          <Button className="navigation-toggle" aria-label="Open navigation" aria-controls="navigation" aria-expanded="false">☰</Button>
+          <Button className="navigation-toggle" aria-label="Open navigation" aria-controls="navigation" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></Button>
           <h1>TUI</h1><div className="console-actions">
             <div className="connection" id="connection-state"><span /><strong>Not started</strong></div>
             <Button id="reconnect-button">Reconnect</Button><Button id="fullscreen-button">Fullscreen</Button>
