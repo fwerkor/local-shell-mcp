@@ -221,3 +221,18 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 .audit-page .audit-filter-strip > label { display: flex; align-items: center; gap: 8px; padding: 0; border: 0; background: transparent; }
 .audit-page .audit-filter-strip select { min-width: 90px; margin: 0; color: #333; font-weight: 400; }
 .audit-page .audit-filter-strip > button { margin-left: auto; }
+
+/* Align all controls against their actual boxes, including unwrapped buttons. */
+.explorer-head :is(label, select, input, button) { margin: 0; align-self: center; }
+.explorer-head .native-button { height: 34px; min-height: 34px; }
+.explorer-head .native-toggle { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.explorer-head input[type="checkbox"] { width: 16px; height: 16px; min-height: 0; flex: none; }
+@media (max-width: 720px), (any-pointer: coarse) {
+  .touchbar { display: grid; grid-template-columns: repeat(9, minmax(0,1fr)); gap: 4px; padding: 6px; background: #191d23; }
+  .touchbar button { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 44px; margin: 0; padding: 0 4px; color: #edf3fa; background: #2c333d; border: 1px solid #566170; border-radius: 3px; font-size: 13px; line-height: 1; touch-action: manipulation; }
+  .terminal-touchbar { display: grid; }
+}
+@media (max-width: 540px) {
+  .touchbar { grid-template-columns: repeat(5, minmax(0,1fr)); }
+  .terminal-touchbar { grid-template-columns: repeat(4, minmax(0,1fr)); }
+}

@@ -86,6 +86,11 @@ def check_native_webui(page: Page) -> None:
             page.locator(f'.nav-item[data-view="{view}"]').click()
             expect(page.locator(selector)).to_be_visible()
             page.wait_for_timeout(200)
+            if view == "files":
+                centers = page.locator(".explorer-head").evaluate("""head =>
+                    [...head.querySelectorAll('[data-role=machine], [data-action=up], [data-role=location], [data-action=go], .native-toggle, [data-action=refresh], [data-action=upload]')]
+                        .map(element => { const rect = element.getBoundingClientRect(); return rect.top + rect.height / 2; })""")
+                assert max(centers) - min(centers) < 1, centers
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), view
             capture(f"{view}-desktop.png")
 
@@ -147,8 +152,10 @@ def check_native_webui(page: Page) -> None:
         capture("terminal-create-dialog.png")
         dialog.get_by_role("button", name="Start terminal", exact=True).click()
         expect(page.locator('[data-role="connection"]')).to_contain_text("Connected", timeout=15000)
-        page.locator('[data-role="command-input"]').fill("printf 'NATIVE-%s\\n' 'REACT-SMOKE'; pwd; ls -lah")
-        page.locator('[data-role="command-form"]').press("Enter")
+        expect(page.locator('[data-role="command-form"]')).to_have_count(0)
+        page.locator(".persistent-terminal .xterm-helper-textarea").focus()
+        page.keyboard.type("printf 'NATIVE-%s\\n' 'REACT-SMOKE'; pwd; ls -lah")
+        page.keyboard.press("Enter")
         expect(page.locator(".persistent-terminal .xterm-rows")).to_contain_text("NATIVE-REACT-SMOKE", timeout=10000)
         capture("terminal-connected.png")
         page.locator('[data-action="reconnect"]').click()
@@ -165,6 +172,25 @@ def check_native_webui(page: Page) -> None:
                 expect(page.locator("#navigation")).to_be_hidden()
                 page.wait_for_timeout(150)
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), (view, width)
+                if width == 390 and view == "terminals":
+                    keys = page.locator(".terminal-touchbar")
+                    expect(keys).to_be_visible()
+                    metrics = keys.evaluate("""bar => ({
+                        width: bar.clientWidth, content: bar.scrollWidth,
+                        buttons: [...bar.querySelectorAll('button')].map(button => ({
+                            width: button.clientWidth, content: button.scrollWidth,
+                            height: button.getBoundingClientRect().height,
+                            foreground: getComputedStyle(button).color,
+                            background: getComputedStyle(button).backgroundColor
+                        }))
+                    })""")
+                    assert metrics["content"] <= metrics["width"], metrics
+                    assert all(button["height"] >= 44 and button["content"] <= button["width"] for button in metrics["buttons"]), metrics
+                    assert all(button["foreground"] != button["background"] for button in metrics["buttons"]), metrics
+                    page.locator(".persistent-terminal .xterm-helper-textarea").focus()
+                    page.keyboard.type("printf 'TOUCH-%s\\n' 'KEYS'")
+                    page.locator('[data-terminal-key="enter"]').click()
+                    expect(page.locator(".persistent-terminal .xterm-rows")).to_contain_text("TOUCH-KEYS", timeout=10000)
                 if width == 390:
                     capture(f"{view}-mobile.png")
             page.locator(".navigation-toggle:visible").click()

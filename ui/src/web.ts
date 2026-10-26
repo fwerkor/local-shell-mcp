@@ -6,7 +6,7 @@ import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
 import { parseWebClipboardPayload, WEB_CLIPBOARD_OSC } from "./clipboard-protocol"
 import { createImageAddon } from "./image-support"
-import { browserSelectionShortcut, browserShortcutSequence } from "./keyboard"
+import { browserSelectionShortcut, browserShortcutSequence, TERMINAL_KEY_SEQUENCES } from "./keyboard"
 import { measureTerminalCellAspect } from "./terminal-geometry"
 import { TerminalWriteBuffer, type TerminalWriteChunk } from "./terminal-write-buffer"
 import { visibleWorkloadCount } from "./web-data"
@@ -767,7 +767,6 @@ function initializeTerminal(): void {
   terminal.onBinary((data) => {
     if (socket?.readyState === WebSocket.OPEN) socket.send(Uint8Array.from(data, (character: string) => character.charCodeAt(0) & 0xff))
   })
-  const touchSequences: Record<string, string> = { escape: "\u001b", tab: "\t", left: "\u001b[D", up: "\u001b[A", down: "\u001b[B", right: "\u001b[C", enter: "\r", help: "\u001bOP" }
   touchButtons.forEach((button) => {
     button.addEventListener("click", () => {
       const key = button.dataset.key || ""
@@ -775,7 +774,7 @@ function initializeTerminal(): void {
         setTouchKeyboard(!touchKeyboardEnabled)
         return
       }
-      const sequence = touchSequences[key]
+      const sequence = TERMINAL_KEY_SEQUENCES[key]
       if (sequence && socket?.readyState === WebSocket.OPEN) socket.send(encoder.encode(sequence))
       if (!usesTouchKeyboard() || touchKeyboardEnabled) terminal?.focus()
       else terminal?.textarea?.blur()
@@ -845,7 +844,7 @@ async function copyPublishedClipboard(): Promise<void> {
 }
 
 window.addEventListener("keydown", (event) => {
-  if (activeView !== "console" || !terminal) return
+  if (activeView !== "console" || !terminal || document.body.classList.contains("navigation-open")) return
   const selectionShortcut = browserSelectionShortcut(event)
   if (selectionShortcut) {
     event.preventDefault()

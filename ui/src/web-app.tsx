@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { flushSync } from "react-dom"
 import { Button, MainTable, Spinner } from "@canonical/react-components"
+import { activeJobCount } from "./web-data"
 import type { NativePageController } from "./web-native/common"
 
 const destinations = [
@@ -99,19 +100,29 @@ export function mountApplication() {
   flushSync(() => createRoot(host).render(<ApplicationShell />))
   const toggles = document.querySelectorAll<HTMLButtonElement>(".navigation-toggle")
   const scrim = document.querySelector<HTMLButtonElement>(".navigation-scrim")!
+  let opener: HTMLButtonElement | null = null
+  const restoreFocus = () => {
+    const target = opener?.getClientRects().length ? opener : Array.from(toggles).find(button => button.getClientRects().length)
+    target?.focus()
+  }
   const setOpen = (open: boolean) => {
     document.body.classList.toggle("navigation-open", open)
     toggles.forEach(button => button.setAttribute("aria-expanded", String(open)))
     scrim.hidden = !open
-    if (open) document.querySelector<HTMLElement>("#navigation .nav-item.active")?.focus()
+    if (open) (document.querySelector<HTMLElement>("#navigation .nav-item.active") || document.querySelector<HTMLElement>("#navigation .nav-item"))?.focus()
   }
-  toggles.forEach(button => button.addEventListener("click", () => setOpen(!document.body.classList.contains("navigation-open"))))
-  scrim.addEventListener("click", () => { setOpen(false); toggles[0]?.focus() })
+  toggles.forEach(button => button.addEventListener("click", () => {
+    opener = button
+    setOpen(!document.body.classList.contains("navigation-open"))
+  }))
+  scrim.addEventListener("click", () => { setOpen(false); restoreFocus() })
   document.querySelector(".primary-nav")!.addEventListener("click", () => setOpen(false))
   document.addEventListener("keydown", event => {
     if (event.key === "Escape" && document.body.classList.contains("navigation-open")) {
+      event.preventDefault()
+      event.stopPropagation()
       setOpen(false)
-      toggles[0]?.focus()
+      restoreFocus()
     }
     if (event.key !== "Tab" || !document.body.classList.contains("navigation-open")) return
     const items = Array.from(document.querySelectorAll<HTMLElement>("#navigation a, #navigation button"))
@@ -156,7 +167,7 @@ export function Overview({ data, navigate }: { data: OverviewData; navigate: (vi
   const machines = data.machines?.machines || []
   const system = data.system || {}
   const metrics = [
-    ["Machines", machines.length, "remotes"], ["Active jobs", data.job_counts?.running ?? 0, "terminals"],
+    ["Machines", machines.length, "remotes"], ["Active jobs", activeJobCount(data), "terminals"],
     ["Sessions", data.session_count ?? 0, "sessions"], ["MCP calls · 24h", data.audit_total_24h ?? 0, "audit"],
   ] as const
   return <div className="overview-page">

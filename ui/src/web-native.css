@@ -143,7 +143,7 @@
 .session-row.active { color: #fff; background: #e5f0fa; box-shadow: none; }
 .session-state { width: 6px; height: 6px; border-radius: 0; background: #35c58d; box-shadow: none; }
 .session-row small { color: #748198; }
-.terminal-stage-panel { position: relative; display: grid; grid-template-columns: minmax(0,1fr); grid-template-rows: auto minmax(0,1fr) auto auto; color: #e7edf8; background: #111111; border-color: #d9d9d9; }
+.terminal-stage-panel { position: relative; display: grid; grid-template-columns: minmax(0,1fr); grid-template-rows: auto minmax(0,1fr) auto; color: #e7edf8; background: #111111; border-color: #d9d9d9; }
 .terminal-stage-panel.tmux-scrollback { grid-template-columns: minmax(0,1fr) 14px; }
 .terminal-stage-panel > header { grid-column: 1 / -1; min-height: 58px; flex-wrap: wrap; color: #e7edf8; background: #f2f2f2; border-color: #d9d9d9; }
 .terminal-stage-panel > header h3 { color: #e7edf8; }
@@ -170,11 +170,9 @@
 .terminal-scrollbar.unsupported { display: none; }
 .terminal-overlay { z-index: 3; grid-row: 2; grid-column: 1; min-width: 0; min-height: 0; display: grid; place-items: center; padding: 20px; color: #8491a6; background: rgba(8,13,24,.9); font-size: 12px; text-align: center; }
 .terminal-overlay[hidden] { display: none; }
-.command-dock { grid-column: 1 / -1; display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 8px; align-items: center; min-height: 43px; padding: 6px 8px; color: #7a89a0; background: #f2f2f2; border-top: 1px solid #d9d9d9; }
-.command-dock input { width: 100%; height: 30px; padding: 0 9px; color: #e5ebf5; background: #111111; border: 1px solid #2e3a50; border-radius: 0; outline: none; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
-.command-dock input:focus { border-color: #7568e8; box-shadow: none; }
-.terminal-touchbar { grid-column: 1 / -1; display: none; grid-template-columns: repeat(8,minmax(0,1fr)); gap: 4px; padding: 5px; background: #0e1726; border-top: 1px solid #d9d9d9; }
-.terminal-touchbar button { height: 31px; color: #d8e0ed; background: #ffffff; border: 1px solid #999999; border-radius: 0; font-size: 12px; }
+.terminal-touchbar { grid-column: 1 / -1; grid-row: 3; display: none; grid-template-columns: repeat(8,minmax(0,1fr)); gap: 4px; padding: 6px; background: #191d23; border-top: 1px solid #343c46; }
+.terminal-touchbar button { display: flex; align-items: center; justify-content: center; min-width: 0; height: 44px; margin: 0; padding: 0 6px; color: #edf3fa; background: #2c333d; border: 1px solid #566170; border-radius: 3px; font-size: 13px; line-height: 1; white-space: nowrap; touch-action: manipulation; }
+.terminal-touchbar button:active { background: #445064; }
 .terminal-search { display: flex; align-items: center; gap: 3px; }
 .terminal-search[hidden] { display: none; }
 .terminal-search input { width: 190px; height: 29px; padding: 0 8px; color: #e4eaf4; background: #111111; border: 1px solid #35425a; border-radius: 0; outline: none; font-size: 12px; }
@@ -375,7 +373,6 @@ button.summary-card { cursor: pointer; }
   .terminal-stage-panel { min-height: 365px; }
   .terminal-stage-actions { width: 100%; justify-content: flex-start; }
   .terminal-touchbar { display: grid; }
-  .command-dock { min-height: 40px; }
   .terminal-search { position: absolute; z-index: 6; top: 8px; right: 8px; left: 8px; padding: 5px; background: #f2f2f2; border: 1px solid #33415a; border-radius: 0; }
   .terminal-search input { flex: 1; width: auto; min-width: 0; }
   .remote-table th:nth-child(3), .remote-table td:nth-child(3), .remote-table th:nth-child(4), .remote-table td:nth-child(4), .remote-table th:nth-child(5), .remote-table td:nth-child(5) { display: none; }
@@ -487,10 +484,6 @@ button.summary-card { cursor: pointer; }
 .terminal-session-switch button { width: 27px; height: 27px; color: #9ba8ba; background: #192438; border: 1px solid #30405a; border-radius: 0; cursor: pointer; font-size: 17px; }
 .terminal-stage-panel { border-radius: 0; box-shadow: none; }
 .persistent-terminal { padding: 13px 14px 8px; }
-.command-dock { grid-template-columns: auto minmax(0,1fr) auto; min-height: 48px; padding: 7px 9px; }
-.command-signals { display: flex; gap: 4px; }
-.command-signals button { height: 29px; padding: 0 7px; color: #96a4b8; background: #ffffff; border: 1px solid #31405a; border-radius: 0; cursor: pointer; font: 11px ui-monospace, monospace; }
-.command-signals button:hover { color: #fff; background: #26334a; }
 
 
 
