@@ -27,15 +27,6 @@
     "coding-agent",
     "codex"
   ],
-  "activationEvents": [
-    "onCommand:local-shell-mcp.startServer",
-    "onCommand:local-shell-mcp.stopServer",
-    "onCommand:local-shell-mcp.restartServer",
-    "onCommand:local-shell-mcp.showStatus",
-    "onCommand:local-shell-mcp.copyMcpUrl",
-    "onCommand:local-shell-mcp.copySetupPrompt",
-    "onCommand:local-shell-mcp.openGuide"
-  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
