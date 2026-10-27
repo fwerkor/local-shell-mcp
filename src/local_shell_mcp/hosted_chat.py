@@ -430,6 +430,11 @@ async def complete_turn(
         context_window,
         validate_context,
     )
+    from .hosted_chat_tools import (
+        TOOL_SEARCH_NAME,
+        choose_tool_schemas,
+        discover_tools,
+    )
 
     endpoint = validate_endpoint(endpoint)
     validate_api_key(key)
@@ -442,8 +447,8 @@ async def complete_turn(
     context_size = context_window(context_size)
     compacted = validate_context(context, len(all_messages))
     request_messages = context_messages(prompt, all_messages, compacted)
-    schemas = []
-    known_tools: set[str] = set()
+    all_schemas: list[dict] = []
+    preferred_tools: list[str] = []
     events: list[dict] = []
     calls = 0
 
@@ -455,8 +460,9 @@ async def complete_turn(
     async with context as session:
         if tools_enabled:
             listed = visible_tools((await session.list_tools()).tools)
-            schemas = [tool_schema(tool) for tool in listed]
-            known_tools = {s["function"]["name"] for s in schemas}
+            all_schemas = [tool_schema(tool) for tool in listed]
+            if any(s["function"]["name"] == TOOL_SEARCH_NAME for s in all_schemas):
+                raise ValueError("MCP tool name conflicts with Hosted Chat discovery")
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(120, connect=15), follow_redirects=False, trust_env=False
         ) as model_http:
@@ -464,6 +470,9 @@ async def complete_turn(
                 async def summarizer(previous: str, batch: str) -> str:
                     return await summarize_with_model(model_http, endpoint, key, model, previous, batch)
 
+                schemas = (choose_tool_schemas(
+                    all_schemas, request_messages, context_size, preferred_tools,
+                ) if all_schemas else [])
                 updated = await compact_messages(
                     all_messages, compacted, context_size, prompt, schemas, summarizer,
                 )
@@ -472,6 +481,11 @@ async def complete_turn(
                         await context_checkpoint(updated)
                     compacted = updated
                 request_messages = context_messages(prompt, all_messages, compacted)
+                if all_schemas:
+                    schemas = choose_tool_schemas(
+                        all_schemas, request_messages, context_size, preferred_tools,
+                    )
+                known_tools = {s["function"]["name"] for s in schemas}
                 payload = {"model": model, "messages": request_messages, "stream": False}
                 if schemas:
                     payload["tools"] = schemas
@@ -501,6 +515,20 @@ async def complete_turn(
                 await save()
                 for call_id, name, arguments in validated:
                     calls += 1
+                    if name == TOOL_SEARCH_NAME:
+                        discovery, preferred_tools = discover_tools(
+                            arguments.get("query"), all_schemas, context_size,
+                        )
+                        events.append({
+                            "type": "tool", "name": name, "error": False,
+                            "call_id": call_id, "result": discovery,
+                        })
+                        all_messages.append({
+                            "role": "tool", "tool_call_id": call_id,
+                            "content": json.dumps(discovery, ensure_ascii=False),
+                        })
+                        await save()
+                        continue
                     if name not in {
                         "session_manage",
                         "plan_manage",

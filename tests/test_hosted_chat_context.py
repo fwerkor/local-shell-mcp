@@ -263,3 +263,126 @@ def test_abbreviated_summary_input_never_exceeds_utf8_budget():
     assert len(shortened) < len(text)
     with pytest.raises(ValueError, match="summarizer context window"):
         abbreviate_summary_input(recap, text, int(8192 * 0.8))
+
+
+@pytest.mark.parametrize("size", [8192, 16384])
+@pytest.mark.asyncio
+async def test_full_mcp_catalog_fits_small_windows_via_discovery(size, monkeypatch):
+    """The actual 48-tool catalog must never block a short 8K/16K chat."""
+    from local_shell_mcp.hosted_chat_tools import TOOL_SEARCH_NAME
+    from local_shell_mcp.tools import build_mcp
+
+    available = [hosted_chat.tool_schema(t) for t in
+                 hosted_chat.visible_tools(await build_mcp().list_tools())]
+    assert len(available) >= 40
+    transcript = [{"role": "user", "content": "Run a shell command"}]
+    assert estimate_tokens({"messages": [
+        {"role": "system", "content": hosted_chat.chat_prompt()}, *transcript],
+        "tools": available}) > int(size * 0.8)
+
+    calls = []
+    requests = []
+    saved = []
+
+    class FakeSession:
+        async def list_tools(self):
+            class Tool:
+                def __init__(self, schema):
+                    self.schema = schema
+
+                def model_dump(self, **_):
+                    return {
+                        "name": self.schema["function"]["name"],
+                        "description": self.schema["function"]["description"],
+                        "inputSchema": self.schema["function"]["parameters"],
+                    }
+            return SimpleNamespace(tools=[Tool(s) for s in available])
+
+        async def call_tool(self, name, args, **_):
+            calls.append((name, args))
+            return SimpleNamespace(isError=False, model_dump=lambda **_: {
+                "content": [{"type": "text", "text": "command executed"}], "isError": False,
+            })
+
+    @asynccontextmanager
+    async def fake_mcp(*_, **__):
+        yield FakeSession()
+
+    class FakeHttp:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            pass
+
+    async def candidates(endpoint):
+        return [(endpoint + "/chat/completions", {}, {})]
+
+    def call(name, args, call_id):
+        import json
+        return {"id": call_id, "type": "function", "function": {
+            "name": name, "arguments": json.dumps(args),
+        }}
+
+    async def reply(_http, _url, _headers, _ext, payload):
+        requests.append(deepcopy(payload))
+        assert estimate_tokens({"messages": payload["messages"],
+                                "tools": payload.get("tools", [])}) <= int(size * 0.8)
+        schemas = {s["function"]["name"] for s in payload.get("tools", [])}
+        if len(requests) == 1:
+            assert schemas == {TOOL_SEARCH_NAME}
+            message = {"tool_calls": [call(TOOL_SEARCH_NAME, {"query": "run_shell"}, "search")],
+                       "content": ""}
+        elif len(requests) == 2:
+            assert "run_shell" in schemas
+            message = {"tool_calls": [call("run_shell", {"command": "echo ok"}, "run")],
+                       "content": ""}
+        else:
+            message = {"content": "Completed"}
+        return {"choices": [{"message": message}]}
+
+    async def checkpoint(messages, events):
+        saved.append((deepcopy(messages), deepcopy(events)))
+
+    monkeypatch.setattr(hosted_chat, "mcp_session", fake_mcp)
+    monkeypatch.setattr(hosted_chat.httpx, "AsyncClient", lambda **_: FakeHttp())
+    monkeypatch.setattr(hosted_chat, "model_request_targets", candidates)
+    monkeypatch.setattr(hosted_chat, "model_response_json", reply)
+
+    output = await hosted_chat.complete_turn(
+        base_url="http://controller", bearer="", endpoint="https://example.org/v1",
+        key="key", model="test-model", messages=transcript, tools_enabled=True,
+        context_size=size, session_id="s_123", checkpoint=checkpoint,
+    )
+    assert len(requests) == 3
+    assert calls == [("run_shell", {"command": "echo ok", "logical_session_id": "s_123"})]
+    assert output["messages"][-1]["content"] == "Completed"
+    assert [e["name"] for e in output["events"]] == [TOOL_SEARCH_NAME, "run_shell"]
+    assert saved[-1][0] == output["messages"]
+
+
+def test_tool_discovery_does_not_leak_hidden_tools_and_is_budgeted():
+    from local_shell_mcp.hosted_chat_tools import (
+        TOOL_SEARCH_NAME,
+        choose_tool_schemas,
+        discover_tools,
+    )
+
+    def schema(name, description="Edit files"):
+        return {"type": "function", "function": {
+            "name": name, "description": description,
+            "parameters": {"type": "object", "properties": {}},
+        }}
+
+    tools = [schema("file_edit"), schema("file_read"), schema("file_write")]
+    tools.extend(schema(f"other_{i}", "large" * 500) for i in range(40))
+    info, names = discover_tools("file edit", tools, 8192)
+    assert names[0] == "file_edit"
+    assert all(name in {s["function"]["name"] for s in tools} for name in names)
+    assert "secret_tool" not in str(info)
+    prompt = [{"role": "user", "content": "edit a file"}]
+    chosen = choose_tool_schemas(tools, prompt, 8192, names)
+    assert chosen[0]["function"]["name"] == TOOL_SEARCH_NAME
+    assert "file_edit" in [s["function"]["name"] for s in chosen]
+    assert estimate_tokens({"messages": prompt, "tools": chosen}) <= int(8192 * 0.8)
+    with pytest.raises(ValueError, match="query"):
+        discover_tools("", tools, 8192)
