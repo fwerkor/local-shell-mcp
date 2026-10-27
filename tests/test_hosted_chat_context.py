@@ -330,12 +330,17 @@ async def test_full_mcp_catalog_fits_small_windows_via_discovery(size, monkeypat
         schemas = {s["function"]["name"] for s in payload.get("tools", [])}
         if len(requests) == 1:
             assert schemas == {TOOL_SEARCH_NAME}
-            message = {"tool_calls": [call(TOOL_SEARCH_NAME, {"query": "run_shell"}, "search")],
-                       "content": ""}
+            searches = [call(TOOL_SEARCH_NAME, {"query": "run_shell"}, "search")]
+            if size == 8192:
+                searches.append(call(TOOL_SEARCH_NAME, {"query": "file_read"}, "search2"))
+            message = {"tool_calls": searches, "content": ""}
         elif len(requests) == 2:
             assert "run_shell" in schemas
-            message = {"tool_calls": [call("run_shell", {"command": "echo ok"}, "run")],
-                       "content": ""}
+            commands = [call("run_shell", {"command": "echo ok"}, "run")]
+            if size == 8192:
+                assert "file_read" in schemas
+                commands.append(call("file_read", {"path": "sample.txt"}, "read"))
+            message = {"tool_calls": commands, "content": ""}
         else:
             message = {"content": "Completed"}
         return {"choices": [{"message": message}]}
@@ -354,10 +359,16 @@ async def test_full_mcp_catalog_fits_small_windows_via_discovery(size, monkeypat
         context_size=size, session_id="s_123", checkpoint=checkpoint,
     )
     assert len(requests) == 3
-    assert calls == [("run_shell", {"command": "echo ok", "logical_session_id": "s_123"})]
+    expected = [("run_shell", {"command": "echo ok", "logical_session_id": "s_123"})]
+    if size == 8192:
+        expected.append(("file_read", {"path": "sample.txt", "logical_session_id": "s_123"}))
+    assert calls == expected
     assert output["messages"][-1]["content"] == "Completed"
-    assert [e["name"] for e in output["events"]] == [TOOL_SEARCH_NAME, "run_shell"]
+    names = [e["name"] for e in output["events"]]
+    assert names == ([TOOL_SEARCH_NAME, TOOL_SEARCH_NAME, "run_shell", "file_read"]
+                     if size == 8192 else [TOOL_SEARCH_NAME, "run_shell"])
     assert saved[-1][0] == output["messages"]
+    assert "matches" in output["events"][0]["result"]["content"][0]["text"]
 
 
 def test_tool_discovery_does_not_leak_hidden_tools_and_is_budgeted():

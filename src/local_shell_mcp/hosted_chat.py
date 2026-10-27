@@ -518,14 +518,18 @@ async def complete_turn(
                     if name == TOOL_SEARCH_NAME:
                         discovery, preferred_tools = discover_tools(
                             arguments.get("query"), all_schemas, context_size,
+                            preferred_tools, context_messages(prompt, all_messages, compacted),
                         )
+                        discovery_text = json.dumps(discovery, ensure_ascii=False)
                         events.append({
                             "type": "tool", "name": name, "error": False,
-                            "call_id": call_id, "result": discovery,
+                            "call_id": call_id,
+                            "result": {"content": [{"type": "text", "text": discovery_text}],
+                                       "isError": False},
                         })
                         all_messages.append({
                             "role": "tool", "tool_call_id": call_id,
-                            "content": json.dumps(discovery, ensure_ascii=False),
+                            "content": discovery_text,
                         })
                         await save()
                         continue

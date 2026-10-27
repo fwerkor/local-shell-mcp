@@ -58,8 +58,11 @@ def choose_tool_schemas(
     return selected
 
 
-def discover_tools(query: str, available: list[dict], context_size: int) -> tuple[dict, list[str]]:
-    """Return only authorized matches that can be advertised together."""
+def discover_tools(
+    query: str, available: list[dict], context_size: int,
+    previous: list[str] | None = None, messages: list[dict] | None = None,
+) -> tuple[dict, list[str]]:
+    """Accumulate only authorized discoveries fitting a shared schema and message budget."""
     if not isinstance(query, str) or not query.strip() or len(query) > 256:
         raise ValueError("Tool search requires a query of at most 256 characters")
     terms = set(re.findall(r"[a-z0-9]+", query.lower())) - {
@@ -80,19 +83,39 @@ def discover_tools(query: str, available: list[dict], context_size: int) -> tupl
     matches = sorted((s for s in available if rank(s)[0] > 0),
                      key=lambda s: (-rank(s)[0], rank(s)[1]))
     selected = [TOOL_SEARCH_SCHEMA]
+    retained: list[str] = []
+    by_name = {s["function"]["name"]: s for s in available}
+    schema_budget = int(context_size * CONTEXT_RATIO * 0.70)
+    total_budget = int(context_size * CONTEXT_RATIO)
+    for name in dict.fromkeys(previous or []):
+        schema = by_name.get(name)
+        if schema is None:
+            continue
+        candidate = [*selected, schema]
+        if estimate_tokens({"tools": candidate}) <= schema_budget:
+            selected = candidate
+            retained.append(name)
     found: list[dict[str, Any]] = []
     for schema in matches:
         if len(found) >= 4:
             break
-        candidate = [*selected, schema]
-        if estimate_tokens({"tools": candidate}) > int(context_size * CONTEXT_RATIO * 0.70):
-            continue
-        selected = candidate
         fn = schema["function"]
-        found.append({"name": fn["name"], "description": fn.get("description", "")[:160]})
+        if fn["name"] in retained:
+            continue
+        item = {"name": fn["name"], "description": fn.get("description", "")[:160]}
+        candidate = [*selected, schema]
+        if estimate_tokens({"tools": candidate}) > schema_budget:
+            continue
+        if messages is not None:
+            preview = {"role": "tool", "tool_call_id": "discovery", "content":
+                       str({"matches": [*found, item]})}
+            if estimate_tokens({"messages": [*messages, preview], "tools": candidate}) > total_budget:
+                continue
+        selected = candidate
+        found.append(item)
     return {
         "matches": found,
         "note": ("These tools are available in the next model step. "
                  "Search again for other capabilities if needed." if found else
                  "No matching tool fits the available schema budget; try a narrower query or larger context window."),
-    }, [item["name"] for item in found]
+    }, [*retained, *(item["name"] for item in found)]
