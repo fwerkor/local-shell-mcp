@@ -693,7 +693,12 @@ def run_browser(port: int) -> None:
                     mobile_page.locator("#keyboard-button").tap()
                     if touch_width == 640:
                         escape_count = len(touch_escape_frames)
+                        mobile_page.locator("#fullscreen-button").tap()
+                        mobile_page.wait_for_function(
+                            "document.fullscreenElement?.id === 'console-view'"
+                        )
                         mobile_page.locator(".navigation-toggle:visible").tap()
+                        mobile_page.wait_for_function("document.fullscreenElement === null")
                         expect(mobile_page.locator("#navigation")).to_be_visible()
                         expect(mobile_page.locator("#navigation .nav-item").first).to_be_focused()
                         mobile_page.keyboard.press("Escape")

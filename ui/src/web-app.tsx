@@ -111,9 +111,18 @@ export function mountApplication() {
     scrim.hidden = !open
     if (open) (document.querySelector<HTMLElement>("#navigation .nav-item.active") || document.querySelector<HTMLElement>("#navigation .nav-item"))?.focus()
   }
-  toggles.forEach(button => button.addEventListener("click", () => {
+  toggles.forEach(button => button.addEventListener("click", async () => {
     opener = button
-    setOpen(!document.body.classList.contains("navigation-open"))
+    const open = !document.body.classList.contains("navigation-open")
+    if (open && document.fullscreenElement) {
+      try {
+        await document.exitFullscreen()
+      } catch {
+        return
+      }
+      if (document.fullscreenElement) return
+    }
+    setOpen(open)
   }))
   scrim.addEventListener("click", () => { setOpen(false); restoreFocus() })
   document.querySelector(".primary-nav")!.addEventListener("click", () => setOpen(false))
