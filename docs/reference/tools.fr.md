@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # Référence des outils
 
 Cette page est construite à partir des schémas MCP réels. Exécutez `python scripts/generate-tools-reference.py` après toute modification de la surface publique des tools pour mettre à jour la référence English.
@@ -288,12 +288,27 @@ Lorsque `machine` est fourni, l’appel requiert aussi `remote:use` et s’exéc
 
 ### `job_list`
 
-Liste les jobs trackés localement ou sur une machine distante. Les jobs actifs sont renvoyés en premier ; `limit` est borné entre 1 et 1000.
+Liste concise des tâches, les actives en premier. Pagination via next_offset ; données limitées à 32 Kio.
 
 | Paramètre | Type | Requis/default | Description |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session de cet appel d’outil. Pendant le travail sur la tâche, transmettez le session_id renvoyé par session_manage. Utilisez null uniquement lorsqu’aucune Logical Session n’est active. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Lorsque `machine` est fourni, l’appel requiert aussi `remote:use` et s’exécute via le protocole remote worker.
+
+### `job_get`
+
+Consulte les détails complets d’une tâche, y compris la commande, la progression et le résultat.
+
+| Paramètre | Type | Requis/default | Description |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session de cet appel d’outil. Pendant le travail sur la tâche, transmettez le session_id renvoyé par session_manage. Utilisez null uniquement lorsqu’aucune Logical Session n’est active. |
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # Referensi tools
 
 Page ini dibangun dari MCP tool schemas yang sebenarnya. Jalankan `python scripts/generate-tools-reference.py` setelah mengubah public tool surface untuk memperbarui English reference.
@@ -288,12 +288,27 @@ Saat `machine` diberikan, call juga memerlukan `remote:use` dan dijalankan melal
 
 ### `job_list`
 
-Mencantumkan tracked jobs secara lokal atau pada remote machine. Job aktif dikembalikan lebih dulu; `limit` dibatasi ke rentang 1-1000.
+Daftar ringkas pekerjaan dengan pekerjaan aktif terlebih dahulu. Gunakan next_offset untuk halaman berikutnya; data dibatasi 32 KiB.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Saat `machine` diberikan, call juga memerlukan `remote:use` dan dijalankan melalui protokol remote worker.
+
+### `job_get`
+
+Ambil detail lengkap pekerjaan termasuk perintah, progres, dan hasil.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session untuk pemanggilan tool ini. Saat mengerjakan task, berikan session_id yang dikembalikan session_manage. Gunakan null hanya ketika tidak ada Logical Session aktif. |
 

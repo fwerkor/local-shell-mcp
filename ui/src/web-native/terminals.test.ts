@@ -179,6 +179,115 @@ describe("Native WebUI terminal session filtering", () => {
 
 
 describe("Native WebUI terminal rendering", () => {
+  test("scrolls the selected session card into the visible part of the rail", () => {
+    const previousCss = (globalThis as any).CSS
+    ;(globalThis as any).CSS = { escape: (value: string) => value }
+    try {
+      const calls: string[] = []
+      const previous: any = { classList: { remove: () => calls.push("remove") } }
+      const selected: any = {
+        classList: { add: () => calls.push("add") },
+        getBoundingClientRect: () => ({ left: 500, right: 655, top: 85, bottom: 130 }),
+      }
+      const list: any = {
+        scrollLeft: 0,
+        scrollTop: 0,
+        getBoundingClientRect: () => ({ left: 100, right: 380, top: 80, bottom: 145 }),
+        querySelector: (selector: string) => selector === ".session-row.active" ? previous : selected,
+      }
+      const controller: any = {
+        selectedSessionId: "build-b",
+        root: { querySelector: () => list },
+      }
+
+      ;(TerminalsController.prototype as any).updateSessionSelection.call(controller)
+      expect(calls).toEqual(["remove", "add"])
+      expect(list.scrollLeft).toBe(275)
+      expect(list.scrollTop).toBe(0)
+
+      // Returning to a different card left of the rail scrolls back without touching page scroll.
+      controller.selectedSessionId = "build-a"
+      selected.getBoundingClientRect = () => ({ left: 70, right: 225, top: 85, bottom: 130 })
+      ;(TerminalsController.prototype as any).updateSessionSelection.call(controller)
+      expect(list.scrollLeft).toBe(245)
+    } finally {
+      ;(globalThis as any).CSS = previousCss
+    }
+  })
+
+  test("does not override manual rail scrolling when selection is unchanged", () => {
+    const selected: any = { classList: { add: () => { throw new Error("unchanged selection") } } }
+    const list: any = {
+      scrollLeft: 100,
+      querySelector: () => selected,
+      getBoundingClientRect: () => { throw new Error("should not auto-scroll") },
+    }
+    const controller: any = { selectedSessionId: "active", renderedSelectedSessionId: "active", root: { querySelector: () => list } }
+    const previousCss = (globalThis as any).CSS
+    ;(globalThis as any).CSS = { escape: (value: string) => value }
+    try {
+      ;(TerminalsController.prototype as any).updateSessionSelection.call(controller)
+      expect(list.scrollLeft).toBe(100)
+    } finally {
+      ;(globalThis as any).CSS = previousCss
+    }
+  })
+
+  test("preserves manual rail position when metadata refresh rebuilds the selected card", () => {
+    const previousCss = (globalThis as any).CSS
+    ;(globalThis as any).CSS = { escape: (value: string) => value }
+    try {
+      let activated = false
+      const selected: any = {
+        classList: { add: () => { activated = true } },
+        getBoundingClientRect: () => { throw new Error("refresh should not auto-scroll") },
+      }
+      const list: any = {
+        scrollLeft: 220,
+        querySelector: (selector: string) => selector === ".session-row.active" ? null : selected,
+        getBoundingClientRect: () => { throw new Error("refresh should not measure rail") },
+      }
+      const controller: any = {
+        selectedSessionId: "build-a",
+        renderedSelectedSessionId: "build-a",
+        root: { querySelector: () => list },
+      }
+
+      ;(TerminalsController.prototype as any).updateSessionSelection.call(controller)
+      expect(activated).toBe(true)
+      expect(list.scrollLeft).toBe(220)
+    } finally {
+      ;(globalThis as any).CSS = previousCss
+    }
+  })
+
+  test("reveals an off-screen active card when clearing a session filter", () => {
+    const previousCss = (globalThis as any).CSS
+    ;(globalThis as any).CSS = { escape: (value: string) => value }
+    try {
+      const selected: any = {
+        classList: { add: () => {} },
+        getBoundingClientRect: () => ({ left: 500, right: 650, top: 90, bottom: 130 }),
+      }
+      const list: any = {
+        scrollLeft: 0,
+        scrollTop: 0,
+        getBoundingClientRect: () => ({ left: 100, right: 380, top: 80, bottom: 150 }),
+        querySelector: (selector: string) => selector === ".session-row.active" ? null : selected,
+      }
+      const controller: any = {
+        selectedSessionId: "late",
+        renderedSelectedSessionId: "late",
+        root: { querySelector: () => list },
+      }
+      ;(TerminalsController.prototype as any).updateSessionSelection.call(controller, true)
+      expect(list.scrollLeft).toBe(270)
+      expect(controller.renderedSelectedSessionId).toBe("late")
+    } finally {
+      ;(globalThis as any).CSS = previousCss
+    }
+  })
+
   test("switches terminal selection without rebuilding the session sidebar", () => {
     const controller: any = {
       selectedSessionId: "a",

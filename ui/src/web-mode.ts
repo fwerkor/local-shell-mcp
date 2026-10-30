@@ -1,6 +1,6 @@
-export const WEB_VIEWS = ["overview", "files", "terminals", "desktop", "sessions", "remotes", "audit", "workloads", "activity"] as const
+export const WEB_VIEWS = ["overview", "files", "terminals", "desktop", "sessions", "remotes", "audit", "workloads", "activity", "hosted-chat"] as const
 export type WebViewName = (typeof WEB_VIEWS)[number] | "console"
-export type InterfaceMode = "web" | "tui"
+export type InterfaceMode = "web" | "tui" | "chat"
 
 const VIEW_SET = new Set<WebViewName>([...WEB_VIEWS, "console"])
 const ALIASES: Record<string, WebViewName> = {
@@ -23,7 +23,7 @@ export function hashForView(view: WebViewName): string {
 }
 
 export function interfaceModeForView(view: WebViewName): InterfaceMode {
-  return view === "console" ? "tui" : "web"
+  return view === "console" ? "tui" : view === "hosted-chat" ? "chat" : "web"
 }
 
 export function oauthReturnView(hash: string, requestedView: WebViewName): WebViewName {

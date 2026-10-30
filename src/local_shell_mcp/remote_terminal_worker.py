@@ -99,14 +99,24 @@ class _TmuxPtyAttachment:
             os.close(self.fd)
         process = self.process
         if process is not None and process.poll() is None:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGTERM)
+            # On macOS a tmux client may move out of its initial process group.
+            # Fall back to signaling the owned subprocess when the group is inaccessible.
+            def signal_process(sig: int) -> None:
+                try:
+                    os.killpg(process.pid, sig)
+                except PermissionError:
+                    with contextlib.suppress(ProcessLookupError):
+                        process.send_signal(sig)
+                except ProcessLookupError:
+                    with contextlib.suppress(ProcessLookupError):
+                        process.send_signal(sig)
+
+            signal_process(signal.SIGTERM)
             waiter = asyncio.create_task(asyncio.to_thread(process.wait))
             try:
                 await asyncio.wait_for(asyncio.shield(waiter), timeout=2)
             except TimeoutError:
-                with contextlib.suppress(ProcessLookupError):
-                    os.killpg(process.pid, signal.SIGKILL)
+                signal_process(signal.SIGKILL)
                 await waiter
 
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # 工具參考
 
 本頁由實際 MCP tool schema 產生。公開工具介面變更後，執行 `python scripts/generate-tools-reference.py` 更新 English 參考頁。
@@ -288,12 +288,27 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_list`
 
-列出本機或 remote machine 上被追蹤的 jobs。活動中的 jobs 會優先回傳；`limit` 會限制在 1-1000 範圍內。
+列出精簡的 Job 摘要，執行中的 Job 優先。使用 next_offset 分頁；資料總量限制為 32 KiB。
 
 | 參數 | 類型 | 必填/預設值 | 說明 |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+指定 `machine` 時，呼叫還需要 `remote:use`，並透過遠端 worker 協定執行。
+
+### `job_get`
+
+取得單個 Job 的完整中繼資料，包括完整命令、進度與結果。
+
+| 參數 | 類型 | 必填/預設值 | 說明 |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 這次工具呼叫所屬的 Logical Session。處理該任務時，傳入 session_manage 回傳的 session_id。只有在沒有活動 Logical Session 時才使用 null。 |
 

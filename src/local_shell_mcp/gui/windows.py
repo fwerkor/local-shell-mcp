@@ -16,6 +16,7 @@ from typing import Any
 
 from PIL import Image
 
+from ..process_utils import managed_process_kwargs
 from .base import (
     GUI_MAX_CAPTURE_DIMENSION,
     GUI_MAX_CAPTURE_PIXELS,
@@ -293,6 +294,7 @@ def _capture_window_image(hwnd: int, destination: Path) -> None:
             text=True,
             check=False,
             timeout=_WINDOW_CAPTURE_TIMEOUT_S,
+            **managed_process_kwargs(),
         )
     except subprocess.TimeoutExpired as exc:
         destination.unlink(missing_ok=True)

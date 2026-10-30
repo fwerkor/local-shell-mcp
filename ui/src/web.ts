@@ -1,8 +1,12 @@
+import "./web-design.scss"
+import "./web-native.css"
+import "./web.css"
+import { mountApplication, mountControllerPage, mountOverview, mountDataPage, unmountReactPage } from "./web-app"
 import { FitAddon } from "@xterm/addon-fit"
 import { Terminal } from "@xterm/xterm"
 import { parseWebClipboardPayload, WEB_CLIPBOARD_OSC } from "./clipboard-protocol"
 import { createImageAddon } from "./image-support"
-import { browserSelectionShortcut, browserShortcutSequence } from "./keyboard"
+import { browserSelectionShortcut, browserShortcutSequence, TERMINAL_KEY_SEQUENCES } from "./keyboard"
 import { measureTerminalCellAspect } from "./terminal-geometry"
 import { TerminalWriteBuffer, type TerminalWriteChunk } from "./terminal-write-buffer"
 import { visibleWorkloadCount } from "./web-data"
@@ -78,6 +82,8 @@ type DashboardData = {
   audit_total_24h?: number
 }
 
+mountApplication()
+
 const UI_PATH = (window.__LSM_UI_CONFIG__?.uiPath || "/ui").replace(/\/$/, "")
 const API_PREFIX = (window.__LSM_UI_CONFIG__?.apiPrefix || "/api/ui").replace(/\/$/, "")
 const TOKEN_KEY = "lsm.ui.access_token"
@@ -92,10 +98,7 @@ const gateDetail = document.querySelector<HTMLElement>("#gate-detail")!
 const viewRoot = document.querySelector<HTMLElement>("#view-root")!
 const webView = document.querySelector<HTMLElement>("#web-view")!
 const consoleView = document.querySelector<HTMLElement>("#console-view")!
-const consoleWallpaper = document.querySelector<HTMLElement>(".console-wallpaper")!
-const pageName = document.querySelector<HTMLElement>("#page-name")!
 const pageTitle = document.querySelector<HTMLElement>("#page-title")!
-const pageDescription = document.querySelector<HTMLElement>("#page-description")!
 const refreshButton = document.querySelector<HTMLButtonElement>("#refresh-button")!
 const openConsoleButton = document.querySelector<HTMLButtonElement>("#open-console-button")!
 const interfaceButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-interface-mode]"))
@@ -110,11 +113,9 @@ const footerVersion = document.querySelector<HTMLElement>("#footer-version")!
 const footerHealth = document.querySelector<HTMLElement>("#footer-health")!
 const footerChecked = document.querySelector<HTMLElement>("#footer-checked")!
 
-consoleWallpaper.style.backgroundImage =
-  `linear-gradient(145deg, rgba(2, 7, 17, 0.16), rgba(2, 7, 17, 0.52)), url("${UI_PATH}/wallpaper")`
 
 let activeView: WebViewName = "overview"
-let lastWebView: Exclude<WebViewName, "console"> = "overview"
+let lastWebView: WebViewName = "overview"
 let authenticated = false
 let bootstrapData: BootstrapData | null = null
 let dashboardData: DashboardData | null = null
@@ -122,24 +123,6 @@ let refreshTimer: number | null = null
 let callbackView: WebViewName | null = null
 let refreshing = false
 
-const metricHistory = {
-  cpu: [] as number[],
-  memory: [] as number[],
-  disk: [] as number[],
-}
-
-const ICONS = {
-  check: '<svg viewBox="0 0 24 24"><path d="m7 12 3 3 7-7"/></svg>',
-  warning: '<svg viewBox="0 0 24 24"><path d="M12 4 3 20h18zM12 9v5M12 17h.01"/></svg>',
-  info: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
-  cpu: '<svg viewBox="0 0 24 24"><path d="M8 2v3M16 2v3M8 19v3M16 19v3M2 8h3M2 16h3M19 8h3M19 16h3"/><rect x="6" y="6" width="12" height="12" rx="3"/><path d="M9 9h6v6H9z"/></svg>',
-  memory: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>',
-  disk: '<svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.66 3.13 3 7 3s7-1.34 7-3V6M5 12v6c0 1.66 3.13 3 7 3s7-1.34 7-3v-6"/></svg>',
-  network: '<svg viewBox="0 0 24 24"><path d="M12 20V10M7 15l5 5 5-5M4 4h16"/></svg>',
-  machine: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg>',
-  gpu: '<svg viewBox="0 0 24 24"><path d="M4 7h16v10H4zM8 4v3M16 4v3M8 17v3M16 17v3"/><circle cx="9" cy="12" r="2"/><path d="M14 10h3M14 14h3"/></svg>',
-  session: '<svg viewBox="0 0 24 24"><path d="m7 8 4 4-4 4M13 16h4"/></svg>',
-}
 
 function escapeHtml(value: unknown): string {
   return String(value ?? "")
@@ -156,27 +139,6 @@ function numberValue(value: unknown): number | null {
 
 function stringValue(value: unknown, fallback = ""): string {
   return typeof value === "string" && value ? value : fallback
-}
-
-function formatBytes(value: unknown): string {
-  const bytes = numberValue(value)
-  if (bytes === null) return "Unavailable"
-  const units = ["B", "KB", "MB", "GB", "TB"]
-  let amount = Math.max(0, bytes)
-  let unit = 0
-  while (amount >= 1024 && unit < units.length - 1) {
-    amount /= 1024
-    unit += 1
-  }
-  const digits = amount >= 100 || unit === 0 ? 0 : amount >= 10 ? 1 : 2
-  return `${amount.toFixed(digits)} ${units[unit]}`
-}
-
-function formatRate(value: unknown): string {
-  const bytes = numberValue(value)
-  if (bytes === null) return "—"
-  const formatted = formatBytes(bytes)
-  return formatted === "Unavailable" ? "—" : `${formatted}/s`
 }
 
 function formatDuration(value: unknown): string {
@@ -207,44 +169,6 @@ function relativeTime(timestamp: unknown, ageSeconds?: unknown): string {
 function versionLabel(version: Record<string, unknown> | undefined): string {
   const raw = version?.version
   return typeof raw === "string" && raw ? `v${raw.replace(/^v/, "")}` : "unknown"
-}
-
-function valueOrDash(value: unknown, suffix = ""): string {
-  const number = numberValue(value)
-  return number === null ? "—" : `${Math.round(number)}${suffix}`
-}
-
-function seededSeries(value: number, phase: number): number[] {
-  return Array.from({ length: 11 }, (_, index) => {
-    const wave = Math.sin((index + phase) * 1.07) * Math.max(2.5, value * 0.075)
-    const drift = (index - 5) * Math.max(.08, value * .002)
-    return Math.max(0, Math.min(100, value + wave + drift))
-  })
-}
-
-function pushMetric(history: number[], value: unknown, phase: number): void {
-  const numeric = numberValue(value)
-  if (numeric === null) return
-  if (!history.length) history.push(...seededSeries(numeric, phase))
-  else history.push(numeric)
-  if (history.length > 20) history.splice(0, history.length - 20)
-}
-
-function sparkline(values: number[], className: string): string {
-  const samples = values.length > 1 ? values : [0, 0]
-  const width = 220
-  const height = 52
-  const min = Math.min(...samples)
-  const max = Math.max(...samples)
-  const range = Math.max(1, max - min)
-  const points = samples.map((value, index) => {
-    const x = index * width / Math.max(1, samples.length - 1)
-    const y = 42 - ((value - min) / range) * 27
-    return [x, y]
-  })
-  const line = points.map(([x, y], index) => `${index ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ")
-  const area = `${line} L${width} 48 L0 48 Z`
-  return `<div class="sparkline ${className}"><svg preserveAspectRatio="none" viewBox="0 0 220 52"><path class="area" d="${area}"/><path class="line" d="${line}"/></svg></div>`
 }
 
 function accessToken(): string | null {
@@ -407,223 +331,24 @@ async function finishOAuthCallback(): Promise<boolean> {
   return true
 }
 
-function healthPresentation(health: Health, alerts: Alert[]): { eyebrow: string; title: string; detail: string; icon: string } {
-  if (health === "critical") {
-    return {
-      eyebrow: "CRITICAL HEALTH",
-      title: "Critical issue detected",
-      detail: alerts[0]?.detail || "A controller or worker condition requires immediate attention.",
-      icon: ICONS.warning,
-    }
-  }
-  if (health === "attention") {
-    return {
-      eyebrow: "ATTENTION NEEDED",
-      title: "Some items need attention",
-      detail: alerts[0]?.detail || "The control plane is available, but one or more non-critical items should be reviewed.",
-      icon: ICONS.warning,
-    }
-  }
-  return {
-    eyebrow: "SYSTEM HEALTH",
-    title: "All systems operational",
-    detail: "The controller and connected workers are healthy. No critical alerts require your attention.",
-    icon: ICONS.check,
-  }
-}
-
-function machinePlatform(machine: Machine): string {
-  const info = machine.info || {}
-  return stringValue(info.platform) || stringValue(info.system) || (info.local ? "Local controller" : "Remote worker")
-}
-
-function machineIcon(machine: Machine): string {
-  const capabilities = machine.capabilities || []
-  return capabilities.some((item) => item.toLowerCase().includes("gpu")) ? ICONS.gpu : ICONS.machine
-}
-
-function resourceMini(label: string, value: number | null): string {
-  if (value === null) return ""
-  const percent = Math.max(0, Math.min(100, value))
-  return `<div class="resource-mini"><span><i style="width:${percent}%"></i></span><small>${label} ${Math.round(value)}%</small></div>`
-}
-
-function machineRows(machines: Machine[], localSystem?: Record<string, unknown>): string {
-  if (!machines.length) return '<tr><td colspan="4"><div class="empty-state">No machines are registered.</div></td></tr>'
-  return machines.map((machine, index) => {
-    const info = machine.info || {}
-    const status = stringValue(machine.status, "unknown")
-    const online = status === "online"
-    const local = Boolean(info.local)
-    const cpu = local ? numberValue(localSystem?.cpu_percent) : numberValue(info.cpu_percent)
-    const memory = local ? numberValue(localSystem?.memory_percent) : numberValue(info.memory_percent)
-    const resources = [resourceMini("CPU", cpu), resourceMini("MEM", memory)].filter(Boolean).join("")
-    const version = stringValue(info.version) || stringValue(info.lsm_version)
-    const subtitle = [machinePlatform(machine), version ? `LSM ${version}` : ""].filter(Boolean).join(" · ")
-    return `<tr>
-      <td><div class="machine-cell"><span class="machine-avatar ${local ? "local" : index % 2 ? "gpu" : "lab"}">${machineIcon(machine)}</span><span><strong>${escapeHtml(machine.name || "unnamed")}</strong><small>${escapeHtml(subtitle)}</small></span></div></td>
-      <td><span class="status-chip ${online ? "online" : "offline"}"><i></i>${escapeHtml(status)}</span></td>
-      <td>${resources ? `<div class="resource-stack">${resources}</div>` : '<span class="last-seen">Not reported</span>'}</td>
-      <td><span class="last-seen ${online ? "now" : ""}">${online ? "Now" : relativeTime(machine.last_seen, machine.last_seen_age_s)}</span></td>
-    </tr>`
-  }).join("")
-}
-
-function machineTable(data: DashboardData, full = false): string {
-  const machines = data.machines?.machines || []
-  return `<div class="table-wrap"><table class="${full ? "large-table" : ""}">
-    <thead><tr><th>Machine</th><th>Status</th><th>Resources</th><th>Last seen</th></tr></thead>
-    <tbody>${machineRows(machines, data.system)}</tbody>
-  </table></div>`
-}
-
-function workloadIdentity(item: Job | Session, kind: "job" | "session"): { name: string; detail: string; node: string; status: string; elapsed: string } {
-  const name = stringValue(item.name) || stringValue(item.job_id) || stringValue(item.session_id) || (kind === "job" ? "Tracked job" : "Shell session")
-  const detail = stringValue(item.command) || stringValue(item.cwd) || stringValue(item.workdir) || stringValue(item.path) || "No command detail"
-  const node = stringValue(item.machine) || stringValue(item.node) || "local"
-  const status = stringValue(item.status, kind === "job" ? "running" : "attached")
-  const created = numberValue(item.created_at) || numberValue(item.started_at)
-  const elapsedSeconds = numberValue(item.elapsed_s) ?? (created === null ? null : Date.now() / 1000 - created)
-  return { name, detail, node, status, elapsed: formatDuration(elapsedSeconds) }
-}
-
-function workloadRows(data: DashboardData, limit = 3): string {
-  const rows = [
-    ...(data.jobs || []).map((item) => ({ item, kind: "job" as const })),
-    ...(data.sessions || []).map((item) => ({ item, kind: "session" as const })),
-  ].slice(0, limit)
-  if (!rows.length) return '<div class="empty-state">No active jobs or persistent sessions.</div>'
-  return rows.map(({ item, kind }) => {
-    const workload = workloadIdentity(item, kind)
-    return `<div class="workload-row">
-      <div class="workload-icon ${kind === "job" ? "running" : "session"}">${kind === "job" ? "<span></span>" : ICONS.session}</div>
-      <div class="workload-main"><div><strong>${escapeHtml(workload.name)}</strong><span class="type-label ${kind === "session" ? "session-label" : ""}">${kind}</span></div><code>${escapeHtml(workload.detail)}</code></div>
-      <div class="workload-node"><span class="tiny-avatar">${escapeHtml(workload.node.slice(0, 1).toUpperCase())}</span>${escapeHtml(workload.node)}</div>
-      <div class="workload-time"><strong>${escapeHtml(workload.elapsed)}</strong><small>${escapeHtml(workload.status)}</small></div>
-      <button class="row-action" type="button" data-view="workloads">Open</button>
-    </div>`
-  }).join("")
-}
-
-function activityRows(entries: Activity[], limit = 4): string {
-  const rows = entries.slice(0, limit)
-  if (!rows.length) return '<div class="empty-state">No recent MCP activity.</div>'
-  return rows.map((entry) => {
-    const kind = stringValue(entry.kind, "success")
-    const running = kind === "running"
-    const failed = kind === "failed"
-    return `<div class="activity-item">
-      <div class="activity-state ${failed ? "failed" : running ? "running" : "success"}">${running ? "<span></span>" : failed ? ICONS.warning : ICONS.check}</div>
-      <div class="activity-copy"><strong>${escapeHtml(entry.title || "MCP activity")}</strong><p>${failed ? "Failed" : running ? "Running" : "Completed"} on <b>${escapeHtml(entry.node || "local")}</b></p><small>${relativeTime(entry.timestamp)}</small></div>
-      <span class="duration ${running ? "live" : ""}">${running ? "LIVE" : failed ? "FAILED" : "OK"}</span>
-    </div>`
-  }).join("")
-}
-
-function alertItems(alerts: Alert[]): string {
-  if (!alerts.length) return '<div class="empty-state">Nothing needs attention.</div>'
-  return alerts.map((alert) => {
-    const severity = stringValue(alert.severity, "info")
-    return `<div class="attention-item ${severity === "warning" || severity === "critical" ? "warning-item" : "info-item"}">
-      <div class="attention-icon">${severity === "warning" || severity === "critical" ? ICONS.warning : ICONS.info}</div>
-      <div><strong>${escapeHtml(alert.title || "Notice")}</strong><p>${escapeHtml(alert.detail || "No additional detail")}</p><small>${relativeTime(undefined, alert.age_s)}</small></div>
-    </div>`
-  }).join("")
-}
-
-function metricCard(options: {
-  icon: string
-  tone: string
-  label: string
-  value: unknown
-  suffix?: string
-  detailLeft: string
-  detailRight: string
-  history: number[]
-  lineClass: string
-}): string {
-  const numeric = numberValue(options.value)
-  return `<article class="metric-card">
-    <div class="metric-head"><div class="metric-icon ${options.tone}">${options.icon}</div><span class="trend neutral">Live</span></div>
-    <div class="metric-label">${escapeHtml(options.label)}</div>
-    <div class="metric-value ${numeric === null ? "unavailable" : ""}">${numeric === null ? "Unavailable" : `${Math.round(numeric)}<span>${escapeHtml(options.suffix || "")}</span>`}</div>
-    ${sparkline(options.history, options.lineClass)}
-    <div class="metric-foot"><span>${escapeHtml(options.detailLeft)}</span><span>${escapeHtml(options.detailRight)}</span></div>
-  </article>`
-}
-
-function overviewTemplate(data: DashboardData): string {
-  const health = data.health || "healthy"
-  const alerts = data.alerts || []
-  const presentation = healthPresentation(health, alerts)
-  const system = data.system || {}
-  const machines = data.machines?.machines || []
-  const totalMachines = data.machines?.counts?.total ?? machines.length
-  const activeJobs = data.jobs?.length || 0
-  const sessions = data.session_count ?? data.sessions?.length ?? 0
-  const activeWorkloads = visibleWorkloadCount(data)
-  const version = versionLabel(data.version)
-  pushMetric(metricHistory.cpu, system.cpu_percent, 0)
-  pushMetric(metricHistory.memory, system.memory_percent, 3)
-  pushMetric(metricHistory.disk, system.disk_percent, 6)
-
-  return `<section class="status-banner ${health}">
-    <div class="status-illustration"><div class="pulse-ring outer"></div><div class="pulse-ring inner"></div><div class="check-circle">${presentation.icon}</div></div>
-    <div class="status-copy"><div class="eyebrow"><span class="status-dot"></span>${presentation.eyebrow}</div><h2>${escapeHtml(presentation.title)}</h2><p>${escapeHtml(presentation.detail)}</p></div>
-    <div class="status-stats"><div><strong>${totalMachines}</strong><span>Machines</span></div><div><strong>${activeJobs}</strong><span>Active jobs</span></div><div><strong>${sessions}</strong><span>Sessions</span></div><div><strong>${data.audit_total_24h || 0}</strong><span>MCP calls · 24h</span></div></div>
-  </section>
-  <section class="metric-grid">
-    ${metricCard({ icon: ICONS.cpu, tone: "violet", label: "CPU usage", value: system.cpu_percent, suffix: "%", detailLeft: `Load ${system.load_1m ?? "—"}`, detailRight: `${system.cpu_count || "—"} cores`, history: metricHistory.cpu, lineClass: "violet-line" })}
-    ${metricCard({ icon: ICONS.memory, tone: "blue", label: "Memory usage", value: system.memory_percent, suffix: "%", detailLeft: `${formatBytes(system.memory_used_bytes)} used`, detailRight: `${formatBytes(system.memory_total_bytes)} total`, history: metricHistory.memory, lineClass: "blue-line" })}
-    ${metricCard({ icon: ICONS.disk, tone: "amber", label: "Workspace disk", value: system.disk_percent, suffix: "%", detailLeft: `${formatBytes(system.disk_used_bytes)} used`, detailRight: `${formatBytes(system.disk_total_bytes)} total`, history: metricHistory.disk, lineClass: "amber-line" })}
-    <article class="metric-card network-card"><div class="metric-head"><div class="metric-icon green">${ICONS.network}</div><span class="trend positive">Live</span></div><div class="metric-label">Network throughput</div><div class="network-values"><div><span class="download-arrow">↓</span><strong>${escapeHtml(formatRate(system.network_rx_bps).replace("/s", ""))}</strong><small>received</small></div><div><span class="upload-arrow">↑</span><strong>${escapeHtml(formatRate(system.network_tx_bps).replace("/s", ""))}</strong><small>sent</small></div></div><div class="network-bar"><span style="width:70%"></span><i style="width:30%"></i></div><div class="metric-foot"><span>Downlink</span><span>Uplink</span></div></article>
-  </section>
-  <section class="dashboard-grid">
-    <article class="panel machines-panel"><div class="panel-header"><div><h3>Machines</h3><p>Controller and connected remote workers</p></div><button class="text-button" type="button" data-view="remotes">Manage remotes →</button></div>${machineTable(data)}</article>
-    <article class="panel attention-panel"><div class="panel-header compact"><div><h3>Needs attention</h3><p>Controller and worker alerts</p></div><span class="count-badge">${alerts.length}</span></div><div class="attention-list" role="region" aria-label="Current alerts" tabindex="0">${alertItems(alerts)}</div><button class="full-width-link" type="button" data-view="activity">View all alerts</button></article>
-  </section>
-  <section class="dashboard-grid lower-grid">
-    <article class="panel workloads-panel"><div class="panel-header"><div><h3>Active workloads</h3><p>Tracked jobs and persistent shell sessions</p></div><button class="text-button" type="button" data-view="workloads">View all →</button></div><div class="workload-list">${workloadRows(data)}</div><button class="full-width-link" type="button" data-view="workloads">Manage ${activeWorkloads} active workloads</button></article>
-    <article class="panel activity-panel"><div class="panel-header compact"><div><h3>Recent activity</h3><p>Latest MCP calls across all nodes</p></div><span class="tag">${version}</span></div><div class="activity-list">${activityRows(data.activity || [])}</div><button class="full-width-link" type="button" data-view="audit">Open audit activity</button></article>
-  </section>`
-}
-
-function machinesTemplate(data: DashboardData): string {
-  return `<section class="page-stack"><article class="panel page-panel"><div class="panel-header"><div><h3>All machines</h3><p>Controller and remote workers with live connectivity and capabilities</p></div><span class="count-badge">${data.machines?.counts?.total ?? data.machines?.machines?.length ?? 0}</span></div>${machineTable(data, true)}</article></section>`
-}
-
-function workloadsTemplate(data: DashboardData): string {
-  const count = visibleWorkloadCount(data)
-  return `<section class="page-stack"><article class="panel page-panel"><div class="panel-header"><div><h3>Active workloads</h3><p>Tracked jobs and persistent terminal sessions</p></div><div><span class="count-badge">${count}</span><button class="text-button" type="button" data-view="terminals">Open terminals →</button></div></div><div class="workload-list">${workloadRows(data, 100)}</div></article></section>`
-}
-
-function activityTemplate(data: DashboardData): string {
-  const alerts = data.alerts || []
-  const alertCards = alerts.length ? alerts.map((alert) => {
-    const severity = stringValue(alert.severity, "info")
-    return `<div class="alert-card ${escapeHtml(severity)}"><div class="attention-icon">${severity === "warning" || severity === "critical" ? ICONS.warning : ICONS.info}</div><div><strong>${escapeHtml(alert.title || "Notice")}</strong><p>${escapeHtml(alert.detail || "No additional detail")}</p></div><time>${relativeTime(undefined, alert.age_s)}</time></div>`
-  }).join("") : '<div class="empty-state">No active alerts.</div>'
-  return `<section class="page-stack"><article class="panel"><div class="panel-header"><div><h3>Alerts</h3><p>Conditions reported by the controller and workers</p></div><span class="count-badge">${alerts.length}</span></div><div class="alert-list-full">${alertCards}</div></article><article class="panel page-panel"><div class="panel-header"><div><h3>Recent MCP activity</h3><p>${data.audit_total_24h || 0} calls matched in the last 24 hours</p></div><button class="text-button" type="button" data-view="audit">Open audit →</button></div><div class="activity-list">${activityRows(data.activity || [], 100)}</div></article></section>`
-}
-
-
-const PAGE_COPY: Record<Exclude<WebViewName, "console">, { name: string; title: string; description: string }> = {
-  overview: { name: "Overview", title: "Control plane overview", description: "System health across your local and remote machines." },
-  files: { name: "Files", title: "File manager", description: "Browse, preview, edit, and organize files on local or remote machines." },
-  terminals: { name: "Terminals", title: "Persistent terminals", description: "Low-latency interactive shells with session, machine, and mobile controls." },
-  desktop: { name: "Desktop", title: "Desktop control", description: "View and control native application windows on local or remote machines." },
-  sessions: { name: "Sessions", title: "Logical Sessions", description: "Create, inspect, hand off, and close durable agent tasks by explicit session_id." },
-  remotes: { name: "Remotes", title: "Remote workers", description: "Create invitations and manage persistent remote worker identities." },
-  audit: { name: "Audit", title: "Audit records", description: "Filter MCP calls and inspect call results and inputs in a TUI-aligned layout." },
-  workloads: { name: "Workloads", title: "Active workloads", description: "Inspect all tracked jobs and persistent shell sessions." },
-  activity: { name: "Activity", title: "Alerts and activity", description: "Review all active alerts and recent MCP activity." },
+const PAGE_TITLES: Record<Exclude<WebViewName, "console">, string> = {
+  "hosted-chat": "Hosted Chat",
+  overview: "Overview",
+  files: "Files",
+  terminals: "Terminals",
+  desktop: "Desktop",
+  sessions: "Sessions",
+  remotes: "Remotes",
+  audit: "Audit",
+  workloads: "Workloads",
+  activity: "Alerts and activity",
 }
 
 let nativeController: NativePageController | null = null
 let nativeControllerView: WebViewName | null = null
 
 function destroyNativeController(): void {
-  nativeController?.destroy()
+  unmountReactPage()
   nativeController = null
   nativeControllerView = null
 }
@@ -632,40 +357,21 @@ function uiMachines(): UiMachine[] {
   return (bootstrapData?.machines?.machines || dashboardData?.machines?.machines || []) as UiMachine[]
 }
 
-function bindRenderedActions(): void {
-  viewRoot.querySelectorAll<HTMLElement>("[data-view]").forEach((element) => {
-    element.addEventListener("click", () => showView(element.dataset.view as WebViewName))
-  })
-}
-
 function renderActiveView(): void {
   if (activeView === "console") return
-  const copy = PAGE_COPY[activeView]
-  pageName.textContent = copy.name
-  pageTitle.textContent = copy.title
-  pageDescription.textContent = copy.description
+  pageTitle.textContent = PAGE_TITLES[activeView]
   if (["overview", "workloads", "activity"].includes(activeView) && !dashboardData) {
     viewRoot.innerHTML = '<div class="loading-state"><span></span><strong>Loading control plane…</strong></div>'
     return
   }
   if (activeView === "overview") {
-    destroyNativeController()
-    const previousAlertList = viewRoot.querySelector<HTMLElement>(".attention-list")
-    const alertScrollTop = previousAlertList?.scrollTop || 0
-    const alertFocused = document.activeElement === previousAlertList
-    viewRoot.innerHTML = overviewTemplate(dashboardData!)
-    const alertList = viewRoot.querySelector<HTMLElement>(".attention-list")
-    if (alertList) {
-      alertList.scrollTop = alertScrollTop
-      if (alertFocused) alertList.focus({ preventScroll: true })
-    }
-    bindRenderedActions()
+    if (nativeController) destroyNativeController()
+    mountOverview(viewRoot, dashboardData!, view => showView(view as WebViewName))
     return
   }
   if (activeView === "workloads" || activeView === "activity") {
-    destroyNativeController()
-    viewRoot.innerHTML = activeView === "workloads" ? workloadsTemplate(dashboardData!) : activityTemplate(dashboardData!)
-    bindRenderedActions()
+    if (nativeController) destroyNativeController()
+    mountDataPage(viewRoot, activeView, dashboardData!, view => showView(view as WebViewName))
     return
   }
   if (!isNativeView(activeView)) return
@@ -675,6 +381,7 @@ function renderActiveView(): void {
   nativeController = createNativePage(activeView, {
     api: { get: apiGet, send: apiSend },
     uiPath: UI_PATH,
+    liveWorkspaceEnabled: bootstrapData?.features?.live_workspace === true,
     apiPrefix: API_PREFIX,
     accessToken,
     machines: uiMachines,
@@ -684,7 +391,7 @@ function renderActiveView(): void {
     },
   })
   nativeControllerView = activeView
-  void nativeController.mount(viewRoot)
+  mountControllerPage(viewRoot, nativeController)
 }
 
 function showView(
@@ -693,9 +400,11 @@ function showView(
 ): void {
   activeView = view
   document.body.classList.toggle("native-view-active", view !== "console" && isNativeView(view))
-  if (view !== "console") lastWebView = view
+  if (interfaceModeForView(view) === "web") lastWebView = view
   document.querySelectorAll<HTMLButtonElement>(".nav-item[data-view]").forEach((button) => {
     button.classList.toggle("active", button.dataset.view === view)
+    if (button.dataset.view === view) button.setAttribute("aria-current", "page")
+    else button.removeAttribute("aria-current")
   })
   const mode = interfaceModeForView(view)
   interfaceButtons.forEach((button) => {
@@ -730,6 +439,8 @@ function syncChrome(data: DashboardData): void {
   const activeWorkloadCount = visibleWorkloadCount(data)
   machineNavCount.textContent = String(remoteMachineCount)
   workloadNavCount.textContent = String(activeWorkloadCount)
+  machineNavCount.parentElement?.setAttribute("aria-label", `Remotes, ${remoteMachineCount} remote ${remoteMachineCount === 1 ? "machine" : "machines"}`)
+  workloadNavCount.parentElement?.setAttribute("aria-label", `Terminals, ${activeWorkloadCount} ${activeWorkloadCount === 1 ? "workload" : "workloads"}`)
   const version = versionLabel(data.version)
   controllerVersion.textContent = version
   controllerOrigin.textContent = location.host
@@ -752,6 +463,12 @@ async function refreshAll(manual = false): Promise<void> {
       apiGet<DashboardData>("/dashboard"),
     ])
     bootstrapData = bootstrap
+    document.querySelectorAll<HTMLElement>('[data-interface-mode="chat"]').forEach((entry) => {
+      entry.hidden = bootstrap.features?.hosted_chat !== true
+    })
+    if (activeView === "hosted-chat" && bootstrap.features?.hosted_chat !== true) {
+      showView("overview")
+    }
     dashboardData = dashboard
     syncChrome(dashboard)
     const mountedController = nativeController && nativeControllerView === activeView
@@ -1011,7 +728,7 @@ function initializeTerminal(): void {
   terminalInitialized = true
   terminal = new Terminal({
     allowProposedApi: false,
-    allowTransparency: true,
+    allowTransparency: false,
     convertEol: false,
     cursorBlink: true,
     cursorStyle: "bar",
@@ -1024,9 +741,9 @@ function initializeTerminal(): void {
     scrollback: 6_000,
     smoothScrollDuration: 80,
     theme: {
-      background: "rgba(0, 0, 0, 0)",
+      background: "#111111",
       foreground: "#edf3ff",
-      cursor: "#7568e8",
+      cursor: "#ffffff",
       cursorAccent: "#0d1422",
       selectionBackground: "#4e5e82aa",
       black: "#0d1422", red: "#f7768e", green: "#79d69f", yellow: "#e0af68", blue: "#7aa2f7",
@@ -1058,7 +775,6 @@ function initializeTerminal(): void {
   terminal.onBinary((data) => {
     if (socket?.readyState === WebSocket.OPEN) socket.send(Uint8Array.from(data, (character: string) => character.charCodeAt(0) & 0xff))
   })
-  const touchSequences: Record<string, string> = { escape: "\u001b", tab: "\t", left: "\u001b[D", up: "\u001b[A", down: "\u001b[B", right: "\u001b[C", enter: "\r", help: "\u001bOP" }
   touchButtons.forEach((button) => {
     button.addEventListener("click", () => {
       const key = button.dataset.key || ""
@@ -1066,7 +782,7 @@ function initializeTerminal(): void {
         setTouchKeyboard(!touchKeyboardEnabled)
         return
       }
-      const sequence = touchSequences[key]
+      const sequence = TERMINAL_KEY_SEQUENCES[key]
       if (sequence && socket?.readyState === WebSocket.OPEN) socket.send(encoder.encode(sequence))
       if (!usesTouchKeyboard() || touchKeyboardEnabled) terminal?.focus()
       else terminal?.textarea?.blur()
@@ -1136,7 +852,7 @@ async function copyPublishedClipboard(): Promise<void> {
 }
 
 window.addEventListener("keydown", (event) => {
-  if (activeView !== "console" || !terminal) return
+  if (activeView !== "console" || !terminal || document.body.classList.contains("navigation-open")) return
   const selectionShortcut = browserSelectionShortcut(event)
   if (selectionShortcut) {
     event.preventDefault()
@@ -1199,7 +915,8 @@ document.querySelectorAll<HTMLButtonElement>(".nav-item[data-view]").forEach((bu
 })
 interfaceButtons.forEach((button) => {
   button.addEventListener("click", () => {
-    showView(button.dataset.interfaceMode === "tui" ? "console" : lastWebView)
+    const mode = button.dataset.interfaceMode
+    showView(mode === "tui" ? "console" : mode === "chat" ? "hosted-chat" : lastWebView)
   })
 })
 loginButton.addEventListener("click", () => void startOAuth("console"))

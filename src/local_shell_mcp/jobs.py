@@ -43,8 +43,9 @@ JOB_STORE_VERSION = 2
 JOB_STORE_LEGACY_VERSIONS = {1}
 JOB_STORE_LOCK_TIMEOUT_S = 2.0
 JOB_STORE_LOCK_RETRY_INTERVAL_S = 0.05
-JOB_LIST_DEFAULT_LIMIT = 100
+JOB_LIST_DEFAULT_LIMIT = 25
 JOB_LIST_MAX_LIMIT = 1_000
+JOB_LIST_MAX_RESPONSE_BYTES = 32_768
 MANAGED_JOB_STORE_RETRY_ATTEMPTS = 2
 MANAGED_DEFERRED_UPDATE_VERSION = 1
 MANAGED_DEFERRED_APPLIED_KEY = "managed_deferred_update_ids"
@@ -1081,6 +1082,43 @@ def _public_job(job: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _job_list_text(value: Any, max_bytes: int) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    # Store paths can contain surrogate-escaped filesystem bytes. Replace them
+    # before truncating so list responses remain valid UTF-8.
+    encoded = text.encode("utf-8", errors="replace")
+    if len(encoded) <= max_bytes:
+        return encoded.decode("utf-8")
+    return encoded[: max_bytes - 3].decode("utf-8", errors="ignore") + "…"
+
+
+def _job_list_summary(job: dict[str, Any]) -> dict[str, Any]:
+    command = str(job.get("command") or "")
+    summary = {
+        "job_id": _job_list_text(job.get("job_id"), 128),
+        "kind": _job_list_text(job.get("kind", "shell"), 32),
+        "name": _job_list_text(job.get("name"), 160),
+        "status": _job_list_text(job.get("status"), 32),
+        "command": _job_list_text(command, 192),
+        "command_truncated": len(command.encode("utf-8", errors="replace")) > 192,
+        "cwd": _job_list_text(job.get("cwd"), 256),
+        "session_id": _job_list_text(job.get("session_id"), 128),
+        "backend": _job_list_text(job.get("backend"), 64),
+        "created_at": job.get("created_at"),
+        "updated_at": job.get("updated_at"),
+        "completed_at": job.get("completed_at"),
+        "exit_code": job.get("exit_code"),
+        "attempts": job.get("attempts", 1),
+        "log_truncated": bool(job.get("log_truncated", False)),
+        "output_bytes": int(job.get("output_bytes") or 0),
+    }
+    if job.get("status") in {"failed", "lost"}:
+        summary["error"] = _job_list_text(job.get("error"), 256)
+    return summary
+
+
 def _find_job(store: dict[str, Any], job_id: str) -> dict[str, Any]:
     for job in store.get("jobs", []):
         if job.get("job_id") == job_id:
@@ -1596,8 +1634,12 @@ async def run_job_with_timeout(
 async def list_jobs(
     include_finished: bool = True,
     limit: int = JOB_LIST_DEFAULT_LIMIT,
+    offset: int = 0,
+    *,
+    include_recent_failures: bool = False,
 ) -> dict[str, Any]:
     limit = max(1, min(int(limit), JOB_LIST_MAX_LIMIT))
+    offset = max(0, int(offset))
     active = (
         set()
         if get_settings().disable_local
@@ -1627,19 +1669,75 @@ async def list_jobs(
             reverse=True,
         )
         total = len(candidates)
-        rows = [_public_job(job) for job in candidates[:limit]]
         counts: dict[str, int] = {}
+        known_statuses = TERMINAL_STATUSES | {"starting", "running", "stopping", "retrying"}
         for job in visible_jobs:
             status = str(job.get("status") or "unknown")
+            status = status if status in known_statuses else "unknown"
             counts[status] = counts.get(status, 0) + 1
+
+        recent_failures = (
+            [
+                _job_list_summary(job)
+                for job in sorted(
+                    (
+                        job for job in visible_jobs
+                        if job.get("status") in {"failed", "lost"}
+                        and now - float(job.get("updated_at") or job.get("created_at") or 0) <= 86_400
+                    ),
+                    key=lambda job: float(job.get("updated_at") or job.get("created_at") or 0),
+                    reverse=True,
+                )[:3]
+            ]
+            if include_recent_failures
+            else None
+        )
+        extra = {"recent_failures": recent_failures} if recent_failures is not None else {}
+        rows: list[dict[str, Any]] = []
+        page_start = min(offset, total)
+        for job in candidates[page_start : page_start + limit]:
+            row = _job_list_summary(job)
+            new_returned = len(rows) + 1
+            next_offset = page_start + new_returned
+            candidate_response = {
+                "jobs": [*rows, row],
+                "counts": counts,
+                "total": total,
+                "returned": new_returned,
+                "offset": page_start,
+                "next_offset": next_offset if next_offset < total else None,
+                "truncated": next_offset < total,
+                **extra,
+            }
+            if len(json.dumps(candidate_response, ensure_ascii=True).encode("utf-8")) > JOB_LIST_MAX_RESPONSE_BYTES:
+                break
+            rows.append(row)
+
     returned = len(rows)
+    next_offset = page_start + returned
     return {
         "jobs": rows,
         "counts": counts,
         "total": total,
         "returned": returned,
-        "truncated": returned < total,
+        "offset": page_start,
+        "next_offset": next_offset if next_offset < total else None,
+        "truncated": next_offset < total,
+        **extra,
     }
+
+
+async def get_job(job_id: str) -> dict[str, Any]:
+    active = (
+        set()
+        if get_settings().disable_local
+        else _active_session_ids(await list_shells())
+    )
+    with _store_transaction() as store:
+        job = _refresh_job_status(_find_job(store, job_id), active)
+        if get_settings().disable_local and job.get("kind") != "managed":
+            raise ValueError("local shell jobs are unavailable when local access is disabled")
+        return {"job": _public_job(job)}
 
 
 async def tail_job(job_id: str, lines: int = 200) -> dict[str, Any]:

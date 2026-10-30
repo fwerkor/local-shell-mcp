@@ -401,6 +401,7 @@ async def test_read_only_tools_have_read_only_hint(tmp_path, monkeypatch):
         "shell_read",
         "shell_list",
         "job_list",
+        "job_get",
         "job_tail",
         "file_list",
         "file_tree",

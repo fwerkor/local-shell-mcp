@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d4016e996b7de27eb0d52bc7b076277fd976b12906ce5f44d04c1d1d229bf85c -->
+<!-- i18n-source-sha256: c1206f28e9661a542c4c26bae628647a355f6ed1b12ca740574add7374666d57 -->
 # ヒューマンインターフェース
 
 `local-shell-mcp` は、同じ service API、workspace、persistent terminal registry、remote-worker registry、MCP audit log の上に、互換性のある2つの human interface を提供します。
@@ -38,6 +38,8 @@ workspace_open(session_id=...)
 `session_id` が唯一の永続 task identity です。Agent は別 conversation の Session を list、推測、自動選択してはいけません。新しい conversation で作業を続ける場合、user が既存の `session_id` を明示的に渡します。Agent は start/resume 後、重要な progress checkpoint、および turn を終える前に、使用中の `session_id` を user に知らせ、手動 handoff できるようにします。Session は machine や working directory には結び付きません。通常の tool parameter が引き続き local/remote target と path を選択します。
 
 任意の `plan_manage` Plan で Session の Goal mode を有効にできます。Plan が active で agent activity が 15 分ない場合、関連付けられた Live Workspace は ChatGPT に continuation を要求できます。continuation は同じ明示的な `session_id` を resume し、accepted/rejected を問わず最大 10 回です。blocked、completed、cancelled の Plan は自動 continuation されません。すべての step が completed/skipped の active Plan は、resumed agent が Plan を正式に finish できるよう、cleanup continuation の対象に残ります。人間の pause/resume/cancel control は一時的な Live Workspace state ではなく Session 所有の Plan を更新します。
+
+オプションのセルフホスト モデルのホストと MCP アプリ クライアントについては、[Hosted Chat](hosted-chat.md) を参照してください。
 
 ## ブラウザーインターフェース
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # Tools reference
 
 이 페이지는 실제 MCP tool schema에서 구성됩니다. Public tool surface를 변경한 뒤 `python scripts/generate-tools-reference.py`를 실행해 English reference를 갱신하십시오.
@@ -288,12 +288,27 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_list`
 
-Local 또는 remote machine의 tracked jobs를 나열합니다. Active job을 먼저 반환하며 `limit`은 1-1000 범위로 제한됩니다.
+활성 작업을 우선 표시하는 간략한 작업 목록입니다. next_offset으로 페이지를 이동하며 데이터는 32 KiB로 제한됩니다.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+`machine`을 지정하면 이 call에는 추가로 `remote:use`가 필요하며 remote worker protocol을 통해 실행됩니다.
+
+### `job_get`
+
+전체 명령어, 진행 상태 및 결과를 포함한 작업 세부 정보를 가져옵니다.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 이 tool call이 속한 Logical Session입니다. task를 수행하는 동안 session_manage가 반환한 session_id를 전달합니다. active Logical Session이 없을 때만 null을 사용합니다. |
 

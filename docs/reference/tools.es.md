@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # Referencia de herramientas
 
 Esta página se construye a partir de los schemas reales de las tools MCP. Ejecute `python scripts/generate-tools-reference.py` después de cambiar la superficie pública de tools para actualizar la referencia English.
@@ -288,12 +288,27 @@ Cuando se proporciona `machine`, la llamada también requiere `remote:use` y se 
 
 ### `job_list`
 
-Lista jobs trackeados localmente o en una máquina remota. Los jobs activos se devuelven primero; `limit` se limita al rango 1-1000.
+Lista resumida de trabajos, primero los activos. Paginación con next_offset; datos limitados a 32 KiB.
 
 | Parámetro | Tipo | Requerido/default | Descripción |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session para esta llamada de herramienta. Mientras trabajes en la tarea, pasa el session_id devuelto por session_manage. Usa null solo cuando no haya una Logical Session activa. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Cuando se proporciona `machine`, la llamada también requiere `remote:use` y se ejecuta mediante el protocolo de remote worker.
+
+### `job_get`
+
+Obtiene los detalles completos de un trabajo, incluidos comando, progreso y resultado.
+
+| Parámetro | Tipo | Requerido/default | Descripción |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session para esta llamada de herramienta. Mientras trabajes en la tarea, pasa el session_id devuelto por session_manage. Usa null solo cuando no haya una Logical Session activa. |
 

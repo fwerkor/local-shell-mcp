@@ -62,6 +62,7 @@ from .jobs import (
     JOB_LIST_DEFAULT_LIMIT,
     ManagedJobContext,
     discard_unreferenced_python_script,
+    get_job,
     list_jobs,
     register_managed_job_handler,
     retry_job,
@@ -492,6 +493,7 @@ PUBLIC_TOOL_TIMEOUT_OVERRIDES_S: dict[str, float] = {
     "shell_read": 60.0,
     "shell_list": 30.0,
     "job_list": 60.0,
+    "job_get": 60.0,
     "job_tail": 60.0,
     "file_list": 60.0,
     "file_tree": 90.0,
@@ -1588,6 +1590,7 @@ MACHINE_CAPABLE_TOOL_NAMES = {
     "shell_list",
     "job_start",
     "job_list",
+    "job_get",
     "job_tail",
     "job_stop",
     "job_retry",
@@ -1624,7 +1627,7 @@ LOCAL_ONLY_TOOL_NAMES = {
 def _disabled_local_access_error(tool_name: str, arguments: dict[str, Any]) -> str | None:
     if not get_settings().disable_local:
         return None
-    if tool_name in {"job_list", "job_tail", "job_stop", "job_retry"} and arguments.get(
+    if tool_name in {"job_list", "job_get", "job_tail", "job_stop", "job_retry"} and arguments.get(
         "machine"
     ) in {None, ""}:
         return None
@@ -3972,17 +3975,28 @@ def _register_job_tools(mcp: FastMCP, settings: Any, read_only_tool: ToolAnnotat
     async def job_list(
         include_finished: bool = True,
         limit: int = JOB_LIST_DEFAULT_LIMIT,
+        offset: int = 0,
         machine: str | None = None,
     ) -> ToolResult:
-        """List tracked jobs locally or on a remote machine. Active jobs are returned first; limit is clamped to 1-1000."""
+        """List compact job summaries, newest active first. Paginate with next_offset; JSON data payload is capped at 32 KiB."""
         if machine:
             return await _remote_call(
                 settings,
                 machine,
                 "job_list",
-                {"include_finished": include_finished, "limit": limit},
+                {"include_finished": include_finished, "limit": limit, "offset": offset},
             )
-        return await _tool_call(list_jobs, include_finished, limit)
+        return await _tool_call(list_jobs, include_finished, limit, offset)
+
+    @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
+    async def job_get(
+        job_id: str,
+        machine: str | None = None,
+    ) -> ToolResult:
+        """Get the complete metadata of one tracked job, including full command, progress and result."""
+        if machine:
+            return await _remote_call(settings, machine, "job_get", {"job_id": job_id})
+        return await _tool_call(get_job, job_id)
 
     @mcp.tool(structured_output=True, annotations=read_only_tool, meta=shell_read_meta)
     async def job_tail(

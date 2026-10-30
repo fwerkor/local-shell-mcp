@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # 工具参考
 
 本页由实际 MCP tool schema 生成。公开工具接口变更后，运行 `python scripts/generate-tools-reference.py` 更新 English 参考页。
@@ -288,12 +288,27 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_list`
 
-列出本地或 remote machine 上被跟踪的 jobs。活动中的 jobs 会优先返回；`limit` 会限制在 1-1000 范围内。
+列出简洁的 Job 摘要，运行中的 Job 优先。使用 next_offset 翻页；数据总量限制为 32 KiB。
 
 | 参数 | 类型 | 必填/默认值 | 说明 |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+指定 `machine` 时，调用还需要 `remote:use`，并通过远程 worker 协议执行。
+
+### `job_get`
+
+获取单个 Job 的完整元数据，包括命令全文、进度和结果。
+
+| 参数 | 类型 | 必填/默认值 | 说明 |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | 这次工具调用所属的 Logical Session。处理该任务时，传入 session_manage 返回的 session_id。只有在没有活动 Logical Session 时才使用 null。 |
 

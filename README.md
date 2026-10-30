@@ -242,6 +242,16 @@ The following independently maintained projects explore adjacent session and orc
 - [rijuyuezhu/local-shell-mcp](https://github.com/rijuyuezhu/local-shell-mcp) uses a different, execution-oriented session model that binds workspace context and related resources to explicit sessions. It has its own tool surface and release lifecycle.
 - [DongYaoZe/localshell-web-supervisor](https://github.com/DongYaoZe/localshell-web-supervisor) is a local reliability and orchestration layer for browser-driven agents using Local Shell MCP. It supervises replaceable browser workers while reconciling durable LSM sessions, Goals/jobs, and actual workspace/Git state, with guarded lease, handoff, takeover, and recovery flows. It is not part of the LSM runtime or release lifecycle.
 
+## Star History
+
+<a href="https://www.star-history.com/fwerkor/local-shell-mcp">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=fwerkor/local-shell-mcp&amp;type=Date&amp;theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=fwerkor/local-shell-mcp&amp;type=Date" />
+    <img alt="Star History Chart for fwerkor/local-shell-mcp" src="https://api.star-history.com/svg?repos=fwerkor/local-shell-mcp&amp;type=Date" />
+  </picture>
+</a>
+
 ## Security model
 
 This project intentionally exposes powerful tools. Treat the connected model as having control of the container or VM.

@@ -15,7 +15,7 @@ from contextlib import suppress
 from pathlib import Path
 from urllib.parse import quote
 
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import Page, expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 TUI_NAME = "local-shell-mcp-tui.exe" if os.name == "nt" else "local-shell-mcp-tui"
@@ -252,6 +252,7 @@ def run_browser(port: int) -> None:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page.on("pageerror", lambda error: print(f"Browser error: {error}", flush=True))
         session_ids: list[str] = []
         try:
             page.goto(f"{origin}/ui", wait_until="networkidle")
@@ -271,11 +272,11 @@ def run_browser(port: int) -> None:
             wallpaper_background = page.locator(".console-wallpaper").evaluate(
                 "element => getComputedStyle(element).backgroundImage"
             )
-            assert "/ui/wallpaper" in wallpaper_background, wallpaper_background
+            assert wallpaper_background == "none", wallpaper_background
             terminal_background = page.locator("#terminal .xterm-viewport").evaluate(
                 "element => getComputedStyle(element).backgroundColor"
             )
-            assert terminal_background == "rgba(0, 0, 0, 0)", terminal_background
+            assert terminal_background == "rgb(17, 17, 17)", terminal_background
 
             bootstrap = api_request(page, "/api/ui/bootstrap")
             assert bootstrap["status"] == 200, bootstrap
@@ -287,6 +288,10 @@ def run_browser(port: int) -> None:
             dashboard = api_request(page, "/api/ui/dashboard")
             assert dashboard["status"] == 200, dashboard
             assert dashboard["body"]["data"]["health"] in {"healthy", "attention", "critical"}
+            import runpy
+
+            native_smoke = runpy.run_path(str(ROOT / "scripts/ui-native-smoke.py"))
+            native_smoke["check_native_webui"](page)
             click_tui_label(page, "Files")
             wait_for_terminal_text(page, "mouse-second.txt")
             click_until_terminal_text(
@@ -611,6 +616,8 @@ def run_browser(port: int) -> None:
                 is_mobile=True,
             )
             mobile_page = mobile_context.new_page()
+            touch_escape_frames: list[str | bytes] = []
+            mobile_page.on("websocket", lambda ws: ws.on("framesent", lambda frame: touch_escape_frames.append(frame) if frame in ("\x1b", b"\x1b") else None))
             try:
                 mobile_page.goto(f"{origin}/ui", wait_until="networkidle")
                 mobile_page.locator("#login-button").click()
@@ -675,6 +682,33 @@ def run_browser(port: int) -> None:
                     })()"""
                 )
                 assert coarse_pointer_mouse == {"readOnly": False, "inputMode": "text"}
+
+                for touch_width in (640, 1024):
+                    mobile_page.set_viewport_size({"width": touch_width, "height": 480})
+                    mobile_page.locator("#terminal").tap(position={"x":40,"y":40})
+                    expect(mobile_page.locator("#keyboard-button")).to_be_visible()
+                    mobile_page.locator("#keyboard-button").tap()
+                    assert mobile_page.locator("#keyboard-button").get_attribute("aria-pressed") == "true"
+                    assert mobile_page.locator("#terminal textarea").evaluate("element => !element.readOnly")
+                    mobile_page.locator("#keyboard-button").tap()
+                    if touch_width == 640:
+                        escape_count = len(touch_escape_frames)
+                        mobile_page.locator("#fullscreen-button").tap()
+                        mobile_page.wait_for_function(
+                            "document.fullscreenElement?.id === 'console-view'"
+                        )
+                        mobile_page.locator(".navigation-toggle:visible").tap()
+                        mobile_page.wait_for_function("document.fullscreenElement === null")
+                        expect(mobile_page.locator("#navigation")).to_be_visible()
+                        expect(mobile_page.locator("#navigation .nav-item").first).to_be_focused()
+                        mobile_page.keyboard.press("Escape")
+                        expect(mobile_page.locator("#navigation")).to_be_hidden()
+                        expect(mobile_page.locator(".navigation-toggle:visible")).to_be_focused()
+                        mobile_page.wait_for_timeout(100)
+                        assert len(touch_escape_frames) == escape_count, "Drawer Escape reached remote TUI"
+                        screenshots = Path(os.getenv("LSM_UI_SCREENSHOTS", "/tmp/lsm-incus-ui-screenshots"))
+                        screenshots.mkdir(parents=True, exist_ok=True)
+                        mobile_page.screenshot(path=str(screenshots / "tui-touch-landscape.png"), animations="disabled")
             finally:
                 mobile_context.close()
 

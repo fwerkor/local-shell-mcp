@@ -1233,3 +1233,26 @@ async def test_windows_uia_timeout_rotates_worker_and_allows_followup(monkeypatc
     finally:
         release.set()
         backend._executor.shutdown(wait=True)
+
+
+
+def test_windows_capture_helper_uses_hidden_process_flags(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import local_shell_mcp.gui.windows as windows
+
+    destination = tmp_path / "captured.png"
+    captured = {}
+
+    def fake_run(argv, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    monkeypatch.setattr(windows.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        windows, "managed_process_kwargs", lambda: {"creationflags": 0x08000000}
+    )
+
+    windows._capture_window_image(123, destination)
+
+    assert captured["creationflags"] == 0x08000000

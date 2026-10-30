@@ -1449,8 +1449,9 @@ async def test_transfer_path_starts_tracked_managed_job(tmp_path, monkeypatch):
             break
 
     assert current["status"] == "succeeded"
-    assert current["progress"]["phase"] == "completed"
-    assert current["result"]["transport"] == "http-chunks"
+    detail = (await jobs_module.get_job(job["job_id"]))["job"]
+    assert detail["progress"]["phase"] == "completed"
+    assert detail["result"]["transport"] == "http-chunks"
     assert (root / "copied.bin").read_bytes() == payload
     tail = await jobs_module.tail_job(job["job_id"])
     assert "transfer started" in tail["output"]

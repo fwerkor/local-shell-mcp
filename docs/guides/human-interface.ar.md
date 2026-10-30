@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d4016e996b7de27eb0d52bc7b076277fd976b12906ce5f44d04c1d1d229bf85c -->
+<!-- i18n-source-sha256: c1206f28e9661a542c4c26bae628647a355f6ed1b12ca740574add7374666d57 -->
 # واجهة المستخدم
 
 يوفر `local-shell-mcp` واجهتين بشريتين متوافقتين فوق نفس service API وworkspace وسجل persistent terminals وسجل remote workers وسجل تدقيق MCP:
@@ -38,6 +38,8 @@ workspace_open(session_id=...)
 `session_id` هي هوية المهمة الدائمة الوحيدة. لا يجوز للـ Agent سرد Session من محادثة أخرى أو استنتاجها أو اختيارها تلقائيًا. لمتابعة العمل في محادثة جديدة، يمرر المستخدم `session_id` الموجودة صراحةً. ينبغي للـ Agent إبلاغ المستخدم بالـ `session_id` النشطة بعد start/resume، وعند نقاط التقدم المهمة، وقبل إنهاء turn حتى يمكن تسليمها يدويًا. لا ترتبط Sessions بـ machine أو working directory؛ وتستمر معاملات الأدوات العادية في اختيار الأهداف local/remote والمسارات.
 
 يتيح Plan اختياري عبر `plan_manage` وضع Goal mode للـ Session. إذا كان Plan في حالة active ولم يحدث agent activity لمدة 15 دقيقة، يمكن لـ Live Workspace المرتبط أن يطلب من ChatGPT المتابعة. تستأنف continuation نفس `session_id` الصريحة وتقتصر على 10 محاولات سواء قُبلت أم رُفضت. لا تتم متابعة Plans ذات الحالات blocked أو completed أو cancelled تلقائيًا؛ ويظل Plan active الذي أصبحت كل steps فيه completed أو skipped مؤهلًا لـ continuation ختامية حتى يتمكن الـ Agent المستأنف من إنهاء Plan. تعدّل أدوات pause/resume/cancel البشرية الـ Plan المملوك للـ Session بدلًا من حالة Live Workspace المؤقتة.
+
+راجع [Hosted Chat](hosted-chat.md) للتعرف على مضيف النموذج الاختياري المستضاف ذاتيًا وعميل MCP Apps.
 
 ## واجهة المتصفح
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # Riferimento strumenti
 
 Questa pagina è costruita dagli effettivi schema MCP. Esegui `python scripts/generate-tools-reference.py` dopo modifiche alla superficie pubblica degli strumenti per aggiornare il riferimento English.
@@ -288,12 +288,27 @@ Quando viene fornito `machine`, la chiamata richiede anche `remote:use` e viene 
 
 ### `job_list`
 
-Elenca job tracciati localmente o su macchina remota. I job attivi vengono restituiti per primi; `limit` è limitato all’intervallo 1-1000.
+Elenco sintetico dei job, con quelli attivi per primi. Paginazione con next_offset; dati limitati a 32 KiB.
 
 | Parametro | Tipo | Obbligatorio/default | Descrizione |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session per questa chiamata tool. Durante il lavoro sul task, passa il session_id restituito da session_manage. Usa null solo quando non è attiva alcuna Logical Session. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Quando viene fornito `machine`, la chiamata richiede anche `remote:use` e viene eseguita tramite il protocollo remote worker.
+
+### `job_get`
+
+Mostra i dettagli completi di un job, inclusi comando, avanzamento e risultato.
+
+| Parametro | Tipo | Obbligatorio/default | Descrizione |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session per questa chiamata tool. Durante il lavoro sul task, passa il session_id restituito da session_manage. Usa null solo quando non è attiva alcuna Logical Session. |
 

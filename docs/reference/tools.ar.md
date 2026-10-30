@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # مرجع الأدوات
 
 تُبنى هذه الصفحة من MCP tool schemas الفعلية. شغّل `python scripts/generate-tools-reference.py` بعد تغيير public tool surface لتحديث English reference.
@@ -288,12 +288,27 @@ OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, 
 
 ### `job_list`
 
-يسرد jobs المتتبعة محليًا أو على machine بعيدة. تُعرض jobs النشطة أولًا، وتُقيّد قيمة `limit` إلى النطاق 1-1000.
+قائمة موجزة للمهام مع تقديم المهام النشطة، وحد إجمالي للبيانات يبلغ 32 KiB. استخدم next_offset للصفحات التالية.
 
 | المعامل | النوع | مطلوب/default | الوصف |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+عند تحديد `machine`، يتطلب الاستدعاء أيضًا `remote:use` ويعمل عبر بروتوكول remote worker.
+
+### `job_get`
+
+عرض جميع بيانات المهمة، بما فيها الأمر الكامل والتقدم والنتيجة.
+
+| المعامل | النوع | مطلوب/default | الوصف |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session لاستدعاء الأداة هذا. مرّر session_id الذي أعاده session_manage أثناء العمل على المهمة. استخدم null فقط عندما لا توجد Logical Session نشطة. |
 

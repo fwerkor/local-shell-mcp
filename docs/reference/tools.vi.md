@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 9d4f25e43e61dce5f3b828eb3e0d2bfd03a7e01d4dba980b9e71987a64832f61 -->
+<!-- i18n-source-sha256: 32314f2816f4d6ade3a7d3482aba335f893b6e490167fcdb9b958f38ef49b2a5 -->
 # Tham chiếu tools
 
 Page này được xây từ MCP tool schemas thực tế. Chạy `python scripts/generate-tools-reference.py` sau khi thay đổi public tool surface để cập nhật English reference.
@@ -288,12 +288,27 @@ Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao th�
 
 ### `job_list`
 
-Liệt kê tracked jobs local hoặc trên remote machine. Các job đang hoạt động được trả về trước; `limit` được giới hạn trong khoảng 1-1000.
+Danh sách công việc rút gọn, ưu tiên công việc đang chạy. Phân trang bằng next_offset; dữ liệu tối đa 32 KiB.
 
 | Parameter | Type | Required/default | Description |
 |---|---|---|---|
 | `include_finished` | `boolean` | `true` |  |
-| `limit` | `integer` | `100` |  |
+| `limit` | `integer` | `25` |  |
+| `offset` | `integer` | `0` |  |
+| `machine` | `string \| null` | `null` |  |
+| `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
+
+OAuth scopes: `shell:read, shell:write, shell:execute, browser:use, file:share, remote:use`.
+
+Khi cung cấp `machine`, call cũng cần `remote:use` và chạy qua giao thức remote worker.
+
+### `job_get`
+
+Lấy chi tiết đầy đủ của công việc, bao gồm lệnh, tiến độ và kết quả.
+
+| Parameter | Type | Required/default | Description |
+|---|---|---|---|
+| `job_id` | `string` | required |  |
 | `machine` | `string \| null` | `null` |  |
 | `logical_session_id` | `string \| null` | required | Logical Session cho lần gọi tool này. Khi làm việc trên task, truyền session_id do session_manage trả về. Chỉ dùng null khi không có Logical Session hoạt động. |
 

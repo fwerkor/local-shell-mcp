@@ -731,7 +731,7 @@ async def test_stateless_managed_job_and_audit_stay_off_disk(tmp_path, monkeypat
     audit_rows = audit_module.query_audit(search="serverless_test")
 
     assert current["status"] == "succeeded"
-    assert current["result"] == {"value": 7}
+    assert (await jobs_module.get_job(job["job_id"]))["job"]["result"] == {"value": 7}
     assert "working" in tail["output"]
     assert audit_rows["count"] >= 1
     assert get_state_store().read_bytes("jobs.json") is not None
