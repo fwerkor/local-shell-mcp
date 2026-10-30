@@ -397,3 +397,43 @@ def test_tool_discovery_does_not_leak_hidden_tools_and_is_budgeted():
     assert estimate_tokens({"messages": prompt, "tools": chosen}) <= int(8192 * 0.8)
     with pytest.raises(ValueError, match="query"):
         discover_tools("", tools, 8192)
+
+
+def test_tool_discovery_handles_stale_preferences_and_tight_budgets():
+    from local_shell_mcp.hosted_chat_tools import (
+        TOOL_SEARCH_NAME, choose_tool_schemas, discover_tools,
+    )
+
+    def tool(name, description="Read and edit files"):
+        return {"type": "function", "function": {
+            "name": name, "description": description,
+            "parameters": {"type": "object", "properties": {}},
+        }}
+
+    small = [tool(f"file_{i}") for i in range(6)]
+    huge = tool("file_huge", "file " * 12000)
+    all_tools = [*small, huge]
+    prompt = [{"role": "user", "content": "Edit a file"}]
+
+    # Stale preference names must not break schema selection after a tool is removed.
+    selected = choose_tool_schemas(all_tools, prompt, 8192, ["gone", "file_huge", "file_0"])
+    names = [schema["function"]["name"] for schema in selected]
+    assert names[0] == TOOL_SEARCH_NAME
+    assert "file_huge" not in names
+    assert "file_0" in names
+
+    # The discovery catalogue can change between calls; retain only installed tools.
+    result, preferred = discover_tools(
+        "file", all_tools, 8192, previous=["removed_tool", "file_0"],
+    )
+    assert "removed_tool" not in preferred
+    assert preferred.count("file_0") == 1
+    assert len(result["matches"]) == 4
+    assert "file_huge" not in preferred
+
+    # The conversation and next tool-result preview share a fixed context budget.
+    crowded = [{"role": "user", "content": "message " * 8500}]
+    result, preferred = discover_tools("file_1", small, 8192, messages=crowded)
+    assert not preferred
+    assert not result["matches"]
+    assert "No matching tool fits" in result["note"]
