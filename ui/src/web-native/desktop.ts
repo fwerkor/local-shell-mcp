@@ -198,7 +198,7 @@ export class DesktopController extends BaseController {
               <h3 data-role="desktop-title">Desktop window</h3>
               <p data-role="desktop-meta">Choose a window to begin.</p>
             </div>
-            <div class="desktop-frame-actions"><span data-role="desktop-scale">—</span>${button("Refresh frame", "desktop-refresh-frame")}</div>
+            <div class="desktop-frame-actions"><span data-role="desktop-scale">—</span>${button("Fit / Actual size", "desktop-scale-mode")}${button("Fullscreen", "desktop-fullscreen")}${button("Refresh frame", "desktop-refresh-frame")}</div>
           </header>
           <div class="desktop-stage-wrap">
             <div class="desktop-stage" data-role="desktop-stage" tabindex="0" aria-label="Interactive desktop window">
@@ -691,6 +691,21 @@ export class DesktopController extends BaseController {
 
   private onClick(event: MouseEvent): void {
     const actionTarget = (event.target as HTMLElement).closest<HTMLElement>("[data-action]")
+    if (actionTarget?.dataset.action === "desktop-fullscreen") {
+      const panel = this.root.querySelector<HTMLElement>(".desktop-panel")
+      const result = document.fullscreenElement ? document.exitFullscreen() : panel?.requestFullscreen()
+      void result?.catch(error => this.context.notify(String(error), "error"))
+      return
+    }
+    if (actionTarget?.dataset.action === "desktop-scale-mode") {
+      const stage = this.root.querySelector<HTMLElement>("[data-role=desktop-stage]")
+      if (stage) {
+        const actual = stage.dataset.scale !== "actual"
+        stage.dataset.scale = actual ? "actual" : "fit"
+        actionTarget.setAttribute("aria-pressed", String(actual))
+      }
+      return
+    }
     if (actionTarget?.dataset.action === "desktop-refresh-windows") {
       void this.refreshWindows(true)
       return

@@ -1,0 +1,15 @@
+$font-base-family: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+$font-monospace: '"Ubuntu Mono", "Cascadia Code", Consolas, monospace';
+$font-heading-family: $font-base-family;
+$increase-font-size-on-larger-screens: false;
+@import "vanilla-framework";
+@include vf-base;
+@include vf-p-buttons;
+@include vf-p-forms;
+@include vf-p-modal;
+@include vf-p-notification;
+@include vf-p-table-sortable;
+@include vf-p-table-mobile-card;
+@include vf-p-icons;
+@include vf-p-side-navigation;
+

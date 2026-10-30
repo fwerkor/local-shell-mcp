@@ -307,7 +307,7 @@ def test_webui_shell_uses_available_viewport_without_fixed_desktop_cap():
 
     assert "1540px" not in css
     assert "960px" not in css
-    assert ":fullscreen .shell" in css
+    assert ".desktop-panel:fullscreen" in css
 
 
 def test_webui_index_versions_static_assets_for_cache_busting(tmp_path, monkeypatch):
@@ -317,7 +317,7 @@ def test_webui_index_versions_static_assets_for_cache_busting(tmp_path, monkeypa
 
     assert f"/ui/assets/web.css?v={__version__}" in html
     assert f"/ui/assets/web.js?v={__version__}" in html
-    assert f"/ui/assets/logo.svg?v={__version__}" in html
+    assert f"/ui/assets/favicon.svg?v={__version__}" in html
     assert "__LSM_UI_ASSET_VERSION__" not in html
 
 
@@ -327,17 +327,15 @@ def test_webui_visual_regressions_are_packaged():
     css = (asset_root / "web.css").read_text(encoding="utf-8")
     script = (asset_root / "web.js").read_text(encoding="utf-8")
 
-    assert "<strong>TUI</strong>" in html
-    for view in ("files", "terminals", "sessions", "remotes", "audit"):
-        assert f'data-view="{view}"' in html
-    assert "Open TUI" in html
-    assert "scrollbar-width:none!important" in css
-    assert "-ms-overflow-style:none" in css
-    scrollbar_rule = css.split("#terminal .xterm-viewport::-webkit-scrollbar{", 1)[1].split("}", 1)[0]
-    assert {"width:0", "height:0", "display:none"}.issubset(scrollbar_rule.split(";"))
-    dark_mode = "@media (prefers-color-scheme:dark)"
-    assert dark_mode in css
-    assert css.rindex(dark_mode) > css.rindex(".alert-card{display:grid")
+    assert 'id="application"' in html
+    for label in ("Overview", "Files", "Terminals", "Desktop", "Sessions", "Remotes", "Audit"):
+        assert label in script
+    assert "p-button--positive" in css
+    assert "p-modal__dialog" in css
+    assert ".overview-metrics" in css
+    assert ".navigation-scrim" in css
+    assert ".desktop-panel:fullscreen" in css
+    assert not list(asset_root.glob("*.scss"))
     assert ".explorer-host{" in css
     assert ".wx-willow-theme" in css
     assert "cdn.svar.dev" not in css
@@ -867,7 +865,7 @@ def test_webui_shell_is_public_but_api_remains_oauth_protected(tmp_path, monkeyp
     api = client.get("/api/ui/bootstrap")
 
     assert page.status_code == 200
-    assert "Human Interface" in page.text
+    assert 'id="application"' in page.text
     assert api.status_code == 401
 
 
