@@ -236,3 +236,12 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
   .touchbar { grid-template-columns: repeat(5, minmax(0,1fr)); }
   .terminal-touchbar { grid-template-columns: repeat(4, minmax(0,1fr)); }
 }
+
+/* Hosted Chat is a separate interface directly below the Web UI / TUI selector. */
+.hosted-chat-entry { display: flex; align-items: center; gap: 10px; width: calc(100% - 32px); margin: 0 16px 10px; padding: 10px 12px; background: transparent; color: #ddd; border: 1px solid #ffffff26; text-align: left; }
+.hosted-chat-entry svg { flex: none; width: 20px; height: 20px; }
+.hosted-chat-entry strong { display: block; font-weight: 500; }
+.hosted-chat-entry small { display: block; color: #bbb; font-size: 11px; }
+.hosted-chat-entry:hover, .hosted-chat-entry.active { color: white; border-color: #77b5ef; background: #ffffff14; }
+.hosted-chat-entry:hover small, .hosted-chat-entry.active small { color: #ddd; }
+.hosted-chat-entry[hidden] { display: none; }

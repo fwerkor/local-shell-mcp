@@ -21,6 +21,7 @@ function NavigationIcon({ view }: { view: string }) {
     sessions: "M6 3h12v18H6zM9 7h6M9 11h6M9 15h4",
     remotes: "M3 3h18v7H3zM3 14h18v7H3zM7 6.5h.01M7 17.5h.01M11 6.5h6M11 17.5h6",
     audit: "M5 3h14v18H5zM8 7h8M8 11h8M8 15h5",
+    "hosted-chat": "M4 5h16v12H8l-4 3V5zM8 9h8M8 13h5",
   }
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={paths[view] || paths.terminals} /></svg>
 }
@@ -45,6 +46,10 @@ export function ApplicationShell() {
           <Button className="active" data-interface-mode="web" aria-pressed="true">Web UI</Button>
           <Button data-interface-mode="tui" aria-pressed="false">TUI</Button>
         </div>
+        <button className="hosted-chat-entry" type="button" data-interface-mode="chat" aria-pressed="false" hidden>
+          <NavigationIcon view="hosted-chat" />
+          <span><strong>Hosted Chat</strong><small>BYOK · MCP Apps</small></span>
+        </button>
         <div className="navigation-label">Workspace</div>
         <nav className="primary-nav p-side-navigation" aria-label="Primary navigation">
           {destinations.map(([view, label]) => <button key={view} className={`nav-item${view === "overview" ? " active" : ""}`} type="button" data-view={view} aria-label={label}>
@@ -126,6 +131,7 @@ export function mountApplication() {
   }))
   scrim.addEventListener("click", () => { setOpen(false); restoreFocus() })
   document.querySelector(".primary-nav")!.addEventListener("click", () => setOpen(false))
+  document.querySelector(".hosted-chat-entry")!.addEventListener("click", () => setOpen(false))
   document.addEventListener("keydown", event => {
     if (event.key === "Escape" && document.body.classList.contains("navigation-open")) {
       event.preventDefault()

@@ -9,6 +9,10 @@ describe("WebUI navigation", () => {
     const views = [...markup.matchAll(/data-view="([^"]+)" aria-label="([^"]+)"/g)]
     expect(views.map(([,view]) => view)).toEqual(["overview","files","terminals","desktop","sessions","remotes","audit"])
     expect(views.every(([, ,label]) => label.length > 0)).toBe(true)
+    expect(markup).toContain('data-interface-mode="chat" aria-pressed="false" hidden')
+    expect(markup).toContain('>Hosted Chat</strong>')
+    expect(markup.indexOf('data-interface-mode="chat"')).toBeGreaterThan(markup.indexOf('data-interface-mode="tui"'))
+    expect(markup.indexOf('data-interface-mode="chat"')).toBeLessThan(markup.indexOf('class="navigation-label"'))
     expect(markup).toContain('aria-controls="navigation"')
     expect(markup).toContain('aria-label="Close navigation"')
   })
