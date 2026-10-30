@@ -401,7 +401,9 @@ def test_tool_discovery_does_not_leak_hidden_tools_and_is_budgeted():
 
 def test_tool_discovery_handles_stale_preferences_and_tight_budgets():
     from local_shell_mcp.hosted_chat_tools import (
-        TOOL_SEARCH_NAME, choose_tool_schemas, discover_tools,
+        TOOL_SEARCH_NAME,
+        choose_tool_schemas,
+        discover_tools,
     )
 
     def tool(name, description="Read and edit files"):
