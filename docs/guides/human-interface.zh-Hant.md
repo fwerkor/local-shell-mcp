@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d4016e996b7de27eb0d52bc7b076277fd976b12906ce5f44d04c1d1d229bf85c -->
+<!-- i18n-source-sha256: c1206f28e9661a542c4c26bae628647a355f6ed1b12ca740574add7374666d57 -->
 # 人機介面
 
 `local-shell-mcp` 在同一個服務 API、工作區、持久終端註冊表、遠端 worker 註冊表和 MCP 稽核日誌之上提供兩種相容的人機介面：
@@ -38,6 +38,8 @@ workspace_open(session_id=...)
 `session_id` 是唯一的持久任務身分。Agent 不得列出、推斷或自動選擇其他對話中的 Session。要在新對話繼續工作，由使用者明確傳入既有的 `session_id`。Agent 應在 start/resume 後、重要進度回報時，以及結束目前 turn 前告知使用者正在使用的 `session_id`，以便人工交接。Session 不綁定 machine 或 working directory；一般工具參數仍決定本機/遠端目標與路徑。
 
 可選的 `plan_manage` Plan 會為 Session 啟用 Goal mode。Plan active 且 15 分鐘沒有 agent activity 時，已關聯的 Live Workspace 可以要求 ChatGPT 繼續；續跑會 resume 同一個明確的 `session_id`，並限制為最多 10 次 continuation attempt（無論接受或拒絕）。blocked、completed、cancelled Plan 不會自動續跑；若 active Plan 的所有 step 都已 completed/skipped，仍可觸發一次收尾 continuation，讓 resumed agent 正式 finish Plan。人類的 pause/resume/cancel 控制修改的是 Session 持有的 Plan，而不是暫時的 Live Workspace state。
+
+有關可選的自託管模型主機和 MCP 應用程式用戶端，請參閱 [Hosted Chat](hosted-chat.md)。
 
 ## 瀏覽器介面
 
