@@ -192,7 +192,10 @@ async def test_tool_call_loop_preserves_results_but_not_private_metadata(monkeyp
         result = await http.post(url, headers=headers, json=payload)
         return result.json()
 
-    monkeypatch.setattr(hosted_chat, "model_request_target", fake_target)
+    async def fake_targets(endpoint):
+        return [await fake_target(endpoint)]
+
+    monkeypatch.setattr(hosted_chat, "model_request_targets", fake_targets)
     monkeypatch.setattr(hosted_chat, "model_response_json", fake_response)
     monkeypatch.setattr(hosted_chat, "mcp_session", fake_mcp)
     monkeypatch.setattr(hosted_chat.httpx, "AsyncClient", lambda **_: FakeHttp())

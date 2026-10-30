@@ -1,3 +1,4 @@
+import { compile } from "sass"
 import { createHash } from "node:crypto"
 import { mkdir, rm } from "node:fs/promises"
 import { resolve } from "node:path"
@@ -42,11 +43,22 @@ await mkdir(staticDir, { recursive: true })
 const result = await Bun.build({
   entrypoints: [
     resolve(root, "src/web.ts"),
-    resolve(root, "src/web.css"),
-    resolve(root, "src/web-native.css"),
-    resolve(root, "src/web-console-mobile.css"),
   ],
   ...browserBuild,
+  plugins: [{
+    name: "compile-scss",
+    setup(build) {
+      build.onLoad({ filter: /\.scss$/ }, args => ({
+        contents: compile(args.path, {
+          loadPaths: [resolve(root, "node_modules")],
+          style: "compressed",
+          silenceDeprecations: ["import", "global-builtin", "color-functions", "legacy-js-api", "if-function"],
+          logger: { warn() {}, debug() {} },
+        }).css,
+        loader: "css",
+      }))
+    },
+  }],
 })
 if (!result.success) {
   for (const log of result.logs) console.error(log)
@@ -61,17 +73,13 @@ if (!liveResult.success) {
   process.exit(1)
 }
 const webCssPath = resolve(staticDir, "web.css")
-const nativeCssPath = resolve(staticDir, "web-native.css")
-const consoleCssPath = resolve(staticDir, "web-console-mobile.css")
-const bundledStyles = `${await Bun.file(webCssPath).text()}\n${await Bun.file(nativeCssPath).text()}\n${await Bun.file(consoleCssPath).text()}`
+const bundledStyles = await Bun.file(webCssPath).text()
 // SVAR ships unused remote font declarations. Native Files uses system fonts
 // and embedded SVG icons, so remove those CDN references from the self-hosted bundle.
 await Bun.write(webCssPath, bundledStyles.replace(/@font-face\s*\{[^}]*cdn\.svar\.dev[^}]*\}/g, ""))
 const webScriptPath = resolve(staticDir, "web.js")
 await Bun.write(webScriptPath, (await Bun.file(webScriptPath).text()).replace(/[ \t]+$/gm, ""))
-await rm(nativeCssPath, { force: true })
-await rm(consoleCssPath, { force: true })
-for (const asset of ["index.html", "logo.svg", "favicon.svg"]) {
+for (const asset of ["index.html", "logo.svg", "favicon.svg", "third-party-notices.txt"]) {
   await Bun.write(resolve(staticDir, asset), Bun.file(resolve(root, "static", asset)))
 }
 const liveScriptPath = resolve(staticDir, "live-workspace.js")

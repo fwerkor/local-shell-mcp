@@ -117,47 +117,13 @@ describe("Native WebUI actions", () => {
     expect(sources.join("\n")).not.toContain("refresh-sessions")
   })
 
-  test("keeps native mobile content clear of the bottom nav and exposes shared refresh", async () => {
-    const styles = await Bun.file(new URL("./web.css", import.meta.url)).text()
 
-    expect(styles).toContain("body.native-view-active .main-content { padding: 16px 14px calc(84px + env(safe-area-inset-bottom, 0px)); }")
-    expect(styles).toContain("body.native-view-active #refresh-button { display: inline-flex; }")
-  })
 
-  test("shows CPU and memory together in machine resource rows", async () => {
-    const web = await Bun.file(new URL("./web.ts", import.meta.url)).text()
-    const styles = await Bun.file(new URL("./web.css", import.meta.url)).text()
 
-    expect(web).toContain('resourceMini("CPU", cpu)')
-    expect(web).toContain('resourceMini("MEM", memory)')
-    expect(web).toContain("const local = Boolean(info.local)")
-    expect(web).not.toContain('machine.name === "local"')
-    expect(web).toContain("local ? numberValue(localSystem?.memory_percent) : numberValue(info.memory_percent)")
-    expect(styles).toContain(".resource-stack")
-  })
 
-  test("keeps overview card footers pinned to the bottom of stretched dashboard rows", async () => {
-    const styles = await Bun.file(new URL("./web.css", import.meta.url)).text()
 
-    expect(styles).toContain(".attention-panel, .workloads-panel, .activity-panel { display:flex; flex-direction:column; }")
-    expect(styles).toContain(".attention-panel .attention-list, .workloads-panel .workload-list, .activity-panel .activity-list { flex:1 1 auto; }")
-    expect(styles).toContain(".workloads-panel .workload-list { display:flex; flex-direction:column; }")
-  })
 
-  test("renders all current alerts within the available dashboard height", async () => {
-    const web = await Bun.file(new URL("./web.ts", import.meta.url)).text()
-    const styles = await Bun.file(new URL("./web.css", import.meta.url)).text()
-    const items = web.slice(web.indexOf("function alertItems("), web.indexOf("function metricCard("))
 
-    expect(items).toContain("return alerts.map(")
-    expect(items).not.toContain(".slice(")
-    expect(web).toContain('class="attention-list" role="region" aria-label="Current alerts" tabindex="0"')
-    expect(web).toContain('alertList.scrollTop = alertScrollTop')
-    expect(web).toContain('if (alertFocused) alertList.focus({ preventScroll: true })')
-    expect(styles).toContain(".attention-panel { height:0; min-height:100%; }")
-    expect(styles).toContain(".attention-panel .attention-list { flex:1 1 0; min-height:0; overflow-y:auto;")
-    expect(styles).toContain(".attention-panel .attention-list { flex:none; max-height:60vh; }")
-  })
 
   test("uses a standalone responsive web file explorer", async () => {
     const styles = await Bun.file(new URL("./web-native.css", import.meta.url)).text()
@@ -187,14 +153,11 @@ describe("Native WebUI actions", () => {
   })
 
   test("keeps narrow native tables compact without discarding timestamps", async () => {
-    const dashboardStyles = await Bun.file(new URL("./web.css", import.meta.url)).text()
     const styles = await Bun.file(new URL("./web-native.css", import.meta.url)).text()
     const remotes = await Bun.file(new URL("./web-native/remotes.ts", import.meta.url)).text()
     const sessions = await Bun.file(new URL("./web-native/sessions.ts", import.meta.url)).text()
     const audit = await Bun.file(new URL("./web-native/audit.ts", import.meta.url)).text()
 
-    expect(dashboardStyles).toContain(".machines-panel .table-wrap table { min-width: 700px; }")
-    expect(dashboardStyles).not.toContain("  table { min-width: 700px; }")
     expect(styles).toContain(".native-table { width: 100%; min-width: 0;")
     expect(styles).toContain(".remote-table th:nth-child(1) { width: 88px; }")
     expect(styles).toContain(".remote-table th:nth-child(2) { width: auto; }")

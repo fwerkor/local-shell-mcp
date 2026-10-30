@@ -63,3 +63,9 @@ export function browserShortcutSequence(event: BrowserShortcutEvent): string | u
   const physicalKey = physicalShortcutKey(event.code)
   return physicalKey ? categorySequences[physicalKey] || browserShortcutSequences[physicalKey] : undefined
 }
+
+export const TERMINAL_KEY_SEQUENCES: Readonly<Record<string, string>> = {
+  escape: "\u001b", tab: "\t", left: "\u001b[D", up: "\u001b[A",
+  down: "\u001b[B", right: "\u001b[C", enter: "\r", help: "\u001bOP",
+  interrupt: "\u0003",
+}
