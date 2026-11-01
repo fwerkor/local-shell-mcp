@@ -251,7 +251,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
   .app-shell:not([hidden]), .main-content { height: 100dvh; min-height: 0; }
   .main-content { display: flex; flex-direction: column; overflow-y: auto; }
   .main-content > .topbar, .main-content > .page-footer { flex: none; }
-  .main-content > #view-root { flex: 1 1 auto; min-height: 0; }
+  .main-content > #view-root { flex: 1 1 auto; }
   .native-view-active .main-content { overflow: hidden; }
   .native-view-active #view-root, .native-view-active .controller-page { display: flex; flex-direction: column; min-height: 0; }
   .native-view-active .controller-page, .native-view-active .native-page { flex: 1 1 auto; min-height: 0; }
@@ -328,6 +328,9 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 :root[data-theme="dark"] :is(.audit-details,.session-detail,.desktop-connection) { background: #14202c; }
 :root[data-theme="dark"] :is(.audit-detail-card,.session-identity,.session-section,.session-detail-block) { background: #1b2734; border-color: var(--line); }
 :root[data-theme="dark"] :is(.audit-detail-card h4,.native-dialog header p,.detail-json h4) { color: #d9e4f0; }
+:root[data-theme="dark"] :is(.remote-title h2,.remote-resources h4) { color: var(--text); }
+:root[data-theme="dark"] :is(.remote-title p,.detail-grid dt,.detail-grid dd,.remote-resources-empty) { color: #b8c8d9; }
+:root[data-theme="dark"] .remote-resources { border-color: var(--line); }
 /* Session detail sections use explicit light-theme colors upstream. */
 :root[data-theme="dark"] :is(.session-section-title h4,.session-detail-block h4,.session-plan-steps strong,.session-activity-row strong) { color: #e1e7ef; }
 :root[data-theme="dark"] :is(.session-detail-block p,.session-detail-block ul,.session-plan-objective,.session-section-title > span:not(.status-chip),.session-plan-steps small,.session-activity-row span) { color: #b8c8d9; }
