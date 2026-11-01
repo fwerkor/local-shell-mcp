@@ -731,3 +731,8 @@ button.summary-card { cursor: pointer; }
   .native-view-active .hosted-chat { min-height: 0; height: 100%; }
   .native-view-active .hosted-chat .hosted-messages { max-height: none; }
 }
+
+/* Landscape phones and tablets retain shortcut keys when touch is primary. */
+@media (pointer: coarse) and (hover: none) {
+  .terminal-touchbar { display: grid; }
+}
