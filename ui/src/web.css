@@ -227,7 +227,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 .explorer-head .native-button { height: 34px; min-height: 34px; }
 .explorer-head .native-toggle { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .explorer-head input[type="checkbox"] { width: 16px; height: 16px; min-height: 0; flex: none; }
-@media (max-width: 720px), (pointer: coarse) and (hover: none) {
+@media (max-width: 720px), (max-width: 1100px) and (pointer: coarse) and (hover: none) {
   .touchbar { display: grid; grid-template-columns: repeat(9, minmax(0,1fr)); gap: 4px; padding: 6px; background: #191d23; }
   .touchbar button { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 44px; margin: 0; padding: 0 4px; color: #edf3fa; background: #2c333d; border: 1px solid #566170; border-radius: 3px; font-size: 13px; line-height: 1; touch-action: manipulation; }
   .terminal-touchbar { display: grid; }
