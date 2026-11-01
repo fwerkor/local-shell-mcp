@@ -328,9 +328,23 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 :root[data-theme="dark"] :is(.audit-details,.session-detail,.desktop-connection) { background: #14202c; }
 :root[data-theme="dark"] :is(.audit-detail-card,.session-identity,.session-section,.session-detail-block) { background: #1b2734; border-color: var(--line); }
 :root[data-theme="dark"] :is(.audit-detail-card h4,.native-dialog header p,.detail-json h4) { color: #d9e4f0; }
+/* Session detail sections use explicit light-theme colors upstream. */
+:root[data-theme="dark"] :is(.session-section-title h4,.session-detail-block h4,.session-plan-steps strong,.session-activity-row strong) { color: #e1e7ef; }
+:root[data-theme="dark"] :is(.session-detail-block p,.session-detail-block ul,.session-plan-objective,.session-section-title > span:not(.status-chip),.session-plan-steps small,.session-activity-row span) { color: #b8c8d9; }
+:root[data-theme="dark"] :is(.session-plan-steps article,.session-activity-row) { background: #202f40; border-color: var(--line); }
+:root[data-theme="dark"] .session-activity-row pre { color: #c7d5e5; background: #14202c; }
+:root[data-theme="dark"] .session-note { color: #e9ce94; background: #423520; }
 :root[data-theme="dark"] .preview-warning { color: #f4cc8b; background: #493719; border-color: #5d4728; }
 :root[data-theme="dark"] .explorer-host .wx-willow-theme { color: var(--text); background: #1b2734; }
 :root[data-theme="dark"] .explorer-host :is(input,select,button) { color: var(--text); background-color: #202f40; }
 :root[data-theme="dark"] .explorer-host [class*="wx-filemanager"] { color: var(--text); background-color: #1b2734; }
 :root[data-theme="dark"] .toast { color: var(--text); }
 :root[data-theme="dark"] .native-dialog-overlay { background: #060b10b8; }
+
+/* Stacked Hosted Chat workspaces cannot fit within one viewport. */
+@media (min-width: 1101px) and (max-width: 1350px) and (min-height: 560px) {
+  .native-view-active:has(.hosted-chat .hosted-workspace:not([hidden])) .main-content { overflow-y: auto; }
+  .native-view-active:has(.hosted-chat .hosted-workspace:not([hidden])) #view-root { flex: 0 0 auto; }
+  .native-view-active .hosted-chat:has(.hosted-workspace:not([hidden])) { height: auto; min-height: calc(100dvh - 205px); }
+  .native-view-active .hosted-chat:has(.hosted-workspace:not([hidden])) .hosted-messages { max-height: calc(100dvh - 420px); }
+}
