@@ -321,7 +321,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 :root[data-theme="dark"] .status-chip.error { color: #ffb4bf; background: #52252e; }
 :root[data-theme="dark"] :is(.terminal-toolbar,.terminal-sessions,.terminal-stage-panel > header,.desktop-panel > header) { color: var(--text); background: #202c3a; border-color: var(--line); }
 :root[data-theme="dark"] .terminal-session-search { color: var(--muted); background: #14202c; border-color: #344254; }
-:root[data-theme="dark"] .terminal-session-search input { color: var(--text); }
+:root[data-theme="dark"] .terminal-session-search input { color: var(--text); background: transparent; }
 :root[data-theme="dark"] :is(.terminal-stage-panel > header h3,.terminal-sessions > header h3,.terminal-sessions .session-row) { color: var(--text); }
 :root[data-theme="dark"] .terminal-sessions .session-row.active { color: #b8ddff; background: #234766; }
 :root[data-theme="dark"] .terminal-sessions .session-row:hover { background: #273a4c; }
