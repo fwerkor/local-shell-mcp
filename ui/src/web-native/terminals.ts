@@ -66,7 +66,7 @@ export class TerminalsController extends BaseController {
         <div class="toolbar-actions">${button("New", "new-session", { icon: "+", primary: true })}${button("Sessions", "toggle-sidebar")}</div>
       </div>
       <div class="terminal-layout" data-role="terminal-workspace">
-        <aside class="native-panel terminal-sessions"><header><div><h3>Sessions</h3><p data-role="session-summary">Loading…</p></div><div class="terminal-session-switch"><button type="button" data-action="previous-session" aria-label="Previous session">‹</button><button type="button" data-action="next-session" aria-label="Next session">›</button></div></header><label class="terminal-session-search"><span>⌕</span><input data-role="session-search" type="search" placeholder="Filter sessions"/></label><div class="session-list" data-role="sessions"></div></aside>
+        <aside class="native-panel terminal-sessions"><header><div><h3>Sessions</h3><p data-role="session-summary">Loading…</p></div></header><label class="terminal-session-search"><span>⌕</span><input data-role="session-search" type="search" placeholder="Filter sessions"/></label><div class="session-list" data-role="sessions"></div></aside>
         <section class="native-panel terminal-stage-panel"><header><div><h3 data-role="terminal-title">Persistent terminal</h3><p data-role="terminal-subtitle">Loading terminals…</p></div><div class="terminal-stage-actions"><div class="terminal-connection-actions" role="group" aria-label="Current terminal session">${button("Reconnect", "reconnect", { icon: "↻" })}${button("Kill", "kill-session", { danger: true, disabled: true })}</div><div class="terminal-view-actions" role="group" aria-label="Terminal view">${button("Copy", "copy")}${button("Paste", "paste")}${button("Find", "search")}${button("Clear", "clear")}${button("Fullscreen", "fullscreen")}${button("A−", "font-down")}${button("A+", "font-up")}</div><div class="terminal-search" data-role="search-box" hidden><input data-role="search-input" placeholder="Find in terminal"/><button type="button" data-action="search-prev">Previous</button><button type="button" data-action="search-next">Next</button><button type="button" data-action="search-close">Close</button></div></div></header><div class="persistent-terminal" data-role="terminal"></div><div class="terminal-scrollbar unsupported" data-role="scrollbar" role="scrollbar" tabindex="0" aria-label="Terminal scrollback" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><div class="terminal-scrollbar-spacer"></div></div><div class="terminal-overlay" data-role="terminal-overlay">Loading terminals…</div><nav class="terminal-touchbar" aria-label="Terminal shortcut keys">${[["escape", "Esc"], ["tab", "Tab"], ["left", "←"], ["up", "↑"], ["down", "↓"], ["right", "→"], ["enter", "Enter"], ["interrupt", "Ctrl-C"]].map(([key, label]) => `<button type="button" data-terminal-key="${key}">${label}</button>`).join("")}</nav></section>
       </div>
     </section>`
@@ -201,7 +201,7 @@ export class TerminalsController extends BaseController {
     if (summary) summary.textContent = "Loading…"
     if (title) title.textContent = "Persistent terminal"
     if (subtitle) subtitle.textContent = "Loading terminals…"
-    for (const action of ["kill-session", "previous-session", "next-session", "reconnect", "copy", "paste", "search", "clear"]) {
+    for (const action of ["kill-session", "reconnect", "copy", "paste", "search", "clear"]) {
       const control = this.root.querySelector<HTMLButtonElement>(`[data-action=${action}]`)
       if (control) control.disabled = true
     }
@@ -221,14 +221,10 @@ export class TerminalsController extends BaseController {
     const list = this.root.querySelector<HTMLElement>("[data-role=sessions]")
     const summary = this.root.querySelector<HTMLElement>("[data-role=session-summary]")
     const kill = this.root.querySelector<HTMLButtonElement>("[data-action=kill-session]")
-    const previous = this.root.querySelector<HTMLButtonElement>("[data-action=previous-session]")
-    const next = this.root.querySelector<HTMLButtonElement>("[data-action=next-session]")
     const visibleSessions = this.visibleSessions()
     const hasSession = Boolean(this.selectedSessionId)
     if (summary) summary.textContent = `${this.sessions.length} persistent session${this.sessions.length === 1 ? "" : "s"}`
     if (kill) kill.disabled = !hasSession
-    if (previous) previous.disabled = visibleSessions.length < 2
-    if (next) next.disabled = visibleSessions.length < 2
     for (const action of ["reconnect", "copy", "paste", "search", "clear"]) {
       const control = this.root.querySelector<HTMLButtonElement>(`[data-action=${action}]`)
       if (control) control.disabled = !hasSession
@@ -717,8 +713,6 @@ export class TerminalsController extends BaseController {
     if (action === "new-session") void this.createSession()
     else if (action === "kill-session") void this.killSession()
     else if (action === "reconnect") this.connect()
-    else if (action === "previous-session") this.switchSession(-1)
-    else if (action === "next-session") this.switchSession(1)
     else if (action === "toggle-sidebar") this.toggleSidebar()
     else if (action === "font-down") this.changeFontSize(-1)
     else if (action === "font-up") this.changeFontSize(1)

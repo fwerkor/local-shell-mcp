@@ -80,3 +80,30 @@ describe("Native WebUI remote details", () => {
     expect(html).toContain("&lt;svg")
   })
 })
+
+describe("Overview machine navigation", () => {
+  test("focuses the requested worker on arrival then preserves user selection", async () => {
+    const { RemotesController } = await import("./remotes")
+    const records = [worker({name:"worker-a"}), worker({name:"worker-b"}), worker({name:"worker-c"})]
+    const context: any = {selectedRemote:"worker-c", api:{get:async () => ({machines:records, enabled:true})}, notify:() => {}}
+    const controller: any = new RemotesController(context)
+    controller.requestedRemote = context.selectedRemote
+    controller.render = () => {}
+    await controller.refresh()
+    expect(controller.machines[controller.selected].name).toBe("worker-c")
+    expect(controller.requestedRemote).toBe(undefined)
+    controller.selected = 1
+    records.reverse()
+    await controller.refresh()
+    expect(controller.machines[controller.selected].name).toBe("worker-b")
+  })
+
+  test("falls back to the first worker when the requested node is no longer present", async () => {
+    const { RemotesController } = await import("./remotes")
+    const controller: any = new RemotesController({api:{get:async () => ({machines:[worker()],enabled:true})},notify:() => {}} as any)
+    controller.requestedRemote = "disconnected"
+    controller.render = () => {}
+    await controller.refresh()
+    expect(controller.selected).toBe(0)
+  })
+})

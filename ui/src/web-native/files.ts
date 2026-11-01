@@ -105,6 +105,7 @@ export class FilesController implements NativePageController {
     root.addEventListener("click", this.click)
     root.addEventListener("change", this.change)
     root.addEventListener("keydown", this.keydown)
+    root.addEventListener("dblclick", this.preventExplorerTextSelection)
     void this.refresh()
   }
 
@@ -128,6 +129,12 @@ export class FilesController implements NativePageController {
         void this.refresh()
       }
     }
+  }
+
+  private readonly preventExplorerTextSelection = (event: MouseEvent): void => {
+    const target = event.target
+    if (!(target instanceof Element) || target.closest("input,textarea,[contenteditable=true]")) return
+    if (target.closest(".explorer-host")) event.preventDefault()
   }
 
   private readonly change = (event: Event): void => {
@@ -390,6 +397,7 @@ export class FilesController implements NativePageController {
     this.root.removeEventListener("click", this.click)
     this.root.removeEventListener("change", this.change)
     this.root.removeEventListener("keydown", this.keydown)
+    this.root.removeEventListener("dblclick", this.preventExplorerTextSelection)
     this.reactRoot?.unmount()
     this.reactRoot = null
     this.api = null

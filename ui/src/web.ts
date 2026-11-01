@@ -9,9 +9,9 @@ import { createImageAddon } from "./image-support"
 import { browserSelectionShortcut, browserShortcutSequence, TERMINAL_KEY_SEQUENCES } from "./keyboard"
 import { measureTerminalCellAspect } from "./terminal-geometry"
 import { TerminalWriteBuffer, type TerminalWriteChunk } from "./terminal-write-buffer"
-import { visibleWorkloadCount } from "./web-data"
 import { hashForView, interfaceModeForView, oauthReturnView, viewFromHash, type WebViewName } from "./web-mode"
 import { createNativePage, isNativeView, type NativePageController, type NoticeTone } from "./web-native"
+import { installWebTheme } from "./web-theme"
 import type { Machine as UiMachine } from "./types"
 
 declare global {
@@ -83,6 +83,7 @@ type DashboardData = {
 }
 
 mountApplication()
+installWebTheme(document.querySelector<HTMLButtonElement>("#theme-toggle")!)
 
 const UI_PATH = (window.__LSM_UI_CONFIG__?.uiPath || "/ui").replace(/\/$/, "")
 const API_PREFIX = (window.__LSM_UI_CONFIG__?.apiPrefix || "/api/ui").replace(/\/$/, "")
@@ -104,7 +105,6 @@ const openConsoleButton = document.querySelector<HTMLButtonElement>("#open-conso
 const interfaceButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-interface-mode]"))
 const updatedAt = document.querySelector<HTMLElement>("#updated-at")!
 const machineNavCount = document.querySelector<HTMLElement>("#machine-nav-count")!
-const workloadNavCount = document.querySelector<HTMLElement>("#workload-nav-count")!
 const controllerStatus = document.querySelector<HTMLElement>("#controller-status")!
 const controllerUptime = document.querySelector<HTMLElement>("#controller-uptime")!
 const controllerVersion = document.querySelector<HTMLElement>("#controller-version")!
@@ -346,6 +346,7 @@ const PAGE_TITLES: Record<Exclude<WebViewName, "console">, string> = {
 
 let nativeController: NativePageController | null = null
 let nativeControllerView: WebViewName | null = null
+let pendingRemoteSelection: string | undefined
 
 function destroyNativeController(): void {
   unmountReactPage()
@@ -366,7 +367,10 @@ function renderActiveView(): void {
   }
   if (activeView === "overview") {
     if (nativeController) destroyNativeController()
-    mountOverview(viewRoot, dashboardData!, view => showView(view as WebViewName))
+    mountOverview(viewRoot, dashboardData!, (view, machine) => {
+      pendingRemoteSelection = view === "remotes" ? machine : undefined
+      showView(view as WebViewName)
+    })
     return
   }
   if (activeView === "workloads" || activeView === "activity") {
@@ -386,11 +390,13 @@ function renderActiveView(): void {
     accessToken,
     machines: uiMachines,
     notify,
+    selectedRemote: activeView === "remotes" ? pendingRemoteSelection : undefined,
     refreshChrome: async () => {
       await refreshAll(false)
     },
   })
   nativeControllerView = activeView
+  pendingRemoteSelection = undefined
   mountControllerPage(viewRoot, nativeController)
 }
 
@@ -436,11 +442,8 @@ function showView(
 function syncChrome(data: DashboardData): void {
   const machines = data.machines?.machines || []
   const remoteMachineCount = machines.filter((machine) => machine.info?.local !== true).length
-  const activeWorkloadCount = visibleWorkloadCount(data)
   machineNavCount.textContent = String(remoteMachineCount)
-  workloadNavCount.textContent = String(activeWorkloadCount)
   machineNavCount.parentElement?.setAttribute("aria-label", `Remotes, ${remoteMachineCount} remote ${remoteMachineCount === 1 ? "machine" : "machines"}`)
-  workloadNavCount.parentElement?.setAttribute("aria-label", `Terminals, ${activeWorkloadCount} ${activeWorkloadCount === 1 ? "workload" : "workloads"}`)
   const version = versionLabel(data.version)
   controllerVersion.textContent = version
   controllerOrigin.textContent = location.host

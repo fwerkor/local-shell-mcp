@@ -16,6 +16,7 @@ export interface NativePageContext {
   apiPrefix?: string
   accessToken: () => string | null
   machines: () => Machine[]
+  selectedRemote?: string
   notify: (message: string, tone?: NoticeTone) => void
   refreshChrome: () => Promise<void>
 }

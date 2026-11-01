@@ -227,7 +227,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 .explorer-head .native-button { height: 34px; min-height: 34px; }
 .explorer-head .native-toggle { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .explorer-head input[type="checkbox"] { width: 16px; height: 16px; min-height: 0; flex: none; }
-@media (max-width: 720px), (any-pointer: coarse) {
+@media (max-width: 720px) {
   .touchbar { display: grid; grid-template-columns: repeat(9, minmax(0,1fr)); gap: 4px; padding: 6px; background: #191d23; }
   .touchbar button { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 44px; margin: 0; padding: 0 4px; color: #edf3fa; background: #2c333d; border: 1px solid #566170; border-radius: 3px; font-size: 13px; line-height: 1; touch-action: manipulation; }
   .terminal-touchbar { display: grid; }
@@ -245,3 +245,92 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 .hosted-chat-entry:hover, .hosted-chat-entry.active { color: white; border-color: #77b5ef; background: #ffffff14; }
 .hosted-chat-entry:hover small, .hosted-chat-entry.active small { color: #ddd; }
 .hosted-chat-entry[hidden] { display: none; }
+
+/* Full-height native workspaces should not scroll the entire document. */
+@media (min-width: 1101px) and (min-height: 560px) {
+  .app-shell:not([hidden]), .main-content { height: 100dvh; min-height: 0; }
+  .main-content { display: flex; flex-direction: column; overflow-y: auto; }
+  .main-content > .topbar, .main-content > .page-footer { flex: none; }
+  .main-content > #view-root { flex: 1 1 auto; min-height: 0; }
+  .native-view-active .main-content { overflow: hidden; }
+  .native-view-active #view-root, .native-view-active .controller-page { display: flex; flex-direction: column; min-height: 0; }
+  .native-view-active .controller-page, .native-view-active .native-page { flex: 1 1 auto; min-height: 0; }
+}
+
+/* Files: a double-click opens an item, while editable controls retain text selection. */
+.explorer-host :is([class*="wx-filemanager"],[class*="wx-list"],[class*="wx-table"]) { user-select: none; -webkit-user-select: none; }
+.explorer-host :is(input,textarea,[contenteditable="true"]) { user-select: text; -webkit-user-select: text; }
+.explorer-host :is([class*="wx-toolbar"],[class*="wx-header"]) button { display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; }
+.explorer-host :is([class*="wx-toolbar"],[class*="wx-header"]) { align-items: center; }
+.lsm-modal.wide .p-modal__dialog { width: min(1360px,calc(100vw - 48px)); max-width: none; }
+.lsm-modal.wide .native-field textarea { min-height: min(60dvh,700px); resize: vertical; font: 13px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace; tab-size: 2; }
+
+/* Audit: one grouped toolbar, responsive controls and predictable button alignment. */
+.audit-controls { min-width: 0; display: grid; border: 1px solid var(--line); background: var(--panel); }
+.audit-page .audit-filter-strip { display: flex; flex-wrap: wrap; align-items: end; gap: 9px 12px; padding: 10px 12px; border: 0; background: transparent; }
+.audit-page .audit-filter-strip > label { display: grid; flex: 0 1 auto; gap: 4px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 12px; }
+.audit-page .audit-filter-strip > label.audit-search-field { flex: 1 1 230px; min-width: 180px; }
+.audit-page .audit-filter-strip select, .audit-page .audit-filter-strip input { width: 100%; min-width: 100px; height: 34px; padding: 0 9px; color: var(--text, #333); background: var(--panel); border: 1px solid var(--line); font-size: 12px; font-weight: 400; }
+.audit-page .audit-filter-strip label.audit-search-field input { min-width: 0; }
+.audit-page .audit-filter-actions { display: flex; align-items: center; align-self: end; gap: 5px; margin-left: auto; }
+.audit-page .audit-filter-actions button { height: 34px; }
+.audit-page .audit-advanced { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; padding: 9px 12px; border: 0; border-top: 1px solid var(--line); background: var(--panel); }
+.audit-page .audit-advanced[hidden] { display: none; }
+.audit-page .audit-advanced label { flex: 1 1 160px; }
+@media (max-width: 760px) { .audit-page .audit-filter-strip > label { flex: 1 1 130px; } .audit-page .audit-filter-actions { width: 100%; margin-left: 0; justify-content: flex-start; flex-wrap: wrap; } }
+
+/* Avoid light-text-on-light-panel terminal toolbars. */
+.terminal-toolbar label, .terminal-toolbar select, .terminal-toolbar .native-button,
+.terminal-sessions > header h3, .terminal-stage-panel > header h3,
+.terminal-sessions .native-button, .terminal-stage-actions .native-button { color: var(--text, #333); }
+.terminal-sessions .session-row { color: var(--text, #333); }
+.terminal-sessions .session-row.active { color: #0052a3; }
+.terminal-sessions .session-row:hover { background: #eaf2fa; }
+.terminal-sessions .session-row small { color: var(--muted); }
+.terminal-session-search { color: #69778a; background: var(--panel); border-color: var(--line); }
+.terminal-session-search input { color: var(--text, #333); }
+.terminal-stage-panel > header { color: var(--text, #333); }
+
+/* Unified light/dark palette, including native workspaces and file dialogs. */
+:root { --text: #262626; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --text: #e1e7ef; --muted: #a9b9ca; --line: #354558;
+  --panel: #1b2734; --accent: #80bbff; --accent-soft: #264361;
+  --sidebar: #101820; --sidebar-text: #e1e7ef;
+  color: var(--text); background: #111b25;
+}
+:root[data-theme="dark"] :is(body,.main-content) { color: var(--text); background: #111b25; }
+:root[data-theme="dark"] a { color: #8ec5ff; }
+:root[data-theme="dark"] :is(.topbar,.page-footer,.overview-section,.overview-metrics,.overview-resources,.summary-metric,.native-toolbar,.native-panel,.explorer-head,.explorer-host,.auth-card,.panel,.page-panel,.audit-controls,.audit-page .audit-advanced,.audit-page .audit-filter-strip,.session-identity,.session-section,.session-detail-block,.native-dialog,.toast) { color: var(--text); background: var(--panel); border-color: var(--line); }
+:root[data-theme="dark"] :is(.topbar h1,.overview-section h2,.summary-metric strong,.resource-meter strong,.native-toolbar strong,.native-panel > header h3,.native-table td strong,.native-empty strong,.native-dialog h2,.terminal-sessions > header h3,.terminal-stage-panel > header h3) { color: #ebf2fa; }
+:root[data-theme="dark"] :is(.page-heading,.resource-meter,.machine-resources,.native-toolbar label,.native-panel > header p,.native-table td,.native-table code,.native-empty,.native-empty span,.detail-json summary,.detail-json h4,.terminal-toolbar label,.terminal-stage-panel > header p,.sessions-filter,.native-toggle) { color: #afbdcd; }
+:root[data-theme="dark"] :is(.native-toolbar input,.native-toolbar select,.sessions-filter select,.explorer-head input,.explorer-head select,.audit-page .audit-filter-strip input,.audit-page .audit-filter-strip select,.audit-advanced input,.native-field input,.native-field textarea,.terminal-session-search) { color: var(--text); background: #14202c; border-color: #405168; }
+:root[data-theme="dark"] :is(.native-button,.terminal-toolbar .native-button,.terminal-stage-actions .native-button,.terminal-sessions .native-button,.p-button:not(.p-button--positive):not(.p-button--negative),.audit-filter-actions .native-button) { color: #e0e8f2; background: #273648; border-color: #485b70; }
+:root[data-theme="dark"] :is(.native-button,.p-button):hover:not(:disabled) { color: #fff; background: #334962; border-color: #6083a5; }
+:root[data-theme="dark"] :is(.native-button.primary,.p-button--positive) { color: #fff; background: #095dba; border-color: #1379d2; }
+:root[data-theme="dark"] :is(.overview-alert,.overview-event,.native-panel > header,.native-table th,.native-table td,.native-dialog > header,.native-dialog > footer,.session-section-title) { border-color: var(--line); }
+:root[data-theme="dark"] :is(.native-table th,.audit-detail-card,.audit-value pre,.session-detail,.detail-json pre,.code-preview,.native-dialog > footer) { color: var(--text); background: #172430; }
+:root[data-theme="dark"] :is(.native-table tbody tr:hover td,.session-row:hover,.summary-metric:hover) { background: #273a4c; }
+:root[data-theme="dark"] :is(.native-table tbody tr.selected td,.session-row.active) { color: #a8d4ff; background: #234766; }
+:root[data-theme="dark"] .health-banner { color: #b2dfc9; background: #183629; border-color: #2fa17a; }
+:root[data-theme="dark"] .health-banner.attention { color: #eed4a0; background: #3b3020; }
+:root[data-theme="dark"] .status-chip.neutral { color: #bbc6d5; background: #334155; }
+:root[data-theme="dark"] .status-chip.success { color: #9ce0bc; background: #1c4534; }
+:root[data-theme="dark"] .status-chip.warning { color: #f4cc8b; background: #51381c; }
+:root[data-theme="dark"] .status-chip.error { color: #ffb4bf; background: #52252e; }
+:root[data-theme="dark"] :is(.terminal-toolbar,.terminal-sessions,.terminal-stage-panel > header,.desktop-panel > header) { color: var(--text); background: #202c3a; border-color: var(--line); }
+:root[data-theme="dark"] .terminal-session-search { color: var(--muted); background: #14202c; border-color: #344254; }
+:root[data-theme="dark"] .terminal-session-search input { color: var(--text); }
+:root[data-theme="dark"] :is(.terminal-stage-panel > header h3,.terminal-sessions > header h3,.terminal-sessions .session-row) { color: var(--text); }
+:root[data-theme="dark"] .terminal-sessions .session-row.active { color: #b8ddff; background: #234766; }
+:root[data-theme="dark"] .terminal-sessions .session-row:hover { background: #273a4c; }
+:root[data-theme="dark"] :is(.audit-details,.session-detail,.desktop-connection) { background: #14202c; }
+:root[data-theme="dark"] :is(.audit-detail-card,.session-identity,.session-section,.session-detail-block) { background: #1b2734; border-color: var(--line); }
+:root[data-theme="dark"] :is(.audit-detail-card h4,.native-dialog header p,.detail-json h4) { color: #d9e4f0; }
+:root[data-theme="dark"] .preview-warning { color: #f4cc8b; background: #493719; border-color: #5d4728; }
+:root[data-theme="dark"] .explorer-host .wx-willow-theme { color: var(--text); background: #1b2734; }
+:root[data-theme="dark"] .explorer-host :is(input,select,button) { color: var(--text); background-color: #202f40; }
+:root[data-theme="dark"] .explorer-host [class*="wx-filemanager"] { color: var(--text); background-color: #1b2734; }
+:root[data-theme="dark"] .toast { color: var(--text); }
+:root[data-theme="dark"] .native-dialog-overlay { background: #060b10b8; }

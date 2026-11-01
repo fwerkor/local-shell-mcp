@@ -90,8 +90,10 @@ describe("Native WebUI actions", () => {
     expect(audit).toContain('data-action="next-record"')
     expect(audit).toContain('button("Advanced", "toggle-advanced")')
     expect(audit).not.toContain('button("Search", "search")')
-    expect(terminals).toContain('"previous-session"')
-    expect(terminals).toContain('"next-session"')
+    expect(terminals).not.toContain('data-action="previous-session"')
+    expect(terminals).not.toContain('data-action="next-session"')
+    expect(terminals).toContain('this.switchSession(-1)')
+    expect(terminals).toContain('this.switchSession(1)')
     for (const label of ["Copy", "Paste", "Find", "Clear", "Fullscreen"]) {
       expect(terminals).toContain(`button("${label}"`)
     }
