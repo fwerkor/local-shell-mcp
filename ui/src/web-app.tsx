@@ -55,7 +55,6 @@ export function ApplicationShell() {
           {destinations.map(([view, label]) => <button key={view} className={`nav-item${view === "overview" ? " active" : ""}`} type="button" data-view={view} aria-label={label}>
             <span className="nav-icon" aria-hidden="true"><NavigationIcon view={view} /></span><span>{label}</span>
             {view === "remotes" && <span className="nav-badge" id="machine-nav-count">—</span>}
-            {view === "terminals" && <span className="nav-badge" id="workload-nav-count">—</span>}
           </button>)}
         </nav>
         <div className="sidebar-spacer" />
@@ -72,7 +71,7 @@ export function ApplicationShell() {
           <div className="page-heading"><span className="page-context">Controller</span><h1 id="page-title">Overview</h1></div>
           <div className="topbar-actions">
             <span className="live-pill" id="live-pill"><i /><span id="updated-at">Waiting for data</span></span>
-            <Button id="refresh-button">Refresh</Button><Button id="open-console-button">Open TUI</Button>
+            <Button id="theme-toggle" title="Change appearance">Theme: Auto</Button><Button id="refresh-button">Refresh</Button><Button id="open-console-button">Open TUI</Button>
           </div>
         </header>
         <div id="view-root" tabIndex={-1}><Spinner text="Loading control plane…" /></div>
@@ -178,7 +177,7 @@ type OverviewData = {
 }
 function percent(value: unknown) { return typeof value === "number" ? `${value.toFixed(1)}%` : "—" }
 
-export function Overview({ data, navigate }: { data: OverviewData; navigate: (view: string) => void }) {
+export function Overview({ data, navigate }: { data: OverviewData; navigate: (view: string, machine?: string) => void }) {
   const machines = data.machines?.machines || []
   const system = data.system || {}
   const metrics = [
@@ -199,7 +198,7 @@ export function Overview({ data, navigate }: { data: OverviewData; navigate: (vi
     <section className="overview-section"><header><h2>Machines</h2><Button onClick={() => navigate("remotes")}>Manage remotes</Button></header>
       <MainTable sortable responsive headers={[{content:"Name",sortKey:"name"},{content:"Status",sortKey:"status"},{content:"Resources"},{content:"Working directory"}]} emptyStateMsg="No machines connected."
         rows={machines.map(machine => ({key: machine.name, sortData: {name:machine.name,status:machine.status}, columns:[
-          {content:<Button appearance="link" onClick={() => navigate("remotes")}>{machine.name}</Button>},
+          {content:<Button appearance="link" onClick={() => navigate("remotes", machine.name)}>{machine.name}</Button>},
           {content:<span className={`status-chip ${machine.status === "online" ? "success" : "neutral"}`}>{machine.status || "Unknown"}</span>},
           {content:<div className="machine-resources"><span>CPU {percent(machine.info?.local ? system.cpu_percent : machine.info?.cpu_percent)}</span><span>MEM {percent(machine.info?.local ? system.memory_percent : machine.info?.memory_percent)}</span></div>},
           {content:<code title={machine.workdir}>{machine.workdir || "—"}</code>},
@@ -215,7 +214,7 @@ export function Overview({ data, navigate }: { data: OverviewData; navigate: (vi
     </div>
   </div>
 }
-export function mountOverview(host: HTMLElement, data: OverviewData, navigate: (view: string) => void) {
+export function mountOverview(host: HTMLElement, data: OverviewData, navigate: (view: string, machine?: string) => void) {
   if (!pageRoot) pageRoot = createRoot(host)
   flushSync(() => pageRoot!.render(<Overview data={data} navigate={navigate} />))
 }

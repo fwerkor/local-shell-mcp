@@ -16,9 +16,12 @@ describe("WebUI navigation", () => {
     expect(markup).toContain('aria-controls="navigation"')
     expect(markup).toContain('aria-label="Close navigation"')
   })
-  test("keeps live counts in accessible names", async () => {
+  test("keeps the remote count accessible without inventing a terminal count", async () => {
     const source = await Bun.file(new URL("./web.ts",import.meta.url)).text()
     expect(source).toContain('machineNavCount.parentElement?.setAttribute("aria-label", `Remotes, ${remoteMachineCount} remote')
-    expect(source).toContain('workloadNavCount.parentElement?.setAttribute("aria-label", `Terminals, ${activeWorkloadCount}')
+    expect(source).not.toContain("workloadNavCount")
+    const markup = renderToStaticMarkup(<ApplicationShell />)
+    expect(markup).not.toContain('id="workload-nav-count"')
+    expect(markup).toContain('aria-label="Terminals"')
   })
 })

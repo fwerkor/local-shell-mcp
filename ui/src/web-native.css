@@ -717,3 +717,22 @@ button.summary-card { cursor: pointer; }
 .hosted-profile-dialog { border-radius: 4px; }
 .hosted-profile-dialog input, .hosted-profile-dialog select { border-radius: 3px; }
 @media (max-width: 800px) { .hosted-chat { min-height: calc(100dvh - 210px); } .hosted-workspace:not([hidden]) { min-height: 300px; } }
+
+/* Give full-height workspaces all available content space; panels scroll internally. */
+@media (min-width: 1101px) and (min-height: 560px) {
+  .native-view-active :is(.terminals-page,.desktop-page,.explorer-page,.audit-page,.sessions-page,.remotes-page) { height: 100%; min-height: 0; }
+  .native-view-active :is(.terminals-page,.desktop-page,.audit-page) { grid-template-rows: auto minmax(0,1fr); }
+  .native-view-active :is(.sessions-page,.remotes-page) { grid-template-rows: auto auto minmax(0,1fr); }
+  .native-view-active :is(.sessions-layout,.remotes-layout) { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+  .native-view-active .explorer-page { grid-template-rows: auto minmax(0,1fr); }
+  .native-view-active .explorer-page:has(.explorer-transfer-status:not([hidden])) { grid-template-rows: auto auto minmax(0,1fr); }
+  .native-view-active :is(.terminal-layout,.desktop-panel,.audit-layout,.sessions-layout,.remotes-layout) { height: auto; min-height: 0; }
+  .native-view-active .explorer-host { height: auto; min-height: 0; }
+  .native-view-active .hosted-chat { min-height: 0; height: 100%; }
+  .native-view-active .hosted-chat .hosted-messages { max-height: none; }
+}
+
+/* Landscape phones and tablets retain shortcut keys when touch is primary. */
+@media (max-width: 1100px) and (pointer: coarse) and (hover: none) {
+  .terminal-touchbar { display: grid; }
+}
