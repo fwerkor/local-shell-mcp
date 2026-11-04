@@ -378,8 +378,8 @@ class _SettingsFields:
 
     # Durable Logical Sessions and optional Goal plans exposed through MCP.
     logical_sessions_enabled: bool = True
-    # Optional self-hosted BYOK chat/MCP Apps host (no model provider configured by default).
-    hosted_chat_enabled: bool = False
+    # Self-hosted BYOK chat/MCP Apps host (no model provider configured by default).
+    hosted_chat_enabled: bool = True
     # Explicit administrator opt-in for loopback/private HTTP(S) model APIs.
     hosted_chat_allow_private_endpoints: bool = False
 

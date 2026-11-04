@@ -1,14 +1,14 @@
-<!-- i18n-source-sha256: 53d1b81800534bc6d5334883b7de74660c988088c66f492ddbd68aced8797379 -->
+<!-- i18n-source-sha256: 78210f26f159c89fa83851d7f597b727ddf3aaab7229c279aa5bcacf21d92669 -->
 # Bate-papo hospedado (opcional)
 
 O Hosted Chat é um cliente de bate-papo BYOK e aplicativos MCP auto-hospedado integrado à interface humana do LSM. **não** é um modo de Sessão Lógica: as conversas têm identidades independentes e podem opcionalmente anexar uma Sessão Lógica LSM existente. ChatGPT e outros clientes externos continuam trabalhando com as mesmas sessões e ferramentas LSM.
 
-## Habilitar
+## Disponibilidade
 
-O bate-papo hospedado está desabilitado por padrão. Definir:
+O Hosted Chat está ativado por padrão no modo MCP com armazenamento de estado persistente. Para desativá-lo, defina:
 
 ```env
-LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED=true
+LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED=false
 ```
 
 Reinicie o controlador e abra **Hosted Chat** imediatamente abaixo do seletor Web UI/TUI. O recurso também possui uma entrada na barra superior móvel. O host do chat usa a identidade e os escopos LSM OAuth existentes. O mesmo controlador opera o servidor MCP usado pelo loop de ferramentas do modelo; Os trabalhadores não podem iniciar a execução.
