@@ -649,10 +649,11 @@ else:
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    settings = Settings()
+    settings = Settings().with_workspace_relative_defaults()
     config = os.getenv("LOCAL_SHELL_MCP_CONFIG")
-    if config:
-        settings = settings.apply_yaml(Path(config).expanduser(), preserve_environment=True)
+    config_path = Path(config).expanduser() if config else settings.state_dir / "config.yaml"
+    if config or config_path.is_file():
+        settings = settings.apply_yaml(config_path, preserve_environment=True)
     settings = settings.with_workspace_relative_defaults()
     if not settings.stateless_controller:
         settings.workspace_root.mkdir(parents=True, exist_ok=True)

@@ -574,6 +574,7 @@ _SCOPE_DETAILS = {
         "Create temporary links for files from the configured workspace.",
     ),
     "remote:use": ("Use remote workers", "Access configured remote machines through this service."),
+    "admin:config": ("Manage controller settings", "Edit server configuration and restart the controller."),
 }
 
 
@@ -602,7 +603,7 @@ def _authorize_form(
     headers: dict[str, str] | None = None,
 ) -> HTMLResponse:
     settings = get_settings()
-    scope = _scope_value()
+    scope = _scope_value() + (" admin:config" if "admin:config" in params.get("scope", "").split() else "")
     resource = params.get("resource") or resource_url()
     client = _get_client(params.get("client_id", ""))
     client_name = client.client_name if client and client.client_name else "ChatGPT"
@@ -746,11 +747,17 @@ async def oauth_authorize_post(request: Request) -> Response:
             return _authorize_form(params, error="OAuth client registry is full")
 
     code = secrets.token_urlsafe(32)
+    # A management scope is only issued to the controller's own WebUI callback.
+    ui_callback = f"{public_base_url(request)}{get_settings().ui_path}/callback"
+    ui_admin = (
+        params.get("redirect_uri") == ui_callback
+        and "admin:config" in params.get("scope", "").split()
+    )
     auth_code = AuthCode(
         code=code,
         client_id=params["client_id"],
         redirect_uri=params["redirect_uri"],
-        scope=_scope_value(),
+        scope=_scope_value() + (" admin:config" if ui_admin else ""),
         resource=params.get("resource") or resource_url(request),
         code_challenge=params.get("code_challenge"),
         code_challenge_method=params.get("code_challenge_method"),
