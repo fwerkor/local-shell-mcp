@@ -3,15 +3,15 @@
 
 Hosted Chat 是一个自托管、BYOK 聊天和集成到 LSM 人机界面中的 MCP Apps 客户端。它不是逻辑会话模式：对话具有独立的身份，并且可以选择附加现有的 LSM 逻辑会话。 ChatGPT 和其他外部客户端继续使用相同的 LSM 会话和工具。
 
-## 启用
+## 可用性
 
-默认情况下禁用托管聊天。设定：
+Hosted Chat 在 MCP 模式且使用持久化状态存储时默认启用。如需关闭，请设置：
 
 ```env
-LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED=true
+LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED=false
 ```
 
-重新启动控制器并在 Web UI / TUI 选择器下方立即打开 **托管聊天**。该功能还有一个移动顶栏条目。聊天主机使用现有的 LSM OAuth 身份和范围。同一控制器操作模型工具循环使用的 MCP 服务器；工人无法发起执行。
+启用时，**Hosted Chat** 入口显示在 Web UI / TUI 选择器下方。修改设置后需要重启控制器。该功能还有一个移动顶栏条目。聊天主机使用现有的 LSM OAuth 身份和范围。同一控制器操作模型工具循环使用的 MCP 服务器；工人无法发起执行。
 
 ## 型号简介
 

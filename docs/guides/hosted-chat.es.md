@@ -3,12 +3,12 @@
 
 Hosted Chat es un cliente de aplicaciones MCP y chat BYOK autohospedado integrado en la interfaz humana de LSM. **No** es un modo de sesión lógica: las conversaciones tienen identidades independientes y, opcionalmente, pueden adjuntar una sesión lógica LSM existente. ChatGPT y otros clientes externos continúan trabajando con las mismas sesiones y herramientas de LSM.
 
-## Habilitar
+## Disponibilidad
 
-El chat alojado está deshabilitado de forma predeterminada. Conjunto:
+Hosted Chat está habilitado de forma predeterminada en modo MCP con almacenamiento de estado persistente. Para deshabilitarlo, establezca:
 
 ```env
-LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED=true
+LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED=false
 ```
 
 Reinicie el controlador y abra **Chat alojado** inmediatamente debajo del selector Web UI/TUI. La función también tiene una entrada en la barra superior móvil. El anfitrión del chat utiliza la identidad y los ámbitos de LSM OAuth existentes. El mismo controlador opera el servidor MCP utilizado por el bucle de herramientas del modelo; Los trabajadores no pueden iniciar la ejecución.

@@ -3,12 +3,12 @@
 
 Barındırılan Sohbet, LSM'nin insan arayüzüne entegre edilmiş, kendi kendine barındırılan, BYOK sohbeti ve MCP Uygulamaları istemcisidir. Bu bir Mantıksal Oturum modu **değildir**: konuşmaların bağımsız kimlikleri vardır ve isteğe bağlı olarak mevcut bir LSM Mantıksal Oturumuna eklenebilir. ChatGPT ve diğer harici istemciler aynı LSM Oturumları ve araçlarıyla çalışmaya devam eder.
 
-## Etkinleştir
+## Kullanılabilirlik
 
-Barındırılan Sohbet varsayılan olarak devre dışıdır. Ayarla:
+Hosted Chat, kalıcı durum depolaması kullanılan MCP modunda varsayılan olarak etkindir. Devre dışı bırakmak için şunu ayarlayın:
 
 ```env
-LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED=true
+LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED=false
 ```
 
 Denetleyiciyi yeniden başlatın ve Web Kullanıcı Arayüzü / TUI seçicinin hemen altındaki **Barındırılan Sohbet**'i açın. Bu özellik aynı zamanda mobil üst çubuk girişine de sahiptir. Sohbet sunucusu mevcut LSM OAuth kimliğini ve kapsamlarını kullanır. Aynı denetleyici, modelin araç döngüsü tarafından kullanılan MCP sunucusunu çalıştırır; İşçiler yürütmeyi başlatamaz.
