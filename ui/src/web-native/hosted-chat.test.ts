@@ -182,3 +182,45 @@ test("late reload cannot steal an in-flight manual conversation selection", asyn
   await reload
   expect(selected).toEqual([])
 })
+
+test("first message creates a conversation from the empty welcome screen", async () => {
+  const controller: any = new HostedChatController({} as any)
+  const input = { value: "First question", style: {}, scrollHeight: 48 }
+  controller.profiles = [{ id: "profile-1", name: "Local", model: "test-model" }]
+  controller.root = {
+    querySelector: (selector: string) => selector === "[data-chat-input]" ? input
+      : selector === "[data-chat-model]" ? { value: "profile-1" } : null,
+  }
+  controller.renderConversation = () => undefined
+  controller.renderList = () => undefined
+  controller.select = async () => undefined
+  const calls: { action: string; payload: Record<string, unknown> }[] = []
+  controller.post = async (action: string, payload: Record<string, unknown>) => {
+    calls.push({ action, payload })
+    if (action === "conversation-create") return { id: "first-chat", profile_id: "profile-1", status: "idle" }
+    return {}
+  }
+  expect(await controller.send()).toBe(true)
+  expect(calls).toEqual([
+    { action: "conversation-create", payload: { profile_id: "profile-1" } },
+    { action: "send", payload: { id: "first-chat", text: "First question" } },
+  ])
+  expect(input.value).toBe("")
+  expect(controller.busy).toBe(false)
+})
+
+test("mobile drawer actions update state and accessibility attributes", async () => {
+  const controller: any = new HostedChatController({} as any)
+  let open = false
+  let expanded = "false"
+  controller.root = {
+    classList: { toggle: (_name: string, state: boolean) => { open = state } },
+    querySelector: () => ({ setAttribute: (_name: string, state: string) => { expanded = state } }),
+  }
+  await controller.action("drawer")
+  expect(open).toBe(true)
+  expect(expanded).toBe("true")
+  await controller.action("drawer-close")
+  expect(open).toBe(false)
+  expect(expanded).toBe("false")
+})
