@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 53d1b81800534bc6d5334883b7de74660c988088c66f492ddbd68aced8797379 -->
+<!-- i18n-source-sha256: 78210f26f159c89fa83851d7f597b727ddf3aaab7229c279aa5bcacf21d92669 -->
 # 托管聊天（可选）
 
 Hosted Chat 是一个自托管、BYOK 聊天和集成到 LSM 人机界面中的 MCP Apps 客户端。它不是逻辑会话模式：对话具有独立的身份，并且可以选择附加现有的 LSM 逻辑会话。 ChatGPT 和其他外部客户端继续使用相同的 LSM 会话和工具。

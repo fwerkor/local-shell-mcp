@@ -10,7 +10,7 @@ Hosted Chat is enabled by default in MCP mode with a persistent state backend. T
 LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED=false
 ```
 
-Restart the Controller and open **Hosted Chat** immediately beneath the Web UI / TUI selector. The feature also has a mobile top-bar entry. The chat host uses the existing LSM OAuth identity and scopes. The same controller operates the MCP server used by the model's tool loop; Workers cannot initiate execution.
+When enabled, **Hosted Chat** appears immediately beneath the Web UI / TUI selector. Restart the Controller after changing the setting. The feature also has a mobile top-bar entry. The chat host uses the existing LSM OAuth identity and scopes. The same controller operates the MCP server used by the model's tool loop; Workers cannot initiate execution.
 
 ## Model profiles
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 53d1b81800534bc6d5334883b7de74660c988088c66f492ddbd68aced8797379 -->
+<!-- i18n-source-sha256: 78210f26f159c89fa83851d7f597b727ddf3aaab7229c279aa5bcacf21d92669 -->
 # Bate-papo hospedado (opcional)
 
 O Hosted Chat é um cliente de bate-papo BYOK e aplicativos MCP auto-hospedado integrado à interface humana do LSM. **não** é um modo de Sessão Lógica: as conversas têm identidades independentes e podem opcionalmente anexar uma Sessão Lógica LSM existente. ChatGPT e outros clientes externos continuam trabalhando com as mesmas sessões e ferramentas LSM.

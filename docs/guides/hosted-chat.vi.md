@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 53d1b81800534bc6d5334883b7de74660c988088c66f492ddbd68aced8797379 -->
+<!-- i18n-source-sha256: 78210f26f159c89fa83851d7f597b727ddf3aaab7229c279aa5bcacf21d92669 -->
 # Trò chuyện được lưu trữ (tùy chọn)
 
 Trò chuyện được lưu trữ là ứng dụng trò chuyện BYOK và ứng dụng MCP Apps tự lưu trữ, được tích hợp vào giao diện con người của LSM. Đây **không phải** là chế độ Phiên logic: các cuộc hội thoại có danh tính độc lập và có thể tùy ý đính kèm Phiên logic LSM hiện có. ChatGPT và các ứng dụng khách bên ngoài khác tiếp tục làm việc với cùng các phiên và công cụ LSM.

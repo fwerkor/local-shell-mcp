@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 53d1b81800534bc6d5334883b7de74660c988088c66f492ddbd68aced8797379 -->
+<!-- i18n-source-sha256: 78210f26f159c89fa83851d7f597b727ddf3aaab7229c279aa5bcacf21d92669 -->
 # Chat alojado (opcional)
 
 Hosted Chat es un cliente de aplicaciones MCP y chat BYOK autohospedado integrado en la interfaz humana de LSM. **No** es un modo de sesión lógica: las conversaciones tienen identidades independientes y, opcionalmente, pueden adjuntar una sesión lógica LSM existente. ChatGPT y otros clientes externos continúan trabajando con las mismas sesiones y herramientas de LSM.

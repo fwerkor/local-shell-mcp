@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 53d1b81800534bc6d5334883b7de74660c988088c66f492ddbd68aced8797379 -->
+<!-- i18n-source-sha256: 78210f26f159c89fa83851d7f597b727ddf3aaab7229c279aa5bcacf21d92669 -->
 # Hostowany czat (opcjonalnie)
 
 Hosted Chat to hostowany samodzielnie klient czatu BYOK i aplikacji MCP zintegrowany z interfejsem LSM. Nie jest to **nie** tryb sesji logicznej: konwersacje mają niezależne tożsamości i opcjonalnie mogą dołączać istniejącą sesję logiczną LSM. ChatGPT i inni klienci zewnętrzni kontynuują pracę z tymi samymi sesjami i narzędziami LSM.

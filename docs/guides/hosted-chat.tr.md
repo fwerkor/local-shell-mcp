@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 53d1b81800534bc6d5334883b7de74660c988088c66f492ddbd68aced8797379 -->
+<!-- i18n-source-sha256: 78210f26f159c89fa83851d7f597b727ddf3aaab7229c279aa5bcacf21d92669 -->
 # Barındırılan Sohbet (isteğe bağlı)
 
 Barındırılan Sohbet, LSM'nin insan arayüzüne entegre edilmiş, kendi kendine barındırılan, BYOK sohbeti ve MCP Uygulamaları istemcisidir. Bu bir Mantıksal Oturum modu **değildir**: konuşmaların bağımsız kimlikleri vardır ve isteğe bağlı olarak mevcut bir LSM Mantıksal Oturumuna eklenebilir. ChatGPT ve diğer harici istemciler aynı LSM Oturumları ve araçlarıyla çalışmaya devam eder.
