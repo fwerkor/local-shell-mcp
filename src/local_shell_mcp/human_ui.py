@@ -3209,6 +3209,54 @@ async def ui_root_redirect(request: Request) -> RedirectResponse:  # noqa: ARG00
     return RedirectResponse(f"./{ui_path}/", status_code=307)
 
 
+async def api_settings(request: Request) -> Response:
+    """Privileged controller configuration, independent of shell workspace access."""
+    try:
+        _require_ui_scopes(request, "admin:config")
+        if get_settings().auth_mode == "none":
+            from .auth import _is_direct_localhost_request
+
+            if not _is_direct_localhost_request(request):
+                raise HTTPException(status_code=403, detail="Anonymous configuration access is restricted to direct localhost")
+        if request.method == "POST":
+            from .oauth import public_base_url
+
+            origin = request.headers.get("origin")
+            if origin and origin.rstrip("/") != public_base_url(request):
+                raise HTTPException(status_code=403, detail="Configuration changes require a same-origin request")
+            if request.headers.get("sec-fetch-site") == "cross-site":
+                raise HTTPException(status_code=403, detail="Cross-site configuration changes are forbidden")
+        from .config_management import config_snapshot, save_config
+
+        action = request.path_params.get("action")
+        if request.method == "GET" and action == "view":
+            return _json_ok(await asyncio.to_thread(config_snapshot))
+        if request.method == "POST" and action == "save":
+            data = await request.json()
+            if not isinstance(data, dict) or not isinstance(data.get("changes"), dict) or not isinstance(data.get("revision"), str):
+                raise ValueError("Expected changes and a configuration revision")
+            result = await asyncio.to_thread(save_config, data["changes"], data["revision"])
+            from .audit import audit
+
+            audit("ui_config_saved", keys=result["changed"])
+            return _json_ok(result)
+        if request.method == "POST" and action == "restart":
+            from .controller_restart import request_controller_restart, restart_available
+
+            # Defer shutdown until the response has left the ASGI handler.
+            loop = asyncio.get_running_loop()
+            if not restart_available():
+                raise HTTPException(status_code=503, detail="Controller restart is unavailable in this process")
+            loop.call_later(0.5, request_controller_restart)
+            from .audit import audit
+
+            audit("ui_config_restart_requested")
+            return _json_ok({"restarting": True})
+        raise HTTPException(status_code=404, detail="Unknown settings action")
+    except Exception as exc:
+        return _json_error(exc, status_code=409 if isinstance(exc, RuntimeError) else 400)
+
+
 async def api_hosted_chat(request: Request) -> Response:
     """Durable Hosted Chat, using the caller's principal for all MCP operations."""
     try:
@@ -3622,6 +3670,7 @@ def ui_routes() -> list[Any]:
         WebSocketRoute(ui_path + "/ws/shell", ui_shell_websocket),
         WebSocketRoute(ui_path + "/ws/desktop", ui_desktop_websocket),
         Route(UI_API_PREFIX + "/hosted-chat/{action}", api_hosted_chat, methods=["GET", "POST"]),
+        Route(UI_API_PREFIX + "/settings/{action}", api_settings, methods=["GET", "POST"]),
         Route(UI_API_PREFIX + "/bootstrap", api_bootstrap, methods=["GET"]),
         Route(UI_API_PREFIX + "/dashboard", api_dashboard, methods=["GET"]),
         Route(UI_API_PREFIX + "/machines", api_machines, methods=["GET"]),

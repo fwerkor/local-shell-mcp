@@ -1,13 +1,19 @@
 # Configuration
 
-The repository ships one copyable starter file: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose reads the resulting `.env` file automatically, and other runtimes can use the same `LOCAL_SHELL_MCP_` environment variables. YAML remains an optional advanced input for binary or source deployments; create a file explicitly and select it with `LOCAL_SHELL_MCP_CONFIG` or `--config`. Environment variables override YAML values, so avoid defining the same setting in both unless the override is intentional. YAML keys use the field names shown below.
+The repository ships one copyable starter file: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose reads the resulting `.env` file automatically, and other runtimes can use the same `LOCAL_SHELL_MCP_` environment variables. For WebUI-managed settings, LSM automatically reads `<state_dir>/config.yaml` when it exists. You can also select another YAML file with `LOCAL_SHELL_MCP_CONFIG` or `--config`. Environment variables override YAML values, so avoid defining the same setting in both unless the override is intentional. YAML keys use the field names shown below.
 
 ## Precedence
 
 1. Built-in defaults from `Settings`.
-2. YAML config selected by `LOCAL_SHELL_MCP_CONFIG` or `--config`.
+2. YAML config from `<state_dir>/config.yaml` (if present), or a file selected by `LOCAL_SHELL_MCP_CONFIG` or `--config`.
 3. Environment variables with the `LOCAL_SHELL_MCP_` prefix.
 4. CLI flags such as `--mode`, `--config`, `--remote`, and `--no-remote`, which set the corresponding environment values before settings load.
+
+## Editing settings in the WebUI
+
+Open **Settings** in the WebUI to search, edit, reset, and save controller settings. The editor writes YAML atomically with owner-only permissions on Unix; existing YAML comments may be reformatted. Environment-variable overrides are displayed as read-only. Secret values are never sent back to the browser. Writes are checked against the runtime settings schema, and conflicting external edits require refreshing before saving.
+
+**Save** persists configuration without immediately altering the running process. **Save & restart** combines both steps. **Restart controller** requests a graceful shutdown followed by re-execution of the same Python command, including CLI arguments. Active connections will disconnect. Changing `host`, `port`, `ui_path`, authentication, or state storage can require manually updating the URL or recovering the configuration file. Config management requires the WebUI-only OAuth `admin:config` scope; anonymous configurations can use it only through a direct loopback connection.
 
 ## Minimal public configuration
 

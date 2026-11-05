@@ -92,12 +92,20 @@ def _run_uvicorn(app, settings) -> None:  # noqa: ANN001
         timeout_graceful_shutdown=_GRACEFUL_SHUTDOWN_TIMEOUT_S,
         log_level=_log_level_name().lower(),
     )
+    from . import controller_restart
+
     server = ShutdownAwareServer(config=config)
+    controller_restart.set_active_server(server)
     _prepare_remote_polls_for_server_start()
-    with suppress(KeyboardInterrupt):  # pragma: full coverage
-        server.run()
-    if not server.started:
-        raise SystemExit(STARTUP_FAILURE)
+    try:
+        with suppress(KeyboardInterrupt):  # pragma: full coverage
+            server.run()
+        if not server.started:
+            raise SystemExit(STARTUP_FAILURE)
+    finally:
+        controller_restart.clear_active_server()
+    if controller_restart.restart_requested():
+        os.execv(sys.executable, [sys.executable, *getattr(sys, "orig_argv", sys.argv)[1:]])
 
 
 def _with_oauth_routes(inner_app):  # noqa: ANN001

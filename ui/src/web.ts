@@ -282,7 +282,7 @@ async function startOAuth(returnView: WebViewName): Promise<void> {
     authorize.searchParams.set("response_type", "code")
     authorize.searchParams.set("client_id", client.client_id)
     authorize.searchParams.set("redirect_uri", callback)
-    authorize.searchParams.set("scope", "shell:read shell:write shell:execute browser:use file:share remote:use")
+    authorize.searchParams.set("scope", "shell:read shell:write shell:execute browser:use file:share remote:use admin:config")
     authorize.searchParams.set("resource", location.origin)
     authorize.searchParams.set("code_challenge", challenge)
     authorize.searchParams.set("code_challenge_method", "S256")
@@ -340,6 +340,7 @@ const PAGE_TITLES: Record<Exclude<WebViewName, "console">, string> = {
   sessions: "Sessions",
   remotes: "Remotes",
   audit: "Audit",
+  settings: "Settings",
   workloads: "Workloads",
   activity: "Alerts and activity",
 }

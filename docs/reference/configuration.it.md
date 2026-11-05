@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
+<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
 # Configurazione
 
 Il repository include un solo file iniziale copiabile: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose legge automaticamente il `.env` risultante e gli altri runtime possono usare le stesse environment variables `LOCAL_SHELL_MCP_`. YAML resta un input avanzato opzionale per deployment binary o source; crea esplicitamente un file e selezionalo con `LOCAL_SHELL_MCP_CONFIG` o `--config`. Le environment variables sovrascrivono i valori YAML, quindi evita di definire lo stesso setting in entrambi salvo quando l’override è intenzionale. Le YAML keys usano i field names riportati sotto.
@@ -6,9 +6,15 @@ Il repository include un solo file iniziale copiabile: [`.env.example`](https://
 ## Precedenza
 
 1. Defaults built-in di `Settings`.
-2. Config YAML selezionata da `LOCAL_SHELL_MCP_CONFIG` o `--config`.
+2. Config YAML selezionata da `LOCAL_SHELL_MCP_CONFIG` o `--config`. LSM legge automaticamente anche `<state_dir>/config.yaml` quando esiste.
 3. Environment variables con prefisso `LOCAL_SHELL_MCP_`.
 4. CLI flags come `--mode`, `--config`, `--remote` e `--no-remote`, che impostano i corrispondenti environment values prima del load dei settings.
+
+## Modificare le impostazioni nella WebUI
+
+La pagina **Settings** della WebUI consente di cercare, modificare, ripristinare e salvare le impostazioni del controller. Su Unix il file YAML viene scritto atomicamente con permessi riservati al proprietario; i commenti esistenti possono essere riformattati. I valori definiti da variabili di ambiente sono di sola lettura. I segreti non vengono restituiti al browser. Prima del salvataggio vengono eseguite la validazione e la verifica dei conflitti.
+
+**Save** salva soltanto, **Save & restart** salva e riavvia, **Restart controller** riavvia separatamente. Il servizio viene arrestato correttamente e viene rieseguito il comando Python originale, interrompendo le connessioni. Modifiche a indirizzo, porta, autenticazione o directory di stato possono richiedere recupero manuale. La gestione richiede il permesso OAuth `admin:config` esclusivo della WebUI; senza autenticazione è consentito solo l’accesso diretto loopback.
 
 ## Configurazione pubblica minima
 
