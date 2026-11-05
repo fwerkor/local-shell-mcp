@@ -224,3 +224,93 @@ test("mobile drawer actions update state and accessibility attributes", async ()
   expect(open).toBe(false)
   expect(expanded).toBe("false")
 })
+
+test("sending is blocked while a conversation selection is pending", async () => {
+  const controller: any = new HostedChatController({} as any)
+  controller.profiles = [{ id: "p", name: "Profile", model: "test-model" }]
+  controller.active = { id: "old", profile_id: "p", status: "idle" }
+  const input = { value: "Follow-up in the selected chat" }
+  controller.root = {
+    querySelector: (selector: string) => selector === "[data-chat-input]" ? input : null,
+  }
+  controller.renderConversation = () => undefined
+  controller.renderList = () => undefined
+  controller.closeWorkspace = async () => undefined
+  controller.startPolling = () => undefined
+  let resolveSelection!: (record: any) => void
+  controller.get = () => new Promise((resolve) => { resolveSelection = resolve })
+  const posts: string[] = []
+  controller.post = async (action: string) => { posts.push(action); return {} }
+
+  const selecting = controller.select("selected")
+  expect(controller.selectingConversation).toBe(true)
+  expect(controller.active).toBeNull()
+  expect(await controller.send()).toBe(false)
+  expect(posts).toEqual([])
+  expect(input.value).toBe("Follow-up in the selected chat")
+
+  resolveSelection({ id: "selected", profile_id: "p", status: "idle" })
+  await selecting
+  expect(controller.selectingConversation).toBe(false)
+  expect(controller.active.id).toBe("selected")
+})
+
+test("out-of-order selections keep the composer blocked until the latest one finishes", async () => {
+  const controller: any = new HostedChatController({} as any)
+  controller.active = { id: "old", status: "idle" }
+  controller.renderConversation = () => undefined
+  controller.renderList = () => undefined
+  controller.closeWorkspace = async () => undefined
+  controller.startPolling = () => undefined
+  const pending = new Map<string, (record: any) => void>()
+  controller.get = (_action: string, query: string) => new Promise((resolve) => {
+    pending.set(new URLSearchParams(query.slice(1)).get("id")!, resolve)
+  })
+
+  const a = controller.select("a")
+  const b = controller.select("b")
+  pending.get("a")!({ id: "a", status: "idle" })
+  await a
+  expect(controller.selectingConversation).toBe(true)
+  pending.get("b")!({ id: "b", status: "idle" })
+  await b
+  expect(controller.selectingConversation).toBe(false)
+  expect(controller.active.id).toBe("b")
+})
+
+test("closing the drawer restores keyboard focus to the opener", async () => {
+  const controller: any = new HostedChatController({} as any)
+  const previousDocument = (globalThis as any).document
+  const closeButton = { focus: () => { (globalThis as any).document.activeElement = closeButton } }
+  const opener = {
+    expanded: "false",
+    focus: () => { (globalThis as any).document.activeElement = opener },
+    setAttribute: (_name: string, value: string) => { opener.expanded = value },
+  }
+  const history = { contains: (node: unknown) => node === closeButton }
+  const classes = new Set<string>()
+  controller.root = {
+    classList: {
+      toggle: (name: string, value: boolean) => { value ? classes.add(name) : classes.delete(name) },
+      contains: (name: string) => classes.has(name),
+    },
+    querySelector: (selector: string) => {
+      if (selector === "#hosted-chat-history") return history
+      if (selector === '[data-chat-action="drawer"]') return opener
+      if (selector === ".hosted-close-drawer") return closeButton
+      return null
+    },
+  }
+  ;(globalThis as any).document = { activeElement: null }
+  try {
+    await controller.action("drawer")
+    expect((globalThis as any).document.activeElement).toBe(closeButton)
+    expect(classes.has("hosted-drawer-open")).toBe(true)
+    await controller.action("drawer-close")
+    expect((globalThis as any).document.activeElement).toBe(opener)
+    expect(opener.expanded).toBe("false")
+    expect(classes.has("hosted-drawer-open")).toBe(false)
+  } finally {
+    (globalThis as any).document = previousDocument
+  }
+})

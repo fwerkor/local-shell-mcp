@@ -15,6 +15,7 @@ export class HostedChatController extends BaseController {
   private archives: Summary[] = []
   private showArchives = false
   private selectionEpoch = 0
+  private selectingEpoch: number | null = null
   private archiveFilter = ""
   private active: Conversation | null = null
   private bridge: AppBridge | null = null
@@ -150,8 +151,18 @@ export class HostedChatController extends BaseController {
   }
 
   private setDrawerOpen(open: boolean): void {
+    const history = this.root?.querySelector?.<HTMLElement>("#hosted-chat-history")
+    const opener = this.root?.querySelector?.<HTMLButtonElement>('[data-chat-action="drawer"]')
+    const focusWasInDrawer = !open && !!this.root?.classList?.contains?.("hosted-drawer-open")
+      && typeof document !== "undefined" && !!history?.contains?.(document.activeElement)
     this.root?.classList?.toggle("hosted-drawer-open", open)
-    this.root?.querySelector?.('[data-chat-action="drawer"]')?.setAttribute?.("aria-expanded", String(open))
+    opener?.setAttribute?.("aria-expanded", String(open))
+    if (open) this.root?.querySelector?.<HTMLButtonElement>(".hosted-close-drawer")?.focus?.()
+    else if (focusWasInDrawer) opener?.focus?.()
+  }
+
+  private get selectingConversation(): boolean {
+    return this.selectingEpoch !== null && this.selectingEpoch === this.selectionEpoch
   }
 
   private resizeComposer(): void {
@@ -269,9 +280,9 @@ export class HostedChatController extends BaseController {
     this.root.querySelector<HTMLButtonElement>('[data-chat-action="session"]')!.hidden = this.showArchives || !active
     this.root.querySelector<HTMLButtonElement>('[data-chat-action="workspace"]')!.hidden = this.showArchives || !active || this.context.liveWorkspaceEnabled !== true
     this.root.querySelector<HTMLButtonElement>('[data-chat-action="delete"]')!.hidden = !active
-    this.root.querySelector<HTMLButtonElement>("[data-chat-send]")!.disabled = this.showArchives || (!active && !this.profiles.length) || active?.status === "running" || this.busy
+    this.root.querySelector<HTMLButtonElement>("[data-chat-send]")!.disabled = this.showArchives || this.selectingConversation || (!active && !this.profiles.length) || active?.status === "running" || this.busy
     const input = this.root.querySelector<HTMLTextAreaElement>("[data-chat-input]")!
-    input.disabled = this.showArchives || (!active && !this.profiles.length)
+    input.disabled = this.showArchives || this.selectingConversation || (!active && !this.profiles.length)
     input.placeholder = this.showArchives ? "Restore this chat to reply" : !this.profiles.length
       ? "Configure a model profile to start…" : "Message LSM Chat…"
     const hint = this.root.querySelector<HTMLElement>("[data-chat-composer-hint]")!
@@ -284,10 +295,12 @@ export class HostedChatController extends BaseController {
 
   private async select(id: string): Promise<void> {
     const epoch = ++this.selectionEpoch
+    this.selectingEpoch = epoch
     const viewArchives = this.showArchives
     try {
       const switching = this.active?.id !== id
-      if (switching) { this.active = null; this.renderConversation() }
+      if (switching) this.active = null
+      this.renderConversation()
       const data = await this.get<Conversation>(viewArchives ? "archive" : "conversation", `?id=${encodeURIComponent(id)}`)
       if (this.destroyed || this.showArchives !== viewArchives || this.selectionEpoch !== epoch) return
       if (switching) {
@@ -297,10 +310,16 @@ export class HostedChatController extends BaseController {
       }
       this.active = data
       this.renderList()
-      this.renderConversation()
       this.setDrawerOpen(false)
       this.startPolling()
-    } catch (error) { this.notifyError(error) }
+    } catch (error) {
+      this.notifyError(error)
+    } finally {
+      if (this.selectingEpoch === epoch) {
+        this.selectingEpoch = null
+        if (!this.destroyed) this.renderConversation()
+      }
+    }
   }
 
   private startPolling(): void {
@@ -334,16 +353,19 @@ export class HostedChatController extends BaseController {
   }
 
   private async send(text?: string): Promise<boolean> {
-    if (this.busy || this.showArchives || this.active?.status === "running" || (!this.active && !this.profiles.length)) return false
+    if (this.busy || this.showArchives || this.selectingConversation || this.active?.status === "running" || (!this.active && !this.profiles.length)) return false
     const input = this.root.querySelector<HTMLTextAreaElement>("[data-chat-input]")!
     const content = text ?? input.value
     if (!content.trim()) return false
     this.busy = true
+    const selectionEpoch = this.selectionEpoch
     this.renderConversation()
     try {
       if (!this.active) {
         const profileId = this.root.querySelector<HTMLSelectElement>("[data-chat-model]")?.value || this.profiles[0].id
-        this.active = await this.post<Conversation>("conversation-create", { profile_id: profileId })
+        const created = await this.post<Conversation>("conversation-create", { profile_id: profileId })
+        if (this.destroyed || this.showArchives || this.selectionEpoch !== selectionEpoch) return false
+        this.active = created
         this.renderList()
       }
       const id = this.active.id
