@@ -1,0 +1,61 @@
+--- a/api/server/index.js
++++ b/api/server/index.js
+@@ -408,6 +408,7 @@
+   /* API Endpoints */
+   app.use('/api/auth/lsm', preAuthTenantMiddleware, require('./routes/lsm-auth'));
+   app.use('/api/auth', preAuthTenantMiddleware, routes.auth);
++  app.use('/api/lsm/preferences', require('./routes/lsm-prefs').router);
+   app.use('/api/insights', routes.insights);
+   app.use('/api/admin', routes.adminAuth);
+   app.use('/api/admin/config', routes.adminConfig);
+--- a/api/server/routes/agents/index.js
++++ b/api/server/routes/agents/index.js
+@@ -139,6 +139,7 @@
+ router.use('/v1', openai);
+ 
+ router.use(requireJwtAuth);
++router.use(require('../lsm-prefs').loadForAgentRequest);
+ // Capture the short-lived trigger identity immediately after authentication. Downstream
+ // middleware reads this stable decision instead of re-verifying an expired token.
+ router.use((req, _res, next) => {
+--- a/api/server/controllers/agents/client.js
++++ b/api/server/controllers/agents/client.js
+@@ -3211,6 +3211,7 @@
+    * @returns {Promise<{ withKeys?: string; withoutKeys?: string } | undefined>}
+    */
+   async useMemory() {
++    if (this.options.req.lsmChatPrefs?.memory === false) return;
+     const user = this.options.req.user;
+     if (user.personalization?.memories === false) {
+       return;
+--- a/packages/api/src/agents/load.ts
++++ b/packages/api/src/agents/load.ts
+@@ -51,6 +51,7 @@
+ 
+ export interface LoadAgentParams {
+   req: {
++    lsmChatPrefs?: { web: boolean; lsm: boolean; memory: boolean };
+     user?: { id?: string; role?: string };
+     config?: AppConfig;
+     body?: {
+@@ -94,6 +95,7 @@
+       mcpServers.add(mcpServer);
+     }
+   }
++  if (req.lsmChatPrefs?.lsm === false) mcpServers.delete('LSM');
+   /** Publish the servers this request will actually use back onto the body. The
+    *  instruction path reads `req.body.ephemeralAgent.mcp` directly and prefers
+    *  it over the agent's tools, so it would otherwise both inject a hidden
+@@ -108,10 +110,10 @@
+   if (ephemeralAgent?.file_search === true || modelSpec?.fileSearch === true) {
+     tools.push(Tools.file_search);
+   }
+-  if (ephemeralAgent?.web_search === true || modelSpec?.webSearch === true) {
++  if (req.lsmChatPrefs?.web !== false && (ephemeralAgent?.web_search === true || modelSpec?.webSearch === true)) {
+     tools.push(Tools.web_search);
+   }
+-  if (ephemeralAgent?.memory === true || modelSpec?.memory === true) {
++  if (req.lsmChatPrefs?.memory !== false && (ephemeralAgent?.memory === true || modelSpec?.memory === true)) {
+     tools.push(Tools.memory);
+   }
+   /** Same downstream gating as persisted agents applies: `createRun` only

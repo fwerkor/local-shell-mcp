@@ -386,6 +386,7 @@ function renderActiveView(): void {
     api: { get: apiGet, send: apiSend },
     uiPath: UI_PATH,
     liveWorkspaceEnabled: bootstrapData?.features?.live_workspace === true,
+    librechatEnabled: bootstrapData?.features?.librechat === true,
     apiPrefix: API_PREFIX,
     accessToken,
     machines: uiMachines,

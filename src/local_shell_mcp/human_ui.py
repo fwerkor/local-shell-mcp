@@ -800,6 +800,7 @@ async def api_bootstrap(request: Request) -> Response:
             "features": {
                 "remote": settings.remote_enabled,
                 "hosted_chat": (settings.hosted_chat_enabled and settings.mode != "http" and settings.state_backend != "memory"),
+                **({"librechat": True} if os.environ.get("LOCAL_SHELL_MCP_LIBRECHAT_URL") and settings.state_backend != "memory" else {}),
                 "live_workspace": settings.live_workspace_enabled,
                 "wallpaper": settings.ui_wallpaper,
             },
@@ -3209,6 +3210,108 @@ async def ui_root_redirect(request: Request) -> RedirectResponse:  # noqa: ARG00
     return RedirectResponse(f"./{ui_path}/", status_code=307)
 
 
+async def api_librechat_policy(request: Request) -> Response:
+    """Mirror per-conversation LSM tool authorization into the controller's own state."""
+    from .librechat_integration import is_bridge_service, set_chat_tool_policy
+
+    if not is_bridge_service(request):
+        return JSONResponse({"error": "LibreChat service authentication required"}, status_code=403)
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("Expected JSON object")
+        set_chat_tool_policy(
+            str(payload.get("user_id") or ""),
+            str(payload.get("conversation_id") or ""),
+            payload.get("lsm"),
+        )
+        return _json_ok({"updated": True})
+    except Exception as exc:
+        return _json_error(exc)
+
+
+async def api_librechat_upload(request: Request) -> Response:
+    """Store a user attachment on the controller's local machine, not in LibreChat's container."""
+    from .librechat_integration import MAX_CHAT_UPLOAD_BYTES, local_upload_path
+
+    path: Path | None = None
+    try:
+        _require_ui_scopes(request, "shell:read", "shell:write")
+        subject = _logical_session_subject(request, create=True)
+        if not subject:
+            raise PermissionError("An authenticated user is required")
+        expected = int(request.headers.get("content-length") or -1)
+        if not 0 < expected <= MAX_CHAT_UPLOAD_BYTES:
+            raise ValueError("Upload must declare a size between 1 byte and 32 MiB")
+        name = request.query_params.get("name", "")
+        path = local_upload_path(subject, name, Path(get_settings().workspace_root))
+        # Exclusive, no-follow creation; interrupted streams never publish partial files.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags, 0o600)
+        received = 0
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                async for chunk in request.stream():
+                    received += len(chunk)
+                    if received > expected:
+                        raise ValueError("Upload exceeds the declared size")
+                    await asyncio.to_thread(handle.write, chunk)
+                if received != expected:
+                    raise ValueError("Incomplete upload")
+                await asyncio.to_thread(handle.flush)
+                await asyncio.to_thread(os.fsync, handle.fileno())
+        except BaseException:
+            path.unlink(missing_ok=True)
+            path = None
+            raise
+        return _json_ok({"machine": "local", "path": str(path), "size": received})
+    except asyncio.CancelledError:
+        if path is not None:
+            path.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        return _json_error(exc)
+
+
+async def api_librechat_identity(request: Request) -> Response:
+    """Only the LibreChat service may register the authenticated subject behind its own user id."""
+    try:
+        from .librechat_integration import is_bridge_service, register_identity
+
+        if not is_bridge_service(request):
+            return JSONResponse({"error": "LibreChat service authentication required"}, status_code=403)
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("Expected JSON object")
+        register_identity(str(payload.get("user_id") or ""), str(payload.get("ticket") or ""))
+        return _json_ok({"registered": True})
+    except Exception as exc:
+        return _json_error(exc)
+
+
+async def api_librechat_ticket(request: Request) -> Response:
+    """Exchange the existing authenticated LSM principal for a one-use chat login ticket."""
+    try:
+        _require_ui_scopes(request, "shell:read")
+        from .librechat_integration import issue_chat_ticket
+
+        subject = _logical_session_subject(request, create=True)
+        if not subject:
+            raise PermissionError("An authenticated LSM identity is required")
+        from .auth import current_principal, principal_scopes
+
+        principal = current_principal()
+        scopes = " ".join(sorted(principal_scopes(principal))) if principal else ""
+        auth_mode = "none" if principal and principal.claims.get("auth") == "none" else "oauth"
+        expires_at = principal.claims.get("exp") if principal else None
+        return _json_ok(issue_chat_ticket(
+            subject, scopes=scopes, auth_mode=auth_mode,
+            grant_expires_at=expires_at if isinstance(expires_at, int) else None,
+        ))
+    except Exception as exc:
+        return _json_error(exc)
+
+
 async def api_hosted_chat(request: Request) -> Response:
     """Durable Hosted Chat, using the caller's principal for all MCP operations."""
     try:
@@ -3621,6 +3724,10 @@ def ui_routes() -> list[Any]:
         WebSocketRoute(ui_path + "/ws", ui_terminal_websocket),
         WebSocketRoute(ui_path + "/ws/shell", ui_shell_websocket),
         WebSocketRoute(ui_path + "/ws/desktop", ui_desktop_websocket),
+        Route(UI_API_PREFIX + "/librechat/upload", api_librechat_upload, methods=["POST"]),
+        Route(UI_API_PREFIX + "/librechat/policy", api_librechat_policy, methods=["POST"]),
+        Route(UI_API_PREFIX + "/librechat/identity", api_librechat_identity, methods=["POST"]),
+        Route(UI_API_PREFIX + "/librechat/ticket", api_librechat_ticket, methods=["POST"]),
         Route(UI_API_PREFIX + "/hosted-chat/{action}", api_hosted_chat, methods=["GET", "POST"]),
         Route(UI_API_PREFIX + "/bootstrap", api_bootstrap, methods=["GET"]),
         Route(UI_API_PREFIX + "/dashboard", api_dashboard, methods=["GET"]),

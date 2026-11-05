@@ -736,3 +736,32 @@ button.summary-card { cursor: pointer; }
 @media (max-width: 1100px) and (pointer: coarse) and (hover: none) {
   .terminal-touchbar { display: grid; }
 }
+
+
+/* Embedded LibreChat occupies the chat viewport while LSM retains auth and navigation. */
+body:has(.lsm-librechat) .sidebar,
+body:has(.lsm-librechat) .topbar,
+body:has(.lsm-librechat) .page-footer { display:none; }
+body:has(.lsm-librechat) .main-content {
+  height:100dvh; min-height:0; margin:0; overflow:hidden;
+}
+body:has(.lsm-librechat) #view-root {
+  display:flex; height:100%; padding:0; min-height:0;
+}
+body:has(.lsm-librechat) #view-root > .controller-page {
+  display:flex; flex:1 1 auto; min-height:0; min-width:0;
+}
+.lsm-librechat { display:flex; position:relative; flex:1 1 auto; min-height:0; min-width:0; }
+.lsm-librechat-frame { display:block; border:0; flex:1 1 auto; min-height:0; min-width:0; width:100%; }
+.lsm-librechat-frame[hidden] { display:none; }
+.lsm-librechat-loading {
+  position:absolute; z-index:2; inset:0; display:grid; place-items:center;
+  background:var(--surface, #fff); color:var(--text, #222);
+}
+.lsm-librechat-loading[hidden] { display:none; }
+.lsm-librechat [data-chat-reconnect] {
+  position:absolute; z-index:3; inset:auto 20px 20px auto; padding:10px 16px;
+  border:1px solid var(--line, #ccc); border-radius:8px;
+  background:var(--surface, #fff); color:var(--text, #222);
+}
+.lsm-librechat [data-chat-reconnect][hidden] { display:none; }

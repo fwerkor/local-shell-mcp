@@ -1,0 +1,9 @@
+use_default_settings: true
+server:
+  secret_key: "REPLACE_WITH_RANDOM_KEY_GENERATED_BY_PREPARE"
+  limiter: true
+  public_instance: false
+search:
+  formats:
+    - html
+    - json

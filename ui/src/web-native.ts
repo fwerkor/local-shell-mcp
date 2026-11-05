@@ -1,6 +1,7 @@
 import { AuditController } from "./web-native/audit"
 import type { NativePageContext, NativePageController } from "./web-native/common"
 import { DesktopController } from "./web-native/desktop"
+import { LibreChatController } from "./web-native/librechat"
 import { HostedChatController } from "./web-native/hosted-chat"
 import { FilesController } from "./web-native/files"
 import { RemotesController } from "./web-native/remotes"
@@ -12,7 +13,7 @@ export type { NativePageContext, NativePageController, NoticeTone } from "./web-
 export type NativeViewName = "files" | "terminals" | "desktop" | "sessions" | "remotes" | "audit" | "hosted-chat"
 
 export function createNativePage(view: NativeViewName, context: NativePageContext): NativePageController {
-  if (view === "hosted-chat") return new HostedChatController(context)
+  if (view === "hosted-chat") return context.librechatEnabled ? new LibreChatController(context) : new HostedChatController(context)
   if (view === "files") return new FilesController(context)
   if (view === "terminals") return new TerminalsController(context)
   if (view === "desktop") return new DesktopController(context)

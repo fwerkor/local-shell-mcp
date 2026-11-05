@@ -1,0 +1,75 @@
+version: 1.3.17
+cache: true
+
+# All chat, project, agent, memory and message records remain in LibreChat's
+# server-side MongoDB. The LSM controller owns user authentication and tool execution.
+interface:
+  modelSelect: true
+  parameters: true
+  presets: false
+  fileSearch: false
+  prompts:
+    use: false
+    create: false
+    share: false
+    public: false
+  agents:
+    use: true
+    create: true
+    share: false
+    public: false
+  marketplace:
+    use: false
+  defaultPinnedTools:
+    - web_search
+    - mcp
+  mcpServers:
+    use: true
+    create: false
+    share: false
+    public: false
+
+# Only the single trusted LSM nested MCP endpoint is exposed in LibreChat.
+# Its user id header is expanded by LibreChat's trusted YAML server configuration,
+# never accepted from user-configured MCP endpoints.
+mcpSettings:
+  allowedAddresses:
+    - "local-shell-mcp:8765"
+
+mcpServers:
+  LSM:
+    type: streamable-http
+    url: "${LSM_CONTROLLER_INTERNAL_URL}/mcp"
+    headers:
+      Authorization: "Bearer ${LSM_LIBRECHAT_BRIDGE_SECRET}"
+      X-LSM-Chat-User-Id: "{{LIBRECHAT_USER_ID}}"
+    requestHeaders:
+      X-LSM-Conversation-Id: "{{LIBRECHAT_BODY_CONVERSATIONID}}"
+
+endpoints:
+  agents:
+    # Keep Chat/Agent orchestration (Ask User, delegation, subagents, handoff),
+    # web browsing and user memory. Remove duplicate LibreChat execution,
+    # workspace, file search, artifacts and Skills.
+    capabilities:
+      - deferred_tools
+      - web_search
+      - subagents
+      - context
+      - memory
+      - ask_user_question
+      - tools
+      - chain
+
+# A search backend can be supplied without exposing additional MCP servers.
+# Defaults and credentials are administrator-controlled, not editable by chat users.
+webSearch:
+  searchProvider: searxng
+  searxngInstanceUrl: "${SEARXNG_INSTANCE_URL}"
+  scraperProvider: keenable
+  rerankerType: none
+  allowedAddresses:
+    - "searxng:8080"
+
+# Per-chat memory isolation and per-chat LSM/web permission enforcement are not
+# yet implemented upstream. Do not claim this config alone implements them.

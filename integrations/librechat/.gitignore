@@ -1,0 +1,5 @@
+upstream-src/
+.env
+data/
+*.pem
+searxng-settings.yml

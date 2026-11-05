@@ -1,0 +1,18 @@
+--- a/client/src/components/Chat/Input/ChatForm.tsx
++++ b/client/src/components/Chat/Input/ChatForm.tsx
+@@ -66,6 +66,7 @@
+ import CollapseChat from './CollapseChat';
+ import QuoteButton from './QuoteButton';
+ import TokenUsage from './TokenUsage';
++import LsmChatPermissions from './LsmChatPermissions';
+ import StopButton from './StopButton';
+ import SendButton from './SendButton';
+ import EditBadges from './EditBadges';
+@@ -886,6 +887,7 @@
+                   <PendingToolApprovalButton conversationId={conversationId} />
+                 )}
+                 <div className="grow" />
++                {index === 0 && <LsmChatPermissions conversationId={conversationId} />}
+                 <TokenUsage index={index} conversation={conversation} isSubmitting={isSubmitting} />
+                 {SpeechToText && (
+                   <AudioRecorder

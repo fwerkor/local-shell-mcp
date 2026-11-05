@@ -12,6 +12,7 @@ export interface NativeApi {
 export interface NativePageContext {
   api: NativeApi
   uiPath: string
+  librechatEnabled?: boolean
   liveWorkspaceEnabled?: boolean
   apiPrefix?: string
   accessToken: () => string | null
