@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
+<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
 # Конфигурация
 
 Repository поставляет один копируемый стартовый файл: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose автоматически читает получившийся `.env`, а другие runtime могут использовать те же environment variables `LOCAL_SHELL_MCP_`. YAML остаётся optional advanced input для binary/source deployments; явно создайте файл и выберите его через `LOCAL_SHELL_MCP_CONFIG` или `--config`. Environment variables override YAML values, поэтому не определяйте одну настройку в обоих местах, если override не нужен намеренно. YAML keys используют field names ниже.
@@ -6,9 +6,15 @@ Repository поставляет один копируемый стартовый
 ## Приоритет
 
 1. Built-in defaults из `Settings`.
-2. YAML config, выбранный `LOCAL_SHELL_MCP_CONFIG` или `--config`.
+2. YAML config, выбранный `LOCAL_SHELL_MCP_CONFIG` или `--config`. LSM также автоматически загружает `<state_dir>/config.yaml`, если файл существует.
 3. Environment variables с prefix `LOCAL_SHELL_MCP_`.
 4. CLI flags `--mode`, `--config`, `--remote`, `--no-remote` и т. п.; они задают соответствующие environment values до загрузки settings.
+
+## Редактирование настроек через WebUI
+
+Страница **Settings** в WebUI позволяет искать, изменять, сбрасывать и сохранять настройки контроллера. В Unix YAML записывается атомарно с правами только владельца; существующие комментарии могут быть переформатированы. Значения, заданные переменными окружения, доступны только для чтения. Секреты не отправляются в браузер. Перед сохранением выполняются проверка значений и обнаружение параллельных изменений.
+
+**Save** только сохраняет, **Save & restart** сохраняет и перезапускает, **Restart controller** перезапускает отдельно. Сервис корректно останавливается и повторно запускает исходную команду Python, разрывая соединения. Изменение адреса, порта, аутентификации или каталога состояния может потребовать ручного восстановления. Управление требует специального OAuth-права `admin:config` для WebUI; без аутентификации разрешено только прямое подключение через loopback.
 
 ## Минимальная public configuration
 

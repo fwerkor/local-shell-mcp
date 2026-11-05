@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
+<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
 # Yapılandırma
 
 Repository tek bir kopyalanabilir başlangıç dosyası sağlar: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose oluşan `.env` dosyasını otomatik okur; diğer runtimes da aynı `LOCAL_SHELL_MCP_` environment variables değerlerini kullanabilir. YAML binary/source deployments için optional advanced input olarak kalır; dosyayı explicit oluşturup `LOCAL_SHELL_MCP_CONFIG` veya `--config` ile seçin. Environment variables YAML values değerlerini override eder; override bilinçli değilse aynı setting’i iki yerde tanımlamayın. YAML keys aşağıdaki field names değerlerini kullanır.
@@ -6,9 +6,15 @@ Repository tek bir kopyalanabilir başlangıç dosyası sağlar: [`.env.example`
 ## Öncelik
 
 1. `Settings` içindeki built-in defaults.
-2. `LOCAL_SHELL_MCP_CONFIG` veya `--config` ile seçilen YAML config.
+2. `LOCAL_SHELL_MCP_CONFIG` veya `--config` ile seçilen YAML config. LSM, mevcutsa `<state_dir>/config.yaml` dosyasını da otomatik olarak okur.
 3. `LOCAL_SHELL_MCP_` prefix environment variables.
 4. `--mode`, `--config`, `--remote`, `--no-remote` gibi CLI flags; settings load öncesinde karşılık gelen environment values değerlerini set eder.
+
+## WebUI üzerinden ayarları düzenleme
+
+WebUI içindeki **Settings** sayfası denetleyici ayarlarını arama, düzenleme, sıfırlama ve kaydetme olanağı sağlar. Unix üzerinde YAML dosyası yalnızca sahibinin erişebileceği izinlerle atomik olarak yazılır; mevcut yorumlar yeniden biçimlendirilebilir. Ortam değişkenlerinin belirlediği seçenekler salt okunurdur. Gizli değerler tarayıcıya gönderilmez. Kaydetmeden önce doğrulama yapılır ve eşzamanlı değişiklikler denetlenir.
+
+**Save** yalnızca kaydeder, **Save & restart** kaydeder ve yeniden başlatır, **Restart controller** ayrı olarak yeniden başlatır. Hizmet düzgün biçimde kapanıp özgün Python komutuyla yeniden çalışır ve mevcut bağlantılar kesilir. Adres, port, kimlik doğrulama veya durum dizini değişiklikleri elle kurtarma gerektirebilir. Yönetim için WebUI’ye özel `admin:config` OAuth izni gerekir; kimlik doğrulama yoksa yalnızca doğrudan loopback erişimi kabul edilir.
 
 ## Minimal public configuration
 

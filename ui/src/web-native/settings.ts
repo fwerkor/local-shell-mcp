@@ -1,7 +1,7 @@
 import { BaseController, confirmDialog, escapeHtml, type NativePageContext } from "./common"
 
 type Field = { name: string; group: string; type: "boolean" | "integer" | "list" | "text"; value: unknown; configured: boolean; sensitive: boolean; locked: boolean; pending: boolean; source: "environment" | "config" | "default"; choices: string[] | null }
-type Snapshot = { path: string; revision: string; fields: Field[] }
+type Snapshot = { path: string; revision: string; fields: Field[]; running: { port: number; ui_path: string } }
 const CRITICAL = new Set(["host", "port", "mode", "auth_mode", "ui_enabled", "ui_path", "state_dir", "state_backend", "stateless_controller", "oauth_jwt_secret", "public_base_url"])
 const HELP: Record<string, string> = {
   host: "Controller listen address", port: "Listener port (may change the browser URL)",
@@ -9,6 +9,17 @@ const HELP: Record<string, string> = {
   oauth_jwt_secret: "Changing this invalidates current OAuth tokens", oauth_admin_pin: "PIN used to approve OAuth clients",
   hosted_chat_enabled: "Enable hosted BYOK Chat", workspace_root: "Local filesystem workspace root",
   state_dir: "Directory for controller state", allow_full_container: "Disable built-in command and path restrictions",
+}
+
+export function restartDestination(currentUrl: string, runningPort: number, nextPort: number, nextPath: string): string {
+  const url = new URL(currentUrl)
+  // Only change the port for direct connections. A reverse proxy's external port
+  // is independently configured and must not be rewritten.
+  if (url.port && Number(url.port) === runningPort && nextPort !== runningPort) {
+    url.port = String(nextPort)
+  }
+  if (nextPath) url.pathname = `${nextPath.replace(/\/$/, "")}/`
+  return url.href
 }
 
 function fieldControl(field: Field): string {
@@ -187,16 +198,18 @@ export class SettingsController extends BaseController {
       await this.context.api.send("/settings/restart", "POST", {})
       const notice = this.root.querySelector<HTMLElement>(".settings-notice")
       if (notice) notice.textContent = "Restart requested. Checking server availability…"
-      const url = new URL(window.location.href)
-      const oldPort = this.data?.fields.find(f => f.name === "port")?.value
-      if (this.nextPort && window.location.port && Number(window.location.port) === oldPort) url.port = String(this.nextPort)
-      if (this.nextPath) url.pathname = this.nextPath.replace(/\/$/, "") + "/"
+      const running = this.data?.running
+      const nextPort = this.nextPort ?? Number(this.data?.fields.find(f => f.name === "port")?.value ?? running?.port)
+      const nextPath = this.nextPath ?? String(this.data?.fields.find(f => f.name === "ui_path")?.value ?? running?.ui_path ?? "")
+      const url = new URL(restartDestination(window.location.href, running?.port ?? 0, nextPort, nextPath))
       let attempt = 0
       const poll = async () => {
         attempt++
         try {
-          const response = await fetch(new URL("/readyz", url.origin), { cache: "no-store" })
-          if (response.ok && attempt >= 7) { window.location.assign(url.href); return }
+          const response = await fetch(new URL("/readyz", url.origin), {
+            cache: "no-store", mode: url.origin === window.location.origin ? "cors" : "no-cors",
+          })
+          if ((response.ok || response.type === "opaque") && attempt >= 7) { window.location.assign(url.href); return }
         } catch { /* Controller may be offline during restart. */ }
         if (attempt < 35) window.setTimeout(() => { void poll() }, 1200)
         else if (notice) notice.textContent = `The controller is still unreachable. Check the configuration and open ${url.origin}${url.pathname} manually.`

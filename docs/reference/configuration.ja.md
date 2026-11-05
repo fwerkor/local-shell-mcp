@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
+<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
 # 設定
 
 Repository にはコピー可能な starter file [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example) が含まれます。Docker Compose は作成した `.env` を自動的に読み取り、他の runtime でも同じ `LOCAL_SHELL_MCP_` environment variables を使用できます。YAML は binary/source deployment 向けの optional advanced input です。File を明示的に作成し、`LOCAL_SHELL_MCP_CONFIG` または `--config` で選択します。Environment variables は YAML values を override するため、意図的な override でない限り同じ setting を両方に定義しないでください。YAML keys は以下の field names を使います。
@@ -6,9 +6,15 @@ Repository にはコピー可能な starter file [`.env.example`](https://github
 ## 優先順位
 
 1. `Settings` の built-in defaults。
-2. `LOCAL_SHELL_MCP_CONFIG` または `--config` で選択された YAML config。
+2. `LOCAL_SHELL_MCP_CONFIG` または `--config` で選択された YAML config。 LSM は `<state_dir>/config.yaml` も自動読み込みするため、明示的な指定は不要です。
 3. `LOCAL_SHELL_MCP_` prefix の environment variables。
 4. `--mode`、`--config`、`--remote`、`--no-remote` などの CLI flags。Settings load 前に対応する environment values を設定します。
+
+## WebUI での設定編集
+
+WebUI の **Settings** ページでコントローラー設定の検索、編集、リセット、保存ができます。Unix 系では所有者のみがアクセスできる権限で YAML を原子的に書き込みます。既存のコメントは再整形される場合があります。環境変数で上書きされた項目は読み取り専用で、秘密情報はブラウザーに返しません。保存前に検証し、競合する変更を検出します。
+
+**Save** は保存のみ、**Save & restart** は保存して再起動、**Restart controller** は再起動のみ実行します。元の Python コマンドを使って正常終了後に再起動するため、接続は切断されます。ポートや認証、状態ディレクトリを変更した場合は手動復旧が必要になることがあります。管理には WebUI 専用の `admin:config` OAuth 権限が必要で、認証なしのモードではローカルループバックからの直接アクセスに限定されます。
 
 ## 最小 public configuration
 

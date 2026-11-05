@@ -4,6 +4,7 @@ import contextlib
 import os
 import secrets
 import threading
+from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -647,11 +648,24 @@ else:
             return Settings(**merged, _load_environment=False)
 
 
+def controller_config_path(environment: Mapping[str, str] | None = None) -> Path:
+    """Find controller YAML without prematurely changing dependent Settings defaults."""
+    values = os.environ if environment is None else environment
+    explicit = values.get("LOCAL_SHELL_MCP_CONFIG", "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+    workspace = Path(values.get("LOCAL_SHELL_MCP_WORKSPACE_ROOT") or DEFAULT_WORKSPACE_ROOT).expanduser().resolve()
+    state_dir = Path(values.get("LOCAL_SHELL_MCP_STATE_DIR") or DEFAULT_STATE_DIR).expanduser().resolve()
+    if _matches_default_path(state_dir, DEFAULT_STATE_DIR) and not _matches_default_path(workspace, DEFAULT_WORKSPACE_ROOT):
+        state_dir = workspace / ".local-shell-mcp"
+    return state_dir / "config.yaml"
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    settings = Settings().with_workspace_relative_defaults()
+    settings = Settings()
     config = os.getenv("LOCAL_SHELL_MCP_CONFIG")
-    config_path = Path(config).expanduser() if config else settings.state_dir / "config.yaml"
+    config_path = controller_config_path()
     if config or config_path.is_file():
         settings = settings.apply_yaml(config_path, preserve_environment=True)
     settings = settings.with_workspace_relative_defaults()

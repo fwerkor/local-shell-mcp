@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
+<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
 # 配置
 
 仓库提供一个可直接复制的起始文件：[`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example)。Docker Compose 会自动读取由此生成的 `.env`，其他 runtime 也可以使用相同的 `LOCAL_SHELL_MCP_` 环境变量。YAML 仍是 binary 或源码部署的可选高级输入；需要显式创建配置文件，并通过 `LOCAL_SHELL_MCP_CONFIG` 或 `--config` 选择。环境变量会覆盖 YAML，因此除非确实需要覆盖，否则不要在两处重复定义同一设置。YAML key 使用下表所列字段名。
@@ -6,9 +6,15 @@
 ## 优先级
 
 1. `Settings` 中的内置默认值。
-2. 由 `LOCAL_SHELL_MCP_CONFIG` 或 `--config` 选择的 YAML 配置。
+2. 由 `LOCAL_SHELL_MCP_CONFIG` 或 `--config` 选择的 YAML 配置。 LSM 也会自动加载 `<state_dir>/config.yaml`，无需手动指定配置文件。
 3. 以 `LOCAL_SHELL_MCP_` 为前缀的环境变量。
 4. `--mode`、`--config`、`--remote`、`--no-remote` 等 CLI flag；它们会在加载 settings 前设置对应环境值。
+
+## 在 WebUI 中编辑配置
+
+WebUI 中的 **Settings** 页面支持搜索、编辑、重置和保存控制器配置。系统在类 Unix 系统上以仅所有者可读写的权限原子写入 YAML；现有注释可能重新排版。环境变量覆盖的字段为只读，密钥不会回传浏览器。保存前会校验参数，并检测外部并发修改。
+
+**Save** 只保存配置，**Save & restart** 保存后重启，**Restart controller** 则单独重启。重启会正常关闭服务并重新执行原 Python 命令，当前连接会断开。改变地址、端口、认证或状态目录后，可能需要手动恢复访问。管理功能需要 WebUI 专属的 `admin:config` OAuth 权限；无认证模式仅允许直接从本机回环地址访问。
 
 ## 最小公共配置
 

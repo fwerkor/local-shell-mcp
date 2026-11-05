@@ -13,6 +13,7 @@ from .settings import (
     SENSITIVE_SETTING_KEYS,
     Settings,
     _without_environment_overrides,
+    controller_config_path,
     get_settings,
     validate_public_oauth_configuration,
 )
@@ -29,11 +30,7 @@ _CHOICES = {
 
 
 def config_file() -> Path:
-    explicit = os.getenv("LOCAL_SHELL_MCP_CONFIG")
-    if explicit:
-        return Path(explicit).expanduser().absolute()
-    # Resolve the same default state directory used by get_settings() before YAML.
-    return Settings().with_workspace_relative_defaults().state_dir / "config.yaml"
+    return controller_config_path().absolute()
 
 
 def _read_config(path: Path) -> tuple[dict[str, Any], str]:
@@ -120,7 +117,11 @@ def config_snapshot() -> dict[str, Any]:
             "source": "environment" if locked else "config" if name in flat else "default",
             "choices": _CHOICES.get(name),
         })
-    return {"path": str(path), "revision": revision, "fields": fields}
+    running = get_settings()
+    return {
+        "path": str(path), "revision": revision, "fields": fields,
+        "running": {"port": running.port, "ui_path": running.ui_path},
+    }
 
 
 def _apply_change(document: dict[str, Any], name: str, value: Any) -> None:
@@ -146,7 +147,7 @@ def _apply_change(document: dict[str, Any], name: str, value: Any) -> None:
 
 def _validate_candidate(document: dict[str, Any], changed: set[str]) -> Settings:
     flat = _flatten_values(document)
-    base = Settings().with_workspace_relative_defaults()
+    base = Settings()
     merged = base.model_dump()
     merged.update(_without_environment_overrides(flat))
     if merged["mode"] == "both":
@@ -157,10 +158,23 @@ def _validate_candidate(document: dict[str, Any], changed: set[str]) -> Settings
         else:
             candidate = Settings(**merged, _load_environment=False)
         candidate = candidate.with_workspace_relative_defaults()
-        if "oauth_jwt_secret" not in changed and candidate.oauth_jwt_secret in {"", "dev-change-me"}:
+        # Stateless OAuth cannot re-use a generated secret from the running server.
+        # Its next startup is required to have an explicitly configured secret.
+        explicit_secret = (
+            os.getenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET")
+            or flat.get("oauth_jwt_secret")
+        )
+        if candidate.stateless_controller and candidate.auth_mode == "oauth":
+            if (not isinstance(explicit_secret, str)
+                    or len(explicit_secret.encode("utf-8")) < 32
+                    or explicit_secret in {"dev-change-me", "change-me-64-hex-random-secret"}):
+                raise ValueError("stateless OAuth requires an explicit strong oauth_jwt_secret")
+        elif "oauth_jwt_secret" not in changed and candidate.oauth_jwt_secret in {"", "dev-change-me"}:
             candidate = candidate.model_copy(update={"oauth_jwt_secret": get_settings().oauth_jwt_secret})
         validate_public_oauth_configuration(candidate)
     except Exception as exc:
+        if isinstance(exc, ValueError) and str(exc).startswith("stateless OAuth requires"):
+            raise
         if hasattr(exc, "errors"):
             errors = exc.errors()
             if errors:

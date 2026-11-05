@@ -19,6 +19,7 @@ def configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
     monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
+    monkeypatch.delenv("LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED", raising=False)
     get_settings.cache_clear()
     yield tmp_path
     get_settings.cache_clear()
@@ -124,3 +125,111 @@ def test_oauth_management_scope_and_same_origin(configured, monkeypatch):
     same_origin = {**headers, "Origin": "http://testserver"}
     assert client.post("/api/ui/settings/save", headers=same_origin, json=params).status_code == 200
     assert config_snapshot()["fields"]
+
+
+def test_yaml_state_dir_does_not_anchor_default_subpaths(configured):
+    chosen_state = configured / "separate-state"
+    config_file().parent.mkdir(parents=True, exist_ok=True)
+    config_file().write_text(f"state_dir: {chosen_state}\n")
+    get_settings.cache_clear()
+    settings = get_settings()
+    assert settings.state_dir == chosen_state
+    assert settings.audit_log_path == chosen_state / "audit.jsonl"
+    assert settings.agent_config_dir == chosen_state / "agent_config"
+    fields = {row["name"]: row for row in config_snapshot()["fields"]}
+    assert fields["audit_log_path"]["value"] == str(chosen_state / "audit.jsonl")
+
+
+def test_stateless_oauth_requires_explicit_secret_before_saving(configured, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "oauth")
+    get_settings.cache_clear()
+    initial = config_snapshot()
+    with pytest.raises(ValueError, match="explicit strong oauth_jwt_secret"):
+        save_config({"stateless_controller": True}, initial["revision"])
+    assert config_snapshot()["revision"] == initial["revision"]
+    secret = "valid-saved-jwt-secret-with-at-least-32-bytes"
+    save_config({"stateless_controller": True, "oauth_jwt_secret": secret}, initial["revision"])
+    get_settings.cache_clear()
+    assert get_settings().stateless_controller
+    assert get_settings().oauth_jwt_secret == secret
+
+
+def test_cli_and_tui_discover_default_yaml_endpoint(configured):
+    from local_shell_mcp.cli_call import _apply_yaml_controller_values
+    path = config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("port: 18899\nmax_timeout_s: 120\n")
+    values = {"LOCAL_SHELL_MCP_WORKSPACE_ROOT": str(configured)}
+    resolved = _apply_yaml_controller_values(values)
+    assert resolved["LOCAL_SHELL_MCP_PORT"] == "18899"
+    assert resolved["LOCAL_SHELL_MCP_MAX_TIMEOUT_S"] == "120"
+    assert resolved["LOCAL_SHELL_MCP_STATE_DIR"] == str(configured / ".local-shell-mcp")
+    assert _apply_yaml_controller_values({**values, "LOCAL_SHELL_MCP_PORT": "19991"})["LOCAL_SHELL_MCP_PORT"] == "19991"
+
+
+def test_invalid_config_formats_and_size(configured, monkeypatch):
+    from local_shell_mcp import config_management as cfg
+
+    path = config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.mkdir()
+    with pytest.raises(ValueError, match="regular file"):
+        config_snapshot()
+    path.rmdir()
+    for content in ("[]", "- not: a mapping", "3", "null: value"):
+        path.write_text(content)
+        with pytest.raises(ValueError, match="YAML mapping"):
+            config_snapshot()
+    path.write_text("null\n")
+    assert config_snapshot()["fields"]
+    path.write_text("max_jobs: 12\n")
+    monkeypatch.setattr(cfg, "_MAX_CONFIG_BYTES", 8)
+    with pytest.raises(ValueError, match="256 KiB"):
+        config_snapshot()
+
+
+def test_reject_invalid_changes_and_preserve_file_on_write_failure(configured, monkeypatch):
+    from local_shell_mcp import config_management as cfg
+
+    data = config_snapshot()
+    for changes, message in (
+        ({}, "one or more"),
+        ({"unknown_key": "x"}, "Unknown"),
+        ({"max_jobs": {}}, "Unsupported"),
+        ({"command_denylist": [12]}, "list of strings"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            save_config(changes, data["revision"])
+
+    def refuse_replace(*args):
+        raise OSError("write blocked")
+
+    monkeypatch.setattr(cfg.os, "replace", refuse_replace)
+    with pytest.raises(OSError, match="write blocked"):
+        save_config({"max_jobs": 11}, data["revision"])
+    assert not config_file().exists()
+    assert not list(config_file().parent.glob(".config-*.tmp"))
+
+
+def test_reject_oversized_config_write(configured, monkeypatch):
+    from local_shell_mcp import config_management as cfg
+
+    path = config_file()
+    data = config_snapshot()
+    monkeypatch.setattr(cfg, "_MAX_CONFIG_BYTES", 30)
+    with pytest.raises(ValueError, match="256 KiB"):
+        save_config({"state_backend_prefix": "a" * 50}, data["revision"])
+    assert not path.exists()
+
+
+def test_nested_yaml_reset_and_update(configured):
+    path = config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("oauth:\n  admin_pin: original\n  code_ttl_s: 300\n")
+    data = config_snapshot()
+    saved = save_config({"oauth_admin_pin": "replacement"}, data["revision"])
+    assert "admin_pin: replacement" in path.read_text()
+    saved = save_config({"oauth_admin_pin": None}, saved["revision"])
+    assert "admin_pin:" not in path.read_text()
+    assert "code_ttl_s:" in path.read_text()
+    save_config({"ui_tui_command": None}, saved["revision"])
