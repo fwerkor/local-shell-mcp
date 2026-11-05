@@ -343,11 +343,3 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 :root[data-theme="dark"] .explorer-host [class*="wx-filemanager"] { color: var(--text); background-color: #1b2734; }
 :root[data-theme="dark"] .toast { color: var(--text); }
 :root[data-theme="dark"] .native-dialog-overlay { background: #060b10b8; }
-
-/* Stacked Hosted Chat workspaces cannot fit within one viewport. */
-@media (min-width: 1101px) and (max-width: 1350px) and (min-height: 560px) {
-  .native-view-active:has(.hosted-chat .hosted-workspace:not([hidden])) .main-content { overflow-y: auto; }
-  .native-view-active:has(.hosted-chat .hosted-workspace:not([hidden])) #view-root { flex: 0 0 auto; }
-  .native-view-active .hosted-chat:has(.hosted-workspace:not([hidden])) { height: auto; min-height: calc(100dvh - 205px); }
-  .native-view-active .hosted-chat:has(.hosted-workspace:not([hidden])) .hosted-messages { max-height: calc(100dvh - 420px); }
-}

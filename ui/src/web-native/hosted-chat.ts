@@ -15,6 +15,7 @@ export class HostedChatController extends BaseController {
   private archives: Summary[] = []
   private showArchives = false
   private selectionEpoch = 0
+  private selectingEpoch: number | null = null
   private archiveFilter = ""
   private active: Conversation | null = null
   private bridge: AppBridge | null = null
@@ -29,35 +30,64 @@ export class HostedChatController extends BaseController {
   mount(root: HTMLElement): void {
     this.root = root
     root.innerHTML = `<div class="hosted-chat">
-      <aside class="hosted-chats">
-        <div class="hosted-chats-head"><strong data-chat-heading>Conversations</strong><button type="button" data-chat-action="new">+ New</button></div>
-        <input data-chat-archive-filter class="hosted-archive-filter" placeholder="Find archived conversations" aria-label="Filter archived conversations by title" hidden />
-        <div data-chat-list class="hosted-chats-list"></div>
-        <button type="button" data-chat-action="archives" class="hosted-settings">Archived conversations</button>
-        <button type="button" data-chat-action="profile" class="hosted-settings">Model profiles</button>
-      </aside>
-      <section class="hosted-main">
-        <div class="hosted-toolbar">
-          <div class="hosted-model"><select data-chat-model aria-label="Model profile"></select><span data-chat-status></span></div>
-          <div class="hosted-toolbar-actions">
-            <button type="button" data-chat-action="session">Attach LSM Session</button>
-            <button type="button" data-chat-action="workspace">Live Workspace</button>
-            <button type="button" data-chat-action="compact">Compact</button>
-            <button type="button" data-chat-action="archive">Archive</button>
-            <button type="button" data-chat-action="restore" hidden>Restore</button>
-            <button type="button" data-chat-action="delete">Delete</button>
-          </div>
+      <button class="hosted-chat-scrim" type="button" data-chat-action="drawer-close" aria-label="Close conversation history"></button>
+      <aside class="hosted-chats" id="hosted-chat-history" aria-label="Conversation history">
+        <div class="hosted-chats-head">
+          <div class="hosted-brand"><span class="hosted-brand-mark" aria-hidden="true">LSM</span><strong>Chat</strong></div>
+          <button type="button" class="hosted-icon-button hosted-close-drawer" data-chat-action="drawer-close" aria-label="Close history">✕</button>
         </div>
+        <button type="button" class="hosted-new-chat" data-chat-action="new">
+          <span aria-hidden="true">＋</span> New chat
+        </button>
+        <div class="hosted-list-label" data-chat-heading>Recent</div>
+        <input data-chat-archive-filter class="hosted-archive-filter" placeholder="Search archived chats" aria-label="Filter archived conversations by title" hidden />
+        <div data-chat-list class="hosted-chats-list"></div>
+        <div class="hosted-sidebar-footer">
+          <button type="button" data-chat-action="archives" class="hosted-settings"><span aria-hidden="true">▤</span> Archived chats</button>
+          <button type="button" data-chat-action="profile" class="hosted-settings"><span aria-hidden="true">⚙</span> Model profiles</button>
+          <button type="button" data-chat-action="controller" class="hosted-settings"><span aria-hidden="true">↗</span> Controller dashboard</button>
+        </div>
+      </aside>
+      <section class="hosted-main" aria-label="Chat conversation">
+        <header class="hosted-toolbar">
+          <button type="button" class="hosted-icon-button hosted-open-drawer" data-chat-action="drawer"
+            aria-label="Open conversation history" aria-controls="hosted-chat-history" aria-expanded="false">☰</button>
+          <div class="hosted-model">
+            <select data-chat-model aria-label="Model profile"></select>
+            <span data-chat-status></span>
+          </div>
+          <div class="hosted-toolbar-actions">
+            <button type="button" class="hosted-icon-button hosted-new-top" data-chat-action="new" aria-label="New chat" title="New chat">＋</button>
+            <details class="hosted-menu" data-chat-menu>
+              <summary class="hosted-icon-button" aria-label="Conversation options" title="Conversation options">•••</summary>
+              <div class="hosted-menu-items">
+                <button type="button" data-chat-action="profile">Model profiles</button>
+                <button type="button" data-chat-action="session">Attach LSM Session</button>
+                <button type="button" data-chat-action="workspace">Live Workspace</button>
+                <button type="button" data-chat-action="compact">Compact context</button>
+                <button type="button" data-chat-action="archive">Archive chat</button>
+                <button type="button" data-chat-action="restore" hidden>Restore chat</button>
+                <button type="button" data-chat-action="delete" class="hosted-danger">Delete chat</button>
+              </div>
+            </details>
+          </div>
+        </header>
         <div class="hosted-context-info" data-chat-context-info hidden></div>
         <div class="hosted-messages" data-chat-messages aria-live="polite"></div>
         <form class="hosted-composer" data-chat-form>
-          <textarea data-chat-input rows="3" placeholder="Ask anything or use LSM tools…"></textarea>
-          <div class="hosted-composer-bottom"><span>Model runs on your configured endpoint. Conversations are stored on this server.</span>
-          <button type="button" data-chat-action="stop" hidden>Stop</button><button type="submit" data-chat-send>Send</button></div>
+          <div class="hosted-composer-shell">
+            <textarea data-chat-input rows="1" placeholder="Message LSM Chat…" aria-label="Your message"></textarea>
+            <div class="hosted-composer-bottom">
+              <span data-chat-composer-hint>LSM tools available through MCP</span>
+              <button type="button" data-chat-action="stop" class="hosted-stop" hidden>Stop</button>
+              <button type="submit" data-chat-send aria-label="Send message" title="Send message">↑</button>
+            </div>
+          </div>
+          <p class="hosted-composer-note">AI responses can be inaccurate. Check important information.</p>
         </form>
       </section>
       <aside class="hosted-workspace" data-chat-workspace hidden>
-        <header><strong>LSM Live Workspace</strong><button type="button" data-chat-action="close-workspace">Close</button></header>
+        <header><strong>Live Workspace</strong><button type="button" data-chat-action="close-workspace">Close</button></header>
         <div data-chat-app></div>
       </aside>
       <dialog class="hosted-profile-dialog" data-chat-profile-dialog>
@@ -90,10 +120,18 @@ export class HostedChatController extends BaseController {
       event.preventDefault()
       void this.send()
     })
-    this.listen(root.querySelector<HTMLTextAreaElement>("[data-chat-input]")!, "keydown", (event) => {
+    const input = root.querySelector<HTMLTextAreaElement>("[data-chat-input]")!
+    this.listen(input, "keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
         event.preventDefault()
         void this.send()
+      }
+    })
+    this.listen(input, "input", () => this.resizeComposer())
+    this.listen(root, "keydown", (event) => {
+      if (event.key === "Escape") {
+        this.setDrawerOpen(false)
+        root.querySelector<HTMLElement>("[data-chat-menu]")?.removeAttribute("open")
       }
     })
     this.listen(root.querySelector<HTMLInputElement>("[data-chat-archive-filter]")!, "input", (event) => {
@@ -110,6 +148,28 @@ export class HostedChatController extends BaseController {
     this.listen(root.querySelector<HTMLSelectElement>("[data-profile-existing]")!, "change", () => this.populateProfileForm())
     this.root.querySelector<HTMLButtonElement>('[data-chat-action="workspace"]')!.hidden = this.context.liveWorkspaceEnabled !== true
     void this.reload()
+  }
+
+  private setDrawerOpen(open: boolean): void {
+    const history = this.root?.querySelector?.<HTMLElement>("#hosted-chat-history")
+    const opener = this.root?.querySelector?.<HTMLButtonElement>('[data-chat-action="drawer"]')
+    const focusWasInDrawer = !open && !!this.root?.classList?.contains?.("hosted-drawer-open")
+      && typeof document !== "undefined" && !!history?.contains?.(document.activeElement)
+    this.root?.classList?.toggle("hosted-drawer-open", open)
+    opener?.setAttribute?.("aria-expanded", String(open))
+    if (open) this.root?.querySelector?.<HTMLButtonElement>(".hosted-close-drawer")?.focus?.()
+    else if (focusWasInDrawer) opener?.focus?.()
+  }
+
+  private get selectingConversation(): boolean {
+    return this.selectingEpoch !== null && this.selectingEpoch === this.selectionEpoch
+  }
+
+  private resizeComposer(): void {
+    const input = this.root.querySelector<HTMLTextAreaElement>("[data-chat-input]")
+    if (!input) return
+    input.style.height = "auto"
+    input.style.height = `${Math.min(input.scrollHeight, 220)}px`
   }
 
   private async get<T>(action: string, query = ""): Promise<T> {
@@ -154,9 +214,12 @@ export class HostedChatController extends BaseController {
        class="${conversation.id === this.active?.id ? "active" : ""}">
        <span>${escapeHtml(conversation.title || "New chat")}</span><small>${conversation.status === "running" ? "Running" : ""}</small></button>`
     ).join("") : `<p class="hosted-empty">${this.showArchives ? "No matching archived conversations." : "No conversations yet."}</p>`
-    this.root.querySelector<HTMLElement>("[data-chat-heading]")!.textContent = this.showArchives ? "Archived" : "Conversations"
+    this.root.querySelector<HTMLElement>("[data-chat-heading]")!.textContent = this.showArchives ? "Archived chats" : "Recent"
     this.root.querySelector<HTMLButtonElement>('[data-chat-action="new"]')!.hidden = this.showArchives
-    this.root.querySelector<HTMLButtonElement>('[data-chat-action="archives"]')!.textContent = this.showArchives ? "Back to conversations" : "Archived conversations"
+    const topNew = this.root.querySelector<HTMLButtonElement>(".hosted-new-top")
+    if (topNew) topNew.hidden = this.showArchives
+    this.root.querySelector<HTMLButtonElement>('[data-chat-action="archives"]')!.innerHTML = this.showArchives
+      ? '<span aria-hidden="true">←</span> Back to chats' : '<span aria-hidden="true">▤</span> Archived chats'
     this.root.querySelector<HTMLInputElement>("[data-chat-archive-filter]")!.hidden = !this.showArchives
     const select = this.root.querySelector<HTMLSelectElement>("[data-chat-model]")!
     const selected = this.active?.profile_id || select.value
@@ -169,10 +232,16 @@ export class HostedChatController extends BaseController {
     if (this.destroyed) return
     const messages = this.root.querySelector<HTMLElement>("[data-chat-messages]")!
     const active = this.active
+    const previousScrollTop = messages.scrollTop
+    const atBottom = messages.scrollHeight - previousScrollTop - messages.clientHeight < 120
+    const switched = messages.dataset.conversationId !== (active?.id || "")
+    messages.dataset.conversationId = active?.id || ""
     if (!active) {
       messages.innerHTML = this.showArchives
         ? '<div class="hosted-welcome"><h2>Archived conversations</h2><p>Select a conversation to read it, or restore it to continue.</p></div>'
-        : '<div class="hosted-welcome"><h2>Hosted Chat</h2><p>Configure your model profile, then start a conversation. LSM tools are available through MCP.</p></div>'
+        : this.profiles.length
+          ? '<div class="hosted-welcome"><div class="hosted-welcome-mark">✳</div><h2>What can I help with?</h2><p>Ask a question, work with your files, or use LSM tools.</p></div>'
+          : '<div class="hosted-welcome"><div class="hosted-welcome-mark">✳</div><h2>Set up your model</h2><p>Add a model profile to start chatting.</p><button type="button" data-chat-action="profile" class="hosted-welcome-setup">Configure model</button></div>'
     } else {
       const visible = active.messages.filter((m) => m.role !== "tool" && (!m.tool_calls?.length || m.content))
       const activity = active.events.map((event) => {
@@ -187,8 +256,9 @@ export class HostedChatController extends BaseController {
         (this.showArchives ? '<p class="hosted-running">Archived · restore this conversation to continue.</p>' : active.status === "running" ? '<div class="hosted-running">Agent running · waiting for model or tools…</div>' : "") +
         (active.error ? `<p class="hosted-error">${escapeHtml(active.error)}</p>` : "")
     }
+    messages.scrollTop = switched || atBottom ? messages.scrollHeight : previousScrollTop
     const contextInfo = this.root.querySelector<HTMLElement>("[data-chat-context-info]")!
-    contextInfo.hidden = !active || this.showArchives
+    contextInfo.hidden = !active || this.showArchives || !active.context?.through
     if (active && !this.showArchives) {
       const through = active.context?.through || 0
       contextInfo.innerHTML = through
@@ -196,7 +266,8 @@ export class HostedChatController extends BaseController {
         : '<span>Context: full recent transcript · automatic compact enabled</span>'
     }
     const status = this.root.querySelector<HTMLElement>("[data-chat-status]")!
-    status.textContent = active?.session_id ? `LSM: ${active.session_id}` : active?.status || "No session attached"
+    status.textContent = active?.session_id ? `LSM session · ${active.session_id}`
+      : active?.status === "running" ? "Generating…" : ""
     const stop = this.root.querySelector<HTMLButtonElement>('[data-chat-action="stop"]')!
     stop.hidden = this.showArchives || active?.status !== "running"
     const compact = this.root.querySelector<HTMLButtonElement>('[data-chat-action="compact"]')!
@@ -206,21 +277,30 @@ export class HostedChatController extends BaseController {
     this.root.querySelector<HTMLButtonElement>('[data-chat-action="archive"]')!.hidden = this.showArchives || !active
     this.root.querySelector<HTMLButtonElement>('[data-chat-action="archive"]')!.disabled = active?.status === "running"
     this.root.querySelector<HTMLButtonElement>('[data-chat-action="restore"]')!.hidden = !this.showArchives || !active
-    this.root.querySelector<HTMLButtonElement>('[data-chat-action="session"]')!.hidden = this.showArchives
-    this.root.querySelector<HTMLButtonElement>('[data-chat-action="workspace"]')!.hidden = this.showArchives || this.context.liveWorkspaceEnabled !== true
-    this.root.querySelector<HTMLButtonElement>("[data-chat-send]")!.disabled = this.showArchives || !active || active.status === "running" || this.busy
-    this.root.querySelector<HTMLTextAreaElement>("[data-chat-input]")!.disabled = this.showArchives
+    this.root.querySelector<HTMLButtonElement>('[data-chat-action="session"]')!.hidden = this.showArchives || !active
+    this.root.querySelector<HTMLButtonElement>('[data-chat-action="workspace"]')!.hidden = this.showArchives || !active || this.context.liveWorkspaceEnabled !== true
+    this.root.querySelector<HTMLButtonElement>('[data-chat-action="delete"]')!.hidden = !active
+    this.root.querySelector<HTMLButtonElement>("[data-chat-send]")!.disabled = this.showArchives || this.selectingConversation || (!active && !this.profiles.length) || active?.status === "running" || this.busy
+    const input = this.root.querySelector<HTMLTextAreaElement>("[data-chat-input]")!
+    input.disabled = this.showArchives || this.selectingConversation || (!active && !this.profiles.length)
+    input.placeholder = this.showArchives ? "Restore this chat to reply" : !this.profiles.length
+      ? "Configure a model profile to start…" : "Message LSM Chat…"
+    const hint = this.root.querySelector<HTMLElement>("[data-chat-composer-hint]")!
+    hint.textContent = active?.session_id ? "LSM session attached" : "LSM tools available through MCP"
     const selector = this.root.querySelector<HTMLSelectElement>("[data-chat-model]")!
     selector.disabled = this.showArchives || active?.status === "running"
     if (active) selector.value = active.profile_id
+    this.resizeComposer()
   }
 
   private async select(id: string): Promise<void> {
     const epoch = ++this.selectionEpoch
+    this.selectingEpoch = epoch
     const viewArchives = this.showArchives
     try {
       const switching = this.active?.id !== id
-      if (switching) { this.active = null; this.renderConversation() }
+      if (switching) this.active = null
+      this.renderConversation()
       const data = await this.get<Conversation>(viewArchives ? "archive" : "conversation", `?id=${encodeURIComponent(id)}`)
       if (this.destroyed || this.showArchives !== viewArchives || this.selectionEpoch !== epoch) return
       if (switching) {
@@ -230,9 +310,16 @@ export class HostedChatController extends BaseController {
       }
       this.active = data
       this.renderList()
-      this.renderConversation()
+      this.setDrawerOpen(false)
       this.startPolling()
-    } catch (error) { this.notifyError(error) }
+    } catch (error) {
+      this.notifyError(error)
+    } finally {
+      if (this.selectingEpoch === epoch) {
+        this.selectingEpoch = null
+        if (!this.destroyed) this.renderConversation()
+      }
+    }
   }
 
   private startPolling(): void {
@@ -266,19 +353,28 @@ export class HostedChatController extends BaseController {
   }
 
   private async send(text?: string): Promise<boolean> {
-    if (this.busy || this.showArchives || !this.active || this.active.status === "running") return false
+    if (this.busy || this.showArchives || this.selectingConversation || this.active?.status === "running" || (!this.active && !this.profiles.length)) return false
     const input = this.root.querySelector<HTMLTextAreaElement>("[data-chat-input]")!
     const content = text ?? input.value
     if (!content.trim()) return false
     this.busy = true
+    const selectionEpoch = this.selectionEpoch
     this.renderConversation()
     try {
+      if (!this.active) {
+        const profileId = this.root.querySelector<HTMLSelectElement>("[data-chat-model]")?.value || this.profiles[0].id
+        const created = await this.post<Conversation>("conversation-create", { profile_id: profileId })
+        if (this.destroyed || this.showArchives || this.selectionEpoch !== selectionEpoch) return false
+        this.active = created
+        this.renderList()
+      }
       const id = this.active.id
       const message = this.modelContext ? `${this.modelContext}\n\n${content}` : content
       await this.post("send", { id, text: message })
       if (this.active?.id === id) {
         this.modelContext = ""
         input.value = ""
+        this.resizeComposer()
         await this.select(id)
       }
       return true
@@ -290,8 +386,16 @@ export class HostedChatController extends BaseController {
 
   private async action(action: string, id?: string): Promise<void> {
     try {
+      if (action === "drawer") { this.setDrawerOpen(true); return }
+      if (action === "drawer-close") { this.setDrawerOpen(false); return }
+      if (action === "controller") {
+        document.querySelector<HTMLButtonElement>('.nav-item[data-view="overview"]')?.click()
+        return
+      }
+      this.root?.querySelector?.("[data-chat-menu]")?.removeAttribute?.("open")
       if (action === "select" && id) { await this.select(id); return }
       if (action === "archives") {
+        this.setDrawerOpen(false)
         ++this.selectionEpoch
         await this.closeWorkspace()
         this.showArchives = !this.showArchives
@@ -303,6 +407,7 @@ export class HostedChatController extends BaseController {
       if (action === "profile-close") { this.root.querySelector<HTMLDialogElement>("[data-chat-profile-dialog]")?.close(); return }
       if (action === "profile-delete") { await this.deleteProfile(); return }
       if (action === "new" && !this.showArchives) {
+        this.setDrawerOpen(false)
         ++this.selectionEpoch
         this.modelContext = ""
         if (!this.profiles.length) { this.profileDialog(); return }
@@ -311,6 +416,7 @@ export class HostedChatController extends BaseController {
         this.active = null
         await this.reload()
         await this.select(conversation.id)
+        this.root.querySelector<HTMLTextAreaElement>("[data-chat-input]")?.focus()
         return
       }
       if (!this.active) return

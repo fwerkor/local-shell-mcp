@@ -406,6 +406,7 @@ function showView(
 ): void {
   activeView = view
   document.body.classList.toggle("native-view-active", view !== "console" && isNativeView(view))
+  document.body.classList.toggle("hosted-chat-view", view === "hosted-chat")
   if (interfaceModeForView(view) === "web") lastWebView = view
   document.querySelectorAll<HTMLButtonElement>(".nav-item[data-view]").forEach((button) => {
     button.classList.toggle("active", button.dataset.view === view)
