@@ -1,14 +1,14 @@
-<!-- i18n-source-sha256: 53d1b81800534bc6d5334883b7de74660c988088c66f492ddbd68aced8797379 -->
+<!-- i18n-source-sha256: 78210f26f159c89fa83851d7f597b727ddf3aaab7229c279aa5bcacf21d92669 -->
 # Obrolan yang Dihosting (opsional)
 
 Obrolan yang Dihosting adalah klien Aplikasi MCP dan obrolan BYOK yang dihosting sendiri dan terintegrasi ke dalam antarmuka manusia LSM. Ini **bukan** mode Sesi Logis: percakapan memiliki identitas independen dan secara opsional dapat melampirkan Sesi Logis LSM yang ada. ChatGPT dan klien eksternal lainnya terus bekerja dengan Sesi dan alat LSM yang sama.
 
-## Aktifkan
+## Ketersediaan
 
-Obrolan yang Dihosting dinonaktifkan secara default. Tetapkan:
+Hosted Chat diaktifkan secara default dalam mode MCP dengan penyimpanan status persisten. Untuk menonaktifkannya, atur:
 
 ```env
-LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED=true
+LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED=false
 ```
 
 Mulai ulang Pengontrol dan buka **Obrolan yang Dihosting** tepat di bawah pemilih UI Web/TUI. Fitur ini juga memiliki entri bilah atas seluler. Host obrolan menggunakan identitas dan cakupan LSM OAuth yang ada. Pengontrol yang sama mengoperasikan server MCP yang digunakan oleh loop alat model; Pekerja tidak dapat memulai eksekusi.
