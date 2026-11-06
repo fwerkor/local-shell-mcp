@@ -643,7 +643,7 @@ jobs:
           docker run --rm "$image" local-shell-mcp version
           docker run --rm --entrypoint python "$image" -c 'import pathlib, zstandard; assert not pathlib.Path("/app/src/local_shell_mcp/ui_runtime").exists(); assert pathlib.Path("/app/src/local_shell_mcp/ui_static/web.js").is_file()'
           docker run --rm --entrypoint sh "$image" -c 'for tool in local-shell-mcp-tui gcc clang rustc cargo go javac node npm libreoffice; do ! command -v "$tool" || exit 1; done'
-          docker run --rm --entrypoint python "$image" -c 'from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch(headless=True); assert browser.new_page().evaluate("1 + 1") == 2; browser.close(); p.stop()'
+          docker run --rm --entrypoint python "$image" -c 'import os, pathlib; from playwright.sync_api import sync_playwright; assert not pathlib.Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"]).exists(); p = sync_playwright().start(); assert p.chromium is not None; p.stop()'
           docker image inspect --format 'Lean Docker image size: {{.Size}} bytes' "$image"
 
   compose:

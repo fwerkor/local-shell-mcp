@@ -92,16 +92,16 @@ RUN set -eux; \
   install -m 0755 /tmp/local-shell-mcp-tmux "/app/src/local_shell_mcp/helpers/linux-${helper_arch}/tmux"; \
   rm -f /tmp/local-shell-mcp-tmux
 COPY --from=ui-builder /source/src/local_shell_mcp/ui_static /app/src/local_shell_mcp/ui_static
-# Chromium is the default browser used by LSM's Playwright tools. Installing
-# just Chromium avoids the Firefox/WebKit payloads in the upstream image.
+# The Playwright Python API stays available, but no browser binaries or their
+# heavyweight system libraries are installed by default.
 RUN pip install --no-cache-dir -e . "playwright==${PLAYWRIGHT_VERSION}" \
-  && python -m playwright install --with-deps chromium \
-  && rm -rf /var/lib/apt/lists/* /root/.cache/pip \
+  && rm -rf /root/.cache/pip \
   && python -c "import zstandard" \
   && test -s /app/src/local_shell_mcp/ui_static/index.html \
   && test -s /app/src/local_shell_mcp/ui_static/web.js \
   && test -s /app/src/local_shell_mcp/ui_static/web.css \
-  && test ! -e /app/src/local_shell_mcp/ui_runtime
+  && test ! -e /app/src/local_shell_mcp/ui_runtime \
+  && test ! -d "${PLAYWRIGHT_BROWSERS_PATH}"
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN useradd -m -u 10001 agent \
