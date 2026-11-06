@@ -232,7 +232,7 @@ def test_mcp_tool_calls_are_blocked_when_conversation_disables_lsm(tmp_path, mon
         get_settings.cache_clear()
 
 
-def test_noauth_mcp_installs_bridge_auth_when_librechat_is_enabled(monkeypatch):
+def test_noauth_mcp_installs_bridge_auth_when_librechat_is_enabled(tmp_path, monkeypatch):
     from starlette.applications import Starlette
 
     from local_shell_mcp.auth import AuthMiddleware
@@ -244,6 +244,10 @@ def test_noauth_mcp_installs_bridge_auth_when_librechat_is_enabled(monkeypatch):
             return Starlette()
 
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_BACKEND", "file")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
     get_settings.cache_clear()
     try:
         app = _build_mcp_http_app(FakeMcp())
