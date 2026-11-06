@@ -261,7 +261,7 @@ def _verify_oauth(request: Request, settings: Settings) -> Principal:
 def verify_request(request: Request) -> Principal:
     settings = get_settings()
     path = str(request.url.path)
-    if path == "/api/ui/librechat/identity":
+    if path in {"/api/ui/librechat/identity", "/api/ui/librechat/policy"}:
         from .librechat_integration import is_bridge_service
 
         if is_bridge_service(request):
