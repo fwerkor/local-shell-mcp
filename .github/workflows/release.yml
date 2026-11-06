@@ -219,29 +219,24 @@ jobs:
             helper_platform: linux/amd64
             helper_tag: linux-x86_64
             binary: local-shell-mcp
-            tui_binary: local-shell-mcp-tui
             archive: tar.gz
           - artifact: linux-aarch64
             runner: ubuntu-24.04-arm
             helper_platform: linux/arm64
             helper_tag: linux-aarch64
             binary: local-shell-mcp
-            tui_binary: local-shell-mcp-tui
             archive: tar.gz
           - artifact: macos-x86_64
             runner: macos-15-intel
             binary: local-shell-mcp
-            tui_binary: local-shell-mcp-tui
             archive: tar.gz
           - artifact: macos-aarch64
             runner: macos-15
             binary: local-shell-mcp
-            tui_binary: local-shell-mcp-tui
             archive: tar.gz
           - artifact: windows-x86_64
             runner: windows-latest
             binary: local-shell-mcp.exe
-            tui_binary: local-shell-mcp-tui.exe
             archive: zip
     runs-on: ${{ matrix.runner }}
     steps:
@@ -265,12 +260,12 @@ jobs:
         shell: bash
         run: scripts/build-tmux-helper.sh "src/local_shell_mcp/helpers/${{ matrix.helper_tag }}/tmux" "${{ matrix.helper_platform }}"
 
-      - name: Build OpenTUI runtime and embedded WebUI
+      - name: Build embedded WebUI only
         working-directory: ui
         run: |
           bun install --frozen-lockfile
           bun run typecheck
-          bun run build
+          bun run build:web
 
       - name: Build self-contained executable
         shell: bash
@@ -292,14 +287,15 @@ jobs:
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
             PYINSTALLER_ARGS+=(--collect-all winpty)
           fi
+          # --collect-all must not pick up any generated OpenTUI payload.
+          rm -rf src/local_shell_mcp/ui_runtime
           pyinstaller "${PYINSTALLER_ARGS[@]}" scripts/pyinstaller-entry.py
 
-      - name: Smoke test embedded OpenTUI runtime
+      - name: Smoke test standalone WebUI without OpenTUI
         shell: bash
         run: |
           ./dist/${{ matrix.binary }} --help
-          ./ui/dist/${{ matrix.tui_binary }} --version
-          python scripts/standalone-ui-smoke.py --server ./dist/${{ matrix.binary }}
+          python scripts/standalone-ui-smoke.py --server ./dist/${{ matrix.binary }} --web-only
 
       - name: Package executable
         shell: bash
@@ -315,9 +311,10 @@ jobs:
 
             ./local-shell-mcp --mode mcp
 
-          Open the WebUI at http://127.0.0.1:8765/ui, or launch the native TUI:
-
-            ./local-shell-mcp tui
+          Open the WebUI at http://127.0.0.1:8765/ui.
+          The native OpenTUI runtime is not included in this lean binary.
+          To use OpenTUI, install the optional sidecar and configure
+          LOCAL_SHELL_MCP_UI_TUI_COMMAND to its executable path.
 
           Useful environment variables:
 

@@ -534,7 +534,7 @@ jobs:
           bun install --frozen-lockfile
           bun run test
           bun run typecheck
-          bun run build
+          bun run build:web
 
       - name: Build self-contained executable
         shell: bash
@@ -557,6 +557,8 @@ jobs:
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
             PYINSTALLER_ARGS+=(--collect-all winpty)
           fi
+          # Prevent a stale local TUI build from leaking into --collect-all.
+          rm -rf src/local_shell_mcp/ui_runtime
           pyinstaller "${PYINSTALLER_ARGS[@]}" scripts/pyinstaller-entry.py
 
       - name: Smoke test self-contained executable
@@ -565,7 +567,7 @@ jobs:
           ./dist/${{ matrix.binary }} --version
           ./dist/${{ matrix.binary }} version
           ./dist/${{ matrix.binary }} --help
-          python scripts/standalone-ui-smoke.py --server ./dist/${{ matrix.binary }}
+          python scripts/standalone-ui-smoke.py --server ./dist/${{ matrix.binary }} --web-only
 
 
   bundled-tmux:
@@ -633,11 +635,16 @@ jobs:
           cache-from: type=gha,scope=ci-docker-${{ matrix.suffix }}
           cache-to: type=gha,mode=max,scope=ci-docker-${{ matrix.suffix }}
 
-      - name: Smoke test Docker image CLI
+      - name: Smoke test lean Docker runtime
         run: |
           set -euxo pipefail
-          docker run --rm local-shell-mcp:ci-${{ matrix.suffix }} local-shell-mcp --version
-          docker run --rm local-shell-mcp:ci-${{ matrix.suffix }} local-shell-mcp version
+          image=local-shell-mcp:ci-${{ matrix.suffix }}
+          docker run --rm "$image" local-shell-mcp --version
+          docker run --rm "$image" local-shell-mcp version
+          docker run --rm --entrypoint python "$image" -c 'import pathlib, zstandard; assert not pathlib.Path("/app/src/local_shell_mcp/ui_runtime").exists(); assert pathlib.Path("/app/src/local_shell_mcp/ui_static/web.js").is_file()'
+          docker run --rm --entrypoint sh "$image" -c 'for tool in local-shell-mcp-tui gcc clang rustc cargo go javac node npm libreoffice; do ! command -v "$tool" || exit 1; done'
+          docker run --rm --entrypoint python "$image" -c 'from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch(headless=True); assert browser.new_page().evaluate("1 + 1") == 2; browser.close(); p.stop()'
+          docker image inspect --format 'Lean Docker image size: {{.Size}} bytes' "$image"
 
   compose:
     name: Docker Compose / config and build
