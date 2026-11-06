@@ -109,3 +109,25 @@ def test_bridge_api_policy_and_error_paths():
     assert client.post("/api/ui/librechat/identity", json=[], headers=headers).status_code == 400
     assert client.post("/api/ui/librechat/upload?name=bad.txt", content=b"").status_code == 400
     assert client.post("/api/ui/librechat/upload?name=bad.txt", content=b"data", headers={"Content-Length": "0"}).status_code == 400
+
+
+def test_librechat_private_mcp_host_does_not_disable_rebinding_protection(monkeypatch):
+    from local_shell_mcp.settings import get_settings
+    from local_shell_mcp.tools import _transport_security_settings
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_PORT", "8766")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_LIBRECHAT_INTERNAL_HOST", "host.docker.internal")
+    get_settings.cache_clear()
+    security = _transport_security_settings()
+    assert security.enable_dns_rebinding_protection
+    assert "local-shell-mcp:8766" in security.allowed_hosts
+    assert "host.docker.internal:8766" in security.allowed_hosts
+    assert "evil.example:8766" not in security.allowed_hosts
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_LIBRECHAT_INTERNAL_HOST", "evil.example")
+    with pytest.raises(ValueError, match="Unsupported LibreChat"):
+        _transport_security_settings()
+    monkeypatch.delenv("LOCAL_SHELL_MCP_LIBRECHAT_URL")
+    monkeypatch.delenv("LOCAL_SHELL_MCP_LIBRECHAT_INTERNAL_HOST")
+    security = _transport_security_settings()
+    assert "local-shell-mcp:8766" not in security.allowed_hosts

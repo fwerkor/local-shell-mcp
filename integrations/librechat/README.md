@@ -59,6 +59,10 @@ Controller environment** (not in the user's local browser):
 - `LOCAL_SHELL_MCP_LIBRECHAT_BRIDGE_SECRET=<random 32+ byte secret>` — shared
   with the chat service as `LSM_LIBRECHAT_BRIDGE_SECRET`.
 - Persistent LSM state backend: `file` or `redis`; never `memory`.
+- Docker MCP Host validation keeps DNS rebinding protection on, allowing only
+  `local-shell-mcp:<Controller port>` in addition to existing trusted hosts.
+  Isolated tests can opt into `LOCAL_SHELL_MCP_LIBRECHAT_INTERNAL_HOST=host.docker.internal`
+  on the **test** Controller; never enable that override for the production service.
 
 Set these values for the optional Chat Compose stack (use an encrypted secrets
 store; do not commit its `.env`):
