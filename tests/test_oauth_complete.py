@@ -611,3 +611,28 @@ def test_authorization_capacity_error_and_no_pin_hint(tmp_path, monkeypatch):
     monkeypatch.setattr(oauth, "MAX_OAUTH_CODES", 0)
     response = client.post("/oauth/authorize", data=params)
     assert "Too many pending authorization requests" in response.text
+
+
+def test_authorization_page_is_compact_and_follows_system_theme(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    client = TestClient(_app())
+    client_id = _register(client)
+    response = client.get(
+        "/oauth/authorize",
+        params={
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": "https://client.test/callback",
+            "code_challenge": "challenge",
+            "code_challenge_method": "S256",
+        },
+    )
+    assert response.status_code == 200
+    assert "Authorize connection" in response.text
+    assert "test client" in response.text
+    assert 'name="pin"' in response.text
+    assert 'autocomplete="current-password"' in response.text
+    assert 'name="client_id"' in response.text
+    assert "prefers-color-scheme: dark" in response.text
+    assert "Read workspace" not in response.text
+    assert "LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN" not in response.text
