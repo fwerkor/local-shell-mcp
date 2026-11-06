@@ -65,30 +65,29 @@ def test_invalid_secret_and_subject(monkeypatch):
 
 def test_server_registration_and_scope_mapping(tmp_path, monkeypatch):
     from local_shell_mcp.librechat_integration import principal_for_chat_user, register_identity
-    from local_shell_mcp.settings import get_settings
+    from local_shell_mcp.state_store import FileStateStore
 
-    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path))
-    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_BACKEND", "file")
-    get_settings.cache_clear()
-    try:
-        first = issue_chat_ticket("user-a", scopes="shell:read")
-        assert register_identity("a" * 24, first["ticket"])["subject"] == "user-a"
-        registered = principal_for_chat_user("a" * 24)
-        assert registered["subject"] == "user-a"
-        assert registered["scopes"] == "shell:read"
-        assert registered["auth_mode"] == "oauth"
-        assert registered["grant_until"] > 0
-        second = issue_chat_ticket("user-b", scopes="shell:execute")
-        with pytest.raises(PermissionError):
-            register_identity("a" * 24, second["ticket"])
-        assert principal_for_chat_user("a" * 24)["subject"] == "user-a"
-        with pytest.raises(ValueError):
-            principal_for_chat_user("../../etc")
-        with pytest.raises(PermissionError):
-            principal_for_chat_user("b" * 24)
-    finally:
-        get_settings.cache_clear()
-
+    # Isolate this test from inherited controller configuration (CI uses a
+    # workspace with no write permission).
+    monkeypatch.setattr(
+        "local_shell_mcp.state_store.get_state_store",
+        lambda: FileStateStore(tmp_path),
+    )
+    first = issue_chat_ticket("user-a", scopes="shell:read")
+    assert register_identity("a" * 24, first["ticket"])["subject"] == "user-a"
+    registered = principal_for_chat_user("a" * 24)
+    assert registered["subject"] == "user-a"
+    assert registered["scopes"] == "shell:read"
+    assert registered["auth_mode"] == "oauth"
+    assert registered["grant_until"] > 0
+    second = issue_chat_ticket("user-b", scopes="shell:execute")
+    with pytest.raises(PermissionError):
+        register_identity("a" * 24, second["ticket"])
+    assert principal_for_chat_user("a" * 24)["subject"] == "user-a"
+    with pytest.raises(ValueError):
+        principal_for_chat_user("../../etc")
+    with pytest.raises(PermissionError):
+        principal_for_chat_user("b" * 24)
 
 def test_chat_upload_path_user_isolated_and_cannot_traverse(tmp_path):
     from local_shell_mcp.librechat_integration import local_upload_path
@@ -159,30 +158,29 @@ def test_chat_tool_policy_isolated_per_conversation(tmp_path, monkeypatch):
         register_identity,
         set_chat_tool_policy,
     )
-    from local_shell_mcp.settings import get_settings
+    from local_shell_mcp.state_store import FileStateStore
 
-    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path))
-    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_BACKEND", "file")
-    get_settings.cache_clear()
-    try:
-        register_identity("a" * 24, issue_chat_ticket("owner-a")["ticket"])
-        register_identity("b" * 24, issue_chat_ticket("owner-b")["ticket"])
-        assert may_chat_call_lsm("a" * 24, "conversation-a")
-        set_chat_tool_policy("a" * 24, "conversation-a", False)
-        assert not may_chat_call_lsm("a" * 24, "conversation-a")
-        assert may_chat_call_lsm("a" * 24, "conversation-b")
-        assert may_chat_call_lsm("b" * 24, "conversation-a")
-        set_chat_tool_policy("a" * 24, "conversation-a", True)
-        assert may_chat_call_lsm("a" * 24, "conversation-a")
-        with pytest.raises(ValueError):
-            set_chat_tool_policy("a" * 24, "../not-allowed", False)
-        with pytest.raises(ValueError):
-            set_chat_tool_policy("a" * 24, "conversation-a", "false")
-        with pytest.raises(PermissionError):
-            set_chat_tool_policy("c" * 24, "conversation-a", True)
-    finally:
-        get_settings.cache_clear()
-
+    # Isolate this test from inherited controller configuration (CI uses a
+    # workspace with no write permission).
+    monkeypatch.setattr(
+        "local_shell_mcp.state_store.get_state_store",
+        lambda: FileStateStore(tmp_path),
+    )
+    register_identity("a" * 24, issue_chat_ticket("owner-a")["ticket"])
+    register_identity("b" * 24, issue_chat_ticket("owner-b")["ticket"])
+    assert may_chat_call_lsm("a" * 24, "conversation-a")
+    set_chat_tool_policy("a" * 24, "conversation-a", False)
+    assert not may_chat_call_lsm("a" * 24, "conversation-a")
+    assert may_chat_call_lsm("a" * 24, "conversation-b")
+    assert may_chat_call_lsm("b" * 24, "conversation-a")
+    set_chat_tool_policy("a" * 24, "conversation-a", True)
+    assert may_chat_call_lsm("a" * 24, "conversation-a")
+    with pytest.raises(ValueError):
+        set_chat_tool_policy("a" * 24, "../not-allowed", False)
+    with pytest.raises(ValueError):
+        set_chat_tool_policy("a" * 24, "conversation-a", "false")
+    with pytest.raises(PermissionError):
+        set_chat_tool_policy("c" * 24, "conversation-a", True)
 
 def test_mcp_tool_calls_are_blocked_when_conversation_disables_lsm(tmp_path, monkeypatch):
     from starlette.testclient import TestClient

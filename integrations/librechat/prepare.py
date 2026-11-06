@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Clone the pinned LibreChat upstream release and apply the LSM integration."""
-from pathlib import Path
-import subprocess
 import secrets
+import subprocess
+from pathlib import Path
 
 from apply_upstream import apply
 

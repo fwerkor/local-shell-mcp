@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Apply the minimal LSM authentication bridge to a pinned LibreChat checkout."""
 
-from pathlib import Path
 import argparse
 import shutil
 import subprocess
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
