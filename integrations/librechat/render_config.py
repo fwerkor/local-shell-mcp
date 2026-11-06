@@ -43,7 +43,7 @@ def render(source: Path, destination: Path, environment: Mapping[str, str]) -> N
         environment.get("LSM_CONTROLLER_INTERNAL_URL", "http://local-shell-mcp:8765"),
         allowed_hosts={"local-shell-mcp", "host.docker.internal"},
     )
-    search, _ = _internal_origin(
+    _internal_origin(
         environment.get("SEARXNG_INSTANCE_URL", "http://searxng:8080"),
         allowed_hosts={"searxng"},
     )
@@ -53,16 +53,13 @@ def render(source: Path, destination: Path, environment: Mapping[str, str]) -> N
             f"Authorization: {json.dumps('Bearer ' + secret)}"
         ),
         '- "local-shell-mcp:8765"': f"- {json.dumps(host_port)}",
-        'searxngInstanceUrl: "${SEARXNG_INSTANCE_URL}"': (
-            f"searxngInstanceUrl: {json.dumps(search)}"
-        ),
     }
     result = source.read_text(encoding="utf-8")
     for placeholder, replacement in values.items():
         if result.count(placeholder) != 1:
             raise ValueError(f"Unexpected LibreChat configuration template: {placeholder.split(':')[0]}")
         result = result.replace(placeholder, replacement)
-    if "${" in result:
+    if "${" in result.replace("${SEARXNG_INSTANCE_URL}", ""):
         raise ValueError("Unresolved environment placeholder in LibreChat configuration")
 
     destination.parent.mkdir(parents=True, exist_ok=True)

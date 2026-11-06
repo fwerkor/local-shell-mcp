@@ -19,8 +19,8 @@ def test_render_config_resolves_mcp_credentials_privately(tmp_path):
     text = dest.read_text()
     assert 'url: "http://local-shell-mcp:8765/mcp"' in text
     assert f'Authorization: "Bearer {secret}"' in text
-    assert 'searxngInstanceUrl: "http://searxng:8080"' in text
-    assert "${" not in text
+    assert 'searxngInstanceUrl: "${SEARXNG_INSTANCE_URL}"' in text
+    assert "${" not in text.replace("${SEARXNG_INSTANCE_URL}", "")
     assert dest.stat().st_mode & 0o777 == 0o600
     assert secret not in (ROOT / "librechat.yaml").read_text()
 

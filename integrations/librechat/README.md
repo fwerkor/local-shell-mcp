@@ -96,8 +96,9 @@ exporting `LSM_LIBRECHAT_BRIDGE_SECRET` and before starting the Compose stack;
 regenerate and restart Chat after rotating that secret. The renderer restricts
 internal endpoints to the trusted `local-shell-mcp` service (or
 `host.docker.internal` for isolated acceptance) and the `searxng` service.
-The stock LibreChat YAML loader does not reliably expand these placeholders
-during the early MCP registry initialization.
+The stock LibreChat MCP registry does not reliably expand embedded URL and
+Authorization placeholders during early initialization. SearXNG deliberately
+retains its environment-variable reference, as required by LibreChat web search.
 
 The example Compose file intentionally does **not** set up HTTPS/TLS or LSM
 production credentials. Place LibreChat behind the existing HTTPS proxy, with
