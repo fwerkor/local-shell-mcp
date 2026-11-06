@@ -1,6 +1,7 @@
 """Validate private, deterministic runtime MCP configuration generation."""
 
 import importlib.util
+import os
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,8 @@ def test_render_config_resolves_mcp_credentials_privately(tmp_path):
     assert f'Authorization: "Bearer {secret}"' in text
     assert 'searxngInstanceUrl: "${SEARXNG_INSTANCE_URL}"' in text
     assert "${" not in text.replace("${SEARXNG_INSTANCE_URL}", "")
-    assert dest.stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert dest.stat().st_mode & 0o777 == 0o600
     assert secret not in (ROOT / "librechat.yaml").read_text()
 
 
