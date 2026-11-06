@@ -88,6 +88,20 @@ def test_vendored_librechat_is_self_contained():
     assert "upstream-src" not in compose
 
 
+def test_single_user_auth_routes_and_gui_proxy_contract():
+    app = INTEGRATION / "app"
+    auth = (app / "api/server/routes/auth.js").read_text()
+    assert "router.post(\'/refresh\'" in auth
+    assert "router.post(\'/logout\'" in auth
+    for disabled in ("/login", "/register", "/resetPassword", "/2fa"):
+        assert disabled not in auth
+    login = (app / "api/server/routes/lsm-auth.js").read_text()
+    assert "workspace@local-shell-mcp.invalid" in login
+    proxy = (app / "api/server/routes/lsm-controller.js").read_text()
+    assert "x-lsm-gui-observation-id" in proxy
+    assert "x-lsm-gui-coordinate-input" in proxy
+
+
 def test_unified_ui_native_pages_present():
     pages = INTEGRATION / "app/client/src/components/LSM"
     for name in ("Control.tsx", "Overview.tsx", "Files.tsx", "Operations.tsx", "Desktop.tsx"):

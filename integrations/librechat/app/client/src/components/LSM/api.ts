@@ -20,7 +20,7 @@ export async function read<T>(route: string, params: Record<string, string | num
   return result.data;
 }
 export async function write<T>(route: string, body: RecordValue): Promise<T> {
-  const result = await request.post<Envelope<T>>(endpoint + '/' + route, body);
+  const result = (await request.post(endpoint + '/' + route, body)) as Envelope<T>;
   if (!result.ok) throw new Error(result.message || result.error || 'Controller action failed');
   return result.data;
 }

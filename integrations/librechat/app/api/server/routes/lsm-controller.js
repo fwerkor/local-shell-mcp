@@ -62,7 +62,13 @@ router.use(async (req, res) => {
     });
     res.status(upstream.status);
     res.set('Cache-Control', 'no-store');
-    for (const header of ['content-type', 'content-disposition', 'content-length']) {
+    for (const header of [
+      'content-type', 'content-disposition', 'content-length',
+      'x-lsm-gui-window-x', 'x-lsm-gui-window-y',
+      'x-lsm-gui-window-width', 'x-lsm-gui-window-height',
+      'x-lsm-gui-backend', 'x-lsm-gui-observation-id',
+      'x-lsm-gui-observation-ttl-s', 'x-lsm-gui-coordinate-input',
+    ]) {
       const value = upstream.headers.get(header);
       if (value) res.set(header, value);
     }
