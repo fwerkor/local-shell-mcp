@@ -319,7 +319,7 @@ def _registration_response(client: OAuthClient, *, reused: bool) -> JSONResponse
         {
             "client_id": client.client_id,
             "client_id_issued_at": client.created_at,
-            "client_name": client.client_name or "ChatGPT",
+            "client_name": client.client_name or "OAuth client",
             "redirect_uris": client.redirect_uris,
             "grant_types": ["authorization_code"],
             "response_types": ["code"],
@@ -357,7 +357,7 @@ def _persist_legacy_client(client_id: str, redirect_uri: str) -> OAuthClient | N
         client = OAuthClient(
             client_id=client_id,
             redirect_uris=[redirect_uri],
-            client_name="ChatGPT",
+            client_name=None,
             approved=True,
         )
         _CLIENTS[client_id] = client
@@ -565,7 +565,7 @@ def _authorize_form(
     settings = get_settings()
     scope = _scope_value()
     client = _get_client(params.get("client_id", ""))
-    client_name = client.client_name if client and client.client_name else "ChatGPT"
+    client_name = client.client_name if client and client.client_name else "OAuth client"
     error_html = (
         f'<div class="notice notice-error" role="alert">{html_lib.escape(error)}</div>'
         if error
