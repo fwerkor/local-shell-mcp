@@ -80,6 +80,7 @@ path = "hatch_build.py"
 
 [tool.ruff]
 line-length = 100
+extend-exclude = ["integrations/librechat/app"]
 target-version = "py311"
 
 [tool.ruff.lint]

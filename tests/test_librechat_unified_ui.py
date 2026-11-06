@@ -12,6 +12,18 @@ ROOT = Path(__file__).resolve().parents[1]
 INTEGRATION = ROOT / "integrations" / "librechat"
 
 
+@pytest.fixture(autouse=True)
+def isolated_controller_settings(tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_BACKEND", "file")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 def _request(path: str, *, service: bool = True) -> Request:
     headers = [(b"x-lsm-chat-user-id", b"0123456789abcdef01234567")]
     if service:
@@ -42,9 +54,11 @@ def test_lsm_proxy_uses_identity_mapping_and_original_scopes():
 
 @pytest.mark.parametrize("path", ["/api/ui/files", "/api/ui/librechat/upload"])
 def test_lsm_proxy_rejects_missing_service_credential(path):
-    with patch("local_shell_mcp.librechat_integration.is_bridge_service", return_value=False):
-        with pytest.raises(HTTPException) as captured:
-            verify_request(_request(path, service=False))
+    with (
+        patch("local_shell_mcp.librechat_integration.is_bridge_service", return_value=False),
+        pytest.raises(HTTPException) as captured,
+    ):
+        verify_request(_request(path, service=False))
     assert captured.value.status_code == 401
 
 
@@ -53,9 +67,9 @@ def test_lsm_proxy_denies_expired_identity():
         patch("local_shell_mcp.librechat_integration.is_bridge_service", return_value=True),
         patch("local_shell_mcp.librechat_integration.principal_for_chat_user",
               side_effect=PermissionError("expired")),
+        pytest.raises(HTTPException) as captured,
     ):
-        with pytest.raises(HTTPException) as captured:
-            verify_request(_request("/api/ui/terminals"))
+        verify_request(_request("/api/ui/terminals"))
     assert captured.value.status_code == 401
 
 

@@ -1,5 +1,6 @@
 import { memo, lazy, Suspense, useEffect, useRef } from 'react';
-import { Button, Sidebar, Skeleton } from '@librechat/client';\nimport { Link } from 'react-router-dom';
+import { Button, Sidebar, Skeleton } from '@librechat/client';
+import { Link } from 'react-router-dom';
 import type { NavLink } from '~/common';
 import AgentMarketplaceButton from '~/components/Nav/AgentMarketplaceButton';
 import { CLOSE_SIDEBAR_ID } from '~/components/Chat/Menus/OpenSidebar';
