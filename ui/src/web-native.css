@@ -738,7 +738,7 @@ button.summary-card { cursor: pointer; }
 }
 
 
-/* Embedded LibreChat occupies the chat viewport while LSM retains auth and navigation. */
+/* The LSM entry only displays a short-lived handoff to the full workspace. */
 body:has(.lsm-librechat) .sidebar,
 body:has(.lsm-librechat) .topbar,
 body:has(.lsm-librechat) .page-footer { display:none; }
@@ -752,8 +752,6 @@ body:has(.lsm-librechat) #view-root > .controller-page {
   display:flex; flex:1 1 auto; min-height:0; min-width:0;
 }
 .lsm-librechat { display:flex; position:relative; flex:1 1 auto; min-height:0; min-width:0; }
-.lsm-librechat-frame { display:block; border:0; flex:1 1 auto; min-height:0; min-width:0; width:100%; }
-.lsm-librechat-frame[hidden] { display:none; }
 .lsm-librechat-loading {
   position:absolute; z-index:2; inset:0; display:grid; place-items:center;
   background:var(--surface, #fff); color:var(--text, #222);

@@ -148,24 +148,6 @@ export default function useTextarea({
     setActivePrompt(undefined);
   }, [activePrompt, insertComposerText, setActivePrompt]);
 
-  // An attachment uploaded through LSM is an absolute local-machine path.
-  // Never accept this cross-window event from arbitrary sites or nested frames.
-  useEffect(() => {
-    const parentOrigin = document.querySelector<HTMLMetaElement>('meta[name="lsm-parent-origin"]')?.content;
-    if (!parentOrigin || window.parent === window) return;
-    const receiveAttachment = (event: MessageEvent) => {
-      if (event.source !== window.parent || event.origin !== parentOrigin) return;
-      if (event.data?.type !== 'lsm:local-attachment') return;
-      const path = event.data.path;
-      if (typeof path !== 'string' || !path || path.length > 2048) return;
-      const textarea = textAreaRef.current;
-      if (!textarea || !textarea.getClientRects().length) return;
-      insertComposerText(`\nLocal attachment: ${path}\nRead this file using LSM tools if needed.\n`);
-    };
-    window.addEventListener('message', receiveAttachment);
-    return () => window.removeEventListener('message', receiveAttachment);
-  }, [insertComposerText, textAreaRef]);
-
   useEffect(() => {
     const onAttachment = (event: Event) => {
       const path = (event as CustomEvent<{ path: string }>).detail?.path;

@@ -52,12 +52,12 @@ through the private Controller API and refuses expired grants.
 `/control/overview`; chat remains at `/c/new`. Mobile and desktop share
 LibreChat's responsive navigation and light/dark theme tokens.
 
-The LSM WebUI's ordinary `/ui` URL launches the new workspace when the
-Controller advertises LibreChat. A short-lived, one-use signed ticket
-authenticates the user to the chat backend. New deployments should configure
-the chat and Controller HTTPS origins on the **same site**, with the
-Controller origin added to LibreChat's CSP frame ancestors. The old Hosted Chat
-screen is a fallback only when LibreChat is unconfigured.
+The LSM WebUI's ordinary `/ui` URL performs an authenticated handoff to
+the **top-level LibreChat workspace** when the Controller advertises LibreChat.
+A short-lived, one-use signed ticket authenticates the user to the chat backend
+via a top-level POST; there is **no iframe wrapper** or cross-frame upload path.
+Configure the chat and Controller HTTPS origins on the **same site**.
+The original LSM WebUI is retained for Controller deployments without chat.
 
 ## Authentication and API boundary
 

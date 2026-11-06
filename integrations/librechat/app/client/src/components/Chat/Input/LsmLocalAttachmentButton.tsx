@@ -11,11 +11,6 @@ export default function LsmLocalAttachmentButton() {
       setError('Attachments must be between 1 byte and 32 MiB');
       return;
     }
-    const origin = document.querySelector<HTMLMetaElement>('meta[name="lsm-parent-origin"]')?.content;
-    if (origin && window.parent !== window) {
-      window.parent.postMessage({ type: 'lsm:upload', file }, origin);
-      return;
-    }
     setBusy(true);
     setError('');
     try {
