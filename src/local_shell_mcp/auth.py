@@ -521,7 +521,8 @@ class AuthMiddleware:
 
         if (
             path == "/mcp"
-            and request.state.principal.claims.get("auth") == "librechat-bridge"
+            and request.headers.get("x-lsm-chat-user-id")
+            and request.state.principal.subject is not None
             and "tools/call" in _mcp_methods_from_body(body or b"")
         ):
             from .librechat_integration import may_chat_call_lsm

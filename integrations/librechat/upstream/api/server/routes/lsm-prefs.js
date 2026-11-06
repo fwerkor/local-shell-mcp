@@ -90,7 +90,10 @@ router.put('/:conversationId', async (req, res) => {
 
 const loadForAgentRequest = async (req, res, next) => {
   try {
-    if (req.method !== 'POST' || !req.path.startsWith('/chat')) return next();
+    if (
+      req.method !== 'POST' ||
+      !['/chat', '/chat/resume'].includes(req.path)
+    ) return next();
     const conversationId = req.body?.conversationId;
     if (!conversationId || conversationId === 'new') {
       req.lsmChatPrefs = { ...DEFAULTS };

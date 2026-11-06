@@ -230,3 +230,26 @@ def test_mcp_tool_calls_are_blocked_when_conversation_disables_lsm(tmp_path, mon
         assert client.post("/mcp", json=invocation, headers=headers).status_code == 403
     finally:
         get_settings.cache_clear()
+
+
+def test_noauth_mcp_installs_bridge_auth_when_librechat_is_enabled(monkeypatch):
+    from starlette.applications import Starlette
+
+    from local_shell_mcp.auth import AuthMiddleware
+    from local_shell_mcp.main import _build_mcp_http_app
+    from local_shell_mcp.settings import get_settings
+
+    class FakeMcp:
+        def streamable_http_app(self):
+            return Starlette()
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    get_settings.cache_clear()
+    try:
+        app = _build_mcp_http_app(FakeMcp())
+        assert any(item.cls is AuthMiddleware for item in app.user_middleware)
+        monkeypatch.delenv("LOCAL_SHELL_MCP_LIBRECHAT_URL")
+        app = _build_mcp_http_app(FakeMcp())
+        assert not any(item.cls is AuthMiddleware for item in app.user_middleware)
+    finally:
+        get_settings.cache_clear()

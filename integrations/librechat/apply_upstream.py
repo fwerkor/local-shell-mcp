@@ -40,6 +40,10 @@ def apply(source: Path) -> None:
 
     prefs = source / "api/server/routes/lsm-prefs.js"
     shutil.copy2(ROOT / "upstream/api/server/routes/lsm-prefs.js", prefs)
+    shutil.copy2(
+        ROOT / "upstream/api/server/routes/lsm-prefs.spec.js",
+        source / "api/server/routes/lsm-prefs.spec.js",
+    )
     if "lsmChatPrefs" not in (source / "api/server/controllers/agents/client.js").read_text():
         subprocess.run(
             ["patch", "-p1", "--forward", "-i", str(ROOT / "preferences.patch")],
@@ -50,6 +54,13 @@ def apply(source: Path) -> None:
     if "req.lsmChatPrefs?.memory" not in agent.read_text():
         subprocess.run(
             ["patch", "-p1", "--forward", "-i", str(ROOT / "agentPolicy.patch")],
+            cwd=source, check=True,
+        )
+
+    agent_runtime = source / "packages/api/src/agents/runtime.ts"
+    if "lsmChatPrefs?: LsmChatPreferences" not in agent_runtime.read_text():
+        subprocess.run(
+            ["patch", "-p1", "--forward", "-i", str(ROOT / "savedAgentPolicy.patch")],
             cwd=source, check=True,
         )
 
