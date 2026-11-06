@@ -82,7 +82,7 @@ from .transfer_ops import (
     transfer_stat,
     transfer_write_bytes,
 )
-from .tui_runtime import materialize_embedded_tui
+from .tui_runtime import embedded_tui_payload, materialize_embedded_tui
 from .ui_security import (
     CLI_LOCAL_TOKEN_ENV,
     UI_LOCAL_TOKEN_ENV,
@@ -570,7 +570,7 @@ def _ui_index_html() -> str:
     path = _assets_dir() / "index.html"
     if path.exists():
         html = path.read_text(encoding="utf-8")
-        config = json.dumps({"uiPath": ui_path, "apiPrefix": UI_API_PREFIX})
+        config = json.dumps({"uiPath": ui_path, "apiPrefix": UI_API_PREFIX, "tuiAvailable": tui_runtime_available()})
         return (
             html.replace("__LSM_UI_PATH__", ui_path)
             .replace("__LSM_UI_ASSET_VERSION__", __version__)
@@ -801,6 +801,7 @@ async def api_bootstrap(request: Request) -> Response:
                 "remote": settings.remote_enabled,
                 "hosted_chat": (settings.hosted_chat_enabled and settings.mode != "http" and settings.state_backend != "memory"),
                 "live_workspace": settings.live_workspace_enabled,
+                "tui": tui_runtime_available(),
                 "wallpaper": settings.ui_wallpaper,
             },
         }
@@ -1957,22 +1958,39 @@ def _split_tui_command(value: str, *, windows: bool | None = None) -> list[str]:
     return parts
 
 
-def resolve_tui_command() -> list[str]:
-    settings = get_settings()
-    if settings.ui_tui_command:
-        return _split_tui_command(settings.ui_tui_command)
-
+def _tui_sidecar_candidates() -> list[Path]:
     executable_dir = Path(sys.executable).resolve().parent
     repository_root = Path(__file__).resolve().parents[2]
     sidecar_name = "local-shell-mcp-tui.exe" if os.name == "nt" else "local-shell-mcp-tui"
-    sidecar_candidates = [
+    return [
         executable_dir / sidecar_name,
         Path(sys.argv[0]).resolve().parent / sidecar_name,
         repository_root / "ui" / "dist" / sidecar_name,
         Path.cwd() / "ui" / "dist" / sidecar_name,
         Path("/app/ui/dist") / sidecar_name,
     ]
-    for candidate in sidecar_candidates:
+
+
+def tui_runtime_available() -> bool:
+    command = get_settings().ui_tui_command
+    if command:
+        try:
+            return shutil.which(_split_tui_command(command)[0]) is not None
+        except ValueError:
+            return False
+    if embedded_tui_payload() is not None:
+        return True
+    if any(candidate.is_file() for candidate in _tui_sidecar_candidates()):
+        return True
+    return _tui_source_path() is not None and shutil.which("bun") is not None
+
+
+def resolve_tui_command() -> list[str]:
+    settings = get_settings()
+    if settings.ui_tui_command:
+        return _split_tui_command(settings.ui_tui_command)
+
+    for candidate in _tui_sidecar_candidates():
         if candidate.is_file():
             return [str(candidate)]
 
