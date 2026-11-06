@@ -3,3 +3,4 @@ upstream-src/
 data/
 *.pem
 searxng-settings.yml
+librechat.runtime.yaml

@@ -69,8 +69,8 @@ export LIBRECHAT_PUBLIC_URL=https://chat.example.org
 export LSM_LIBRECHAT_BRIDGE_SECRET=... # exactly the Controller bridge secret
 export JWT_SECRET=...
 export JWT_REFRESH_SECRET=...
-export CREDS_KEY=...
-export CREDS_IV=...
+export CREDS_KEY=... # 64 hexadecimal characters (32 bytes)
+export CREDS_IV=... # 32 hexadecimal characters (16 bytes)
 export MEILI_MASTER_KEY=...
 export LSM_DOCKER_NETWORK=local-shell-mcp_default
 ```
@@ -85,9 +85,19 @@ Once secrets, DNS, HTTPS and the existing Docker network are available,
 deploy with:
 
 ```sh
+python3 integrations/librechat/render_config.py
 docker compose -f integrations/librechat/compose.yaml build chat
 docker compose -f integrations/librechat/compose.yaml up -d
 ```
+
+The generated `integrations/librechat/librechat.runtime.yaml` contains the live MCP
+bridge credential and is gitignored with file mode 0600. Generate it after
+exporting `LSM_LIBRECHAT_BRIDGE_SECRET` and before starting the Compose stack;
+regenerate and restart Chat after rotating that secret. The renderer restricts
+internal endpoints to the trusted `local-shell-mcp` service (or
+`host.docker.internal` for isolated acceptance) and the `searxng` service.
+The stock LibreChat YAML loader does not reliably expand these placeholders
+during the early MCP registry initialization.
 
 The example Compose file intentionally does **not** set up HTTPS/TLS or LSM
 production credentials. Place LibreChat behind the existing HTTPS proxy, with

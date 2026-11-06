@@ -34,7 +34,7 @@ services:
       - default
       - lsm-existing
     volumes:
-      - ./librechat.yaml:/app/librechat.yaml:ro
+      - ./librechat.runtime.yaml:/app/librechat.yaml:ro
       - chat-uploads:/app/uploads
       - chat-images:/app/client/public/images
       - chat-data:/app/data
