@@ -39,6 +39,10 @@ mcpSettings:
 mcpServers:
   LSM:
     type: streamable-http
+    # LSM uses an operator-managed service credential, not MCP OAuth.
+    # Automatic OAuth probing omits this credential and misclassifies the
+    # private endpoint as an OAuth server (0 tools / reauth_required).
+    requiresOAuth: false
     url: "${LSM_CONTROLLER_INTERNAL_URL}/mcp"
     headers:
       Authorization: "Bearer ${LSM_LIBRECHAT_BRIDGE_SECRET}"
