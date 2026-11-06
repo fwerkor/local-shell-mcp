@@ -1,0 +1,175 @@
+import { useEffect, useState } from 'react';
+import { CheckCircle2, Play, RefreshCw, Send, Square, Server, Trash2, Plus, Search } from 'lucide-react';
+import { asText, read, write, type RecordValue } from './api';
+
+type View = 'terminals' | 'sessions' | 'remotes' | 'audit';
+const btn = 'rounded-lg border border-border-medium bg-surface-primary px-3 py-2 text-sm hover:bg-surface-hover disabled:opacity-40';
+const block = 'rounded-xl border border-border-light bg-surface-primary p-4';
+const row = 'w-full rounded-lg px-3 py-3 text-left text-sm transition-colors hover:bg-surface-hover';
+const keyFor = (data: RecordValue, fallback: number) =>
+  String(data.session_id || data.machine || data.id || data.job_id || fallback);
+const labelFor = (data: RecordValue) => asText(data.name || data.label || data.session_id || data.machine || data.event || data.id);
+export default function Operations({ section }: { section: View }) {
+  const [payload, setPayload] = useState<RecordValue | null>(null);
+  const [error, setError] = useState('');
+  const [selected, setSelected] = useState('');
+  const [detail, setDetail] = useState<RecordValue | null>(null);
+  const [machine, setMachine] = useState('local');
+  const [machines, setMachines] = useState<string[]>(['local']);
+  const [input, setInput] = useState('');
+  const [filter, setFilter] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [refreshId, setRefreshId] = useState(0);
+
+  const refresh = async () => {
+    setBusy(true);
+    try {
+      const path = section === 'sessions' ? 'logical-sessions' : section;
+      const data = await read<RecordValue>(path, section === 'terminals' ? { machine } : section === 'audit' ? { limit: 150, search: filter } : {});
+      setPayload(data); setError('');
+    } catch (e) { setError(String(e)); }
+    finally { setBusy(false); }
+  };
+  useEffect(() => {
+    void refresh();
+    if (section === 'terminals' || section === 'remotes') {
+      void read<{ machines?: RecordValue[] }>('machines').then(data => {
+        setMachines(['local', ...(data.machines ?? []).map(item => String(item.machine || item.name || item.id || '')).filter(v => v && v !== 'local')]);
+      }).catch(() => {});
+    }
+  }, [section, machine, refreshId]);
+  const act = async (path: string, data: RecordValue, clear = false) => {
+    setBusy(true);
+    try {
+      await write(path, data); setError('');
+      if (clear) { setSelected(''); setDetail(null); }
+      setRefreshId(n => n + 1);
+    } catch (e) { setError(String(e)); }
+    finally { setBusy(false); }
+  };
+  const inspect = async (path: string, params: Record<string, string>) => {
+    try { setDetail(await read<RecordValue>(path, params)); setError(''); }
+    catch (e) { setError(String(e)); }
+  };
+  const [terminalText, setTerminalText] = useState('');
+  useEffect(() => {
+    if (section !== 'terminals' || !selected) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const result = await read<RecordValue>('terminals/read', { machine, session_id: selected, lines: 400 });
+        if (!cancelled) setTerminalText(String(result.output ?? result.text ?? result.content ?? JSON.stringify(result, null, 2)));
+      } catch (e) { if (!cancelled) setError(String(e)); }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 2200);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [section, selected, machine]);
+
+  const terminalRows = (payload?.sessions as RecordValue[] | undefined) ?? [];
+  const sessionRows = (payload?.sessions as RecordValue[] | undefined) ?? [];
+  const remoteRows = (payload?.machines as RecordValue[] | undefined) ?? [];
+  const auditRows = (payload?.entries as RecordValue[] | undefined) ?? [];
+  return <div className="space-y-4">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div><h2 className="text-xl font-semibold">{section === 'terminals' ? 'Persistent terminals' : section === 'sessions' ? 'Logical sessions' : section === 'remotes' ? 'Remotes' : 'Audit trail'}</h2>
+        <p className="mt-1 text-sm text-text-secondary">
+          {section === 'terminals' ? 'Manage persistent shells on your machines.' : section === 'sessions' ? 'Track and control logical workloads.' : section === 'remotes' ? 'Inspect and manage connected workers.' : 'Inspect Controller events and tool calls.'}
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {section === 'terminals' && <select aria-label="Terminal machine" className={btn} value={machine} onChange={e => {setSelected(''); setMachine(e.target.value);}}>
+          {machines.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>}
+        {section === 'terminals' && <button className={btn} disabled={busy} onClick={() => void act('terminals/start', { machine, cwd: '.', name: 'Terminal' })}><Plus size={16} className="mr-1 inline" />New shell</button>}
+        {section === 'remotes' && <button className={btn} disabled={busy} onClick={() => {
+          const name = window.prompt('New remote invite name'); if (name) void act('remotes', { name });
+        }}><Plus size={16} className="mr-1 inline" />Invite</button>}
+        {section === 'sessions' && <button className={btn} disabled={busy} onClick={() => {
+          const label = window.prompt('Session label'); if (label) void act('logical-sessions/start', { label });
+        }}><Plus size={16} className="mr-1 inline" />New session</button>}
+        <button className={btn} disabled={busy} onClick={() => setRefreshId(n => n + 1)}><RefreshCw size={16} className={busy ? 'animate-spin' : ''} aria-label="Refresh" /></button>
+      </div>
+    </div>
+    {section === 'audit' && <form onSubmit={e => { e.preventDefault(); setRefreshId(n => n + 1); }} className="flex gap-2">
+      <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Search events…" aria-label="Search audit"
+        className="min-w-0 flex-1 rounded-lg border border-border-medium bg-surface-primary px-3 py-2 text-sm" />
+      <button className={btn} type="submit"><Search size={16} className="mr-1 inline" />Search</button>
+    </form>}
+    {error && <p role="alert" className="rounded-lg border border-red-400/40 p-3 text-sm text-red-500">{error}</p>}
+    <div className="grid min-h-52 gap-4 lg:grid-cols-[minmax(245px,0.8fr)_minmax(320px,1.2fr)]">
+      <section className={block + ' max-h-[70vh] overflow-auto'}>
+        <h3 className="mb-3 text-sm font-semibold">{section === 'terminals' ? 'Shell sessions' : section === 'sessions' ? 'Session history' : section === 'remotes' ? 'Workers' : 'Events'}</h3>
+        {(() => {
+          const items = section === 'terminals' ? terminalRows : section === 'sessions' ? sessionRows : section === 'remotes' ? remoteRows : auditRows;
+          if (!payload) return <p className="text-sm text-text-secondary">Loading…</p>;
+          if (items.length === 0) return <p className="text-sm text-text-secondary">Nothing to display</p>;
+          return items.map((item, i) => {
+            const id = keyFor(item, i);
+            return <button key={id + i} className={row + (selected === id ? ' bg-surface-active-alt' : '')}
+              onClick={() => {
+                setSelected(id); setDetail(item);
+                if (section === 'sessions') void inspect('logical-sessions/detail', { session_id: id });
+                if (section === 'audit') void inspect('audit/detail', { id });
+              }}>
+              <div className="flex items-center justify-between gap-2">
+                <strong className="truncate font-medium">{labelFor(item)}</strong>
+                <span className="shrink-0 text-xs text-text-secondary">{asText(item.status || item.severity || '')}</span>
+              </div>
+              <div className="mt-1 truncate text-xs text-text-secondary">
+                {asText(item.machine || item.operation || item.objective || item.updated_at || item.created_at || '')}
+              </div>
+            </button>;
+          });
+        })()}
+      </section>
+      <section className={block + ' min-w-0'}>
+        {!selected && <p className="py-8 text-center text-sm text-text-secondary">Select an item to inspect it.</p>}
+        {!!selected && section === 'terminals' && <>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3 className="truncate text-sm font-semibold">{selected}</h3>
+            <button className={btn} disabled={busy} onClick={() => { if (window.confirm('Terminate this shell?')) void act('terminals/kill', { machine, session_id: selected }, true); }}>
+              <Square size={15} className="mr-1 inline" />Stop
+            </button>
+          </div>
+          <pre className="h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black p-3 font-mono text-xs leading-5 text-green-100" aria-label="Terminal output">
+            {terminalText || 'No output yet'}
+          </pre>
+          <form className="mt-3 flex gap-2" onSubmit={e => { e.preventDefault(); if (!input) return; void act('terminals/send', { machine, session_id: selected, input_text: input, enter: true }); setInput(''); }}>
+            <input value={input} onChange={e => setInput(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-border-medium bg-surface-primary px-3 py-2 font-mono text-sm"
+              aria-label="Shell input" placeholder="Send input to shell" />
+            <button type="submit" className={btn} disabled={busy || !input}><Send size={16} /></button>
+          </form>
+        </>}
+        {!!selected && section === 'sessions' && <>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <h3 className="mr-auto text-sm font-semibold">Session detail</h3>
+            {['finish', 'cancel'].map(action => <button key={action} className={btn} disabled={busy}
+              onClick={() => { if (window.confirm(action + ' session?')) void act('logical-sessions/' + action, { session_id: selected }); }}>
+              {action === 'finish' ? <CheckCircle2 size={15} className="mr-1 inline" /> : <Square size={15} className="mr-1 inline" />}{action}
+            </button>)}
+          </div>
+          <pre className="max-h-[58vh] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-surface-primary-alt p-3 font-mono text-xs">{JSON.stringify(detail, null, 2)}</pre>
+        </>}
+        {!!selected && section === 'remotes' && <>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold">{labelFor(detail || {})}</h3>
+            <div className="flex gap-2">
+              <button className={btn} disabled={busy} onClick={() => {
+                const name = window.prompt('Rename worker'); if (name) void act('remotes/rename', { machine: selected, new_name: name });
+              }}>Rename</button>
+              <button className={btn} disabled={busy} onClick={() => { if (window.confirm('Revoke this worker?')) void act('remotes/revoke', { machine: selected }, true); }}>
+                <Trash2 size={15} />
+              </button>
+            </div>
+          </div>
+          <pre className="max-h-[58vh] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-surface-primary-alt p-3 font-mono text-xs">{JSON.stringify(detail, null, 2)}</pre>
+        </>}
+        {!!selected && section === 'audit' && <>
+          <h3 className="mb-3 text-sm font-semibold">Event detail</h3>
+          <pre className="max-h-[58vh] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-surface-primary-alt p-3 font-mono text-xs">{JSON.stringify(detail, null, 2)}</pre>
+        </>}
+      </section>
+    </div>
+  </div>;
+}

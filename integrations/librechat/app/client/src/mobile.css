@@ -1,0 +1,152 @@
+.hover-button.active {
+  display: block;
+  visibility: visible;
+}
+
+.nav {
+  position: fixed;
+  z-index: 110;
+  top: 0;
+
+  /* max-width: 260px; */
+
+  bottom: 0;
+  opacity: 0;
+}
+
+.nav.active {
+  position: relative;
+  left: 0;
+  opacity: 1;
+}
+
+@media (max-width: 767px) {
+  .nav {
+    width: calc(100% - 10px)  ;
+    transition: all 0.15s;
+  }
+
+  .nav.active {
+    position: fixed;
+  }
+}
+
+@media (max-width: 1024px) {
+  .hover-button {
+    display: block;
+    visibility: visible;
+  }
+}
+
+.hide-scrollbar {
+  /* Hide scrollbar for Chrome, Safari, and Opera */
+  scrollbar-width: none; /* For Firefox */
+  -ms-overflow-style: none; /* For Internet Explorer and Edge */
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none; /* For WebKit browsers */
+}
+
+@keyframes tuning {
+  0% { transform: rotate(30deg); }
+  25% { transform: rotate(110deg); }
+  50% { transform: rotate(-40deg); }
+  75% { transform: rotate(80deg) }
+  100% { transform: rotate(30deg) }
+}
+
+.rotate {
+  animation: tuning 2.1s 1;
+}
+
+.azure-bg-color {
+  background: linear-gradient(0.375turn, #61bde2, #4389d0);
+}
+
+@keyframes slowPulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.slow-pulse {
+  animation: slowPulse 2.5s ease-in-out infinite;
+}
+
+.scrollbar-gutter-stable {
+  scrollbar-gutter: stable;
+}
+
+/* Reserves the same band a `scrollbar-gutter: stable` container holds back, so
+   a centered column lines up with the scrolling message column. Use this, not
+   the gutter itself, wherever the column has content painted outside its box:
+   `scrollbar-gutter` only applies to scroll containers, and a scroll container
+   clips (the composer's in-flight steer overlay, a button's focus ring).
+
+   `useScrollbarGutter` measures the band the message column really reserves and
+   publishes it here. The token is only the fallback for before that first
+   measurement: it matches the `::-webkit-scrollbar` width, which Firefox
+   ignores and an overlay scrollbar drops to nothing. */
+/* Below `sm` the composer runs edge to edge (it is squared off at the bottom and
+   carries no horizontal padding there), so holding the band back would leave a
+   dead strip down its right side instead of lining anything up. The message
+   column it aligns to only shares a centre from `sm` up. */
+@media (min-width: 640px) {
+  .scrollbar-gutter-spacer {
+    padding-inline-end: var(--message-scrollbar-gutter, var(--scrollbar-size));
+  }
+}
+
+/* Base wrapper for both preview and editor */
+.sp-wrapper {
+  @apply flex h-full w-full grow flex-col;
+}
+
+/* Stack containers (sp-preview and sp-editor) */
+.sp-preview,
+.sp-editor {
+  @apply flex h-full w-full grow flex-col;
+}
+
+/* Inner containers */
+.sp-preview-container,
+.sp-code-editor {
+  @apply flex h-full w-full grow flex-col;
+}
+
+/* Content elements */
+.sp-preview-iframe {
+  @apply h-full w-full grow;
+}
+
+.sp-cm {
+  @apply h-full w-full grow;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-3px); }
+  20%, 40%, 60%, 80% { transform: translateX(3px); }
+}
+
+.shake {
+  animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+}
+
+.cm-content:focus {
+  outline: none !important;
+}
+
+p.whitespace-pre-wrap a, li a {
+  color: #0066cc;
+  text-decoration: underline;
+  font-weight: bold;
+}
+
+.dark p.whitespace-pre-wrap a, .dark li a {
+  color: #52a0ff;
+}

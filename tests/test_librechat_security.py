@@ -96,6 +96,10 @@ def test_bridge_api_policy_and_error_paths():
     assert client.post("/api/ui/librechat/identity", json={"user_id": user_id, "ticket": "invalid"}, headers=headers).status_code == 400
     assert client.post("/api/ui/librechat/identity", json={"user_id": user_id, "ticket": token}, headers=headers).status_code == 200
     assert client.post("/api/ui/librechat/identity", json={"user_id": user_id, "ticket": token}, headers=headers).status_code == 200
+    session = "/api/ui/librechat/session"
+    assert client.post(session, json={"user_id": user_id}, headers=headers).status_code == 200
+    assert client.post(session, json={"user_id": user_id}).status_code == 403
+    assert client.post(session, json={"user_id": "d" * 24}, headers=headers).status_code == 401
     uri = "/api/ui/librechat/policy"
     body = {"user_id": user_id, "conversation_id": "chat-1", "lsm": False}
     assert client.post(uri, json=body).status_code == 403

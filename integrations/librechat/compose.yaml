@@ -1,14 +1,16 @@
-# Experimental embedded-chat deployment. Place next to a prepared upstream-src.
+# Unified LSM WebUI, built exclusively from the vendored LibreChat source.
 # Expose LibreChat through an HTTPS reverse proxy on the SAME SITE as LSM.
 services:
   chat:
     build:
-      context: ./upstream-src
+      context: ./app
       dockerfile: Dockerfile
       target: node
     image: lsm-librechat:0.8.8
     restart: unless-stopped
     environment:
+      APP_TITLE: Local Shell MCP
+      LSM_SINGLE_USER: 'true'
       HOST: 0.0.0.0
       PORT: "3080"
       MONGO_URI: mongodb://mongodb:27017/LibreChat

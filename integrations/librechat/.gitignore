@@ -1,4 +1,3 @@
-upstream-src/
 .env
 data/
 *.pem

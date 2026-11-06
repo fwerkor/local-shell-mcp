@@ -118,9 +118,8 @@ def register_identity(librechat_id: str, ticket: str) -> dict:
     }
     store = get_state_store()
     with store.lock(key):
-        existing = store.read_bytes(key)
-        if existing is not None and json.loads(existing)["subject"] != entry["subject"]:
-            raise PermissionError("LibreChat identity belongs to a different LSM user")
+        # The one internal LibreChat account follows the active LSM login.
+        # A valid signed ticket may replace its prior subject/grant.
         store.write_bytes(key, json.dumps(entry, separators=(",", ":")).encode("utf-8"))
     return entry
 

@@ -1,92 +1,129 @@
-# LibreChat as the LSM Chat subsystem (experimental)
+# Local Shell MCP unified WebUI (vendored LibreChat)
 
-This integration embeds a **pinned, patched LibreChat v0.8.8** instead of extending
-the handwritten Hosted Chat UI. The old implementation remains a fallback until
-a full deployment and auth/tool end-to-end acceptance test is completed.
+The **main LSM workspace** uses a directly vendored, modified LibreChat v0.8.8
+frontend and backend at [`app/`](./app/). LSM Controller pages are React routes
+within the same LibreChat shell, sidebar, navigation and theme. The LSM logo
+and favicon are used for the workspace. The previous LSM WebUI is retained
+only for authentication/fallback and for Controller deployments without chat.
 
-## Ownership and capabilities
+**No clone of LibreChat is required or performed by build, test or startup.**
+`compose.yaml` builds exclusively from `./app`; all vendor changes are ordinary,
+reviewable source files. Installing third-party package dependencies still
+requires access to the configured package registries unless cached or mirrored.
 
-| Subsystem | Owner |
+## Source and licensing
+
+The initial upstream base is LibreChat **v0.8.8**, commit
+`e8f3be08623663d4ad7f7241e693c94469b63bb0`. Source and attribution are
+retained in `app/LICENSE` and `app/`. See [VENDORED.md](./VENDORED.md)
+for upgrade expectations. There are **no submodules, online prepare scripts or
+runtime patch-appliers**.
+
+The entire application source is intentionally version-controlled in this PR.
+Dependency directories, generated assets, credentials and backend databases
+are excluded. This does **not** make the optional chat runtime part of LSM's
+standalone Python/binary or minimal Docker Controller image.
+
+## Architecture
+
+| Concern | Owner |
 | --- | --- |
-| Login, authenticated subject, original OAuth scopes | LSM Controller |
-| LSM tool execution, nested MCP gateway, worker permissions, audit | LSM |
-| Conversation/project/message/archive storage | LibreChat MongoDB on the server |
-| Search index | server-side Meilisearch |
-| Model profiles, model-specific reasoning, human-in-the-loop Ask User | LibreChat |
-| Subagents and agent handoff | LibreChat Agent Runtime |
-| Web search and page retrieval | LibreChat web tool using SearXNG |
-| Chat attachments | LSM Controller's **local** workspace, path in composer |
-| Per-conversation web/LSM/memory toggles | LibreChat MongoDB; LSM MCP tool veto replicated in LSM server state |
+| Single-user LSM login, original permission scopes, tools, workers, audit | LSM Controller |
+| Unified navigation, chat UI and Controller React pages | Vendored LibreChat app |
+| Chat, messages, projects, archives, settings | LibreChat MongoDB (server-side) |
+| Chat and project search | Meilisearch |
+| Web search | LibreChat with SearXNG |
+| LSM tool execution | Nested LSM MCP gateway |
+| Controller metrics, file/terminal/GUI/remote/session operations | Existing LSM Controller APIs |
+| Chat attachment storage | Controller local workspace |
 
-There is exactly one configured external MCP server, **LSM**. It points to the
-Controller's existing nested MCP service, without exposing LibreChat's MCP
-server editor/marketplace. This configuration disables the separate code
-runner, file-search chat tool, Skills and Artifacts capabilities; it preserves
-the native **Ask User**, **subagents**, and **handoff** facilities.
+**Single-user boundary:** LSM owns authentication and the chat backend has one fixed
+internal workspace account (`workspace@local-shell-mcp.invalid`). Independent
+LibreChat registration, passwords, password reset, third-party sign-in, 2FA,
+admin and account-deletion flows are disabled or removed from navigation.
+The backend retains a lightweight private JWT session and the MongoDB user
+foreign key required by LibreChat's chat/project data model; these are not a
+second user-management system. Chat refresh checks the current LSM grant
+through the private Controller API and refuses expired grants.
 
-**Permission invariant:** LSM tools ON implies web search ON. Either can be
-turned off; web search may stay ON with LSM tools OFF. Memory can independently
-be turned off; the agent request stops loading/injecting long-term memories and
-gates its inline memory write/delete tools. Ordinary chat transcript remains
-available.
+**Controller routes:** `/control/overview`, `/control/files`,
+`/control/terminals`, `/control/desktop`, `/control/sessions`,
+`/control/remotes`, `/control/audit`. The workspace homepage is
+`/control/overview`; chat remains at `/c/new`. Mobile and desktop share
+LibreChat's responsive navigation and light/dark theme tokens.
 
-## Prepare the pinned upstream
+The LSM WebUI's ordinary `/ui` URL launches the new workspace when the
+Controller advertises LibreChat. A short-lived, one-use signed ticket
+authenticates the user to the chat backend. New deployments should configure
+the chat and Controller HTTPS origins on the **same site**, with the
+Controller origin added to LibreChat's CSP frame ancestors. The old Hosted Chat
+screen is a fallback only when LibreChat is unconfigured.
 
-From the repository root:
+## Authentication and API boundary
 
-```sh
-python3 integrations/librechat/prepare.py
+LibreChat's backend exposes `/api/lsm/controller/*`. It validates the
+LibreChat JWT session, accepts **only mapped LSM users**, allowlists supported
+Controller operations and forwards them via its private Docker network.
+The bridge carries an administrator-managed secret and the fixed internal
+LibreChat account ID; the LSM Controller reconstructs the active single-user
+LSM identity and authorization scopes **for every request**, enforcing its
+existing per-operation checks. Anonymous web requests and arbitrary forwarded
+headers cannot impersonate an LSM user. Controller credentials are never sent
+to the browser or stored in LibreChat user profiles. Server-side requests
+do not follow redirects.
+
+Read operations and mutating operations use the same Controller API and audit
+hooks as the original WebUI. Requests for shell execution, remote access or
+file modification still require their original scopes. The terminal and GUI
+components do not bypass these authorization checks.
+
+Per-conversation web/LSM/memory toggles are stored in LibreChat's MongoDB.
+LSM MCP calls and LSM per-chat tool denials are enforced again at the
+Controller boundary. A chat attachment is an authenticated, streaming,
+size-limited upload (maximum 32 MiB) to:
+
+```text
+<LSM_WORKSPACE_ROOT>/.lsm-chat-uploads/<owner hash>/<UUID>-<filename>
 ```
 
-This clones the exact upstream commit
-`e8f3be08623663d4ad7f7241e693c94469b63bb0` into the gitignored
-`integrations/librechat/upstream-src` and applies only the reviewed patches.
-It also generates a private random SearXNG secret (file mode 0600). Re-running
-`prepare.py` verifies the commit and is idempotent.
+Its absolute path is inserted into the composer for inspection through
+the LSM tools. Uploading does not grant new read or tool permissions.
 
-The integration patch set is intentionally separate from LibreChat's source.
-When updating LibreChat, explicitly re-pin, rebase the patches, and rerun
-the UI, authentication and tool-policy tests.
+LibreChat's original file-search, code runner, skill marketplace and
+duplicate external MCP editor are disabled. The supported MCP server is LSM;
+web search and LSM tools are enabled by default. Ask User, delegated agents
+and handoff are retained.
 
-## Deployment requirements
+## Configuration
 
-LSM retains its existing UI login. Configure these values in the **LSM
-Controller environment** (not in the user's local browser):
+Set on the **LSM Controller**, not in a browser:
 
-- `LOCAL_SHELL_MCP_LIBRECHAT_URL=https://chat.example.org` — public LibreChat
-  origin, with HTTPS and the same *site* as the Controller (avoid browsers
-  blocking third-party cookies inside the iframe).
-- `LOCAL_SHELL_MCP_LIBRECHAT_BRIDGE_SECRET=<random 32+ byte secret>` — shared
-  with the chat service as `LSM_LIBRECHAT_BRIDGE_SECRET`.
-- Persistent LSM state backend: `file` or `redis`; never `memory`.
-- Docker MCP Host validation keeps DNS rebinding protection on, allowing only
-  `local-shell-mcp:<Controller port>` in addition to existing trusted hosts.
-  Isolated tests can opt into `LOCAL_SHELL_MCP_LIBRECHAT_INTERNAL_HOST=host.docker.internal`
-  on the **test** Controller; never enable that override for the production service.
+- `LOCAL_SHELL_MCP_LIBRECHAT_URL=https://chat.example.org`
+- `LOCAL_SHELL_MCP_LIBRECHAT_BRIDGE_SECRET=<32+ byte random secret>`
+- A persistent `file` or `redis` state backend; `memory` is not supported.
 
-Set these values for the optional Chat Compose stack (use an encrypted secrets
-store; do not commit its `.env`):
+Set for the **optional LibreChat Compose stack** (use secret storage, never
+commit an `.env`):
 
 ```sh
 export LSM_PUBLIC_ORIGIN=https://lsm.example.org
 export LIBRECHAT_PUBLIC_URL=https://chat.example.org
-export LSM_LIBRECHAT_BRIDGE_SECRET=... # exactly the Controller bridge secret
+export LSM_LIBRECHAT_BRIDGE_SECRET=... # same as Controller secret
 export JWT_SECRET=...
 export JWT_REFRESH_SECRET=...
-export CREDS_KEY=... # 64 hexadecimal characters (32 bytes)
-export CREDS_IV=... # 32 hexadecimal characters (16 bytes)
+export CREDS_KEY=...      # 64 hexadecimal characters
+export CREDS_IV=...       # 32 hexadecimal characters
 export MEILI_MASTER_KEY=...
 export LSM_DOCKER_NETWORK=local-shell-mcp_default
 ```
 
-`LSM_DOCKER_NETWORK` is the existing network containing the LSM
-`local-shell-mcp` service, reachable as
-`http://local-shell-mcp:8765`. Do not expose the controller's internal MCP
-port publicly or substitute an untrusted network for the private Docker
-network.
+The Docker network must contain the private Controller service
+`http://local-shell-mcp:8765`. Neither the Controller's internal MCP
+port nor the LibreChat API and database containers should be made
+public. The example Compose stack only binds chat to
+`127.0.0.1:3080` and requires an external HTTPS reverse proxy.
 
-Once secrets, DNS, HTTPS and the existing Docker network are available,
-deploy with:
+Build and launch directly from the **checked-in** source:
 
 ```sh
 python3 integrations/librechat/render_config.py
@@ -94,53 +131,28 @@ docker compose -f integrations/librechat/compose.yaml build chat
 docker compose -f integrations/librechat/compose.yaml up -d
 ```
 
-The generated `integrations/librechat/librechat.runtime.yaml` contains the live MCP
-bridge credential and is gitignored with file mode 0600. Generate it after
-exporting `LSM_LIBRECHAT_BRIDGE_SECRET` and before starting the Compose stack;
-regenerate and restart Chat after rotating that secret. The renderer restricts
-internal endpoints to the trusted `local-shell-mcp` service (or
-`host.docker.internal` for isolated acceptance) and the `searxng` service.
-The stock LibreChat MCP registry does not reliably expand embedded URL and
-Authorization placeholders during early initialization. SearXNG deliberately
-retains its environment-variable reference, as required by LibreChat web search.
+The generated `librechat.runtime.yaml` contains the bridge secret,
+is mode 0600 and is gitignored; regenerate it after secret rotation.
+The proxy must send the external HTTPS host correctly and allow the
+Controller origin as a **narrow** CSP frame ancestor. Internal names
+are restricted by the config renderer; never disable DNS rebinding
+protection to make the integration work.
 
-The example Compose file intentionally does **not** set up HTTPS/TLS or LSM
-production credentials. Place LibreChat behind the existing HTTPS proxy, with
-`X_FRAME_OPTIONS=off` and a narrow `CSP_FRAME_ANCESTORS` allowlist containing
-only the Controller origin. The API and DB containers must remain private.
+## Validation and rollout
 
-Opening **Chat** in LSM WebUI first authenticates against LSM, exchanges a
-short-lived signed ticket (never placed in a URL) for LibreChat's session,
-then embeds the LibreChat client. A conversation's LSM MCP tools run under
-a mapped, expiring LSM principal; disabled LSM tools are rejected again at
-the Controller's `tools/call` boundary.
+Relevant automated checks cover LSM identity and expiry, Controller
+API authorization, chat permissions, local attachments, the API proxy
+allowlist and the vendored source layout. The vendored client and
+server must also pass build and HTTPS browser smoke checks before
+production rollout.
 
-## Uploaded files
+The vendored source excludes upstream developer automation, e2e suites,
+example deployment material and most unrelated upstream tests; source size
+was reduced from approximately 78 MiB to about 42 MiB. The chat Docker image
+uses a separate runtime stage without the build-time Python/uv tooling.
 
-The native LibreChat chat composer uses **Attach to LSM** rather than the
-separate LibreChat file uploader. Each file is written by an authenticated,
-size-limited streaming upload to:
-
-```text
-<LSM_WORKSPACE_ROOT>/.lsm-chat-uploads/<owner hash>/<UUID>-<original filename>
-```
-
-The absolute path is inserted into the current composer, where an LSM tool
-can inspect it. A file upload does *not* grant any additional tool permission:
-if the conversation disables LSM tools, the model cannot read the file through
-them. Files are on the Controller's **local machine/container**, not on the
-mobile browser, the remote worker, or the LibreChat image layer. Files need
-normal LSM workspace backup/retention policy.
-
-## Validation and rollout boundaries
-
-Local checks cover ticket signing, stable user mappings, authorization scopes,
-local upload integrity, forbidden unauthorized service calls, per-conversation
-tool denial, WebUI TypeScript and a patched LibreChat frontend build.
-
-**Not yet production-validated:** true multi-container login and refresh-cookie
-flow, end-to-end LSM MCP handshake inside a LibreChat agent turn, OAuth
-revocation/timeout UX, network-search provider reachability, project memory
-isolation and database migrations. No production deployment or automatic
-removal of the old Hosted Chat is performed by this patch. Integration remains
-explicitly **opt-in** until these acceptance tests pass.
+The optional chat stack requires MongoDB, Meilisearch and SearXNG.
+The Controller's standalone binary and light Docker packaging do not
+include those services, or a second full development environment.
+Production deployment and data migrations are deliberate operations;
+this source change alone does not deploy to production.

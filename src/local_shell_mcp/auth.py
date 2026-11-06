@@ -261,14 +261,20 @@ def _verify_oauth(request: Request, settings: Settings) -> Principal:
 def verify_request(request: Request) -> Principal:
     settings = get_settings()
     path = str(request.url.path)
-    if path in {"/api/ui/librechat/identity", "/api/ui/librechat/policy"}:
+    if path in {"/api/ui/librechat/identity", "/api/ui/librechat/policy", "/api/ui/librechat/session"}:
         from .librechat_integration import is_bridge_service
 
         if is_bridge_service(request):
             return Principal(
                 email=None, subject="librechat-bridge-service", claims={"auth": "librechat-service"}
             )
-    if path == "/mcp" and request.headers.get("x-lsm-chat-user-id"):
+    # LibreChat routes all Controller API requests through its authenticated backend.
+    # The bridge header alone is never sufficient: validate the service secret and
+    # resolve the previously registered, expiring LSM principal on every request.
+    chat_user = request.headers.get("x-lsm-chat-user-id")
+    if chat_user and (path == "/mcp" or (
+        path.startswith("/api/ui/") and (path == "/api/ui/librechat/upload" or not path.startswith("/api/ui/librechat/"))
+    )):
         from .librechat_integration import is_bridge_service, principal_for_chat_user
 
         if not is_bridge_service(request):

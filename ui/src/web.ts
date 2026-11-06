@@ -468,9 +468,9 @@ async function refreshAll(manual = false): Promise<void> {
     ])
     bootstrapData = bootstrap
     document.querySelectorAll<HTMLElement>('[data-interface-mode="chat"]').forEach((entry) => {
-      entry.hidden = bootstrap.features?.hosted_chat !== true
+      entry.hidden = bootstrap.features?.hosted_chat !== true && bootstrap.features?.librechat !== true
     })
-    if (activeView === "hosted-chat" && bootstrap.features?.hosted_chat !== true) {
+    if (activeView === "hosted-chat" && bootstrap.features?.hosted_chat !== true && bootstrap.features?.librechat !== true) {
       showView("overview")
     }
     dashboardData = dashboard
@@ -941,7 +941,7 @@ async function boot(): Promise<void> {
     authenticated = true
     authGate.hidden = true
     appShell.hidden = false
-    const initialView = callbackView || viewFromHash(location.hash) || "overview"
+    const initialView = callbackView || viewFromHash(location.hash) || (bootstrapData?.features?.librechat ? "hosted-chat" : "overview")
     showView(initialView, { syncHash: callbackView !== "console", replaceHash: true })
     await refreshAll(false)
     startRefreshTimer()

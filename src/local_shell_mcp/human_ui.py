@@ -3289,6 +3289,22 @@ async def api_librechat_identity(request: Request) -> Response:
         return _json_error(exc)
 
 
+async def api_librechat_session(request: Request) -> Response:
+    """Allow the single LibreChat account to refresh only while its LSM grant is valid."""
+    from .librechat_integration import is_bridge_service, principal_for_chat_user
+
+    if not is_bridge_service(request):
+        return JSONResponse({"error": "LibreChat service authentication required"}, status_code=403)
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("Expected JSON object")
+        principal_for_chat_user(str(payload.get("user_id") or ""))
+        return _json_ok({"valid": True})
+    except (ValueError, PermissionError) as exc:
+        return _json_error(exc, status_code=401)
+
+
 async def api_librechat_ticket(request: Request) -> Response:
     """Exchange the existing authenticated LSM principal for a one-use chat login ticket."""
     try:
@@ -3727,6 +3743,7 @@ def ui_routes() -> list[Any]:
         Route(UI_API_PREFIX + "/librechat/upload", api_librechat_upload, methods=["POST"]),
         Route(UI_API_PREFIX + "/librechat/policy", api_librechat_policy, methods=["POST"]),
         Route(UI_API_PREFIX + "/librechat/identity", api_librechat_identity, methods=["POST"]),
+        Route(UI_API_PREFIX + "/librechat/session", api_librechat_session, methods=["POST"]),
         Route(UI_API_PREFIX + "/librechat/ticket", api_librechat_ticket, methods=["POST"]),
         Route(UI_API_PREFIX + "/hosted-chat/{action}", api_hosted_chat, methods=["GET", "POST"]),
         Route(UI_API_PREFIX + "/bootstrap", api_bootstrap, methods=["GET"]),

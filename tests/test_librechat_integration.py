@@ -80,10 +80,12 @@ def test_server_registration_and_scope_mapping(tmp_path, monkeypatch):
     assert registered["scopes"] == "shell:read"
     assert registered["auth_mode"] == "oauth"
     assert registered["grant_until"] > 0
+    # LSM is single-user: a fresh signed login renews the same internal chat
+    # identity rather than creating another LibreChat account.
     second = issue_chat_ticket("user-b", scopes="shell:execute")
-    with pytest.raises(PermissionError):
-        register_identity("a" * 24, second["ticket"])
-    assert principal_for_chat_user("a" * 24)["subject"] == "user-a"
+    register_identity("a" * 24, second["ticket"])
+    assert principal_for_chat_user("a" * 24)["subject"] == "user-b"
+    assert principal_for_chat_user("a" * 24)["scopes"] == "shell:execute"
     with pytest.raises(ValueError):
         principal_for_chat_user("../../etc")
     with pytest.raises(PermissionError):
