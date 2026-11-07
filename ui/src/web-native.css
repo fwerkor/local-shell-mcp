@@ -736,3 +736,30 @@ button.summary-card { cursor: pointer; }
 @media (max-width: 1100px) and (pointer: coarse) and (hover: none) {
   .terminal-touchbar { display: grid; }
 }
+
+
+/* The LSM entry only displays a short-lived handoff to the full workspace. */
+body:has(.lsm-librechat) .sidebar,
+body:has(.lsm-librechat) .topbar,
+body:has(.lsm-librechat) .page-footer { display:none; }
+body:has(.lsm-librechat) .main-content {
+  height:100dvh; min-height:0; margin:0; overflow:hidden;
+}
+body:has(.lsm-librechat) #view-root {
+  display:flex; height:100%; padding:0; min-height:0;
+}
+body:has(.lsm-librechat) #view-root > .controller-page {
+  display:flex; flex:1 1 auto; min-height:0; min-width:0;
+}
+.lsm-librechat { display:flex; position:relative; flex:1 1 auto; min-height:0; min-width:0; }
+.lsm-librechat-loading {
+  position:absolute; z-index:2; inset:0; display:grid; place-items:center;
+  background:var(--surface, #fff); color:var(--text, #222);
+}
+.lsm-librechat-loading[hidden] { display:none; }
+.lsm-librechat [data-chat-reconnect] {
+  position:absolute; z-index:3; inset:auto 20px 20px auto; padding:10px 16px;
+  border:1px solid var(--line, #ccc); border-radius:8px;
+  background:var(--surface, #fff); color:var(--text, #222);
+}
+.lsm-librechat [data-chat-reconnect][hidden] { display:none; }

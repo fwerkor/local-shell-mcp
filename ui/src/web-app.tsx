@@ -48,7 +48,7 @@ export function ApplicationShell() {
         </div>
         <button className="hosted-chat-entry" type="button" data-interface-mode="chat" aria-pressed="false" hidden>
           <NavigationIcon view="hosted-chat" />
-          <span><strong>Hosted Chat</strong><small>BYOK · MCP Apps</small></span>
+          <span><strong>Workspace</strong><small>Chat · Controller</small></span>
         </button>
         <div className="navigation-label">Workspace</div>
         <nav className="primary-nav p-side-navigation" aria-label="Primary navigation">

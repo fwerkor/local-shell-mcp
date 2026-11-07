@@ -1,30 +1,29 @@
-<!-- i18n-source-sha256: 8b4e2e48e58e65721bf5ebf9f7b1d8aedf34d62d5a7948d36d6b9102ee1f6cc3 -->
+<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
 # Выбор runtime и модель развёртывания
 
-В `local-shell-mcp` есть два независимых решения:
+`local-shell-mcp` имеет два взаимодополняющих решения:
 
 1. **Runtime**: как запускается процесс сервера и какой workspace он контролирует.
-2. **Client connection**: как ChatGPT или другой MCP client достигает этого сервера.
+2. **Интерфейс**: используйте дополнительный [unified web workspace](../getting-started/web-workspace.md) или подключите внешний клиент MCP, например Gemini или ChatGPT.
 
-Не рассматривайте ChatGPT как способ развёртывания. ChatGPT — client. Docker, VS Code extension, release binaries, установки Python и stdio mode — варианты runtime.
+Рекомендуемый ежедневный интерфейс — это автономное веб-рабочее пространство (чат, проекты и страницы управления LSM). Он развертывается отдельно от контроллера. Docker, расширение VS Code, двоичные файлы выпуска, установки Python и режим stdio — это способы запуска контроллера; внешние чат-приложения остаются дополнительными клиентами.
 
 ```text
 Runtime layer                      Exposure layer                 Client layer
 -------------------------------    ---------------------------    ----------------------
-Docker Compose                     local HTTP only                ChatGPT custom MCP
+Docker Создать локальное только HTTP Единое веб-рабочее пространство
 VS Code extension                  HTTPS reverse proxy/tunnel     Generic MCP client
 Standalone binary                  stdio process pipe             VS Code extension UI
 pipx / source checkout             remote-worker outbound join    REST-style diagnostics
 ```
 
-Типичная публичная схема:
+Обычная самостоятельная установка:
 
 ```text
-ChatGPT
-  -> https://mcp.example.com/mcp
-  -> reverse proxy or tunnel
-  -> local-shell-mcp runtime
-  -> controlled workspace
+Браузер -> https://chat.example.com (единое веб-рабочее пространство)
+        -> аутентифицированный контроллер local-shell-mcp
+        -> контролируемое рабочее пространство и исходящие работники
+Дополнительный внешний клиент -> https://mcp.example.com/mcp
 ```
 
 Локальная схема MCP client может быть проще:
@@ -37,10 +36,10 @@ Local MCP client
 
 ## Матрица выбора runtime
 
-| Runtime | Лучше всего для | Граница изоляции | Источник toolchain | Публичный доступ ChatGPT | Страница |
+| Время выполнения | Лучшее для | Граница изоляции | Источник инструментальной цепочки | Внешний доступ MCP | Страница |
 |---|---|---|---|---|---|
-| Docker Compose | Большинство coding-agent нагрузок и воспроизводимые workspaces | Container | Project image содержит широкий набор инструментов | Добавить HTTPS proxy или tunnel | [Docker Compose](../installation/docker.md) |
-| Docker Compose + tunnel sidecar | Публичное развёртывание одним stack с Cloudflare Tunnel | Container | Project image | Встроено в Compose `tunnel` profile | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| Докер Составление | Большинство рабочих нагрузок агента кодирования и повторяемые рабочие пространства | Контейнер | Образ экономичного контроллера; устанавливать наборы инструментов для конкретных задач отдельно | Добавьте HTTPS-прокси или туннель | [Docker Compose](../installation/docker.md) |
+| Docker Compose + туннельная коляска | Развертывание общедоступного контроллера с помощью Cloudflare Tunnel | Контейнер | Изображение проекта | Встроен в профиль Compose `tunnel`. | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Запуск/остановка server из editor workspace | Обычно host process | Host tools плюс настроенный executable | Добавить внешний HTTPS tunnel/proxy для ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Hosts/VM, где Docker недоступен | Host or VM | Host tools плюс настроенный executable | Добавить HTTPS proxy или tunnel | [Standalone binary](../installation/binary.md) |
 | `pipx` / source install | Python-native использование, debugging, development | Host virtualenv or VM | Python package плюс host tools | Добавить HTTPS proxy или tunnel | [Python install](../installation/python.md) |
@@ -48,14 +47,16 @@ Local MCP client
 
 ## Матрица подключения client
 
-| Путь client | Нужен публичный HTTPS | Использует `/mcp` | Нужен OAuth | Типичный runtime |
+| Интерфейс | Требуется общедоступный HTTPS. | Использует `/mcp` | Требуется OAuth | Типичное время выполнения |
 |---|---:|---:|---:|---|
+| Единое веб-рабочее пространство LSM | Да для удаленного доступа; также возможен локальный прокси | Внутренне | вход в ЛСМ | Контроллер плюс отдельный веб-стек |
+| Gemini Spark / Пользовательские приложения | Да | Да | Да, для публичного использования | Любой HTTP-контроллер |
 | ChatGPT custom MCP connector | Да | Да | Да для публичного использования | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | Нет | Нет | Нет | `local-shell-mcp --mode stdio` |
 | Generic HTTP MCP client | Обычно нет для localhost; да через сети | Да | Рекомендуется вне localhost | Any HTTP runtime |
 | VS Code extension helper flow | Только если нужен ChatGPT | Да при копировании ChatGPT URL | Рекомендуется для ChatGPT | VS Code-launched runtime |
 
-См. [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md), [network connectivity](../clients/connectivity.md).
+См. [unified web workspace](../getting-started/web-workspace.md), [Gemini Spark](../getting-started/gemini-spark.md), [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md) и [network connectivity](../clients/connectivity.md).
 
 ## Что контролирует каждый runtime
 
@@ -75,15 +76,15 @@ Local MCP client
 |---|---|---|---|
 | Где выполняются команды? | В container | Обычно в host workspace | В process environment host или VM |
 | Default workspace? | Mounted `/workspace` | Текущая папка VS Code или настроенный path | `LOCAL_SHELL_MCP_WORKSPACE_ROOT` |
-| Compilers/browsers предустановлены? | Да, широко | Только установленные на host | Только установленные на host |
+| Предустановлены ли компиляторы и браузеры? | Нет; установить то, что нужно для задачи | Только если установлено на хосте | Только если установлено на хосте |
 | Легко сбросить? | Пересоздать container и workspace volume | Зависит от workspace | Зависит от host/VM |
 | Подходит для произвольной установки пакетов? | Да, если disposable | Рискованнее на host | Рискованнее вне VM |
 
 ## Рекомендуемый выбор
 
-Сначала используйте **Docker Compose**, если нет причины поступить иначе. Он даёт самую ясную safety boundary и самый полный стандартный toolchain.
+Сначала используйте **Docker Compose**, если у вас нет причин не делать этого. Это дает четкую границу безопасности, не требуя большой предустановленной цепочки инструментов разработки.
 
-Используйте **VS Code extension**, когда workflow начинается в editor и нужен local launcher. Это всё ещё runtime. Сам по себе он не делает server доступным ChatGPT; для ChatGPT web/app добавьте tunnel или reverse proxy.
+Используйте **расширение VS Code**, если рабочий процесс запускается из редактора и вам нужен локальный модуль запуска. Это все еще время выполнения. Удаленным веб-клиентам необходим доступный HTTPS-прокси или туннель.
 
 Используйте **standalone binary**, если Docker недоступен, но VM, container host или dedicated user account уже обеспечивают boundary.
 
@@ -93,7 +94,7 @@ Local MCP client
 
 ## Правило публичного endpoint
 
-Для HTTP MCP clients вроде ChatGPT MCP endpoint:
+Для внешних клиентов HTTP MCP, таких как Gemini и ChatGPT, конечная точка MCP:
 
 ```text
 https://your-public-host.example.com/mcp
@@ -117,6 +118,8 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 
 ## Страницы client
 
+- [Unified web workspace](../getting-started/web-workspace.md)
+- [Gemini Spark / Custom Apps](../getting-started/gemini-spark.md)
 - [ChatGPT connector](../getting-started/chatgpt-connector.md)
 - [Generic MCP clients](../clients/generic-mcp.md)
 - [Public HTTPS exposure](../clients/connectivity.md)

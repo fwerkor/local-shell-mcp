@@ -1,14 +1,14 @@
-<!-- i18n-source-sha256: b999ae6985930651e74b974b12109889360442811d6eeb306e6fa39754dbc173 -->
+<!-- i18n-source-sha256: a66d491558f07c419c8b5958d36c47cd90b081fc1c81f015bb62398cfd573e55 -->
 <div class="hero-shell" markdown>
-<span class="hero-eyebrow">ChatGPT 対応 MCP control plane</span>
+<span class="hero-eyebrow">セルフホスト型 AI ワークスペース · MCP コントロール プレーン</span>
 
 # local-shell-mcp
 
-Chat を離れずに、AI assistant に制御された shell、実 workspace、Git、browser automation、file sharing、remote-worker access を提供します。
+1 つの自己ホスト型インターフェイスでチャット、プロジェクト、ファイル、端末、リモート マシン、AI ツールを実行します。必要に応じて外部 MCP クライアントに接続します。
 
 <div class="hero-actions" markdown>
 [はじめる](getting-started/quickstart.md){ .hero-action .hero-action--primary }
-[Runtime を選ぶ](guides/deployment.md){ .hero-action .hero-action--secondary }
+[Web workspace](getting-started/web-workspace.md){ .hero-action .hero-action--secondary }
 [Tools reference](reference/tools.md){ .hero-action .hero-action--secondary }
 </div>
 </div>
@@ -20,8 +20,8 @@ Chat を離れずに、AI assistant に制御された shell、実 workspace、G
 </div>
 
 <div class="feature-card" markdown>
-### Runtime と client のレイヤー
-Docker、VS Code extension、binary、Python、stdio などの runtime を選び、その後 ChatGPT または別の MCP client を独立して接続します。
+### 統合された Web ワークスペース
+組み込みのチャットとプロジェクト履歴を、コントローラー ファイル、ターミナル、デスクトップ、セッション、リモート、監査とともに使用します。外部 MCP クライアントはオプションのままです。
 </div>
 
 <div class="feature-card" markdown>
@@ -32,7 +32,7 @@ SSH port を開かず、outbound worker connection で NAT、firewall、HPC mach
 
 ## 提供するもの
 
-`local-shell-mcp` は制御された local/container workspace を ChatGPT や他の MCP client に公開します。Shell、persistent shell、filesystem、search、patch、Git、Playwright、audit、optional Goal Plan を持つ durable logical Session、tokenized file link、remote-worker tool を、OAuth 対応の ChatGPT-compatible MCP server から提供します。
+`local-shell-mcp` は、統合された自己ホスト型 AI ワークスペースと外部クライアント用の MCP サーバーを提供します。シェル、永続シェル、ファイルシステム、検索、パッチ、Git、Playwright、監査、オプションの目標プランを備えた耐久性のある論理セッション、トークン化されたファイルリンク、認証された MCP エンドポイントを介したリモート ワーカー ツールを提供します。
 
 AI が repository を調査し、tests を実行し、files を編集し、Git を操作し、browser evidence を収集し、downloadable artifacts を作成し、control server へ outbound 接続しかできない remote machine を制御する必要がある場合に使います。
 
@@ -41,7 +41,7 @@ AI が repository を調査し、tests を実行し、files を編集し、Git �
 ```text
 Runtime layer: Docker / VS Code extension / binary / Python / stdio
 Exposure layer: localhost / HTTPS proxy / tunnel / stdio pipe
-Client layer: ChatGPT / generic MCP client / editor helper
+クライアント層: 統合 WebUI / Gemini / ChatGPT / 汎用 MCP クライアント
 Controlled workspace: /workspace or configured workspace root
 Optional remote workers: outbound machine connections
 ```
@@ -52,8 +52,10 @@ Optional remote workers: outbound machine connections
 
 | シナリオ | 開始ページ | 理由 |
 |---|---|---|
-| 初めての public ChatGPT deployment | [Quickstart](getting-started/quickstart.md) | OAuth と `/mcp` 設定を含む Docker Compose 手順 |
+| プライマリブラウザワークスペース | [Unified web workspace](getting-started/web-workspace.md) | 共有ログインを使用したチャット、プロジェクト、LSM コントロール ページ |
+| 最初のコントローラーの導入 | [Quickstart](getting-started/quickstart.md) | Docker Compose、OAuth、および最初のブラウザー セッション |
 | runtime layer を選ぶ | [Runtime choices](guides/deployment.md) | Docker、VS Code、binary、Python、stdio を別々の runtime option として説明 |
+| ジェミニスパークを接続する | [Gemini Custom Apps](getting-started/gemini-spark.md) | 資格、HTTPS MCP URL、OAuth、およびテスト |
 | ChatGPT を client として追加 | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint、OAuth、最初の安全な prompt、tool discovery |
 | LSM を DeepSeek Harness に追加 | [DeepSeek Harness plugin](clients/deepseek-harness.md) | この repository を DSH bundle として install し、完全な LSM tool/remote-worker surface を維持 |
 | VS Code から実行 | [VS Code extension runtime](installation/vscode-extension.md) | Editor-launched runtime と host safety の注意 |
@@ -77,12 +79,12 @@ Optional remote workers: outbound machine connections
 
 ## 代表的な workflow
 
-### ChatGPT で coding
+### Web ワークスペースでのコーディング
 
-1. 専用 workspace で Docker Compose、VS Code extension、binary、Python などの runtime を開始します。
-2. ChatGPT に network access が必要なら HTTP runtime を公開します。
-3. Public `/mcp` endpoint を ChatGPT に追加します。
-4. まず repository の調査と read-only checks を依頼します。
+1. LSM コントローラーとオプションの [unified web workspace](getting-started/web-workspace.md) を開始します。
+2. `/ui` を開き、LSM ID を使用してサインインします。
+3. モデル エンドポイントを構成し、新しい会話を開きます。
+4. モデルにリポジトリを検査し、最初に読み取り専用チェックを実行するように依頼します。
 5. 承認されたら file patch、tests、diff review、commit、push を行わせます。
 6. File link や remote system を扱う task では audit log を確認します。
 

@@ -461,6 +461,39 @@ class DynamicMCPManager:
 
             if action == "get":
                 return {"action": action, "server": server.public()}
+            if action == "update":
+                updated = DynamicMCPServer.from_json(server.to_json())
+                if transport is not None:
+                    updated.transport = transport.strip().lower()
+                if updated.transport == "stdio":
+                    if get_settings().disable_local:
+                        raise ValueError("stdio dynamic MCP servers are disabled")
+                    if command is not None:
+                        updated.command = command.strip()
+                    if args is not None:
+                        updated.args = [str(item) for item in args]
+                    if cwd is not None:
+                        updated.cwd = str(resolve_path(cwd.strip() or "."))
+                    updated.url = None
+                    if updated.command:
+                        check_command_policy(shlex.join([updated.command, *updated.args]))
+                elif updated.transport == "streamable_http":
+                    if url is not None:
+                        updated.url = url.strip()
+                    updated.command = None
+                    updated.args = []
+                    updated.cwd = None
+                if env is not None:
+                    updated.env = _string_dict(env, label="env")
+                if headers is not None:
+                    updated.headers = _string_dict(headers, label="headers")
+                self._validate_config(updated)
+                updated.tools = []
+                updated.refreshed_at = None
+                updated.updated_at = _now_iso()
+                servers[clean_name] = updated
+                self._save(servers)
+                return {"action": action, "server": updated.public(), "refreshed": False}
             if action in {"enable", "disable"}:
                 server.enabled = action == "enable"
             elif action == "remove":
@@ -482,7 +515,7 @@ class DynamicMCPManager:
                 server.refreshed_at = None
             else:
                 raise ValueError(
-                    "action must be register, list, get, enable, disable, remove, refresh, "
+                    "action must be register, list, get, update, enable, disable, remove, refresh, "
                     "env_set, env_unset, header_set, or header_unset"
                 )
             server.updated_at = _now_iso()

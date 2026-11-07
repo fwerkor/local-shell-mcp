@@ -25,3 +25,6 @@ src/local_shell_mcp/ui_runtime/
 
 # Snap build output
 *.snap
+
+# Generated MkDocs site
+site/

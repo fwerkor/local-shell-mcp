@@ -1,0 +1,80 @@
+# Unified LSM WebUI, built exclusively from the vendored LibreChat source.
+# Expose LibreChat through an HTTPS reverse proxy on the SAME SITE as LSM.
+services:
+  chat:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+      target: node
+    image: lsm-librechat:0.8.8
+    restart: unless-stopped
+    environment:
+      APP_TITLE: local-shell-mcp
+      # Optional model endpoints. The single user can supply credentials in the UI,
+      # or the operator can set provider keys in the Compose environment.
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-user_provided}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-user_provided}"
+      GOOGLE_KEY: "${GOOGLE_KEY:-user_provided}"
+      LSM_SINGLE_USER: 'true'
+      HOST: 0.0.0.0
+      PORT: "3080"
+      MONGO_URI: mongodb://mongodb:27017/LibreChat
+      MEILI_HOST: http://meilisearch:7700
+      LSM_CONTROLLER_INTERNAL_URL: "http://local-shell-mcp:8765"
+      LSM_PARENT_ORIGIN: "${LSM_PUBLIC_ORIGIN:?Set the public HTTPS LSM origin}"
+      LSM_LIBRECHAT_BRIDGE_SECRET: "${LSM_LIBRECHAT_BRIDGE_SECRET:?Set the bridge secret}"
+      SEARXNG_INSTANCE_URL: http://searxng:8080
+      ALLOW_EMAIL_LOGIN: "false"
+      ALLOW_REGISTRATION: "false"
+      ALLOW_SOCIAL_LOGIN: "false"
+      SEARCH: "true"
+      MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:?Set the search index key}"
+      JWT_SECRET: "${JWT_SECRET:?Set the JWT signing secret}"
+      JWT_REFRESH_SECRET: "${JWT_REFRESH_SECRET:?Set the refresh secret}"
+      CREDS_KEY: "${CREDS_KEY:?Set the encryption key}"
+      CREDS_IV: "${CREDS_IV:?Set the IV}"
+      DOMAIN_CLIENT: "${LIBRECHAT_PUBLIC_URL:?Set the public HTTPS URL}"
+      DOMAIN_SERVER: "${LIBRECHAT_PUBLIC_URL:?Set the public HTTPS URL}"
+    networks:
+      - default
+      - lsm-existing
+    volumes:
+      - ./librechat.runtime.yaml:/app/librechat.yaml:ro
+      - chat-uploads:/app/uploads
+      - chat-images:/app/client/public/images
+      - chat-data:/app/data
+    depends_on:
+      - mongodb
+      - meilisearch
+      - searxng
+    ports:
+      - "127.0.0.1:3080:3080"
+  mongodb:
+    image: mongo:8.0.20
+    restart: unless-stopped
+    volumes:
+      - chat-db:/data/db
+  meilisearch:
+    image: getmeili/meilisearch:v1.35.1
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:?Set the search index key}"
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - chat-index:/meili_data
+  searxng:
+    image: searxng/searxng:latest
+    restart: unless-stopped
+    volumes:
+      - ./searxng-settings.yml:/etc/searxng/settings.yml:ro
+volumes:
+  chat-db:
+  chat-index:
+  chat-uploads:
+  chat-images:
+  chat-data:
+
+networks:
+  lsm-existing:
+    external: true
+    name: "${LSM_DOCKER_NETWORK:-local-shell-mcp_default}"

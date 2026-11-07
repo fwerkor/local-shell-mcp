@@ -264,7 +264,7 @@ async function startOAuth(returnView: WebViewName): Promise<void> {
     const registration = await fetch("/oauth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ client_name: "local-shell-mcp WebUI", redirect_uris: [callback] }),
+      body: JSON.stringify({ client_name: "WebUI", redirect_uris: [callback] }),
     })
     if (!registration.ok) throw new Error(`Client registration failed: ${registration.status}`)
     const client = await registration.json() as { client_id: string }
@@ -386,6 +386,7 @@ function renderActiveView(): void {
     api: { get: apiGet, send: apiSend },
     uiPath: UI_PATH,
     liveWorkspaceEnabled: bootstrapData?.features?.live_workspace === true,
+    librechatEnabled: bootstrapData?.features?.librechat === true,
     apiPrefix: API_PREFIX,
     accessToken,
     machines: uiMachines,
@@ -467,9 +468,9 @@ async function refreshAll(manual = false): Promise<void> {
     ])
     bootstrapData = bootstrap
     document.querySelectorAll<HTMLElement>('[data-interface-mode="chat"]').forEach((entry) => {
-      entry.hidden = bootstrap.features?.hosted_chat !== true
+      entry.hidden = bootstrap.features?.hosted_chat !== true && bootstrap.features?.librechat !== true
     })
-    if (activeView === "hosted-chat" && bootstrap.features?.hosted_chat !== true) {
+    if (activeView === "hosted-chat" && bootstrap.features?.hosted_chat !== true && bootstrap.features?.librechat !== true) {
       showView("overview")
     }
     dashboardData = dashboard
@@ -940,7 +941,7 @@ async function boot(): Promise<void> {
     authenticated = true
     authGate.hidden = true
     appShell.hidden = false
-    const initialView = callbackView || viewFromHash(location.hash) || "overview"
+    const initialView = callbackView || viewFromHash(location.hash) || (bootstrapData?.features?.librechat ? "hosted-chat" : "overview")
     showView(initialView, { syncHash: callbackView !== "console", replaceHash: true })
     await refreshAll(false)
     startRefreshTimer()

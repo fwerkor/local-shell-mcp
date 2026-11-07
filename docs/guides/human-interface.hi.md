@@ -1,7 +1,9 @@
-<!-- i18n-source-sha256: c1206f28e9661a542c4c26bae628647a355f6ed1b12ca740574add7374666d57 -->
+<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
 # मानव इंटरफ़ेस
 
-`local-shell-mcp` एक ही service API, workspace, persistent terminal registry, remote-worker registry और MCP audit log पर दो compatible human interfaces देता है:
+[unified web workspace](../getting-started/web-workspace.md) अनुशंसित ब्राउज़र इंटरफ़ेस है। यह समान एलएसएम प्राधिकरण और टूल एपीआई का उपयोग करके एआई चैट, प्रोजेक्ट्स और एलएसएम कंट्रोलर पेजों को एक संशोधित लिब्रेचैट यूआई में जोड़ता है। यह एक अलग से तैनात वैकल्पिक सेवा है।
+
+लाइटवेट कंट्रोलर एक ही एपीआई, वर्कस्पेस, लगातार टर्मिनल रजिस्ट्री, रिमोट-वर्कर रजिस्ट्री और एमसीपी ऑडिट लॉग के शीर्ष पर दो संगत फ़ॉलबैक मानव इंटरफेस भी बनाए रखता है:
 
 - **Web UI** तेज़ operational inspection के लिए अनुकूलित native browser dashboard है।
 - **OpenTUI** पूर्ण terminal-oriented application है और browser के अंदर तथा native terminal command दोनों रूपों में उपलब्ध रहता है।

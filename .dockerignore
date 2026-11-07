@@ -13,6 +13,9 @@ dist
 *.egg-info
 workspaces
 node_modules
+# The optional unified WebUI is built using its own Compose context.
+# Keep the 78 MB vendored source out of the minimal Controller build context.
+integrations/librechat/app
 vscode-extension/node_modules
 vscode-extension/out
 vscode-extension/dist

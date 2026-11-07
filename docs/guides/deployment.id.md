@@ -1,30 +1,29 @@
-<!-- i18n-source-sha256: 8b4e2e48e58e65721bf5ebf9f7b1d8aedf34d62d5a7948d36d6b9102ee1f6cc3 -->
+<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
 # Pilihan runtime dan model deployment
 
-`local-shell-mcp` memiliki dua keputusan yang independen:
+`local-shell-mcp` memiliki dua keputusan yang saling melengkapi:
 
 1. **Runtime**: bagaimana proses server berjalan dan workspace apa yang dikontrol.
-2. **Client connection**: bagaimana ChatGPT atau MCP client lain mencapai server tersebut.
+2. **Antarmuka**: gunakan [unified web workspace](../getting-started/web-workspace.md) opsional, atau sambungkan klien MCP eksternal seperti Gemini atau ChatGPT.
 
-Jangan anggap ChatGPT sebagai metode deployment. ChatGPT adalah client. Docker, VS Code extension, release binaries, instalasi Python, dan stdio mode adalah pilihan runtime.
+Antarmuka harian yang direkomendasikan adalah ruang kerja web yang dihosting sendiri (obrolan, proyek, dan halaman kontrol LSM). Itu dikerahkan secara terpisah dari Pengendali. Docker, ekstensi VS Code, binari rilis, instalasi Python, dan mode stdio adalah cara untuk menjalankan Controller; aplikasi obrolan eksternal tetap menjadi klien opsional.
 
 ```text
 Runtime layer                      Exposure layer                 Client layer
 -------------------------------    ---------------------------    ----------------------
-Docker Compose                     local HTTP only                ChatGPT custom MCP
+Docker Tulis HTTP lokal saja Ruang kerja web terpadu
 VS Code extension                  HTTPS reverse proxy/tunnel     Generic MCP client
 Standalone binary                  stdio process pipe             VS Code extension UI
 pipx / source checkout             remote-worker outbound join    REST-style diagnostics
 ```
 
-Setup publik yang umum:
+Pengaturan umum yang dihosting sendiri adalah:
 
 ```text
-ChatGPT
-  -> https://mcp.example.com/mcp
-  -> reverse proxy or tunnel
-  -> local-shell-mcp runtime
-  -> controlled workspace
+Browser -> https://chat.example.com (ruang kerja web terpadu)
+        -> Pengontrol shell-mcp lokal yang diautentikasi
+        -> ruang kerja terkontrol dan Pekerja keluar
+Klien eksternal opsional -> https://mcp.example.com/mcp
 ```
 
 Setup MCP client lokal bisa lebih sederhana:
@@ -37,10 +36,10 @@ Local MCP client
 
 ## Matriks pilihan runtime
 
-| Runtime | Paling cocok untuk | Batas isolasi | Sumber toolchain | Akses publik ChatGPT | Halaman |
+| Waktu proses | Terbaik untuk | Batas isolasi | Sumber rantai alat | Akses MCP eksternal | Halaman |
 |---|---|---|---|---|---|
-| Docker Compose | Sebagian besar coding-agent workloads dan workspaces reproducible | Container | Project image memuat toolchain default luas | Tambahkan HTTPS proxy atau tunnel | [Docker Compose](../installation/docker.md) |
-| Docker Compose + tunnel sidecar | Deployment publik satu stack dengan Cloudflare Tunnel | Container | Project image | Terintegrasi di profile Compose `tunnel` | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| Penulisan Docker | Sebagian besar beban kerja agen pengkodean dan ruang kerja yang dapat diulang | Wadah | Gambar Pengontrol Ramping; instal rantai alat khusus tugas secara terpisah | Tambahkan proksi atau terowongan HTTPS | [Docker Compose](../installation/docker.md) |
+| Docker Compose + sespan terowongan | Penerapan Pengontrol Publik dengan Cloudflare Tunnel | Wadah | Gambar proyek | Dibangun ke dalam profil Compose `tunnel` | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Start/stop server dari editor workspace | Biasanya host process | Host tools plus executable yang dikonfigurasi | Tambahkan HTTPS tunnel/proxy eksternal untuk ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Host atau VM tanpa Docker | Host or VM | Host tools plus executable yang dikonfigurasi | Tambahkan HTTPS proxy atau tunnel | [Standalone binary](../installation/binary.md) |
 | `pipx` / source install | Penggunaan Python-native, debugging, development | Host virtualenv or VM | Python package plus host tools | Tambahkan HTTPS proxy atau tunnel | [Python install](../installation/python.md) |
@@ -48,14 +47,16 @@ Local MCP client
 
 ## Matriks koneksi client
 
-| Client path | Butuh HTTPS publik | Pakai `/mcp` | Butuh OAuth | Runtime umum |
+| Antarmuka | Membutuhkan HTTPS publik | Menggunakan `/mcp` | Membutuhkan OAuth | Waktu proses yang khas |
 |---|---:|---:|---:|---|
+| Ruang kerja web LSM terpadu | Ya untuk akses jarak jauh; proxy lokal juga dimungkinkan | Secara internal | login LSM | Pengontrol ditambah tumpukan web terpisah |
+| Gemini Spark / Aplikasi Khusus | Ya | Ya | Ya untuk kepentingan umum | Pengontrol HTTP apa pun |
 | ChatGPT custom MCP connector | Ya | Ya | Ya untuk penggunaan publik | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | Tidak | Tidak | Tidak | `local-shell-mcp --mode stdio` |
 | Generic HTTP MCP client | Biasanya tidak di localhost; ya lintas jaringan | Ya | Disarankan di luar localhost | Any HTTP runtime |
 | VS Code extension helper flow | Hanya jika ChatGPT harus connect | Ya saat copy URL ChatGPT | Disarankan untuk ChatGPT | VS Code-launched runtime |
 
-Lihat [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md), [network connectivity](../clients/connectivity.md).
+Lihat [unified web workspace](../getting-started/web-workspace.md), [Gemini Spark](../getting-started/gemini-spark.md), [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md), dan [network connectivity](../clients/connectivity.md).
 
 ## Apa yang dikontrol tiap runtime
 
@@ -75,15 +76,15 @@ Perbedaannya bukan abstract API, melainkan **operating environment** di belakang
 |---|---|---|---|
 | Di mana command berjalan? | Di dalam container | Biasanya pada host workspace | Di host atau VM process environment |
 | Default workspace? | Mounted `/workspace` | Folder VS Code saat ini atau path terkonfigurasi | `LOCAL_SHELL_MCP_WORKSPACE_ROOT` |
-| Compiler/browser sudah tersedia? | Ya, luas | Hanya jika terpasang di host | Hanya jika terpasang di host |
+| Apakah kompiler dan browser sudah diinstal sebelumnya? | TIDAK; menginstal apa yang dibutuhkan tugas tersebut | Hanya jika diinstal pada host | Hanya jika diinstal pada host |
 | Mudah di-reset? | Buat ulang container dan workspace volume | Tergantung workspace | Tergantung host/VM |
 | Cocok untuk arbitrary package install? | Ya jika disposable | Lebih berisiko di host | Lebih berisiko di luar VM |
 
 ## Pilihan yang disarankan
 
-Gunakan **Docker Compose** terlebih dahulu kecuali ada alasan lain. Ini memberi safety boundary paling jelas dan default toolchain paling lengkap.
+Gunakan **Docker Compose** terlebih dahulu kecuali Anda mempunyai alasan untuk tidak melakukannya. Ini memberikan batas keamanan yang jelas tanpa memerlukan toolchain pengembangan besar yang sudah diinstal sebelumnya.
 
-Gunakan **VS Code extension** jika workflow dimulai dari editor dan Anda menginginkan local launcher. Ini tetap runtime. Ia tidak membuat server otomatis dapat dijangkau ChatGPT; tambahkan tunnel atau reverse proxy untuk ChatGPT web/app.
+Gunakan **ekstensi VS Code** saat alur kerja dimulai dari editor dan Anda menginginkan peluncur lokal. Ini masih waktu proses. Klien web jarak jauh memerlukan proxy atau terowongan HTTPS yang dapat dijangkau.
 
 Gunakan **standalone binary** jika Docker tidak tersedia tetapi VM, container host, atau dedicated user account sudah memberi boundary.
 
@@ -93,7 +94,7 @@ Gunakan **stdio mode** hanya untuk MCP client lokal yang dapat spawn server proc
 
 ## Aturan public endpoint
 
-Untuk HTTP MCP client seperti ChatGPT, MCP endpoint adalah:
+Untuk klien HTTP MCP eksternal seperti Gemini dan ChatGPT, titik akhir MCP adalah:
 
 ```text
 https://your-public-host.example.com/mcp
@@ -117,6 +118,8 @@ Jangan tambahkan `/mcp` ke `LOCAL_SHELL_MCP_PUBLIC_BASE_URL`.
 
 ## Halaman client
 
+- [Unified web workspace](../getting-started/web-workspace.md)
+- [Gemini Spark / Custom Apps](../getting-started/gemini-spark.md)
 - [ChatGPT connector](../getting-started/chatgpt-connector.md)
 - [Generic MCP clients](../clients/generic-mcp.md)
 - [Public HTTPS exposure](../clients/connectivity.md)

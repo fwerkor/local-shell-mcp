@@ -1,7 +1,9 @@
-<!-- i18n-source-sha256: c1206f28e9661a542c4c26bae628647a355f6ed1b12ca740574add7374666d57 -->
+<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
 # Giao diện người dùng
 
-`local-shell-mcp` cung cấp hai human interface tương thích trên cùng service API, workspace, persistent terminal registry, remote-worker registry và MCP audit log:
+[unified web workspace](../getting-started/web-workspace.md) là giao diện trình duyệt được đề xuất. Nó kết hợp trò chuyện AI, các dự án và các trang Bộ điều khiển LSM trong một giao diện người dùng LibreChat đã được sửa đổi, sử dụng cùng các API công cụ và ủy quyền LSM. Đây là một dịch vụ tùy chọn được triển khai riêng biệt.
+
+Bộ điều khiển nhẹ cũng giữ lại hai giao diện dự phòng tương thích của con người trên cùng một API, không gian làm việc, sổ đăng ký thiết bị đầu cuối liên tục, sổ đăng ký nhân viên từ xa và nhật ký kiểm tra MCP:
 
 - **Web UI** là bảng điều khiển trình duyệt native được tối ưu cho việc kiểm tra vận hành nhanh.
 - **OpenTUI** là ứng dụng hướng terminal đầy đủ và vẫn dùng được cả trong trình duyệt lẫn dưới dạng lệnh terminal native.

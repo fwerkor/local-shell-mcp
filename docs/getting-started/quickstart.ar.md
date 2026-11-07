@@ -1,12 +1,12 @@
-<!-- i18n-source-sha256: a3fdf9088031e6903b15497a3df881a8e6ed2f6f2b34dd4d0b68b0414a2ca81e -->
+<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
 # البدء السريع
 
-يستخدم هذا الدليل Docker Compose كأول runtime وChatGPT كأول client. وهما خياران مستقلان: Docker وVS Code extension وbinary وPython وstdio خيارات runtime؛ وChatGPT وعملاء MCP العامون خيارات client. راجع [خيارات runtime ونموذج النشر](../guides/deployment.md) لرؤية الخريطة الكاملة.
+يبدأ هذا الدليل تشغيل وحدة تحكم LSM ويفتح واجهة المتصفح الخاصة بها. [unified web workspace](web-workspace.md) هي التجربة اليومية الموصى بها؛ إنها عبارة عن مكدس دردشة اختياري تم نشره بشكل منفصل. يمكن لعملاء ChatGPT وGemini وعملاء MCP الخارجيين الآخرين الاتصال بنفس وحدة التحكم. انظر [runtime choices and deployment model](../guides/deployment.md).
 
 ## المتطلبات
 
 - Docker Engine مع Compose v2.
-- HTTPS endpoint عام إذا كان ChatGPT سيتصل من الويب.
+- نقطة نهاية HTTPS عامة إذا كان يجب على المستخدمين البعيدين أو عملاء MCP الخارجيين الاتصال.
 - دليل workspace مخصص.
 - OAuth admin PIN وJWT secret طويلان وعشوائيان.
 
@@ -65,15 +65,15 @@ http://local-shell-mcp:8765
 
 مع Caddy أو Nginx أو Traefik أو Nginx Proxy Manager أو أي reverse proxy آخر، مرّر HTTPS traffic إلى `127.0.0.1:8765` أو عنوان شبكة الـ container.
 
-## 4. توصيل ChatGPT
+## 4. افتح مساحة عمل المتصفح
 
-استخدم MCP endpoint التالي:
+افتح تسجيل دخول وحدة التحكم:
 
 ```text
-https://your-public-host.example.com/mcp
+https://your-public-host.example.com/ui
 ```
 
-اتبع [دليل موصل ChatGPT](chatgpt-connector.md) لإكمال OAuth والموافقة على الأدوات.
+للدردشة والمشاريع وصفحات التحكم المتكاملة اتبع [unified web workspace guide](web-workspace.md). تتوفر واجهة WebUI الأصلية خفيفة الوزن عند عدم تثبيت الدردشة.
 
 ## 5. تأكيد الوصول إلى الأدوات بأمان
 
@@ -129,6 +129,8 @@ curl -i http://127.0.0.1:8765/healthz
 | التشغيل من VS Code | [VS Code extension runtime](../installation/vscode-extension.md) |
 | التشغيل باستخدام release binary | [Runtime binary مستقل](../installation/binary.md) |
 | التشغيل باستخدام Python أو source checkout | [Python runtimes](../installation/python.md) |
+| استخدم واجهة الدردشة والتحكم الموحدة | [Unified web workspace](web-workspace.md) |
+| أضف الجوزاء سبارك كعميل | [Gemini Custom Apps](gemini-spark.md) |
 | إضافة ChatGPT كـ client | [ChatGPT connector](chatgpt-connector.md) |
 | اختيار الأدوات وكتابة prompts أفضل | [أنماط الاستخدام](../guides/usage-patterns.md) |
 | توصيل جهاز HPC أو NPU/GPU أو NAT | [Workers البعيدة](../guides/remote-workers.md) |

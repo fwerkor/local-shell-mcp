@@ -1,7 +1,9 @@
-<!-- i18n-source-sha256: c1206f28e9661a542c4c26bae628647a355f6ed1b12ca740574add7374666d57 -->
+<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
 # Benutzeroberfläche
 
-`local-shell-mcp` bietet zwei kompatible Benutzerschnittstellen über derselben Service-API, demselben Workspace, Persistent-Terminal-Register, Remote-Worker-Register und MCP-Audit-Log:
+Der [unified web workspace](../getting-started/web-workspace.md) ist die empfohlene Browseroberfläche. Es kombiniert KI-Chat, Projekte und LSM-Controller-Seiten in einer modifizierten LibreChat-Benutzeroberfläche und verwendet dabei dieselben LSM-Autorisierungs- und Tool-APIs. Es handelt sich um einen separat bereitgestellten optionalen Dienst.
+
+Der leichtgewichtige Controller verfügt außerdem über zwei kompatible Fallback-Benutzerschnittstellen zusätzlich zu derselben API, demselben Arbeitsbereich, derselben persistenten Terminalregistrierung, derselben Remote-Worker-Registrierung und demselben MCP-Überwachungsprotokoll:
 
 - **Web UI** ist ein natives Browser-Dashboard für schnelle Betriebsprüfungen.
 - **OpenTUI** ist die vollständige terminalorientierte Anwendung und steht sowohl im Browser als auch als nativer Terminalbefehl zur Verfügung.

@@ -5,6 +5,7 @@ import base64
 import inspect
 import ipaddress
 import json
+import os
 import subprocess
 import time
 import uuid
@@ -655,6 +656,16 @@ def _transport_security_settings() -> TransportSecuritySettings:
         allowed_hosts.add(configured_transport_host)
         allowed_hosts.add(f"{configured_transport_host}:*")
         allowed_origins.add(f"http://{configured_transport_host}:*")
+
+    # LibreChat reaches the controller through a private Docker service name.
+    # Preserve DNS rebinding checks for every other Host header.
+    if os.environ.get("LOCAL_SHELL_MCP_LIBRECHAT_URL"):
+        allowed_hosts.add(f"local-shell-mcp:{settings.port}")
+        internal_host = os.environ.get("LOCAL_SHELL_MCP_LIBRECHAT_INTERNAL_HOST", "").strip()
+        if internal_host:
+            if internal_host != "host.docker.internal":
+                raise ValueError("Unsupported LibreChat internal Controller host")
+            allowed_hosts.add(f"{internal_host}:{settings.port}")
 
     if settings.public_base_url:
         parsed = urlparse(settings.public_base_url)

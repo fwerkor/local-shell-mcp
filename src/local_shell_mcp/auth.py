@@ -261,6 +261,36 @@ def _verify_oauth(request: Request, settings: Settings) -> Principal:
 def verify_request(request: Request) -> Principal:
     settings = get_settings()
     path = str(request.url.path)
+    if path in {"/api/ui/librechat/identity", "/api/ui/librechat/policy", "/api/ui/librechat/session"}:
+        from .librechat_integration import is_bridge_service
+
+        if is_bridge_service(request):
+            return Principal(
+                email=None, subject="librechat-bridge-service", claims={"auth": "librechat-service"}
+            )
+    # LibreChat routes all Controller API requests through its authenticated backend.
+    # The bridge header alone is never sufficient: validate the service secret and
+    # resolve the previously registered, expiring LSM principal on every request.
+    chat_user = request.headers.get("x-lsm-chat-user-id")
+    if chat_user and (path == "/mcp" or (
+        path.startswith("/api/ui/") and (path == "/api/ui/librechat/upload" or not path.startswith("/api/ui/librechat/"))
+    )):
+        from .librechat_integration import is_bridge_service, principal_for_chat_user
+
+        if not is_bridge_service(request):
+            raise HTTPException(status_code=401, detail="Invalid LibreChat bridge authentication")
+        try:
+            mapping = principal_for_chat_user(request.headers["x-lsm-chat-user-id"])
+        except (ValueError, PermissionError) as exc:
+            raise HTTPException(status_code=401, detail="Unknown LibreChat user") from exc
+        return Principal(
+            email=None, subject=mapping["subject"],
+            claims={
+                "auth": "none" if mapping["auth_mode"] == "none" else "librechat-bridge",
+                "scope": mapping["scopes"],
+            },
+        )
+
     if path == "/mcp" and is_loopback_target(request) and has_valid_cli_local_token(request):
         return Principal(email="localhost", subject="local-cli", claims={"auth": "local-cli"})
     if (
@@ -495,6 +525,40 @@ class AuthMiddleware:
             await response(scope, downstream_receive, send)
             return
 
+        if (
+            path == "/mcp"
+            and request.headers.get("x-lsm-chat-user-id")
+            and request.state.principal.subject is not None
+            and "tools/call" in _mcp_methods_from_body(body or b"")
+        ):
+            from .librechat_integration import may_chat_call_lsm
+
+            user_id = request.headers.get("x-lsm-chat-user-id", "")
+            conversation_id = request.headers.get("x-lsm-conversation-id", "")
+            try:
+                messages = json.loads(body or b"null")
+                if not isinstance(messages, list):
+                    messages = [messages]
+                tool_calls = [
+                    message for message in messages
+                    if isinstance(message, dict) and message.get("method") == "tools/call"
+                ]
+                permitted = bool(tool_calls) and all(
+                    isinstance(call.get("params"), dict)
+                    and isinstance(call["params"].get("name"), str)
+                    and may_chat_call_lsm(user_id, conversation_id, call["params"]["name"])
+                    for call in tool_calls
+                )
+            except (ValueError, PermissionError, TypeError):
+                permitted = False
+            if not permitted:
+                response = JSONResponse(
+                    {"detail": "This conversation is not authorized to use LSM tools"},
+                    status_code=403,
+                )
+                await response(scope, downstream_receive, send)
+                return
+
         token = _CURRENT_PRINCIPAL.set(request.state.principal)
         try:
             await self.app(scope, downstream_receive, send)
@@ -571,7 +635,7 @@ class RequestBodyLimitMiddleware:
             return
 
         if (scope.get("path", "").startswith("/remote/transfer/upload/")
-                or scope.get("path", "") == "/api/ui/files/upload"):
+                or scope.get("path", "") in {"/api/ui/files/upload", "/api/ui/librechat/upload"}):
             # Upload tickets validate an exact byte count and SHA-256 while streaming.
             # Buffering here would turn the transfer back into a memory-bound request.
             await self.app(scope, receive, send)
