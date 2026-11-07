@@ -1,14 +1,14 @@
-<!-- i18n-source-sha256: 53d1b81800534bc6d5334883b7de74660c988088c66f492ddbd68aced8797379 -->
+<!-- i18n-source-sha256: 78210f26f159c89fa83851d7f597b727ddf3aaab7229c279aa5bcacf21d92669 -->
 # Trò chuyện được lưu trữ (tùy chọn)
 
 Trò chuyện được lưu trữ là ứng dụng trò chuyện BYOK và ứng dụng MCP Apps tự lưu trữ, được tích hợp vào giao diện con người của LSM. Đây **không phải** là chế độ Phiên logic: các cuộc hội thoại có danh tính độc lập và có thể tùy ý đính kèm Phiên logic LSM hiện có. ChatGPT và các ứng dụng khách bên ngoài khác tiếp tục làm việc với cùng các phiên và công cụ LSM.
 
-## Kích hoạt
+## Khả dụng
 
-Trò chuyện được lưu trữ bị tắt theo mặc định. Đặt:
+Hosted Chat được bật mặc định ở chế độ MCP với bộ lưu trữ trạng thái bền vững. Để tắt, đặt:
 
 ```env
-LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED=true
+LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED=false
 ```
 
 Khởi động lại Bộ điều khiển và mở **Trò chuyện được lưu trữ** ngay bên dưới bộ chọn Giao diện người dùng web / TUI. Tính năng này cũng có mục nhập trên thanh trên cùng trên thiết bị di động. Máy chủ trò chuyện sử dụng danh tính và phạm vi LSM OAuth hiện có. Bộ điều khiển tương tự vận hành máy chủ MCP được sử dụng bởi vòng lặp công cụ của mô hình; Công nhân không thể bắt đầu thực hiện.

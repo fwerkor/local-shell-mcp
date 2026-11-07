@@ -2,15 +2,15 @@
 
 Hosted Chat is a self-hosted, BYOK chat and MCP Apps client integrated into LSM's human interface. It is **not** a Logical Session mode: conversations have independent identities and can optionally attach an existing LSM Logical Session. ChatGPT and other external clients continue working with the same LSM Sessions and tools.
 
-## Enable
+## Availability
 
-Hosted Chat is disabled by default. Set:
+Hosted Chat is enabled by default in MCP mode with a persistent state backend. To disable it, set:
 
 ```env
-LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED=true
+LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED=false
 ```
 
-Restart the Controller and open **Hosted Chat** immediately beneath the Web UI / TUI selector. The feature also has a mobile top-bar entry. The chat host uses the existing LSM OAuth identity and scopes. The same controller operates the MCP server used by the model's tool loop; Workers cannot initiate execution.
+When enabled, **Hosted Chat** appears immediately beneath the Web UI / TUI selector. Restart the Controller after changing the setting. The feature also has a mobile top-bar entry. The chat host uses the existing LSM OAuth identity and scopes. The same controller operates the MCP server used by the model's tool loop; Workers cannot initiate execution.
 
 ## Model profiles
 

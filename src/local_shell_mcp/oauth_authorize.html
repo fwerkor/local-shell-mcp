@@ -3,257 +3,232 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="color-scheme" content="dark" />
-  <title>Authorize local-shell-mcp</title>
+  <meta name="color-scheme" content="light dark" />
+  <title>Authorize · local-shell-mcp</title>
   <link rel="icon" type="image/svg+xml" href="$favicon_url" />
   <style>
     :root {
-      color-scheme: dark;
+      color-scheme: light;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #07111f;
-      color: #e8eef8;
+      font-synthesis: none;
+      --page: #f4f7f9;
+      --page-glow: rgba(69, 173, 158, .13);
+      --surface: #ffffff;
+      --border: #e1e7eb;
+      --text: #17252e;
+      --muted: #667781;
+      --subtle: #8a9aa4;
+      --accent: #087c70;
+      --accent-hover: #06685f;
+      --accent-text: #ffffff;
+      --field: #f9fbfc;
+      --field-border: #ccd7dd;
+      --ring: rgba(8, 124, 112, .16);
+      --symbol-bg: #e9f7f2;
+      --shadow: 0 26px 70px rgba(32, 59, 68, .075), 0 3px 12px rgba(32, 59, 68, .035);
+      --error-bg: #fff2f1;
+      --error-border: #facdca;
+      --error-text: #a23a36;
+      --warning-bg: #fffaea;
+      --warning-border: #f0dfaa;
+      --warning-text: #735817;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --page: #0b1219;
+        --page-glow: rgba(21, 155, 137, .10);
+        --surface: #121d26;
+        --border: #283943;
+        --text: #ecf3f5;
+        --muted: #a1b1ba;
+        --subtle: #8297a2;
+        --accent: #4ad2b4;
+        --accent-hover: #73e1c7;
+        --accent-text: #092721;
+        --field: #0e1820;
+        --field-border: #344751;
+        --ring: rgba(74, 210, 180, .15);
+        --symbol-bg: #183d39;
+        --shadow: 0 28px 76px rgba(0, 0, 0, .27), 0 3px 12px rgba(0, 0, 0, .14);
+        --error-bg: #341e22;
+        --error-border: #744044;
+        --error-text: #ffb1ac;
+        --warning-bg: #302819;
+        --warning-border: #6d552d;
+        --warning-text: #f0d394;
+      }
     }
     * { box-sizing: border-box; }
     body {
       min-height: 100vh;
+      min-height: 100dvh;
       margin: 0;
       display: grid;
       place-items: center;
       padding: 32px 20px;
-      background:
-        radial-gradient(circle at 12% 10%, rgba(45, 212, 191, .16), transparent 32rem),
-        radial-gradient(circle at 88% 84%, rgba(59, 130, 246, .18), transparent 30rem),
-        linear-gradient(145deg, #07111f 0%, #0b1728 48%, #08111d 100%);
+      background: radial-gradient(ellipse 560px 370px at 50% 20%, var(--page-glow), transparent 95%), var(--page);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
     }
-    body::before {
-      content: "";
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      opacity: .22;
-      background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
-      background-size: 32px 32px;
-      mask-image: linear-gradient(to bottom, black, transparent 85%);
-    }
-    main {
-      position: relative;
-      width: min(100%, 680px);
-    }
+    main { width: min(100%, 440px); }
     .brand {
       display: flex;
       align-items: center;
-      gap: 12px;
-      margin: 0 0 18px 4px;
-      color: #a9b8cb;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 27px;
       font-size: 14px;
-      font-weight: 650;
-      letter-spacing: .02em;
+      font-weight: 730;
+      letter-spacing: -.02em;
     }
     .brand-mark {
       display: grid;
       place-items: center;
-      width: 34px;
-      height: 34px;
-      overflow: hidden;
+      width: 33px;
+      height: 33px;
       border-radius: 10px;
-      box-shadow: 0 8px 24px rgba(99, 102, 241, .24);
+      overflow: hidden;
     }
     .brand-mark img { display: block; width: 100%; height: 100%; }
     .card {
-      overflow: hidden;
-      border: 1px solid rgba(148, 163, 184, .18);
-      border-radius: 24px;
-      background: rgba(10, 22, 38, .88);
-      box-shadow: 0 28px 80px rgba(0, 0, 0, .42), inset 0 1px rgba(255,255,255,.04);
-      backdrop-filter: blur(18px);
+      padding: 38px 36px 34px;
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
     }
-    .card-header {
-      padding: 32px 34px 26px;
-      border-bottom: 1px solid rgba(148, 163, 184, .13);
-    }
-    .eyebrow {
-      margin: 0 0 9px;
-      color: #5eead4;
-      font-size: 12px;
-      font-weight: 750;
-      letter-spacing: .12em;
-      text-transform: uppercase;
+    .symbol {
+      display: grid;
+      place-items: center;
+      width: 54px;
+      height: 54px;
+      margin: 0 auto 23px;
+      border-radius: 17px;
+      background: var(--symbol-bg);
+      color: var(--accent);
     }
     h1 {
       margin: 0;
-      color: #f8fafc;
-      font-size: clamp(26px, 5vw, 36px);
-      line-height: 1.16;
-      letter-spacing: -.035em;
+      font-size: clamp(24px, 5vw, 28px);
+      line-height: 1.25;
+      letter-spacing: -.045em;
+      text-align: center;
+      font-weight: 740;
     }
     .lead {
-      margin: 13px 0 0;
-      color: #a9b8cb;
+      margin: 12px 0 30px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+      text-align: center;
+      overflow-wrap: anywhere;
+    }
+    .lead strong { color: var(--text); font-weight: 690; }
+    .field { display: block; }
+    .field > span {
+      display: block;
+      margin-bottom: 9px;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 660;
+    }
+    .field input {
+      display: block;
+      width: 100%;
+      height: 50px;
+      padding: 0 15px;
+      border: 1px solid var(--field-border);
+      border-radius: 11px;
+      outline: 0;
+      background: var(--field);
+      color: var(--text);
+      font: inherit;
       font-size: 15px;
-      line-height: 1.65;
+      letter-spacing: .025em;
+      transition: border-color .16s ease, box-shadow .16s ease;
     }
-    .lead strong { color: #e8eef8; }
-    .card-body { padding: 28px 34px 34px; }
-    .section-title {
-      margin: 0 0 14px;
-      color: #cbd5e1;
-      font-size: 13px;
-      font-weight: 700;
-    }
-    .permissions {
-      display: grid;
-      gap: 10px;
-      margin: 0 0 24px;
-      padding: 0;
-      list-style: none;
-    }
-    .permission {
-      display: grid;
-      grid-template-columns: 30px 1fr;
-      gap: 11px;
-      align-items: start;
-      padding: 12px 14px;
-      border: 1px solid rgba(148, 163, 184, .12);
-      border-radius: 13px;
-      background: rgba(15, 30, 49, .66);
-    }
-    .permission-icon {
-      display: grid;
-      place-items: center;
-      width: 25px;
-      height: 25px;
-      margin-top: 1px;
-      border-radius: 8px;
-      background: rgba(45, 212, 191, .12);
-      color: #5eead4;
-      font-size: 13px;
-      font-weight: 800;
-    }
-    .permission strong { display: block; color: #e8eef8; font-size: 14px; line-height: 1.45; }
-    .permission small { display: block; margin-top: 2px; color: #8292a7; font-size: 12.5px; line-height: 1.5; }
-    .resource {
+    .field input::placeholder { color: var(--subtle); letter-spacing: normal; }
+    .field input:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 4px var(--ring); }
+    .submit {
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 14px;
-      margin-bottom: 24px;
-      padding: 13px 14px;
-      border-radius: 13px;
-      background: rgba(7, 17, 31, .7);
-      color: #8ea0b7;
-      font-size: 12px;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      min-height: 50px;
+      margin-top: 22px;
+      padding: 12px 18px;
+      border: 0;
+      border-radius: 11px;
+      background: var(--accent);
+      color: var(--accent-text);
+      font: inherit;
+      font-size: 14px;
+      font-weight: 720;
+      cursor: pointer;
+      transition: background .16s ease, transform .16s ease;
     }
-    .resource code {
-      min-width: 0;
-      overflow: hidden;
-      color: #cbd5e1;
-      font-size: 12px;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
+    .submit:hover { background: var(--accent-hover); }
+    .submit:active { transform: translateY(1px); }
+    .submit:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+    .submit svg { flex: none; }
     .notice {
-      display: grid;
-      gap: 4px;
       margin-bottom: 20px;
-      padding: 13px 15px;
+      padding: 12px 14px;
       border: 1px solid;
-      border-radius: 13px;
+      border-radius: 10px;
       font-size: 13px;
       line-height: 1.5;
     }
-    .notice strong { color: inherit; }
-    .notice span { color: #b6c2d1; }
-    .notice-error { border-color: rgba(251, 113, 133, .32); background: rgba(159, 18, 57, .14); color: #fda4af; }
-    .notice-warning { border-color: rgba(251, 191, 36, .27); background: rgba(146, 64, 14, .13); color: #fcd34d; }
-    .field { display: grid; gap: 8px; }
-    .field > span { color: #dbe5f2; font-size: 13px; font-weight: 700; }
-    input {
-      width: 100%;
-      min-height: 48px;
-      border: 1px solid rgba(148, 163, 184, .25);
-      border-radius: 12px;
-      outline: none;
-      background: rgba(5, 14, 26, .78);
-      color: #f8fafc;
-      padding: 0 14px;
-      font: inherit;
-      transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
-    }
-    input::placeholder { color: #65768c; }
-    input:focus {
-      border-color: rgba(45, 212, 191, .72);
-      background: rgba(7, 20, 34, .95);
-      box-shadow: 0 0 0 4px rgba(45, 212, 191, .1);
-    }
-    .field-help { margin: 8px 0 22px; color: #718198; font-size: 12px; line-height: 1.5; }
-    .field-help code { color: #9fb0c4; }
-    .actions { display: grid; gap: 12px; }
-    button {
-      min-height: 50px;
-      border: 0;
-      border-radius: 13px;
-      cursor: pointer;
-      background: linear-gradient(135deg, #2dd4bf, #22c3ee);
-      color: #04211f;
-      font: inherit;
-      font-size: 15px;
-      font-weight: 750;
-      box-shadow: 0 12px 30px rgba(34, 211, 238, .15), inset 0 1px rgba(255,255,255,.35);
-      transition: transform .16s ease, filter .16s ease, box-shadow .16s ease;
-    }
-    button:hover { filter: brightness(1.07); box-shadow: 0 15px 34px rgba(34, 211, 238, .22), inset 0 1px rgba(255,255,255,.4); transform: translateY(-1px); }
-    button:active { transform: translateY(0); }
-    button:focus-visible { outline: 3px solid rgba(94, 234, 212, .45); outline-offset: 3px; }
-    .security {
-      display: flex;
-      align-items: flex-start;
-      justify-content: center;
-      gap: 7px;
-      margin: 0;
-      color: #66778d;
-      font-size: 11.5px;
+    .notice-error { background: var(--error-bg); border-color: var(--error-border); color: var(--error-text); }
+    .notice-warning { background: var(--warning-bg); border-color: var(--warning-border); color: var(--warning-text); }
+    .footnote {
+      margin: 21px 0 0;
+      color: var(--subtle);
+      font-size: 12px;
       line-height: 1.5;
       text-align: center;
     }
-    .security svg { flex: 0 0 auto; margin-top: 1px; }
-    @media (max-width: 560px) {
-      body { place-items: start center; padding: 24px 14px; }
-      .brand { margin-left: 2px; }
-      .card { border-radius: 20px; }
-      .card-header { padding: 27px 22px 22px; }
-      .card-body { padding: 23px 22px 27px; }
-      .resource { align-items: flex-start; flex-direction: column; gap: 5px; }
-      .resource code { width: 100%; white-space: normal; overflow-wrap: anywhere; }
+    @media (max-width: 480px) {
+      body { padding: 24px 16px; }
+      .brand { margin-bottom: 22px; }
+      .card { padding: 32px 23px 28px; border-radius: 19px; }
+      .lead { margin-bottom: 26px; }
     }
-    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition: none !important; }
+    }
   </style>
 </head>
 <body>
   <main>
-    <div class="brand"><span class="brand-mark" aria-hidden="true"><img src="$logo_url" alt="" /></span><span>local-shell-mcp</span></div>
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"><img src="$logo_url" alt="" /></span>
+      <span>local-shell-mcp</span>
+    </div>
     <section class="card" aria-labelledby="authorization-title">
-      <header class="card-header">
-        <p class="eyebrow">OAuth authorization</p>
-        <h1 id="authorization-title">Approve access to your workspace</h1>
-        <p class="lead"><strong>$client_name</strong> is requesting access through local-shell-mcp.</p>
-      </header>
-      <div class="card-body">
-        <p class="section-title">This connection will be able to</p>
-        <ul class="permissions">$scope_items</ul>
-        <div class="resource"><span>Resource</span><code title="$resource_title">$resource</code></div>
-        $error_html
-        <form method="post" action="/oauth/authorize">
-          $hidden_inputs
-          $pin_field
-          <div class="actions">
-            <button type="submit">Approve connection</button>
-            <p class="security">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.9 8.8 7 10 4.1-1.2 7-5.4 7-10V6l-7-3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m9.5 12 1.7 1.7 3.6-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              <span>$security_notice</span>
-            </p>
-          </div>
-        </form>
+      <div class="symbol" aria-hidden="true">
+        <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="5" y="10" width="14" height="11" rx="2.5" />
+          <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+          <path d="M12 14v3" />
+        </svg>
       </div>
+      <h1 id="authorization-title">Authorize connection</h1>
+      <p class="lead"><strong>$client_name</strong> wants to access your workspace.</p>
+      $error_html
+      <form method="post" action="/oauth/authorize">
+        $hidden_inputs
+        $pin_field
+        <button class="submit" type="submit">
+          <span>Approve access</span>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h14m-6-6 6 6-6 6" />
+          </svg>
+        </button>
+      </form>
+      <p class="footnote">Only approve clients you trust.</p>
     </section>
   </main>
 </body>

@@ -300,16 +300,29 @@ def test_hosted_chat_http_api_persists_profiles_and_history(chat_store, monkeypa
         )
 
 
-def test_hosted_chat_disabled_by_default_and_rejects_ephemeral_state(chat_store, monkeypatch):
+def test_hosted_chat_enabled_by_default_and_explicit_opt_out(chat_store, monkeypatch):
     from starlette.applications import Starlette
     from starlette.testclient import TestClient
 
     from local_shell_mcp.human_ui import ui_routes
 
+    monkeypatch.delenv("LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED", raising=False)
+    get_settings.cache_clear()
+    assert get_settings().hosted_chat_enabled is True
+    with TestClient(Starlette(routes=ui_routes())) as client:
+        assert client.get("/api/ui/hosted-chat/profiles").status_code == 200
+        assert client.get("/api/ui/bootstrap").json()["data"]["features"]["hosted_chat"] is True
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED", "false")
+    get_settings.cache_clear()
+    assert get_settings().hosted_chat_enabled is False
     with TestClient(Starlette(routes=ui_routes())) as client:
         assert client.get("/api/ui/hosted-chat/profiles").status_code == 404
-    monkeypatch.setenv("LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED", "true")
+        assert client.get("/api/ui/bootstrap").json()["data"]["features"]["hosted_chat"] is False
+
+    monkeypatch.delenv("LOCAL_SHELL_MCP_HOSTED_CHAT_ENABLED")
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_BACKEND", "memory")
     get_settings.cache_clear()
     with TestClient(Starlette(routes=ui_routes())) as client:
         assert client.get("/api/ui/hosted-chat/profiles").status_code == 503
+        assert client.get("/api/ui/bootstrap").json()["data"]["features"]["hosted_chat"] is False
