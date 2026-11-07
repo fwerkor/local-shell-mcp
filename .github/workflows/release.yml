@@ -283,6 +283,10 @@ jobs:
             --collect-all starlette
             --collect-all zstandard
             --exclude-module cryptography
+            --exclude-module playwright
+            --add-data src/local_shell_mcp/browser_sessions.py:local_shell_mcp/browser_external
+            --add-data src/local_shell_mcp/browser_external_service.py:local_shell_mcp/browser_external
+            --add-data src/local_shell_mcp/browser_external_paths.py:local_shell_mcp/browser_external
           )
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
             PYINSTALLER_ARGS+=(--collect-all winpty)
@@ -296,6 +300,7 @@ jobs:
         run: |
           ./dist/${{ matrix.binary }} --help
           python scripts/standalone-ui-smoke.py --server ./dist/${{ matrix.binary }} --web-only
+          python scripts/check-standalone-browser.py --binary ./dist/${{ matrix.binary }}
 
       - name: Package executable
         shell: bash

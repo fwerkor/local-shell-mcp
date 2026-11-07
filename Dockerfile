@@ -1,6 +1,5 @@
 # check=skip=SecretsUsedInArgOrEnv
 ARG BUN_VERSION=1.3.14
-ARG PLAYWRIGHT_VERSION=1.59.0
 FROM oven/bun:${BUN_VERSION} AS ui-builder
 WORKDIR /source
 COPY ui /source/ui
@@ -39,7 +38,6 @@ RUN LIBEVENT_CFLAGS="$(pkg-config --cflags libevent)" \
   && install -m 0755 tmux /out/tmux
 
 FROM python:3.12-slim-bookworm
-ARG PLAYWRIGHT_VERSION
 ARG TARGETARCH
 
 ENV PYTHONUNBUFFERED=1 \
@@ -92,9 +90,9 @@ RUN set -eux; \
   install -m 0755 /tmp/local-shell-mcp-tmux "/app/src/local_shell_mcp/helpers/linux-${helper_arch}/tmux"; \
   rm -f /tmp/local-shell-mcp-tmux
 COPY --from=ui-builder /source/src/local_shell_mcp/ui_static /app/src/local_shell_mcp/ui_static
-# The Playwright Python API stays available, but no browser binaries or their
-# heavyweight system libraries are installed by default.
-RUN pip install --no-cache-dir -e . "playwright==${PLAYWRIGHT_VERSION}" \
+# Browser automation is optional; neither Playwright nor browser runtimes
+# belong in the base image.
+RUN pip install --no-cache-dir -e . \
   && rm -rf /root/.cache/pip \
   && python -c "import zstandard" \
   && test -s /app/src/local_shell_mcp/ui_static/index.html \

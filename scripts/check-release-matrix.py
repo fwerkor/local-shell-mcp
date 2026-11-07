@@ -129,6 +129,13 @@ def main() -> int:
     if "--collect-all zstandard" not in binary_build_script:
         print("Release standalone binaries must bundle the zstandard native extension.")
         return 1
+    if "--exclude-module playwright" not in binary_build_script:
+        print("Release standalone binaries must not bundle the Playwright runtime.")
+        return 1
+    for source in ("browser_sessions.py", "browser_external_service.py", "browser_external_paths.py"):
+        if f"--add-data src/local_shell_mcp/{source}:local_shell_mcp/browser_external" not in binary_build_script:
+            print(f"External browser sidecar source is missing: {source}")
+            return 1
 
     package_script = step_script(binary_job, "Package executable")
     if not package_script:

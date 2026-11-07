@@ -122,7 +122,18 @@ Standalone release executables and Docker images include the WebUI and native te
 local-shell-mcp tui
 ```
 
-The lean Docker image installs Python runtime dependencies, common shell utilities, and tmux. It does not include programming-language toolchains, Node.js development tools, office suites, scientific Python packages, or **any Playwright browser binaries (Chromium, Firefox, WebKit)**. The Playwright Python API remains installed, but browser tools require a browser to be installed separately. For a custom image, install the desired browser and its system dependencies with `python -m playwright install --with-deps chromium` (or `firefox`/`webkit`), or mount a compatible browser cache. Other optional packages can be installed in a derived image or the agent workspace (for example, `pip install -r requirements-agent.txt` from a source checkout).
+The lean Docker image includes Python runtime dependencies, common shell utilities, and tmux. It does not include toolchains, Node.js, office suites, scientific Python packages, **Playwright, or browser binaries**. These can be installed in a derived image or the agent workspace when required.
+
+Playwright is an **optional external dependency** for standalone binaries. The built-in `browser_session`, `browser_snapshot`, and `browser_act` interfaces use an external Python child process, while `browser_get_text`, `browser_capture`, and `browser_run_script` already execute scripts using the configured Python. Install Playwright and a browser into that Python environment:
+
+```bash
+python3 -m pip install playwright
+python3 -m playwright install chromium
+# If using a dedicated virtual environment, point LSM to its interpreter:
+# LOCAL_SHELL_MCP_PYTHON_BIN=/path/to/venv/bin/python
+```
+
+Python-wheel installations can enable browser support with `pip install 'local-shell-mcp[browser]'`, then install the desired browser. Without Playwright, ordinary LSM features work as usual; browser calls report the missing dependency. In containers, browser system dependencies can be installed on demand using `python -m playwright install --with-deps chromium`.
 
 The native TUI authenticates the loopback Human UI API with the same host-only dedicated CLI credential used by `lsm call`; split-runtime layouts can pass `--token-file`. Browser-spawned OpenTUI uses a controller-process credential created lazily in memory and never writes that privileged credential to the state directory or state backend. A dedicated local CLI credential can also invoke the registered MCP tool surface directly from shell scripts; the Human UI token is intentionally never accepted by `/mcp`. By default, `call` connects to the running loopback controller, so remote-worker calls use the live controller process instead of a separate process-local worker registry:
 

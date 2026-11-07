@@ -155,7 +155,7 @@ jobs:
       - name: Install project and browser runtime
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e '.[dev]'
+          python -m pip install -e '.[dev,browser]'
           python -m playwright install --with-deps chromium
 
       - name: Build the shared OpenTUI and WebUI
@@ -193,7 +193,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ripgrep tmux python3-gi gir1.2-atspi-2.0
           python -m pip install --upgrade pip
-          python -m pip install -e '.[dev]'
+          python -m pip install -e '.[dev,browser]'
           python -m playwright install --with-deps chromium
 
       - name: Build and test Human UI
@@ -290,7 +290,7 @@ jobs:
       - name: Install project
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e '.[dev]'
+          python -m pip install -e '.[dev,browser]'
 
       - name: Show runtime versions
         run: |
@@ -390,7 +390,7 @@ jobs:
       - name: Install project
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e '.[dev]'
+          python -m pip install -e '.[dev,browser]'
 
       - name: Boot server and run endpoint smoke test
         run: python scripts/ci-smoke.py --mode ${{ matrix.mode }} --auth ${{ matrix.auth }}
@@ -553,6 +553,10 @@ jobs:
             --collect-all starlette
             --collect-all zstandard
             --exclude-module cryptography
+            --exclude-module playwright
+            --add-data src/local_shell_mcp/browser_sessions.py:local_shell_mcp/browser_external
+            --add-data src/local_shell_mcp/browser_external_service.py:local_shell_mcp/browser_external
+            --add-data src/local_shell_mcp/browser_external_paths.py:local_shell_mcp/browser_external
           )
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
             PYINSTALLER_ARGS+=(--collect-all winpty)
@@ -568,6 +572,7 @@ jobs:
           ./dist/${{ matrix.binary }} version
           ./dist/${{ matrix.binary }} --help
           python scripts/standalone-ui-smoke.py --server ./dist/${{ matrix.binary }} --web-only
+          python scripts/check-standalone-browser.py --binary ./dist/${{ matrix.binary }}
 
 
   bundled-tmux:
@@ -643,7 +648,7 @@ jobs:
           docker run --rm "$image" local-shell-mcp version
           docker run --rm --entrypoint python "$image" -c 'import pathlib, zstandard; assert not pathlib.Path("/app/src/local_shell_mcp/ui_runtime").exists(); assert pathlib.Path("/app/src/local_shell_mcp/ui_static/web.js").is_file()'
           docker run --rm --entrypoint sh "$image" -c 'for tool in local-shell-mcp-tui gcc clang rustc cargo go javac node npm libreoffice; do ! command -v "$tool" || exit 1; done'
-          docker run --rm --entrypoint python "$image" -c 'import os, pathlib; from playwright.sync_api import sync_playwright; assert not pathlib.Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"]).exists(); p = sync_playwright().start(); assert p.chromium is not None; p.stop()'
+          docker run --rm --entrypoint python "$image" -c 'import importlib.util, os, pathlib; assert importlib.util.find_spec("playwright") is None; assert not pathlib.Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"]).exists()'
           docker image inspect --format 'Lean Docker image size: {{.Size}} bytes' "$image"
 
   compose:
