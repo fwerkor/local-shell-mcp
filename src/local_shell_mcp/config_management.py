@@ -27,7 +27,7 @@ _MAX_CONFIG_BYTES = 256 * 1024
 _CHOICES = {
     "mode": ["mcp", "http", "both", "stdio"],
     "auth_mode": ["oauth", "none"],
-    "state_backend": ["file", "memory", "redis"],
+    "state_backend": ["sqlite", "file", "memory", "redis"],
     "ui_wallpaper": ["bing", "aurora", "none"],
     "remote_transfer_strategy": ["auto", "relay", "direct", "object_store"],
 }

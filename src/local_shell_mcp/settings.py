@@ -235,6 +235,25 @@ def _ensure_oauth_jwt_secret(settings: Settings) -> Settings:
         )
     if current not in _WEAK_OAUTH_SECRET_VALUES:
         return settings
+    if settings.state_backend == "sqlite":
+        from .sqlite_store import SQLiteDatabase
+
+        database = SQLiteDatabase(settings.state_dir)
+        with database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT value FROM state WHERE key=?", (OAUTH_JWT_SECRET_FILE_NAME,)).fetchone()
+            if row:
+                stored = bytes(row[0]).decode("utf-8").strip()
+            else:
+                legacy_path = settings.state_dir / OAUTH_JWT_SECRET_FILE_NAME
+                legacy = _read_oauth_secret(legacy_path)
+                if legacy_path.exists() and not legacy:
+                    raise RuntimeError(f"OAuth secret file exists but is invalid: {legacy_path}")
+                stored = legacy or secrets.token_urlsafe(48)
+                db.execute("INSERT INTO state(key, value) VALUES(?,?)", (OAUTH_JWT_SECRET_FILE_NAME, stored.encode()))
+            if len(stored.encode("utf-8")) < 32:
+                raise RuntimeError("Stored SQLite OAuth secret is invalid")
+        return _replace_settings(settings, oauth_jwt_secret=stored)
     return _replace_settings(
         settings,
         oauth_jwt_secret=_get_or_create_oauth_secret(settings.state_dir),
@@ -345,7 +364,7 @@ class _SettingsFields:
     # Run the controller without persistent local state. This implies disable_local
     # and defaults the state backend to process memory unless Redis is configured.
     stateless_controller: bool = False
-    state_backend: Literal["file", "memory", "redis"] = "file"
+    state_backend: Literal["sqlite", "file", "memory", "redis"] = "file"
     state_backend_url: str | None = None
     state_backend_prefix: str = "local-shell-mcp"
 
@@ -547,7 +566,7 @@ if _PYDANTIC_AVAILABLE:
             _validate_numeric_settings(self)
             if self.stateless_controller:
                 self.disable_local = True
-                if self.state_backend == "file":
+                if self.state_backend in {"file", "sqlite"}:
                     self.state_backend = "memory"
                 self.file_download_enabled = False
                 self.ui_wallpaper = "none"
@@ -618,7 +637,7 @@ else:
             _validate_numeric_settings(self)
             if self.stateless_controller:
                 self.disable_local = True
-                if self.state_backend == "file":
+                if self.state_backend in {"file", "sqlite"}:
                     self.state_backend = "memory"
                 self.file_download_enabled = False
                 self.ui_wallpaper = "none"
@@ -675,10 +694,10 @@ def get_settings() -> Settings:
     settings = settings.with_workspace_relative_defaults()
     if not settings.stateless_controller:
         settings.workspace_root.mkdir(parents=True, exist_ok=True)
-    if settings.state_backend == "file":
+    if settings.state_backend in {"file", "sqlite"}:
         settings.state_dir.mkdir(parents=True, exist_ok=True)
     settings = _ensure_oauth_jwt_secret(settings)
-    if settings.state_backend == "file":
+    if settings.state_backend in {"file", "sqlite"}:
         settings.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
         settings.agent_config_dir.mkdir(parents=True, exist_ok=True)
     return settings
