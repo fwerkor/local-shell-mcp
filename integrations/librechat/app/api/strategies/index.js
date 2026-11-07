@@ -1,37 +1,6 @@
-const { setupOpenId, getOpenIdConfig, getOpenIdEmail } = require('./openidStrategy');
-const openIdJwtLogin = require('./openIdJwtStrategy');
-const facebookLogin = require('./facebookStrategy');
-const { facebookAdminLogin } = facebookLogin;
-const discordLogin = require('./discordStrategy');
-const { discordAdminLogin } = discordLogin;
-const passportLogin = require('./localStrategy');
-const googleLogin = require('./googleStrategy');
-const { googleAdminLogin } = googleLogin;
-const githubLogin = require('./githubStrategy');
-const { githubAdminLogin } = githubLogin;
-const { setupSaml } = require('./samlStrategy');
-const appleLogin = require('./appleStrategy');
-const { appleAdminLogin } = appleLogin;
-const ldapLogin = require('./ldapStrategy');
+// LSM is a single-user Controller-authenticated application. Only its JWT
+// session and the legacy OIDC logout compatibility helpers remain.
 const jwtLogin = require('./jwtStrategy');
+const { getOpenIdConfig, getOpenIdEmail } = require('./openidStrategy');
 
-module.exports = {
-  appleLogin,
-  appleAdminLogin,
-  passportLogin,
-  googleLogin,
-  googleAdminLogin,
-  githubLogin,
-  githubAdminLogin,
-  discordLogin,
-  discordAdminLogin,
-  jwtLogin,
-  facebookLogin,
-  facebookAdminLogin,
-  setupOpenId,
-  getOpenIdConfig,
-  getOpenIdEmail,
-  ldapLogin,
-  setupSaml,
-  openIdJwtLogin,
-};
+module.exports = { jwtLogin, getOpenIdConfig, getOpenIdEmail };

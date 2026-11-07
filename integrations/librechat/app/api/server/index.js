@@ -1,3 +1,9 @@
+// The vendored runtime intentionally has no standalone account manager.
+// Refuse to start it without the LSM identity bridge and its single-user policy.
+if (process.env.LSM_SINGLE_USER !== 'true') {
+  throw new Error('This LibreChat derivative requires LSM_SINGLE_USER=true');
+}
+
 require('../config/credentials');
 
 const telemetry = require('./telemetry');
@@ -76,13 +82,12 @@ const { initializeGitHubSkillSync } = require('./services/Skills/sync');
 const { initializeAgentTriggerService } = require('./services/Agents/triggers');
 const { resumeAgentEventDetachedAction } = require('./services/Agents/detachedActionResume');
 const { initializeScheduleEngine, recordExpiredScheduleApproval } = require('./services/Schedules');
-const { jwtLogin, ldapLogin, passportLogin } = require('~/strategies');
+const { jwtLogin } = require('~/strategies');
 const { startExpiredFileSweep } = require('./services/Files/process');
 const { checkMigrations } = require('./services/start/migration');
 const optionalJwtAuth = require('./middleware/optionalJwtAuth');
 const initializeMCPs = require('./services/initializeMCPs');
 const { configureSubagentTaskRouting } = require('./services/Endpoints/agents/subagentThreadStore');
-const configureSocialLogins = require('./socialLogins');
 const createSpaFallback = require('./utils/fallback');
 const { getAppConfig } = require('./services/Config');
 const staticCache = require('./utils/staticCache');
@@ -95,7 +100,7 @@ configureFileConfigRegexEngine();
 /** Reject messageFilter PII patterns the RE2 runtime engine cannot compile, at config load. */
 configureMessageFilterRegexValidator();
 
-const { PORT, HOST, ALLOW_SOCIAL_LOGIN, DISABLE_COMPRESSION, TRUST_PROXY } = process.env ?? {};
+const { PORT, HOST, DISABLE_COMPRESSION, TRUST_PROXY } = process.env ?? {};
 
 // Allow PORT=0 to be used for automatic free port assignment
 const port = isNaN(Number(PORT)) ? 3080 : Number(PORT);
@@ -388,30 +393,16 @@ const startServer = async () => {
   }
   app.use('/api/agents/chat', agentStartupTelemetryMiddleware);
 
-  if (!ALLOW_SOCIAL_LOGIN) {
-    console.warn('Social logins are disabled. Set ALLOW_SOCIAL_LOGIN=true to enable them.');
-  }
-
-  /* OAUTH */
+  // Authentication comes from the LSM bridge; only JWT is needed to keep
+  // the authenticated chat session. Third-party account flows are not mounted.
   app.use(passport.initialize());
   passport.use(jwtLogin());
-  passport.use(passportLogin());
-
-  /* LDAP Auth */
-  if (process.env.LDAP_URL && process.env.LDAP_USER_SEARCH_BASE) {
-    passport.use(ldapLogin);
-  }
-
-  if (isEnabled(ALLOW_SOCIAL_LOGIN)) {
-    await configureSocialLogins(app, appConfig);
-  }
 
   /* Per-request capability cache — must be registered before any route that calls hasCapability */
   app.use(capabilityContextMiddleware);
 
   /* Pre-auth tenant context for unauthenticated routes that need tenant scoping.
    * The reverse proxy / auth gateway sets `X-Tenant-Id` header for multi-tenant deployments. */
-  app.use('/oauth', preAuthTenantMiddleware, routes.oauth);
   /* API Endpoints */
   app.use('/api/auth/lsm', preAuthTenantMiddleware, require('./routes/lsm-auth'));
   if (process.env.LSM_SINGLE_USER === 'true') {
@@ -453,21 +444,7 @@ const startServer = async () => {
   app.use('/api/auth', preAuthTenantMiddleware, routes.auth);
   app.use('/api/lsm/preferences', require('./routes/lsm-prefs').router);
   app.use('/api/lsm/controller', require('./routes/lsm-controller').router);
-  app.use('/api/insights', routes.insights);
-  app.use('/api/admin', routes.adminAuth);
-  app.use('/api/admin/config', routes.adminConfig);
-  app.use('/api/admin/code-environments', routes.adminCodeEnvironments);
-  app.use('/api/code-environments', routes.codeEnvironments);
-  app.use('/api/admin/langfuse', routes.adminLangfuse);
-  app.use('/api/admin/grants', routes.adminGrants);
-  app.use('/api/admin/groups', routes.adminGroups);
-  app.use('/api/admin/roles', routes.adminRoles);
-  app.use('/api/admin/skills', routes.adminSkills);
-  app.use('/api/admin/users', routes.adminUsers);
-  app.use('/api/admin/audit-log', routes.adminAuditLog);
-  app.use('/api/actions', routes.actions);
   app.use('/api/keys', routes.keys);
-  app.use('/api/api-keys', routes.apiKeys);
   app.use('/api/user', routes.user);
   app.use('/api/search', routes.search);
   app.use('/api/messages', routes.messages);
@@ -479,7 +456,6 @@ const startServer = async () => {
   app.use('/api/skills', routes.skills);
   app.use('/api/categories', routes.categories);
   app.use('/api/endpoints', routes.endpoints);
-  app.use('/api/balance', routes.balance);
   app.use('/api/models', routes.models);
   app.use('/api/config', preAuthTenantMiddleware, optionalJwtAuth, routes.config);
   app.use('/api/assistants', routes.assistants);
@@ -491,7 +467,6 @@ const startServer = async () => {
     }),
     routes.staticRoute,
   );
-  app.use('/api/share', preAuthTenantMiddleware, routes.share);
   app.use('/api/roles', routes.roles);
   app.use('/api/agents/chat', rejectChatStartsUntilReady);
   app.use('/api/agents', routes.agents);
@@ -502,11 +477,9 @@ const startServer = async () => {
 
   app.use('/api/tags', routes.tags);
   app.use('/api/mcp', routes.mcp);
-  app.use('/api/rum', routes.rum);
 
   app.use('/metrics', metricsRouter);
 
-  app.use('/api', routes.openapi);
 
   /** 404 for unmatched API routes */
   app.use('/api', apiNotFound);

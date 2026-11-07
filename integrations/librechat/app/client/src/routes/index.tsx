@@ -6,7 +6,6 @@ import AgentMarketplace from '~/components/Agents/Marketplace';
 import { AuthContextProvider } from '~/hooks/AuthContext';
 import RouteErrorBoundary from './RouteErrorBoundary';
 import LoginLayout from './Layouts/Login';
-import WithRum from '~/lib/rum/WithRum';
 import ChatRoute from './ChatRoute';
 import LsmControl from '~/components/LSM/Control';
 import Search from './Search';
@@ -14,9 +13,7 @@ import Root from './Root';
 
 const AuthLayout = () => (
   <AuthContextProvider>
-    <WithRum>
-      <Outlet />
-    </WithRum>
+    <Outlet />
     <ApiErrorWatcher />
   </AuthContextProvider>
 );

@@ -18,3 +18,23 @@ currently vendored commit, retain MIT notices, port the LSM changes within
 `app/`, run application builds and integration tests and update this
 document's version/commit. Never automatically download or execute an
 unreviewed upstream revision during builds.
+
+## LSM-specific pruning policy
+
+This is a deliberately scoped **single-user** derivative, not a general
+LibreChat distribution. We removed standalone OAuth/social/password/LDAP/SAML
+sign-in, admin routes, account-management CLI, RUM and Insights collection,
+standalone Redis/search/deployment stacks, migration/localization maintenance
+scripts, experimental runtimes, and unused benchmark harnesses. The embedded
+chat UI includes English, Simplified Chinese and Traditional Chinese; other
+languages fall back to English. Controller docs and native UI locales are
+maintained independently.
+
+Keep the chat and Agent runtimes, projects and conversation history, provider
+selection/BYOK, search, memories, subagents, Ask User, MCP gateway, local
+upload integration, Controller settings, and unified Control UI. Services may
+still be needed by those systems after their standalone HTTP routes are removed.
+PWA stale-asset recovery remains enabled without upstream browser telemetry.
+
+For every update, run `npm run check:lsm`, `npm run frontend`, client TypeScript
+checking and the Controller's Python integration tests before publishing.

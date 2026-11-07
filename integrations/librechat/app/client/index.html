@@ -79,158 +79,42 @@
       document.head.appendChild(loadingContainerStyle);
     </script>
     <script>
+      // Keep the PWA's stale-chunk recovery without the disabled upstream RUM SDK.
       (function () {
-        var KEY = 'lc-asset-recovery-at';
-        var RUM_QUEUE_KEY = 'lc-rum-queue';
-        var MAX_RUM_QUEUE = 20;
-        window.__lcRumRecoveryGuardInstalled = true;
-        window.__lcRumQueue = Array.isArray(window.__lcRumQueue) ? window.__lcRumQueue : [];
-        try {
-          var persistedQueue = JSON.parse(sessionStorage.getItem(RUM_QUEUE_KEY) || '[]');
-          if (Array.isArray(persistedQueue)) {
-            window.__lcRumQueue = persistedQueue.concat(window.__lcRumQueue).slice(-MAX_RUM_QUEUE);
-          }
-        } catch (e) {
-          /* Diagnostics should never affect application startup. */
-        }
-        window.__lcRumPush = function (type, attributes) {
+        const key = 'lsm-asset-recovery-at';
+        function recover() {
           try {
-            var safeAttributes = {};
-            Object.keys(attributes || {}).forEach(function (key) {
-              var value = attributes[key];
-              if (
-                typeof value !== 'string' &&
-                typeof value !== 'number' &&
-                typeof value !== 'boolean'
-              ) {
-                return;
-              }
-              safeAttributes[key] = value;
-            });
-            /* Stamp before persistence: a recovery reload may precede the RUM module. */
-            safeAttributes.clientBuildId = 'unknown';
-            var entryScripts = document.querySelectorAll('script[type="module"][src]');
-            for (var i = 0; i < entryScripts.length; i++) {
-              var filename = entryScripts[i]
-                .getAttribute('src')
-                .split(/[?#]/, 1)[0]
-                .split('/')
-                .pop();
-              if (/^index[.-][\w-]+\.js$/.test(filename)) {
-                safeAttributes.clientBuildId = filename;
-                break;
-              }
-            }
-            if (window.__lcRumQueue.length >= MAX_RUM_QUEUE) {
-              window.__lcRumQueue.shift();
-            }
-            window.__lcRumQueue.push({
-              type: type,
-              at: Math.round(performance.now()),
-              visibilityState: document.visibilityState,
-              attributes: safeAttributes,
-            });
-            sessionStorage.setItem(RUM_QUEUE_KEY, JSON.stringify(window.__lcRumQueue));
-          } catch (e) {
-            /* Diagnostics should never affect application startup. */
-          }
-        };
-        function shouldRecover() {
-          try {
-            var last = Number(sessionStorage.getItem(KEY)) || 0;
-            if (Date.now() - last < 60000) {
-              return false;
-            }
-            sessionStorage.setItem(KEY, String(Date.now()));
-            return true;
-          } catch (e) {
-            return false;
-          }
+            if (Date.now() - Number(sessionStorage.getItem(key) || 0) < 60000) return;
+            sessionStorage.setItem(key, String(Date.now()));
+          } catch { return; }
+          const reload = () => window.location.reload();
+          if (!navigator.serviceWorker) { reload(); return; }
+          const base = new URL('./', document.baseURI || location.href).href;
+          navigator.serviceWorker.getRegistrations().then((registrations) =>
+            Promise.all(registrations.filter((registration) =>
+              registration.scope.startsWith(base)).map((registration) => registration.unregister())),
+          ).then(reload, reload);
         }
-        window.__lcRecoverStaleAssets = function () {
-          if (!shouldRecover()) {
-            return false;
-          }
-          window.__lcRumPush('stale-asset-recovery-start');
-          var reload = function () {
-            window.__lcRumPush('stale-asset-recovery-reload');
-            window.location.reload();
-          };
-          if (navigator.serviceWorker) {
-            var scopeBase = new URL('./', document.baseURI || window.location.href).href;
-            navigator.serviceWorker
-              .getRegistrations()
-              .then(function (registrations) {
-                return Promise.all(
-                  registrations
-                    .filter(function (registration) {
-                      return registration.scope.indexOf(scopeBase) === 0;
-                    })
-                    .map(function (registration) {
-                      return registration.unregister();
-                    }),
-                );
-              })
-              .then(reload, reload);
-          } else {
-            reload();
-          }
-          return true;
-        };
+        window.__lcRecoverStaleAssets = recover;
         if (navigator.serviceWorker) {
-          navigator.serviceWorker.addEventListener('message', function (event) {
-            if (!event.data || event.data.type !== 'LC_SW_PING') {
-              return;
-            }
-            var source = event.source || navigator.serviceWorker.controller;
-            if (source) {
-              source.postMessage({ type: 'LC_SW_PONG' });
-            }
+          navigator.serviceWorker.addEventListener('message', (event) => {
+            if (event.data?.type !== 'LC_SW_PING') return;
+            (event.source || navigator.serviceWorker.controller)?.postMessage({ type: 'LC_SW_PONG' });
           });
         }
-        window.addEventListener(
-          'error',
-          function (event) {
-            var el = event.target;
-            if (!el || !el.tagName) {
-              return;
-            }
-            var failedScript = el.tagName === 'SCRIPT' && el.src;
-            var failedPreload =
-              el.tagName === 'LINK' && /preload/.test(el.rel || '') && /\.js$/.test(el.href || '');
-            if (failedScript || failedPreload) {
-              var isRumBootstrap = el.getAttribute('data-lc-rum-bootstrap') === 'true';
-              window.__lcRumPush('asset-load-error', {
-                tagName: el.tagName,
-                assetUrl: el.src || el.href,
-                optional: isRumBootstrap,
-              });
-              if (isRumBootstrap) {
-                return;
-              }
-              window.__lcRecoverStaleAssets();
-            }
-          },
-          true,
-        );
-        window.addEventListener('unhandledrejection', function (event) {
-          var message = event.reason && event.reason.message;
-          if (
-            typeof message === 'string' &&
-            (message.indexOf('dynamically imported module') !== -1 ||
-              message.indexOf('Importing a module script failed') !== -1)
-          ) {
-            window.__lcRumPush('dynamic-import-error');
-            window.__lcRecoverStaleAssets();
+        window.addEventListener('error', (event) => {
+          const el = event.target;
+          if (el?.tagName === 'SCRIPT' && el.src ||
+              el?.tagName === 'LINK' && /preload/.test(el.rel || '') && /\.js$/.test(el.href || '')) {
+            recover();
           }
+        }, true);
+        window.addEventListener('unhandledrejection', (event) => {
+          const message = event.reason?.message;
+          if (typeof message === 'string' && /dynamically imported module|Importing a module script failed/.test(message)) recover();
         });
       })();
     </script>
-    <script
-      data-lc-rum-bootstrap="true"
-      type="module"
-      src="/src/lib/rum/bootstrap-entry.js"
-    ></script>
     <script defer type="module" src="/src/main.jsx"></script>
   </head>
   <body>

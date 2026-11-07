@@ -457,7 +457,7 @@ const resolveBrowserTabId = (): string => {
     }
     const navigationType =
       typeof performance.getEntriesByType === 'function'
-        ? performance.getEntriesByType('navigation')[0]?.type
+        ? (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)?.type
         : undefined;
     if (
       stored != null &&
