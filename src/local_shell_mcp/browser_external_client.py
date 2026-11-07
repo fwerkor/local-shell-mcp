@@ -136,7 +136,13 @@ class ExternalBrowserSessionManager:
                 )
                 process.stdin.write(request.encode("utf-8") + b"\n")
                 await process.stdin.drain()
-        except (Exception, asyncio.CancelledError):
+        except asyncio.CancelledError:
+            if request_id is not None:
+                self._pending.pop(request_id, None)
+            if future is not None:
+                future.cancel()
+            raise
+        except Exception:
             if request_id is not None:
                 self._pending.pop(request_id, None)
             if future is not None:
