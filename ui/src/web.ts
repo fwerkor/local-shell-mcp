@@ -392,6 +392,14 @@ function renderActiveView(): void {
     machines: uiMachines,
     notify,
     selectedRemote: activeView === "remotes" ? pendingRemoteSelection : undefined,
+    reauthorize: async () => {
+      sessionStorage.removeItem(TOKEN_KEY)
+      authenticated = false
+      stopRefreshTimer()
+      appShell.hidden = true
+      authGate.hidden = false
+      await startOAuth("settings")
+    },
     refreshChrome: async () => {
       await refreshAll(false)
     },

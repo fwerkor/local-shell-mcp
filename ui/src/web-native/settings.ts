@@ -15,7 +15,8 @@ export function restartDestination(currentUrl: string, runningPort: number, next
   const url = new URL(currentUrl)
   // Only change the port for direct connections. A reverse proxy's external port
   // is independently configured and must not be rewritten.
-  if (url.port && Number(url.port) === runningPort && nextPort !== runningPort) {
+  const effectivePort = url.port ? Number(url.port) : url.protocol === "https:" ? 443 : url.protocol === "http:" ? 80 : null
+  if (effectivePort === runningPort && nextPort !== runningPort) {
     url.port = String(nextPort)
   }
   if (nextPath) url.pathname = `${nextPath.replace(/\/$/, "")}/`
@@ -82,7 +83,11 @@ export class SettingsController extends BaseController {
       this.draft.clear()
       this.render()
     } catch (error) {
-      if (!this.destroyed) this.root.innerHTML = `<div class="native-error">${escapeHtml(error instanceof Error ? error.message : String(error))}. Reauthorize if the token lacks admin:config.</div>`
+      if (!this.destroyed) {
+        const message = error instanceof Error ? error.message : String(error)
+        const reauthorize = message.includes("admin:config") && this.context.reauthorize
+        this.root.innerHTML = `<div class="native-error"><p>${escapeHtml(message)}</p>${reauthorize ? '<button class="native-button primary" data-action="reauthorize">Reauthorize Settings access</button>' : ""}</div>`
+      }
     } finally { this.busy = false }
   }
 
@@ -169,6 +174,7 @@ export class SettingsController extends BaseController {
     const reset = el.closest<HTMLButtonElement>("[data-reset]")
     if (reset) { this.draft.set(reset.dataset.reset!, null); this.render(); return }
     const action = el.closest<HTMLElement>("[data-action]")?.dataset.action
+    if (action === "reauthorize") { await this.context.reauthorize?.(); return }
     if (action === "reload") await this.load()
     if (action === "save") await this.save()
     if (action === "apply" && await this.save()) await this.restart()

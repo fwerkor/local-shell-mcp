@@ -19,6 +19,7 @@ export interface NativePageContext {
   selectedRemote?: string
   notify: (message: string, tone?: NoticeTone) => void
   refreshChrome: () => Promise<void>
+  reauthorize?: () => void | Promise<void>
 }
 
 export interface NativePageController {
