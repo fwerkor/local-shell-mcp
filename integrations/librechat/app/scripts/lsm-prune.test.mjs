@@ -48,3 +48,12 @@ test('shipped translation resources match the language picker', () => {
   assert.ok(!existsSync(resolve(root, 'client/src/locales/ja/translation.json')));
   assert.ok(!text('client/src/components/Appearance/Selectors.tsx').includes("value: 'ja-JP'"));
 });
+
+
+test('conversation permissions are loaded before any update and keyed by conversation', () => {
+  const permissions = text('client/src/components/Chat/Input/LsmChatPermissions.tsx');
+  assert.ok(permissions.includes("['lsm', 'chat-permissions', conversationId]"));
+  assert.ok(permissions.includes('!query.data || query.isFetching || mutation.isLoading'));
+  assert.ok(permissions.includes('if (!available || disabled || !query.data) return'));
+  assert.ok(permissions.includes('client.setQueryData(preferenceKey(requestedId), saved)'));
+});
