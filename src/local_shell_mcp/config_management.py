@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import secrets
 import tempfile
 import threading
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import Any
 import yaml
 
 from .settings import (
+    _WEAK_OAUTH_SECRET_VALUES,
     SENSITIVE_SETTING_KEYS,
     Settings,
     _without_environment_overrides,
@@ -169,8 +171,11 @@ def _validate_candidate(document: dict[str, Any], changed: set[str]) -> Settings
                     or len(explicit_secret.encode("utf-8")) < 32
                     or explicit_secret in {"dev-change-me", "change-me-64-hex-random-secret"}):
                 raise ValueError("stateless OAuth requires an explicit strong oauth_jwt_secret")
-        elif "oauth_jwt_secret" not in changed and candidate.oauth_jwt_secret in {"", "dev-change-me"}:
-            candidate = candidate.model_copy(update={"oauth_jwt_secret": get_settings().oauth_jwt_secret})
+        elif candidate.auth_mode == "oauth" and candidate.oauth_jwt_secret in _WEAK_OAUTH_SECRET_VALUES:
+            # Stateful startup generates and persists a strong secret. Simulate
+            # that validation without writing state or reusing a weak secret
+            # from a currently unauthenticated process.
+            candidate = candidate.model_copy(update={"oauth_jwt_secret": secrets.token_urlsafe(48)})
         validate_public_oauth_configuration(candidate)
     except Exception as exc:
         if isinstance(exc, ValueError) and str(exc).startswith("stateless OAuth requires"):

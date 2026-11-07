@@ -3209,6 +3209,23 @@ async def ui_root_redirect(request: Request) -> RedirectResponse:  # noqa: ARG00
     return RedirectResponse(f"./{ui_path}/", status_code=307)
 
 
+def _settings_same_origin(request: Request) -> bool:
+    origin = request.headers.get("origin")
+    if not origin:
+        return True
+    actual = f"{request.url.scheme}://{request.url.netloc}"
+    if origin == actual:
+        return True
+    # TLS-terminating reverse proxies may expose HTTPS while the ASGI request
+    # is HTTP. Only accept the advertised URL when its host is the request Host.
+    advertised = get_settings().public_base_url
+    return bool(
+        advertised
+        and origin == advertised.rstrip("/")
+        and urlsplit(advertised).netloc == request.url.netloc
+    )
+
+
 async def api_settings(request: Request) -> Response:
     """Privileged controller configuration, independent of shell workspace access."""
     try:
@@ -3219,10 +3236,7 @@ async def api_settings(request: Request) -> Response:
             if not _is_direct_localhost_request(request):
                 raise HTTPException(status_code=403, detail="Anonymous configuration access is restricted to direct localhost")
         if request.method == "POST":
-            from .oauth import public_base_url
-
-            origin = request.headers.get("origin")
-            if origin and origin.rstrip("/") != public_base_url(request):
+            if not _settings_same_origin(request):
                 raise HTTPException(status_code=403, detail="Configuration changes require a same-origin request")
             if request.headers.get("sec-fetch-site") == "cross-site":
                 raise HTTPException(status_code=403, detail="Cross-site configuration changes are forbidden")

@@ -651,11 +651,15 @@ else:
 def controller_config_path(environment: Mapping[str, str] | None = None) -> Path:
     """Find controller YAML without prematurely changing dependent Settings defaults."""
     values = os.environ if environment is None else environment
+
+    def expand(value: str | Path) -> Path:
+        return Path(os.path.expandvars(os.path.expanduser(str(value))))
+
     explicit = values.get("LOCAL_SHELL_MCP_CONFIG", "").strip()
     if explicit:
-        return Path(explicit).expanduser()
-    workspace = Path(values.get("LOCAL_SHELL_MCP_WORKSPACE_ROOT") or DEFAULT_WORKSPACE_ROOT).expanduser().resolve()
-    state_dir = Path(values.get("LOCAL_SHELL_MCP_STATE_DIR") or DEFAULT_STATE_DIR).expanduser().resolve()
+        return expand(explicit)
+    workspace = expand(values.get("LOCAL_SHELL_MCP_WORKSPACE_ROOT") or DEFAULT_WORKSPACE_ROOT).resolve()
+    state_dir = expand(values.get("LOCAL_SHELL_MCP_STATE_DIR") or DEFAULT_STATE_DIR).resolve()
     if _matches_default_path(state_dir, DEFAULT_STATE_DIR) and not _matches_default_path(workspace, DEFAULT_WORKSPACE_ROOT):
         state_dir = workspace / ".local-shell-mcp"
     return state_dir / "config.yaml"

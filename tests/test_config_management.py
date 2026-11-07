@@ -128,6 +128,40 @@ def test_oauth_management_scope_and_same_origin(configured, monkeypatch):
     assert config_snapshot()["fields"]
 
 
+def test_direct_localhost_config_writes_with_public_url(configured, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL", "https://controller.example.test")
+    get_settings.cache_clear()
+    with TestClient(
+        build_http_app(), base_url="http://127.0.0.1:8765", client=("127.0.0.1", 43561)
+    ) as client:
+        snapshot = client.get("/api/ui/settings/view")
+        assert snapshot.status_code == 200
+        params = {"revision": snapshot.json()["data"]["revision"], "changes": {"max_jobs": 36}}
+        path = "/api/ui/settings/save"
+        assert client.post(path, headers={"Origin": "http://127.0.0.1:8765"}, json=params).status_code == 200
+        assert client.post(path, headers={"Origin": "https://evil.example.test"}, json=params).status_code in {401, 403}
+
+
+def test_proxy_origin_requires_same_host_even_with_advertised_https(configured, monkeypatch):
+    from starlette.requests import Request
+
+    from local_shell_mcp.human_ui import _settings_same_origin
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL", "https://controller.example.test")
+    get_settings.cache_clear()
+
+    def request(host: str, origin: str) -> Request:
+        return Request({
+            "type": "http", "method": "POST", "scheme": "http", "path": "/api/ui/settings/save",
+            "headers": [(b"host", host.encode()), (b"origin", origin.encode())],
+            "server": (host, 80), "query_string": b"",
+        })
+
+    assert _settings_same_origin(request("controller.example.test", "https://controller.example.test"))
+    assert not _settings_same_origin(request("localhost:8765", "https://controller.example.test"))
+    assert not _settings_same_origin(request("controller.example.test", "https://attacker.example.test"))
+
+
 def test_yaml_state_dir_does_not_anchor_default_subpaths(configured):
     chosen_state = configured / "separate-state"
     config_file().parent.mkdir(parents=True, exist_ok=True)
@@ -234,3 +268,33 @@ def test_nested_yaml_reset_and_update(configured):
     assert "admin_pin:" not in path.read_text()
     assert "code_ttl_s:" in path.read_text()
     save_config({"ui_tui_command": None}, saved["revision"])
+
+
+def test_stateful_oauth_can_be_enabled_without_an_explicit_secret(configured, monkeypatch):
+    monkeypatch.delenv("LOCAL_SHELL_MCP_AUTH_MODE", raising=False)
+    path = config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("auth_mode: none\n")
+    get_settings.cache_clear()
+    assert get_settings().auth_mode == "none"
+    initial = config_snapshot()
+    save_config({"auth_mode": "oauth"}, initial["revision"])
+    secret_path = get_settings().state_dir / "oauth-jwt-secret"
+    assert not secret_path.exists()
+    get_settings.cache_clear()
+    assert get_settings().auth_mode == "oauth"
+    assert len(get_settings().oauth_jwt_secret.encode("utf-8")) >= 32
+    assert secret_path.is_file()
+
+
+def test_default_config_path_expands_environment_variables(configured, monkeypatch):
+    from local_shell_mcp.settings import controller_config_path
+
+    monkeypatch.setenv("CONFIG_TEST_BASE", str(configured))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", "$CONFIG_TEST_BASE/state")
+    assert controller_config_path() == configured / "state" / "config.yaml"
+    monkeypatch.delenv("LOCAL_SHELL_MCP_STATE_DIR")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", "$CONFIG_TEST_BASE/workspace")
+    assert controller_config_path() == configured / "workspace" / ".local-shell-mcp" / "config.yaml"
+    monkeypatch.setenv("LOCAL_SHELL_MCP_CONFIG", "$CONFIG_TEST_BASE/custom.yaml")
+    assert controller_config_path() == configured / "custom.yaml"

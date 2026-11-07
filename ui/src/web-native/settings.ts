@@ -22,6 +22,14 @@ export function restartDestination(currentUrl: string, runningPort: number, next
   return url.href
 }
 
+export function nextRestartSettings(snapshot: Snapshot | null): { port: number; uiPath: string } {
+  const running = snapshot?.running
+  return {
+    port: Number(snapshot?.fields.find(f => f.name === "port")?.value ?? running?.port ?? 0),
+    uiPath: String(snapshot?.fields.find(f => f.name === "ui_path")?.value ?? running?.ui_path ?? ""),
+  }
+}
+
 function fieldControl(field: Field): string {
   const name = escapeHtml(field.name)
   const disabled = field.locked ? " disabled" : ""
@@ -49,8 +57,6 @@ export class SettingsController extends BaseController {
   private group = "All"
   private busy = false
   private pendingRestart = false
-  private nextPort: number | null = null
-  private nextPath: string | null = null
 
   constructor(context: NativePageContext) { super(context) }
 
@@ -178,8 +184,6 @@ export class SettingsController extends BaseController {
     try {
       await this.context.api.send("/settings/save", "POST", { changes, revision: this.data.revision })
       this.pendingRestart = true
-      if (typeof changes.port === "number") this.nextPort = changes.port
-      if (typeof changes.ui_path === "string") this.nextPath = changes.ui_path
       this.context.notify("Configuration saved. Restart to apply.", "success")
       this.data = await this.context.api.get<Snapshot>("/settings/view")
       this.draft.clear()
@@ -199,8 +203,7 @@ export class SettingsController extends BaseController {
       const notice = this.root.querySelector<HTMLElement>(".settings-notice")
       if (notice) notice.textContent = "Restart requested. Checking server availability…"
       const running = this.data?.running
-      const nextPort = this.nextPort ?? Number(this.data?.fields.find(f => f.name === "port")?.value ?? running?.port)
-      const nextPath = this.nextPath ?? String(this.data?.fields.find(f => f.name === "ui_path")?.value ?? running?.ui_path ?? "")
+      const { port: nextPort, uiPath: nextPath } = nextRestartSettings(this.data)
       const url = new URL(restartDestination(window.location.href, running?.port ?? 0, nextPort, nextPath))
       let attempt = 0
       const poll = async () => {
