@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
+<!-- i18n-source-sha256: d7d01bc3f36f434c8e66c3fb6f65c2934937c5b2937dd9e8ba7beefc018fd14f -->
 # خيارات Runtime ونموذج النشر
 
 يحتوي `local-shell-mcp` على قرارين متكاملين:
@@ -40,11 +40,11 @@ Local MCP client
 
 | وقت التشغيل | الأفضل ل | حد العزلة | مصدر سلسلة الأدوات | الوصول الخارجي لـ MCP | الصفحة |
 |---|---|---|---|---|---|
-| عامل الميناء يؤلف | معظم أعباء عمل وكيل الترميز ومساحات العمل القابلة للتكرار | حاوية | صورة وحدة التحكم الهزيلة؛ تثبيت سلاسل الأدوات الخاصة بالمهمة بشكل منفصل | أضف وكيل أو نفق HTTPS | [Docker Compose](../installation/docker.md) |
+| **المصدر مباشرة (موصى به)** / `pipx` | استخدام Python-native وdebugging وdevelopment | Host virtualenv or VM | Python package مع أدوات host | أضف HTTPS proxy أو tunnel | [Python install](../installation/python.md) |
+| عامل الميناء يؤلف | حاويات معزولة ومؤقتة | حاوية | صورة وحدة التحكم الهزيلة؛ تثبيت سلاسل الأدوات الخاصة بالمهمة بشكل منفصل | أضف وكيل أو نفق HTTPS | [Docker Compose](../installation/docker.md) |
 | Docker Compose + عربة جانبية للنفق | غير موصى به: إعادة التوجيه عبر خادم عام؛ وCloudflare Tunnel حل أخير | حاوية | صورة المشروع | إعادة التوجيه عبر خادم عام؛ وCloudflare Tunnel حل أخير | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | بدء/إيقاف server من editor workspace | عادة process على host | أدوات host مع executable مضبوط | أضف HTTPS tunnel/proxy خارجيًا لـ ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Hosts أو VM بدون Docker | Host or VM | أدوات host مع executable مضبوط | أضف HTTPS proxy أو tunnel | [Standalone binary](../installation/binary.md) |
-| `pipx` / source install | استخدام Python-native وdebugging وdevelopment | Host virtualenv or VM | Python package مع أدوات host | أضف HTTPS proxy أو tunnel | [Python install](../installation/python.md) |
 | Stdio mode | MCP clients محليون يشغّلون العمليات مباشرة | Client process boundary | أدوات host مع executable مضبوط | غير قابل للاستخدام مع ChatGPT web/app | [Stdio mode](../installation/stdio.md) |
 
 ## مصفوفة اتصال Client
@@ -84,7 +84,7 @@ Local MCP client
 
 ## الاختيار الموصى به
 
-استخدم **Docker Compose** أولاً ما لم يكن لديك سبب لعدم القيام بذلك. إنه يوفر حدود أمان واضحة دون الحاجة إلى سلسلة أدوات تطوير كبيرة مثبتة مسبقًا.
+ننصح **بالنشر المباشر من الشيفرة المصدرية** في بيئة معزولة. راجع [دليل Python والمصدر](../installation/python.md). يظل Docker Compose بديلاً مناسباً للحاويات المؤقتة.
 
 استخدم **ملحق VS Code** عندما يبدأ سير العمل من محرر وتريد مشغلًا محليًا. لا يزال وقت التشغيل. يحتاج عملاء الويب عن بعد إلى وكيل HTTPS أو نفق يمكن الوصول إليه.
 

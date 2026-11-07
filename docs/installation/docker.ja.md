@@ -1,13 +1,13 @@
-<!-- i18n-source-sha256: f44188b1e2f3b4d79d97c78edb15270aa338ddf7989d85df1559168a0678eaa8 -->
+<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
 # Docker Compose runtime
 
-Docker Compose は多くの user に推奨される runtime です。モデルに制御された Linux workspace、再現可能な toolchain、persistent credentials、browser automation support、簡単な upgrade path を提供します。
+Docker Compose は隔離コンテナー向けの代替手段です。**ソースからの直接デプロイを推奨**します。[Python/ソースのガイド](python.md)を参照してください。
 
 これは runtime の選択です。ChatGPT、generic HTTP MCP client に接続することも、local testing のみに使うこともできます。
 
 ## Docker image に含まれるもの
 
-Image は Playwright Python image をベースにし、広い development toolchain を install しています。目的は、AI coding agent が project ごとに runtime image を再 build せず、多様な repository を扱えるようにすることです。
+イメージは python:3.12-slim ベースで、最低限の実行ツールのみを含みます。開発ツールチェーン、Playwright/ブラウザー、オフィスソフトはプリインストールされません。
 
 含まれる category：
 
@@ -15,12 +15,12 @@ Image は Playwright Python image をベースにし、広い development toolch
 |---|---|
 | Shell と inspection | Bash, curl, wget, jq, ripgrep, tree, tmux, patch, file |
 | Git と credentials | Git, GitHub CLI, OpenSSH client, credential persistence volume |
-| C/C++ build | build-essential, clang, cmake, ninja, autoconf, automake, gdb, lldb |
-| Python | Python, pip, venv, pipx, package development dependencies |
-| JavaScript/TypeScript | Node.js, npm, yarn, pnpm, TypeScript, ts-node |
-| その他の言語 | Go, Rust, Java, Ruby, PHP, Perl, Lua, R |
-| Browser automation | Playwright browsers and browser dependencies |
-| Document tooling | LibreOffice, Pandoc, Poppler utilities, OCR tooling |
+| C/C++ build | 未搭載。必要に応じて追加 |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | 未搭載。必要に応じて追加 |
+| その他の言語 | 未搭載。必要に応じて追加 |
+| Browser automation | 未搭載。必要に応じて追加 |
+| Document tooling | 未搭載。必要に応じて追加 |
 
 正確な image content は convenience layer であり stable API ではありません。Project-specific dependencies は workspace または project build scripts に置いてください。
 
@@ -114,7 +114,6 @@ http://local-shell-mcp:8765
 ## Tunnel sidecar なしの reverse proxy
 
 **推奨:** 公開アクセスには、公開サーバーへの直接デプロイ、または公開サーバー経由の転送と HTTPS リバースプロキシを使用してください。
-
 既に Caddy、Nginx、Traefik、Nginx Proxy Manager を使っているなら通常の Compose service を維持し、HTTPS を次へ forward します：
 
 ```text

@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 19347ba1d8d3f26f227506397f4093281319e6a2a59833ced1da286c1d46f21a -->
+<!-- i18n-source-sha256: c8c0d8ebdbb123b9ac4af1fd288f30e8ca69037ca086486cb8027e2592f4b75a -->
 # Runtime Python, pipx và source
 
-Runtime Python hữu ích cho phát triển, gỡ lỗi và các môi trường nơi quản lý package Python dễ hơn Docker. Chúng chạy cùng server với runtime Docker và binary.
+**Nên cài đặt trực tiếp từ repository mã nguồn.** Sử dụng Python virtual environment và workspace có giới hạn quyền. Docker Compose vẫn khả dụng.
 
 Dùng trang này cho ba trường hợp liên quan:
 
@@ -48,7 +48,7 @@ Process dùng các tool đã cài trên host. Package Python không tự cài co
 
 ## Editable source checkout
 
-Dùng để phát triển project:
+Dùng cho triển khai thông thường và phát triển. Để truy cập công khai, xem [quickstart](../getting-started/quickstart.md).
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git
@@ -56,13 +56,21 @@ cd local-shell-mcp
 python -m venv .venv
 . .venv/bin/activate
 pip install --upgrade pip
-pip install -e '.[dev,docs]'
-LOCAL_SHELL_MCP_WORKSPACE_ROOT=/tmp/local-shell-mcp-workspace local-shell-mcp --mode mcp
+pip install -e .
+cp .env.example .env
+# Replace the example OAuth secrets in .env before starting.
+set -a
+. ./.env
+set +a
+mkdir -p workspaces/default
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
+local-shell-mcp --mode mcp
 ```
 
 Chạy kiểm tra:
 
 ```bash
+python -m pip install -e '.[dev,docs]'
 ruff check .
 pytest -q
 mkdocs build --strict
@@ -70,13 +78,14 @@ mkdocs build --strict
 
 ## Thiết lập trình duyệt
 
-Package Python phụ thuộc Playwright, nhưng browser binary vẫn có thể cần cài trên host:
+Playwright là tùy chọn; chỉ cài thư viện và trình duyệt khi cần.
 
 ```bash
+python -m pip install -e '.[browser]'
 python -m playwright install chromium
 ```
 
-Một số host Linux cần browser dependency bổ sung. Docker tránh được phần lớn việc này vì image bắt đầu từ Playwright base image.
+Cài trình duyệt là tùy chọn; image Docker cơ bản không có Playwright hoặc trình duyệt.
 
 ## Dùng HTTP MCP công khai
 

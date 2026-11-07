@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 19347ba1d8d3f26f227506397f4093281319e6a2a59833ced1da286c1d46f21a -->
+<!-- i18n-source-sha256: c8c0d8ebdbb123b9ac4af1fd288f30e8ca69037ca086486cb8027e2592f4b75a -->
 # Runtime Python, pipx, dan source
 
-Runtime Python berguna untuk pengembangan, debugging, dan lingkungan yang lebih mudah mengelola paket Python daripada Docker. Runtime ini menjalankan server yang sama dengan runtime Docker dan binary.
+**Instalasi langsung dari repository sumber direkomendasikan.** Pakai Python virtual environment dan workspace terbatas; Docker Compose tetap tersedia.
 
 Gunakan halaman ini untuk tiga kasus terkait:
 
@@ -48,7 +48,7 @@ Process menggunakan tool yang terpasang di host. Paket Python tidak memasang com
 
 ## Editable source checkout
 
-Gunakan untuk pengembangan project:
+Gunakan untuk deployment biasa dan pengembangan. Untuk akses publik, lihat [quickstart](../getting-started/quickstart.md).
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git
@@ -56,13 +56,21 @@ cd local-shell-mcp
 python -m venv .venv
 . .venv/bin/activate
 pip install --upgrade pip
-pip install -e '.[dev,docs]'
-LOCAL_SHELL_MCP_WORKSPACE_ROOT=/tmp/local-shell-mcp-workspace local-shell-mcp --mode mcp
+pip install -e .
+cp .env.example .env
+# Replace the example OAuth secrets in .env before starting.
+set -a
+. ./.env
+set +a
+mkdir -p workspaces/default
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
+local-shell-mcp --mode mcp
 ```
 
 Jalankan pemeriksaan:
 
 ```bash
+python -m pip install -e '.[dev,docs]'
 ruff check .
 pytest -q
 mkdocs build --strict
@@ -70,13 +78,14 @@ mkdocs build --strict
 
 ## Penyiapan browser
 
-Paket Python bergantung pada Playwright, tetapi browser binary mungkin masih perlu dipasang di host:
+Playwright bersifat opsional; instal library dan browser hanya saat diperlukan.
 
 ```bash
+python -m pip install -e '.[browser]'
 python -m playwright install chromium
 ```
 
-Sebagian host Linux memerlukan browser dependency tambahan. Docker menghindari sebagian besar hal ini karena image dimulai dari Playwright base image.
+Instalasi browser bersifat opsional; image Docker dasar tidak menyertakan Playwright atau browser.
 
 ## Penggunaan HTTP MCP publik
 

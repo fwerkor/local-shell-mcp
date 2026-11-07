@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
+<!-- i18n-source-sha256: d7d01bc3f36f434c8e66c3fb6f65c2934937c5b2937dd9e8ba7beefc018fd14f -->
 # Runtime の選択とデプロイモデル
 
 `local-shell-mcp` には 2 つの相補的な決定があります。
@@ -40,11 +40,11 @@ Local MCP client
 
 | ランタイム | こんな方に最適 | 分離境界 | ツールチェーンのソース | 外部 MCP アクセス | ページ |
 |---|---|---|---|---|---|
-| Docker Compose | ほとんどのコーディング エージェントのワークロードと反復可能なワークスペース | コンテナ | 無駄のないコントローラーのイメージ。タスク固有のツールチェーンを個別にインストールする | HTTPS プロキシまたはトンネルを追加する | [Docker Compose](../installation/docker.md) |
+| **ソース checkout（推奨）** / `pipx` | Python-native 利用、debug、development | Host virtualenv or VM | Python package と host tools | HTTPS proxy または tunnel を追加 | [Python install](../installation/python.md) |
+| Docker Compose | 隔離された使い捨てコンテナー | コンテナ | 無駄のないコントローラーのイメージ。タスク固有のツールチェーンを個別にインストールする | HTTPS プロキシまたはトンネルを追加する | [Docker Compose](../installation/docker.md) |
 | Docker Compose + トンネル サイドカー | 非推奨: 公開サーバー経由で転送し、Cloudflare Tunnel は最終手段にする | コンテナ | プロジェクトイメージ | 公開サーバー経由で転送し、Cloudflare Tunnel は最終手段にする | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | editor workspace から server を start/stop | 通常 host process | host tools と設定済み executable | ChatGPT 用に外部 HTTPS tunnel/proxy を追加 | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Docker が使えない host/VM | Host or VM | host tools と設定済み executable | HTTPS proxy または tunnel を追加 | [Standalone binary](../installation/binary.md) |
-| `pipx` / source install | Python-native 利用、debug、development | Host virtualenv or VM | Python package と host tools | HTTPS proxy または tunnel を追加 | [Python install](../installation/python.md) |
 | Stdio mode | tool process を直接 spawn する local MCP client | Client process boundary | host tools と設定済み executable | ChatGPT web/app では使用不可 | [Stdio mode](../installation/stdio.md) |
 
 ## Client 接続マトリクス
@@ -84,7 +84,7 @@ Local MCP client
 
 ## 推奨選択
 
-理由がない限り、最初に **Docker Compose** を使用してください。これにより、事前にインストールされた大規模な開発ツールチェーンを必要とせずに、明確な安全境界が得られます。
+隔離された環境で**ソースコードから直接デプロイ**する方法を推奨します。[Python/ソースのガイド](../installation/python.md)を参照してください。Docker Compose は代替手段です。
 
 ワークフローがエディターから開始され、ローカル ランチャーが必要な場合は、**VS Code 拡張機能** を使用します。まだランタイムです。リモート Web クライアントには、到達可能な HTTPS プロキシまたはトンネルが必要です。
 

@@ -1,13 +1,13 @@
-<!-- i18n-source-sha256: f44188b1e2f3b4d79d97c78edb15270aa338ddf7989d85df1559168a0678eaa8 -->
+<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
 # Runtime Docker Compose
 
-Docker Compose — рекомендуемый runtime для большинства пользователей. Он даёт модели контролируемый Linux workspace, воспроизводимый toolchain, persistent credentials, поддержку browser automation и простой путь обновления.
+Docker Compose — альтернатива для изолированных контейнеров. **Рекомендуется запуск напрямую из исходников**; см. [руководство по Python/исходникам](python.md).
 
 Это выбор runtime. Его можно подключить к ChatGPT, универсальному HTTP MCP client или оставить локальным для тестирования.
 
 ## Что входит в Docker image
 
-Image основан на Playwright Python image и устанавливает широкий development toolchain. Цель — позволить AI coding agent работать с разными repositories без пересборки runtime для каждого проекта.
+Образ основан на python:3.12-slim и включает только базовые утилиты. Инструменты разработки, Playwright/браузеры и офисные приложения не предустановлены.
 
 Включённые категории:
 
@@ -15,12 +15,12 @@ Image основан на Playwright Python image и устанавливает 
 |---|---|
 | Shell и inspection | Bash, curl, wget, jq, ripgrep, tree, tmux, patch, file |
 | Git и credentials | Git, GitHub CLI, OpenSSH client, credential persistence volume |
-| C/C++ build | build-essential, clang, cmake, ninja, autoconf, automake, gdb, lldb |
-| Python | Python, pip, venv, pipx, package development dependencies |
-| JavaScript/TypeScript | Node.js, npm, yarn, pnpm, TypeScript, ts-node |
-| Другие языки | Go, Rust, Java, Ruby, PHP, Perl, Lua, R |
-| Browser automation | Playwright browsers and browser dependencies |
-| Document tooling | LibreOffice, Pandoc, Poppler utilities, OCR tooling |
+| C/C++ build | Нет в образе; установите при необходимости |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | Нет в образе; установите при необходимости |
+| Другие языки | Нет в образе; установите при необходимости |
+| Browser automation | Нет в образе; установите при необходимости |
+| Document tooling | Нет в образе; установите при необходимости |
 
 Точный состав image — convenience layer, а не стабильный API. Project-specific dependencies должны оставаться в workspace или project build scripts.
 
@@ -114,7 +114,6 @@ Compose service доверяет forwarded headers, потому что publishe
 ## Reverse proxy без tunnel sidecar
 
 **Рекомендуется:** Для публичного доступа используйте сервер с публичным адресом или пересылку трафика через публичный сервер с обратным HTTPS-прокси.
-
 Если уже используется Caddy, Nginx, Traefik или Nginx Proxy Manager, оставьте обычный Compose service и перенаправьте HTTPS на:
 
 ```text

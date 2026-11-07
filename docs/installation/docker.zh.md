@@ -1,26 +1,26 @@
-<!-- i18n-source-sha256: f44188b1e2f3b4d79d97c78edb15270aa338ddf7989d85df1559168a0678eaa8 -->
+<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
 # Docker Compose 运行时
 
-Docker Compose 是大多数用户的推荐运行时。它为模型提供受控 Linux 工作区、可重复工具链、持久凭据、浏览器自动化支持，以及简单的升级路径。
+Docker Compose 是可选的隔离容器部署方式。**首选直接源码部署**，具体步骤见 [Python/源码运行时指南](python.md)。
 
 这是运行时选择。它可以接入 ChatGPT、通用 HTTP MCP 客户端，也可以只在本地测试。
 
 ## Docker 镜像包含什么
 
-镜像基于 Playwright Python 镜像，并安装较完整的开发工具链。目标是让 AI 编程代理能够处理许多仓库，而不必为每个项目重新构建运行时。
+镜像基于 python:3.12-slim，仅预装基础运行工具。完整开发工具链、Playwright/浏览器以及办公软件均不在基础镜像中。
 
-包含的类别：
+各类工具的预装情况：
 
 | 类别 | 示例 |
 |---|---|
 | Shell 与检查 | Bash、curl、wget、jq、ripgrep、tree、tmux、patch、file |
 | Git 与凭据 | Git、GitHub CLI、OpenSSH client、凭据持久化卷 |
-| C/C++ 构建 | build-essential、clang、cmake、ninja、autoconf、automake、gdb、lldb |
-| Python | Python、pip、venv、pipx、包开发依赖 |
-| JavaScript/TypeScript | Node.js、npm、yarn、pnpm、TypeScript、ts-node |
-| 其它语言 | Go、Rust、Java、Ruby、PHP、Perl、Lua、R |
-| 浏览器自动化 | Playwright 浏览器和浏览器依赖 |
-| 文档工具 | LibreOffice、Pandoc、Poppler 工具、OCR 工具 |
+| C/C++ 构建 | 默认不包含，按需安装 |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | 默认不包含，按需安装 |
+| 其它语言 | 默认不包含，按需安装 |
+| 浏览器自动化 | 默认不包含，按需安装 |
+| 文档工具 | 默认不包含，按需安装 |
 
 镜像内容应视为便利层，而不是稳定 API。项目特定依赖仍应放在工作区或项目构建脚本中。
 
@@ -113,7 +113,6 @@ http://local-shell-mcp:8765
 ## 不使用 tunnel sidecar 的反向代理
 
 **推荐：** 有条件时应直接部署到具有公网地址的服务器，或通过公网服务器配合 HTTPS 反向代理转发流量。
-
 如果你已经运行 Caddy、Nginx、Traefik 或 Nginx Proxy Manager，保留普通 Compose 服务，并把 HTTPS 转发到：
 
 ```text

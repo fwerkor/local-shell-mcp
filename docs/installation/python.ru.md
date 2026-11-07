@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 19347ba1d8d3f26f227506397f4093281319e6a2a59833ced1da286c1d46f21a -->
+<!-- i18n-source-sha256: c8c0d8ebdbb123b9ac4af1fd288f30e8ca69037ca086486cb8027e2592f4b75a -->
 # Python, pipx и source runtimes
 
-Python runtimes удобны для разработки, отладки и сред, где управление Python-пакетами проще Docker. Они запускают тот же server, что Docker и binary runtimes.
+**Рекомендуется установка непосредственно из репозитория исходников.** Используйте виртуальную среду Python и ограниченную рабочую папку. Docker Compose остаётся доступным.
 
 Эта страница описывает три связанных случая:
 
@@ -48,7 +48,7 @@ Process использует инструменты, установленные 
 
 ## Editable source checkout
 
-Для разработки проекта:
+Используйте для обычного развёртывания и разработки. Публичный доступ описан в [quickstart](../getting-started/quickstart.md).
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git
@@ -56,13 +56,21 @@ cd local-shell-mcp
 python -m venv .venv
 . .venv/bin/activate
 pip install --upgrade pip
-pip install -e '.[dev,docs]'
-LOCAL_SHELL_MCP_WORKSPACE_ROOT=/tmp/local-shell-mcp-workspace local-shell-mcp --mode mcp
+pip install -e .
+cp .env.example .env
+# Replace the example OAuth secrets in .env before starting.
+set -a
+. ./.env
+set +a
+mkdir -p workspaces/default
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
+local-shell-mcp --mode mcp
 ```
 
 Запустите проверки:
 
 ```bash
+python -m pip install -e '.[dev,docs]'
 ruff check .
 pytest -q
 mkdocs build --strict
@@ -70,13 +78,14 @@ mkdocs build --strict
 
 ## Настройка браузера
 
-Python package зависит от Playwright, но browser binaries иногда нужно отдельно установить на host:
+Playwright необязателен; установите библиотеку и браузер при необходимости.
 
 ```bash
+python -m pip install -e '.[browser]'
 python -m playwright install chromium
 ```
 
-Некоторым Linux host нужны дополнительные browser dependencies. Docker избегает большей части этого, поскольку image основан на Playwright base image.
+Установка браузера необязательна; базовый образ Docker не содержит Playwright или браузеров.
 
 ## Публичное использование HTTP MCP
 

@@ -1,25 +1,25 @@
 # Docker Compose runtime
 
-Docker Compose is the recommended runtime for most users. It gives the model a controlled Linux workspace, a repeatable toolchain, persistent credentials, browser automation support, and an easy upgrade path.
+Docker Compose is an alternative for disposable or isolated deployments. **Direct source-checkout deployment is recommended for most users**; see the [Python/source runtime guide](python.md). Docker provides a controlled Linux workspace and convenient rebuilds, but its image is deliberately lightweight and task-specific tools must be installed separately.
 
 This is a runtime choice. It can be connected to ChatGPT, a generic HTTP MCP client, or kept local for testing.
 
 ## What the Docker image includes
 
-The image is based on the Playwright Python image and installs a broad development toolchain. The intent is to let an AI coding agent operate many repositories without asking you to rebuild the runtime for every project.
+The image uses python:3.12-slim and includes only essential runtime utilities. Full development toolchains, Playwright/browser binaries, and office suites are not preinstalled.
 
-Included categories:
+Availability by category:
 
 | Category | Examples |
 |---|---|
 | Shell and inspection | Bash, curl, wget, jq, ripgrep, tree, tmux, patch, file |
 | Git and credentials | Git, GitHub CLI, OpenSSH client, credential persistence volume |
-| C/C++ build | build-essential, clang, cmake, ninja, autoconf, automake, gdb, lldb |
-| Python | Python, pip, venv, pipx, package development dependencies |
-| JavaScript/TypeScript | Node.js, npm, yarn, pnpm, TypeScript, ts-node |
-| Other languages | Go, Rust, Java, Ruby, PHP, Perl, Lua, R |
-| Browser automation | Playwright browsers and browser dependencies |
-| Document tooling | LibreOffice, Pandoc, Poppler utilities, OCR tooling |
+| C/C++ build | Not included by default; install when needed |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | Not included by default; install when needed |
+| Other languages | Not included by default; install when needed |
+| Browser automation | Not included by default; install when needed |
+| Document tooling | Not included by default; install when needed |
 
 The exact image content should be treated as a convenience layer, not a stable API. Project-specific dependencies still belong in the workspace or project build scripts.
 
@@ -113,7 +113,6 @@ The Compose service trusts forwarded headers because its published port is restr
 ## Reverse proxy without tunnel sidecar
 
 **Recommended for public access.** Deploy the Controller on a public server, or use a public server to forward traffic to a private Controller. Terminate HTTPS at a trusted reverse proxy and preserve request bodies and streaming responses for file transfers.
-
 If you already run Caddy, Nginx, Traefik, or Nginx Proxy Manager, keep the normal Compose service and forward HTTPS to:
 
 ```text

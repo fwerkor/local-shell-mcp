@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
+<!-- i18n-source-sha256: d7d01bc3f36f434c8e66c3fb6f65c2934937c5b2937dd9e8ba7beefc018fd14f -->
 # Runtime-Auswahl und Bereitstellungsmodell
 
 `local-shell-mcp` hat zwei komplementäre Entscheidungen:
@@ -40,11 +40,11 @@ Local MCP client
 
 | Laufzeit | Am besten für | Isolationsgrenze | Toolchain-Quelle | Externer MCP-Zugriff | Seite |
 |---|---|---|---|---|---|
+| **Quellcode-Checkout (empfohlen)** / `pipx` | Python-native Nutzung, Debugging, Entwicklung | Host virtualenv or VM | Python-Package plus Hosttools | HTTPS-Proxy oder Tunnel hinzufügen | [Python install](../installation/python.md) |
 | Docker Compose | Die meisten Coding-Agent-Workloads und wiederholbaren Arbeitsbereiche | Behälter | Lean Controller-Image; Installieren Sie aufgabenspezifische Toolchains separat | Fügen Sie einen HTTPS-Proxy oder -Tunnel hinzu | [Docker Compose](../installation/docker.md) |
 | Docker Compose + Tunnel-Sidecar | Nicht empfohlen: Über öffentlichen Server weiterleiten; Cloudflare Tunnel nur als Notlösung | Behälter | Projektbild | Über öffentlichen Server weiterleiten; Cloudflare Tunnel nur als Notlösung | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Server aus Editor-Workspace starten/stoppen | Meist Hostprozess | Hosttools plus konfiguriertes Executable | Externen HTTPS-Tunnel/Proxy für ChatGPT hinzufügen | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Hosts oder VMs ohne Docker | Host or VM | Hosttools plus konfiguriertes Executable | HTTPS-Proxy oder Tunnel hinzufügen | [Standalone binary](../installation/binary.md) |
-| `pipx` / source install | Python-native Nutzung, Debugging, Entwicklung | Host virtualenv or VM | Python-Package plus Hosttools | HTTPS-Proxy oder Tunnel hinzufügen | [Python install](../installation/python.md) |
 | Stdio mode | Lokale MCP-Clients, die Prozesse direkt starten | Client process boundary | Hosttools plus konfiguriertes Executable | Nicht mit ChatGPT web/app nutzbar | [Stdio mode](../installation/stdio.md) |
 
 ## Client-Verbindungsmatrix
@@ -84,7 +84,7 @@ Der Unterschied ist nicht die abstrakte API, sondern die **Betriebsumgebung** da
 
 ## Empfohlene Auswahl
 
-Verwenden Sie zuerst **Docker Compose**, es sei denn, Sie haben einen Grund, dies nicht zu tun. Es bietet eine klare Sicherheitsgrenze, ohne dass eine große vorinstallierte Entwicklungs-Toolchain erforderlich ist.
+**Die direkte Bereitstellung aus den Quellen** in einer isolierten Umgebung wird empfohlen; siehe [Python-/Quellcode-Anleitung](../installation/python.md). Docker Compose bleibt eine Alternative.
 
 Verwenden Sie die **VS-Code-Erweiterung**, wenn der Workflow von einem Editor aus gestartet wird und Sie einen lokalen Launcher wünschen. Es ist immer noch eine Laufzeit. Remote-Webclients benötigen einen erreichbaren HTTPS-Proxy oder -Tunnel.
 

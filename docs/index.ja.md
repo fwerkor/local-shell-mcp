@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: a66d491558f07c419c8b5958d36c47cd90b081fc1c81f015bb62398cfd573e55 -->
+<!-- i18n-source-sha256: 276e9356b895a85759d31467512bdc530c9baa216a368df4ef1bccce39530d0e -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">セルフホスト型 AI ワークスペース · MCP コントロール プレーン</span>
 
@@ -53,7 +53,7 @@ Optional remote workers: outbound machine connections
 | シナリオ | 開始ページ | 理由 |
 |---|---|---|
 | プライマリブラウザワークスペース | [Unified web workspace](getting-started/web-workspace.md) | 共有ログインを使用したチャット、プロジェクト、LSM コントロール ページ |
-| 最初のコントローラーの導入 | [Quickstart](getting-started/quickstart.md) | Docker Compose、OAuth、および最初のブラウザー セッション |
+| 最初のコントローラーの導入 | [Quickstart](getting-started/quickstart.md) | 推奨のソースデプロイ、OAuth、最初のブラウザーセッション。 |
 | runtime layer を選ぶ | [Runtime choices](guides/deployment.md) | Docker、VS Code、binary、Python、stdio を別々の runtime option として説明 |
 | ジェミニスパークを接続する | [Gemini Custom Apps](getting-started/gemini-spark.md) | 資格、HTTPS MCP URL、OAuth、およびテスト |
 | ChatGPT を client として追加 | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint、OAuth、最初の安全な prompt、tool discovery |

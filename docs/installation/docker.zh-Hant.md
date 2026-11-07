@@ -1,26 +1,26 @@
-<!-- i18n-source-sha256: f44188b1e2f3b4d79d97c78edb15270aa338ddf7989d85df1559168a0678eaa8 -->
+<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
 # Docker Compose 運行時
 
-Docker Compose 是大多數用戶的推薦運行時。它爲模型提供受控 Linux 工作區、可重複工具鏈、持久憑據、瀏覽器自動化支持，以及簡單的升級路徑。
+Docker Compose 是可選的隔離容器部署方式。**首選直接原始碼部署**，步驟見 [Python/原始碼執行指南](python.md)。
 
 這是運行時選擇。它可以接入 ChatGPT、通用 HTTP MCP 客戶端，也可以只在本地測試。
 
 ## Docker 鏡像包含什麼
 
-鏡像基於 Playwright Python 鏡像，並安裝較完整的開發工具鏈。目標是讓 AI 編程代理能夠處理許多倉庫，而不必爲每個項目重新構建運行時。
+映像檔基於 python:3.12-slim，只預裝基本執行工具。完整開發工具鏈、Playwright/瀏覽器與辦公套件均不包含在基礎映像檔中。
 
-包含的類別：
+各類工具的預裝情況：
 
 | 類別 | 示例 |
 |---|---|
 | Shell 與檢查 | Bash、curl、wget、jq、ripgrep、tree、tmux、patch、file |
 | Git 與憑據 | Git、GitHub CLI、OpenSSH client、憑據持久化卷 |
-| C/C++ 構建 | build-essential、clang、cmake、ninja、autoconf、automake、gdb、lldb |
-| Python | Python、pip、venv、pipx、包開發依賴 |
-| JavaScript/TypeScript | Node.js、npm、yarn、pnpm、TypeScript、ts-node |
-| 其它語言 | Go、Rust、Java、Ruby、PHP、Perl、Lua、R |
-| 瀏覽器自動化 | Playwright 瀏覽器和瀏覽器依賴 |
-| 文檔工具 | LibreOffice、Pandoc、Poppler 工具、OCR 工具 |
+| C/C++ 構建 | 預設不包含，依需求安裝 |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | 預設不包含，依需求安裝 |
+| 其它語言 | 預設不包含，依需求安裝 |
+| 瀏覽器自動化 | 預設不包含，依需求安裝 |
+| 文檔工具 | 預設不包含，依需求安裝 |
 
 鏡像內容應視爲便利層，而不是穩定 API。項目特定依賴仍應放在工作區或項目構建腳本中。
 
@@ -113,7 +113,6 @@ http://local-shell-mcp:8765
 ## 不使用 tunnel sidecar 的反向代理
 
 **推薦：** 有條件時，應直接部署到具有公網位址的伺服器，或透過公網伺服器搭配 HTTPS 反向代理轉發流量。
-
 如果你已經運行 Caddy、Nginx、Traefik 或 Nginx Proxy Manager，保留普通 Compose 服務，並把 HTTPS 轉發到：
 
 ```text

@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 19347ba1d8d3f26f227506397f4093281319e6a2a59833ced1da286c1d46f21a -->
+<!-- i18n-source-sha256: c8c0d8ebdbb123b9ac4af1fd288f30e8ca69037ca086486cb8027e2592f4b75a -->
 # Python, pipx और source runtimes
 
-Python runtimes development, debugging और उन environments के लिए उपयोगी हैं जहाँ Python package management Docker से आसान है। वे Docker और binary runtimes वाला ही server चलाते हैं।
+**सीधे स्रोत कोड से इंस्टॉल करना अनुशंसित है।** Python वर्चुअल एनवायरनमेंट और सीमित workspace का उपयोग करें; Docker Compose विकल्प है।
 
 यह page तीन संबंधित cases के लिए है:
 
@@ -48,7 +48,7 @@ Process host पर installed tools उपयोग करता है। Pytho
 
 ## Editable source checkout
 
-Project development के लिए:
+इसे सामान्य deployment और development के लिए उपयोग करें। सार्वजनिक पहुँच के लिए देखें [quickstart](../getting-started/quickstart.md).
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git
@@ -56,13 +56,21 @@ cd local-shell-mcp
 python -m venv .venv
 . .venv/bin/activate
 pip install --upgrade pip
-pip install -e '.[dev,docs]'
-LOCAL_SHELL_MCP_WORKSPACE_ROOT=/tmp/local-shell-mcp-workspace local-shell-mcp --mode mcp
+pip install -e .
+cp .env.example .env
+# Replace the example OAuth secrets in .env before starting.
+set -a
+. ./.env
+set +a
+mkdir -p workspaces/default
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
+local-shell-mcp --mode mcp
 ```
 
 Checks चलाएँ:
 
 ```bash
+python -m pip install -e '.[dev,docs]'
 ruff check .
 pytest -q
 mkdocs build --strict
@@ -70,13 +78,14 @@ mkdocs build --strict
 
 ## Browser setup
 
-Python package Playwright पर निर्भर है, लेकिन browser binaries को host पर अलग से install करना पड़ सकता है:
+Playwright वैकल्पिक है; जरूरत पड़ने पर लाइब्रेरी और ब्राउज़र इंस्टॉल करें।
 
 ```bash
+python -m pip install -e '.[browser]'
 python -m playwright install chromium
 ```
 
-कुछ Linux hosts को अतिरिक्त browser dependencies चाहिए। Docker इनमें से अधिकांश से बचता है क्योंकि image Playwright base image से शुरू होती है।
+ब्राउज़र इंस्टॉलेशन वैकल्पिक है; Docker की मूल इमेज में Playwright या ब्राउज़र शामिल नहीं हैं।
 
 ## Public HTTP MCP use
 

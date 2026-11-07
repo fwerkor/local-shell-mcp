@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 19347ba1d8d3f26f227506397f4093281319e6a2a59833ced1da286c1d46f21a -->
+<!-- i18n-source-sha256: c8c0d8ebdbb123b9ac4af1fd288f30e8ca69037ca086486cb8027e2592f4b75a -->
 # Python、pipx 與源碼運行時
 
-Python 運行時適合開發、調試，以及 Python 包管理比 Docker 更容易維護的環境。它運行的服務與 Docker 和二進制運行時相同。
+**直接從原始碼部署是最推薦的方式。** 請使用獨立 Python 虛擬環境和受限工作區。Docker Compose 可以作為替代方案。
 
 本頁覆蓋三個相關場景：
 
@@ -48,7 +48,7 @@ local-shell-mcp --mode mcp
 
 ## 可編輯源碼 checkout
 
-用於項目開發：
+一般原始碼部署及開發都可使用此方式。公開 OAuth 與 HTTPS 設定請參閱 [quickstart](../getting-started/quickstart.md).
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git
@@ -56,13 +56,21 @@ cd local-shell-mcp
 python -m venv .venv
 . .venv/bin/activate
 pip install --upgrade pip
-pip install -e '.[dev,docs]'
-LOCAL_SHELL_MCP_WORKSPACE_ROOT=/tmp/local-shell-mcp-workspace local-shell-mcp --mode mcp
+pip install -e .
+cp .env.example .env
+# Replace the example OAuth secrets in .env before starting.
+set -a
+. ./.env
+set +a
+mkdir -p workspaces/default
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
+local-shell-mcp --mode mcp
 ```
 
 運行檢查：
 
 ```bash
+python -m pip install -e '.[dev,docs]'
 ruff check .
 pytest -q
 mkdocs build --strict
@@ -70,13 +78,14 @@ mkdocs build --strict
 
 ## 瀏覽器設置
 
-Python 包依賴 Playwright，但宿主機上可能仍需要安裝瀏覽器二進制：
+Playwright 為可選相依套件，只有需要瀏覽器自動化時才需安裝 Python 套件及瀏覽器。
 
 ```bash
+python -m pip install -e '.[browser]'
 python -m playwright install chromium
 ```
 
-部分 Linux 宿主機還需要額外瀏覽器系統依賴。Docker 大多能避免這些問題，因爲鏡像基於 Playwright base image。
+瀏覽器支援為可選功能；基礎 Docker 映像檔不包含 Playwright 或瀏覽器。
 
 ## 公開 HTTP MCP 使用
 

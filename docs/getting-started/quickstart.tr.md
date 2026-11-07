@@ -1,14 +1,16 @@
-<!-- i18n-source-sha256: a9820f08198cf8e823f59550928c07346f9669f2dbec46d3b8cd523c34034e01 -->
+<!-- i18n-source-sha256: 3575b9b50708261678473f74b66076f0c14807ccd7f7c3e60b4d1e897ac778df -->
 # Hızlı başlangıç
 
 Bu kılavuz bir LSM Denetleyicisini başlatır ve tarayıcı arayüzünü açar. [unified web workspace](web-workspace.md) önerilen günlük deneyimdir; ayrı olarak konuşlandırılmış, isteğe bağlı bir sohbet yığınıdır. ChatGPT, Gemini ve diğer harici MCP istemcileri aynı Denetleyiciye bağlanabilir. Bkz. [runtime choices and deployment model](../guides/deployment.md).
 
+Yalıtılmış bir ortamda **doğrudan kaynak koddan dağıtım** önerilir. Docker Compose alternatiftir.
+
 ## Gereksinimler
 
-- Compose v2 ile Docker Engine.
-- Uzak kullanıcıların veya harici MCP istemcilerinin bağlanması gerekiyorsa genel bir HTTPS uç noktası.
-- Özel bir workspace directory.
-- Uzun ve rastgele OAuth admin PIN ile JWT secret.
+- Git ve `venv` / `pip` ile Python 3.11+.
+- Uzak kullanıcılar veya harici MCP istemcileri için gerekirse genel HTTPS.
+- Sınırlandırılmış özel çalışma alanı.
+- Güçlü OAuth yönetici PIN’i ve rastgele JWT sırrı.
 
 !!! warning
     Bağlı model yapılandırılmış workspace üzerinde işlem yapabilir. Servisi disposable container veya VM içinde çalıştırın ve host-control resources bağlamayın.
@@ -18,11 +20,15 @@ Bu kılavuz bir LSM Denetleyicisini başlatır ve tarayıcı arayüzünü açar.
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e .
 cp .env.example .env
-python scripts/init_compose_env.py
+chmod 600 .env
+openssl rand -hex 32
 ```
 
-`.env` dosyasını düzenleyin:
+`.env` içindeki örnek PIN ve JWT sırrını değiştirin (`openssl rand -hex 32` kullanın). Kaynak çalıştırma `.env` dosyasını otomatik yüklemez.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
@@ -35,38 +41,37 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
 
 ```bash
 mkdir -p workspaces/default
-docker compose up -d
+set -a
+. ./.env
+set +a
+. .venv/bin/activate
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
+local-shell-mcp --mode mcp
 ```
 
-Durumu kontrol edin:
+Başka bir terminalde durumu denetleyin:
 
 ```bash
-docker compose ps
-docker compose logs --tail=100 local-shell-mcp
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Sağlıklı yanıt HTTP `200` döndürür.
+Sağlıklı yanıt HTTP `200` döndürür. Sürekli çalıştırmak için servis yöneticisi kullanın.
 
 ## 3. HTTPS yayınlama
 
-**Önerilir:** Genel erişim için herkese açık bir sunucuya dağıtın veya trafiği HTTPS ters vekiliyle herkese açık bir sunucu üzerinden iletin.
-
-**Önerilmez:** Cloudflare Tunnel üzerinden istemci tarafındaki yükleme hızı çok düşük olabilir; bu da dosya yükleme ve aktarımı işlevlerini kullanmayı zorlaştırır. Yalnızca genel sunucu veya yönlendirme mümkün değilse kullanın. Configure `CLOUDFLARE_TUNNEL_TOKEN` in `.env` only when choosing the optional tunnel sidecar.
-
-Cloudflare Tunnel sidecar için:
-
-```bash
-docker compose --profile tunnel up -d
-```
-
-Cloudflare Zero Trust içinde public hostname’i şuraya yönlendirin:
+Uzak erişim için genel sunucu veya HTTPS ters proxy (Caddy, Nginx, Traefik) kullanın. Dosya transferleri dahil tüm siteyi şu adrese yönlendirin:
 
 ```text
-http://local-shell-mcp:8765
+http://127.0.0.1:8765
 ```
 
-Caddy, Nginx, Traefik, Nginx Proxy Manager veya başka bir reverse proxy için HTTPS traffic’i `127.0.0.1:8765` ya da container network address’e iletin.
+HTTPS bağlantısını denetleyin:
+
+```bash
+curl -i https://your-public-host.example.com/healthz
+```
+
+Dosya aktarımı için **Cloudflare Tunnel önerilmez**: istemci yüklemeleri yavaş olabilir. OAuth açık kalmak kaydıyla genel sunucu veya normal proxy/port yönlendirme tercih edin. Alternatif: [Docker](../installation/docker.md).
 
 ## 4. Tarayıcı çalışma alanını açın
 
@@ -109,17 +114,20 @@ Başarısız testi düzelt. Önce ilgili dosyaları oku, en küçük patch’i y
 
 ## Güncelleme
 
+Kaynağı güncelleyin, editable paketi yeniden kurun ve Controller’ı yeniden başlatın:
+
 ```bash
-docker compose pull
-docker compose up -d
+git pull --ff-only
+python -m pip install -e .
+# Restart the Controller process or service after updating.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Tunnel profile kullanıyorsanız:
+Docker Compose kullanıyorsanız konteynerleri güncelleyin:
 
 ```bash
-docker compose --profile tunnel pull
-docker compose --profile tunnel up -d
+docker compose pull
+docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 

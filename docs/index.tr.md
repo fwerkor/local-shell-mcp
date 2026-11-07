@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: a66d491558f07c419c8b5958d36c47cd90b081fc1c81f015bb62398cfd573e55 -->
+<!-- i18n-source-sha256: 276e9356b895a85759d31467512bdc530c9baa216a368df4ef1bccce39530d0e -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">Kendi kendine barındırılan yapay zeka çalışma alanı · MCP kontrol düzlemi</span>
 
@@ -53,7 +53,7 @@ Amaçlanan isolation boundary, service’in çalıştığı container veya VM’
 | Senaryo | Buradan başla | Neden |
 |---|---|---|
 | Birincil tarayıcı çalışma alanı | [Unified web workspace](getting-started/web-workspace.md) | Paylaşılan oturum açmayla sohbet, projeler ve LSM kontrol sayfaları |
-| İlk Denetleyici dağıtımı | [Quickstart](getting-started/quickstart.md) | Docker Compose, OAuth ve ilk tarayıcı oturumu |
+| İlk Denetleyici dağıtımı | [Quickstart](getting-started/quickstart.md) | Önerilen kaynak dağıtımı, OAuth ve ilk tarayıcı oturumu. |
 | runtime layer seçimi | [Runtime choices](guides/deployment.md) | Docker, VS Code, binary, Python ve stdio’yu ayrı runtime options olarak açıklar |
 | Gemini Spark'ı Bağlama | [Gemini Custom Apps](getting-started/gemini-spark.md) | Uygunluk, HTTPS MCP URL'si, OAuth ve test |
 | ChatGPT’yi client olarak ekleme | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, ilk güvenli prompt, tool discovery |

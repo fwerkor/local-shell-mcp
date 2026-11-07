@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: a66d491558f07c419c8b5958d36c47cd90b081fc1c81f015bb62398cfd573e55 -->
+<!-- i18n-source-sha256: 276e9356b895a85759d31467512bdc530c9baa216a368df4ef1bccce39530d0e -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">Автономное рабочее пространство ИИ · Плоскость управления MCP</span>
 
@@ -53,7 +53,7 @@ Optional remote workers: outbound machine connections
 | Сценарий | Начать здесь | Почему |
 |---|---|---|
 | Основное рабочее пространство браузера | [Unified web workspace](getting-started/web-workspace.md) | Чат, проекты и страницы управления LSM с общим логином |
-| Первое развертывание контроллера | [Quickstart](getting-started/quickstart.md) | Docker Compose, OAuth и первый сеанс браузера |
+| Первое развертывание контроллера | [Quickstart](getting-started/quickstart.md) | Рекомендуемый запуск из исходников, OAuth и первый сеанс браузера. |
 | Выбор runtime layer | [Runtime choices](guides/deployment.md) | Объясняет Docker, VS Code, binary, Python и stdio как отдельные runtime options |
 | Подключение Gemini Spark | [Gemini Custom Apps](getting-started/gemini-spark.md) | Право на участие, URL-адрес HTTPS MCP, OAuth и тестирование |
 | Добавить ChatGPT как client | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, первый безопасный prompt, tool discovery |

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
+<!-- i18n-source-sha256: d7d01bc3f36f434c8e66c3fb6f65c2934937c5b2937dd9e8ba7beefc018fd14f -->
 # Runtime 선택과 deployment 모델
 
 `local-shell-mcp`에는 두 가지 보완적인 결정이 있습니다.
@@ -40,11 +40,11 @@ Local MCP client
 
 | 런타임 | 다음에 가장 적합 | 격리 경계 | 툴체인 소스 | 외부 MCP 액세스 | 페이지 |
 |---|---|---|---|---|---|
-| 도커 작성 | 대부분의 코딩 에이전트 작업 부하 및 반복 가능한 작업 공간 | 컨테이너 | 린 컨트롤러 이미지; 작업별 툴체인을 별도로 설치 | HTTPS 프록시 또는 터널 추가 | [Docker Compose](../installation/docker.md) |
+| **소스 체크아웃(권장)** / `pipx` | Python-native 사용, debug, development | Host virtualenv or VM | Python package와 host tools | HTTPS proxy 또는 tunnel 추가 | [Python install](../installation/python.md) |
+| 도커 작성 | 격리된 임시 컨테이너 | 컨테이너 | 린 컨트롤러 이미지; 작업별 툴체인을 별도로 설치 | HTTPS 프록시 또는 터널 추가 | [Docker Compose](../installation/docker.md) |
 | Docker Compose + 터널 사이드카 | 비권장: 공인 서버를 통해 전달하고 Cloudflare Tunnel은 최후의 수단으로 사용 | 컨테이너 | 프로젝트 이미지 | 공인 서버를 통해 전달하고 Cloudflare Tunnel은 최후의 수단으로 사용 | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | editor workspace에서 server 시작/중지 | 대개 host process | host tools와 설정된 executable | ChatGPT용 외부 HTTPS tunnel/proxy 추가 | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Docker를 사용할 수 없는 host/VM | Host or VM | host tools와 설정된 executable | HTTPS proxy 또는 tunnel 추가 | [Standalone binary](../installation/binary.md) |
-| `pipx` / source install | Python-native 사용, debug, development | Host virtualenv or VM | Python package와 host tools | HTTPS proxy 또는 tunnel 추가 | [Python install](../installation/python.md) |
 | Stdio mode | tool process를 직접 spawn하는 local MCP client | Client process boundary | host tools와 설정된 executable | ChatGPT web/app에서는 사용 불가 | [Stdio mode](../installation/stdio.md) |
 
 ## Client 연결 매트릭스
@@ -84,7 +84,7 @@ Local MCP client
 
 ## 권장 선택
 
-특별한 이유가 없는 한 **Docker Compose**를 먼저 사용하세요. 사전 설치된 대규모 개발 툴체인 없이도 명확한 안전 경계를 제공합니다.
+격리된 환경에서 **소스에서 직접 배포**하는 방식을 권장합니다. [Python/소스 안내](../installation/python.md)를 참조하세요. Docker Compose는 대안입니다.
 
 워크플로가 편집기에서 시작되고 로컬 실행 프로그램이 필요한 경우 **VS Code 확장**을 사용하세요. 아직은 런타임입니다. 원격 웹 클라이언트에는 연결 가능한 HTTPS 프록시 또는 터널이 필요합니다.
 

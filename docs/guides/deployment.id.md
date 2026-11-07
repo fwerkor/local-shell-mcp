@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
+<!-- i18n-source-sha256: d7d01bc3f36f434c8e66c3fb6f65c2934937c5b2937dd9e8ba7beefc018fd14f -->
 # Pilihan runtime dan model deployment
 
 `local-shell-mcp` memiliki dua keputusan yang saling melengkapi:
@@ -40,11 +40,11 @@ Local MCP client
 
 | Waktu proses | Terbaik untuk | Batas isolasi | Sumber rantai alat | Akses MCP eksternal | Halaman |
 |---|---|---|---|---|---|
-| Penulisan Docker | Sebagian besar beban kerja agen pengkodean dan ruang kerja yang dapat diulang | Wadah | Gambar Pengontrol Ramping; instal rantai alat khusus tugas secara terpisah | Tambahkan proksi atau terowongan HTTPS | [Docker Compose](../installation/docker.md) |
+| **Source checkout (direkomendasikan)** / `pipx` | Penggunaan Python-native, debugging, development | Host virtualenv or VM | Python package plus host tools | Tambahkan HTTPS proxy atau tunnel | [Python install](../installation/python.md) |
+| Penulisan Docker | Container terisolasi dan sementara | Wadah | Gambar Pengontrol Ramping; instal rantai alat khusus tugas secara terpisah | Tambahkan proksi atau terowongan HTTPS | [Docker Compose](../installation/docker.md) |
 | Docker Compose + sespan terowongan | Tidak direkomendasikan: Teruskan lewat server publik; Cloudflare Tunnel hanya pilihan terakhir | Wadah | Gambar proyek | Teruskan lewat server publik; Cloudflare Tunnel hanya pilihan terakhir | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Start/stop server dari editor workspace | Biasanya host process | Host tools plus executable yang dikonfigurasi | Tambahkan HTTPS tunnel/proxy eksternal untuk ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Host atau VM tanpa Docker | Host or VM | Host tools plus executable yang dikonfigurasi | Tambahkan HTTPS proxy atau tunnel | [Standalone binary](../installation/binary.md) |
-| `pipx` / source install | Penggunaan Python-native, debugging, development | Host virtualenv or VM | Python package plus host tools | Tambahkan HTTPS proxy atau tunnel | [Python install](../installation/python.md) |
 | Stdio mode | MCP client lokal yang spawn process langsung | Client process boundary | Host tools plus executable yang dikonfigurasi | Tidak dapat dipakai ChatGPT web/app | [Stdio mode](../installation/stdio.md) |
 
 ## Matriks koneksi client
@@ -84,7 +84,7 @@ Perbedaannya bukan abstract API, melainkan **operating environment** di belakang
 
 ## Pilihan yang disarankan
 
-Gunakan **Docker Compose** terlebih dahulu kecuali Anda mempunyai alasan untuk tidak melakukannya. Ini memberikan batas keamanan yang jelas tanpa memerlukan toolchain pengembangan besar yang sudah diinstal sebelumnya.
+**Deployment langsung dari source checkout** dalam lingkungan terisolasi direkomendasikan; lihat [panduan Python/source](../installation/python.md). Docker Compose adalah alternatif.
 
 Gunakan **ekstensi VS Code** saat alur kerja dimulai dari editor dan Anda menginginkan peluncur lokal. Ini masih waktu proses. Klien web jarak jauh memerlukan proxy atau terowongan HTTPS yang dapat dijangkau.
 

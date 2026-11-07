@@ -1,13 +1,13 @@
-<!-- i18n-source-sha256: f44188b1e2f3b4d79d97c78edb15270aa338ddf7989d85df1559168a0678eaa8 -->
+<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
 # Runtime عبر Docker Compose
 
-Docker Compose هو runtime الموصى به لمعظم المستخدمين. يمنح النموذج workspace Linux مضبوطًا وtoolchain قابلًا لإعادة الإنتاج وcredentials دائمة ودعم browser automation ومسار upgrade سهلًا.
+Docker Compose خيار بديل للحاويات المعزولة. **يُنصح بالنشر المباشر من المصدر**؛ انظر [دليل Python والمصدر](python.md).
 
 هذا اختيار runtime. يمكن وصله بـ ChatGPT أو MCP client عام عبر HTTP أو إبقاؤه محليًا للاختبار.
 
 ## ما الذي تتضمنه Docker image
 
-تعتمد image على Playwright Python image وتثبّت development toolchain واسعًا. الهدف أن يتمكن AI coding agent من العمل على repositories كثيرة دون إعادة بناء runtime لكل project.
+تحتوي الصورة المبنية على python:3.12-slim على أدوات تشغيل أساسية فقط. لا تتضمن أدوات التطوير الكبيرة أو Playwright والمتصفحات أو برامج المكتب.
 
 الفئات المتضمنة:
 
@@ -15,12 +15,12 @@ Docker Compose هو runtime الموصى به لمعظم المستخدمين. �
 |---|---|
 | Shell والفحص | Bash, curl, wget, jq, ripgrep, tree, tmux, patch, file |
 | Git وcredentials | Git, GitHub CLI, OpenSSH client, credential persistence volume |
-| C/C++ build | build-essential, clang, cmake, ninja, autoconf, automake, gdb, lldb |
-| Python | Python, pip, venv, pipx, package development dependencies |
-| JavaScript/TypeScript | Node.js, npm, yarn, pnpm, TypeScript, ts-node |
-| لغات أخرى | Go, Rust, Java, Ruby, PHP, Perl, Lua, R |
-| Browser automation | Playwright browsers and browser dependencies |
-| Document tooling | LibreOffice, Pandoc, Poppler utilities, OCR tooling |
+| C/C++ build | غير مضمن؛ ثبّته عند الحاجة |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | غير مضمن؛ ثبّته عند الحاجة |
+| لغات أخرى | غير مضمن؛ ثبّته عند الحاجة |
+| Browser automation | غير مضمن؛ ثبّته عند الحاجة |
+| Document tooling | غير مضمن؛ ثبّته عند الحاجة |
 
 يجب اعتبار محتوى image الدقيق convenience layer وليس stable API. تبقى project-specific dependencies داخل workspace أو project build scripts.
 
@@ -114,7 +114,6 @@ http://local-shell-mcp:8765
 ## Reverse proxy بدون tunnel sidecar
 
 **موصى به:** استخدم خادمًا ذا عنوان عام، أو أعد توجيه حركة المرور عبر خادم عام باستخدام وكيل HTTPS عكسي.
-
 إذا كنت تستخدم Caddy أو Nginx أو Traefik أو Nginx Proxy Manager بالفعل، فاحتفظ بخدمة Compose العادية ومرر HTTPS إلى:
 
 ```text

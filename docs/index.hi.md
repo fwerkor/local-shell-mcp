@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: a66d491558f07c419c8b5958d36c47cd90b081fc1c81f015bb62398cfd573e55 -->
+<!-- i18n-source-sha256: 276e9356b895a85759d31467512bdc530c9baa216a368df4ef1bccce39530d0e -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">स्व-होस्टेड एआई कार्यक्षेत्र · एमसीपी नियंत्रण विमान</span>
 
@@ -53,7 +53,7 @@ Optional remote workers: outbound machine connections
 | Scenario | यहाँ से शुरू करें | क्यों |
 |---|---|---|
 | प्राथमिक ब्राउज़र कार्यक्षेत्र | [Unified web workspace](getting-started/web-workspace.md) | साझा लॉगिन के साथ चैट, प्रोजेक्ट और एलएसएम नियंत्रण पृष्ठ |
-| प्रथम नियंत्रक परिनियोजन | [Quickstart](getting-started/quickstart.md) | डॉकर कंपोज़, OAuth और पहला ब्राउज़र सत्र |
+| प्रथम नियंत्रक परिनियोजन | [Quickstart](getting-started/quickstart.md) | अनुशंसित source deployment, OAuth और पहला ब्राउज़र सत्र। |
 | runtime layer चुनना | [Runtime choices](guides/deployment.md) | Docker, VS Code, binary, Python और stdio को अलग runtime options के रूप में समझाता है |
 | जेमिनी स्पार्क को जोड़ना | [Gemini Custom Apps](getting-started/gemini-spark.md) | पात्रता, HTTPS MCP URL, OAuth और परीक्षण |
 | ChatGPT को client के रूप में जोड़ना | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, पहला safe prompt, tool discovery |

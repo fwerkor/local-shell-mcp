@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: a66d491558f07c419c8b5958d36c47cd90b081fc1c81f015bb62398cfd573e55 -->
+<!-- i18n-source-sha256: 276e9356b895a85759d31467512bdc530c9baa216a368df4ef1bccce39530d0e -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">自託管AI工作區·MCP控制平面</span>
 
@@ -53,7 +53,7 @@
 | 場景 | 閱讀頁面 | 原因 |
 |---|---|---|
 | 主瀏覽器工作區 | [Unified web workspace](getting-started/web-workspace.md) | 具有共享登入的聊天、專案和 LSM 控制頁面 |
-| 第一個控制器部署 | [Quickstart](getting-started/quickstart.md) | Docker Compose、OAuth 和第一個瀏覽器會話 |
+| 第一個控制器部署 | [Quickstart](getting-started/quickstart.md) | 推薦的原始碼部署、OAuth 與首次瀏覽器使用。 |
 | 選擇運行時層 | [運行時選擇](guides/deployment.md) | 把 Docker、VS Code、二進制、Python 和 stdio 與客戶端接入分開說明 |
 | 連接 Gemini Spark | [Gemini Custom Apps](getting-started/gemini-spark.md) | 資格、HTTPS MCP URL、OAuth 和測試 |
 | 把 ChatGPT 作爲客戶端接入 | [ChatGPT 連接器](getting-started/chatgpt-connector.md) | 端點、OAuth、首次安全提示和工具發現 |
