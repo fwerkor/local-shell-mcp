@@ -256,6 +256,7 @@ def test_v2_client_id_is_migrated_after_pin_approval(tmp_path, monkeypatch):
 
     form = client.get("/oauth/authorize", params=params)
     assert "Unknown client_id" not in form.text
+    assert "<strong>OAuth client</strong>" in form.text
     assert client_id not in oauth._CLIENTS
 
     rejected = client.post("/oauth/authorize", data={**params, "pin": "wrong"})
@@ -273,6 +274,7 @@ def test_v2_client_id_is_migrated_after_pin_approval(tmp_path, monkeypatch):
     oauth._CLIENTS.clear()
     reloaded = client.get("/oauth/authorize", params=params)
     assert "Unknown client_id" not in reloaded.text
+    assert "<strong>OAuth client</strong>" in reloaded.text
     assert client_id in oauth._CLIENTS
 
 
@@ -611,3 +613,49 @@ def test_authorization_capacity_error_and_no_pin_hint(tmp_path, monkeypatch):
     monkeypatch.setattr(oauth, "MAX_OAUTH_CODES", 0)
     response = client.post("/oauth/authorize", data=params)
     assert "Too many pending authorization requests" in response.text
+
+
+def test_authorization_page_is_compact_and_follows_system_theme(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    client = TestClient(_app())
+    client_id = _register(client)
+    response = client.get(
+        "/oauth/authorize",
+        params={
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": "https://client.test/callback",
+            "code_challenge": "challenge",
+            "code_challenge_method": "S256",
+        },
+    )
+    assert response.status_code == 200
+    assert "Authorize connection" in response.text
+    assert "test client" in response.text
+    assert "ChatGPT" not in response.text
+    assert 'name="pin"' in response.text
+    assert 'autocomplete="current-password"' in response.text
+    assert 'name="client_id"' in response.text
+    assert "prefers-color-scheme: dark" in response.text
+    assert "Read workspace" not in response.text
+    assert "LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN" not in response.text
+
+
+def test_unnamed_oauth_client_has_neutral_authorization_label(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    client = TestClient(_app())
+    registered = client.post(
+        "/oauth/register", json={"redirect_uris": ["https://client.test/callback"]}
+    )
+    assert registered.status_code == 201
+    assert registered.json()["client_name"] == "OAuth client"
+    params = {
+        "response_type": "code",
+        "client_id": registered.json()["client_id"],
+        "redirect_uri": "https://client.test/callback",
+        "code_challenge": "challenge",
+        "code_challenge_method": "S256",
+    }
+    form = client.get("/oauth/authorize", params=params)
+    assert "<strong>OAuth client</strong> wants to access your workspace" in form.text
+    assert "ChatGPT" not in form.text
