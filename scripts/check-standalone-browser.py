@@ -24,8 +24,10 @@ def main() -> None:
     parser.add_argument("--binary", type=Path, required=True)
     args = parser.parse_args()
     archive = CArchiveReader(str(args.binary.resolve()))
-    contents = set(archive.toc)
-    assert contents >= EXPECTED_SIDECAR, "External browser source is absent from executable"
+    # PyInstaller records Windows archive paths with backslashes.
+    contents = {name.replace("\\", "/") for name in archive.toc}
+    missing = EXPECTED_SIDECAR - contents
+    assert not missing, f"External browser source is absent from executable: {sorted(missing)}"
     assert not any(path.startswith("playwright/") for path in contents), (
         "Playwright package leaked into the standalone executable"
     )

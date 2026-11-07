@@ -35,7 +35,7 @@ async def _serve(state_dir: Path, *, input_stream=None, output_stream=None) -> N
             except Exception as exc:
                 response = {"ok": False, "error_type": type(exc).__name__, "message": str(exc)}
             output_stream.write(
-                json.dumps(response, ensure_ascii=False, separators=(",", ":")) + "\n"
+                json.dumps(response, ensure_ascii=True, separators=(",", ":")) + "\n"
             )
             output_stream.flush()
     finally:

@@ -151,11 +151,15 @@ async def test_external_browser_stdio_worker(tmp_path: Path, monkeypatch: pytest
             assert session_id == "session"
             return {"text": "汉字"}
 
+        async def close(self, session_id):
+            raise ValueError(f"unknown browser session: {session_id}")
+
     monkeypatch.setattr(
         browser_external_service, "BrowserSessionManager", FakeBrowserSessionManager
     )
     requests = [
         {"method": "snapshot", "args": ["session"], "kwargs": {}},
+        {"method": "close", "args": ["汉字"], "kwargs": {}},
         {"method": "private_method", "args": [], "kwargs": {}},
         {"method": "manage", "args": [], "kwargs": {"action": "list"}},
         {"method": "snapshot", "args": [], "kwargs": {}},
@@ -163,15 +167,19 @@ async def test_external_browser_stdio_worker(tmp_path: Path, monkeypatch: pytest
     input_stream = io.BytesIO(
         ("\n".join(json.dumps(value) for value in requests) + "\n{invalid-json}\n").encode()
     )
-    output_stream = io.StringIO()
+    # Windows can use a non-UTF-8 encoding for pipe stdout.
+    output_stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", write_through=True)
     await browser_external_service._serve(
         tmp_path / ".state", input_stream=input_stream, output_stream=output_stream
     )
-    responses = [json.loads(line) for line in output_stream.getvalue().splitlines()]
-    assert len(responses) == 5
+    output = output_stream.buffer.getvalue().decode("ascii")
+    responses = [json.loads(line) for line in output.splitlines()]
+    assert len(responses) == 6
     assert responses[0] == {"ok": True, "result": {"text": "汉字"}}
     assert responses[1]["error_type"] == "ValueError"
-    assert responses[2]["ok"] is True
-    assert responses[3]["error_type"] == "TypeError"
-    assert responses[4]["error_type"] == "JSONDecodeError"
+    assert "汉字" in responses[1]["message"]
+    assert responses[2]["error_type"] == "ValueError"
+    assert responses[3]["ok"] is True
+    assert responses[4]["error_type"] == "TypeError"
+    assert responses[5]["error_type"] == "JSONDecodeError"
     assert calls == [{"action": "list"}, {"action": "cleanup"}]
