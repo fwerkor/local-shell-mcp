@@ -1,0 +1,142 @@
+{
+  "name": "LibreChat",
+  "version": "v0.8.8",
+  "description": "",
+  "packageManager": "npm@11.13.0",
+  "scarfSettings": {
+    "enabled": false
+  },
+  "workspaces": [
+    "api",
+    "client",
+    "packages/*"
+  ],
+  "scripts": {
+    "backend": "cross-env NODE_ENV=production node api/server/index.js",
+    "backend:dev": "cross-env NODE_ENV=development npx nodemon api/server/index.js",
+    "build:data-provider": "cd packages/data-provider && npm run build",
+    "build:api": "cd packages/api && npm run build",
+    "build:data-schemas": "cd packages/data-schemas && npm run build",
+    "build:client": "cd client && npm run build",
+    "build:client-package": "cd packages/client && npm run build",
+    "build:packages": "npm run build:data-provider && npm run build:data-schemas && npm run build:api && npm run build:client-package",
+    "build": "npx turbo run build",
+    "frontend": "npm run build:data-provider && npm run build:data-schemas && npm run build:api && npm run build:client-package && cd client && npm run build",
+    "frontend:dev": "cd client && npm run dev",
+    "test:client": "cd client && npm run test:ci",
+    "test:api": "cd api && npm run test:ci",
+    "test:packages:api": "cd packages/api && npm run test:ci",
+    "test:packages:data-provider": "cd packages/data-provider && npm run test:ci",
+    "test:packages:data-schemas": "cd packages/data-schemas && npm run test:ci",
+    "test:all": "npm run test:client && npm run test:api && npm run test:packages:api && npm run test:packages:data-provider && npm run test:packages:data-schemas",
+    "lint:fix": "eslint . --fix",
+    "lint": "eslint .",
+    "sort-imports:check": "node scripts/sort-imports.mts --check",
+    "static-checks": "node scripts/static-checks.mts",
+    "static-checks:full": "node scripts/static-checks.mts --full",
+    "check:lsm": "node --test scripts/lsm-prune.test.mjs"
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "@eslint/compat": "^1.2.6",
+    "@eslint/eslintrc": "^3.3.4",
+    "@eslint/js": "^9.20.0",
+    "@types/react-virtualized": "^9.22.0",
+    "brace-expansion": "^2.1.2",
+    "caniuse-lite": "^1.0.30001741",
+    "cross-env": "^7.0.3",
+    "elliptic": "^6.6.1",
+    "eslint": "^9.39.1",
+    "eslint-config-prettier": "^10.0.1",
+    "eslint-import-resolver-typescript": "^3.7.0",
+    "eslint-plugin-i18next": "^6.1.1",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-jest": "^29.1.0",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-prettier": "^5.2.3",
+    "eslint-plugin-react": "^7.37.4",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-simple-import-sort": "^12.1.1",
+    "globals": "^15.14.0",
+    "jest": "^30.2.0",
+    "prettier": "^3.5.0",
+    "prettier-plugin-tailwindcss": "^0.6.11",
+    "turbo": "^2.10.5",
+    "typescript-eslint": "^8.60.1"
+  },
+  "overrides": {
+    "minimatch@3": {
+      "brace-expansion": "^1.1.16"
+    },
+    "minimatch@5": {
+      "brace-expansion": "^2.1.2"
+    },
+    "minimatch@9": {
+      "brace-expansion": "^2.1.2"
+    },
+    "minimatch@10": {
+      "brace-expansion": "^5.0.8"
+    },
+    "@xmldom/xmldom": "^0.8.15",
+    "@humanfs/node": "^0.16.8",
+    "qs": "^6.16.0",
+    "baseline-browser-mapping": "^2.11.0",
+    "browserslist": "^4.28.7",
+    "elliptic": "^6.6.1",
+    "fast-uri": "^3.1.7",
+    "fflate": "^0.8.3",
+    "form-data": "^4.0.6",
+    "ip-address": "^10.5.1",
+    "langsmith": "^0.6.0",
+    "postcss": "^8.5.18",
+    "postcss-selector-parser@6": "^6.1.3",
+    "postcss-selector-parser@7": "^7.1.3",
+    "tslib": "^2.8.1",
+    "fast-xml-parser": "5.7.2",
+    "serialize-javascript": "7.0.5",
+    "mdast-util-gfm-autolink-literal": "2.0.0",
+    "remark-gfm": {
+      "mdast-util-gfm-autolink-literal": "2.0.0"
+    },
+    "mdast-util-gfm": {
+      "mdast-util-gfm-autolink-literal": "2.0.0"
+    },
+    "katex": "^0.16.21",
+    "rehype-katex": {
+      "katex": "^0.16.21"
+    },
+    "remark-math": {
+      "micromark-extension-math": {
+        "katex": "^0.16.21"
+      }
+    },
+    "eslint": {
+      "ajv": "6.14.0"
+    },
+    "underscore": "1.13.8",
+    "hono": "^4.13.7",
+    "@hono/node-server": "^2.1.1",
+    "monaco-editor": {
+      "dompurify": "3.4.16"
+    },
+    "test-exclude": "^8.0.0",
+    "js-yaml": "^4.3.2",
+    "ws": "^8.21.0",
+    "@opentelemetry/core": "^2.9.0",
+    "@opentelemetry/propagator-jaeger": "^2.10.0",
+    "protobufjs": "^7.6.5",
+    "@grpc/grpc-js": "^1.14.5",
+    "gaxios": {
+      "uuid": "^11.1.1"
+    }
+  },
+  "nodemonConfig": {
+    "ignore": [
+      "api/data/",
+      "data/",
+      "client/",
+      "admin/",
+      "packages/"
+    ]
+  }
+}

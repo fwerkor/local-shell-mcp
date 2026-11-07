@@ -1,12 +1,12 @@
-<!-- i18n-source-sha256: a3fdf9088031e6903b15497a3df881a8e6ed2f6f2b34dd4d0b68b0414a2ca81e -->
+<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
 # Schnellstart
 
-Diese Anleitung verwendet Docker Compose als ersten Runtime und ChatGPT als ersten Client. Das sind unabhängige Entscheidungen: Docker, VS Code extension, binary, Python und stdio sind Runtime-Optionen; ChatGPT und generische MCP-Clients sind Client-Optionen. Die vollständige Übersicht finden Sie unter [Runtime-Auswahl und Bereitstellungsmodell](../guides/deployment.md).
+Diese Anleitung startet einen LSM Controller und öffnet seine Browseroberfläche. Der [unified web workspace](web-workspace.md) ist das empfohlene tägliche Erlebnis; Es handelt sich um einen separat bereitgestellten, optionalen Chat-Stack. ChatGPT, Gemini und andere externe MCP-Clients können sich mit demselben Controller verbinden. Siehe [runtime choices and deployment model](../guides/deployment.md).
 
 ## Voraussetzungen
 
 - Docker Engine mit Compose v2.
-- Ein öffentlicher HTTPS-Endpoint, wenn ChatGPT aus dem Web verbinden muss.
+- Ein öffentlicher HTTPS-Endpunkt, wenn Remotebenutzer oder externe MCP-Clients eine Verbindung herstellen müssen.
 - Ein eigenes Workspace-Verzeichnis.
 - Eine lange zufällige OAuth admin PIN und ein JWT secret.
 
@@ -65,15 +65,15 @@ http://local-shell-mcp:8765
 
 Bei Caddy, Nginx, Traefik, Nginx Proxy Manager oder einem anderen Reverse Proxy leiten Sie HTTPS-Verkehr an `127.0.0.1:8765` oder die Container-Netzwerkadresse weiter.
 
-## 4. ChatGPT verbinden
+## 4. Öffnen Sie den Browser-Arbeitsbereich
 
-Verwenden Sie den MCP-Endpoint:
+Öffnen Sie das Controller-Login:
 
 ```text
-https://your-public-host.example.com/mcp
+https://your-public-host.example.com/ui
 ```
 
-Folgen Sie der [ChatGPT-Connector-Anleitung](chatgpt-connector.md), um OAuth und Tool-Freigabe abzuschließen.
+Für Chat, Projekte und integrierte Steuerungsseiten folgen Sie dem [unified web workspace guide](web-workspace.md). Die ursprüngliche, leichtgewichtige WebUI ist verfügbar, wenn Chat nicht installiert ist.
 
 ## 5. Tool-Zugriff sicher bestätigen
 
@@ -129,6 +129,8 @@ curl -i http://127.0.0.1:8765/healthz
 | Aus VS Code ausführen | [VS Code extension runtime](../installation/vscode-extension.md) |
 | Mit einem Release-Binary ausführen | [Standalone-Binary-Runtime](../installation/binary.md) |
 | Mit Python oder Source Checkout ausführen | [Python runtimes](../installation/python.md) |
+| Nutzen Sie die einheitliche Chat- und Steuerungsoberfläche | [Unified web workspace](web-workspace.md) |
+| Fügen Sie Gemini Spark als Kunden hinzu | [Gemini Custom Apps](gemini-spark.md) |
 | ChatGPT als Client hinzufügen | [ChatGPT connector](chatgpt-connector.md) |
 | Tools auswählen und bessere Prompts schreiben | [Nutzungsmuster](../guides/usage-patterns.md) |
 | Eine HPC-, NPU/GPU- oder NAT-Maschine anbinden | [Remote workers](../guides/remote-workers.md) |

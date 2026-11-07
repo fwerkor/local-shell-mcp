@@ -1,12 +1,12 @@
-<!-- i18n-source-sha256: a3fdf9088031e6903b15497a3df881a8e6ed2f6f2b34dd4d0b68b0414a2ca81e -->
+<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
 # Inicio rápido
 
-Esta guía usa Docker Compose como primer runtime y ChatGPT como primer client. Son decisiones independientes: Docker, VS Code extension, binary, Python y stdio son opciones de runtime; ChatGPT y los clientes MCP genéricos son opciones de client. Consulte [opciones de runtime y modelo de despliegue](../guides/deployment.md) para ver el mapa completo.
+Esta guía inicia un controlador LSM y abre su interfaz de navegador. El [unified web workspace](web-workspace.md) es la experiencia diaria recomendada; es una pila de chat opcional implementada por separado. ChatGPT, Gemini y otros clientes MCP externos pueden conectarse al mismo controlador. Ver [runtime choices and deployment model](../guides/deployment.md).
 
 ## Requisitos
 
 - Docker Engine con Compose v2.
-- Un endpoint HTTPS público si ChatGPT debe conectarse desde la web.
+- Un punto final HTTPS público si deben conectarse usuarios remotos o clientes MCP externos.
 - Un directorio de workspace dedicado.
 - Un OAuth admin PIN y JWT secret largos y aleatorios.
 
@@ -65,15 +65,15 @@ http://local-shell-mcp:8765
 
 Con Caddy, Nginx, Traefik, Nginx Proxy Manager u otro reverse proxy, reenvíe el tráfico HTTPS a `127.0.0.1:8765` o a la dirección de red del container.
 
-## 4. Conectar ChatGPT
+## 4. Abra el espacio de trabajo del navegador.
 
-Use el endpoint MCP:
+Abra el inicio de sesión del Controlador:
 
 ```text
-https://your-public-host.example.com/mcp
+https://tu-host-público.example.com/ui
 ```
 
-Siga la [guía del conector de ChatGPT](chatgpt-connector.md) para completar OAuth y la aprobación de herramientas.
+Para chat, proyectos y páginas de control integrado, siga [unified web workspace guide](web-workspace.md). La WebUI ligera original está disponible cuando el chat no está instalado.
 
 ## 5. Confirmar de forma segura el acceso a herramientas
 
@@ -129,6 +129,8 @@ curl -i http://127.0.0.1:8765/healthz
 | Ejecutar desde VS Code | [VS Code extension runtime](../installation/vscode-extension.md) |
 | Ejecutar con un binary de release | [Runtime binary independiente](../installation/binary.md) |
 | Ejecutar con Python o source checkout | [Python runtimes](../installation/python.md) |
+| Utilice la interfaz unificada de chat y control | [Unified web workspace](web-workspace.md) |
+| Añade Gemini Spark como cliente | [Gemini Custom Apps](gemini-spark.md) |
 | Añadir ChatGPT como client | [ChatGPT connector](chatgpt-connector.md) |
 | Elegir herramientas y escribir mejores prompts | [Patrones de uso](../guides/usage-patterns.md) |
 | Conectar una máquina HPC, NPU/GPU o NAT | [Workers remotos](../guides/remote-workers.md) |

@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "useDefineForClassFields": true,
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": false,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noImplicitAny": false,
+    "noEmit": true,
+    "jsx": "preserve",
+    "paths": {
+      "~/*": ["./src/*"],
+      "test/*": ["./test/*"],
+      "*": ["./*", "../../node_modules/*"],
+      "librechat-data-provider/*": ["../packages/data-provider/*"]
+    }
+  },
+  "types": ["node", "jest", "@testing-library/jest-dom"],
+  "exclude": ["node_modules", "vite.config.ts"],
+  "include": [
+    "src/**/*",
+    "test/**/*",
+    "test/setupTests.js",
+    "env.d.ts",
+    "../packages/client/src/hooks/useDelayedRender.tsx",
+    "../packages/client/src/components/InfoHoverCard.tsx"
+  ]
+}

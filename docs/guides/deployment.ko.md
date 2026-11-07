@@ -1,30 +1,29 @@
-<!-- i18n-source-sha256: 8b4e2e48e58e65721bf5ebf9f7b1d8aedf34d62d5a7948d36d6b9102ee1f6cc3 -->
+<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
 # Runtime 선택과 deployment 모델
 
-`local-shell-mcp`에는 서로 독립적인 두 가지 결정이 있습니다:
+`local-shell-mcp`에는 두 가지 보완적인 결정이 있습니다.
 
 1. **Runtime**: server process를 어떻게 실행하고 어떤 workspace를 제어할지.
-2. **Client connection**: ChatGPT 또는 다른 MCP client가 그 server에 어떻게 접근할지.
+2. **인터페이스**: [unified web workspace](../getting-started/web-workspace.md) 옵션을 사용하거나 Gemini 또는 ChatGPT와 같은 외부 MCP 클라이언트를 연결하세요.
 
-ChatGPT를 deployment 방법으로 취급하지 마십시오. ChatGPT는 client입니다. Docker, VS Code extension, release binary, Python install, stdio mode가 runtime 선택지입니다.
+권장되는 일일 인터페이스는 자체 호스팅 웹 작업 공간(채팅, 프로젝트 및 LSM 제어 페이지)입니다. 컨트롤러와 별도로 배포됩니다. Docker, VS Code 확장, 릴리스 바이너리, Python 설치 및 stdio 모드는 컨트롤러를 실행하는 방법입니다. 외부 채팅 앱은 선택적인 클라이언트로 남아 있습니다.
 
 ```text
 Runtime layer                      Exposure layer                 Client layer
 -------------------------------    ---------------------------    ----------------------
-Docker Compose                     local HTTP only                ChatGPT custom MCP
+Docker Compose 로컬 HTTP 전용 통합 웹 작업공간
 VS Code extension                  HTTPS reverse proxy/tunnel     Generic MCP client
 Standalone binary                  stdio process pipe             VS Code extension UI
 pipx / source checkout             remote-worker outbound join    REST-style diagnostics
 ```
 
-일반적인 public setup:
+일반적인 자체 호스팅 설정은 다음과 같습니다.
 
 ```text
-ChatGPT
-  -> https://mcp.example.com/mcp
-  -> reverse proxy or tunnel
-  -> local-shell-mcp runtime
-  -> controlled workspace
+브라우저 -> https://chat.example.com (통합 웹 작업공간)
+        -> 인증된 local-shell-mcp 컨트롤러
+        -> 통제된 작업 공간 및 아웃바운드 근로자
+선택적 외부 클라이언트 -> https://mcp.example.com/mcp
 ```
 
 local MCP client setup은 더 단순할 수 있습니다:
@@ -37,10 +36,10 @@ Local MCP client
 
 ## Runtime 선택 매트릭스
 
-| Runtime | 적합한 용도 | Isolation boundary | Toolchain source | Public ChatGPT access | 페이지 |
+| 런타임 | 다음에 가장 적합 | 격리 경계 | 툴체인 소스 | 외부 MCP 액세스 | 페이지 |
 |---|---|---|---|---|---|
-| Docker Compose | 대부분의 coding-agent workload와 재현 가능한 workspace | Container | Project image에 폭넓은 기본 toolchain 포함 | HTTPS proxy 또는 tunnel 추가 | [Docker Compose](../installation/docker.md) |
-| Docker Compose + tunnel sidecar | Cloudflare Tunnel을 포함한 단일 stack public deployment | Container | Project image | Compose `tunnel` profile에 내장 | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| 도커 작성 | 대부분의 코딩 에이전트 작업 부하 및 반복 가능한 작업 공간 | 컨테이너 | 린 컨트롤러 이미지; 작업별 툴체인을 별도로 설치 | HTTPS 프록시 또는 터널 추가 | [Docker Compose](../installation/docker.md) |
+| Docker Compose + 터널 사이드카 | Cloudflare Tunnel을 사용한 Public Controller 배포 | 컨테이너 | 프로젝트 이미지 | Compose `tunnel` 프로필에 내장됨 | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | editor workspace에서 server 시작/중지 | 대개 host process | host tools와 설정된 executable | ChatGPT용 외부 HTTPS tunnel/proxy 추가 | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Docker를 사용할 수 없는 host/VM | Host or VM | host tools와 설정된 executable | HTTPS proxy 또는 tunnel 추가 | [Standalone binary](../installation/binary.md) |
 | `pipx` / source install | Python-native 사용, debug, development | Host virtualenv or VM | Python package와 host tools | HTTPS proxy 또는 tunnel 추가 | [Python install](../installation/python.md) |
@@ -48,14 +47,16 @@ Local MCP client
 
 ## Client 연결 매트릭스
 
-| Client path | Public HTTPS 필요 | `/mcp` 사용 | OAuth 필요 | 일반 runtime |
+| 인터페이스 | 공개 HTTPS가 필요합니다 | `/mcp`를 사용합니다. | OAuth 필요 | 일반적인 런타임 |
 |---|---:|---:|---:|---|
+| 통합 LSM 웹 작업공간 | 예, 원격 액세스의 경우입니다. 로컬 프록시도 가능 | 내부적으로 | LSM 로그인 | 컨트롤러와 별도의 웹 스택 |
+| Gemini Spark / 맞춤형 앱 | 예 | 예 | 네, 공용으로 사용하세요 | 모든 HTTP 컨트롤러 |
 | ChatGPT custom MCP connector | 예 | 예 | public 사용 시 예 | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | 아니요 | 아니요 | 아니요 | `local-shell-mcp --mode stdio` |
 | Generic HTTP MCP client | localhost는 보통 아니요, 네트워크에서는 예 | 예 | localhost 밖에서는 권장 | Any HTTP runtime |
 | VS Code extension helper flow | ChatGPT 연결 시에만 | ChatGPT URL copy 시 예 | ChatGPT에서는 권장 | VS Code-launched runtime |
 
-참조: [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md), [network connectivity](../clients/connectivity.md).
+[unified web workspace](../getting-started/web-workspace.md), [Gemini Spark](../getting-started/gemini-spark.md), [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md) 및 [network connectivity](../clients/connectivity.md)를 참조하세요.
 
 ## 각 runtime이 제어하는 것
 
@@ -75,15 +76,15 @@ Local MCP client
 |---|---|---|---|
 | Command 실행 위치? | container 내부 | 대개 host workspace | host 또는 VM process environment |
 | Default workspace? | Mounted `/workspace` | 현재 VS Code folder 또는 설정 path | `LOCAL_SHELL_MCP_WORKSPACE_ROOT` |
-| Compiler/browser preinstall? | 폭넓게 포함 | host에 설치된 것만 | host에 설치된 것만 |
+| 컴파일러와 브라우저가 사전 설치되어 있습니까? | 아니요; 작업에 필요한 것을 설치하십시오. | 호스트에 설치된 경우에만 | 호스트에 설치된 경우에만 |
 | Reset이 쉬운가? | container와 workspace volume 재생성 | workspace에 따라 다름 | host/VM에 따라 다름 |
 | 임의 package install에 적합? | disposable이면 예 | host에서는 위험 증가 | VM이 아니면 위험 증가 |
 
 ## 권장 선택
 
-특별한 이유가 없다면 **Docker Compose**부터 사용하십시오. 가장 명확한 safety boundary와 가장 완전한 기본 toolchain을 제공합니다.
+특별한 이유가 없는 한 **Docker Compose**를 먼저 사용하세요. 사전 설치된 대규모 개발 툴체인 없이도 명확한 안전 경계를 제공합니다.
 
-workflow가 editor에서 시작하고 local launcher가 필요하면 **VS Code extension**을 사용하십시오. 이것도 runtime입니다. 그 자체로 ChatGPT에서 접근 가능해지는 것은 아니므로 ChatGPT web/app에서는 tunnel 또는 reverse proxy를 추가해야 합니다.
+워크플로가 편집기에서 시작되고 로컬 실행 프로그램이 필요한 경우 **VS Code 확장**을 사용하세요. 아직은 런타임입니다. 원격 웹 클라이언트에는 연결 가능한 HTTPS 프록시 또는 터널이 필요합니다.
 
 Docker를 사용할 수 없지만 VM/container host/dedicated user account가 boundary를 제공한다면 **standalone binary**를 사용하십시오.
 
@@ -93,7 +94,7 @@ server process를 spawn할 수 있는 local MCP client에만 **stdio mode**를 �
 
 ## Public endpoint 규칙
 
-ChatGPT 같은 HTTP MCP client의 MCP endpoint:
+Gemini 및 ChatGPT와 같은 외부 HTTP MCP 클라이언트의 경우 MCP 끝점은 다음과 같습니다.
 
 ```text
 https://your-public-host.example.com/mcp
@@ -117,6 +118,8 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 
 ## Client 페이지
 
+- [Unified web workspace](../getting-started/web-workspace.md)
+- [Gemini Spark / Custom Apps](../getting-started/gemini-spark.md)
 - [ChatGPT connector](../getting-started/chatgpt-connector.md)
 - [Generic MCP clients](../clients/generic-mcp.md)
 - [Public HTTPS exposure](../clients/connectivity.md)

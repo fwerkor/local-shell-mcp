@@ -1,0 +1,84 @@
+.popover-ui {
+  display: flex;
+  max-height: min(var(--popover-available-height, 1700px), 1700px);
+  flex-direction: column;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: 0.7rem;
+  border-width: 1px;
+  border-style: solid;
+  border-color: rgb(var(--border-light) / var(--border-light-alpha, 1));
+  background-color: rgb(var(--surface-primary));
+  padding: 0.5rem;
+  color: rgb(var(--text-primary));
+  box-shadow:
+    0 10px 15px -3px rgb(0 0 0 / 0.1),
+    0 4px 6px -4px rgb(0 0 0 / 0.1);
+  transform-origin: var(--popover-transform-origin, top);
+  opacity: 0;
+  transition-property: opacity, scale;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+  scale: 0.95;
+  margin-top: 4px;
+  margin-right: -2px;
+}
+
+/* Elevation here is a black shadow, which carries no separation at all against
+ * a pure black surface. Lives with the primitive rather than in the app
+ * stylesheet, which the published package does not include. */
+html.high-contrast .popover-ui {
+  border: 1px solid rgb(var(--border-medium));
+  box-shadow: none;
+}
+
+.popover-animate {
+  opacity: 0;
+  transform: scale(0.95) translateY(-0.5rem);
+  transition:
+    opacity 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.popover-animate[data-enter] {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+}
+
+.popover-ui:focus-visible,
+.popover-ui[data-focus-visible] {
+  outline: 2px solid rgb(var(--text-primary));
+  outline-offset: -1px;
+}
+
+.popover-ui:where(.dark, .dark *) {
+  background-color: rgb(var(--surface-secondary));
+  color: rgb(var(--text-secondary));
+  box-shadow:
+    0 10px 15px -3px rgb(0 0 0 / 0.25),
+    0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+.select-item {
+  display: flex;
+  cursor: pointer;
+  scroll-margin: 0.5rem;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+  outline: none !important;
+}
+
+.select-item[aria-disabled='true'] {
+  opacity: 0.5;
+}
+
+.select-item[data-active-item] {
+  background-color: rgb(var(--surface-hover));
+  color: rgb(var(--text-primary));
+}
+
+.popover-ui[data-enter] {
+  opacity: 1;
+  scale: 1;
+}

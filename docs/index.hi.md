@@ -1,14 +1,14 @@
-<!-- i18n-source-sha256: b999ae6985930651e74b974b12109889360442811d6eeb306e6fa39754dbc173 -->
+<!-- i18n-source-sha256: a66d491558f07c419c8b5958d36c47cd90b081fc1c81f015bb62398cfd573e55 -->
 <div class="hero-shell" markdown>
-<span class="hero-eyebrow">ChatGPT-compatible MCP control plane</span>
+<span class="hero-eyebrow">स्व-होस्टेड एआई कार्यक्षेत्र · एमसीपी नियंत्रण विमान</span>
 
 # local-shell-mcp
 
-Chat छोड़े बिना अपने AI assistant को नियंत्रित shell, वास्तविक workspace, Git, browser automation, file sharing और remote-worker access दें।
+एक स्व-होस्टेड इंटरफ़ेस में चैट, प्रोजेक्ट, फ़ाइलें, टर्मिनल, रिमोट मशीनें और एआई उपकरण। जब आपको बाहरी एमसीपी क्लाइंट की आवश्यकता हो तो उन्हें कनेक्ट करें।
 
 <div class="hero-actions" markdown>
 [शुरू करें](getting-started/quickstart.md){ .hero-action .hero-action--primary }
-[Runtime चुनें](guides/deployment.md){ .hero-action .hero-action--secondary }
+[Web workspace](getting-started/web-workspace.md){ .hero-action .hero-action--secondary }
 [Tools reference](reference/tools.md){ .hero-action .hero-action--secondary }
 </div>
 </div>
@@ -20,8 +20,8 @@ Chat छोड़े बिना अपने AI assistant को नियं�
 </div>
 
 <div class="feature-card" markdown>
-### Runtime और client layers
-Docker, VS Code extension, binary, Python या stdio जैसे runtime चुनें, फिर ChatGPT या अन्य MCP client अलग से connect करें।
+### एकीकृत वेब कार्यक्षेत्र
+नियंत्रक फ़ाइलों, टर्मिनलों, डेस्कटॉप, सत्रों, रिमोट और ऑडिट के साथ-साथ अंतर्निहित चैट और प्रोजेक्ट इतिहास का उपयोग करें। बाहरी एमसीपी क्लाइंट वैकल्पिक रहते हैं।
 </div>
 
 <div class="feature-card" markdown>
@@ -32,7 +32,7 @@ SSH ports खोले बिना outbound worker connections से NAT, fire
 
 ## क्या प्रदान करता है
 
-`local-shell-mcp` ChatGPT और अन्य MCP clients को नियंत्रित local/container workspace देता है। यह OAuth-सक्षम ChatGPT-compatible MCP server के जरिए shell, persistent shell, filesystem, search, patch, Git, Playwright, audit, optional Goal Plans वाली durable logical Sessions, tokenized file links और remote-worker tools देता है।
+`local-shell-mcp` बाहरी ग्राहकों के लिए एक एकीकृत स्व-होस्टेड AI कार्यक्षेत्र और एक MCP सर्वर प्रदान करता है। यह प्रमाणित एमसीपी एंडपॉइंट के माध्यम से शेल, लगातार शेल, फाइल सिस्टम, खोज, पैच, गिट, प्लेराइट, ऑडिट, वैकल्पिक लक्ष्य योजनाओं के साथ टिकाऊ तार्किक सत्र, टोकनयुक्त फ़ाइल-लिंक और रिमोट-वर्कर टूल प्रदान करता है।
 
 जब AI को repository inspect करना, tests चलाना, files edit करना, Git operate करना, browser evidence इकट्ठा करना, downloadable artifacts बनाना या केवल control server की ओर outbound connect कर सकने वाली remote machine को control करना हो, तब इसका उपयोग करें।
 
@@ -41,7 +41,7 @@ SSH ports खोले बिना outbound worker connections से NAT, fire
 ```text
 Runtime layer: Docker / VS Code extension / binary / Python / stdio
 Exposure layer: localhost / HTTPS proxy / tunnel / stdio pipe
-Client layer: ChatGPT / generic MCP client / editor helper
+क्लाइंट परत: एकीकृत वेबयूआई/जेमिनी/चैटजीपीटी/जेनेरिक एमसीपी क्लाइंट
 Controlled workspace: /workspace or configured workspace root
 Optional remote workers: outbound machine connections
 ```
@@ -52,8 +52,10 @@ Optional remote workers: outbound machine connections
 
 | Scenario | यहाँ से शुरू करें | क्यों |
 |---|---|---|
-| पहला public ChatGPT deployment | [Quickstart](getting-started/quickstart.md) | OAuth और `/mcp` setup सहित Docker Compose path |
+| प्राथमिक ब्राउज़र कार्यक्षेत्र | [Unified web workspace](getting-started/web-workspace.md) | साझा लॉगिन के साथ चैट, प्रोजेक्ट और एलएसएम नियंत्रण पृष्ठ |
+| प्रथम नियंत्रक परिनियोजन | [Quickstart](getting-started/quickstart.md) | डॉकर कंपोज़, OAuth और पहला ब्राउज़र सत्र |
 | runtime layer चुनना | [Runtime choices](guides/deployment.md) | Docker, VS Code, binary, Python और stdio को अलग runtime options के रूप में समझाता है |
+| जेमिनी स्पार्क को जोड़ना | [Gemini Custom Apps](getting-started/gemini-spark.md) | पात्रता, HTTPS MCP URL, OAuth और परीक्षण |
 | ChatGPT को client के रूप में जोड़ना | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, पहला safe prompt, tool discovery |
 | LSM को DeepSeek Harness में जोड़ना | [DeepSeek Harness plugin](clients/deepseek-harness.md) | इस repository को DSH bundle के रूप में install करें और पूर्ण LSM tool/remote-worker surface बनाए रखें |
 | VS Code से चलाना | [VS Code extension runtime](installation/vscode-extension.md) | Editor-launched runtime और host safety notes |
@@ -77,12 +79,12 @@ Optional remote workers: outbound machine connections
 
 ## Typical workflows
 
-### ChatGPT के साथ coding
+### वेब कार्यक्षेत्र में कोडिंग
 
-1. Dedicated workspace में Docker Compose, VS Code extension, binary या Python जैसा runtime शुरू करें।
-2. यदि ChatGPT को network access चाहिए तो HTTP runtime expose करें।
-3. Public `/mcp` endpoint ChatGPT में जोड़ें।
-4. पहले repository inspect करने और read-only checks चलाने को कहें।
+1. एक एलएसएम नियंत्रक और वैकल्पिक [unified web workspace](getting-started/web-workspace.md) प्रारंभ करें।
+2. `/ui` खोलें और LSM पहचान का उपयोग करके साइन इन करें।
+3. एक मॉडल समापन बिंदु कॉन्फ़िगर करें और एक नया वार्तालाप खोलें।
+4. मॉडल को रिपॉजिटरी का निरीक्षण करने और पहले केवल-पढ़ने के लिए चेक चलाने के लिए कहें।
 5. Approval के बाद files patch, tests, diff review, commit और push करने दें।
 6. File links या remote systems वाले tasks में audit log review करें।
 

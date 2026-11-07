@@ -1,12 +1,12 @@
-<!-- i18n-source-sha256: a3fdf9088031e6903b15497a3df881a8e6ed2f6f2b34dd4d0b68b0414a2ca81e -->
+<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
 # Hızlı başlangıç
 
-Bu kılavuz ilk runtime olarak Docker Compose, ilk client olarak ChatGPT kullanır. Bunlar bağımsız seçimlerdir: Docker, VS Code extension, binary, Python ve stdio runtime seçenekleridir; ChatGPT ve genel MCP client’ları client seçenekleridir. Tam harita için [runtime seçenekleri ve deployment modeli](../guides/deployment.md) bölümüne bakın.
+Bu kılavuz bir LSM Denetleyicisini başlatır ve tarayıcı arayüzünü açar. [unified web workspace](web-workspace.md) önerilen günlük deneyimdir; ayrı olarak konuşlandırılmış, isteğe bağlı bir sohbet yığınıdır. ChatGPT, Gemini ve diğer harici MCP istemcileri aynı Denetleyiciye bağlanabilir. Bkz. [runtime choices and deployment model](../guides/deployment.md).
 
 ## Gereksinimler
 
 - Compose v2 ile Docker Engine.
-- ChatGPT Web üzerinden bağlanacaksa herkese açık HTTPS endpoint.
+- Uzak kullanıcıların veya harici MCP istemcilerinin bağlanması gerekiyorsa genel bir HTTPS uç noktası.
 - Özel bir workspace directory.
 - Uzun ve rastgele OAuth admin PIN ile JWT secret.
 
@@ -65,15 +65,15 @@ http://local-shell-mcp:8765
 
 Caddy, Nginx, Traefik, Nginx Proxy Manager veya başka bir reverse proxy için HTTPS traffic’i `127.0.0.1:8765` ya da container network address’e iletin.
 
-## 4. ChatGPT bağlama
+## 4. Tarayıcı çalışma alanını açın
 
-MCP endpoint’i kullanın:
+Denetleyici girişini açın:
 
 ```text
-https://your-public-host.example.com/mcp
+https://herkese açık-ana makineniz.example.com/ui
 ```
 
-OAuth ve tool approval işlemini tamamlamak için [ChatGPT connector kılavuzunu](chatgpt-connector.md) izleyin.
+Sohbet, projeler ve entegre kontrol sayfaları için [unified web workspace guide](web-workspace.md)'i takip edin. Orijinal hafif WebUI, sohbet yüklü olmadığında kullanılabilir.
 
 ## 5. Tool erişimini güvenle doğrulama
 
@@ -129,6 +129,8 @@ curl -i http://127.0.0.1:8765/healthz
 | VS Code’dan çalıştırma | [VS Code extension runtime](../installation/vscode-extension.md) |
 | release binary ile çalıştırma | [Standalone binary runtime](../installation/binary.md) |
 | Python veya source checkout ile çalıştırma | [Python runtimes](../installation/python.md) |
+| Birleşik sohbet ve kontrol arayüzünü kullanın | [Unified web workspace](web-workspace.md) |
+| Gemini Spark'ı istemci olarak ekleyin | [Gemini Custom Apps](gemini-spark.md) |
 | ChatGPT’yi client olarak ekleme | [ChatGPT connector](chatgpt-connector.md) |
 | tools seçme ve daha iyi prompt yazma | [Kullanım kalıpları](../guides/usage-patterns.md) |
 | HPC, NPU/GPU veya NAT makinesi bağlama | [Uzak workers](../guides/remote-workers.md) |

@@ -1,7 +1,9 @@
-<!-- i18n-source-sha256: c1206f28e9661a542c4c26bae628647a355f6ed1b12ca740574add7374666d57 -->
+<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
 # 人機介面
 
-`local-shell-mcp` 在同一個服務 API、工作區、持久終端註冊表、遠端 worker 註冊表和 MCP 稽核日誌之上提供兩種相容的人機介面：
+[unified web workspace](../getting-started/web-workspace.md) 是推薦的瀏覽器介面。它使用相同的 LSM 授權和工具 API，將 AI 聊天、專案和 LSM 控制器頁面結合在一個修改過的 LibreChat UI 中。它是一項單獨部署的可選服務。
+
+輕量級控制器還在相同的 API、工作區、持久終端註冊表、遠端工作註冊表和 MCP 審核日誌之上保留了兩個相容的後備人機介面：
 
 - **Web UI** 是原生瀏覽器儀表板，針對快速檢查執行狀態進行最佳化。
 - **OpenTUI** 是完整的終端式應用，既可在瀏覽器中使用，也可作為原生終端命令執行。

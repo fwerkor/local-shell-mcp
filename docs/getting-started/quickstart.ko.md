@@ -1,12 +1,12 @@
-<!-- i18n-source-sha256: a3fdf9088031e6903b15497a3df881a8e6ed2f6f2b34dd4d0b68b0414a2ca81e -->
+<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
 # 빠른 시작
 
-이 가이드는 첫 runtime으로 Docker Compose를, 첫 client로 ChatGPT를 사용합니다. 두 선택은 서로 독립적입니다. Docker, VS Code extension, binary, Python, stdio는 runtime 옵션이고 ChatGPT와 일반 MCP client는 client 옵션입니다. 전체 구조는 [runtime 선택 및 deployment 모델](../guides/deployment.md)을 참조하십시오.
+이 가이드는 LSM 컨트롤러를 시작하고 해당 브라우저 인터페이스를 엽니다. [unified web workspace](web-workspace.md)는 권장되는 일일 경험입니다. 이는 별도로 배포된 선택적 채팅 스택입니다. ChatGPT, Gemini 및 기타 외부 MCP 클라이언트는 동일한 컨트롤러에 연결할 수 있습니다. [runtime choices and deployment model](../guides/deployment.md)를 참조하세요.
 
 ## 요구 사항
 
 - Compose v2가 포함된 Docker Engine.
-- ChatGPT가 웹에서 연결해야 한다면 공개 HTTPS endpoint.
+- 원격 사용자 또는 외부 MCP 클라이언트가 연결되어야 하는 경우 공용 HTTPS 엔드포인트.
 - 전용 workspace directory.
 - 충분히 긴 임의의 OAuth admin PIN과 JWT secret.
 
@@ -65,15 +65,15 @@ http://local-shell-mcp:8765
 
 Caddy, Nginx, Traefik, Nginx Proxy Manager 또는 다른 reverse proxy를 사용한다면 HTTPS traffic을 `127.0.0.1:8765` 또는 container network address로 전달합니다.
 
-## 4. ChatGPT 연결
+## 4. 브라우저 작업 공간을 엽니다
 
-다음 MCP endpoint를 사용합니다:
+컨트롤러 로그인을 엽니다.
 
 ```text
-https://your-public-host.example.com/mcp
+https://your-public-host.example.com/ui
 ```
 
-[ChatGPT connector 가이드](chatgpt-connector.md)를 따라 OAuth와 tool approval을 완료합니다.
+채팅, 프로젝트, 통합 제어 페이지는 [unified web workspace guide](web-workspace.md)를 따르세요. 원래의 경량 WebUI는 채팅이 설치되지 않은 경우에도 사용할 수 있습니다.
 
 ## 5. 안전하게 tool access 확인
 
@@ -129,6 +129,8 @@ curl -i http://127.0.0.1:8765/healthz
 | VS Code에서 실행 | [VS Code extension runtime](../installation/vscode-extension.md) |
 | release binary로 실행 | [Standalone binary runtime](../installation/binary.md) |
 | Python 또는 source checkout으로 실행 | [Python runtimes](../installation/python.md) |
+| 통합 채팅 및 제어 인터페이스 사용 | [Unified web workspace](web-workspace.md) |
+| Gemini Spark를 클라이언트로 추가 | [Gemini Custom Apps](gemini-spark.md) |
 | ChatGPT를 client로 추가 | [ChatGPT connector](chatgpt-connector.md) |
 | tool 선택과 더 나은 prompt 작성 | [Usage patterns](../guides/usage-patterns.md) |
 | HPC, NPU/GPU 또는 NAT machine 연결 | [Remote workers](../guides/remote-workers.md) |

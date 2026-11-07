@@ -4,7 +4,7 @@
 
 # local-shell-mcp
 
-**A ChatGPT-ready MCP control plane for shell, files, browser automation, file links, and remote machines.**
+**A self-hosted AI workspace and MCP control plane for shell, files, browsers, and remote machines.**
 
 [![Docs](https://img.shields.io/badge/docs-fwerkor.github.io%2Flocal--shell--mcp-7c3aed?logo=materialformkdocs&logoColor=white)](https://fwerkor.github.io/local-shell-mcp/)
 [![CI](https://github.com/fwerkor/local-shell-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/fwerkor/local-shell-mcp/actions/workflows/ci.yml)
@@ -14,18 +14,18 @@
 [![Docker](https://img.shields.io/badge/docker-ready-2496ed?logo=docker&logoColor=white)](https://github.com/fwerkor/local-shell-mcp/pkgs/container/local-shell-mcp)
 [![License](https://img.shields.io/github/license/fwerkor/local-shell-mcp)](LICENSE)
 
-[Documentation](https://fwerkor.github.io/local-shell-mcp/) · [Quickstart](https://fwerkor.github.io/local-shell-mcp/getting-started/quickstart/) · [Runtime choices](https://fwerkor.github.io/local-shell-mcp/guides/deployment/) · [ChatGPT connector](https://fwerkor.github.io/local-shell-mcp/getting-started/chatgpt-connector/) · [DSH plugin](https://fwerkor.github.io/local-shell-mcp/clients/deepseek-harness/) · [Tools](https://fwerkor.github.io/local-shell-mcp/reference/tools/) · [Releases](https://github.com/fwerkor/local-shell-mcp/releases)
+[Documentation](https://fwerkor.github.io/local-shell-mcp/) · [Quickstart](https://fwerkor.github.io/local-shell-mcp/getting-started/quickstart/) · [Runtime choices](https://fwerkor.github.io/local-shell-mcp/guides/deployment/) · [Web workspace](https://fwerkor.github.io/local-shell-mcp/getting-started/web-workspace/) · [Gemini Spark](https://fwerkor.github.io/local-shell-mcp/getting-started/gemini-spark/) · [ChatGPT connector](https://fwerkor.github.io/local-shell-mcp/getting-started/chatgpt-connector/) · [DSH plugin](https://fwerkor.github.io/local-shell-mcp/clients/deepseek-harness/) · [Tools](https://fwerkor.github.io/local-shell-mcp/reference/tools/) · [Releases](https://github.com/fwerkor/local-shell-mcp/releases)
 
 </div>
 
 ---
 
-`local-shell-mcp` gives ChatGPT Developer Mode and other MCP clients controlled access to a real execution environment. It exposes a dedicated workspace with shell, persistent shell, filesystem, search, patch, Playwright, audit, durable logical sessions with optional Goal plans, public file links, and outbound remote-worker access. Git is handled through ordinary shell commands instead of a parallel wrapper API.
+`local-shell-mcp` combines a self-hosted AI chat workspace with controlled access to a real execution environment. The unified browser UI is the recommended daily entry point; ChatGPT, Gemini and other external MCP clients remain supported. It exposes a dedicated workspace with shell, persistent shell, filesystem, search, patch, Playwright, audit, durable logical sessions with optional Goal plans, public file links, and outbound remote-worker access. Git is handled through ordinary shell commands instead of a parallel wrapper API.
 
 ```text
 Runtime: Docker / VS Code extension / binary / Python / stdio
   -> exposure: localhost, HTTPS proxy/tunnel, or stdio pipe
-  -> client: ChatGPT or another MCP client
+  -> client: unified LSM WebUI (optional), ChatGPT, Gemini, or another MCP client
   -> controlled workspace at /workspace or configured root
   -> optional remote workers connected over outbound HTTP(S)
 ```
@@ -43,7 +43,8 @@ The intended safety boundary is the container or VM, not the host.
 | Native desktop GUI | Observe accessibility trees plus screenshots and control Linux, Windows, or macOS applications with guarded semantic/coordinate actions. |
 | Remote workers | Control NAT, firewall, HPC, NPU, or lab machines that can only connect outward. |
 | Agent Skills | Discover, load, and read reusable `SKILL.md` workflows through three fixed tools without changing the MCP tool list. |
-| ChatGPT connector support | OAuth 2.1, `/mcp`, discovery controls, and ChatGPT-compatible tool schemas. |
+| Unified web workspace | Chat, projects, history, files, terminals, desktop, sessions, remotes, audit and nested MCP management in one browser UI. |
+| External MCP clients | OAuth 2.1 and `/mcp` for ChatGPT, Gemini and other compatible clients. |
 | DeepSeek Harness plugin | Install this repository as a DSH bundle and expose the complete LSM tool surface, including remote workers. |
 | ChatGPT Live Workspace | Render a native MCP App for real-time activity, terminal, files, diffs, jobs, remotes, audit, and direct human/agent collaboration inside ChatGPT. |
 | Safer operations | Workspace scoping, shell timeouts, output limits, environment filtering, audit logs, and secret scanning. |
@@ -93,7 +94,9 @@ Start the bundled Cloudflare Tunnel sidecar when you need public HTTPS access:
 docker compose --profile tunnel up -d
 ```
 
-The public MCP endpoint is:
+Open the LSM browser login at `http://127.0.0.1:8765/ui` (or the configured HTTPS origin's `/ui`). For integrated **chat, projects and Controller pages**, deploy the [unified web workspace](https://fwerkor.github.io/local-shell-mcp/getting-started/web-workspace/); the Controller-only browser UI remains available without the optional chat stack.
+
+External clients such as Gemini or ChatGPT can connect to the public MCP endpoint:
 
 ```text
 https://your-public-host.example.com/mcp
@@ -103,7 +106,9 @@ Full setup instructions are in the [documentation](https://fwerkor.github.io/loc
 
 ## Human interface
 
-The service includes two compatible human interfaces backed by the same authenticated API and state:
+The **recommended interface** is the [unified web workspace](https://fwerkor.github.io/local-shell-mcp/getting-started/web-workspace/), which integrates chat and LSM Controller pages directly into a modified LibreChat React application. It uses the LSM login, stores chat projects and history on the server, and manages external tools through LSM's nested MCP registry. Its Node.js, MongoDB, Meilisearch and SearXNG services are **optional**, deployed separately from the lightweight Controller and Worker bundles.
+
+The Controller also retains two lightweight fallback interfaces backed by the same authenticated API and state:
 
 - **Web UI** is a native browser dashboard for system health, machines, workloads, recent MCP activity, and alerts.
 - **OpenTUI** is an optional terminal-oriented interface with Dashboard, Files, Terminals, Remotes, and Audit screens. Build the native sidecar separately (`cd ui && bun run build:tui`) or install a Python wheel that embeds it. The browser console and native `local-shell-mcp tui` command appear when the runtime is installed.
@@ -151,7 +156,9 @@ Files remains an LSM-native three-pane file manager inside OpenTUI for local and
 
 See the [human interface guide](https://fwerkor.github.io/local-shell-mcp/guides/human-interface/).
 
-## ChatGPT setup
+## External MCP clients
+
+The built-in web workspace is the primary browser experience. External clients connect separately using LSM's `/mcp` endpoint; consult [Gemini Spark / Custom Apps](https://fwerkor.github.io/local-shell-mcp/getting-started/gemini-spark/) or the [ChatGPT connector](https://fwerkor.github.io/local-shell-mcp/getting-started/chatgpt-connector/).
 
 For full shell, filesystem, remote-worker, and Playwright tools, use ChatGPT Developer Mode or another full MCP client. ChatGPT is a client connection; choose and start a runtime first.
 

@@ -1,14 +1,14 @@
-<!-- i18n-source-sha256: b999ae6985930651e74b974b12109889360442811d6eeb306e6fa39754dbc173 -->
+<!-- i18n-source-sha256: a66d491558f07c419c8b5958d36c47cd90b081fc1c81f015bb62398cfd573e55 -->
 <div class="hero-shell" markdown>
-<span class="hero-eyebrow">MCP control plane tương thích ChatGPT</span>
+<span class="hero-eyebrow">Không gian làm việc AI tự lưu trữ · Mặt phẳng điều khiển MCP</span>
 
 # local-shell-mcp
 
-Cung cấp cho AI assistant shell được kiểm soát, workspace thực, Git, browser automation, file sharing và remote-worker access mà không rời chat.
+Trò chuyện, dự án, tệp, thiết bị đầu cuối, máy từ xa và công cụ AI trong một giao diện tự lưu trữ. Kết nối các máy khách MCP bên ngoài khi bạn cần chúng.
 
 <div class="hero-actions" markdown>
 [Bắt đầu](getting-started/quickstart.md){ .hero-action .hero-action--primary }
-[Chọn runtime](guides/deployment.md){ .hero-action .hero-action--secondary }
+[Web workspace](getting-started/web-workspace.md){ .hero-action .hero-action--secondary }
 [Tham chiếu tools](reference/tools.md){ .hero-action .hero-action--secondary }
 </div>
 </div>
@@ -20,8 +20,8 @@ Chạy tests, kiểm tra repositories, patch files, vận hành Git và giữ au
 </div>
 
 <div class="feature-card" markdown>
-### Các lớp runtime và client
-Chọn runtime như Docker, VS Code extension, binary, Python hoặc stdio, rồi kết nối ChatGPT hay MCP client khác riêng biệt.
+### Không gian làm việc web hợp nhất
+Sử dụng lịch sử dự án và trò chuyện tích hợp cùng với các tệp Bộ điều khiển, thiết bị đầu cuối, máy tính để bàn, phiên, điều khiển từ xa và kiểm tra. Các máy khách MCP bên ngoài vẫn là tùy chọn.
 </div>
 
 <div class="feature-card" markdown>
@@ -32,7 +32,7 @@ Gắn máy sau NAT, firewall hoặc HPC qua outbound worker connections mà khô
 
 ## Cung cấp những gì
 
-`local-shell-mcp` cung cấp workspace local hoặc container có kiểm soát cho ChatGPT và các MCP client khác. Nó cung cấp shell, persistent shell, filesystem, search, patch, Git, Playwright, audit, logical Session bền vững với Goal Plan tùy chọn, tokenized file link và remote-worker tool qua MCP server tương thích ChatGPT có OAuth.
+`local-shell-mcp` cung cấp không gian làm việc AI tự lưu trữ thống nhất và máy chủ MCP cho các máy khách bên ngoài. Nó cung cấp shell, shell liên tục, hệ thống tệp, tìm kiếm, bản vá, Git, Playwright, kiểm toán, các phiên logic bền bỉ với các gói Mục tiêu tùy chọn, liên kết tệp được mã hóa và các công cụ làm việc từ xa thông qua các điểm cuối MCP được xác thực.
 
 Dùng khi AI cần inspect repository, chạy tests, edit files, operate Git, thu browser evidence, tạo downloadable artifacts hoặc điều khiển remote machine chỉ có thể outbound connect tới control server.
 
@@ -41,7 +41,7 @@ Dùng khi AI cần inspect repository, chạy tests, edit files, operate Git, th
 ```text
 Lớp runtime: Docker / VS Code extension / binary / Python / stdio
 Lớp exposure: localhost / HTTPS proxy / tunnel / stdio pipe
-Lớp client: ChatGPT / generic MCP client / editor helper
+Lớp máy khách: WebUI / Gemini / ChatGPT / máy khách MCP chung thống nhất
 Workspace được kiểm soát: /workspace or configured workspace root
 Remote workers tùy chọn: outbound machine connections
 ```
@@ -52,8 +52,10 @@ Isolation boundary dự kiến là container hoặc VM chạy service.
 
 | Kịch bản | Bắt đầu ở đây | Lý do |
 |---|---|---|
-| Public ChatGPT deployment đầu tiên | [Quickstart](getting-started/quickstart.md) | Đường Docker Compose với OAuth và setup `/mcp` |
+| Không gian làm việc của trình duyệt chính | [Unified web workspace](getting-started/web-workspace.md) | Các trang trò chuyện, dự án và kiểm soát LSM có thông tin đăng nhập chung |
+| Triển khai bộ điều khiển đầu tiên | [Quickstart](getting-started/quickstart.md) | Docker Compose, OAuth và phiên trình duyệt đầu tiên |
 | Chọn runtime layer | [Runtime choices](guides/deployment.md) | Giải thích Docker, VS Code, binary, Python và stdio là các runtime option riêng |
+| Kết nối Gemini Spark | [Gemini Custom Apps](getting-started/gemini-spark.md) | Tính đủ điều kiện, URL HTTPS MCP, OAuth và thử nghiệm |
 | Thêm ChatGPT làm client | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, prompt an toàn đầu tiên, tool discovery |
 | Thêm LSM vào DeepSeek Harness | [Plugin DeepSeek Harness](clients/deepseek-harness.md) | Cài repository này như DSH bundle đồng thời giữ toàn bộ LSM tool và remote-worker surface |
 | Chạy từ VS Code | [VS Code extension runtime](installation/vscode-extension.md) | Editor-launched runtime và lưu ý host safety |
@@ -77,12 +79,12 @@ Isolation boundary dự kiến là container hoặc VM chạy service.
 
 ## Workflow điển hình
 
-### Coding với ChatGPT
+### Mã hóa trong không gian làm việc web
 
-1. Khởi động runtime như Docker Compose, VS Code extension, binary hoặc Python trong dedicated workspace.
-2. Expose HTTP runtime nếu ChatGPT cần network access.
-3. Thêm public `/mcp` endpoint vào ChatGPT.
-4. Trước tiên yêu cầu inspect repository và chạy read-only checks.
+1. Khởi động Bộ điều khiển LSM và [unified web workspace](getting-started/web-workspace.md) tùy chọn.
+2. Mở `/ui` và đăng nhập bằng thông tin nhận dạng LSM.
+3. Định cấu hình điểm cuối mô hình và mở cuộc trò chuyện mới.
+4. Yêu cầu mô hình kiểm tra kho lưu trữ và chạy kiểm tra chỉ đọc trước.
 5. Sau khi chấp thuận, cho phép patch files, tests, diff review, commit và push.
 6. Review audit log khi task liên quan file links hoặc remote systems.
 

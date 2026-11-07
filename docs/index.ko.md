@@ -1,14 +1,14 @@
-<!-- i18n-source-sha256: b999ae6985930651e74b974b12109889360442811d6eeb306e6fa39754dbc173 -->
+<!-- i18n-source-sha256: a66d491558f07c419c8b5958d36c47cd90b081fc1c81f015bb62398cfd573e55 -->
 <div class="hero-shell" markdown>
-<span class="hero-eyebrow">ChatGPT 호환 MCP control plane</span>
+<span class="hero-eyebrow">자체 호스팅 AI 작업 공간 · MCP 제어 평면</span>
 
 # local-shell-mcp
 
-Chat을 떠나지 않고 AI assistant에 제어된 shell, 실제 workspace, Git, browser automation, file sharing, remote-worker access를 제공합니다.
+하나의 자체 호스팅 인터페이스에 채팅, 프로젝트, 파일, 터미널, 원격 시스템 및 AI 도구가 포함되어 있습니다. 필요할 때 외부 MCP 클라이언트를 연결하세요.
 
 <div class="hero-actions" markdown>
 [시작하기](getting-started/quickstart.md){ .hero-action .hero-action--primary }
-[Runtime 선택](guides/deployment.md){ .hero-action .hero-action--secondary }
+[Web workspace](getting-started/web-workspace.md){ .hero-action .hero-action--secondary }
 [Tools reference](reference/tools.md){ .hero-action .hero-action--secondary }
 </div>
 </div>
@@ -20,8 +20,8 @@ Chat을 떠나지 않고 AI assistant에 제어된 shell, 실제 workspace, Git,
 </div>
 
 <div class="feature-card" markdown>
-### Runtime 및 client 레이어
-Docker, VS Code extension, binary, Python, stdio 같은 runtime을 고른 다음 ChatGPT 또는 다른 MCP client를 별도로 연결합니다.
+### 통합된 웹 작업공간
+컨트롤러 파일, 터미널, 데스크톱, 세션, 원격 및 감사와 함께 내장된 채팅 및 프로젝트 기록을 사용하세요. 외부 MCP 클라이언트는 선택 사항으로 유지됩니다.
 </div>
 
 <div class="feature-card" markdown>
@@ -32,7 +32,7 @@ SSH port를 열지 않고 outbound worker connection으로 NAT, firewall 또는 
 
 ## 제공 기능
 
-`local-shell-mcp`는 제어된 local/container workspace를 ChatGPT와 다른 MCP client에 노출합니다. Shell, persistent shell, filesystem, search, patch, Git, Playwright, audit, optional Goal Plan이 있는 durable logical Session, tokenized file link, remote-worker tool을 OAuth 지원 ChatGPT-compatible MCP server로 제공합니다.
+`local-shell-mcp`는 통합된 자체 호스팅 AI 작업 공간과 외부 클라이언트를 위한 MCP 서버를 제공합니다. 인증된 MCP 엔드포인트를 통해 셸, 영구 셸, 파일 시스템, 검색, 패치, Git, Playwright, 감사, 선택적 목표 계획이 포함된 내구성 있는 논리 세션, 토큰화된 파일 링크 및 원격 작업자 도구를 제공합니다.
 
 AI가 repository를 검사하고 tests를 실행하고 files를 편집하고 Git을 조작하고 browser evidence를 수집하고 downloadable artifacts를 만들거나 control server로 outbound 연결만 가능한 remote machine을 제어해야 할 때 사용합니다.
 
@@ -41,7 +41,7 @@ AI가 repository를 검사하고 tests를 실행하고 files를 편집하고 Git
 ```text
 Runtime layer: Docker / VS Code extension / binary / Python / stdio
 Exposure layer: localhost / HTTPS proxy / tunnel / stdio pipe
-Client layer: ChatGPT / generic MCP client / editor helper
+클라이언트 레이어: 통합 WebUI / Gemini / ChatGPT / 일반 MCP 클라이언트
 Controlled workspace: /workspace or configured workspace root
 Optional remote workers: outbound machine connections
 ```
@@ -52,8 +52,10 @@ Optional remote workers: outbound machine connections
 
 | 시나리오 | 시작 페이지 | 이유 |
 |---|---|---|
-| 첫 public ChatGPT deployment | [Quickstart](getting-started/quickstart.md) | OAuth와 `/mcp` 설정을 포함한 Docker Compose 경로 |
+| 기본 브라우저 작업공간 | [Unified web workspace](getting-started/web-workspace.md) | 공유 로그인이 포함된 채팅, 프로젝트 및 LSM 제어 페이지 |
+| 첫 번째 컨트롤러 배포 | [Quickstart](getting-started/quickstart.md) | Docker Compose, OAuth 및 첫 번째 브라우저 세션 |
 | runtime layer 선택 | [Runtime choices](guides/deployment.md) | Docker, VS Code, binary, Python, stdio를 별도 runtime option으로 설명 |
+| Gemini Spark 연결하기 | [Gemini Custom Apps](getting-started/gemini-spark.md) | 자격, HTTPS MCP URL, OAuth 및 테스트 |
 | ChatGPT를 client로 추가 | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, 첫 안전 prompt, tool discovery |
 | LSM을 DeepSeek Harness에 추가 | [DeepSeek Harness plugin](clients/deepseek-harness.md) | 이 repository를 DSH bundle로 설치하면서 전체 LSM tool 및 remote-worker surface 유지 |
 | VS Code에서 실행 | [VS Code extension runtime](installation/vscode-extension.md) | Editor-launched runtime 및 host safety 참고 |
@@ -77,12 +79,12 @@ Optional remote workers: outbound machine connections
 
 ## 대표 workflow
 
-### ChatGPT로 coding
+### 웹 작업공간에서 코딩하기
 
-1. 전용 workspace에서 Docker Compose, VS Code extension, binary, Python 같은 runtime을 시작합니다.
-2. ChatGPT에 network access가 필요하면 HTTP runtime을 공개합니다.
-3. Public `/mcp` endpoint를 ChatGPT에 추가합니다.
-4. 먼저 repository 검사와 read-only checks를 요청합니다.
+1. LSM 컨트롤러와 선택적 [unified web workspace](getting-started/web-workspace.md)를 시작합니다.
+2. `/ui`를 열고 LSM ID를 사용하여 로그인합니다.
+3. 모델 엔드포인트를 구성하고 새 대화를 엽니다.
+4. 모델에 저장소를 검사하고 읽기 전용 검사를 먼저 실행하도록 요청하세요.
 5. 승인되면 file patch, tests, diff review, commit, push를 수행하게 합니다.
 6. File link 또는 remote system이 관련된 task에서는 audit log를 확인합니다.
 

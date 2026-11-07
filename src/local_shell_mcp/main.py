@@ -181,7 +181,7 @@ def _build_mcp_http_app(mcp):  # noqa: ANN001
             McpSessionLimitMiddleware,
             session_manager=session_manager,
         )
-    if settings.auth_mode != "none":
+    if settings.auth_mode != "none" or os.environ.get("LOCAL_SHELL_MCP_LIBRECHAT_URL"):
         app.add_middleware(AuthMiddleware)
     app.add_middleware(RequestBodyLimitMiddleware)
     # Must be outermost so browser preflights from the MCP App sandbox do not

@@ -1,14 +1,14 @@
-<!-- i18n-source-sha256: b999ae6985930651e74b974b12109889360442811d6eeb306e6fa39754dbc173 -->
+<!-- i18n-source-sha256: a66d491558f07c419c8b5958d36c47cd90b081fc1c81f015bb62398cfd573e55 -->
 <div class="hero-shell" markdown>
-<span class="hero-eyebrow">ChatGPT uyumlu MCP kontrol düzlemi</span>
+<span class="hero-eyebrow">Kendi kendine barındırılan yapay zeka çalışma alanı · MCP kontrol düzlemi</span>
 
 # local-shell-mcp
 
-Chat’ten çıkmadan AI assistant’ınıza kontrollü shell, gerçek workspace, Git, browser automation, file sharing ve remote-worker access verin.
+Kendi kendine barındırılan tek bir arayüzde sohbet, projeler, dosyalar, terminaller, uzak makineler ve yapay zeka araçları. İhtiyacınız olduğunda harici MCP istemcilerini bağlayın.
 
 <div class="hero-actions" markdown>
 [Başla](getting-started/quickstart.md){ .hero-action .hero-action--primary }
-[Runtime seç](guides/deployment.md){ .hero-action .hero-action--secondary }
+[Web workspace](getting-started/web-workspace.md){ .hero-action .hero-action--secondary }
 [Tools referansı](reference/tools.md){ .hero-action .hero-action--secondary }
 </div>
 </div>
@@ -20,8 +20,8 @@ Tek MCP endpoint üzerinden tests çalıştırın, repositories inceleyin, files
 </div>
 
 <div class="feature-card" markdown>
-### Runtime ve client katmanları
-Docker, VS Code extension, binary, Python veya stdio gibi runtime seçin, ardından ChatGPT veya başka bir MCP client’ı ayrı bağlayın.
+### Birleşik web çalışma alanı
+Denetleyici dosyaları, terminaller, masaüstü, oturumlar, uzaktan kumandalar ve denetimin yanı sıra yerleşik sohbet ve proje geçmişini kullanın. Harici MCP istemcileri isteğe bağlı kalır.
 </div>
 
 <div class="feature-card" markdown>
@@ -32,7 +32,7 @@ SSH ports açmadan outbound worker connections ile NAT, firewall veya HPC machin
 
 ## Neler sağlar
 
-`local-shell-mcp`, kontrollü local/container workspace’i ChatGPT ve diğer MCP istemcilerine açar. OAuth destekli ChatGPT-compatible MCP server üzerinden shell, persistent shell, filesystem, search, patch, Git, Playwright, audit, optional Goal Plan içeren kalıcı logical Sessions, tokenized file link ve remote-worker araçları sağlar.
+`local-shell-mcp`, harici istemciler için birleşik, kendi kendine barındırılan bir yapay zeka çalışma alanı ve bir MCP sunucusu sağlar. Kimliği doğrulanmış MCP uç noktaları aracılığıyla kabuk, kalıcı kabuk, dosya sistemi, arama, yama, Git, Oyun Yazarı, denetim, isteğe bağlı Hedef planları ile dayanıklı mantıksal oturumlar, tokenleştirilmiş dosya bağlantısı ve uzaktan çalışma araçları sağlar.
 
 AI’ın repository incelemesi, tests çalıştırması, files düzenlemesi, Git kullanması, browser evidence toplaması, downloadable artifacts üretmesi veya yalnız control server’a outbound bağlanabilen remote machine’i kontrol etmesi gerektiğinde kullanın.
 
@@ -41,7 +41,7 @@ AI’ın repository incelemesi, tests çalıştırması, files düzenlemesi, Git
 ```text
 Runtime katmanı: Docker / VS Code extension / binary / Python / stdio
 Exposure katmanı: localhost / HTTPS proxy / tunnel / stdio pipe
-Client katmanı: ChatGPT / generic MCP client / editor helper
+İstemci katmanı: birleştirilmiş WebUI / Gemini / ChatGPT / genel MCP istemcisi
 Kontrollü workspace: /workspace or configured workspace root
 Optional remote workers: outbound machine connections
 ```
@@ -52,8 +52,10 @@ Amaçlanan isolation boundary, service’in çalıştığı container veya VM’
 
 | Senaryo | Buradan başla | Neden |
 |---|---|---|
-| İlk public ChatGPT deployment | [Quickstart](getting-started/quickstart.md) | OAuth ve `/mcp` setup içeren Docker Compose yolu |
+| Birincil tarayıcı çalışma alanı | [Unified web workspace](getting-started/web-workspace.md) | Paylaşılan oturum açmayla sohbet, projeler ve LSM kontrol sayfaları |
+| İlk Denetleyici dağıtımı | [Quickstart](getting-started/quickstart.md) | Docker Compose, OAuth ve ilk tarayıcı oturumu |
 | runtime layer seçimi | [Runtime choices](guides/deployment.md) | Docker, VS Code, binary, Python ve stdio’yu ayrı runtime options olarak açıklar |
+| Gemini Spark'ı Bağlama | [Gemini Custom Apps](getting-started/gemini-spark.md) | Uygunluk, HTTPS MCP URL'si, OAuth ve test |
 | ChatGPT’yi client olarak ekleme | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, ilk güvenli prompt, tool discovery |
 | LSM’yi DeepSeek Harness’a eklemek | [DeepSeek Harness plugin](clients/deepseek-harness.md) | Bu repository’yi DSH bundle olarak kurarken tam LSM tool ve remote-worker surface’i koru |
 | VS Code’dan çalıştırma | [VS Code extension runtime](installation/vscode-extension.md) | Editor-launched runtime ve host safety notları |
@@ -77,12 +79,12 @@ Amaçlanan isolation boundary, service’in çalıştığı container veya VM’
 
 ## Tipik workflows
 
-### ChatGPT ile coding
+### Web çalışma alanında kodlama
 
-1. Dedicated workspace içinde Docker Compose, VS Code extension, binary veya Python gibi runtime başlatın.
-2. ChatGPT network access gerektiriyorsa HTTP runtime’ı expose edin.
-3. Public `/mcp` endpoint’i ChatGPT’ye ekleyin.
-4. Önce repository inspection ve read-only checks isteyin.
+1. Bir LSM Denetleyicisini ve isteğe bağlı [unified web workspace](getting-started/web-workspace.md)'yi başlatın.
+2. `/ui`'i açın ve LSM kimliğini kullanarak oturum açın.
+3. Bir model uç noktası yapılandırın ve yeni bir konuşma açın.
+4. Modelden depoyu incelemesini ve önce salt okunur kontrolleri çalıştırmasını isteyin.
 5. Onay sonrası patch files, tests, diff review, commit ve push işlemlerine izin verin.
 6. File links veya remote systems içeren task’larda audit log’u inceleyin.
 
