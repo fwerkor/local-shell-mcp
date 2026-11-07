@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 474398c2065f510156f7fba24967ca8f6600b586ffb1e002416b7a10dc34c3dc -->
+<!-- i18n-source-sha256: e75cf6e4ffc3fe904983cd63b99b43c2877c4bdd99174b2d4a96393eff5d9e3f -->
 # Ujednolicony internetowy obszar roboczy
 
 **Ujednolicony internetowy obszar roboczy LSM** to zalecany sposób codziennego korzystania z local-Shell-mcp. Łączy czat AI, historię projektu i płaszczyznę kontroli LSM w jednym responsywnym interfejsie, opartym na zmodyfikowanym, dostarczanym przez dostawcę interfejsie LibreChat. Nadal możesz podłączać zewnętrznych klientów MCP, takich jak [ChatGPT](chatgpt-connector.md) lub [Gemini](gemini-spark.md).
@@ -59,7 +59,7 @@ W przypadku korzystania z głównego wdrożenia Docker Compose powyższe zmienne
 ## Zaloguj się i korzystaj z czatu
 
 1. Otwórz `https://lsm.example.org/ui`, uwierzytelnij się przy użyciu loginu **LSM Controller** i wykonaj jednorazowe przekazanie do internetowego obszaru roboczego. Nie tworzysz drugiego konta użytkownika LibreChat.
-2. Skonfiguruj dostępnego dostawcę LLM lub modelowy punkt końcowy dla usługi czatu. Obszar roboczy udostępnia interfejs czatu i mostek narzędziowy; **nie obejmuje modelu ani kredytów API**.
+2. Skonfiguruj dostawcę modelu. Opcjonalny stos sieciowy domyślnie udostępnia dane uwierzytelniające OpenAI, Anthropic i Google jako `user_provided`: przed rozpoczęciem wprowadź własny klucz dostawcy w ustawieniach punktu końcowego czatu lub ustaw `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` lub `GOOGLE_KEY` w środowisku tworzenia czatu. Wybierz obsługiwany model na czacie. **LSM nie obejmuje modeli ani kredytów API.** Zewnętrzne połączenie MCP Gemini Spark jest niezależne od konfiguracji modelu Gemini w tym miejscu.
 3. Utwórz rozmowę. Wyszukiwarka internetowa i narzędzia LSM są domyślnie włączone, w zależności od uprawnień Kontrolera. W razie potrzeby użyj opcji **Sieć**, **LSM**, **Zewnętrzny MCP** i **Pamięć** dla poszczególnych rozmów.
 4. Zacznij od żądania tylko do odczytu: "Sprawdź status kontrolera i wyświetl katalog główny obszaru roboczego. Nie modyfikuj plików. "
 5. Przejdź do **Pliki**, **Terminale**, **Pulpit**, **Sesje**, **Pliki zdalne** lub **Audyt**, aby uzyskać bezpośrednią kontrolę i kontrolę.

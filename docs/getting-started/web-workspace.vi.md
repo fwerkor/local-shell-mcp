@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 474398c2065f510156f7fba24967ca8f6600b586ffb1e002416b7a10dc34c3dc -->
+<!-- i18n-source-sha256: e75cf6e4ffc3fe904983cd63b99b43c2877c4bdd99174b2d4a96393eff5d9e3f -->
 # Không gian làm việc web hợp nhất
 
 **Không gian làm việc web LSM hợp nhất** là cách được khuyến nghị để sử dụng local-shell-mcp hàng ngày. Nó kết hợp trò chuyện AI, lịch sử dự án và mặt phẳng điều khiển LSM trong một giao diện đáp ứng, dựa trên giao diện người dùng LibreChat đã được sửa đổi và cung cấp. Bạn vẫn có thể kết nối các máy khách MCP bên ngoài như [ChatGPT](chatgpt-connector.md) hoặc [Gemini](gemini-spark.md).
@@ -59,7 +59,7 @@ Khi sử dụng triển khai Docker Compose gốc, các biến Trình điều kh
 ## Đăng nhập và sử dụng trò chuyện
 
 1. Mở `https://lsm.example.org/ui`, xác thực bằng thông tin đăng nhập **LSM Controller** và thực hiện chuyển giao một lần vào không gian làm việc trên web. Bạn không tạo tài khoản người dùng LibreChat thứ hai.
-2. Định cấu hình nhà cung cấp LLM có sẵn hoặc điểm cuối mô hình cho dịch vụ trò chuyện. Không gian làm việc cung cấp giao diện trò chuyện và cầu nối công cụ; **nó không bao gồm tín dụng mô hình hoặc API**.
+2. Định cấu hình nhà cung cấp mô hình. Ngăn xếp web tùy chọn hiển thị thông tin xác thực OpenAI, Anthropic và Google dưới dạng `user_provided` theo mặc định: nhập khóa nhà cung cấp của riêng bạn vào cài đặt điểm cuối trò chuyện hoặc đặt `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` hoặc `GOOGLE_KEY` trong môi trường Soạn trò chuyện trước khi bắt đầu. Chọn một mô hình được hỗ trợ trong trò chuyện. **LSM không bao gồm mô hình hoặc tín dụng API.** Kết nối MCP bên ngoài của Gemini Spark tách biệt với việc định cấu hình mô hình Gemini tại đây.
 3. Tạo một cuộc trò chuyện. Các công cụ tìm kiếm trên web và LSM được bật theo mặc định, tùy thuộc vào quyền của Bộ điều khiển. Sử dụng các điều khiển **Web**, **LSM**, **External MCP** và **Memory** cho mỗi cuộc trò chuyện nếu cần.
 4. Bắt đầu với yêu cầu chỉ đọc: "Kiểm tra trạng thái Bộ điều khiển và liệt kê thư mục gốc của không gian làm việc. Không sửa đổi tệp."
 5. Điều hướng đến **Tệp**, **Thiết bị đầu cuối**, **Máy tính để bàn**, **Phiên**, **Điều khiển từ xa** hoặc **Kiểm tra** để kiểm tra và kiểm soát trực tiếp.

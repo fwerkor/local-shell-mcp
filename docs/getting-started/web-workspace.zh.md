@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 474398c2065f510156f7fba24967ca8f6600b586ffb1e002416b7a10dc34c3dc -->
+<!-- i18n-source-sha256: e75cf6e4ffc3fe904983cd63b99b43c2877c4bdd99174b2d4a96393eff5d9e3f -->
 # 统一 Web 工作区
 
 **统一的 LSM Web 工作区**是日常使用 local-shell-mcp 的推荐入口。它将 AI 聊天、项目历史记录和 LSM 控制面结合在一个响应式界面中，基于经过定制并内置的 LibreChat 前端。您仍然可以连接外部 MCP 客户端，例如 [ChatGPT](chatgpt-connector.md) 或 [Gemini](gemini-spark.md)。
@@ -58,8 +58,8 @@ docker compose -f integrations/librechat/compose.yaml up -d
 
 ## 登录并使用聊天功能
 
-1. 打开 `https://lsm.example.org/ui`，使用 **LSM Controller** 账号登录，然后按照一次性切换进入 Web 工作区。您无需创建第二个 LibreChat 用户帐户。
-2. 为聊天服务配置可用的 LLM 提供商或模型端点。工作区提供聊天界面和工具桥； **它并不附带模型权重或 API 额度**。
+1. 打开 `https://lsm.example.org/ui`，使用 **LSM Controller** 登录进行身份验证，然后按照一次性切换进入 Web 工作区。您无需创建第二个 LibreChat 用户帐户。
+2. 配置模型提供者。可选的 Web 堆栈默认将 OpenAI、Anthropic 和 Google 凭证公开为 `user_provided`：在聊天端点设置中输入您自己的提供商密钥，或在开始之前在聊天 Compose 环境中设置 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY` 或 `GOOGLE_KEY`。在聊天中选择支持的型号。 **LSM 不包括模型或 API 积分。** Gemini Spark 的外部 MCP 连接与此处配置 Gemini 模型是分开的。
 3. 创建对话。默认情况下启用 Web 搜索和 LSM 工具，但需遵守控制器权限。根据需要使用每个对话 **Web**、**LSM**、**外部 MCP** 和 **内存** 控件。
 4. 从只读请求开始：“检查控制器状态并列出工作空间根目录。请勿修改文件。”
 5. 导航到**文件**、**终端**、**桌面**、**会话**、**远程**或**审计**以进行直接检查和控制。
@@ -68,7 +68,7 @@ docker compose -f integrations/librechat/compose.yaml up -d
 
 ## 外部 MCP、安全和数据
 
-使用工作区 MCP 侧边栏管理嵌套的外部 MCP 服务器。这支持本地 stdio 服务器和 HTTP 服务器，包括单独的私有环境变量和请求标头。秘密不会返回到浏览器。 **External MCP** 聊天开关允许搜索、检查和调用嵌套工具；当禁用本机 LSM 工具时，它不会授予模型 `mcp_manage`。 UI 管理受到正常控制器授权的保护。
+使用工作区 MCP 侧边栏管理嵌套的外部 MCP 服务器。这支持本地 stdio 服务器和 HTTP 服务器，包括单独的私有环境变量和请求标头。秘密不会返回到浏览器。 **外部 MCP** 聊天切换允许搜索、检查和调用嵌套工具；当禁用本机 LSM 工具时，它不会授予模型 `mcp_manage`。 UI 管理受到正常控制器授权的保护。
 
 聊天消息、项目和档案存储在服务器端 Web 堆栈的 MongoDB 中；搜索使用 Meilisearch。 Controller分别拥有工具权限、Worker身份、会话状态和审计。如果需要保留所有历史记录，请备份两个数据存储。聊天后台是LSM登录下的单用户；不要向公众公开其内部 API 或数据库。
 

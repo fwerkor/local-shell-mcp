@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 474398c2065f510156f7fba24967ca8f6600b586ffb1e002416b7a10dc34c3dc -->
+<!-- i18n-source-sha256: e75cf6e4ffc3fe904983cd63b99b43c2877c4bdd99174b2d4a96393eff5d9e3f -->
 # Espace de travail Web unifié
 
 L'**espace de travail Web LSM unifié** est la méthode recommandée pour utiliser local-shell-mcp au quotidien. Il combine le chat IA, l'historique du projet et le plan de contrôle LSM dans une seule interface réactive, basée sur une interface LibreChat modifiée et vendue. Vous pouvez toujours connecter des clients MCP externes tels que [ChatGPT](chatgpt-connector.md) ou [Gemini](gemini-spark.md).
@@ -59,7 +59,7 @@ Lors de l'utilisation du déploiement Docker Compose racine, les variables du co
 ## Connectez-vous et utilisez le chat
 
 1. Ouvrez `https://lsm.example.org/ui`, authentifiez-vous à l'aide de la connexion **LSM Controller** et suivez le transfert unique dans l'espace de travail Web. Vous ne créez pas de deuxième compte utilisateur LibreChat.
-2. Configurez un fournisseur LLM disponible ou un point de terminaison de modèle pour le service de chat. L'espace de travail fournit l'interface de discussion et le pont d'outils ; **il n'inclut pas de modèle ni de crédits API**.
+2. Configurez un fournisseur de modèles. La pile Web facultative expose les informations d'identification OpenAI, Anthropic et Google sous la forme `user_provided` par défaut : entrez votre propre clé de fournisseur dans les paramètres du point de terminaison de chat, ou définissez `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` ou `GOOGLE_KEY` dans l'environnement de composition de chat avant de commencer. Choisissez un modèle pris en charge dans le chat. **LSM n'inclut pas les modèles ni les crédits API.** La connexion MCP externe de Gemini Spark est distincte de la configuration d'un modèle Gemini ici.
 3. Créez une conversation. Les outils de recherche Web et LSM sont activés par défaut, sous réserve des autorisations du contrôleur. Utilisez les contrôles **Web**, **LSM**, **External MCP** et **Memory** par conversation selon vos besoins.
 4. Commencez par une requête en lecture seule : "Vérifiez l'état du contrôleur et répertoriez la racine de l'espace de travail. Ne modifiez pas les fichiers. "
 5. Accédez à **Fichiers**, **Terminaux**, **Desktop**, **Sessions**, **Remotes** ou **Audit** pour une inspection et un contrôle directs.

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 474398c2065f510156f7fba24967ca8f6600b586ffb1e002416b7a10dc34c3dc -->
+<!-- i18n-source-sha256: e75cf6e4ffc3fe904983cd63b99b43c2877c4bdd99174b2d4a96393eff5d9e3f -->
 # Spazio di lavoro Web unificato
 
 L'**area di lavoro web LSM unificata** è il modo consigliato per utilizzare local-shell-mcp quotidianamente. Combina la chat AI, la cronologia del progetto e il piano di controllo LSM in un'unica interfaccia reattiva, basata su un frontend LibreChat modificato e venduto. Puoi comunque connettere client MCP esterni come [ChatGPT](chatgpt-connector.md) o [Gemini](gemini-spark.md).
@@ -59,7 +59,7 @@ Quando si utilizza la distribuzione root Docker Compose, le variabili Controller
 ## Accedi e usa la chat
 
 1. Apri `https://lsm.example.org/ui`, autenticati utilizzando il login **LSM Controller** e segui il trasferimento una tantum nell'area di lavoro web. Non crei un secondo account utente LibreChat.
-2. Configurare un provider LLM disponibile o un endpoint modello per il servizio chat. L'area di lavoro fornisce l'interfaccia di chat e il tool bridge; **non include un modello o crediti API**.
+2. Configura un fornitore di modelli. Lo stack web opzionale espone le credenziali OpenAI, Anthropic e Google come `user_provided` per impostazione predefinita: inserisci la chiave del tuo provider nelle impostazioni dell'endpoint della chat o imposta `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` o `GOOGLE_KEY` nell'ambiente di composizione della chat prima di iniziare. Scegli un modello supportato nella chat. **LSM non include modelli o crediti API.** La connessione MCP esterna di Gemini Spark è separata dalla configurazione di un modello Gemini qui.
 3. Crea una conversazione. Gli strumenti di ricerca Web e LSM sono abilitati per impostazione predefinita, soggetti alle autorizzazioni del Controller. Utilizza i controlli **Web**, **LSM**, **MCP esterno** e **Memoria** per conversazione in base alle necessità.
 4. Inizia con una richiesta di sola lettura: "Controlla lo stato del controller ed elenca la radice dell'area di lavoro. Non modificare i file. "
 5. Passare a **File**, **Terminali**, **Desktop**, **Sessioni**, **Remoti** o **Audit** per ispezione e controllo diretti.

@@ -165,7 +165,7 @@ example deployment material and most unrelated upstream tests; source size
 was reduced from approximately 78 MiB to about 42 MiB. The chat Docker image
 uses a separate runtime stage without the build-time Python/uv tooling.
 
-The optional chat stack requires MongoDB, Meilisearch and SearXNG.
+The optional chat stack requires MongoDB, Meilisearch and SearXNG. The stack also exposes provider credentials (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_KEY`) with the vendor-supported `user_provided` default; a single user may configure credentials in endpoint settings, or the operator may supply secrets through the deployment environment. No model weights or API credits are bundled.
 The Controller's standalone binary and light Docker packaging do not
 include those services, or a second full development environment.
 Production deployment and data migrations are deliberate operations;

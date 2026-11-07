@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 474398c2065f510156f7fba24967ca8f6600b586ffb1e002416b7a10dc34c3dc -->
+<!-- i18n-source-sha256: e75cf6e4ffc3fe904983cd63b99b43c2877c4bdd99174b2d4a96393eff5d9e3f -->
 # Espacio de trabajo web unificado
 
 El **espacio de trabajo web unificado de LSM** es la forma recomendada de utilizar local-shell-mcp en el día a día. Combina el chat de IA, el historial del proyecto y el plano de control LSM en una interfaz responsiva, basada en una interfaz LibreChat modificada y suministrada. Aún puede conectar clientes MCP externos como [ChatGPT](chatgpt-connector.md) o [Gemini](gemini-spark.md).
@@ -59,7 +59,7 @@ Cuando se utiliza la implementación raíz de Docker Compose, las variables del 
 ## Inicia sesión y usa el chat
 
 1. Abra `https://lsm.example.org/ui`, autentíquese utilizando el inicio de sesión del **Controlador LSM** y siga la transferencia única al espacio de trabajo web. No crea una segunda cuenta de usuario de LibreChat.
-2. Configure un proveedor de LLM disponible o un terminal modelo para el servicio de chat. El espacio de trabajo proporciona la interfaz de chat y el puente de herramientas; **no incluye modelo ni créditos API**.
+2. Configurar un proveedor de modelo. La pila web opcional expone las credenciales de OpenAI, Anthropic y Google como `user_provided` de forma predeterminada: ingrese su propia clave de proveedor en la configuración del punto final del chat, o configure `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` o `GOOGLE_KEY` en el entorno de redacción del chat antes de comenzar. Elija un modelo compatible en el chat. **LSM no incluye modelos ni créditos API.** La conexión MCP externa de Gemini Spark es independiente de la configuración de un modelo Gemini aquí.
 3. Crea una conversación. Las herramientas de búsqueda web y LSM están habilitadas de forma predeterminada, sujetas a los permisos del Controlador. Utilice los controles por conversación **Web**, **LSM**, **MCP externo** y **Memoria** según sea necesario.
 4. Comience con una solicitud de solo lectura: "Verifique el estado del controlador y enumere la raíz del espacio de trabajo. No modifique los archivos".
 5. Navegue a **Archivos**, **Terminales**, **Escritorio**, **Sesiones**, **Remotos** o **Auditoría** para inspección y control directos.

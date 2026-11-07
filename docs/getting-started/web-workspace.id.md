@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 474398c2065f510156f7fba24967ca8f6600b586ffb1e002416b7a10dc34c3dc -->
+<!-- i18n-source-sha256: e75cf6e4ffc3fe904983cd63b99b43c2877c4bdd99174b2d4a96393eff5d9e3f -->
 # Ruang kerja web terpadu
 
 **Ruang kerja web LSM terpadu** adalah cara yang disarankan untuk menggunakan local-shell-mcp sehari-hari. Ini menggabungkan obrolan AI, riwayat proyek, dan bidang kendali LSM dalam satu antarmuka responsif, berdasarkan antarmuka LibreChat yang dimodifikasi dan dibuat oleh vendor. Anda masih dapat menghubungkan klien MCP eksternal seperti [ChatGPT](chatgpt-connector.md) atau [Gemini](gemini-spark.md).
@@ -59,7 +59,7 @@ Saat menggunakan penerapan root Docker Compose, variabel Pengontrol di atas term
 ## Masuk dan gunakan obrolan
 
 1. Buka `https://lsm.example.org/ui`, autentikasi menggunakan login **LSM Controller**, dan ikuti handoff satu kali ke ruang kerja web. Anda tidak membuat akun pengguna LibreChat kedua.
-2. Konfigurasikan penyedia LLM atau titik akhir model yang tersedia untuk layanan obrolan. Ruang kerja menyediakan antarmuka obrolan dan jembatan alat; **tidak termasuk model atau kredit API**.
+2. Konfigurasikan penyedia model. Tumpukan web opsional menampilkan kredensial OpenAI, Anthropic, dan Google sebagai `user_provided` secara default: masukkan kunci penyedia Anda sendiri di pengaturan titik akhir obrolan, atau setel `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, atau `GOOGLE_KEY` di lingkungan Compose obrolan sebelum memulai. Pilih model yang didukung dalam obrolan. **LSM tidak menyertakan model atau kredit API.** Koneksi MCP eksternal Gemini Spark terpisah dari konfigurasi model Gemini di sini.
 3. Buat percakapan. Pencarian web dan alat LSM diaktifkan secara default, tergantung pada izin Pengontrol. Gunakan kontrol **Web**, **LSM**, **MCP Eksternal**, dan **Memori** per percakapan sesuai kebutuhan.
 4. Mulailah dengan permintaan baca-saja: "Periksa status Pengontrol dan daftarkan root ruang kerja. Jangan ubah file."
 5. Navigasikan ke **File**, **Terminal**, **Desktop**, **Sessions**, **Remote** atau **Audit** untuk pemeriksaan dan kontrol langsung.

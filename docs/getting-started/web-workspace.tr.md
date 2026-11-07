@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 474398c2065f510156f7fba24967ca8f6600b586ffb1e002416b7a10dc34c3dc -->
+<!-- i18n-source-sha256: e75cf6e4ffc3fe904983cd63b99b43c2877c4bdd99174b2d4a96393eff5d9e3f -->
 # Birleşik web çalışma alanı
 
 **Birleşik LSM web çalışma alanı**, local-shell-mcp'yi günlük olarak kullanmanın önerilen yoludur. Yapay zeka sohbetini, proje geçmişini ve LSM kontrol düzlemini değiştirilmiş, satıcı tarafından sunulan LibreChat ön ucunu temel alan tek bir duyarlı arayüzde birleştirir. [ChatGPT](chatgpt-connector.md) veya [Gemini](gemini-spark.md) gibi harici MCP istemcilerini hâlâ bağlayabilirsiniz.
@@ -59,7 +59,7 @@ Kök Docker Compose dağıtımını kullanırken yukarıdaki Denetleyici değiş
 ## Oturum açın ve sohbeti kullanın
 
 1. `https://lsm.example.org/ui`'i açın, **LSM Denetleyici** oturum açma bilgilerini kullanarak kimlik doğrulaması yapın ve web çalışma alanına tek seferlik geçişi takip edin. İkinci bir LibreChat kullanıcı hesabı oluşturmazsınız.
-2. Sohbet hizmeti için kullanılabilir bir LLM sağlayıcısı veya model uç noktası yapılandırın. Çalışma alanı sohbet arayüzünü ve araç köprüsünü sağlar; **bir model veya API kredisi içermez**.
+2. Bir model sağlayıcı yapılandırın. İsteğe bağlı web yığını, OpenAI, Anthropic ve Google kimlik bilgilerini varsayılan olarak `user_provided` olarak gösterir: sohbet uç noktası ayarlarında kendi sağlayıcı anahtarınızı girin veya başlamadan önce sohbet Compose ortamında `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` veya `GOOGLE_KEY`'i ayarlayın. Sohbette desteklenen bir model seçin. **LSM, modelleri veya API kredilerini içermez.** Gemini Spark'ın harici MCP bağlantısı, Gemini modelini burada yapılandırmaktan farklıdır.
 3. Bir konuşma oluşturun. Web araması ve LSM araçları, Denetleyici izinlerine bağlı olarak varsayılan olarak etkindir. Konuşma başına **Web**, **LSM**, **Harici MCP** ve **Bellek** kontrollerini gerektiği gibi kullanın.
 4. Salt okunur bir istekle başlayın: "Denetleyici durumunu kontrol edin ve çalışma alanı kökünü listeleyin. Dosyaları değiştirmeyin."
 5. Doğrudan inceleme ve kontrol için **Dosyalar**, **Terminaller**, **Masaüstü**, **Oturumlar**, **Uzaktan Kumandalar** veya **Denetim**'e gidin.

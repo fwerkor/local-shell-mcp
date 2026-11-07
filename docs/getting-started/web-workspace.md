@@ -58,7 +58,7 @@ When using the root Docker Compose deployment, the Controller variables above be
 ## Sign in and use chat
 
 1. Open `https://lsm.example.org/ui`, authenticate using the **LSM Controller** login, and follow the one-time handoff into the web workspace. You do not create a second LibreChat user account.
-2. Configure an available LLM provider or model endpoint for the chat service. The workspace supplies the chat interface and tool bridge; **it does not include a model or API credits**.
+2. Configure a model provider. The optional web stack exposes OpenAI, Anthropic and Google credentials as `user_provided` by default: enter your own provider key in the chat endpoint settings, or set `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `GOOGLE_KEY` in the chat Compose environment before starting. Choose a supported model in chat. **LSM does not include models or API credits.** Gemini Spark's external MCP connection is separate from configuring a Gemini model here.
 3. Create a conversation. Web search and LSM tools are enabled by default, subject to Controller permissions. Use the per-conversation **Web**, **LSM**, **External MCP** and **Memory** controls as needed.
 4. Start with a read-only request: “Check Controller status and list the workspace root. Do not modify files.”
 5. Navigate to **Files**, **Terminals**, **Desktop**, **Sessions**, **Remotes** or **Audit** for direct inspection and control.

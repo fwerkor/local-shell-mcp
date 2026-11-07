@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 474398c2065f510156f7fba24967ca8f6600b586ffb1e002416b7a10dc34c3dc -->
+<!-- i18n-source-sha256: e75cf6e4ffc3fe904983cd63b99b43c2877c4bdd99174b2d4a96393eff5d9e3f -->
 # Espaço de trabalho web unificado
 
 O **espaço de trabalho web LSM unificado** é a maneira recomendada de usar local-shell-mcp no dia a dia. Ele combina chat de IA, histórico de projeto e plano de controle LSM em uma interface responsiva, baseada em um frontend LibreChat modificado e vendido. Ainda é possível conectar clientes MCP externos, como [ChatGPT](chatgpt-connector.md) ou [Gemini](gemini-spark.md).
@@ -59,7 +59,7 @@ Ao usar a implantação raiz do Docker Compose, as variáveis ​​do controlad
 ## Faça login e use o bate-papo
 
 1. Abra `https://lsm.example.org/ui`, autentique usando o login do **LSM Controller** e siga a transferência única para o espaço de trabalho da web. Você não cria uma segunda conta de usuário LibreChat.
-2. Configure um provedor LLM ou terminal modelo disponível para o serviço de chat. A área de trabalho fornece a interface de chat e a ponte de ferramentas; **não inclui modelo ou créditos de API**.
+2. Configure um provedor de modelo. A pilha da web opcional expõe as credenciais OpenAI, Anthropic e Google como `user_provided` por padrão: insira sua própria chave de provedor nas configurações do endpoint de chat ou defina `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` ou `GOOGLE_KEY` no ambiente Compose de chat antes de iniciar. Escolha um modelo compatível no chat. **LSM não inclui modelos ou créditos de API.** A conexão MCP externa do Gemini Spark é separada da configuração de um modelo Gemini aqui.
 3. Crie uma conversa. As ferramentas de pesquisa na Web e LSM são habilitadas por padrão, sujeitas às permissões do Controlador. Use os controles **Web**, **LSM**, **MCP externo** e **Memória** por conversa conforme necessário.
 4. Comece com uma solicitação somente leitura: "Verifique o status do controlador e liste a raiz do espaço de trabalho. Não modifique os arquivos".
 5. Navegue até **Arquivos**, **Terminais**, **Desktop**, **Sessões**, **Remotos** ou **Auditoria** para inspeção e controle diretos.

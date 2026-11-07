@@ -10,6 +10,11 @@ services:
     restart: unless-stopped
     environment:
       APP_TITLE: local-shell-mcp
+      # Optional model endpoints. The single user can supply credentials in the UI,
+      # or the operator can set provider keys in the Compose environment.
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-user_provided}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-user_provided}"
+      GOOGLE_KEY: "${GOOGLE_KEY:-user_provided}"
       LSM_SINGLE_USER: 'true'
       HOST: 0.0.0.0
       PORT: "3080"

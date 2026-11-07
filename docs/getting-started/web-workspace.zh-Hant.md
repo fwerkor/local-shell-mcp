@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 474398c2065f510156f7fba24967ca8f6600b586ffb1e002416b7a10dc34c3dc -->
+<!-- i18n-source-sha256: e75cf6e4ffc3fe904983cd63b99b43c2877c4bdd99174b2d4a96393eff5d9e3f -->
 # 統一的網路工作空間
 
 **統一的 LSM Web 工作區**是日常使用 local-shell-mcp 的建議方法。它將 AI 聊天、專案歷史記錄和 LSM 控制平面結合在一個響應式介面中，基於經過修改的供應商 LibreChat 前端。您仍然可以連接外部 MCP 用戶端，例如 [ChatGPT](chatgpt-connector.md) 或 [Gemini](gemini-spark.md)。
@@ -54,19 +54,19 @@ docker compose -f integrations/librechat/compose.yaml build chat
 docker compose -f integrations/librechat/compose.yaml up -d
 ```
 
-當使用根 Docker Compose 部署時，上面的 Controller 變數屬於根 `.env` 並轉發到容器。聊天服務值可以透過 shell 匯出或私人環境文件提供。控制器容器必須可從指定 Docker 網路上位於 `http://local-shell-mcp:8765` 的聊天容器存取。將 `127.0.0.1:3080` 反向代理連接埠到聊天 HTTPS 來源，保留外部主機，並遵循儲存庫中的 [deployment and security notes](https://github.com/fwerkor/local-shell-mcp/blob/main/integrations/librechat/README.md)。 Web 堆疊運行 Node.js、MongoDB、Meilisearch 和 SearXNG；他們**不**包含在工人中。这个单独的部署不是由存储库根目录中的普通 `docker compose up -d` 启动的。
+當使用根 Docker Compose 部署時，上面的 Controller 變數屬於根 `.env` 並轉發到容器。聊天服務值可以透過 shell 匯出或私人環境文件提供。控制器容器必須可從指定 Docker 網路上位於 `http://local-shell-mcp:8765` 的聊天容器存取。將 `127.0.0.1:3080` 反向代理連接埠到聊天 HTTPS 來源，保留外部主機，並遵循儲存庫中的 [deployment and security notes](https://github.com/fwerkor/local-shell-mcp/blob/main/integrations/librechat/README.md)。 Web 堆疊運行 Node.js、MongoDB、Meilisearch 和 SearXNG；他們**不**包含在工人中。這個單獨的部署不是由儲存庫根目錄中的普通 `docker compose up -d` 啟動的。
 
-## 登录并使用聊天功能
+## 登入並使用聊天功能
 
 1. 開啟 `https://lsm.example.org/ui`，使用 **LSM Controller** 登入進行驗證，然後依照一次性切換進入 Web 工作區。您無需建立第二個 LibreChat 使用者帳戶。
-2. 為聊天服務配置可用的 LLM 提供者或模型端點。工作區提供聊天介面和工具橋； **它不包括模型或 API 積分**。
+2. 配置模型提供者。可選的 Web 堆疊預設將 OpenAI、Anthropic 和 Google 憑證公開為 `user_provided`：在聊天端點設定中輸入您自己的提供者金鑰，或在開始之前在聊天 Compose 環境中設定 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY` 或 `GOOGLE_KEY`。在聊天中選擇支援的型號。 **LSM 不包含模型或 API 積分。 ** Gemini Spark 的外部 MCP 連接與此處配置 Gemini 模型是分開的。
 3. 創建對話。預設啟用 Web 搜尋和 LSM 工具，但需遵守控制器權限。根據需要使用每個對話 **Web**、**LSM**、**外部 MCP** 和 **記憶體** 控制項。
 4. 從唯讀請求開始：“檢查控制器狀態並列出工作空間根目錄。請勿修改文件。”
 5. 導航至**文件**、**終端**、**桌面**、**會話**、**遠端**或**審核**以進行直接檢查和控制。
 
 聊天上傳（最多 32 MiB）儲存在控制器工作區下，並且它們的絕對路徑提供給模型。瀏覽器上傳不會授予額外的檔案權限。模型導向的工具呼叫透過 LSM 授權、稽核和遠端工作路由器。
 
-## 外部 MCP、安全和数据
+## 外部 MCP、安全性和數據
 
 使用工作區 MCP 側邊欄管理嵌套的外部 MCP 伺服器。這支援本機 stdio 伺服器和 HTTP 伺服器，包括單獨的私人環境變數和請求標頭。秘密不會返回瀏覽器。 **外部 MCP** 聊天切換允許搜尋、檢查和呼叫嵌套工具；當本機 LSM 工具停用時，它不會授予模型 `mcp_manage`。 UI 管理受到正常控制器授權的保護。
 

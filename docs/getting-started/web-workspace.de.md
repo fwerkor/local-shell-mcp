@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 474398c2065f510156f7fba24967ca8f6600b586ffb1e002416b7a10dc34c3dc -->
+<!-- i18n-source-sha256: e75cf6e4ffc3fe904983cd63b99b43c2877c4bdd99174b2d4a96393eff5d9e3f -->
 # Einheitlicher Web-Arbeitsbereich
 
 Der **einheitliche LSM-Webarbeitsbereich** ist die empfohlene Methode für die tägliche Nutzung von local-shell-mcp. Es kombiniert KI-Chat, Projektverlauf und die LSM-Steuerungsebene in einer reaktionsfähigen Oberfläche, basierend auf einem modifizierten, vom Anbieter bereitgestellten LibreChat-Frontend. Sie können weiterhin externe MCP-Clients wie [ChatGPT](chatgpt-connector.md) oder [Gemini](gemini-spark.md) anschließen.
@@ -59,7 +59,7 @@ Bei Verwendung der Root-Docker-Compose-Bereitstellung gehören die oben genannte
 ## Melden Sie sich an und nutzen Sie den Chat
 
 1. Öffnen Sie `https://lsm.example.org/ui`, authentifizieren Sie sich mit dem **LSM Controller**-Login und folgen Sie der einmaligen Übergabe in den Web-Arbeitsbereich. Sie erstellen kein zweites LibreChat-Benutzerkonto.
-2. Konfigurieren Sie einen verfügbaren LLM-Anbieter oder Modellendpunkt für den Chat-Dienst. Der Arbeitsbereich stellt die Chat-Schnittstelle und die Tool-Bridge bereit; **Es beinhaltet weder ein Modell noch API-Credits**.
+2. Konfigurieren Sie einen Modellanbieter. Der optionale Web-Stack stellt OpenAI-, Anthropic- und Google-Anmeldeinformationen standardmäßig als `user_provided` bereit: Geben Sie Ihren eigenen Anbieterschlüssel in den Chat-Endpunkteinstellungen ein oder legen Sie `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` oder `GOOGLE_KEY` in der Chat-Compose-Umgebung fest, bevor Sie beginnen. Wählen Sie im Chat ein unterstütztes Modell aus. **LSM beinhaltet keine Modelle oder API-Credits.** Die externe MCP-Verbindung von Gemini Spark ist unabhängig von der Konfiguration eines Gemini-Modells hier.
 3. Erstellen Sie ein Gespräch. Websuche und LSM-Tools sind standardmäßig aktiviert und unterliegen den Controller-Berechtigungen. Verwenden Sie je nach Bedarf die konversationsspezifischen Steuerelemente **Web**, **LSM**, **External MCP** und **Memory**.
 4. Beginnen Sie mit einer schreibgeschützten Anfrage: „Überprüfen Sie den Controller-Status und listen Sie das Arbeitsbereichsstammverzeichnis auf. Ändern Sie keine Dateien.“
 5. Navigieren Sie zu **Dateien**, **Terminals**, **Desktop**, **Sitzungen**, **Remotes** oder **Audit** für eine direkte Inspektion und Kontrolle.
