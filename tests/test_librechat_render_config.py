@@ -54,3 +54,13 @@ def test_render_config_rejects_missing_secret_and_modified_template(tmp_path):
     with pytest.raises(ValueError, match="Unexpected LibreChat"):
         MODULE.render(source, dest, {"LSM_LIBRECHAT_BRIDGE_SECRET": "x" * 40})
     assert not dest.exists()
+
+
+def test_embedded_webui_uses_product_name_not_vendor_name():
+    root = Path(__file__).resolve().parents[1] / "integrations" / "librechat"
+    compose = (root / "compose.yaml").read_text()
+    config = (root / "app" / "api" / "server" / "routes" / "config.js").read_text()
+    html = (root / "app" / "client" / "index.html").read_text()
+    assert "APP_TITLE: WebUI" in compose
+    assert "appTitle: process.env.APP_TITLE || 'WebUI'" in config
+    assert "<title>WebUI</title>" in html

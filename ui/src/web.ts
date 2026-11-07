@@ -264,7 +264,7 @@ async function startOAuth(returnView: WebViewName): Promise<void> {
     const registration = await fetch("/oauth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ client_name: "local-shell-mcp WebUI", redirect_uris: [callback] }),
+      body: JSON.stringify({ client_name: "WebUI", redirect_uris: [callback] }),
     })
     if (!registration.ok) throw new Error(`Client registration failed: ${registration.status}`)
     const client = await registration.json() as { client_id: string }

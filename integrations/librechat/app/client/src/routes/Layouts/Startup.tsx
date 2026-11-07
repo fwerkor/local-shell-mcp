@@ -43,7 +43,7 @@ export default function StartupLayout({ isAuthenticated }: { isAuthenticated?: b
   }, [isAuthenticated, navigate, data]);
 
   useEffect(() => {
-    document.title = startupConfig?.appTitle || 'Local Shell MCP';
+    document.title = startupConfig?.appTitle || 'WebUI';
   }, [startupConfig?.appTitle]);
 
   useEffect(() => {

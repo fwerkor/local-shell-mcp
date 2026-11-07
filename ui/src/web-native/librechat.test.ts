@@ -28,3 +28,9 @@ describe("Full-page LSM workspace handoff", () => {
     expect(source).not.toContain("postMessage")
   })
 })
+
+test("registers the built-in workspace under the WebUI name", async () => {
+  const web = await Bun.file(new URL("../web.ts", import.meta.url)).text()
+  expect(web).toContain('client_name: "WebUI"')
+  expect(web).not.toContain('client_name: "LibreChat"')
+})

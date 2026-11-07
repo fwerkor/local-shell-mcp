@@ -67,7 +67,7 @@ function AuthLayout({
           <img
             src="assets/logo.svg"
             className="h-full w-full object-contain"
-            alt={localize('com_ui_logo', { 0: startupConfig?.appTitle ?? 'Local Shell MCP' })}
+            alt={localize('com_ui_logo', { 0: startupConfig?.appTitle ?? 'WebUI' })}
           />
         </div>
       </BlinkAnimation>
