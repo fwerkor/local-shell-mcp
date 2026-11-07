@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
+<!-- i18n-source-sha256: a9820f08198cf8e823f59550928c07346f9669f2dbec46d3b8cd523c34034e01 -->
 # 빠른 시작
 
 이 가이드는 LSM 컨트롤러를 시작하고 해당 브라우저 인터페이스를 엽니다. [unified web workspace](web-workspace.md)는 권장되는 일일 경험입니다. 이는 별도로 배포된 선택적 채팅 스택입니다. ChatGPT, Gemini 및 기타 외부 MCP 클라이언트는 동일한 컨트롤러에 연결할 수 있습니다. [runtime choices and deployment model](../guides/deployment.md)를 참조하세요.
@@ -29,7 +29,6 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 LOCAL_SHELL_MCP_AUTH_MODE=oauth
 LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me-long-random-pin
 LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
-CLOUDFLARE_TUNNEL_TOKEN=
 ```
 
 ## 2. 서버 시작
@@ -50,6 +49,10 @@ curl -i http://127.0.0.1:8765/healthz
 정상 응답은 HTTP `200`을 반환합니다.
 
 ## 3. HTTPS 공개
+
+**권장:** 공개 접속에는 공인 서버에 직접 배포하거나 HTTPS 역방향 프록시를 통해 공인 서버에서 트래픽을 전달하세요.
+
+**비권장:** Cloudflare Tunnel은 클라이언트 측 업로드 속도가 매우 느릴 수 있어 파일 업로드와 전송 기능을 사용하기 어려울 수 있습니다. 공인 서버 배포나 전달이 불가능할 때만 사용하세요. Configure `CLOUDFLARE_TUNNEL_TOKEN` in `.env` only when choosing the optional tunnel sidecar.
 
 Cloudflare Tunnel sidecar를 사용하는 경우:
 

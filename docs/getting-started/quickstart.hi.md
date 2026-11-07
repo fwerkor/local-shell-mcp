@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
+<!-- i18n-source-sha256: a9820f08198cf8e823f59550928c07346f9669f2dbec46d3b8cd523c34034e01 -->
 # त्वरित शुरुआत
 
 यह मार्गदर्शिका एक एलएसएम नियंत्रक प्रारंभ करती है और उसका ब्राउज़र इंटरफ़ेस खोलती है। [unified web workspace](web-workspace.md) अनुशंसित दैनिक अनुभव है; यह एक अलग से तैनात, वैकल्पिक चैट स्टैक है। चैटजीपीटी, जेमिनी और अन्य बाहरी एमसीपी क्लाइंट एक ही नियंत्रक से जुड़ सकते हैं। [runtime choices and deployment model](../guides/deployment.md) देखें.
@@ -29,7 +29,6 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 LOCAL_SHELL_MCP_AUTH_MODE=oauth
 LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me-long-random-pin
 LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
-CLOUDFLARE_TUNNEL_TOKEN=
 ```
 
 ## 2. Server शुरू करें
@@ -50,6 +49,10 @@ curl -i http://127.0.0.1:8765/healthz
 स्वस्थ response HTTP `200` लौटाता है।
 
 ## 3. HTTPS expose करें
+
+**अनुशंसित:** सार्वजनिक पहुँच के लिए सार्वजनिक सर्वर पर तैनात करें या HTTPS रिवर्स प्रॉक्सी के साथ सार्वजनिक सर्वर से ट्रैफ़िक फ़ॉरवर्ड करें।
+
+**अनुशंसित नहीं:** Cloudflare Tunnel में क्लाइंट-साइड अपलोड बहुत धीमे हो सकते हैं, जिससे फ़ाइल अपलोड और स्थानांतरण का उपयोग कठिन हो जाता है। इसे केवल तभी अपनाएँ जब सार्वजनिक सर्वर या फ़ॉरवर्डिंग उपलब्ध न हो। Configure `CLOUDFLARE_TUNNEL_TOKEN` in `.env` only when choosing the optional tunnel sidecar.
 
 Cloudflare Tunnel sidecar के लिए:
 

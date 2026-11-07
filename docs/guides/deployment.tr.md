@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
+<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
 # Runtime seçenekleri ve deployment modeli
 
 `local-shell-mcp`'in iki tamamlayıcı kararı vardır:
@@ -34,12 +34,14 @@ Local MCP client
   -> controlled workspace
 ```
 
+**Önerilir:** Genel erişim için herkese açık bir sunucuya dağıtın veya trafiği HTTPS ters vekiliyle herkese açık bir sunucu üzerinden iletin. **Önerilmez:** Cloudflare Tunnel üzerinden istemci tarafındaki yükleme hızı çok düşük olabilir; bu da dosya yükleme ve aktarımı işlevlerini kullanmayı zorlaştırır. Yalnızca genel sunucu veya yönlendirme mümkün değilse kullanın. ([Public HTTPS exposure](../clients/connectivity.md))
+
 ## Runtime seçim matrisi
 
 | Çalışma zamanı | Şunun için en iyisi: | İzolasyon sınırı | Araç zinciri kaynağı | Harici MCP erişimi | Sayfa |
 |---|---|---|---|---|---|
 | Docker Oluşturma | Çoğu kodlama aracısı iş yükü ve tekrarlanabilir çalışma alanı | Konteyner | Yalın Kontrolör görüntüsü; göreve özgü araç zincirlerini ayrı olarak kurun | HTTPS proxy'si veya tüneli ekleyin | [Docker Compose](../installation/docker.md) |
-| Docker Compose + tünel sepeti | Cloudflare Tüneli ile Kamu Denetleyici dağıtımı | Konteyner | Proje resmi | Compose `tunnel` profiline yerleşik | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| Docker Compose + tünel sepeti | Önerilmez: Genel sunucu üzerinden yönlendirin; Cloudflare Tunnel son çare olsun | Konteyner | Proje resmi | Genel sunucu üzerinden yönlendirin; Cloudflare Tunnel son çare olsun | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Editor workspace içinden server start/stop | Genellikle host process | Host tools ve configured executable | ChatGPT için harici HTTPS tunnel/proxy ekle | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Docker olmayan host veya VM | Host or VM | Host tools ve configured executable | HTTPS proxy veya tunnel ekle | [Standalone binary](../installation/binary.md) |
 | `pipx` / source install | Python-native kullanım, debugging, development | Host virtualenv or VM | Python package ve host tools | HTTPS proxy veya tunnel ekle | [Python install](../installation/python.md) |

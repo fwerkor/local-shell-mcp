@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
+<!-- i18n-source-sha256: f44188b1e2f3b4d79d97c78edb15270aa338ddf7989d85df1559168a0678eaa8 -->
 # Docker Compose runtime
 
 Docker Compose は多くの user に推奨される runtime です。モデルに制御された Linux workspace、再現可能な toolchain、persistent credentials、browser automation support、簡単な upgrade path を提供します。
@@ -82,6 +82,8 @@ https://your-public-host.example.com/mcp
 
 ## Cloudflare Tunnel sidecar
 
+**非推奨:** Cloudflare Tunnel はクライアント側のアップロード速度が非常に遅くなる場合があり、ファイルのアップロードや転送が実用的でなくなります。公開サーバーや転送経路を用意できない場合のみ使用してください。 公開アクセスには、公開サーバーへの直接デプロイ、または公開サーバー経由の転送と HTTPS リバースプロキシを使用してください。 ([network connectivity](../clients/connectivity.md))
+
 Compose file には `tunnel` profile の optional `cloudflared` service が含まれます。Tunnel を MCP server と並べて実行します。
 
 `.env` を設定します：
@@ -110,6 +112,8 @@ http://local-shell-mcp:8765
 公開 port が localhost に制限されるため、Compose service は forwarded headers を信頼します。これにより OAuth PIN rate limiting で public caller address を保持できます。Container port を直接公開する場合は `LOCAL_SHELL_MCP_FORWARDED_ALLOW_IPS=*` を trusted reverse proxy の明示的 address に置き換えてください。
 
 ## Tunnel sidecar なしの reverse proxy
+
+**推奨:** 公開アクセスには、公開サーバーへの直接デプロイ、または公開サーバー経由の転送と HTTPS リバースプロキシを使用してください。
 
 既に Caddy、Nginx、Traefik、Nginx Proxy Manager を使っているなら通常の Compose service を維持し、HTTPS を次へ forward します：
 

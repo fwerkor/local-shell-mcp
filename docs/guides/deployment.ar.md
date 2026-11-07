@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
+<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
 # خيارات Runtime ونموذج النشر
 
 يحتوي `local-shell-mcp` على قرارين متكاملين:
@@ -34,12 +34,14 @@ Local MCP client
   -> controlled workspace
 ```
 
+**موصى به:** استخدم خادمًا ذا عنوان عام، أو أعد توجيه حركة المرور عبر خادم عام باستخدام وكيل HTTPS عكسي. **غير موصى به:** قد تكون سرعة الرفع من جهة العميل عبر Cloudflare Tunnel بطيئة جدًا، مما يجعل رفع الملفات ونقلها صعب الاستخدام. استخدمه فقط عند تعذّر النشر العام أو التوجيه عبر خادم عام. ([Public HTTPS exposure](../clients/connectivity.md))
+
 ## مصفوفة اختيار Runtime
 
 | وقت التشغيل | الأفضل ل | حد العزلة | مصدر سلسلة الأدوات | الوصول الخارجي لـ MCP | الصفحة |
 |---|---|---|---|---|---|
 | عامل الميناء يؤلف | معظم أعباء عمل وكيل الترميز ومساحات العمل القابلة للتكرار | حاوية | صورة وحدة التحكم الهزيلة؛ تثبيت سلاسل الأدوات الخاصة بالمهمة بشكل منفصل | أضف وكيل أو نفق HTTPS | [Docker Compose](../installation/docker.md) |
-| Docker Compose + عربة جانبية للنفق | نشر وحدة التحكم العامة باستخدام Cloudflare Tunnel | حاوية | صورة المشروع | مدمج في ملف تعريف Compose `tunnel` | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| Docker Compose + عربة جانبية للنفق | غير موصى به: إعادة التوجيه عبر خادم عام؛ وCloudflare Tunnel حل أخير | حاوية | صورة المشروع | إعادة التوجيه عبر خادم عام؛ وCloudflare Tunnel حل أخير | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | بدء/إيقاف server من editor workspace | عادة process على host | أدوات host مع executable مضبوط | أضف HTTPS tunnel/proxy خارجيًا لـ ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Hosts أو VM بدون Docker | Host or VM | أدوات host مع executable مضبوط | أضف HTTPS proxy أو tunnel | [Standalone binary](../installation/binary.md) |
 | `pipx` / source install | استخدام Python-native وdebugging وdevelopment | Host virtualenv or VM | Python package مع أدوات host | أضف HTTPS proxy أو tunnel | [Python install](../installation/python.md) |

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 3986da6ff877609189b0d88d363aff1f5f45445f0cfe5ffa608a31929078542c -->
+<!-- i18n-source-sha256: 4eb43e1a065d72171aad5493848eb2f8c57361b110237c8816928e28f227a3d8 -->
 # Connectivité réseau
 
 Les MCP client HTTP situés hors de la machine ont besoin d’un HTTPS origin accessible. Cette page traite du routage réseau, pas du choix du runtime.
@@ -19,13 +19,18 @@ N’incluez pas `/mcp` dans cette base URL.
 
 ## Options de connectivité
 
+**Recommandé:** Pour un accès public, déployez sur un serveur public ou faites transiter le trafic par un serveur public avec un proxy inverse HTTPS.
+
+**Déconseillé:** Le débit montant côté client de Cloudflare Tunnel peut être très faible et rendre les envois et transferts de fichiers difficilement utilisables. À réserver aux cas où un serveur public ou un relais n'est pas possible.
+
+
 | Option | Quand l’utiliser |
 |---|---|
-| Compose tunnel sidecar | Docker Compose avec le profile `tunnel` intégré |
-| Tunnel externe | Tout runtime devant être accessible hors du réseau local |
 | Caddy | TLS automatique simple |
 | Nginx ou Nginx Proxy Manager | Infrastructure Nginx existante |
 | Traefik | Routage container-native existant |
+| Relais via serveur public | Pour un accès public, déployez sur un serveur public ou faites transiter le trafic par un serveur public avec un proxy inverse HTTPS. |
+| Cloudflare Tunnel (déconseillé) | Relais via serveur public ; Cloudflare Tunnel uniquement en dernier recours |
 
 ## Chemins
 
@@ -64,9 +69,9 @@ curl -i https://your-public-host.example.com/healthz
 
 | Runtime | Modèle réseau |
 |---|---|
-| Docker Compose sur un serveur | Reverse proxy existant ou profile tunnel Compose |
-| Docker Compose sur une machine domestique | Outbound tunnel |
-| VS Code extension sur un portable | Tunnel temporaire pour la session |
+| Docker Compose sur un serveur | Proxy inverse HTTPS |
+| Docker Compose sur une machine domestique | Relais via serveur public ; Cloudflare Tunnel uniquement en dernier recours |
+| VS Code extension sur un portable | Relais via serveur public |
 | Binary sur une VM | Reverse proxy sur la VM ou à la périphérie du réseau |
 | Serveur de développement Python/source | Généralement localhost uniquement |
 | Stdio mode | Aucun chemin HTTP ; utiliser un MCP client local |

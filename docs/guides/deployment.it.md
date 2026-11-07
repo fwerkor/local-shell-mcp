@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
+<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
 # Scelte del runtime e modello di deployment
 
 `local-shell-mcp` ha due decisioni complementari:
@@ -34,12 +34,14 @@ Local MCP client
   -> controlled workspace
 ```
 
+**Consigliato:** Per l'accesso pubblico, distribuisci su un server pubblico oppure inoltra il traffico tramite un server pubblico con reverse proxy HTTPS. **Sconsigliato:** La velocità di upload lato client di Cloudflare Tunnel può essere molto bassa, rendendo difficili caricamenti e trasferimenti di file. Usalo solo se non sono possibili un server pubblico o un inoltro tramite esso. ([Public HTTPS exposure](../clients/connectivity.md))
+
 ## Matrice di scelta del runtime
 
 | Durata | Meglio per | Confine di isolamento | Fonte della catena di strumenti | Accesso MCP esterno | Pagina |
 |---|---|---|---|---|---|
 | Docker Componi | La maggior parte dei carichi di lavoro dell'agente di codifica e delle aree di lavoro ripetibili | Contenitore | Immagine del controllore snello; installare separatamente le toolchain specifiche per attività | Aggiungi proxy o tunnel HTTPS | [Docker Compose](../installation/docker.md) |
-| Docker Compose + sidecar tunnel | Distribuzione del controller pubblico con Cloudflare Tunnel | Contenitore | Immagine del progetto | Integrato nel profilo Compose `tunnel` | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| Docker Compose + sidecar tunnel | Sconsigliato: Inoltro tramite server pubblico; Cloudflare Tunnel solo come ripiego | Contenitore | Immagine del progetto | Inoltro tramite server pubblico; Cloudflare Tunnel solo come ripiego | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Avvio/arresto server da editor workspace | Di solito processo host | Strumenti host più executable configurato | Aggiungi tunnel/proxy HTTPS esterno per ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Host o VM senza Docker | Host or VM | Strumenti host più executable configurato | Aggiungi proxy HTTPS o tunnel | [Standalone binary](../installation/binary.md) |
 | `pipx` / source install | Uso Python-native, debugging, development | Host virtualenv or VM | Package Python più strumenti host | Aggiungi proxy HTTPS o tunnel | [Python install](../installation/python.md) |

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
+<!-- i18n-source-sha256: f44188b1e2f3b4d79d97c78edb15270aa338ddf7989d85df1559168a0678eaa8 -->
 # Docker Compose runtime
 
 Docker Compose अधिकांश उपयोगकर्ताओं के लिए अनुशंसित runtime है। यह model को controlled Linux workspace, reproducible toolchain, persistent credentials, browser automation support और आसान upgrade path देता है।
@@ -82,6 +82,8 @@ https://your-public-host.example.com/mcp
 
 ## Cloudflare Tunnel sidecar
 
+**अनुशंसित नहीं:** Cloudflare Tunnel में क्लाइंट-साइड अपलोड बहुत धीमे हो सकते हैं, जिससे फ़ाइल अपलोड और स्थानांतरण का उपयोग कठिन हो जाता है। इसे केवल तभी अपनाएँ जब सार्वजनिक सर्वर या फ़ॉरवर्डिंग उपलब्ध न हो। सार्वजनिक पहुँच के लिए सार्वजनिक सर्वर पर तैनात करें या HTTPS रिवर्स प्रॉक्सी के साथ सार्वजनिक सर्वर से ट्रैफ़िक फ़ॉरवर्ड करें। ([network connectivity](../clients/connectivity.md))
+
 Compose file में `tunnel` profile के पीछे optional `cloudflared` service शामिल है। यह MCP server के साथ tunnel चलाती है।
 
 `.env` configure करें:
@@ -110,6 +112,8 @@ http://local-shell-mcp:8765
 Compose service forwarded headers पर trust करती है क्योंकि published port localhost तक सीमित है; इससे OAuth PIN rate limiting के लिए public caller address सुरक्षित रहता है। यदि container port सीधे expose करें, तो `LOCAL_SHELL_MCP_FORWARDED_ALLOW_IPS=*` को trusted reverse proxies के explicit addresses से बदलें।
 
 ## Tunnel sidecar के बिना reverse proxy
+
+**अनुशंसित:** सार्वजनिक पहुँच के लिए सार्वजनिक सर्वर पर तैनात करें या HTTPS रिवर्स प्रॉक्सी के साथ सार्वजनिक सर्वर से ट्रैफ़िक फ़ॉरवर्ड करें।
 
 यदि Caddy, Nginx, Traefik या Nginx Proxy Manager पहले से चलता है, normal Compose service रखें और HTTPS यहाँ forward करें:
 

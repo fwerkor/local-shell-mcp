@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 3986da6ff877609189b0d88d363aff1f5f45445f0cfe5ffa608a31929078542c -->
+<!-- i18n-source-sha256: 4eb43e1a065d72171aad5493848eb2f8c57361b110237c8816928e28f227a3d8 -->
 # Kết nối mạng
 
 MCP client HTTP ở ngoài máy cần một HTTPS origin có thể truy cập. Trang này nói về định tuyến mạng, không phải việc chọn runtime.
@@ -19,13 +19,18 @@ Không đưa `/mcp` vào base URL này.
 
 ## Các lựa chọn kết nối
 
+**Khuyến nghị:** Để truy cập công khai, hãy triển khai trên máy chủ công khai hoặc chuyển tiếp lưu lượng qua máy chủ công khai bằng reverse proxy HTTPS.
+
+**Không khuyến nghị:** Tốc độ tải lên phía máy khách qua Cloudflare Tunnel có thể rất chậm, khiến việc tải lên và truyền tệp khó sử dụng. Chỉ dùng khi không thể triển khai hoặc chuyển tiếp qua máy chủ công khai.
+
+
 | Lựa chọn | Khi nào dùng |
 |---|---|
-| Compose tunnel sidecar | Docker Compose với profile `tunnel` tích hợp |
-| Tunnel bên ngoài | Bất kỳ runtime nào cần truy cập từ ngoài mạng cục bộ |
 | Caddy | TLS tự động đơn giản |
 | Nginx hoặc Nginx Proxy Manager | Hạ tầng Nginx hiện có |
 | Traefik | Định tuyến container-native hiện có |
+| Chuyển tiếp qua máy chủ công khai | Để truy cập công khai, hãy triển khai trên máy chủ công khai hoặc chuyển tiếp lưu lượng qua máy chủ công khai bằng reverse proxy HTTPS. |
+| Cloudflare Tunnel (không khuyến nghị) | Chuyển tiếp qua máy chủ công khai; Cloudflare Tunnel chỉ là phương án cuối |
 
 ## Đường dẫn
 
@@ -64,9 +69,9 @@ curl -i https://your-public-host.example.com/healthz
 
 | Runtime | Kiểu mạng |
 |---|---|
-| Docker Compose trên server | Reverse proxy hiện có hoặc Compose tunnel profile |
-| Docker Compose trên máy gia đình | Outbound tunnel |
-| VS Code extension trên laptop | Tunnel tạm thời cho phiên |
+| Docker Compose trên server | Reverse proxy HTTPS |
+| Docker Compose trên máy gia đình | Chuyển tiếp qua máy chủ công khai; Cloudflare Tunnel chỉ là phương án cuối |
+| VS Code extension trên laptop | Chuyển tiếp qua máy chủ công khai |
 | Binary trên VM | Reverse proxy trên VM hoặc biên mạng |
 | Server dev Python/source | Thường chỉ localhost |
 | Stdio mode | Không có đường HTTP; dùng MCP client cục bộ |

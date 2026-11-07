@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
+<!-- i18n-source-sha256: f44188b1e2f3b4d79d97c78edb15270aa338ddf7989d85df1559168a0678eaa8 -->
 # Docker Compose 運行時
 
 Docker Compose 是大多數用戶的推薦運行時。它爲模型提供受控 Linux 工作區、可重複工具鏈、持久憑據、瀏覽器自動化支持，以及簡單的升級路徑。
@@ -82,6 +82,8 @@ https://your-public-host.example.com/mcp
 
 ## Cloudflare Tunnel sidecar
 
+**不推薦：** Cloudflare Tunnel 用戶端的上傳速度可能非常慢，導致檔案上傳與傳輸功能難以正常使用。僅在無法進行公網部署或透過公網伺服器轉發時，才考慮作為備選方案。 有條件時，應直接部署到具有公網位址的伺服器，或透過公網伺服器搭配 HTTPS 反向代理轉發流量。 ([網絡連通性](../clients/connectivity.md))
+
 Compose 文件包含一個可選的 `cloudflared` 服務，放在 `tunnel` profile 後面。它會把隧道與 MCP 服務放在同一套 Compose 中運行。
 
 配置 `.env`：
@@ -109,6 +111,8 @@ http://local-shell-mcp:8765
 這是 Cloudflare Tunnel，不是 Cloudflare Access。`local-shell-mcp` 仍然自己處理 ChatGPT 的 OAuth。
 
 ## 不使用 tunnel sidecar 的反向代理
+
+**推薦：** 有條件時，應直接部署到具有公網位址的伺服器，或透過公網伺服器搭配 HTTPS 反向代理轉發流量。
 
 如果你已經運行 Caddy、Nginx、Traefik 或 Nginx Proxy Manager，保留普通 Compose 服務，並把 HTTPS 轉發到：
 

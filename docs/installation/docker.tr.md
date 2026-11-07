@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
+<!-- i18n-source-sha256: f44188b1e2f3b4d79d97c78edb15270aa338ddf7989d85df1559168a0678eaa8 -->
 # Docker Compose runtime
 
 Docker Compose çoğu kullanıcı için önerilen runtime’dır. Modele kontrollü Linux workspace, reproducible toolchain, persistent credentials, browser automation desteği ve kolay upgrade yolu sağlar.
@@ -82,6 +82,8 @@ https://your-public-host.example.com/mcp
 
 ## Cloudflare Tunnel sidecar
 
+**Önerilmez:** Cloudflare Tunnel üzerinden istemci tarafındaki yükleme hızı çok düşük olabilir; bu da dosya yükleme ve aktarımı işlevlerini kullanmayı zorlaştırır. Yalnızca genel sunucu veya yönlendirme mümkün değilse kullanın. Genel erişim için herkese açık bir sunucuya dağıtın veya trafiği HTTPS ters vekiliyle herkese açık bir sunucu üzerinden iletin. ([network connectivity](../clients/connectivity.md))
+
 Compose file `tunnel` profile arkasında optional `cloudflared` service içerir. Tunnel’ı MCP server yanında çalıştırır.
 
 `.env` yapılandırın:
@@ -110,6 +112,8 @@ Bu Cloudflare Tunnel’dır, Cloudflare Access değildir. ChatGPT OAuth işlemle
 Compose service, published port localhost ile sınırlı olduğundan forwarded headers’a güvenir; böylece OAuth PIN rate limiting için public caller address korunur. Container port’u doğrudan expose ederseniz `LOCAL_SHELL_MCP_FORWARDED_ALLOW_IPS=*` değerini trusted reverse proxies’in açık adresleriyle değiştirin.
 
 ## Tunnel sidecar olmadan reverse proxy
+
+**Önerilir:** Genel erişim için herkese açık bir sunucuya dağıtın veya trafiği HTTPS ters vekiliyle herkese açık bir sunucu üzerinden iletin.
 
 Caddy, Nginx, Traefik veya Nginx Proxy Manager zaten kullanıyorsanız normal Compose service’i koruyup HTTPS’i şuraya forward edin:
 

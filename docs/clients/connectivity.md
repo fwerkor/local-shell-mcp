@@ -18,13 +18,17 @@ Do not include `/mcp` in that base URL.
 
 ## Connectivity options
 
+**Recommended:** Deploy directly to a public server, or forward traffic from a private Controller through a public server. Terminate HTTPS with a reverse proxy and ensure it can handle file-upload request bodies and streaming transfers.
+
+**Cloudflare Tunnel is not recommended** for file-transfer workflows: its client-side upload throughput can be very slow, making file uploads or transfers impractical. Use it only as a fallback when direct deployment or public-server forwarding is unavailable.
+
 | Option | Use when |
 |---|---|
-| Compose tunnel sidecar | Docker Compose with the built-in `tunnel` profile |
-| External tunnel | Any runtime that must be reachable from outside the local network |
-| Caddy | Simple automatic TLS |
-| Nginx or Nginx Proxy Manager | Existing Nginx infrastructure |
-| Traefik | Existing container-native routing |
+| Caddy | Public-server deployment with simple automatic TLS |
+| Nginx or Nginx Proxy Manager | Public server or forwarding host with Nginx infrastructure |
+| Traefik | Container-native routing on a public server or forwarding host |
+| Public-server forwarding | The Controller is private but traffic can be relayed through a public server |
+| Cloudflare Tunnel sidecar (not recommended) | Fallback with the optional Compose `tunnel` profile; file uploads may be slow |
 
 ## Paths
 
@@ -63,9 +67,9 @@ curl -i https://your-public-host.example.com/healthz
 
 | Runtime | Network pattern |
 |---|---|
-| Docker Compose on a server | Existing reverse proxy or Compose tunnel profile |
-| Docker Compose on a home machine | Outbound tunnel |
-| VS Code extension on a laptop | Temporary tunnel for the session |
+| Docker Compose on a public server | HTTPS reverse proxy |
+| Docker Compose on a home machine | Forward through a public server if available; Cloudflare Tunnel only as a fallback |
+| VS Code extension on a laptop | Public-server forwarding if remote access is needed |
 | Binary on a VM | Reverse proxy on the VM or network edge |
 | Python/source dev server | Usually localhost only |
 | Stdio mode | No HTTP network path; use a local MCP client |

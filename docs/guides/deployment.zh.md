@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
+<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
 # 运行时选择与部署模型
 
 `local-shell-mcp` 有两个互补的决定：
@@ -34,12 +34,14 @@ pipx / 源码 checkout             远程 worker 出站加入           REST 风
   -> 受控工作区
 ```
 
+**推荐：** 有条件时应直接部署到具有公网地址的服务器，或通过公网服务器配合 HTTPS 反向代理转发流量。 **不推荐：** Cloudflare Tunnel 客户端的上传速度可能非常慢，导致文件上传与传输功能难以正常使用。仅在无法公网部署或通过公网服务器转发时，才将其作为备选方案。 （[公开 HTTPS 暴露](../clients/connectivity.md)）
+
 ## 运行时选择矩阵
 
 | 运行时 | 最适合 | 隔离边界 | 工具链源码 | 外部 MCP 访问 | 页面 |
 |---|---|---|---|---|---|
 | Docker 组合 | 大多数编码代理工作负载和可重复的工作空间 | 集装箱 | 精益控制器形象；单独安装特定于任务的工具链 | 添加 HTTPS 代理或隧道 | [Docker Compose](../installation/docker.md) |
-| Docker Compose + 隧道 sidecar | 使用 Cloudflare Tunnel 部署公共控制器 | 集装箱 | 项目形象 | 内置于 Compose `tunnel` 配置文件中 | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| Docker Compose + 隧道 sidecar | 不推荐: 通过公网服务器转发；Cloudflare Tunnel 仅作备选 | 集装箱 | 项目形象 | 通过公网服务器转发；Cloudflare Tunnel 仅作备选 | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code 扩展 | 从编辑器工作区启动或停止服务 | 通常是宿主机进程 | 宿主机工具，以及配置的可执行文件 | 为 ChatGPT 添加外部 HTTPS 隧道或代理 | [VS Code 扩展](../installation/vscode-extension.md) |
 | 独立二进制 | Docker 不可用，但已有 VM、容器宿主机或专用账号作为边界 | 宿主机或 VM | 宿主机工具 | 添加 HTTPS 代理或隧道 | [独立二进制](../installation/binary.md) |
 | `pipx` / 源码安装 | Python 原生使用、调试、开发 | 宿主机 virtualenv 或 VM | Python 包加宿主机工具 | 添加 HTTPS 代理或隧道 | [Python 安装](../installation/python.md) |

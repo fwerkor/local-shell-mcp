@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
+<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
 # Runtime 선택과 deployment 모델
 
 `local-shell-mcp`에는 두 가지 보완적인 결정이 있습니다.
@@ -34,12 +34,14 @@ Local MCP client
   -> controlled workspace
 ```
 
+**권장:** 공개 접속에는 공인 서버에 직접 배포하거나 HTTPS 역방향 프록시를 통해 공인 서버에서 트래픽을 전달하세요. **비권장:** Cloudflare Tunnel은 클라이언트 측 업로드 속도가 매우 느릴 수 있어 파일 업로드와 전송 기능을 사용하기 어려울 수 있습니다. 공인 서버 배포나 전달이 불가능할 때만 사용하세요. ([Public HTTPS exposure](../clients/connectivity.md))
+
 ## Runtime 선택 매트릭스
 
 | 런타임 | 다음에 가장 적합 | 격리 경계 | 툴체인 소스 | 외부 MCP 액세스 | 페이지 |
 |---|---|---|---|---|---|
 | 도커 작성 | 대부분의 코딩 에이전트 작업 부하 및 반복 가능한 작업 공간 | 컨테이너 | 린 컨트롤러 이미지; 작업별 툴체인을 별도로 설치 | HTTPS 프록시 또는 터널 추가 | [Docker Compose](../installation/docker.md) |
-| Docker Compose + 터널 사이드카 | Cloudflare Tunnel을 사용한 Public Controller 배포 | 컨테이너 | 프로젝트 이미지 | Compose `tunnel` 프로필에 내장됨 | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| Docker Compose + 터널 사이드카 | 비권장: 공인 서버를 통해 전달하고 Cloudflare Tunnel은 최후의 수단으로 사용 | 컨테이너 | 프로젝트 이미지 | 공인 서버를 통해 전달하고 Cloudflare Tunnel은 최후의 수단으로 사용 | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | editor workspace에서 server 시작/중지 | 대개 host process | host tools와 설정된 executable | ChatGPT용 외부 HTTPS tunnel/proxy 추가 | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Docker를 사용할 수 없는 host/VM | Host or VM | host tools와 설정된 executable | HTTPS proxy 또는 tunnel 추가 | [Standalone binary](../installation/binary.md) |
 | `pipx` / source install | Python-native 사용, debug, development | Host virtualenv or VM | Python package와 host tools | HTTPS proxy 또는 tunnel 추가 | [Python install](../installation/python.md) |

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
+<!-- i18n-source-sha256: f44188b1e2f3b4d79d97c78edb15270aa338ddf7989d85df1559168a0678eaa8 -->
 # Runtime Docker Compose
 
 Docker Compose est le runtime recommandé pour la plupart des utilisateurs. Il donne au modèle un workspace Linux contrôlé, un toolchain reproductible, des credentials persistants, le support de browser automation et un chemin de mise à jour simple.
@@ -82,6 +82,8 @@ https://your-public-host.example.com/mcp
 
 ## Cloudflare Tunnel sidecar
 
+**Déconseillé:** Le débit montant côté client de Cloudflare Tunnel peut être très faible et rendre les envois et transferts de fichiers difficilement utilisables. À réserver aux cas où un serveur public ou un relais n'est pas possible. Pour un accès public, déployez sur un serveur public ou faites transiter le trafic par un serveur public avec un proxy inverse HTTPS. ([network connectivity](../clients/connectivity.md))
+
 Le fichier Compose inclut un service `cloudflared` optionnel derrière le profile `tunnel`. Il exécute le tunnel à côté du MCP server.
 
 Configurez `.env` :
@@ -110,6 +112,8 @@ Il s’agit de Cloudflare Tunnel, pas de Cloudflare Access. `local-shell-mcp` co
 Le service Compose fait confiance aux forwarded headers car son port publié est limité à localhost ; cela préserve l’adresse publique de l’appelant pour le rate limiting du OAuth PIN. Si vous exposez directement le port du container, remplacez `LOCAL_SHELL_MCP_FORWARDED_ALLOW_IPS=*` par les adresses explicites de vos reverse proxies de confiance.
 
 ## Reverse proxy sans tunnel sidecar
+
+**Recommandé:** Pour un accès public, déployez sur un serveur public ou faites transiter le trafic par un serveur public avec un proxy inverse HTTPS.
 
 Si vous utilisez déjà Caddy, Nginx, Traefik ou Nginx Proxy Manager, gardez le service Compose normal et transférez HTTPS vers :
 

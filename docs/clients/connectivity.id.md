@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 3986da6ff877609189b0d88d363aff1f5f45445f0cfe5ffa608a31929078542c -->
+<!-- i18n-source-sha256: 4eb43e1a065d72171aad5493848eb2f8c57361b110237c8816928e28f227a3d8 -->
 # Konektivitas jaringan
 
 MCP client HTTP di luar mesin memerlukan HTTPS origin yang dapat dijangkau. Halaman ini membahas routing jaringan, bukan pemilihan runtime.
@@ -19,13 +19,18 @@ Jangan sertakan `/mcp` dalam base URL tersebut.
 
 ## Opsi konektivitas
 
+**Direkomendasikan:** Untuk akses publik, gunakan server publik atau teruskan lalu lintas melalui server publik dengan reverse proxy HTTPS.
+
+**Tidak direkomendasikan:** Kecepatan unggah sisi klien Cloudflare Tunnel bisa sangat lambat, sehingga fitur unggah dan transfer berkas sulit digunakan. Gunakan hanya jika server publik atau penerusan tidak memungkinkan.
+
+
 | Opsi | Kapan digunakan |
 |---|---|
-| Compose tunnel sidecar | Docker Compose dengan profile `tunnel` bawaan |
-| Tunnel eksternal | Runtime apa pun yang harus dapat diakses dari luar jaringan lokal |
 | Caddy | TLS otomatis yang sederhana |
 | Nginx atau Nginx Proxy Manager | Infrastruktur Nginx yang sudah ada |
 | Traefik | Routing container-native yang sudah ada |
+| Penerusan lewat server publik | Untuk akses publik, gunakan server publik atau teruskan lalu lintas melalui server publik dengan reverse proxy HTTPS. |
+| Cloudflare Tunnel (tidak direkomendasikan) | Teruskan lewat server publik; Cloudflare Tunnel hanya pilihan terakhir |
 
 ## Path
 
@@ -64,9 +69,9 @@ curl -i https://your-public-host.example.com/healthz
 
 | Runtime | Pola jaringan |
 |---|---|
-| Docker Compose di server | Reverse proxy yang sudah ada atau Compose tunnel profile |
-| Docker Compose di mesin rumah | Outbound tunnel |
-| VS Code extension di laptop | Tunnel sementara untuk sesi |
+| Docker Compose di server | Reverse proxy HTTPS |
+| Docker Compose di mesin rumah | Teruskan lewat server publik; Cloudflare Tunnel hanya pilihan terakhir |
+| VS Code extension di laptop | Penerusan lewat server publik |
 | Binary di VM | Reverse proxy di VM atau edge jaringan |
 | Server dev Python/source | Biasanya hanya localhost |
 | Stdio mode | Tidak ada jalur HTTP; gunakan MCP client lokal |

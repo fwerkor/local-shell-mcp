@@ -77,7 +77,6 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 LOCAL_SHELL_MCP_AUTH_MODE=oauth
 LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me-long-random-pin
 LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
-CLOUDFLARE_TUNNEL_TOKEN=
 ```
 
 Start the server:
@@ -88,7 +87,9 @@ docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Start the bundled Cloudflare Tunnel sidecar when you need public HTTPS access:
+For public HTTPS access, **prefer deploying on a public server with a reverse proxy**, or forwarding traffic from a private machine through a public server. See [network connectivity](https://fwerkor.github.io/local-shell-mcp/clients/connectivity/).
+
+**Cloudflare Tunnel is not recommended for file-transfer workflows**: its client-side upload throughput can be very slow, making file uploads and transfers impractical. If a public server or forwarding setup is unavailable, the bundled sidecar remains an optional fallback. Set `CLOUDFLARE_TUNNEL_TOKEN` in `.env` before starting it:
 
 ```bash
 docker compose --profile tunnel up -d

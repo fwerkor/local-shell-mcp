@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
+<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
 # Runtime विकल्प और deployment model
 
 `local-shell-mcp` के दो पूरक निर्णय हैं:
@@ -34,12 +34,14 @@ Local MCP client
   -> controlled workspace
 ```
 
+**अनुशंसित:** सार्वजनिक पहुँच के लिए सार्वजनिक सर्वर पर तैनात करें या HTTPS रिवर्स प्रॉक्सी के साथ सार्वजनिक सर्वर से ट्रैफ़िक फ़ॉरवर्ड करें। **अनुशंसित नहीं:** Cloudflare Tunnel में क्लाइंट-साइड अपलोड बहुत धीमे हो सकते हैं, जिससे फ़ाइल अपलोड और स्थानांतरण का उपयोग कठिन हो जाता है। इसे केवल तभी अपनाएँ जब सार्वजनिक सर्वर या फ़ॉरवर्डिंग उपलब्ध न हो। ([Public HTTPS exposure](../clients/connectivity.md))
+
 ## Runtime choice matrix
 
 | रनटाइम | के लिए सर्वोत्तम | अलगाव सीमा | टूलचेन स्रोत | बाहरी एमसीपी पहुंच | पेज |
 |---|---|---|---|---|---|
 | डॉकर कम्पोज़ | अधिकांश कोडिंग-एजेंट कार्यभार और दोहराए जाने योग्य कार्यस्थान | कंटेनर | लीन नियंत्रक छवि; कार्य-विशिष्ट टूलचेन अलग से स्थापित करें | HTTPS प्रॉक्सी या टनल जोड़ें | [Docker Compose](../installation/docker.md) |
-| डॉकर कंपोज़ + टनल साइडकार | क्लाउडफ्लेयर टनल के साथ सार्वजनिक नियंत्रक की तैनाती | कंटेनर | प्रोजेक्ट छवि | कंपोज़ `tunnel` प्रोफ़ाइल में निर्मित | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| डॉकर कंपोज़ + टनल साइडकार | अनुशंसित नहीं: सार्वजनिक सर्वर से फ़ॉरवर्ड करें; Cloudflare Tunnel केवल अंतिम विकल्प | कंटेनर | प्रोजेक्ट छवि | सार्वजनिक सर्वर से फ़ॉरवर्ड करें; Cloudflare Tunnel केवल अंतिम विकल्प | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Editor workspace से server start/stop | आमतौर पर host process | Host tools और configured executable | ChatGPT के लिए external HTTPS tunnel/proxy जोड़ें | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Host/VM जहाँ Docker उपलब्ध नहीं | Host or VM | Host tools और configured executable | HTTPS proxy या tunnel जोड़ें | [Standalone binary](../installation/binary.md) |
 | `pipx` / source install | Python-native use, debugging, development | Host virtualenv or VM | Python package और host tools | HTTPS proxy या tunnel जोड़ें | [Python install](../installation/python.md) |

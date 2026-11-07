@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
+<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
 # Выбор runtime и модель развёртывания
 
 `local-shell-mcp` имеет два взаимодополняющих решения:
@@ -34,12 +34,14 @@ Local MCP client
   -> controlled workspace
 ```
 
+**Рекомендуется:** Для публичного доступа используйте сервер с публичным адресом или пересылку трафика через публичный сервер с обратным HTTPS-прокси. **Не рекомендуется:** Скорость загрузки со стороны клиента через Cloudflare Tunnel может быть очень низкой, из-за чего отправка и передача файлов становятся неудобными. Используйте только при отсутствии возможности развертывания или пересылки через публичный сервер. ([Public HTTPS exposure](../clients/connectivity.md))
+
 ## Матрица выбора runtime
 
 | Время выполнения | Лучшее для | Граница изоляции | Источник инструментальной цепочки | Внешний доступ MCP | Страница |
 |---|---|---|---|---|---|
 | Докер Составление | Большинство рабочих нагрузок агента кодирования и повторяемые рабочие пространства | Контейнер | Образ экономичного контроллера; устанавливать наборы инструментов для конкретных задач отдельно | Добавьте HTTPS-прокси или туннель | [Docker Compose](../installation/docker.md) |
-| Docker Compose + туннельная коляска | Развертывание общедоступного контроллера с помощью Cloudflare Tunnel | Контейнер | Изображение проекта | Встроен в профиль Compose `tunnel`. | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| Docker Compose + туннельная коляска | Не рекомендуется: Пересылка через публичный сервер; Cloudflare Tunnel только в крайнем случае | Контейнер | Изображение проекта | Пересылка через публичный сервер; Cloudflare Tunnel только в крайнем случае | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Запуск/остановка server из editor workspace | Обычно host process | Host tools плюс настроенный executable | Добавить внешний HTTPS tunnel/proxy для ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Hosts/VM, где Docker недоступен | Host or VM | Host tools плюс настроенный executable | Добавить HTTPS proxy или tunnel | [Standalone binary](../installation/binary.md) |
 | `pipx` / source install | Python-native использование, debugging, development | Host virtualenv or VM | Python package плюс host tools | Добавить HTTPS proxy или tunnel | [Python install](../installation/python.md) |

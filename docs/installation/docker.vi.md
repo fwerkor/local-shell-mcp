@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
+<!-- i18n-source-sha256: f44188b1e2f3b4d79d97c78edb15270aa338ddf7989d85df1559168a0678eaa8 -->
 # Runtime Docker Compose
 
 Docker Compose là runtime khuyến nghị cho phần lớn người dùng. Nó cung cấp cho model workspace Linux được kiểm soát, toolchain tái lập, persistent credentials, hỗ trợ browser automation và đường upgrade dễ dàng.
@@ -82,6 +82,8 @@ https://your-public-host.example.com/mcp
 
 ## Cloudflare Tunnel sidecar
 
+**Không khuyến nghị:** Tốc độ tải lên phía máy khách qua Cloudflare Tunnel có thể rất chậm, khiến việc tải lên và truyền tệp khó sử dụng. Chỉ dùng khi không thể triển khai hoặc chuyển tiếp qua máy chủ công khai. Để truy cập công khai, hãy triển khai trên máy chủ công khai hoặc chuyển tiếp lưu lượng qua máy chủ công khai bằng reverse proxy HTTPS. ([network connectivity](../clients/connectivity.md))
+
 Compose file có optional `cloudflared` service sau profile `tunnel`. Nó chạy tunnel cạnh MCP server.
 
 Cấu hình `.env`:
@@ -110,6 +112,8 @@ http://local-shell-mcp:8765
 Compose service tin forwarded headers vì published port giới hạn ở localhost; nhờ đó giữ public caller address cho OAuth PIN rate limiting. Nếu expose container port trực tiếp, thay `LOCAL_SHELL_MCP_FORWARDED_ALLOW_IPS=*` bằng địa chỉ rõ ràng của trusted reverse proxies.
 
 ## Reverse proxy không có tunnel sidecar
+
+**Khuyến nghị:** Để truy cập công khai, hãy triển khai trên máy chủ công khai hoặc chuyển tiếp lưu lượng qua máy chủ công khai bằng reverse proxy HTTPS.
 
 Nếu đã dùng Caddy, Nginx, Traefik hoặc Nginx Proxy Manager, giữ normal Compose service và forward HTTPS tới:
 
