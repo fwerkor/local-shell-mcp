@@ -317,7 +317,7 @@ def test_shell_buffers_arguments_timeouts_and_reader_helpers(tmp_path, monkeypat
     assert shell.public_run_shell_timeout(None) == 10
     assert shell.public_run_shell_timeout(0) == 10
     with pytest.raises(ValueError):
-        shell.public_run_shell_timeout(121)
+        shell.public_run_shell_timeout(shell.PUBLIC_RUN_SHELL_TIMEOUT_CAP_S + 1)
 
     class Stream:
         def __init__(self, values):
