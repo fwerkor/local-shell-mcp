@@ -1,7 +1,9 @@
-<!-- i18n-source-sha256: c1206f28e9661a542c4c26bae628647a355f6ed1b12ca740574add7374666d57 -->
+<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
 # Antarmuka pengguna
 
-`local-shell-mcp` menyediakan dua human interface yang kompatibel di atas service API, workspace, persistent terminal registry, remote-worker registry, dan MCP audit log yang sama:
+[unified web workspace](../getting-started/web-workspace.md) adalah antarmuka browser yang direkomendasikan. Ini menggabungkan obrolan AI, proyek, dan halaman Pengontrol LSM dalam satu UI LibreChat yang dimodifikasi, menggunakan otorisasi LSM dan API alat yang sama. Ini adalah layanan opsional yang diterapkan secara terpisah.
+
+Pengontrol ringan ini juga mempertahankan dua antarmuka manusia cadangan yang kompatibel di atas API, ruang kerja, registri terminal persisten, registri pekerja jarak jauh, dan log audit MCP yang sama:
 
 - **Web UI** adalah dasbor browser native yang dioptimalkan untuk inspeksi operasional cepat.
 - **OpenTUI** adalah aplikasi berorientasi terminal lengkap dan tetap tersedia di browser maupun sebagai perintah terminal native.

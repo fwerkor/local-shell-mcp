@@ -1,13 +1,13 @@
 <div class="hero-shell" markdown>
-<span class="hero-eyebrow">ChatGPT-compatible MCP control plane</span>
+<span class="hero-eyebrow">Self-hosted AI workspace · MCP control plane</span>
 
 # local-shell-mcp
 
-Give your AI assistant a controlled shell, a real workspace, Git, browser automation, file sharing, and remote-worker access without leaving the chat.
+Chat, projects, files, terminals, remote machines and AI tools in one self-hosted interface. Connect external MCP clients when you need them.
 
 <div class="hero-actions" markdown>
 [Get started](getting-started/quickstart.md){ .hero-action .hero-action--primary }
-[Choose runtime](guides/deployment.md){ .hero-action .hero-action--secondary }
+[Web workspace](getting-started/web-workspace.md){ .hero-action .hero-action--secondary }
 [Tools reference](reference/tools.md){ .hero-action .hero-action--secondary }
 </div>
 </div>
@@ -19,8 +19,8 @@ Run tests, inspect repositories, patch files, operate Git, and keep an audit tra
 </div>
 
 <div class="feature-card" markdown>
-### Runtime and client layers
-Choose a runtime such as Docker, VS Code extension, binary, Python, or stdio, then connect ChatGPT or another MCP client separately.
+### Unified web workspace
+Use the built-in chat and project history alongside Controller files, terminals, desktop, sessions, remotes and audit. External MCP clients stay optional.
 </div>
 
 <div class="feature-card" markdown>
@@ -31,7 +31,7 @@ Attach NAT, firewall, or HPC machines through outbound worker connections withou
 
 ## What it provides
 
-`local-shell-mcp` exposes a controlled local or container workspace to ChatGPT and other MCP clients. It provides shell, persistent shell, filesystem, search, patch, Git, Playwright, audit, durable logical sessions with optional Goal plans, tokenized file-link, and remote-worker tools through a ChatGPT-compatible MCP server with OAuth support.
+`local-shell-mcp` provides a unified self-hosted AI workspace and an MCP server for external clients. It provides shell, persistent shell, filesystem, search, patch, Git, Playwright, audit, durable logical sessions with optional Goal plans, tokenized file-link, and remote-worker tools through authenticated MCP endpoints.
 
 Use it when the AI needs to inspect a repository, run tests, edit files, operate Git, collect browser evidence, produce downloadable artifacts, or control a remote machine that can only connect outbound to the control server.
 
@@ -40,7 +40,7 @@ Use it when the AI needs to inspect a repository, run tests, edit files, operate
 ```text
 Runtime layer: Docker / VS Code extension / binary / Python / stdio
 Exposure layer: localhost / HTTPS proxy / tunnel / stdio pipe
-Client layer: ChatGPT / generic MCP client / editor helper
+Client layer: unified WebUI / Gemini / ChatGPT / generic MCP client
 Controlled workspace: /workspace or configured workspace root
 Optional remote workers: outbound machine connections
 ```
@@ -51,8 +51,10 @@ The intended isolation boundary is the container or VM running the service.
 
 | Scenario | Start here | Why |
 |---|---|---|
-| First public ChatGPT deployment | [Quickstart](getting-started/quickstart.md) | Docker Compose path with OAuth and `/mcp` setup |
+| Primary browser workspace | [Unified web workspace](getting-started/web-workspace.md) | Chat, projects and LSM control pages with a shared login |
+| First Controller deployment | [Quickstart](getting-started/quickstart.md) | Docker Compose, OAuth and the first browser session |
 | Choosing the runtime layer | [Runtime choices](guides/deployment.md) | Explains Docker, VS Code, binary, Python, and stdio as separate runtime options |
+| Connecting Gemini Spark | [Gemini Custom Apps](getting-started/gemini-spark.md) | Eligibility, HTTPS MCP URL, OAuth and testing |
 | Adding ChatGPT as a client | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, first safe prompt, tool discovery |
 | Adding LSM to DeepSeek Harness | [DeepSeek Harness plugin](clients/deepseek-harness.md) | Install this repository as a DSH bundle while keeping the complete LSM tool and remote-worker surface |
 | Running from VS Code | [VS Code extension runtime](installation/vscode-extension.md) | Editor-launched runtime and host-safety notes |
@@ -76,12 +78,12 @@ The intended isolation boundary is the container or VM running the service.
 
 ## Typical workflows
 
-### Coding with ChatGPT
+### Coding in the web workspace
 
-1. Start a runtime such as Docker Compose, VS Code extension, binary, or Python in a dedicated workspace.
-2. Expose the HTTP runtime if ChatGPT needs network access.
-3. Add the public `/mcp` endpoint to ChatGPT.
-4. Ask ChatGPT to inspect the repository and run read-only checks first.
+1. Start an LSM Controller and the optional [unified web workspace](getting-started/web-workspace.md).
+2. Open `/ui` and sign in using the LSM identity.
+3. Configure a model endpoint and open a new conversation.
+4. Ask the model to inspect the repository and run read-only checks first.
 5. Let it patch files, run tests, review diffs, commit, and push when approved.
 6. Review the audit log when the task involves file links or remote systems.
 

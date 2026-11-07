@@ -1,14 +1,14 @@
-<!-- i18n-source-sha256: b999ae6985930651e74b974b12109889360442811d6eeb306e6fa39754dbc173 -->
+<!-- i18n-source-sha256: a66d491558f07c419c8b5958d36c47cd90b081fc1c81f015bb62398cfd573e55 -->
 <div class="hero-shell" markdown>
-<span class="hero-eyebrow">ChatGPT-compatible MCP control plane</span>
+<span class="hero-eyebrow">自託管AI工作區·MCP控制平面</span>
 
 # local-shell-mcp
 
-讓 ChatGPT 或其它 MCP 客戶端在受控環境中使用真實 Shell、工作區、Git、瀏覽器自動化、文件分享和遠程節點能力。
+聊天、專案、文件、終端機、遠端電腦和人工智慧工具集中在一個自架介面中。在需要時連接外部 MCP 用戶端。
 
 <div class="hero-actions" markdown>
 [快速開始](getting-started/quickstart.md){ .hero-action .hero-action--primary }
-[選擇運行時](guides/deployment.md){ .hero-action .hero-action--secondary }
+[Web workspace](getting-started/web-workspace.md){ .hero-action .hero-action--secondary }
 [工具參考](reference/tools.md){ .hero-action .hero-action--secondary }
 </div>
 </div>
@@ -20,8 +20,8 @@
 </div>
 
 <div class="feature-card" markdown>
-### 運行時和客戶端分層
-Docker、VS Code 擴展、二進制、Python 和 stdio 是運行時；ChatGPT 和其它 MCP 客戶端是接入層。
+### 統一的網路工作空間
+使用內建的聊天和專案歷史記錄以及控制器檔案、終端、桌面、會話、遠端和審核。外部 MCP 用戶端保持可選。
 </div>
 
 <div class="feature-card" markdown>
@@ -32,7 +32,7 @@ Docker、VS Code 擴展、二進制、Python 和 stdio 是運行時；ChatGPT �
 
 ## 它提供什麼
 
-`local-shell-mcp` 會把一個受控的本地或容器工作區暴露給 ChatGPT 和其他 MCP Client。它提供 Shell、持久 Shell、檔案系統、搜尋、patch、Git、Playwright、稽核、帶可選 Goal Plan 的持久 logical Session、暫時檔案連結和遠端節點工具，並支援 ChatGPT 相容的 MCP over HTTP 與 OAuth。
+`local-shell-mcp` 為外部用戶端提供統一的自架 AI 工作區和 MCP 伺服器。它透過經過驗證的 MCP 端點提供 shell、持久性 shell、檔案系統、搜尋、修補程式、Git、Playwright、稽核、持久邏輯會話以及可選的目標計劃、標記化檔案連結和遠端工作人員工具。
 
 適用場景包括：檢查倉庫、運行測試、修改代碼、操作 Git、採集網頁證據、生成可下載產物，或者控制只能主動連接控制端的遠程機器。
 
@@ -41,7 +41,7 @@ Docker、VS Code 擴展、二進制、Python 和 stdio 是運行時；ChatGPT �
 ```text
 運行時層：Docker / VS Code 擴展 / 二進制 / Python / stdio
 網絡層：localhost / HTTPS 反向代理 / 隧道 / stdio 管道
-客戶端層：ChatGPT / 通用 MCP 客戶端 / 編輯器輔助入口
+客戶端層：統一WebUI / Gemini / ChatGPT /通用MCP客戶端
 受控工作區：/workspace 或配置的 workspace root
 可選遠程節點：遠程機器主動連接控制端
 ```
@@ -52,8 +52,10 @@ Docker、VS Code 擴展、二進制、Python 和 stdio 是運行時；ChatGPT �
 
 | 場景 | 閱讀頁面 | 原因 |
 |---|---|---|
-| 第一次部署給 ChatGPT 使用 | [快速開始](getting-started/quickstart.md) | Docker Compose、OAuth 和 `/mcp` 基礎路徑 |
+| 主瀏覽器工作區 | [Unified web workspace](getting-started/web-workspace.md) | 具有共享登入的聊天、專案和 LSM 控制頁面 |
+| 第一個控制器部署 | [Quickstart](getting-started/quickstart.md) | Docker Compose、OAuth 和第一個瀏覽器會話 |
 | 選擇運行時層 | [運行時選擇](guides/deployment.md) | 把 Docker、VS Code、二進制、Python 和 stdio 與客戶端接入分開說明 |
+| 連接 Gemini Spark | [Gemini Custom Apps](getting-started/gemini-spark.md) | 資格、HTTPS MCP URL、OAuth 和測試 |
 | 把 ChatGPT 作爲客戶端接入 | [ChatGPT 連接器](getting-started/chatgpt-connector.md) | 端點、OAuth、首次安全提示和工具發現 |
 | 把 LSM 接入 DeepSeek Harness | [DeepSeek Harness 外掛](clients/deepseek-harness.md) | 將本 repository 作為 DSH bundle 安裝，同時保留完整 LSM 工具與 remote worker 能力 |
 | 從 VS Code 啓動運行時 | [VS Code 擴展運行時](installation/vscode-extension.md) | 編輯器啓動、設置和主機安全邊界 |
@@ -77,12 +79,12 @@ Docker、VS Code 擴展、二進制、Python 和 stdio 是運行時；ChatGPT �
 
 ## 典型工作流
 
-### 用 ChatGPT 編程
+### 在 Web 工作區中編碼
 
-1. 選擇 Docker Compose、VS Code 擴展、二進制或 Python 等運行時，並在專用工作區啓動。
-2. 如果 ChatGPT 需要訪問該運行時，先配置網絡入口。
-3. 把公開 `/mcp` 端點添加到 ChatGPT。
-4. 先讓 ChatGPT 檢查倉庫並執行只讀檢查。
+1. 啟動 LSM 控制器和可選的 [unified web workspace](getting-started/web-workspace.md)。
+2. 開啟 `/ui` 並使用 LSM 身分登入。
+3. 配置模型端點並開啟新對話。
+4. 要求模型檢查儲存庫並先執行唯讀檢查。
 5. 確認後再讓它修改文件、運行測試、檢查 diff、提交和推送。
 6. 涉及文件鏈接或遠程系統時查看審計日誌。
 

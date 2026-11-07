@@ -1,7 +1,9 @@
-<!-- i18n-source-sha256: c1206f28e9661a542c4c26bae628647a355f6ed1b12ca740574add7374666d57 -->
+<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
 # Interfejs użytkownika
 
-`local-shell-mcp` udostępnia dwa zgodne interfejsy człowieka nad tym samym service API, workspace, rejestrem persistent terminals, rejestrem remote workers i logiem audytu MCP:
+Zalecanym interfejsem przeglądarki jest [unified web workspace](../getting-started/web-workspace.md). Łączy czat AI, projekty i strony kontrolera LSM w jednym zmodyfikowanym interfejsie użytkownika LibreChat, korzystając z tej samej autoryzacji LSM i interfejsów API narzędzi. Jest to oddzielnie wdrażana usługa opcjonalna.
+
+Lekki kontroler zachowuje również dwa kompatybilne awaryjne interfejsy ludzkie na tym samym interfejsie API, obszarze roboczym, trwałym rejestrze terminali, rejestrze pracowników zdalnych i dzienniku audytu MCP:
 
 - **Web UI** to natywny panel przeglądarkowy zoptymalizowany pod szybki podgląd operacyjny.
 - **OpenTUI** to pełna aplikacja terminalowa, dostępna zarówno w przeglądarce, jak i jako natywne polecenie terminala.

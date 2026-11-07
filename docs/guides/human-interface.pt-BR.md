@@ -1,7 +1,9 @@
-<!-- i18n-source-sha256: c1206f28e9661a542c4c26bae628647a355f6ed1b12ca740574add7374666d57 -->
+<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
 # Interface humana
 
-`local-shell-mcp` oferece duas interfaces humanas compatíveis sobre a mesma API de serviço, workspace, registro de terminais persistentes, registro de workers remotos e log de auditoria MCP:
+O [unified web workspace](../getting-started/web-workspace.md) é a interface de navegador recomendada. Ele combina chat de IA, projetos e páginas do controlador LSM em uma interface de usuário modificada do LibreChat, usando a mesma autorização LSM e APIs de ferramenta. É um serviço opcional implantado separadamente.
+
+O Controlador leve também mantém duas interfaces humanas alternativas compatíveis sobre a mesma API, espaço de trabalho, registro de terminal persistente, registro de trabalhador remoto e log de auditoria MCP:
 
 - **Web UI** é um painel nativo do navegador otimizado para inspeção operacional rápida.
 - **OpenTUI** é o aplicativo completo orientado a terminal e continua disponível tanto no navegador quanto como comando nativo de terminal.

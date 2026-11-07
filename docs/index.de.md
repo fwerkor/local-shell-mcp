@@ -1,14 +1,14 @@
-<!-- i18n-source-sha256: b999ae6985930651e74b974b12109889360442811d6eeb306e6fa39754dbc173 -->
+<!-- i18n-source-sha256: a66d491558f07c419c8b5958d36c47cd90b081fc1c81f015bb62398cfd573e55 -->
 <div class="hero-shell" markdown>
-<span class="hero-eyebrow">ChatGPT-kompatible MCP-Control-Plane</span>
+<span class="hero-eyebrow">Selbstgehosteter KI-Arbeitsbereich · MCP-Steuerungsebene</span>
 
 # local-shell-mcp
 
-Geben Sie Ihrem KI-Assistenten eine kontrollierte Shell, einen echten Workspace, Git, Browser-Automatisierung, File Sharing und Remote-worker-Zugriff, ohne den Chat zu verlassen.
+Chat, Projekte, Dateien, Terminals, Remote-Maschinen und KI-Tools in einer selbst gehosteten Oberfläche. Schließen Sie externe MCP-Clients an, wenn Sie sie benötigen.
 
 <div class="hero-actions" markdown>
 [Loslegen](getting-started/quickstart.md){ .hero-action .hero-action--primary }
-[Runtime wählen](guides/deployment.md){ .hero-action .hero-action--secondary }
+[Web workspace](getting-started/web-workspace.md){ .hero-action .hero-action--secondary }
 [Tool-Referenz](reference/tools.md){ .hero-action .hero-action--secondary }
 </div>
 </div>
@@ -20,8 +20,8 @@ Führen Sie Tests aus, untersuchen Sie Repositories, patchen Sie Dateien, bedien
 </div>
 
 <div class="feature-card" markdown>
-### Runtime- und Client-Ebenen
-Wählen Sie einen Runtime wie Docker, VS Code extension, binary, Python oder stdio und verbinden Sie danach ChatGPT oder einen anderen MCP-Client separat.
+### Einheitlicher Web-Arbeitsbereich
+Nutzen Sie den integrierten Chat- und Projektverlauf neben Controller-Dateien, Terminals, Desktops, Sitzungen, Remotes und Audits. Externe MCP-Clients bleiben optional.
 </div>
 
 <div class="feature-card" markdown>
@@ -32,7 +32,7 @@ Binden Sie NAT-, Firewall- oder HPC-Maschinen über ausgehende Worker-Verbindung
 
 ## Was es bereitstellt
 
-`local-shell-mcp` stellt ChatGPT und anderen MCP-Clients einen kontrollierten lokalen oder Container-Workspace bereit. Es bietet Shell, Persistent Shell, Dateisystem, Suche, Patch, Git, Playwright, Audit, dauerhafte logische Sessions mit optionalen Goal-Plänen, tokenisierte Dateilinks und Remote-Worker-Tools über einen ChatGPT-kompatiblen MCP-Server mit OAuth.
+`local-shell-mcp` bietet einen einheitlichen, selbst gehosteten KI-Arbeitsbereich und einen MCP-Server für externe Clients. Es bietet Shell, persistente Shell, Dateisystem, Suche, Patch, Git, Playwright, Audit, dauerhafte logische Sitzungen mit optionalen Zielplänen, tokenisierte Dateiverknüpfung und Remote-Worker-Tools über authentifizierte MCP-Endpunkte.
 
 Verwenden Sie es, wenn die KI ein Repository untersuchen, Tests ausführen, Dateien bearbeiten, Git bedienen, Browser-Evidenz sammeln, herunterladbare Artefakte erzeugen oder eine Remote-Maschine steuern muss, die nur ausgehend zum Control Server verbinden kann.
 
@@ -41,7 +41,7 @@ Verwenden Sie es, wenn die KI ein Repository untersuchen, Tests ausführen, Date
 ```text
 Runtime-Ebene: Docker / VS Code extension / binary / Python / stdio
 Exposure-Ebene: localhost / HTTPS proxy / tunnel / stdio pipe
-Client-Ebene: ChatGPT / generic MCP client / editor helper
+Client-Ebene: einheitlicher WebUI-/Gemini-/ChatGPT-/generischer MCP-Client
 Kontrollierter Workspace: /workspace or configured workspace root
 Optionale Remote workers: outbound machine connections
 ```
@@ -52,8 +52,10 @@ Die vorgesehene Isolationsgrenze ist der Container oder die VM, in der der Diens
 
 | Szenario | Startpunkt | Warum |
 |---|---|---|
-| Erstes öffentliches ChatGPT-Deployment | [Quickstart](getting-started/quickstart.md) | Docker-Compose-Pfad mit OAuth und `/mcp`-Einrichtung |
+| Primärer Browser-Arbeitsbereich | [Unified web workspace](getting-started/web-workspace.md) | Chat, Projekte und LSM-Kontrollseiten mit einem gemeinsamen Login |
+| Erste Controller-Bereitstellung | [Quickstart](getting-started/quickstart.md) | Docker Compose, OAuth und die erste Browsersitzung |
 | Runtime-Ebene auswählen | [Runtime choices](guides/deployment.md) | Erklärt Docker, VS Code, binary, Python und stdio als getrennte Runtime-Optionen |
+| Zwillinge Spark verbinden | [Gemini Custom Apps](getting-started/gemini-spark.md) | Berechtigung, HTTPS-MCP-URL, OAuth und Tests |
 | ChatGPT als Client hinzufügen | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, erster sicherer Prompt und Tool Discovery |
 | LSM zu DeepSeek Harness hinzufügen | [DeepSeek-Harness-Plugin](clients/deepseek-harness.md) | Dieses Repository als DSH-Bundle installieren und die vollständige LSM-Tool- und Remote-Worker-Oberfläche beibehalten |
 | Aus VS Code ausführen | [VS Code extension runtime](installation/vscode-extension.md) | Editor-gestarteter Runtime und Host-Sicherheitshinweise |
@@ -77,12 +79,12 @@ Die vorgesehene Isolationsgrenze ist der Container oder die VM, in der der Diens
 
 ## Typische Workflows
 
-### Coding mit ChatGPT
+### Codierung im Web-Workspace
 
-1. Starten Sie einen Runtime wie Docker Compose, VS Code extension, binary oder Python in einem eigenen Workspace.
-2. Stellen Sie den HTTP-Runtime bereit, wenn ChatGPT Netzwerkzugriff benötigt.
-3. Fügen Sie den öffentlichen `/mcp`-Endpoint zu ChatGPT hinzu.
-4. Lassen Sie zuerst Repository und Read-only-Checks untersuchen.
+1. Starten Sie einen LSM-Controller und den optionalen [unified web workspace](getting-started/web-workspace.md).
+2. Öffnen Sie `/ui` und melden Sie sich mit der LSM-Identität an.
+3. Konfigurieren Sie einen Modellendpunkt und öffnen Sie eine neue Konversation.
+4. Bitten Sie das Modell, das Repository zu überprüfen und zunächst schreibgeschützte Prüfungen durchzuführen.
 5. Erlauben Sie danach Patches, Tests, Diff-Review, Commit und Push nach Freigabe.
 6. Prüfen Sie das Audit Log bei Tasks mit File Links oder Remote-Systemen.
 

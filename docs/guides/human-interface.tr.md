@@ -1,7 +1,9 @@
-<!-- i18n-source-sha256: c1206f28e9661a542c4c26bae628647a355f6ed1b12ca740574add7374666d57 -->
+<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
 # Kullanıcı arayüzü
 
-`local-shell-mcp`, aynı service API, workspace, persistent terminal registry, remote-worker registry ve MCP audit log üzerinde iki uyumlu human interface sunar:
+[unified web workspace](../getting-started/web-workspace.md) önerilen tarayıcı arayüzüdür. Aynı LSM yetkilendirme ve araç API'lerini kullanarak AI sohbeti, projeleri ve LSM Denetleyici sayfalarını değiştirilmiş tek bir LibreChat kullanıcı arayüzünde birleştirir. Ayrı olarak dağıtılan isteğe bağlı bir hizmettir.
+
+Basit Denetleyici ayrıca aynı API'nin üzerinde iki uyumlu yedek insan arayüzünü, çalışma alanını, kalıcı terminal kaydını, uzak çalışan kaydını ve MCP denetim günlüğünü korur:
 
 - **Web UI**, hızlı operasyonel inceleme için optimize edilmiş yerel bir tarayıcı panosudur.
 - **OpenTUI**, tam terminal odaklı uygulamadır ve hem tarayıcı içinde hem de yerel terminal komutu olarak kullanılabilir.

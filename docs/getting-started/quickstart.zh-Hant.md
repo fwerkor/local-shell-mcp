@@ -1,12 +1,12 @@
-<!-- i18n-source-sha256: a3fdf9088031e6903b15497a3df881a8e6ed2f6f2b34dd4d0b68b0414a2ca81e -->
+<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
 # 快速開始
 
-本頁把 Docker Compose 作爲第一個運行時，把 ChatGPT 作爲第一個客戶端。兩者是獨立選擇：Docker、VS Code 擴展、二進制、Python 和 stdio 是運行時；ChatGPT 和通用 MCP 客戶端是接入方式。完整關係見 [運行時與客戶端模型](../guides/deployment.md)。
+本指南啟動 LSM 控制器並開啟其瀏覽器介面。 [unified web workspace](web-workspace.md)為推薦日常體驗；它是一個單獨部署的、可選的聊天堆疊。 ChatGPT、Gemini 和其他外部 MCP 用戶端可以連接到相同控制器。請參閱 [runtime choices and deployment model](../guides/deployment.md)。
 
 ## 要求
 
 - Docker Engine 與 Compose v2。
-- 如果 ChatGPT 需要從公網訪問，需要一個公開 HTTPS 端點。
+- 如果遠端使用者或外部 MCP 用戶端必須連接，則為公共 HTTPS 端點。
 - 一個專用工作區目錄。
 - 較長的隨機 OAuth 管理 PIN 和 JWT 密鑰。
 
@@ -65,15 +65,15 @@ http://local-shell-mcp:8765
 
 如果使用 Caddy、Nginx、Traefik、Nginx Proxy Manager 或其它反向代理，把 HTTPS 流量轉發到 `127.0.0.1:8765` 或容器網絡地址。
 
-## 4. 連接 ChatGPT
+## 4.開啟瀏覽器工作區
 
-MCP 端點爲：
+開啟控制器登入：
 
 ```text
-https://your-public-host.example.com/mcp
+https://your-public-host.example.com/ui
 ```
 
-按照 [ChatGPT 連接器](chatgpt-connector.md) 完成 OAuth 和工具授權。
+對於聊天、專案和整合控制頁面，請關注 [unified web workspace guide](web-workspace.md)。原始輕量級WebUI在未安裝聊天時可用。
 
 ## 5. 安全確認工具訪問
 
@@ -129,6 +129,8 @@ curl -i http://127.0.0.1:8765/healthz
 | 從 VS Code 啓動運行時 | [VS Code 擴展運行時](../installation/vscode-extension.md) |
 | 使用獨立二進制運行 | [獨立二進制運行時](../installation/binary.md) |
 | 使用 Python、pipx 或源碼運行 | [Python 運行時](../installation/python.md) |
+| 使用統一的聊天和控制介面 | [Unified web workspace](web-workspace.md) |
+| 新增 Gemini Spark 作為客戶端 | [Gemini Custom Apps](gemini-spark.md) |
 | 添加 ChatGPT 客戶端 | [ChatGPT 連接器](chatgpt-connector.md) |
 | 選擇工具並寫更好的提示詞 | [使用模式](../guides/usage-patterns.md) |
 | 連接 HPC、NPU/GPU 或 NAT 機器 | [遠程節點](../guides/remote-workers.md) |

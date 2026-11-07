@@ -1,30 +1,29 @@
-<!-- i18n-source-sha256: 8b4e2e48e58e65721bf5ebf9f7b1d8aedf34d62d5a7948d36d6b9102ee1f6cc3 -->
+<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
 # 運行時選擇與部署模型
 
-`local-shell-mcp` 有兩個相互獨立的選擇：
+`local-shell-mcp` 有兩個互補的決定：
 
 1. **運行時**：服務進程如何運行，以及它控制哪個工作區。
-2. **客戶端連接**：ChatGPT 或其它 MCP 客戶端如何連接到這個服務。
+2. **介面**：使用可選的 [unified web workspace](../getting-started/web-workspace.md)，或連接外部 MCP 用戶端，例如 Gemini 或 ChatGPT。
 
-不要把 ChatGPT 當作部署方式。ChatGPT 是客戶端。Docker、VS Code 擴展、Release 二進制、Python 安裝和 stdio 模式纔是運行時選擇。
+建議的日常介面是自架網站 Web 工作區（聊天、專案和 LSM 控制頁面）。它與控制器分開部署。 Docker、VS Code 擴充功能、發布二進位檔案、Python 安裝和 stdio 模式都是運行控制器的方式；外部聊天應用程式仍然是可選用戶端。
 
 ```text
 運行時層                         暴露層                         客戶端層
 -------------------------------  -----------------------------  ----------------------
-Docker Compose                   僅本地 HTTP                    ChatGPT 自定義 MCP
+Docker Compose 僅本地 HTTP 統一 Web 工作區
 VS Code 擴展                     HTTPS 反向代理 / 隧道          通用 MCP 客戶端
 獨立二進制                       stdio 進程管道                 VS Code 擴展 UI
 pipx / 源碼 checkout             遠程 worker 出站加入           REST 風格診斷接口
 ```
 
-常見的公開部署形態是：
+常見的自架設定是：
 
 ```text
-ChatGPT
-  -> https://mcp.example.com/mcp
-  -> 反向代理或隧道
-  -> local-shell-mcp 運行時
-  -> 受控工作區
+瀏覽器 -> https://chat.example.com（統一網路工作區）
+        -> 經過驗證的 local-shell-mcp 控制器
+        -> 受控工作區與外派員工
+可選外部客戶端 -> https://mcp.example.com/mcp
 ```
 
 本地 MCP 客戶端可以更簡單：
@@ -37,10 +36,10 @@ ChatGPT
 
 ## 運行時選擇矩陣
 
-| 運行時 | 適合場景 | 隔離邊界 | 工具鏈來源 | ChatGPT 公網訪問 | 頁面 |
+| 運行時 | 最適合 | 隔離邊界 | 工具鏈源碼 | 外部 MCP 訪問 | 頁面 |
 |---|---|---|---|---|---|
-| Docker Compose | 大多數 coding-agent 任務和可重複工作區 | 容器 | 項目鏡像包含較完整的默認工具鏈 | 添加 HTTPS 代理或隧道 | [Docker Compose](../installation/docker.md) |
-| Docker Compose + tunnel sidecar | 使用 Cloudflare Tunnel 的單棧公開部署 | 容器 | 項目鏡像 | Compose 的 `tunnel` profile 內置 | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| Docker 組合 | 大多數編碼代理工作負載和可重複的工作空間 | 貨櫃 | 精實控制器形象；單獨安裝特定於任務的工具鏈 | 新增 HTTPS 代理或隧道 | [Docker Compose](../installation/docker.md) |
+| Docker Compose + 隧道 sidecar | 使用 Cloudflare Tunnel 部署公用控制器 | 貨櫃 | 項目形象 | 內建於 Compose `tunnel` 設定檔中 | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code 擴展 | 從編輯器工作區啓動或停止服務 | 通常是宿主機進程 | 宿主機工具，以及配置的可執行文件 | 爲 ChatGPT 添加外部 HTTPS 隧道或代理 | [VS Code 擴展](../installation/vscode-extension.md) |
 | 獨立二進制 | Docker 不可用，但已有 VM、容器宿主機或專用賬號作爲邊界 | 宿主機或 VM | 宿主機工具 | 添加 HTTPS 代理或隧道 | [獨立二進制](../installation/binary.md) |
 | `pipx` / 源碼安裝 | Python 原生使用、調試、開發 | 宿主機 virtualenv 或 VM | Python 包加宿主機工具 | 添加 HTTPS 代理或隧道 | [Python 安裝](../installation/python.md) |
@@ -48,14 +47,16 @@ ChatGPT
 
 ## 客戶端連接矩陣
 
-| 客戶端路徑 | 需要公網 HTTPS | 使用 `/mcp` | 需要 OAuth | 常見運行時 |
+| 介面 | 需要公共 HTTPS | 使用 `/mcp` | 需要 OAuth | 典型運行時間 |
 |---|---:|---:|---:|---|
+| 統一 LSM Web 工作區 | 是的，用於遠端存取；也可以使用本地代理 | 內部 | LSM登入 | 控制器加上獨立的網路堆疊 |
+| Gemini Spark / 自訂應用程式 | 是的 | 是的 | 是的，供大眾使用 | 任何 HTTP 控制器 |
 | ChatGPT 自定義 MCP 連接器 | 是 | 是 | 公網使用時需要 | Docker、VS Code 擴展、二進制或 Python |
 | 通過 stdio 的通用本地 MCP 客戶端 | 否 | 否 | 否 | `local-shell-mcp --mode stdio` |
 | 通用 HTTP MCP 客戶端 | localhost 通常不需要；跨網絡需要 | 是 | localhost 之外建議開啓 | 任意 HTTP 運行時 |
 | VS Code 擴展輔助流程 | 只有 ChatGPT 需要連接時才需要 | 複製 ChatGPT URL 時使用 | 用於 ChatGPT 時建議開啓 | VS Code 啓動的運行時 |
 
-另見 [ChatGPT 連接器](../getting-started/chatgpt-connector.md)、[通用 MCP 客戶端](../clients/generic-mcp.md) 和 [網絡連通性](../clients/connectivity.md)。
+請參閱 [unified web workspace](../getting-started/web-workspace.md)、[Gemini Spark](../getting-started/gemini-spark.md)、[ChatGPT connector](../getting-started/chatgpt-connector.md)、[generic MCP clients](../clients/generic-mcp.md) 和 [network connectivity](../clients/connectivity.md)。
 
 ## 每種運行時控制什麼
 
@@ -75,15 +76,15 @@ ChatGPT
 |---|---|---|---|
 | 命令在哪裏運行？ | 容器內 | 通常在宿主機工作區 | 宿主機或 VM 的進程環境 |
 | 默認工作區是什麼？ | 掛載的 `/workspace` | 當前 VS Code 文件夾或配置路徑 | `LOCAL_SHELL_MCP_WORKSPACE_ROOT` |
-| 是否預裝編譯器和瀏覽器？ | 基本齊全 | 取決於宿主機 | 取決於宿主機 |
+| 是否預先安裝了編譯器和瀏覽器？ | 不;安裝任務所需的內容 | 僅當安裝在主機上時 | 僅當安裝在主機上時 |
 | 是否容易重置？ | 刪除並重建容器和工作區卷 | 取決於工作區 | 取決於宿主機或 VM |
 | 是否適合任意包安裝？ | 如果是一次性環境，適合 | 直接宿主機上風險更高 | 除非在 VM 中，否則風險更高 |
 
 ## 推薦選擇
 
-除非有明確理由，否則優先使用 **Docker Compose**。它提供最清晰的安全邊界和最完整的默認工具鏈。
+首先使用**Docker Compose**，除非您有理由不這樣做。它提供了明確的安全邊界，而不需要大型預先安裝的開發工具鏈。
 
-當工作流從編輯器開始，且你需要本地啓動器時，使用 **VS Code 擴展**。它仍然是運行時。它本身不會讓服務被 ChatGPT 訪問；在 ChatGPT 網頁或 App 中使用時，還需要添加隧道或反向代理。
+當工作流程從編輯器啟動並且您需要本機啟動器時，請使用 **VS Code 擴充功能**。它仍然是一個運行時。遠端 Web 用戶端需要可存取的 HTTPS 代理或隧道。
 
 當 Docker 不可用，但已有 VM、容器宿主機或專用用戶賬號提供邊界時，使用**獨立二進制**。
 
@@ -93,7 +94,7 @@ ChatGPT
 
 ## 公開端點規則
 
-對於 ChatGPT 這類 HTTP MCP 客戶端，MCP 端點是：
+對於外部 HTTP MCP 用戶端（例如 Gemini 和 ChatGPT），MCP 端點是：
 
 ```text
 https://your-public-host.example.com/mcp
@@ -117,6 +118,8 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 
 ## 客戶端頁面
 
+- [Unified web workspace](../getting-started/web-workspace.md)
+- [Gemini Spark / Custom Apps](../getting-started/gemini-spark.md)
 - [ChatGPT 連接器](../getting-started/chatgpt-connector.md)
 - [通用 MCP 客戶端](../clients/generic-mcp.md)
 - [公開 HTTPS 暴露](../clients/connectivity.md)

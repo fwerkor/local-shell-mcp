@@ -1,7 +1,7 @@
 {
   "name": "local-shell-mcp",
   "version": "0.0.0-dev",
-  "description": "Official npm launcher for local-shell-mcp, a ChatGPT-ready MCP control plane for shell, files, browser automation, and remote machines.",
+  "description": "Official npm launcher for local-shell-mcp, a self-hosted AI workspace and MCP control plane.",
   "license": "MIT",
   "repository": {
     "type": "git",

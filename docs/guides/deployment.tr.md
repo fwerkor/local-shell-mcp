@@ -1,30 +1,29 @@
-<!-- i18n-source-sha256: 8b4e2e48e58e65721bf5ebf9f7b1d8aedf34d62d5a7948d36d6b9102ee1f6cc3 -->
+<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
 # Runtime seçenekleri ve deployment modeli
 
-`local-shell-mcp` içinde iki bağımsız karar vardır:
+`local-shell-mcp`'in iki tamamlayıcı kararı vardır:
 
 1. **Runtime**: server process’in nasıl çalıştığı ve hangi workspace’i kontrol ettiği.
-2. **Client connection**: ChatGPT veya başka bir MCP client’ın bu server’a nasıl ulaştığı.
+2. **Arayüz**: İsteğe bağlı [unified web workspace](../getting-started/web-workspace.md)'yi kullanın veya Gemini ya da ChatGPT gibi harici bir MCP istemcisine bağlanın.
 
-ChatGPT’yi deployment yöntemi olarak görmeyin. ChatGPT bir client’tır. Docker, VS Code extension, release binaries, Python installs ve stdio mode runtime seçenekleridir.
+Önerilen günlük arayüz, şirket içinde barındırılan web çalışma alanıdır (sohbet, projeler ve LSM kontrol sayfaları). Denetleyiciden ayrı olarak dağıtılır. Docker, VS Code uzantısı, sürüm ikili dosyaları, Python kurulumları ve stdio modu Denetleyiciyi çalıştırmanın yollarıdır; harici sohbet uygulamaları isteğe bağlı istemciler olarak kalır.
 
 ```text
 Runtime layer                      Exposure layer                 Client layer
 -------------------------------    ---------------------------    ----------------------
-Docker Compose                     local HTTP only                ChatGPT custom MCP
+Docker Yalnızca yerel HTTP oluşturun Birleşik web çalışma alanı
 VS Code extension                  HTTPS reverse proxy/tunnel     Generic MCP client
 Standalone binary                  stdio process pipe             VS Code extension UI
 pipx / source checkout             remote-worker outbound join    REST-style diagnostics
 ```
 
-Yaygın bir public setup:
+Yaygın olarak kendi kendine barındırılan bir kurulum:
 
 ```text
-ChatGPT
-  -> https://mcp.example.com/mcp
-  -> reverse proxy or tunnel
-  -> local-shell-mcp runtime
-  -> controlled workspace
+Tarayıcı -> https://chat.example.com (birleşik web çalışma alanı)
+        -> kimliği doğrulanmış yerel kabuk-mcp Denetleyicisi
+        -> kontrollü çalışma alanı ve giden İşçiler
+İsteğe bağlı harici istemci -> https://mcp.example.com/mcp
 ```
 
 Local MCP client setup daha basit olabilir:
@@ -37,10 +36,10 @@ Local MCP client
 
 ## Runtime seçim matrisi
 
-| Runtime | En uygun | Isolation boundary | Toolchain kaynağı | Public ChatGPT erişimi | Sayfa |
+| Çalışma zamanı | Şunun için en iyisi: | İzolasyon sınırı | Araç zinciri kaynağı | Harici MCP erişimi | Sayfa |
 |---|---|---|---|---|---|
-| Docker Compose | Çoğu coding-agent workload ve reproducible workspace | Container | Project image geniş default toolchain içerir | HTTPS proxy veya tunnel ekle | [Docker Compose](../installation/docker.md) |
-| Docker Compose + tunnel sidecar | Cloudflare Tunnel ile tek-stack public deployment | Container | Project image | Compose `tunnel` profile içine gömülü | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| Docker Oluşturma | Çoğu kodlama aracısı iş yükü ve tekrarlanabilir çalışma alanı | Konteyner | Yalın Kontrolör görüntüsü; göreve özgü araç zincirlerini ayrı olarak kurun | HTTPS proxy'si veya tüneli ekleyin | [Docker Compose](../installation/docker.md) |
+| Docker Compose + tünel sepeti | Cloudflare Tüneli ile Kamu Denetleyici dağıtımı | Konteyner | Proje resmi | Compose `tunnel` profiline yerleşik | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Editor workspace içinden server start/stop | Genellikle host process | Host tools ve configured executable | ChatGPT için harici HTTPS tunnel/proxy ekle | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Docker olmayan host veya VM | Host or VM | Host tools ve configured executable | HTTPS proxy veya tunnel ekle | [Standalone binary](../installation/binary.md) |
 | `pipx` / source install | Python-native kullanım, debugging, development | Host virtualenv or VM | Python package ve host tools | HTTPS proxy veya tunnel ekle | [Python install](../installation/python.md) |
@@ -48,14 +47,16 @@ Local MCP client
 
 ## Client bağlantı matrisi
 
-| Client path | Public HTTPS gerekir | `/mcp` kullanır | OAuth gerekir | Tipik runtime |
+| Arayüz | Genel HTTPS gerektirir | `/mcp`'i kullanır | OAuth gerektirir | Tipik çalışma zamanı |
 |---|---:|---:|---:|---|
+| Birleşik LSM web çalışma alanı | Uzaktan erişim için evet; yerel proxy de mümkün | Dahili olarak | LSM'ye giriş | Denetleyici artı ayrı web yığını |
+| Gemini Spark / Özel Uygulamalar | Evet | Evet | Evet genel kullanım için | Herhangi bir HTTP Denetleyicisi |
 | ChatGPT custom MCP connector | Evet | Evet | Public kullanımda evet | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | Hayır | Hayır | Hayır | `local-shell-mcp --mode stdio` |
 | Generic HTTP MCP client | localhost için genelde hayır; ağlar arası evet | Evet | localhost dışında önerilir | Any HTTP runtime |
 | VS Code extension helper flow | Yalnız ChatGPT bağlanacaksa | ChatGPT URL copy edilirken evet | ChatGPT için önerilir | VS Code-launched runtime |
 
-Bkz. [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md), [network connectivity](../clients/connectivity.md).
+[unified web workspace](../getting-started/web-workspace.md), [Gemini Spark](../getting-started/gemini-spark.md), [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md) ve [network connectivity](../clients/connectivity.md)'e bakın.
 
 ## Her runtime neyi kontrol eder
 
@@ -75,15 +76,15 @@ Fark abstract API değil, arkasındaki **operating environment**’dır.
 |---|---|---|---|
 | Command nerede çalışır? | Container içinde | Genellikle host workspace üzerinde | Host veya VM process environment içinde |
 | Default workspace? | Mounted `/workspace` | Geçerli VS Code folder veya configured path | `LOCAL_SHELL_MCP_WORKSPACE_ROOT` |
-| Compiler/browser önceden kurulu mu? | Büyük ölçüde evet | Yalnız host’ta kuruluysa | Yalnız host’ta kuruluysa |
+| Derleyiciler ve tarayıcılar önceden kurulu mu? | HAYIR; görevin gerektirdiğini yükle | Yalnızca ana bilgisayara yüklenmişse | Yalnızca ana bilgisayara yüklenmişse |
 | Reset kolay mı? | Container ve workspace volume yeniden oluştur | Workspace’e bağlı | Host/VM’e bağlı |
 | Arbitrary package install için uygun mu? | Disposable ise evet | Host üzerinde daha riskli | VM dışında daha riskli |
 
 ## Önerilen seçim
 
-Aksi için nedeniniz yoksa önce **Docker Compose** kullanın. En net safety boundary ve en kapsamlı default toolchain’i sağlar.
+Kullanmamak için bir nedeniniz olmadığı sürece öncelikle **Docker Compose**'u kullanın. Önceden kurulmuş büyük bir geliştirme araç zinciri gerektirmeden net bir güvenlik sınırı sağlar.
 
-Workflow editor’dan başlıyor ve local launcher istiyorsanız **VS Code extension** kullanın. Bu da runtime’dır. Tek başına server’ı ChatGPT’den erişilebilir yapmaz; ChatGPT web/app için tunnel veya reverse proxy ekleyin.
+İş akışı bir düzenleyiciden başlatıldığında ve yerel bir başlatıcı istediğinizde **VS Code uzantısını** kullanın. Bu hala bir çalışma zamanıdır. Uzak web istemcilerinin ulaşılabilir bir HTTPS proxy'sine veya tüneline ihtiyacı vardır.
 
 Docker yoksa ancak VM, container host veya dedicated user account zaten boundary sağlıyorsa **standalone binary** kullanın.
 
@@ -93,7 +94,7 @@ Yalnız server process spawn edebilen local MCP client’lar için **stdio mode*
 
 ## Public endpoint kuralı
 
-ChatGPT gibi HTTP MCP client’larda MCP endpoint:
+Gemini ve ChatGPT gibi harici HTTP MCP istemcileri için MCP uç noktası şöyledir:
 
 ```text
 https://your-public-host.example.com/mcp
@@ -117,6 +118,8 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 
 ## Client sayfaları
 
+- [Unified web workspace](../getting-started/web-workspace.md)
+- [Gemini Spark / Custom Apps](../getting-started/gemini-spark.md)
 - [ChatGPT connector](../getting-started/chatgpt-connector.md)
 - [Generic MCP clients](../clients/generic-mcp.md)
 - [Public HTTPS exposure](../clients/connectivity.md)

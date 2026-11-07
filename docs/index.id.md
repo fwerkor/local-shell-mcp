@@ -1,14 +1,14 @@
-<!-- i18n-source-sha256: b999ae6985930651e74b974b12109889360442811d6eeb306e6fa39754dbc173 -->
+<!-- i18n-source-sha256: a66d491558f07c419c8b5958d36c47cd90b081fc1c81f015bb62398cfd573e55 -->
 <div class="hero-shell" markdown>
-<span class="hero-eyebrow">Control plane MCP yang kompatibel dengan ChatGPT</span>
+<span class="hero-eyebrow">Ruang kerja AI yang dihosting sendiri · Bidang kendali MCP</span>
 
 # local-shell-mcp
 
-Berikan AI assistant Anda shell terkontrol, workspace nyata, Git, browser automation, file sharing, dan akses remote-worker tanpa meninggalkan chat.
+Obrolan, proyek, file, terminal, mesin jarak jauh, dan alat AI dalam satu antarmuka yang dihosting sendiri. Hubungkan klien MCP eksternal saat Anda membutuhkannya.
 
 <div class="hero-actions" markdown>
 [Mulai](getting-started/quickstart.md){ .hero-action .hero-action--primary }
-[Pilih runtime](guides/deployment.md){ .hero-action .hero-action--secondary }
+[Web workspace](getting-started/web-workspace.md){ .hero-action .hero-action--secondary }
 [Referensi tools](reference/tools.md){ .hero-action .hero-action--secondary }
 </div>
 </div>
@@ -20,8 +20,8 @@ Jalankan tests, inspeksi repositories, patch files, operasikan Git, dan simpan a
 </div>
 
 <div class="feature-card" markdown>
-### Lapisan runtime dan client
-Pilih runtime seperti Docker, VS Code extension, binary, Python, atau stdio, lalu hubungkan ChatGPT atau MCP client lain secara terpisah.
+### Ruang kerja web terpadu
+Gunakan obrolan bawaan dan riwayat proyek bersama file Pengontrol, terminal, desktop, sesi, remote, dan audit. Klien MCP eksternal tetap opsional.
 </div>
 
 <div class="feature-card" markdown>
@@ -32,7 +32,7 @@ Hubungkan mesin di balik NAT, firewall, atau HPC melalui outbound worker connect
 
 ## Yang disediakan
 
-`local-shell-mcp` mengekspos workspace local atau container yang terkontrol ke ChatGPT dan client MCP lain. Ia menyediakan shell, persistent shell, filesystem, search, patch, Git, Playwright, audit, logical Session durable dengan Goal Plan opsional, tokenized file link, dan tool remote-worker melalui server MCP kompatibel ChatGPT dengan OAuth.
+`local-shell-mcp` menyediakan ruang kerja AI terpadu yang dihosting sendiri dan server MCP untuk klien eksternal. Ini menyediakan shell, shell persisten, sistem file, pencarian, patch, Git, Playwright, audit, sesi logis yang tahan lama dengan rencana Sasaran opsional, tautan file yang diberi token, dan alat pekerja jarak jauh melalui titik akhir MCP yang diautentikasi.
 
 Gunakan saat AI perlu inspeksi repository, menjalankan tests, mengedit files, mengoperasikan Git, mengumpulkan browser evidence, membuat downloadable artifacts, atau mengontrol remote machine yang hanya dapat terhubung outbound ke control server.
 
@@ -41,7 +41,7 @@ Gunakan saat AI perlu inspeksi repository, menjalankan tests, mengedit files, me
 ```text
 Lapisan runtime: Docker / VS Code extension / binary / Python / stdio
 Lapisan exposure: localhost / HTTPS proxy / tunnel / stdio pipe
-Lapisan client: ChatGPT / generic MCP client / editor helper
+Lapisan klien: WebUI/Gemini/ChatGPT/klien MCP generik terpadu
 Workspace terkontrol: /workspace or configured workspace root
 Remote workers opsional: outbound machine connections
 ```
@@ -52,8 +52,10 @@ Isolation boundary yang dimaksud adalah container atau VM tempat service berjala
 
 | Skenario | Mulai di sini | Alasan |
 |---|---|---|
-| Deployment ChatGPT publik pertama | [Quickstart](getting-started/quickstart.md) | Jalur Docker Compose dengan OAuth dan setup `/mcp` |
+| Ruang kerja browser utama | [Unified web workspace](getting-started/web-workspace.md) | Obrolan, proyek, dan halaman kontrol LSM dengan login bersama |
+| Penerapan Pengendali pertama | [Quickstart](getting-started/quickstart.md) | Docker Compose, OAuth dan sesi browser pertama |
 | Memilih runtime layer | [Runtime choices](guides/deployment.md) | Menjelaskan Docker, VS Code, binary, Python, dan stdio sebagai opsi runtime terpisah |
+| Menghubungkan Percikan Gemini | [Gemini Custom Apps](getting-started/gemini-spark.md) | Kelayakan, URL HTTPS MCP, OAuth, dan pengujian |
 | Menambahkan ChatGPT sebagai client | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, prompt aman pertama, tool discovery |
 | Menambahkan LSM ke DeepSeek Harness | [Plugin DeepSeek Harness](clients/deepseek-harness.md) | Instal repository ini sebagai bundle DSH sambil mempertahankan seluruh tool dan remote-worker surface LSM |
 | Menjalankan dari VS Code | [VS Code extension runtime](installation/vscode-extension.md) | Runtime yang diluncurkan editor dan catatan keamanan host |
@@ -77,12 +79,12 @@ Isolation boundary yang dimaksud adalah container atau VM tempat service berjala
 
 ## Workflow umum
 
-### Coding dengan ChatGPT
+### Pengkodean di ruang kerja web
 
-1. Mulai runtime seperti Docker Compose, VS Code extension, binary, atau Python dalam dedicated workspace.
-2. Expose HTTP runtime jika ChatGPT memerlukan network access.
-3. Tambahkan public `/mcp` endpoint ke ChatGPT.
-4. Minta terlebih dahulu inspeksi repository dan read-only checks.
+1. Mulai Pengontrol LSM dan [unified web workspace](getting-started/web-workspace.md) opsional.
+2. Buka `/ui` dan masuk menggunakan identitas LSM.
+3. Konfigurasikan titik akhir model dan buka percakapan baru.
+4. Minta model untuk memeriksa repositori dan menjalankan pemeriksaan hanya-baca terlebih dahulu.
 5. Setelah disetujui, izinkan patch files, tests, diff review, commit, dan push.
 6. Review audit log saat task melibatkan file links atau remote systems.
 

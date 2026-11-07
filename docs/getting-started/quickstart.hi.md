@@ -1,12 +1,12 @@
-<!-- i18n-source-sha256: a3fdf9088031e6903b15497a3df881a8e6ed2f6f2b34dd4d0b68b0414a2ca81e -->
+<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
 # त्वरित शुरुआत
 
-यह गाइड पहले runtime के रूप में Docker Compose और पहले client के रूप में ChatGPT का उपयोग करती है। ये अलग विकल्प हैं: Docker, VS Code extension, binary, Python और stdio runtime विकल्प हैं; ChatGPT और generic MCP clients client विकल्प हैं। पूरी संरचना के लिए [runtime choices और deployment model](../guides/deployment.md) देखें।
+यह मार्गदर्शिका एक एलएसएम नियंत्रक प्रारंभ करती है और उसका ब्राउज़र इंटरफ़ेस खोलती है। [unified web workspace](web-workspace.md) अनुशंसित दैनिक अनुभव है; यह एक अलग से तैनात, वैकल्पिक चैट स्टैक है। चैटजीपीटी, जेमिनी और अन्य बाहरी एमसीपी क्लाइंट एक ही नियंत्रक से जुड़ सकते हैं। [runtime choices and deployment model](../guides/deployment.md) देखें.
 
 ## आवश्यकताएँ
 
 - Compose v2 सहित Docker Engine।
-- यदि ChatGPT को Web से connect करना है तो public HTTPS endpoint।
+- यदि दूरस्थ उपयोगकर्ताओं या बाहरी MCP क्लाइंट को कनेक्ट होना चाहिए तो एक सार्वजनिक HTTPS एंडपॉइंट।
 - एक dedicated workspace directory।
 - लंबा random OAuth admin PIN और JWT secret।
 
@@ -65,15 +65,15 @@ http://local-shell-mcp:8765
 
 Caddy, Nginx, Traefik, Nginx Proxy Manager या किसी अन्य reverse proxy के लिए HTTPS traffic को `127.0.0.1:8765` या container network address पर forward करें।
 
-## 4. ChatGPT connect करें
+## 4. ब्राउज़र कार्यक्षेत्र खोलें
 
-यह MCP endpoint उपयोग करें:
+नियंत्रक लॉगिन खोलें:
 
 ```text
-https://your-public-host.example.com/mcp
+https://your-public-host.example.com/ui
 ```
 
-OAuth और tool approval पूरा करने के लिए [ChatGPT connector guide](chatgpt-connector.md) का पालन करें।
+चैट, प्रोजेक्ट और एकीकृत नियंत्रण पृष्ठों के लिए, [unified web workspace guide](web-workspace.md) का पालन करें। चैट इंस्टॉल न होने पर मूल हल्का वेबयूआई उपलब्ध होता है।
 
 ## 5. Tool access सुरक्षित रूप से जाँचें
 
@@ -129,6 +129,8 @@ curl -i http://127.0.0.1:8765/healthz
 | VS Code से चलाएँ | [VS Code extension runtime](../installation/vscode-extension.md) |
 | release binary से चलाएँ | [Standalone binary runtime](../installation/binary.md) |
 | Python या source checkout से चलाएँ | [Python runtimes](../installation/python.md) |
+| एकीकृत चैट और नियंत्रण इंटरफ़ेस का उपयोग करें | [Unified web workspace](web-workspace.md) |
+| जेमिनी स्पार्क को ग्राहक के रूप में जोड़ें | [Gemini Custom Apps](gemini-spark.md) |
 | ChatGPT को client के रूप में जोड़ें | [ChatGPT connector](chatgpt-connector.md) |
 | tools चुनें और बेहतर prompts लिखें | [Usage patterns](../guides/usage-patterns.md) |
 | HPC, NPU/GPU या NAT machine जोड़ें | [Remote workers](../guides/remote-workers.md) |

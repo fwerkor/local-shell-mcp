@@ -1,5 +1,7 @@
 # Local Shell MCP unified WebUI (vendored LibreChat)
 
+This is LSM's **primary self-hosted browser workspace**. The user-facing [unified web workspace guide](../../docs/getting-started/web-workspace.md) covers installation, sign-in, chat, Controller pages and troubleshooting. This file documents the implementation and deployment boundaries.
+
 The **main LSM workspace** uses a directly vendored, modified LibreChat v0.8.8
 frontend and backend at [`app/`](./app/). LSM Controller pages are React routes
 within the same LibreChat shell, sidebar, navigation and theme. The LSM logo

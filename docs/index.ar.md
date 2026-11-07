@@ -1,14 +1,14 @@
-<!-- i18n-source-sha256: b999ae6985930651e74b974b12109889360442811d6eeb306e6fa39754dbc173 -->
+<!-- i18n-source-sha256: a66d491558f07c419c8b5958d36c47cd90b081fc1c81f015bb62398cfd573e55 -->
 <div class="hero-shell" markdown>
-<span class="hero-eyebrow">مستوى تحكم MCP متوافق مع ChatGPT</span>
+<span class="hero-eyebrow">مساحة عمل الذكاء الاصطناعي ذاتية الاستضافة · طائرة التحكم MCP</span>
 
 # local-shell-mcp
 
-امنح مساعد الذكاء الاصطناعي shell مضبوطًا وworkspace حقيقيًا وGit وbrowser automation وfile sharing ووصولًا إلى remote workers دون مغادرة المحادثة.
+الدردشة والمشاريع والملفات والمحطات الطرفية والأجهزة البعيدة وأدوات الذكاء الاصطناعي في واجهة واحدة مستضافة ذاتيًا. قم بتوصيل عملاء MCP الخارجيين عندما تحتاج إليهم.
 
 <div class="hero-actions" markdown>
 [ابدأ](getting-started/quickstart.md){ .hero-action .hero-action--primary }
-[اختر Runtime](guides/deployment.md){ .hero-action .hero-action--secondary }
+[Web workspace](getting-started/web-workspace.md){ .hero-action .hero-action--secondary }
 [مرجع الأدوات](reference/tools.md){ .hero-action .hero-action--secondary }
 </div>
 </div>
@@ -20,8 +20,8 @@
 </div>
 
 <div class="feature-card" markdown>
-### طبقتا Runtime وClient
-اختر runtime مثل Docker أو VS Code extension أو binary أو Python أو stdio، ثم صِل ChatGPT أو MCP client آخر بصورة مستقلة.
+### مساحة عمل الويب الموحدة
+استخدم سجل الدردشة والمشروع المدمج إلى جانب ملفات وحدة التحكم والمحطات الطرفية وسطح المكتب والجلسات وأجهزة التحكم عن بعد والتدقيق. يظل عملاء MCP الخارجيون اختياريين.
 </div>
 
 <div class="feature-card" markdown>
@@ -32,7 +32,7 @@
 
 ## ما الذي يقدمه
 
-يعرض `local-shell-mcp` workspace محليًا أو داخل container بشكل مضبوط إلى ChatGPT وعملاء MCP الآخرين. ويوفر shell وpersistent shell وfilesystem وsearch وpatch وGit وPlaywright وaudit وSessions منطقية دائمة مع Goal Plans اختيارية وروابط ملفات tokenized وأدوات remote worker عبر MCP server متوافق مع ChatGPT ويدعم OAuth.
+يوفر `local-shell-mcp` مساحة عمل AI موحدة ذاتية الاستضافة وخادم MCP للعملاء الخارجيين. إنه يوفر Shell، وShell المستمر، ونظام الملفات، والبحث، والتصحيح، وGit، وPlaywright، والتدقيق، وجلسات منطقية متينة مع خطط الأهداف الاختيارية، وارتباط الملفات المميز، وأدوات العمل عن بعد من خلال نقاط نهاية MCP المصادق عليها.
 
 استخدمه عندما يحتاج الذكاء الاصطناعي إلى فحص repository أو تشغيل tests أو تحرير files أو استخدام Git أو جمع browser evidence أو إنتاج downloadable artifacts أو التحكم في remote machine لا تستطيع سوى الاتصال الصادر إلى control server.
 
@@ -41,7 +41,7 @@
 ```text
 طبقة Runtime: Docker / VS Code extension / binary / Python / stdio
 طبقة Exposure: localhost / HTTPS proxy / tunnel / stdio pipe
-طبقة Client: ChatGPT / generic MCP client / editor helper
+طبقة العميل: WebUI / Gemini / ChatGPT / عميل MCP الموحد
 Workspace المضبوط: /workspace or configured workspace root
 Remote workers اختيارية: outbound machine connections
 ```
@@ -52,8 +52,10 @@ Remote workers اختيارية: outbound machine connections
 
 | السيناريو | ابدأ هنا | لماذا |
 |---|---|---|
-| أول public deployment لـ ChatGPT | [Quickstart](getting-started/quickstart.md) | مسار Docker Compose مع OAuth وإعداد `/mcp` |
+| مساحة عمل المتصفح الأساسية | [Unified web workspace](getting-started/web-workspace.md) | صفحات التحكم في الدردشة والمشاريع وLSM مع تسجيل دخول مشترك |
+| نشر وحدة التحكم الأولى | [Quickstart](getting-started/quickstart.md) | Docker Compose وOAuth وجلسة المتصفح الأولى |
 | اختيار runtime layer | [Runtime choices](guides/deployment.md) | يشرح Docker وVS Code وbinary وPython وstdio كخيارات runtime منفصلة |
+| ربط الجوزاء سبارك | [Gemini Custom Apps](getting-started/gemini-spark.md) | الأهلية وعنوان URL الخاص بـ HTTPS MCP وOAuth والاختبار |
 | إضافة ChatGPT كـ client | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint وOAuth وأول prompt آمن وtool discovery |
 | إضافة LSM إلى DeepSeek Harness | [إضافة DeepSeek Harness](clients/deepseek-harness.md) | تثبيت repository كحزمة DSH مع إبقاء مجموعة أدوات LSM وremote workers كاملة |
 | التشغيل من VS Code | [VS Code extension runtime](installation/vscode-extension.md) | Runtime مشغل من editor وملاحظات أمان host |
@@ -77,12 +79,12 @@ Remote workers اختيارية: outbound machine connections
 
 ## Workflows نموذجية
 
-### البرمجة مع ChatGPT
+### الترميز في مساحة عمل الويب
 
-1. ابدأ runtime مثل Docker Compose أو VS Code extension أو binary أو Python في workspace مخصص.
-2. اعرض HTTP runtime إذا احتاج ChatGPT إلى network access.
-3. أضف public `/mcp` endpoint إلى ChatGPT.
-4. اطلب أولًا فحص repository وتشغيل checks للقراءة فقط.
+1. ابدأ تشغيل وحدة تحكم LSM و[unified web workspace](getting-started/web-workspace.md) الاختياري.
+2. افتح `/ui` وقم بتسجيل الدخول باستخدام هوية LSM.
+3. قم بتكوين نقطة نهاية النموذج وافتح محادثة جديدة.
+4. اطلب من النموذج فحص المستودع وتشغيل عمليات التحقق للقراءة فقط أولاً.
 5. بعد الموافقة اسمح بتعديل files وتشغيل tests ومراجعة diff وcommit وpush.
 6. راجع audit log عندما تتضمن المهمة file links أو أنظمة بعيدة.
 

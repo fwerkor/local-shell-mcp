@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "local-shell-mcp"
 version = "6.0.0"
-description = "A ChatGPT-compatible OAuth MCP server that gives AI coding agents controlled shell, filesystem, remote-worker, and Playwright access inside a local container."
+description = "A self-hosted AI workspace and OAuth MCP control plane for shell, files, browser automation, and remote machines."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
