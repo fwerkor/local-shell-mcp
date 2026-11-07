@@ -67,8 +67,14 @@ def main() -> int:
         return 1
 
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
-    if "COPY requirements-agent.txt pyproject.toml hatch_build.py README.md LICENSE /app/" not in dockerfile:
+    if "COPY pyproject.toml hatch_build.py README.md LICENSE /app/" not in dockerfile:
         print("Docker builds must copy hatch_build.py before installing the project.")
+        return 1
+    if "FROM python:3.12-slim-bookworm" not in dockerfile or "bun run build:web" not in dockerfile:
+        print("Docker releases must use the slim Python runtime and WebUI-only build.")
+        return 1
+    if "requirements-agent.txt" in dockerfile or '.[dev]' in dockerfile or "local-shell-mcp-tui" in dockerfile:
+        print("Docker runtime must exclude development packages and the OpenTUI sidecar.")
         return 1
 
     if 'python -c "import zstandard"' not in dockerfile:
@@ -115,10 +121,21 @@ def main() -> int:
         print(f"extra: {extra_binary}")
         return 1
 
+    binary_ui_script = step_script(binary_job, "Build embedded WebUI only")
+    if "bun run build:web" not in binary_ui_script or "bun run build:tui" in binary_ui_script:
+        print("Standalone binaries must build only browser assets, never OpenTUI.")
+        return 1
     binary_build_script = step_script(binary_job, "Build self-contained executable")
     if "--collect-all zstandard" not in binary_build_script:
         print("Release standalone binaries must bundle the zstandard native extension.")
         return 1
+    if "--exclude-module playwright" not in binary_build_script:
+        print("Release standalone binaries must not bundle the Playwright runtime.")
+        return 1
+    for source in ("browser_sessions.py", "browser_external_service.py", "browser_external_paths.py"):
+        if f"--add-data src/local_shell_mcp/{source}:local_shell_mcp/browser_external" not in binary_build_script:
+            print(f"External browser sidecar source is missing: {source}")
+            return 1
 
     package_script = step_script(binary_job, "Package executable")
     if not package_script:
@@ -250,9 +267,9 @@ def main() -> int:
         print("VS Code Marketplace prereleases must publish through the prerelease channel.")
         return 1
 
-    smoke_script = step_script(binary_job, "Smoke test embedded OpenTUI runtime")
-    if "standalone-ui-smoke.py" not in smoke_script:
-        print("Release binaries must exercise the embedded OpenTUI runtime before packaging.")
+    smoke_script = step_script(binary_job, "Smoke test standalone WebUI without OpenTUI")
+    if "standalone-ui-smoke.py" not in smoke_script or "--web-only" not in smoke_script:
+        print("Release binaries must test WebUI without an embedded OpenTUI runtime.")
         return 1
 
     docker_job = jobs.get("publish-docker-platform", {})

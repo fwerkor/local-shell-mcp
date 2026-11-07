@@ -20,3 +20,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .DS_Store
+
+# Release images must never ingest generated native OpenTUI payloads.
+src/local_shell_mcp/ui_runtime/

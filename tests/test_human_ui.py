@@ -884,7 +884,12 @@ def test_scoped_ui_token_preserves_oauth_permissions(tmp_path, monkeypatch):
     assert response.status_code == 200
     payload = response.json()["data"]
     assert payload["machines"]["machines"][0]["name"] == "local"
-    assert payload["features"] == {"remote": False, "wallpaper": "bing", "hosted_chat": True, "live_workspace": True}
+    features = payload["features"]
+    assert isinstance(features.pop("tui"), bool)
+    assert features == {
+        "remote": False, "wallpaper": "bing",
+        "hosted_chat": True, "live_workspace": True,
+    }
 
     forbidden = client.post(
         "/api/ui/remotes",
