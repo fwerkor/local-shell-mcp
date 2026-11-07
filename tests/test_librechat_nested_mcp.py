@@ -126,3 +126,100 @@ def test_nested_mcp_requires_bridge_identity(nested_client):
     invalid = {**headers, "Authorization": "Bearer wrong"}
     assert client.get(url, headers=invalid).status_code == 401
     assert client.post(url, json={"action": "list"}, headers=invalid).status_code == 401
+
+
+def test_nested_mcp_connection_edits_cover_transport_variants(nested_client, tmp_path, monkeypatch):
+    import asyncio
+
+    from local_shell_mcp.dynamic_mcp import DynamicMCPManager
+
+    _, _, _ = nested_client
+    manager = DynamicMCPManager(tmp_path / "state")
+
+    def manage(**kwargs):
+        return asyncio.run(manager.manage(**kwargs))
+
+    manage(action="register", name="connection", transport="streamable_http",
+           url="https://example.org/mcp", refresh=False,
+           env={"TOKEN": "private"}, headers={"Authorization": "Bearer secret"})
+    # An unchanged HTTP transport may still accept changes to private settings.
+    first = manage(action="update", name="connection", url="https://example.net/mcp",
+                   env={"TOKEN": "replacement"}, headers={"X-Custom": "value"})
+    assert first["server"]["url"] == "https://example.net/mcp"
+    assert first["server"]["env_keys"] == ["TOKEN"]
+    assert first["server"]["header_keys"] == ["X-Custom"]
+    assert "replacement" not in str(first)
+    assert first["server"]["refreshed_at"] is None
+
+    # Migrate HTTP -> stdio, including executable policy, argv and workdir.
+    converted = manage(action="update", name="connection", transport="stdio",
+                       command="echo", args=["test"], cwd=str(tmp_path))
+    assert converted["server"]["transport"] == "stdio"
+    assert converted["server"]["command"] == "echo"
+    assert converted["server"]["args"] == ["test"]
+    assert converted["server"]["cwd"] == str(tmp_path)
+    assert converted["server"]["url"] is None
+    assert converted["server"]["header_keys"] == ["X-Custom"]
+
+    # Stdio can be updated without spelling out its transport or all fields.
+    modified = manage(action="update", name="connection", command="echo",
+                      args=["one", "two"], cwd="")
+    assert modified["server"]["args"] == ["one", "two"]
+    assert modified["server"]["command"] == "echo"
+
+    # Return to HTTP, dropping stdin command fields without losing credentials.
+    converted_back = manage(action="update", name="connection", transport="streamable_http",
+                            url="https://example.org/replaced")
+    assert converted_back["server"]["transport"] == "streamable_http"
+    assert converted_back["server"]["command"] is None
+    assert converted_back["server"]["args"] == []
+    assert converted_back["server"]["header_keys"] == ["X-Custom"]
+    assert manage(action="get", name="connection")["server"]["url"] == "https://example.org/replaced"
+
+    # Invalid changes must not replace the persisted last-good configuration.
+    with pytest.raises(ValueError, match="absolute HTTP"):
+        manage(action="update", name="connection", url="file:///tmp/mcp")
+    with pytest.raises(ValueError, match="stdio"):
+        manage(action="update", name="connection", transport="stdio")
+    with pytest.raises(ValueError, match="transport"):
+        manage(action="update", name="connection", transport="bad-protocol")
+    with pytest.raises(ValueError, match="values must be strings"):
+        manage(action="update", name="connection", env={"BAD": 123})
+    with pytest.raises(ValueError, match="values must be strings"):
+        manage(action="update", name="connection", headers={"BAD": None})
+    assert manage(action="get", name="connection")["server"]["url"] == "https://example.org/replaced"
+
+    # With local process execution forbidden, HTTP editing still works but stdio fails closed.
+    monkeypatch.setenv("LOCAL_SHELL_MCP_DISABLE_LOCAL", "true")
+    get_settings.cache_clear()
+    try:
+        with pytest.raises(ValueError, match="disabled"):
+            manage(action="update", name="connection", transport="stdio", command="echo")
+        assert manage(action="update", name="connection", url="https://example.org/ok")["server"]["url"] == "https://example.org/ok"
+    finally:
+        get_settings.cache_clear()
+
+
+def test_nested_mcp_ui_scope_restrictions(tmp_path, monkeypatch):
+    from local_shell_mcp.http_app import build_http_app
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_LIBRECHAT_URL", "https://chat.example.test")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_LIBRECHAT_BRIDGE_SECRET", "z" * 48)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "oauth")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_BACKEND", "file")
+    get_settings.cache_clear()
+    try:
+        user = "b" * 24
+        register_identity(user, issue_chat_ticket("limited", scopes="shell:read")["ticket"])
+        headers = {"Authorization": "Bearer " + "z" * 48, "X-LSM-Chat-User-Id": user}
+        client = TestClient(build_http_app())
+        assert client.get("/api/ui/nested-mcp", headers=headers).status_code == 200
+        assert client.post("/api/ui/nested-mcp", json={"action": "list"}, headers=headers).status_code == 403
+        register_identity(user, issue_chat_ticket("limited", scopes="shell:read shell:execute")["ticket"])
+        assert client.post("/api/ui/nested-mcp", json={"action": "list"}, headers=headers).status_code == 200
+        assert client.post("/api/ui/nested-mcp", json={"action": None}, headers=headers).status_code == 400
+        assert client.post("/api/ui/nested-mcp", json={"action": 7}, headers=headers).status_code == 400
+    finally:
+        get_settings.cache_clear()
