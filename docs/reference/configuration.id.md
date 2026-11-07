@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
+<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
 # Konfigurasi
 
 Repository menyediakan satu starter file yang dapat disalin: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose membaca `.env` hasilnya secara otomatis, dan runtime lain dapat memakai environment variables `LOCAL_SHELL_MCP_` yang sama. YAML tetap menjadi optional advanced input untuk deployment binary atau source; buat file secara eksplisit dan pilih dengan `LOCAL_SHELL_MCP_CONFIG` atau `--config`. Environment variables override YAML values, jadi hindari mendefinisikan setting yang sama di keduanya kecuali override memang disengaja. YAML keys menggunakan field names di bawah.
@@ -6,9 +6,15 @@ Repository menyediakan satu starter file yang dapat disalin: [`.env.example`](ht
 ## Precedence
 
 1. Built-in defaults dari `Settings`.
-2. YAML config yang dipilih oleh `LOCAL_SHELL_MCP_CONFIG` atau `--config`.
+2. YAML config yang dipilih oleh `LOCAL_SHELL_MCP_CONFIG` atau `--config`. LSM juga otomatis membaca `<state_dir>/config.yaml` jika berkas tersebut ada.
 3. Environment variables dengan prefix `LOCAL_SHELL_MCP_`.
 4. CLI flags seperti `--mode`, `--config`, `--remote`, dan `--no-remote`, yang mengatur environment values terkait sebelum settings load.
+
+## Mengubah pengaturan melalui WebUI
+
+Halaman **Settings** di WebUI memungkinkan pencarian, pengubahan, pengaturan ulang, dan penyimpanan konfigurasi controller. Pada Unix, YAML ditulis secara atomik dengan izin khusus pemilik; komentar sebelumnya dapat diformat ulang. Pengaturan dari variabel lingkungan hanya dapat dibaca. Nilai rahasia tidak dikirim ke browser. Perubahan divalidasi dan konflik dengan pengeditan eksternal diperiksa sebelum disimpan.
+
+**Save** hanya menyimpan, **Save & restart** menyimpan lalu memulai ulang, dan **Restart controller** memulai ulang secara terpisah. Layanan ditutup dengan tertib lalu menjalankan kembali perintah Python semula sehingga koneksi terputus. Perubahan alamat, port, autentikasi, atau direktori status mungkin perlu pemulihan manual. Pengelolaan memerlukan izin OAuth `admin:config` khusus WebUI; tanpa autentikasi, hanya akses langsung melalui loopback yang diizinkan.
 
 ## Minimal public configuration
 

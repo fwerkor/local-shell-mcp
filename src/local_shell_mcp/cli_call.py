@@ -323,17 +323,17 @@ def _cli_environment() -> dict[str, str]:
 
 
 def _apply_yaml_controller_values(values: dict[str, str]) -> dict[str, str]:
+    from .settings import _flatten_yaml, controller_config_path
+
     config = values.get("LOCAL_SHELL_MCP_CONFIG", "").strip()
-    if not config:
+    path = controller_config_path(values)
+    if not config and not path.is_file():
         return dict(values)
-
-    from .settings import _flatten_yaml
-
-    path = Path(config).expanduser()
     try:
         flat = _flatten_yaml(path)
     except (FileNotFoundError, OSError, RuntimeError, ValueError) as exc:
-        raise ValueError(f"unable to load LOCAL_SHELL_MCP_CONFIG {path}: {exc}") from exc
+        source = "LOCAL_SHELL_MCP_CONFIG" if config else "controller config"
+        raise ValueError(f"unable to load {source} {path}: {exc}") from exc
 
     merged: dict[str, str] = {}
     for field, env_name in CLI_YAML_ENV_FIELDS.items():
