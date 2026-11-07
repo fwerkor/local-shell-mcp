@@ -137,7 +137,7 @@ async def test_mcp_metadata_for_chatgpt_developer_mode(tmp_path, monkeypatch):
     assert content
     assert structured["ok"] is True
     assert structured["data"]["settings"]["default_timeout_s"] == 10
-    assert structured["data"]["settings"]["max_timeout_s"] == 120
+    assert structured["data"]["settings"]["max_timeout_s"] == 3600
 
 
 @pytest.mark.asyncio

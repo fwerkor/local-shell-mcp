@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from types import SimpleNamespace
 
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -31,10 +32,10 @@ def test_watchdog_budgets_cover_registered_routes_and_are_tool_specific(tmp_path
 
     budgets = http_app_module.HTTP_TOOL_WATCHDOG_TIMEOUTS_S
     assert budgets[("POST", "/tools/tree")] == 30
-    assert budgets[("POST", "/tools/run_shell")] == 130
+    assert budgets[("POST", "/tools/run_shell")] == 3615
     assert budgets[("POST", "/tools/browser/capture")] == 75
     assert budgets[("POST", "/tools/browser/text")] == 75
-    assert budgets[("POST", "/tools/playwright/run_script")] == 130
+    assert budgets[("POST", "/tools/playwright/run_script")] == 3615
     assert budgets[("POST", "/tools/shell_send")] is None
     assert budgets[("POST", "/tools/write_file")] is None
     assert ("GET", "/healthz") not in budgets
@@ -55,6 +56,22 @@ def test_rest_tool_watchdog_times_out_registered_short_route(tmp_path, monkeypat
     assert response.status_code == 504
     assert response.json()["error"] == "tool_timeout"
     assert "0.01 second" in response.json()["message"]
+
+
+def test_rest_long_running_shell_not_capped_by_short_tool_watchdog(tmp_path, monkeypatch):
+    _configure_http(tmp_path, monkeypatch)
+    monkeypatch.setattr(http_app_module, "PUBLIC_TOOL_TIMEOUT_S", 0.01)
+
+    async def delayed_shell(command, cwd=".", timeout_s=None, max_output_bytes=None):  # noqa: ANN001, ARG001
+        await asyncio.sleep(0.05)
+        return SimpleNamespace(model_dump=lambda: {"ok": True})
+
+    monkeypatch.setattr(http_app_module, "public_run_shell", delayed_shell)
+    response = TestClient(build_http_app()).post(
+        "/tools/run_shell", json={"command": "echo ok", "timeout_s": 3600}
+    )
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
 
 
 def test_watchdog_preserves_status_and_auth_behavior(tmp_path, monkeypatch):
