@@ -96,10 +96,14 @@ def test_single_user_auth_routes_and_gui_proxy_contract():
     for disabled in ("/login", "/register", "/resetPassword", "/2fa"):
         assert disabled not in auth
     login = (app / "api/server/routes/lsm-auth.js").read_text()
-    assert "workspace@local-shell-mcp.invalid" in login
+    assert "createLsmAuthHandler" in login
+    auth_store = (app / "packages/data-schemas/src/methods/lsmAuth.ts").read_text()
+    assert "workspace@local-shell-mcp.invalid" in auth_store
     proxy = (app / "api/server/routes/lsm-controller.js").read_text()
-    assert "x-lsm-gui-observation-id" in proxy
-    assert "x-lsm-gui-coordinate-input" in proxy
+    assert "makeLsmControllerProxy" in proxy
+    transport = (app / "packages/api/src/lsm/controller.ts").read_text()
+    assert "x-lsm-gui-observation-id" in transport
+    assert "x-lsm-gui-coordinate-input" in transport
 
 
 def test_unified_ui_native_pages_present():

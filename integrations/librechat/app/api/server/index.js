@@ -294,7 +294,14 @@ const startServer = async () => {
 
   if (process.env.LSM_PARENT_ORIGIN) {
     const origin = new URL(process.env.LSM_PARENT_ORIGIN).origin;
-    indexHTML = indexHTML.replace('</head>', `<meta name="lsm-parent-origin" content="${escapeHtmlAttribute(origin)}"></head>`);
+    const uiPath = (process.env.LSM_PARENT_UI_PATH || '/ui').replace(/\/$/, '');
+    if (!/^\/(?!\.\.?\/)(?:[A-Za-z0-9._~-]+\/?)*$/.test(uiPath) ||
+        uiPath.split('/').some((part) => part === '.' || part === '..')) {
+      throw new Error('LSM_PARENT_UI_PATH must be a safe absolute path');
+    }
+    const entry = origin + uiPath + '/#/hosted-chat';
+    indexHTML = indexHTML.replace('</head>',
+      `<meta name="lsm-ui-entry-url" content="${escapeHtmlAttribute(entry)}"></head>`);
   }
 
   /* The composer lays out against whether a footer bar sits beneath it, and

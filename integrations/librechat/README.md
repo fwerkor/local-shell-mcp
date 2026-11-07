@@ -61,6 +61,9 @@ A short-lived, one-use signed ticket authenticates the user to the chat backend
 via a top-level POST; there is **no iframe wrapper** or cross-frame upload path.
 Configure the chat and Controller HTTPS origins on the **same site**.
 The original LSM WebUI is retained for Controller deployments without chat.
+If the Controller uses a custom `LOCAL_SHELL_MCP_UI_PATH`, set the same
+environment variable for the LibreChat Compose deployment so the login
+redirect returns to that mounted route.
 
 ## Authentication and API boundary
 

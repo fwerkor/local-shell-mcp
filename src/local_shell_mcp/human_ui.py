@@ -3263,13 +3263,14 @@ async def api_librechat_policy(request: Request) -> Response:
         payload = await request.json()
         if not isinstance(payload, dict):
             raise ValueError("Expected JSON object")
-        set_chat_tool_policy(
+        updated = set_chat_tool_policy(
             str(payload.get("user_id") or ""),
             str(payload.get("conversation_id") or ""),
             payload.get("lsm"),
             payload.get("mcp", True),
+            revision=payload.get("revision"),
         )
-        return _json_ok({"updated": True})
+        return _json_ok({"updated": updated})
     except Exception as exc:
         return _json_error(exc)
 
@@ -3281,6 +3282,8 @@ async def api_librechat_upload(request: Request) -> Response:
     path: Path | None = None
     try:
         _require_ui_scopes(request, "shell:read", "shell:write")
+        if get_settings().disable_local:
+            raise PermissionError("Local workspace uploads are disabled")
         subject = _logical_session_subject(request, create=True)
         if not subject:
             raise PermissionError("An authenticated user is required")
@@ -3361,7 +3364,12 @@ async def api_librechat_ticket(request: Request) -> Response:
         from .auth import current_principal, principal_scopes
 
         principal = current_principal()
-        scopes = " ".join(sorted(principal_scopes(principal))) if principal else ""
+        from .oauth import ALL_OAUTH_SCOPES
+
+        local_auth = {"none", "native-tui", "local-cli", "localhost-bypass"}
+        scopes = (" ".join(sorted(ALL_OAUTH_SCOPES))
+                  if principal and principal.claims.get("auth") in local_auth
+                  else " ".join(sorted(principal_scopes(principal))) if principal else "")
         auth_mode = "none" if principal and principal.claims.get("auth") == "none" else "oauth"
         expires_at = principal.claims.get("exp") if principal else None
         return _json_ok(issue_chat_ticket(

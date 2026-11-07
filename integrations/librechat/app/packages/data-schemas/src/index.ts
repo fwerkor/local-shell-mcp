@@ -109,3 +109,6 @@ export {
   dropSupersededPromptGroupIndexes,
   backfillMCPServerNormalizedNames,
 } from './migrations';
+
+export { createLsmChatPreferenceStore } from './methods/lsmChatPreference';
+export { createLsmAuthStore } from './methods/lsmAuth';

@@ -177,19 +177,29 @@ EXTERNAL_MCP_CALL_TOOLS = frozenset({
 
 def set_chat_tool_policy(
     librechat_id: str, conversation_id: str, lsm_enabled: bool,
-    mcp_enabled: bool = True,
-) -> None:
+    mcp_enabled: bool = True, revision: int | None = None,
+) -> bool:
     from .state_store import get_state_store
 
     if type(lsm_enabled) is not bool or type(mcp_enabled) is not bool:
         raise ValueError("Invalid chat tool permission")
+    if revision is not None and (type(revision) is not int or revision < 1):
+        raise ValueError("Invalid chat policy revision")
     principal_for_chat_user(librechat_id)
     key = _chat_policy_key(librechat_id, conversation_id)
     store = get_state_store()
     with store.lock(key):
-        store.write_bytes(
-            key, json.dumps({"lsm": lsm_enabled, "mcp": mcp_enabled}, separators=(",", ":")).encode("utf-8")
-        )
+        previous = store.read_bytes(key)
+        current = json.loads(previous) if previous is not None else {}
+        previous_revision = int(current.get("revision", 0))
+        if ((revision is not None and previous_revision >= revision) or
+                (revision is None and previous_revision > 0)):
+            return False
+        policy = {"lsm": lsm_enabled, "mcp": mcp_enabled}
+        if revision is not None:
+            policy["revision"] = revision
+        store.write_bytes(key, json.dumps(policy, separators=(",", ":")).encode("utf-8"))
+        return True
 
 
 def may_chat_call_lsm(

@@ -1,12 +1,16 @@
+import useLocalize from '~/hooks/useLocalize';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Keyboard, Monitor, MousePointer2, RefreshCw } from 'lucide-react';
 import { useAuthContext } from '~/hooks';
-import { asText, binaryRequest, qs, read, write, type RecordValue } from './api';
+import { asText, binaryRequest, qs, type RecordValue } from './api';
+import { useControllerServices } from './hooks';
 
 type Bounds = { x: number; y: number; width: number; height: number };
 type Observation = { id: string; bounds: Bounds; coordinateInput: boolean };
 const button = 'rounded-lg border border-border-medium bg-surface-primary px-3 py-2 text-sm hover:bg-surface-hover disabled:opacity-40';
 export default function Desktop() {
+  const localize = useLocalize();
+  const { read, write } = useControllerServices();
   const { token } = useAuthContext();
   const [machine, setMachine] = useState('local');
   const [machines, setMachines] = useState<string[]>(['local']);
@@ -40,7 +44,7 @@ export default function Desktop() {
     try {
       const response = await binaryRequest('gui/frame' + qs({ machine, window_id: id }), token);
       if (!(response.headers.get('content-type') || '').startsWith('image/')) {
-        throw new Error('Controller returned no display frame');
+        throw new Error(localize('com_lsm_controller_returned_no_display_frame'));
       }
       const bounds: Bounds = {
         x: Number(response.headers.get('x-lsm-gui-window-x') || 0),
@@ -75,19 +79,19 @@ export default function Desktop() {
   };
   return <div className="space-y-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><h2 className="text-xl font-semibold">Desktop</h2><p className="mt-1 text-sm text-text-secondary">Inspect GUI windows and send approved actions.</p></div>
+      <div><h2 className="text-xl font-semibold">{localize('com_lsm_desktop')}</h2><p className="mt-1 text-sm text-text-secondary">{localize('com_lsm_inspect_gui_windows_and_send_approved_actions')}</p></div>
       <div className="flex gap-2">
-        <select aria-label="Desktop machine" className={button} value={machine} onChange={e => setMachine(e.target.value)}>
+        <select aria-label={localize('com_lsm_desktop_machine')} className={button} value={machine} onChange={e => setMachine(e.target.value)}>
           {machines.map(m => <option key={m} value={m}>{m}</option>)}
         </select>
         <button className={button} onClick={() => void refreshWindows()} disabled={busy}><RefreshCw size={16} /></button>
       </div>
     </div>
-    {error && <p className="rounded-lg border border-red-400/40 p-3 text-sm text-red-500" role="alert">{error}</p>}
+    {error && <p className="rounded-lg border border-status-error-border bg-status-error-subtle p-3 text-sm text-status-error" role="alert">{error}</p>}
     <div className="grid min-h-64 gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
       <aside className="rounded-xl border border-border-light p-3">
-        <h3 className="mb-2 text-sm font-semibold">Windows</h3>
-        {windows.length === 0 && <p className="p-2 text-sm text-text-secondary">No windows available</p>}
+        <h3 className="mb-2 text-sm font-semibold">{localize('com_lsm_windows')}</h3>
+        {windows.length === 0 && <p className="p-2 text-sm text-text-secondary">{localize('com_lsm_no_windows_available')}</p>}
         {windows.map((item, index) => {
           const id = String(item.window_id || item.id || '');
           return <button key={id || index} className={'mb-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-surface-hover ' + (windowId === id ? 'bg-surface-active-alt' : '')}
@@ -98,19 +102,19 @@ export default function Desktop() {
       </aside>
       <section className="min-w-0 overflow-hidden rounded-xl border border-border-light">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-light bg-surface-primary-alt px-4 py-3">
-          <span className="text-sm font-medium">{windowId || 'Select a window'}</span>
-          {windowId && <button className={button} onClick={() => void frame()} disabled={busy}>Refresh frame</button>}
+          <span className="text-sm font-medium">{windowId || localize('com_lsm_select_a_window')}</span>
+          {windowId && <button className={button} onClick={() => void frame()} disabled={busy}>{localize('com_lsm_refresh_frame')}</button>}
         </div>
-        {!image ? <p className="p-10 text-center text-sm text-text-secondary">Select a desktop window to view its latest frame.</p> :
+        {!image ? <p className="p-10 text-center text-sm text-text-secondary">{localize('com_lsm_select_a_desktop_window_to_view_its_latest_frame')}</p> :
           <div className="flex flex-col items-center gap-3 p-3">
-            <img ref={imageRef} src={image} alt="Desktop window frame" className={'max-h-[60vh] max-w-full object-contain ' + (observation?.coordinateInput ? 'cursor-crosshair' : '')} onClick={click} />
+            <img ref={imageRef} src={image} alt={localize('com_lsm_desktop_window_frame')} className={'max-h-[60vh] max-w-full object-contain ' + (observation?.coordinateInput ? 'cursor-crosshair' : '')} onClick={click} />
             <div className="flex w-full flex-wrap items-center gap-2">
-              <label htmlFor="lsm-desktop-keys" className="text-xs text-text-secondary"><Keyboard size={15} className="inline" /> Keyboard</label>
+              <label htmlFor="lsm-desktop-keys" className="text-xs text-text-secondary"><Keyboard size={15} className="inline" /> {localize('com_lsm_keyboard')}</label>
               <input id="lsm-desktop-keys" value={keys} onChange={e => setKeys(e.target.value)}
-                placeholder="e.g. CTRL+L" className="min-w-[170px] flex-1 rounded-lg border border-border-medium bg-surface-primary px-3 py-2 text-sm" />
-              <button className={button} onClick={() => { void act({ type: 'key', keys }); setKeys(''); }} disabled={!keys || busy}>Send key</button>
+                placeholder={localize('com_lsm_e_g_ctrl_l')} className="min-w-[170px] flex-1 rounded-lg border border-border-medium bg-surface-primary px-3 py-2 text-sm" />
+              <button className={button} onClick={() => { void act({ type: 'key', keys }); setKeys(''); }} disabled={!keys || busy}>{localize('com_lsm_send_key')}</button>
             </div>
-            <p className="self-start text-xs text-text-secondary">{observation?.coordinateInput ? 'Click the image to interact; Shift+click for right click.' : 'This backend does not support coordinate input.'}</p>
+            <p className="self-start text-xs text-text-secondary">{observation?.coordinateInput ? localize('com_lsm_click_the_image_to_interact_shift_click_for_right_click') : localize('com_lsm_this_backend_does_not_support_coordinate_input')}</p>
           </div>}
       </section>
     </div>

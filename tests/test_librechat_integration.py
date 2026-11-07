@@ -150,6 +150,15 @@ def test_librechat_apis_require_auth_and_store_local_upload(tmp_path, monkeypatc
             headers={"Content-Length": "8"},
         )
         assert wrong.status_code >= 400
+        monkeypatch.setenv("LOCAL_SHELL_MCP_DISABLE_LOCAL", "true")
+        get_settings.cache_clear()
+        blocked = client.post(
+            "/api/ui/librechat/upload?name=denied.txt",
+            content=b"restricted",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+        assert blocked.status_code >= 400
+        assert "denied.txt" not in str(list(tmp_path.rglob("*.txt")))
     finally:
         get_settings.cache_clear()
 
@@ -259,3 +268,21 @@ def test_noauth_mcp_installs_bridge_auth_when_librechat_is_enabled(tmp_path, mon
         assert not any(item.cls is AuthMiddleware for item in app.user_middleware)
     finally:
         get_settings.cache_clear()
+
+def test_versioned_chat_policy_rejects_out_of_order_updates(tmp_path, monkeypatch):
+    from local_shell_mcp.librechat_integration import (
+        issue_chat_ticket, register_identity, set_chat_tool_policy, may_chat_call_lsm,
+    )
+    from local_shell_mcp.state_store import FileStateStore
+    monkeypatch.setattr("local_shell_mcp.state_store.get_state_store",
+                        lambda: FileStateStore(tmp_path))
+    user = "f" * 24
+    register_identity(user, issue_chat_ticket("version-test")["ticket"])
+    assert set_chat_tool_policy(user, "conv-race", True, revision=2)
+    assert set_chat_tool_policy(user, "conv-race", False, revision=3)
+    assert not set_chat_tool_policy(user, "conv-race", True, revision=2)
+    assert not set_chat_tool_policy(user, "conv-race", True, revision=3)
+    assert not set_chat_tool_policy(user, "conv-race", True)
+    assert not may_chat_call_lsm(user, "conv-race")
+    assert set_chat_tool_policy(user, "conv-race", True, revision=4)
+    assert may_chat_call_lsm(user, "conv-race")

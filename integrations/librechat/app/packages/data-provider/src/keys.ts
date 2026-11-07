@@ -32,6 +32,7 @@ export enum QueryKeys {
   agents = 'agents',
   agent = 'agent',
   files = 'files',
+  lsmController = 'lsmController',
   fileConfig = 'fileConfig',
   tools = 'tools',
   toolAuth = 'toolAuth',

@@ -130,3 +130,7 @@ export type { OpenApiRouterDeps } from './openapi/router';
 export type * from './mcp/types';
 export type * from './flow/types';
 export type * from './types';
+
+export { makeLsmControllerProxy, isAllowedLsmControllerPath } from './lsm/controller';
+export { createLsmChatPreferencesHandlers } from './lsm/preferences';
+export { createLsmAuthHandler } from './lsm/auth';

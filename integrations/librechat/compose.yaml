@@ -22,6 +22,7 @@ services:
       MEILI_HOST: http://meilisearch:7700
       LSM_CONTROLLER_INTERNAL_URL: "http://local-shell-mcp:8765"
       LSM_PARENT_ORIGIN: "${LSM_PUBLIC_ORIGIN:?Set the public HTTPS LSM origin}"
+      LSM_PARENT_UI_PATH: "${LOCAL_SHELL_MCP_UI_PATH:-/ui}"
       LSM_LIBRECHAT_BRIDGE_SECRET: "${LSM_LIBRECHAT_BRIDGE_SECRET:?Set the bridge secret}"
       SEARXNG_INSTANCE_URL: http://searxng:8080
       ALLOW_EMAIL_LOGIN: "false"

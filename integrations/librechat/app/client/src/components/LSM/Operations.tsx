@@ -1,15 +1,20 @@
+import useLocalize from '~/hooks/useLocalize';
 import { useEffect, useState } from 'react';
 import { CheckCircle2, Play, RefreshCw, Send, Square, Server, Trash2, Plus, Search } from 'lucide-react';
-import { asText, read, write, type RecordValue } from './api';
+import { asText, type RecordValue } from './api';
+import { useControllerServices } from './hooks';
 
 type View = 'terminals' | 'sessions' | 'remotes' | 'audit';
+type Invite = { name?: string; code: string; command: string; persistent_command?: string; powershell_command: string; powershell_persistent_command?: string; expires_at?: number };
 const btn = 'rounded-lg border border-border-medium bg-surface-primary px-3 py-2 text-sm hover:bg-surface-hover disabled:opacity-40';
 const block = 'rounded-xl border border-border-light bg-surface-primary p-4';
 const row = 'w-full rounded-lg px-3 py-3 text-left text-sm transition-colors hover:bg-surface-hover';
 const keyFor = (data: RecordValue, fallback: number) =>
-  String(data.session_id || data.machine || data.id || data.job_id || fallback);
+  String(data.session_id || data.machine || data.name || data.id || data.job_id || fallback);
 const labelFor = (data: RecordValue) => asText(data.name || data.label || data.session_id || data.machine || data.event || data.id);
 export default function Operations({ section }: { section: View }) {
+  const localize = useLocalize();
+  const { read, write } = useControllerServices();
   const [payload, setPayload] = useState<RecordValue | null>(null);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState('');
@@ -19,6 +24,7 @@ export default function Operations({ section }: { section: View }) {
   const [input, setInput] = useState('');
   const [filter, setFilter] = useState('');
   const [busy, setBusy] = useState(false);
+  const [invite, setInvite] = useState<Invite | null>(null);
   const [refreshId, setRefreshId] = useState(0);
 
   const refresh = async () => {
@@ -41,7 +47,12 @@ export default function Operations({ section }: { section: View }) {
   const act = async (path: string, data: RecordValue, clear = false) => {
     setBusy(true);
     try {
-      await write(path, data); setError('');
+      const result = await write<RecordValue>(path, data);
+      if (path === 'remotes' && typeof result.code === 'string' &&
+          typeof result.command === 'string' && typeof result.powershell_command === 'string') {
+        setInvite(result as Invite);
+      }
+      setError('');
       if (clear) { setSelected(''); setDetail(null); }
       setRefreshId(n => n + 1);
     } catch (e) { setError(String(e)); }
@@ -72,38 +83,53 @@ export default function Operations({ section }: { section: View }) {
   const auditRows = (payload?.entries as RecordValue[] | undefined) ?? [];
   return <div className="space-y-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><h2 className="text-xl font-semibold">{section === 'terminals' ? 'Persistent terminals' : section === 'sessions' ? 'Logical sessions' : section === 'remotes' ? 'Remotes' : 'Audit trail'}</h2>
+      <div><h2 className="text-xl font-semibold">{section === 'terminals' ? localize('com_lsm_persistent_terminals') : section === 'sessions' ? localize('com_lsm_logical_sessions') : section === 'remotes' ? localize('com_lsm_remotes') : localize('com_lsm_audit_trail')}</h2>
         <p className="mt-1 text-sm text-text-secondary">
-          {section === 'terminals' ? 'Manage persistent shells on your machines.' : section === 'sessions' ? 'Track and control logical workloads.' : section === 'remotes' ? 'Inspect and manage connected workers.' : 'Inspect Controller events and tool calls.'}
+          {section === 'terminals' ? localize('com_lsm_manage_persistent_shells_on_your_machines') : section === 'sessions' ? localize('com_lsm_track_and_control_logical_workloads') : section === 'remotes' ? localize('com_lsm_inspect_and_manage_connected_workers') : localize('com_lsm_inspect_controller_events_and_tool_calls')}
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        {section === 'terminals' && <select aria-label="Terminal machine" className={btn} value={machine} onChange={e => {setSelected(''); setMachine(e.target.value);}}>
+        {section === 'terminals' && <select aria-label={localize('com_lsm_terminal_machine')} className={btn} value={machine} onChange={e => {setSelected(''); setMachine(e.target.value);}}>
           {machines.map(m => <option key={m} value={m}>{m}</option>)}
         </select>}
-        {section === 'terminals' && <button className={btn} disabled={busy} onClick={() => void act('terminals/start', { machine, cwd: '.', name: 'Terminal' })}><Plus size={16} className="mr-1 inline" />New shell</button>}
+        {section === 'terminals' && <button className={btn} disabled={busy} onClick={() => void act('terminals/start', { machine, cwd: '.' })}><Plus size={16} className="mr-1 inline" />{localize('com_lsm_new_shell')}</button>}
         {section === 'remotes' && <button className={btn} disabled={busy} onClick={() => {
-          const name = window.prompt('New remote invite name'); if (name) void act('remotes', { name });
-        }}><Plus size={16} className="mr-1 inline" />Invite</button>}
+          const name = window.prompt(localize('com_lsm_new_remote_invite_name')); if (name) void act('remotes', { name });
+        }}><Plus size={16} className="mr-1 inline" />{localize('com_lsm_invite')}</button>}
         {section === 'sessions' && <button className={btn} disabled={busy} onClick={() => {
-          const label = window.prompt('Session label'); if (label) void act('logical-sessions/start', { label });
-        }}><Plus size={16} className="mr-1 inline" />New session</button>}
-        <button className={btn} disabled={busy} onClick={() => setRefreshId(n => n + 1)}><RefreshCw size={16} className={busy ? 'animate-spin' : ''} aria-label="Refresh" /></button>
+          const label = window.prompt(localize('com_lsm_session_label')); if (label) void act('logical-sessions/start', { label });
+        }}><Plus size={16} className="mr-1 inline" />{localize('com_lsm_new_session')}</button>}
+        <button className={btn} disabled={busy} onClick={() => setRefreshId(n => n + 1)}><RefreshCw size={16} className={busy ? 'animate-spin' : ''} aria-label={localize('com_lsm_refresh')} /></button>
       </div>
     </div>
+    {section === 'remotes' && invite && <section className={block + ' space-y-3'} aria-label={localize('com_lsm_remote_enrollment')}>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">{localize('com_lsm_enroll')} {invite.name || localize('com_lsm_remote')} · {localize('com_lsm_invitation')} {invite.code}</h3>
+        <button className={btn} onClick={() => setInvite(null)}>{localize('com_lsm_dismiss')}</button>
+      </div>
+      <p className="text-xs text-text-secondary">{localize('com_lsm_these_one_time_credentials_will_not_be_shown_again_copy_the_command_to_the_new_machine')}</p>
+      {([['Linux / macOS', invite.command], ['Windows PowerShell', invite.powershell_command]] as const).map(([label, command]) =>
+        <div key={label} className="space-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-medium">{label}</span>
+            <button className={btn} onClick={() => void navigator.clipboard.writeText(command)}>{localize('com_lsm_copy_command')}</button>
+          </div>
+          <pre className="overflow-auto rounded-lg bg-surface-primary-alt p-3 font-mono text-xs">{command}</pre>
+        </div>)}
+    </section>}
     {section === 'audit' && <form onSubmit={e => { e.preventDefault(); setRefreshId(n => n + 1); }} className="flex gap-2">
-      <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Search events…" aria-label="Search audit"
+      <input value={filter} onChange={e => setFilter(e.target.value)} placeholder={localize('com_lsm_search_events')} aria-label={localize('com_lsm_search_audit')}
         className="min-w-0 flex-1 rounded-lg border border-border-medium bg-surface-primary px-3 py-2 text-sm" />
-      <button className={btn} type="submit"><Search size={16} className="mr-1 inline" />Search</button>
+      <button className={btn} type="submit"><Search size={16} className="mr-1 inline" />{localize('com_lsm_search')}</button>
     </form>}
-    {error && <p role="alert" className="rounded-lg border border-red-400/40 p-3 text-sm text-red-500">{error}</p>}
+    {error && <p role="alert" className="rounded-lg border border-status-error-border bg-status-error-subtle p-3 text-sm text-status-error">{error}</p>}
     <div className="grid min-h-52 gap-4 lg:grid-cols-[minmax(245px,0.8fr)_minmax(320px,1.2fr)]">
       <section className={block + ' max-h-[70vh] overflow-auto'}>
-        <h3 className="mb-3 text-sm font-semibold">{section === 'terminals' ? 'Shell sessions' : section === 'sessions' ? 'Session history' : section === 'remotes' ? 'Workers' : 'Events'}</h3>
+        <h3 className="mb-3 text-sm font-semibold">{section === 'terminals' ? localize('com_lsm_shell_sessions') : section === 'sessions' ? localize('com_lsm_session_history') : section === 'remotes' ? localize('com_lsm_workers') : localize('com_lsm_events')}</h3>
         {(() => {
           const items = section === 'terminals' ? terminalRows : section === 'sessions' ? sessionRows : section === 'remotes' ? remoteRows : auditRows;
-          if (!payload) return <p className="text-sm text-text-secondary">Loading…</p>;
-          if (items.length === 0) return <p className="text-sm text-text-secondary">Nothing to display</p>;
+          if (!payload) return <p className="text-sm text-text-secondary">{localize('com_lsm_loading')}</p>;
+          if (items.length === 0) return <p className="text-sm text-text-secondary">{localize('com_lsm_nothing_to_display')}</p>;
           return items.map((item, i) => {
             const id = keyFor(item, i);
             return <button key={id + i} className={row + (selected === id ? ' bg-surface-active-alt' : '')}
@@ -124,29 +150,29 @@ export default function Operations({ section }: { section: View }) {
         })()}
       </section>
       <section className={block + ' min-w-0'}>
-        {!selected && <p className="py-8 text-center text-sm text-text-secondary">Select an item to inspect it.</p>}
+        {!selected && <p className="py-8 text-center text-sm text-text-secondary">{localize('com_lsm_select_an_item_to_inspect_it')}</p>}
         {!!selected && section === 'terminals' && <>
           <div className="mb-3 flex items-center justify-between gap-2">
             <h3 className="truncate text-sm font-semibold">{selected}</h3>
-            <button className={btn} disabled={busy} onClick={() => { if (window.confirm('Terminate this shell?')) void act('terminals/kill', { machine, session_id: selected }, true); }}>
-              <Square size={15} className="mr-1 inline" />Stop
+            <button className={btn} disabled={busy} onClick={() => { if (window.confirm(localize('com_lsm_terminate_this_shell'))) void act('terminals/kill', { machine, session_id: selected }, true); }}>
+              <Square size={15} className="mr-1 inline" />{localize('com_lsm_stop')}
             </button>
           </div>
-          <pre className="h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black p-3 font-mono text-xs leading-5 text-green-100" aria-label="Terminal output">
-            {terminalText || 'No output yet'}
+          <pre className="h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-surface-primary-alt p-3 font-mono text-xs leading-5 text-text-primary" aria-label={localize('com_lsm_terminal_output')}>
+            {terminalText || localize('com_lsm_no_output_yet')}
           </pre>
           <form className="mt-3 flex gap-2" onSubmit={e => { e.preventDefault(); if (!input) return; void act('terminals/send', { machine, session_id: selected, input_text: input, enter: true }); setInput(''); }}>
             <input value={input} onChange={e => setInput(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-border-medium bg-surface-primary px-3 py-2 font-mono text-sm"
-              aria-label="Shell input" placeholder="Send input to shell" />
+              aria-label={localize('com_lsm_shell_input')} placeholder={localize('com_lsm_send_input_to_shell')} />
             <button type="submit" className={btn} disabled={busy || !input}><Send size={16} /></button>
           </form>
         </>}
         {!!selected && section === 'sessions' && <>
           <div className="mb-3 flex flex-wrap items-center gap-2">
-            <h3 className="mr-auto text-sm font-semibold">Session detail</h3>
+            <h3 className="mr-auto text-sm font-semibold">{localize('com_lsm_session_detail')}</h3>
             {['finish', 'cancel'].map(action => <button key={action} className={btn} disabled={busy}
-              onClick={() => { if (window.confirm(action + ' session?')) void act('logical-sessions/' + action, { session_id: selected }); }}>
-              {action === 'finish' ? <CheckCircle2 size={15} className="mr-1 inline" /> : <Square size={15} className="mr-1 inline" />}{action}
+              onClick={() => { if (window.confirm(action + ' ' + localize('com_lsm_session'))) void act('logical-sessions/' + action, { session_id: selected }); }}>
+              {action === 'finish' ? <CheckCircle2 size={15} className="mr-1 inline" /> : <Square size={15} className="mr-1 inline" />}{localize(action === 'finish' ? 'com_lsm_finish' : 'com_lsm_cancel')}
             </button>)}
           </div>
           <pre className="max-h-[58vh] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-surface-primary-alt p-3 font-mono text-xs">{JSON.stringify(detail, null, 2)}</pre>
@@ -156,9 +182,9 @@ export default function Operations({ section }: { section: View }) {
             <h3 className="text-sm font-semibold">{labelFor(detail || {})}</h3>
             <div className="flex gap-2">
               <button className={btn} disabled={busy} onClick={() => {
-                const name = window.prompt('Rename worker'); if (name) void act('remotes/rename', { machine: selected, new_name: name });
-              }}>Rename</button>
-              <button className={btn} disabled={busy} onClick={() => { if (window.confirm('Revoke this worker?')) void act('remotes/revoke', { machine: selected }, true); }}>
+                const name = window.prompt(localize('com_lsm_rename_worker')); if (name) void act('remotes/rename', { machine: selected, new_name: name });
+              }}>{localize('com_lsm_rename')}</button>
+              <button className={btn} disabled={busy} onClick={() => { if (window.confirm(localize('com_lsm_revoke_this_worker'))) void act('remotes/revoke', { machine: selected }, true); }}>
                 <Trash2 size={15} />
               </button>
             </div>
@@ -166,7 +192,7 @@ export default function Operations({ section }: { section: View }) {
           <pre className="max-h-[58vh] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-surface-primary-alt p-3 font-mono text-xs">{JSON.stringify(detail, null, 2)}</pre>
         </>}
         {!!selected && section === 'audit' && <>
-          <h3 className="mb-3 text-sm font-semibold">Event detail</h3>
+          <h3 className="mb-3 text-sm font-semibold">{localize('com_lsm_event_detail')}</h3>
           <pre className="max-h-[58vh] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-surface-primary-alt p-3 font-mono text-xs">{JSON.stringify(detail, null, 2)}</pre>
         </>}
       </section>
