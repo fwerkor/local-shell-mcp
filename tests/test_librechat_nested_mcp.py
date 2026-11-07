@@ -57,6 +57,15 @@ def test_nested_mcp_ui_manages_controller_registry_and_redacts_credentials(neste
     assert listed[0]["name"] == "example"
     assert listed[0]["header_keys"] == ["Authorization"]
     assert "private" not in json.dumps(listed)
+    updated = client.post(url, json={
+        "action": "update", "name": "example", "transport": "streamable_http",
+        "url": "https://example.org/changed",
+    }, headers=headers)
+    assert updated.status_code == 200, updated.text
+    updated_server = updated.json()["data"]["server"]
+    assert updated_server["url"] == "https://example.org/changed"
+    assert updated_server["header_keys"] == ["Authorization"]
+    assert updated_server["refreshed_at"] is None
     assert client.post(url, json={
         "action": "disable", "name": "example",
     }, headers=headers).json()["data"]["server"]["enabled"] is False

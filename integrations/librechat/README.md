@@ -97,7 +97,8 @@ the LSM tools. Uploading does not grant new read or tool permissions.
 LibreChat's original file-search, code runner and skill marketplace are
 disabled. Its MCP **sidebar** now manages LSM's *nested* MCP registry through
 the authenticated Controller `/api/ui/nested-mcp` endpoint. It can register,
-enable/disable, refresh or remove stdio/HTTP servers and set/unset their
+edit connection settings without losing existing private credentials,
+enable/disable, refresh or remove stdio/HTTP servers, and set/unset their
 private environment variables and headers. No additional MCP servers are
 persisted in LibreChat's own MCP database. Controller-scope validation and
 secret redaction remain active. The only LibreChat-side MCP connection is

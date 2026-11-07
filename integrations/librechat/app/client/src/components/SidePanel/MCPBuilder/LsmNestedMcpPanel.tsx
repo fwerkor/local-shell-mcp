@@ -34,6 +34,11 @@ export default function LsmNestedMcpPanel() {
   const [transport, setTransport] = useState<'stdio' | 'streamable_http'>('streamable_http');
   const [endpoint, setEndpoint] = useState('');
   const [argumentsText, setArgumentsText] = useState('');
+  const [editing, setEditing] = useState('');
+  const [editTransport, setEditTransport] = useState<'stdio' | 'streamable_http'>('streamable_http');
+  const [editEndpoint, setEditEndpoint] = useState('');
+  const [editArgs, setEditArgs] = useState('');
+  const [editCwd, setEditCwd] = useState('');
   const [credentialKind, setCredentialKind] = useState<'header' | 'env'>('header');
   const [credentialKey, setCredentialKey] = useState('');
   const [credentialValue, setCredentialValue] = useState('');
@@ -63,6 +68,30 @@ export default function LsmNestedMcpPanel() {
       if (action.endsWith('_set') || action.endsWith('_unset')) {
         setCredentialKey(''); setCredentialValue('');
       }
+      await refresh();
+    } catch (err) { setError(String(err)); }
+    finally { setPending(false); }
+  };
+  const beginEdit = (server: Server) => {
+    if (editing === server.name) { setEditing(''); return; }
+    setEditing(server.name);
+    setEditTransport(server.transport);
+    setEditEndpoint(server.transport === 'stdio' ? server.command || '' : server.url || '');
+    setEditArgs((server.args || []).join(' '));
+    setEditCwd(server.cwd || '');
+  };
+  const updateServer = async (event: FormEvent, server: Server) => {
+    event.preventDefault();
+    if (pending || !editEndpoint) return;
+    setPending(true); setError(''); setNotice('');
+    try {
+      const parameters = editTransport === 'stdio'
+        ? { transport: editTransport, command: editEndpoint.trim(),
+            args: editArgs.trim() ? editArgs.trim().split(/\\s+/) : [], cwd: editCwd.trim() || '.' }
+        : { transport: editTransport, url: editEndpoint.trim() };
+      await write('nested-mcp', { action: 'update', name: server.name, ...parameters });
+      setEditing('');
+      setNotice('Connection updated. Refresh tools to load the new endpoint.');
       await refresh();
     } catch (err) { setError(String(err)); }
     finally { setPending(false); }
@@ -140,10 +169,33 @@ export default function LsmNestedMcpPanel() {
             {expanded === server.name && (
               <div className="space-y-3 border-t border-border-light p-3">
                 <div className="flex flex-wrap gap-2">
+                  <button className={buttonStyle} disabled={pending} onClick={() => beginEdit(server)}>Edit</button>
                   <button className={buttonStyle} disabled={pending} onClick={() => void manage(server.enabled ? 'disable' : 'enable', server)}>{server.enabled ? 'Disable' : 'Enable'}</button>
                   <button className={buttonStyle} disabled={pending} onClick={() => void manage('refresh', server)}>Refresh tools</button>
                   <button className={buttonStyle + ' inline-flex items-center gap-1 text-red-500'} disabled={pending} onClick={() => void manage('remove', server)}><Trash2 size={13} /> Remove</button>
                 </div>
+                {editing === server.name && (
+                  <form onSubmit={event => void updateServer(event, server)} className="space-y-2 rounded-lg bg-surface-secondary p-3">
+                    <label className="block text-xs">Transport
+                      <select className={fieldStyle + ' mt-1'} value={editTransport} onChange={event => setEditTransport(event.target.value as typeof editTransport)}>
+                        <option value="streamable_http">Streamable HTTP</option><option value="stdio">Local stdio</option>
+                      </select>
+                    </label>
+                    <label className="block text-xs">{editTransport === 'stdio' ? 'Executable' : 'Server URL'}
+                      <input required className={fieldStyle + ' mt-1'} value={editEndpoint} onChange={event => setEditEndpoint(event.target.value)} />
+                    </label>
+                    {editTransport === 'stdio' && <>
+                      <label className="block text-xs">Arguments
+                        <input className={fieldStyle + ' mt-1'} value={editArgs} onChange={event => setEditArgs(event.target.value)} />
+                      </label>
+                      <label className="block text-xs">Working directory
+                        <input className={fieldStyle + ' mt-1'} value={editCwd} onChange={event => setEditCwd(event.target.value)} placeholder="." />
+                      </label>
+                    </>}
+                    <p className="text-xs text-text-secondary">Existing private credentials are retained.</p>
+                    <button type="submit" className={buttonStyle} disabled={pending}>Save connection</button>
+                  </form>
+                )}
                 {server.refreshed_at && <p className="text-xs text-text-secondary">Last refreshed: {new Date(server.refreshed_at).toLocaleString()}</p>}
                 <div className="space-y-2 border-t border-border-light pt-3">
                   <p className="text-xs font-medium">Credentials</p>

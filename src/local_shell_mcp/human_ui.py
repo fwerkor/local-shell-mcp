@@ -3236,7 +3236,7 @@ async def api_nested_mcp(request: Request) -> Response:
                 raise ValueError("Unsupported MCP management field")
             action = payload.get("action")
             if not isinstance(action, str) or action not in {
-                "list", "register", "get", "enable", "disable", "remove",
+                "list", "register", "get", "update", "enable", "disable", "remove",
                 "refresh", "env_set", "env_unset", "header_set", "header_unset",
             }:
                 raise ValueError("Unsupported nested MCP action")
