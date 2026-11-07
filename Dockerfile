@@ -1,11 +1,10 @@
 # check=skip=SecretsUsedInArgOrEnv
 ARG BUN_VERSION=1.3.14
-ARG PLAYWRIGHT_VERSION=1.59.0
 FROM oven/bun:${BUN_VERSION} AS ui-builder
 WORKDIR /source
 COPY ui /source/ui
 COPY src/local_shell_mcp /source/src/local_shell_mcp
-RUN cd /source/ui && bun install --frozen-lockfile && bun run build
+RUN cd /source/ui && bun install --frozen-lockfile && bun run build:web
 
 FROM alpine:3.22 AS tmux-builder
 ARG TMUX_VERSION=3.5a
@@ -38,91 +37,47 @@ RUN LIBEVENT_CFLAGS="$(pkg-config --cflags libevent)" \
   && mkdir -p /out \
   && install -m 0755 tmux /out/tmux
 
-FROM mcr.microsoft.com/playwright/python:v${PLAYWRIGHT_VERSION}-noble
-ARG PLAYWRIGHT_VERSION
+FROM python:3.12-slim-bookworm
 ARG TARGETARCH
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    VIRTUAL_ENV=/opt/local-shell-mcp-venv \
     LOCAL_SHELL_MCP_WORKSPACE_ROOT=/workspace \
     LOCAL_SHELL_MCP_HOST=0.0.0.0 \
     LOCAL_SHELL_MCP_PORT=8765 \
     LOCAL_SHELL_MCP_PERSISTENT_CREDENTIALS=true \
     LOCAL_SHELL_MCP_CREDENTIALS_DIR=/persist/credentials \
-    LOCAL_SHELL_MCP_UI_TUI_COMMAND=/usr/local/bin/local-shell-mcp-tui
+    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 
+# Only runtime utilities are installed. Development toolchains, office suites,
+# data-science environments, Node.js, and OpenTUI remain opt-in.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     ca-certificates \
-    sudo \
     curl \
-    git \
+    file \
     gh \
+    git \
     jq \
+    libmagic1 \
     openssh-client \
     patch \
+    passwd \
     ripgrep \
+    sqlite3 \
+    sudo \
     tmux \
     tree \
+    unzip \
+    util-linux \
     vim-tiny \
     wget \
     zip \
-    unzip \
-    build-essential \
-    autoconf \
-    automake \
-    clang \
-    cmake \
-    gdb \
-    lldb \
-    libtool \
-    make \
-    ninja-build \
-    pkg-config \
-    python3-dev \
-    python3-pip \
-    python3-venv \
-    pipx \
-    nodejs \
-    npm \
-    golang-go \
-    rustc \
-    cargo \
-    openjdk-21-jdk \
-    maven \
-    gradle \
-    ruby-full \
-    php-cli \
-    php-curl \
-    php-dev \
-    php-mbstring \
-    php-xml \
-    composer \
-    perl \
-    lua5.4 \
-    luarocks \
-    r-base \
-    shellcheck \
-    sqlite3 \
-    file \
-    libmagic1 \
-    pandoc \
-    poppler-utils \
-    tesseract-ocr \
-    libreoffice-calc \
-    libreoffice-impress \
-    libreoffice-writer \
   && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m venv "${VIRTUAL_ENV}"
-ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
-
-RUN npm install -g yarn@1.22.22 pnpm@9.15.9 typescript@5.7.3 ts-node@10.9.2
 
 WORKDIR /app
-COPY requirements-agent.txt pyproject.toml hatch_build.py README.md LICENSE /app/
-RUN pip install --no-cache-dir -r requirements-agent.txt
+COPY pyproject.toml hatch_build.py README.md LICENSE /app/
 COPY src /app/src
 COPY --from=tmux-builder /out/tmux /tmp/local-shell-mcp-tmux
 RUN set -eux; \
@@ -135,14 +90,16 @@ RUN set -eux; \
   install -m 0755 /tmp/local-shell-mcp-tmux "/app/src/local_shell_mcp/helpers/linux-${helper_arch}/tmux"; \
   rm -f /tmp/local-shell-mcp-tmux
 COPY --from=ui-builder /source/src/local_shell_mcp/ui_static /app/src/local_shell_mcp/ui_static
-COPY --from=ui-builder /source/ui/dist/local-shell-mcp-tui /usr/local/bin/local-shell-mcp-tui
-RUN pip install --no-cache-dir -e ".[dev]" "playwright==${PLAYWRIGHT_VERSION}" \
+# Browser automation is optional; neither Playwright nor browser runtimes
+# belong in the base image.
+RUN pip install --no-cache-dir -e . \
+  && rm -rf /root/.cache/pip \
   && python -c "import zstandard" \
-  && chmod 0755 /usr/local/bin/local-shell-mcp-tui \
   && test -s /app/src/local_shell_mcp/ui_static/index.html \
   && test -s /app/src/local_shell_mcp/ui_static/web.js \
   && test -s /app/src/local_shell_mcp/ui_static/web.css \
-  && /usr/local/bin/local-shell-mcp-tui --version
+  && test ! -e /app/src/local_shell_mcp/ui_runtime \
+  && test ! -d "${PLAYWRIGHT_BROWSERS_PATH}"
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN useradd -m -u 10001 agent \

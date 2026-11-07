@@ -107,6 +107,14 @@ async def exercise_websocket(port: int) -> None:
         await receive_render(websocket, minimum_bytes=128)
 
 
+async def exercise_missing_tui(port: int) -> None:
+    uri = f"ws://127.0.0.1:{port}/ui/ws?cols=120&rows=36"
+    async with websockets.connect(uri, subprotocols=["lsm-ui"]) as websocket:
+        message = await asyncio.wait_for(websocket.recv(), timeout=15)
+        if b"OpenTUI runtime not found" not in (message.encode() if isinstance(message, str) else message):
+            raise AssertionError(f"Unexpected TUI response: {message!r}")
+
+
 def api_request(
     port: int,
     path: str,
@@ -249,7 +257,12 @@ def main() -> int:
         action="store_true",
         help="Keep LOCAL_SHELL_MCP_UI_TUI_COMMAND instead of requiring an embedded runtime",
     )
+    parser.add_argument(
+        "--web-only", action="store_true", help="Require WebUI without an embedded OpenTUI runtime"
+    )
     args = parser.parse_args()
+    if args.web_only and args.use_environment_tui:
+        parser.error("--web-only cannot be used with --use-environment-tui")
     server = args.server.resolve()
     if not server.is_file():
         raise FileNotFoundError(server)
@@ -289,7 +302,13 @@ def main() -> int:
             )
             try:
                 wait_for_http(port, process, stdout_path, stderr_path)
-                asyncio.run(exercise_websocket(port))
+                if args.web_only:
+                    with urllib.request.urlopen(f"http://127.0.0.1:{port}/ui", timeout=10) as response:  # noqa: S310
+                        if b'"tuiAvailable": false' not in response.read():
+                            raise AssertionError("WebUI must report that OpenTUI is unavailable")
+                    asyncio.run(exercise_missing_tui(port))
+                else:
+                    asyncio.run(exercise_websocket(port))
                 asyncio.run(exercise_native_terminal(port))
             except BaseException as exc:
                 failure = exc
@@ -302,7 +321,7 @@ def main() -> int:
                 f"Standalone UI smoke failed: {failure}\nstdout:\n{stdout}\nstderr:\n{stderr}"
             ) from failure
 
-    mode = "configured" if args.use_environment_tui else "embedded"
+    mode = "absent" if args.web_only else "configured" if args.use_environment_tui else "embedded"
     print(f"Standalone UI smoke passed with {mode} TUI: {server.name}")
     return 0
 

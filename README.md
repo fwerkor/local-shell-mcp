@@ -106,7 +106,7 @@ Full setup instructions are in the [documentation](https://fwerkor.github.io/loc
 The service includes two compatible human interfaces backed by the same authenticated API and state:
 
 - **Web UI** is a native browser dashboard for system health, machines, workloads, recent MCP activity, and alerts.
-- **OpenTUI** is the full terminal-oriented interface with Dashboard, Files, Terminals, Remotes, and Audit screens. It remains available in the browser as a selectable console and as the native `local-shell-mcp tui` command.
+- **OpenTUI** is an optional terminal-oriented interface with Dashboard, Files, Terminals, Remotes, and Audit screens. Build the native sidecar separately (`cd ui && bun run build:tui`) or install a Python wheel that embeds it. The browser console and native `local-shell-mcp tui` command appear when the runtime is installed.
 
 Open the browser interface on the service origin:
 
@@ -114,13 +114,26 @@ Open the browser interface on the service origin:
 http://127.0.0.1:8765/ui
 ```
 
-The OAuth screen lets you choose Web UI or OpenTUI before authorization. After login, switch modes at any time from the interface selector. Native Web UI routes use URL hashes such as `#/overview` and `#/console`, so a selected mode or page can be bookmarked. The OpenTUI console retains the existing authenticated xterm.js/PTY transport, mouse interaction, automatic resizing, reconnects, fullscreen mode, and mobile shortcut row.
+When OpenTUI is installed, the OAuth screen lets you choose Web UI or OpenTUI before authorization, and the interface selector can switch modes after login. Native Web UI routes use URL hashes such as `#/overview` and `#/console`, so a selected mode or page can be bookmarked. The OpenTUI console retains the existing authenticated xterm.js/PTY transport, mouse interaction, automatic resizing, reconnects, fullscreen mode, and mobile shortcut row.
 
-Standalone release executables embed the native OpenTUI runtime, while Docker images provide it inside the image. Start the service, then launch it without a human login prompt:
+Standalone release executables and Docker images include the WebUI and native terminal but **do not bundle OpenTUI**. Their TUI controls are hidden unless a separately installed runtime is available. The Python wheel and source-development build retain optional OpenTUI support. To enable it, install an appropriate sidecar, set `LOCAL_SHELL_MCP_UI_TUI_COMMAND=/path/to/local-shell-mcp-tui`, and launch:
 
 ```bash
 local-shell-mcp tui
 ```
+
+The lean Docker image includes Python runtime dependencies, common shell utilities, and tmux. It does not include toolchains, Node.js, office suites, scientific Python packages, **Playwright, or browser binaries**. These can be installed in a derived image or the agent workspace when required.
+
+Playwright is an **optional external dependency** for standalone binaries. The built-in `browser_session`, `browser_snapshot`, and `browser_act` interfaces use an external Python child process, while `browser_get_text`, `browser_capture`, and `browser_run_script` already execute scripts using the configured Python. Install Playwright and a browser into that Python environment:
+
+```bash
+python3 -m pip install playwright
+python3 -m playwright install chromium
+# If using a dedicated virtual environment, point LSM to its interpreter:
+# LOCAL_SHELL_MCP_PYTHON_BIN=/path/to/venv/bin/python
+```
+
+Python-wheel installations can enable browser support with `pip install 'local-shell-mcp[browser]'`, then install the desired browser. Without Playwright, ordinary LSM features work as usual; browser calls report the missing dependency. In containers, browser system dependencies can be installed on demand using `python -m playwright install --with-deps chromium`.
 
 The native TUI authenticates the loopback Human UI API with the same host-only dedicated CLI credential used by `lsm call`; split-runtime layouts can pass `--token-file`. Browser-spawned OpenTUI uses a controller-process credential created lazily in memory and never writes that privileged credential to the state directory or state backend. A dedicated local CLI credential can also invoke the registered MCP tool surface directly from shell scripts; the Human UI token is intentionally never accepted by `/mcp`. By default, `call` connects to the running loopback controller, so remote-worker calls use the live controller process instead of a separate process-local worker registry:
 
