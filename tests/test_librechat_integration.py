@@ -289,3 +289,53 @@ def test_versioned_chat_policy_rejects_out_of_order_updates(tmp_path, monkeypatc
     assert not may_chat_call_lsm(user, "conv-race")
     assert set_chat_tool_policy(user, "conv-race", True, revision=4)
     assert may_chat_call_lsm(user, "conv-race")
+
+
+def test_bridge_settings_requires_native_ui_admin_scope(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+
+    from local_shell_mcp.http_app import build_http_app
+    from local_shell_mcp.librechat_integration import register_identity
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "oauth")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST", "false")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_OAUTH_JWT_SECRET", "strong-config-test-secret-of-at-least-32-characters")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_BACKEND", "file")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
+    get_settings.cache_clear()
+    try:
+        administrator = "a" * 24
+        ordinary = "b" * 24
+        register_identity(
+            administrator,
+            issue_chat_ticket("admin", scopes="shell:read admin:config")["ticket"],
+        )
+        register_identity(
+            ordinary,
+            issue_chat_ticket("ordinary", scopes="shell:read")["ticket"],
+        )
+        client = TestClient(build_http_app(), client=("203.0.113.11", 4321))
+        base = {"Authorization": "Bearer " + "z" * 48}
+        denied = client.get(
+            "/api/ui/settings/view", headers={**base, "X-LSM-Chat-User-Id": ordinary}
+        )
+        assert denied.status_code >= 400
+        permitted_headers = {**base, "X-LSM-Chat-User-Id": administrator}
+        snapshot = client.get("/api/ui/settings/view", headers=permitted_headers)
+        assert snapshot.status_code == 200, snapshot.text
+        config = snapshot.json()["data"]
+        assert len(config["fields"]) >= 80
+        save = client.post(
+            "/api/ui/settings/save",
+            headers={**permitted_headers, "Origin": "http://testserver"},
+            json={"revision": config["revision"], "changes": {"max_jobs": 17}},
+        )
+        assert save.status_code == 200, save.text
+        assert (tmp_path / ".local-shell-mcp" / "config.yaml").exists() or (
+            tmp_path / "state" / "config.yaml"
+        ).exists()
+    finally:
+        get_settings.cache_clear()

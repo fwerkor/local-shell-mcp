@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 
 type AuthenticatedRequest = Request & { user?: { id?: string; _id?: string; provider?: string } };
 
-const SAFE_PATH = /^(?:nested-mcp|bootstrap|dashboard|machines|files(?:\/(?:preview|content|download-ticket|download\/[a-zA-Z0-9_-]+|upload|(?:mkdir|touch|rename|copy|move|delete|write)))?|gui\/(?:windows|frame|action)|librechat\/upload|terminals(?:\/(?:read|start|send|resize|kill))?|logical-sessions(?:\/(?:detail|start|finish|cancel|delete))?|audit(?:\/detail)?|remotes(?:\/(?:rename|reset|revoke))?)$/;
+const SAFE_PATH = /^(?:nested-mcp|bootstrap|dashboard|machines|files(?:\/(?:preview|content|download-ticket|download\/[a-zA-Z0-9_-]+|upload|(?:mkdir|touch|rename|copy|move|delete|write)))?|gui\/(?:windows|frame|action)|librechat\/upload|terminals(?:\/(?:read|start|send|resize|kill))?|logical-sessions(?:\/(?:detail|start|finish|cancel|delete))?|audit(?:\/detail)?|remotes(?:\/(?:rename|reset|revoke))?|settings\/(?:view|save|restart))$/;
 const MAX_BODY = 32 * 1024 * 1024;
 
 export const isAllowedLsmControllerPath = (value: string, method: string): boolean => {
@@ -11,9 +11,26 @@ export const isAllowedLsmControllerPath = (value: string, method: string): boole
       !SAFE_PATH.test(value) || !['GET', 'POST', 'HEAD'].includes(method)) return false;
   if (method === 'HEAD') return /^files\/download\//.test(value);
   if (method === 'POST') {
-    return /^(?:nested-mcp|files\/(?:download-ticket|upload|mkdir|touch|rename|copy|move|delete|write)|librechat\/upload|gui\/action|terminals\/(?:start|send|resize|kill)|logical-sessions\/(?:start|finish|cancel|delete)|remotes(?:\/(?:rename|reset|revoke))?)$/.test(value);
+    return /^(?:nested-mcp|files\/(?:download-ticket|upload|mkdir|touch|rename|copy|move|delete|write)|librechat\/upload|gui\/action|terminals\/(?:start|send|resize|kill)|logical-sessions\/(?:start|finish|cancel|delete)|remotes(?:\/(?:rename|reset|revoke))?|settings\/(?:save|restart))$/.test(value);
   }
-  return !/^(?:files\/(?:download-ticket|upload|mkdir|touch|rename|copy|move|delete|write)|librechat\/upload|gui\/action|terminals\/(?:start|send|resize|kill)|logical-sessions\/(?:start|finish|cancel|delete)|remotes\/(?:rename|reset|revoke))$/.test(value);
+  return !/^(?:files\/(?:download-ticket|upload|mkdir|touch|rename|copy|move|delete|write)|librechat\/upload|gui\/action|terminals\/(?:start|send|resize|kill)|logical-sessions\/(?:start|finish|cancel|delete)|remotes\/(?:rename|reset|revoke)|settings\/(?:save|restart))$/.test(value);
+};
+
+/** Strict browser-origin check for configuration mutations. */
+export const isLsmSettingsOriginAllowed = (
+  origin: string | undefined,
+  host: string | undefined,
+  fetchSite: string | undefined,
+): boolean => {
+  if (!origin || !host || (fetchSite && fetchSite !== 'same-origin')) return false;
+  try {
+    const url = new URL(origin);
+    return ['https:', 'http:'].includes(url.protocol) &&
+      url.host.toLowerCase() === host.toLowerCase() &&
+      !url.username && !url.password && url.pathname === '/' && !url.search && !url.hash;
+  } catch {
+    return false;
+  }
 };
 
 export const makeLsmControllerProxy = (configuration: () => { base?: string; secret?: string }): ((req: Request, res: Response) => Promise<void | Response>) => async (req: Request, res: Response): Promise<void | Response> => {
@@ -23,6 +40,10 @@ export const makeLsmControllerProxy = (configuration: () => { base?: string; sec
   if (!base || !secret || Buffer.byteLength(secret, 'utf8') < 32) return res.sendStatus(503);
   if ((req as AuthenticatedRequest).user?.provider !== 'lsm' || !/^[a-f\d]{24}$/i.test(userId)) return res.sendStatus(403);
   if (!isAllowedLsmControllerPath(path, req.method)) return res.sendStatus(404);
+  if (req.method === 'POST' && /^settings\/(?:save|restart)$/.test(path) &&
+      !isLsmSettingsOriginAllowed(
+        req.get('origin'), req.get('host'), req.get('sec-fetch-site'),
+      )) return res.sendStatus(403);
 
   // URL is constructed from an administrator-controlled service origin and
   // an allowlisted relative route only. Reject redirects and unknown routes.

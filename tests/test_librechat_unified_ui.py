@@ -108,5 +108,13 @@ def test_single_user_auth_routes_and_gui_proxy_contract():
 
 def test_unified_ui_native_pages_present():
     pages = INTEGRATION / "app/client/src/components/LSM"
-    for name in ("Control.tsx", "Overview.tsx", "Files.tsx", "Operations.tsx", "Desktop.tsx"):
+    for name in ("Control.tsx", "Overview.tsx", "Files.tsx", "Operations.tsx", "Desktop.tsx", "Settings.tsx"):
         assert (pages / name).is_file()
+    navigation = (pages / "Control.tsx").read_text()
+    settings = (pages / "Settings.tsx").read_text()
+    proxy = (INTEGRATION / "app/packages/api/src/lsm/controller.ts").read_text()
+    assert "/control/" in navigation and "section === 'settings'" in navigation
+    for route in ("settings/view", "settings/save", "settings/restart"):
+        assert route in settings or route.split("/")[-1] in proxy
+    assert "admin:config" in (INTEGRATION / "README.md").read_text()
+    assert "isLsmSettingsOriginAllowed" in proxy

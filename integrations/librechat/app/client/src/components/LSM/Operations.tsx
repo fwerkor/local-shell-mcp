@@ -1,5 +1,5 @@
 import useLocalize from '~/hooks/useLocalize';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Play, RefreshCw, Send, Square, Server, Trash2, Plus, Search } from 'lucide-react';
 import { asText, type RecordValue } from './api';
 import { useControllerServices } from './hooks';
@@ -18,6 +18,9 @@ export default function Operations({ section }: { section: View }) {
   const [payload, setPayload] = useState<RecordValue | null>(null);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState('');
+  const [selectedMachine, setSelectedMachine] = useState('');
+  const [payloadMachine, setPayloadMachine] = useState('');
+  const requestVersion = useRef(0);
   const [detail, setDetail] = useState<RecordValue | null>(null);
   const [machine, setMachine] = useState('local');
   const [machines, setMachines] = useState<string[]>(['local']);
@@ -28,13 +31,20 @@ export default function Operations({ section }: { section: View }) {
   const [refreshId, setRefreshId] = useState(0);
 
   const refresh = async () => {
+    const version = ++requestVersion.current;
+    const requestedMachine = machine;
+    setPayload(null);
     setBusy(true);
     try {
       const path = section === 'sessions' ? 'logical-sessions' : section;
-      const data = await read<RecordValue>(path, section === 'terminals' ? { machine } : section === 'audit' ? { limit: 150, search: filter } : {});
-      setPayload(data); setError('');
-    } catch (e) { setError(String(e)); }
-    finally { setBusy(false); }
+      const data = await read<RecordValue>(path, section === 'terminals' ? { machine: requestedMachine } : section === 'audit' ? { limit: 150, search: filter } : {});
+      if (requestVersion.current !== version) return;
+      setPayload(data); setPayloadMachine(requestedMachine); setError('');
+    } catch (e) {
+      if (requestVersion.current === version) setError(String(e));
+    } finally {
+      if (requestVersion.current === version) setBusy(false);
+    }
   };
   useEffect(() => {
     void refresh();
@@ -43,6 +53,7 @@ export default function Operations({ section }: { section: View }) {
         setMachines(['local', ...(data.machines ?? []).map(item => String(item.machine || item.name || item.id || '')).filter(v => v && v !== 'local')]);
       }).catch(() => {});
     }
+    return () => { ++requestVersion.current; };
   }, [section, machine, refreshId]);
   const act = async (path: string, data: RecordValue, clear = false) => {
     setBusy(true);
@@ -77,7 +88,7 @@ export default function Operations({ section }: { section: View }) {
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [section, selected, machine]);
 
-  const terminalRows = (payload?.sessions as RecordValue[] | undefined) ?? [];
+  const terminalRows = payloadMachine === machine ? ((payload?.sessions as RecordValue[] | undefined) ?? []) : [];
   const sessionRows = (payload?.sessions as RecordValue[] | undefined) ?? [];
   const remoteRows = (payload?.machines as RecordValue[] | undefined) ?? [];
   const auditRows = (payload?.entries as RecordValue[] | undefined) ?? [];
@@ -89,7 +100,7 @@ export default function Operations({ section }: { section: View }) {
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        {section === 'terminals' && <select aria-label={localize('com_lsm_terminal_machine')} className={btn} value={machine} onChange={e => {setSelected(''); setMachine(e.target.value);}}>
+        {section === 'terminals' && <select aria-label={localize('com_lsm_terminal_machine')} className={btn} value={machine} onChange={e => { ++requestVersion.current; setPayload(null); setPayloadMachine(''); setSelected(''); setSelectedMachine(''); setDetail(null); setTerminalText(''); setMachine(e.target.value); }}>
           {machines.map(m => <option key={m} value={m}>{m}</option>)}
         </select>}
         {section === 'terminals' && <button className={btn} disabled={busy} onClick={() => void act('terminals/start', { machine, cwd: '.' })}><Plus size={16} className="mr-1 inline" />{localize('com_lsm_new_shell')}</button>}
@@ -134,7 +145,7 @@ export default function Operations({ section }: { section: View }) {
             const id = keyFor(item, i);
             return <button key={id + i} className={row + (selected === id ? ' bg-surface-active-alt' : '')}
               onClick={() => {
-                setSelected(id); setDetail(item);
+                setSelected(id); setSelectedMachine(section === 'terminals' ? machine : ''); setDetail(item);
                 if (section === 'sessions') void inspect('logical-sessions/detail', { session_id: id });
                 if (section === 'audit') void inspect('audit/detail', { id });
               }}>
@@ -151,7 +162,7 @@ export default function Operations({ section }: { section: View }) {
       </section>
       <section className={block + ' min-w-0'}>
         {!selected && <p className="py-8 text-center text-sm text-text-secondary">{localize('com_lsm_select_an_item_to_inspect_it')}</p>}
-        {!!selected && section === 'terminals' && <>
+        {!!selected && section === 'terminals' && selectedMachine === machine && <>
           <div className="mb-3 flex items-center justify-between gap-2">
             <h3 className="truncate text-sm font-semibold">{selected}</h3>
             <button className={btn} disabled={busy} onClick={() => { if (window.confirm(localize('com_lsm_terminate_this_shell'))) void act('terminals/kill', { machine, session_id: selected }, true); }}>

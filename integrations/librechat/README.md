@@ -51,7 +51,11 @@ through the private Controller API and refuses expired grants.
 
 **Controller routes:** `/control/overview`, `/control/files`,
 `/control/terminals`, `/control/desktop`, `/control/sessions`,
-`/control/remotes`, `/control/audit`. The workspace homepage is
+`/control/remotes`, `/control/audit`, `/control/settings`. The unified
+Settings page carries over PR #331's typed Controller configuration editor:
+searchable grouped fields, environment-lock and secret indicators, YAML
+revision checks, reset-to-default, Save, Save & restart and explicit Restart.
+The workspace homepage is
 `/control/overview`; chat remains at `/c/new`. Mobile and desktop share
 LibreChat's responsive navigation and light/dark theme tokens.
 
@@ -82,6 +86,17 @@ Read operations and mutating operations use the same Controller API and audit
 hooks as the original WebUI. Requests for shell execution, remote access or
 file modification still require their original scopes. The terminal and GUI
 components do not bypass these authorization checks.
+
+**Configuration management:** `/api/lsm/controller/settings/{view,save,restart}`
+forwards only explicitly permitted operations to PR #331's Controller settings
+API. `admin:config` is checked on every request by the Controller; the scope
+is granted through its privileged native WebUI OAuth callback and never exposed
+as an MCP tool. Configuration mutation requests must originate from the same
+LibreChat web origin, and the Controller separately enforces its own same-origin
+and audit protections. In anonymous (`auth_mode=none`) deployments, remote
+configuration changes remain blocked: use the Controller's native local UI.
+The LibreChat sidebar cannot bypass this restriction. During restart, chat
+remains hosted in LibreChat while Settings reconnects to the Controller.
 
 Per-conversation **web / LSM native tools / external MCP / memory** toggles
 are stored in LibreChat's MongoDB. LSM native and external MCP permissions
