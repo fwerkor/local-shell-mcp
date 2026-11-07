@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import re
+import sys
 import time
 import uuid
 from collections import deque
@@ -10,7 +12,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .fs_ops import relative_display, resolve_path
+if __package__:
+    from .fs_ops import relative_display, resolve_path
+else:
+    from browser_external_paths import relative_display, resolve_path
 
 _MAX_SESSIONS = 8
 _IDLE_TIMEOUT_S = 3600
@@ -94,7 +99,9 @@ class BrowserSessionManager:
             await self._cleanup_idle()
             async with self._lock:
                 sessions = list(self._sessions.values())
-                cleanup_pending = sorted(self._cleanup_pending.keys() | self._closing_sessions.keys())
+                cleanup_pending = sorted(
+                    self._cleanup_pending.keys() | self._closing_sessions.keys()
+                )
             return {
                 "sessions": [await self._session_summary(item) for item in sessions],
                 "cleanup_pending": cleanup_pending,
@@ -125,9 +132,7 @@ class BrowserSessionManager:
             raise ValueError("invalid wait_until")
         width = max(320, min(int(width), 7680))
         height = max(240, min(int(height), 4320))
-        if profile_id and (
-            profile_id in {".", ".."} or not _PROFILE_RE.fullmatch(profile_id)
-        ):
+        if profile_id and (profile_id in {".", ".."} or not _PROFILE_RE.fullmatch(profile_id)):
             raise ValueError("profile_id must match [A-Za-z0-9._-] and be at most 80 characters")
         if profile_id and storage_state_path:
             raise ValueError("profile_id and storage_state_path cannot be combined")
@@ -155,7 +160,8 @@ class BrowserSessionManager:
                 from playwright.async_api import async_playwright
             except ImportError as exc:  # pragma: no cover - depends on worker environment.
                 raise RuntimeError(
-                    "Playwright is not installed in this environment; install the local-shell-mcp browser dependency first"
+                    "Playwright is not installed in the configured Python environment; "
+                    "install it with python -m pip install playwright"
                 ) from exc
 
             playwright = await async_playwright().start()
@@ -289,7 +295,9 @@ class BrowserSessionManager:
             if screenshot:
                 artifacts = self._state_dir / "browser-artifacts"
                 artifacts.mkdir(parents=True, exist_ok=True)
-                target = artifacts / f"{session_id[:12]}-{page_state.page_id}-{uuid.uuid4().hex[:8]}.png"
+                target = (
+                    artifacts / f"{session_id[:12]}-{page_state.page_id}-{uuid.uuid4().hex[:8]}.png"
+                )
                 await page.screenshot(path=str(target), full_page=bool(full_page))
                 async with self._artifact_lock:
                     await asyncio.to_thread(self._prune_artifacts, artifacts, target)
@@ -559,9 +567,7 @@ class BrowserSessionManager:
     @staticmethod
     def _record_console_error(session: BrowserSessionState, page_id: str, message: Any) -> None:
         if message.type == "error":
-            session.errors.append(
-                {"page_id": page_id, "kind": "console", "message": message.text}
-            )
+            session.errors.append({"page_id": page_id, "kind": "console", "message": message.text})
 
     async def _session_summary(
         self, session: BrowserSessionState, *, current_page_id: str | None = None
@@ -683,6 +689,14 @@ def get_browser_session_manager(state_dir: Path) -> BrowserSessionManager:
     key = str(Path(state_dir).resolve())
     manager = _BROWSER_MANAGERS.get(key)
     if manager is None:
-        manager = BrowserSessionManager(Path(state_dir))
+        if (
+            getattr(sys, "frozen", False)
+            or os.environ.get("LOCAL_SHELL_MCP_BROWSER_RUNTIME") == "external"
+        ):
+            from .browser_external_client import ExternalBrowserSessionManager
+
+            manager = ExternalBrowserSessionManager(Path(state_dir))
+        else:
+            manager = BrowserSessionManager(Path(state_dir))
         _BROWSER_MANAGERS[key] = manager
     return manager

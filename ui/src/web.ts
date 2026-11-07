@@ -16,7 +16,7 @@ import type { Machine as UiMachine } from "./types"
 
 declare global {
   interface Window {
-    __LSM_UI_CONFIG__?: { uiPath?: string; apiPrefix?: string }
+    __LSM_UI_CONFIG__?: { uiPath?: string; apiPrefix?: string; tuiAvailable?: boolean }
   }
   interface Navigator {
     keyboard?: {
@@ -409,10 +409,24 @@ function renderActiveView(): void {
   mountControllerPage(viewRoot, nativeController)
 }
 
+function tuiAvailable(): boolean {
+  return window.__LSM_UI_CONFIG__?.tuiAvailable !== false
+}
+
+function syncTuiControls(): void {
+  const available = tuiAvailable()
+  loginButton.hidden = !available
+  openConsoleButton.hidden = !available
+  document.querySelectorAll<HTMLElement>('[data-interface-mode="tui"]').forEach((entry) => {
+    entry.hidden = !available
+  })
+}
+
 function showView(
   view: WebViewName,
   { syncHash = true, replaceHash = false }: { syncHash?: boolean; replaceHash?: boolean } = {},
 ): void {
+  if (view === "console" && !tuiAvailable()) view = "overview"
   activeView = view
   document.body.classList.toggle("native-view-active", view !== "console" && isNativeView(view))
   if (interfaceModeForView(view) === "web") lastWebView = view
@@ -922,6 +936,7 @@ window.addEventListener("beforeunload", () => {
 })
 
 // App wiring ---------------------------------------------------------------
+syncTuiControls()
 document.querySelectorAll<HTMLButtonElement>(".nav-item[data-view]").forEach((button) => {
   button.addEventListener("click", () => showView(button.dataset.view as WebViewName))
 })
