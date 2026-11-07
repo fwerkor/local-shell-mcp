@@ -12,11 +12,16 @@ from .fs_ops import resolve_path
 from .settings import get_settings
 from .shell_environment import subprocess_env
 
+_MAX_RESPONSE_BYTES = 64 * 1024 * 1024
+
 
 class ExternalBrowserSessionManager:
     def __init__(self, state_dir: Path) -> None:
         self._state_dir = Path(state_dir)
         self._process: asyncio.subprocess.Process | None = None
+        self._reader_task: asyncio.Task[None] | None = None
+        self._pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
+        self._next_request_id = 0
         self._lock = asyncio.Lock()
 
     @staticmethod
@@ -32,8 +37,11 @@ class ExternalBrowserSessionManager:
 
     async def _spawn(self) -> asyncio.subprocess.Process:
         process = self._process
-        if process is not None and process.returncode is None:
-            return process
+        if process is not None:
+            if process.returncode is None:
+                return process
+            if self._reader_task is not None:
+                await self._reader_task
         settings = get_settings()
         environment = subprocess_env()
         environment["LOCAL_SHELL_MCP_WORKSPACE_ROOT"] = str(settings.workspace_root.resolve())
@@ -47,7 +55,6 @@ class ExternalBrowserSessionManager:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
                 env=environment,
-                limit=4 * 1024 * 1024,
             )
         except OSError as exc:
             raise RuntimeError(
@@ -55,40 +62,102 @@ class ExternalBrowserSessionManager:
                 "configure LOCAL_SHELL_MCP_PYTHON_BIN and install playwright in that environment"
             ) from exc
         self._process = process
+        self._reader_task = asyncio.create_task(self._read_responses(process))
         return process
 
+    async def _read_responses(self, process: asyncio.subprocess.Process) -> None:
+        error: Exception = RuntimeError("External browser process exited unexpectedly")
+        try:
+            assert process.stdout is not None
+            while True:
+                header = await process.stdout.readline()
+                if not header:
+                    break
+                if len(header) > 16 or not header.endswith(b"\n"):
+                    raise ValueError("Invalid browser RPC frame header")
+                length = int(header)
+                if not 0 < length <= _MAX_RESPONSE_BYTES:
+                    raise ValueError("Browser RPC response exceeds maximum frame size")
+                reply = json.loads(await process.stdout.readexactly(length))
+                future = self._pending.pop(reply["id"], None)
+                if future is not None and not future.done():
+                    future.set_result(reply)
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            error = RuntimeError(f"External browser RPC failed: {exc}")
+        finally:
+            if self._process is process:
+                self._process = None
+                self._reader_task = None
+                for future in self._pending.values():
+                    if not future.done():
+                        future.set_exception(error)
+                self._pending.clear()
+            if process.returncode is None:
+                process.kill()
+            await process.wait()
+
     async def _discard(self) -> None:
-        process = self._process
-        self._process = None
-        if process is not None and process.returncode is None:
-            process.kill()
+        async with self._lock:
+            process = self._process
+            reader = self._reader_task
+            self._process = None
+            self._reader_task = None
+            for future in self._pending.values():
+                if not future.done():
+                    future.set_exception(RuntimeError("External browser process was stopped"))
+            self._pending.clear()
+            if reader is not None:
+                reader.cancel()
+            if process is not None and process.returncode is None:
+                process.kill()
+        if reader is not None:
+            await asyncio.gather(reader, return_exceptions=True)
+        if process is not None:
             await process.wait()
 
     async def _request(self, method: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        async with self._lock:
-            process = await self._spawn()
-            assert process.stdin is not None and process.stdout is not None
-            request = json.dumps(
-                {"method": method, "args": args, "kwargs": kwargs},
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-            try:
+        request_id: int | None = None
+        future: asyncio.Future[dict[str, Any]] | None = None
+        process: asyncio.subprocess.Process | None = None
+        try:
+            async with self._lock:
+                process = await self._spawn()
+                assert process.stdin is not None
+                self._next_request_id += 1
+                request_id = self._next_request_id
+                future = asyncio.get_running_loop().create_future()
+                self._pending[request_id] = future
+                request = json.dumps(
+                    {"id": request_id, "method": method, "args": args, "kwargs": kwargs},
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
                 process.stdin.write(request.encode("utf-8") + b"\n")
                 await process.stdin.drain()
-                line = await process.stdout.readline()
-                if not line:
-                    raise RuntimeError("External browser process exited unexpectedly")
-                reply = json.loads(line)
-            except (Exception, asyncio.CancelledError):
+        except (Exception, asyncio.CancelledError):
+            if request_id is not None:
+                self._pending.pop(request_id, None)
+            if future is not None:
+                future.cancel()
+            if process is not None:
                 await self._discard()
-                raise
-            if not reply["ok"]:
-                message = reply.get("message") or "External browser request failed"
-                if reply.get("error_type") == "ValueError":
-                    raise ValueError(message)
-                raise RuntimeError(message)
-            return reply["result"]
+            raise
+
+        assert request_id is not None and future is not None
+        try:
+            reply = await future
+        except asyncio.CancelledError:
+            self._pending.pop(request_id, None)
+            future.cancel()
+            raise
+        if not reply["ok"]:
+            message = reply.get("message") or "External browser request failed"
+            if reply.get("error_type") == "ValueError":
+                raise ValueError(message)
+            raise RuntimeError(message)
+        return reply["result"]
 
     @staticmethod
     def _resolve_storage_paths(kwargs: dict[str, Any], action: str) -> dict[str, Any]:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -158,11 +159,11 @@ async def test_external_browser_stdio_worker(tmp_path: Path, monkeypatch: pytest
         browser_external_service, "BrowserSessionManager", FakeBrowserSessionManager
     )
     requests = [
-        {"method": "snapshot", "args": ["session"], "kwargs": {}},
-        {"method": "close", "args": ["汉字"], "kwargs": {}},
-        {"method": "private_method", "args": [], "kwargs": {}},
-        {"method": "manage", "args": [], "kwargs": {"action": "list"}},
-        {"method": "snapshot", "args": [], "kwargs": {}},
+        {"id": 1, "method": "snapshot", "args": ["session"], "kwargs": {}},
+        {"id": 2, "method": "close", "args": ["汉字"], "kwargs": {}},
+        {"id": 3, "method": "private_method", "args": [], "kwargs": {}},
+        {"id": 4, "method": "manage", "args": [], "kwargs": {"action": "list"}},
+        {"id": 5, "method": "snapshot", "args": [], "kwargs": {}},
     ]
     input_stream = io.BytesIO(
         ("\n".join(json.dumps(value) for value in requests) + "\n{invalid-json}\n").encode()
@@ -173,13 +174,81 @@ async def test_external_browser_stdio_worker(tmp_path: Path, monkeypatch: pytest
         tmp_path / ".state", input_stream=input_stream, output_stream=output_stream
     )
     output = output_stream.buffer.getvalue().decode("ascii")
-    responses = [json.loads(line) for line in output.splitlines()]
+    responses = {}
+    offset = 0
+    while offset < len(output):
+        header_end = output.index("\n", offset)
+        length = int(output[offset:header_end])
+        payload = output[header_end + 1 : header_end + 1 + length]
+        offset = header_end + 1 + length
+        reply = json.loads(payload)
+        responses[reply["id"]] = reply
     assert len(responses) == 6
-    assert responses[0] == {"ok": True, "result": {"text": "汉字"}}
-    assert responses[1]["error_type"] == "ValueError"
-    assert "汉字" in responses[1]["message"]
+    assert responses[1] == {"id": 1, "ok": True, "result": {"text": "汉字"}}
     assert responses[2]["error_type"] == "ValueError"
-    assert responses[3]["ok"] is True
-    assert responses[4]["error_type"] == "TypeError"
-    assert responses[5]["error_type"] == "JSONDecodeError"
+    assert "汉字" in responses[2]["message"]
+    assert responses[3]["error_type"] == "ValueError"
+    assert responses[4]["ok"] is True
+    assert responses[5]["error_type"] == "TypeError"
+    assert responses[None]["error_type"] == "JSONDecodeError"
     assert calls == [{"action": "list"}, {"action": "cleanup"}]
+
+
+@pytest.mark.asyncio
+async def test_external_browser_large_and_concurrent_responses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    script = tmp_path / "fake_browser_service.py"
+    script.write_text(
+        """import asyncio
+import sys
+from pathlib import Path
+from local_shell_mcp import browser_external_service
+
+class FakeBrowserSessionManager:
+    def __init__(self, state_dir):
+        pass
+
+    async def manage(self, **kwargs):
+        return {"sessions": [], "cleanup_pending": []}
+
+    async def act(self, session_id, actions, **kwargs):
+        if session_id == "slow":
+            Path(__file__).with_suffix(".ready").write_text("started")
+        await asyncio.sleep(2.0)
+        return {"session_id": session_id}
+
+    async def snapshot(self, session_id, **kwargs):
+        if session_id == "large":
+            return {"text": "汉字" * 430_000}
+        return {"text": session_id}
+
+browser_external_service.BrowserSessionManager = FakeBrowserSessionManager
+asyncio.run(browser_external_service._serve(Path(sys.argv[1])))
+""",
+        encoding="utf-8",
+    )
+    manager = ExternalBrowserSessionManager(tmp_path / ".state")
+    monkeypatch.setattr(manager, "_service_path", lambda: script)
+    try:
+        slow = asyncio.create_task(manager.act("slow", []))
+        ready_file = script.with_suffix(".ready")
+        for _ in range(200):
+            if ready_file.exists():
+                break
+            await asyncio.sleep(0.025)
+        assert ready_file.exists(), "slow browser action never started"
+        assert await asyncio.wait_for(manager.snapshot("fast"), timeout=1.5) == {"text": "fast"}
+        large = await asyncio.wait_for(manager.snapshot("large"), timeout=8)
+        assert large["text"] == "汉字" * 430_000
+        assert await asyncio.wait_for(slow, timeout=4) == {"session_id": "slow"}
+        assert (await manager.snapshot("after-large"))["text"] == "after-large"
+
+        cancelled = asyncio.create_task(manager.act("cancelled", []))
+        await asyncio.sleep(0.1)
+        cancelled.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled
+        assert await manager.snapshot("still-alive") == {"text": "still-alive"}
+    finally:
+        await manager._discard()
