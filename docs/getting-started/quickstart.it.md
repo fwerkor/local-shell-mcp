@@ -1,34 +1,33 @@
-<!-- i18n-source-sha256: 3575b9b50708261678473f74b66076f0c14807ccd7f7c3e60b4d1e897ac778df -->
+<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
 # Avvio rapido
 
 Questa guida avvia un controller LSM e apre la sua interfaccia browser. Lo [unified web workspace](web-workspace.md) è l'esperienza quotidiana consigliata; è uno stack di chat facoltativo distribuito separatamente. ChatGPT, Gemini e altri client MCP esterni possono connettersi allo stesso Controller. Vedi [runtime choices and deployment model](../guides/deployment.md).
 
-È consigliata la **distribuzione diretta dal codice sorgente** in un ambiente isolato. Docker Compose è un’alternativa.
+È consigliato il **singolo eseguibile del Controller** di [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest), senza Python, Docker o checkout sorgente. Esempio per **Linux x86_64**; altre piattaforme: [installazione binaria](../installation/binary.md).
 
 ## Requisiti
 
-- Git e Python 3.11+ con `venv` e `pip`.
-- HTTPS pubblico solo per utenti remoti o client MCP esterni.
-- Directory di lavoro dedicata e limitata.
+- Eseguibile per la piattaforma e `curl` (Linux x86_64).
+- HTTPS pubblico solo se necessario per accessi remoti o client MCP esterni.
+- Workspace dedicato e limitato.
 - PIN amministratore OAuth robusto e segreto JWT casuale.
 
 !!! warning
     Il modello connesso può operare il workspace configurato. Esegui il servizio in un container o VM usa e getta ed evita di montare risorse di controllo dell’host.
 
-## 1. Clonare e configurare
+## 1. Scaricare e configurare il binario
+
+Scaricare l’eseguibile singolo e generare il segreto JWT:
 
 ```bash
-git clone https://github.com/fwerkor/local-shell-mcp.git
-cd local-shell-mcp
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e .
-cp .env.example .env
-chmod 600 .env
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
+chmod +x local-shell-mcp
+./local-shell-mcp --help
 openssl rand -hex 32
 ```
 
-Modificare `.env` sostituendo PIN e segreto JWT di esempio (usare `openssl rand -hex 32`). L’esecuzione da sorgenti non carica automaticamente `.env`.
+Creare `.env` e sostituire PIN e segreto JWT di esempio (usare `openssl rand -hex 32`). Il binario **non carica automaticamente** `.env`.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
@@ -39,23 +38,25 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
 
 ## 2. Avviare il server
 
+Avviare direttamente l’eseguibile:
+
 ```bash
-mkdir -p workspaces/default
+chmod 600 .env
 set -a
 . ./.env
 set +a
-. .venv/bin/activate
-export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
-local-shell-mcp --mode mcp
+mkdir -p workspace
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
+./local-shell-mcp --mode mcp
 ```
 
-Verificare lo stato in un secondo terminale:
+Verificare lo stato in un altro terminale:
 
 ```bash
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-La risposta corretta è HTTP `200`. Per un servizio permanente utilizzare un gestore di servizi.
+Una risposta corretta restituisce HTTP `200`. Per uso permanente adottare un supervisore e account limitato.
 
 ## 3. Esporre HTTPS
 
@@ -114,16 +115,19 @@ Correggi il test che fallisce. Leggi prima i file pertinenti, applica la patch m
 
 ## Aggiornamento
 
-Aggiornare i sorgenti, reinstallare il pacchetto editable e riavviare il Controller:
+Sostituire l’eseguibile e riavviare il Controller:
 
 ```bash
-git pull --ff-only
-python -m pip install -e .
-# Restart the Controller process or service after updating.
+# Stop the running Controller before replacing the executable.
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp.new
+chmod +x local-shell-mcp.new
+./local-shell-mcp.new --version
+mv local-shell-mcp.new local-shell-mcp
+# Restart the Controller process or service.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Per Docker Compose aggiornare invece il container:
+Per Docker Compose aggiornare il container. Guida sorgenti: [Python](../installation/python.md).
 
 ```bash
 docker compose pull

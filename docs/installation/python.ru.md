@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: c8c0d8ebdbb123b9ac4af1fd288f30e8ca69037ca086486cb8027e2592f4b75a -->
+<!-- i18n-source-sha256: 1d80cfbe14747fb0691e91065f582d1e47eb36921d8b27da1648dcd26114a2e5 -->
 # Python, pipx и source runtimes
 
-**Рекомендуется установка непосредственно из репозитория исходников.** Используйте виртуальную среду Python и ограниченную рабочую папку. Docker Compose остаётся доступным.
+Для обычного развёртывания рекомендуется [единый бинарный файл](binary.md). Python и исходники нужны для разработки и настройки.
 
 Эта страница описывает три связанных случая:
 
@@ -48,7 +48,7 @@ Process использует инструменты, установленные 
 
 ## Editable source checkout
 
-Используйте для обычного развёртывания и разработки. Публичный доступ описан в [quickstart](../getting-started/quickstart.md).
+Исходники подходят для разработки; для обычного запуска выберите [бинарник](binary.md). OAuth/HTTPS: [быстрый старт](../getting-started/quickstart.md).
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git

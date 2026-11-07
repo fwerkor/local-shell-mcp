@@ -1,34 +1,33 @@
-<!-- i18n-source-sha256: 3575b9b50708261678473f74b66076f0c14807ccd7f7c3e60b4d1e897ac778df -->
+<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
 # Hızlı başlangıç
 
 Bu kılavuz bir LSM Denetleyicisini başlatır ve tarayıcı arayüzünü açar. [unified web workspace](web-workspace.md) önerilen günlük deneyimdir; ayrı olarak konuşlandırılmış, isteğe bağlı bir sohbet yığınıdır. ChatGPT, Gemini ve diğer harici MCP istemcileri aynı Denetleyiciye bağlanabilir. Bkz. [runtime choices and deployment model](../guides/deployment.md).
 
-Yalıtılmış bir ortamda **doğrudan kaynak koddan dağıtım** önerilir. Docker Compose alternatiftir.
+Önerilen yöntem, [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest) üzerinden **tek dosyalık Controller çalıştırılabilirini** kullanmaktır. Python, Docker veya kaynak checkout gerekmez. Örnek **Linux x86_64** içindir; diğerleri: [ikili kurulum](../installation/binary.md).
 
 ## Gereksinimler
 
-- Git ve `venv` / `pip` ile Python 3.11+.
-- Uzak kullanıcılar veya harici MCP istemcileri için gerekirse genel HTTPS.
-- Sınırlandırılmış özel çalışma alanı.
+- Uygun çalıştırılabilir dosya ve `curl` (Linux x86_64 örneği).
+- Uzak kullanıcılar veya harici MCP istemcileri için gerektiğinde genel HTTPS.
+- Ayrı ve sınırlı çalışma alanı.
 - Güçlü OAuth yönetici PIN’i ve rastgele JWT sırrı.
 
 !!! warning
     Bağlı model yapılandırılmış workspace üzerinde işlem yapabilir. Servisi disposable container veya VM içinde çalıştırın ve host-control resources bağlamayın.
 
-## 1. Clone ve yapılandırma
+## 1. Çalıştırılabilir dosyayı indirme ve yapılandırma
+
+Tek dosyayı indirin ve JWT sırrı üretin:
 
 ```bash
-git clone https://github.com/fwerkor/local-shell-mcp.git
-cd local-shell-mcp
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e .
-cp .env.example .env
-chmod 600 .env
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
+chmod +x local-shell-mcp
+./local-shell-mcp --help
 openssl rand -hex 32
 ```
 
-`.env` içindeki örnek PIN ve JWT sırrını değiştirin (`openssl rand -hex 32` kullanın). Kaynak çalıştırma `.env` dosyasını otomatik yüklemez.
+`.env` oluşturup örnek PIN ve JWT sırrını değiştirin (`openssl rand -hex 32`). İkili `.env` dosyasını **otomatik yüklemez**.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
@@ -39,23 +38,25 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
 
 ## 2. Sunucuyu başlatma
 
+İndirilen dosyayı doğrudan başlatın:
+
 ```bash
-mkdir -p workspaces/default
+chmod 600 .env
 set -a
 . ./.env
 set +a
-. .venv/bin/activate
-export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
-local-shell-mcp --mode mcp
+mkdir -p workspace
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
+./local-shell-mcp --mode mcp
 ```
 
-Başka bir terminalde durumu denetleyin:
+Durumu başka bir terminalde kontrol edin:
 
 ```bash
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Sağlıklı yanıt HTTP `200` döndürür. Sürekli çalıştırmak için servis yöneticisi kullanın.
+Sağlıklı yanıt HTTP `200` döndürür. Kalıcı çalıştırma için servis yöneticisi kullanın.
 
 ## 3. HTTPS yayınlama
 
@@ -114,16 +115,19 @@ Başarısız testi düzelt. Önce ilgili dosyaları oku, en küçük patch’i y
 
 ## Güncelleme
 
-Kaynağı güncelleyin, editable paketi yeniden kurun ve Controller’ı yeniden başlatın:
+Yeni sürüm dosyasını değiştirip Controller’ı yeniden başlatın:
 
 ```bash
-git pull --ff-only
-python -m pip install -e .
-# Restart the Controller process or service after updating.
+# Stop the running Controller before replacing the executable.
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp.new
+chmod +x local-shell-mcp.new
+./local-shell-mcp.new --version
+mv local-shell-mcp.new local-shell-mcp
+# Restart the Controller process or service.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Docker Compose kullanıyorsanız konteynerleri güncelleyin:
+Docker Compose için konteyneri güncelleyin; kaynak kurulum: [Python](../installation/python.md).
 
 ```bash
 docker compose pull

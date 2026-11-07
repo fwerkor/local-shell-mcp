@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
+<!-- i18n-source-sha256: f769f579039e6eae80c7c955b80248ae0919448b2f5ca18ea4588ee66b0beba1 -->
 # Docker Compose 运行时
 
-Docker Compose 是可选的隔离容器部署方式。**首选直接源码部署**，具体步骤见 [Python/源码运行时指南](python.md)。
+大多数用户应首选 [单文件二进制](binary.md)；Docker Compose 适合需要可重建、隔离容器的环境。
 
 这是运行时选择。它可以接入 ChatGPT、通用 HTTP MCP 客户端，也可以只在本地测试。
 

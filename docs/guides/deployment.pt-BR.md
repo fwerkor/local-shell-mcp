@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d7d01bc3f36f434c8e66c3fb6f65c2934937c5b2937dd9e8ba7beefc018fd14f -->
+<!-- i18n-source-sha256: cef0a90f9de3e2806e2a6bd8925217ea44ea6d6e6bce911eea09b1d4192a82d9 -->
 # Opções de runtime e modelo de implantação
 
 `local-shell-mcp` tem duas decisões complementares:
@@ -6,7 +6,7 @@
 1. **Runtime**: como o processo do servidor roda e qual workspace controla.
 2. **Interface**: use o [unified web workspace](../getting-started/web-workspace.md) opcional ou conecte um cliente MCP externo, como Gemini ou ChatGPT.
 
-A interface diária recomendada é o espaço de trabalho web auto-hospedado (chat, projetos e páginas de controle LSM). Ele é implantado separadamente do Controlador. Docker, a extensão VS Code, binários de lançamento, instalações Python e modo stdio são maneiras de executar o Controlador; aplicativos de bate-papo externos permanecem clientes opcionais.
+**Recomendamos o Controller como executável único**, sem Python, Docker ou código-fonte. As outras opções continuam disponíveis.
 
 ```text
 Runtime layer                      Exposure layer                 Client layer
@@ -40,11 +40,11 @@ Local MCP client
 
 | Tempo de execução | Melhor para | Limite de isolamento | Fonte do conjunto de ferramentas | Acesso MCP externo | Página |
 |---|---|---|---|---|---|
-| **Código-fonte (recomendado)** / `pipx` | Uso Python-native, debugging, development | Host virtualenv or VM | Pacote Python mais ferramentas host | Adicionar proxy HTTPS ou tunnel | [Python install](../installation/python.md) |
+| **Executável único (recomendado)** | Maioria das plataformas suportadas | Host or VM | Ferramentas host mais executable configurado | Adicionar proxy HTTPS ou tunnel | [Standalone binary](../installation/binary.md) |
 | Composição do Docker | Contêineres isolados e descartáveis | Recipiente | Imagem do Controlador Lean; instalar conjuntos de ferramentas específicos de tarefas separadamente | Adicionar proxy ou túnel HTTPS | [Docker Compose](../installation/docker.md) |
 | Docker Compose + sidecar de túnel | Não recomendado: Encaminhe por servidor público; Cloudflare Tunnel apenas como último recurso | Recipiente | Imagem do projeto | Encaminhe por servidor público; Cloudflare Tunnel apenas como último recurso | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Iniciar/parar server de um editor workspace | Normalmente processo host | Ferramentas host mais executable configurado | Adicionar tunnel/proxy HTTPS externo para ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
-| Standalone binary | Hosts ou VM sem Docker | Host or VM | Ferramentas host mais executable configurado | Adicionar proxy HTTPS ou tunnel | [Standalone binary](../installation/binary.md) |
+| Fonte / pipx | Desenvolvimento e customização | Host virtualenv or VM | Pacote Python mais ferramentas host | Adicionar proxy HTTPS ou tunnel | [Python install](../installation/python.md) |
 | Stdio mode | MCP clients locais que iniciam processos diretamente | Client process boundary | Ferramentas host mais executable configurado | Não utilizável pelo ChatGPT web/app | [Stdio mode](../installation/stdio.md) |
 
 ## Matriz de conexão client
@@ -84,11 +84,11 @@ A diferença não é a API abstrata, mas o **operating environment** por trás d
 
 ## Seleção recomendada
 
-Recomendamos **implantação direta do código-fonte** em ambiente isolado; consulte o [guia Python/fonte](../installation/python.md). Docker Compose é uma alternativa.
+**Prefira o executável único**: baixe a versão correta e use uma conta restrita e workspace dedicado. [Guia do binário](../installation/binary.md).
 
 Use a **extensão do VS Code** quando o fluxo de trabalho iniciar em um editor e você desejar um iniciador local. Ainda é um tempo de execução. Os clientes web remotos precisam de um proxy ou túnel HTTPS acessível.
 
-Use **standalone binary** quando Docker não estiver disponível, mas VM, container host ou conta dedicada já fornecerem a boundary.
+**Código-fonte** é voltado a desenvolvimento, depuração e customização com Python virtual. [Guia Python](../installation/python.md).
 
 Use **`pipx` ou source install** para development/debugging do próprio `local-shell-mcp` ou quando um Python-based environment for mais fácil de manter.
 

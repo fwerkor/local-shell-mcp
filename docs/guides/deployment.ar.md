@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d7d01bc3f36f434c8e66c3fb6f65c2934937c5b2937dd9e8ba7beefc018fd14f -->
+<!-- i18n-source-sha256: cef0a90f9de3e2806e2a6bd8925217ea44ea6d6e6bce911eea09b1d4192a82d9 -->
 # خيارات Runtime ونموذج النشر
 
 يحتوي `local-shell-mcp` على قرارين متكاملين:
@@ -6,7 +6,7 @@
 1. **Runtime**: كيفية تشغيل عملية الخادم وما الـ workspace الذي تتحكم فيه.
 2. **الواجهة**: استخدم [unified web workspace](../getting-started/web-workspace.md) الاختياري، أو قم بتوصيل عميل MCP خارجي مثل Gemini أو ChatGPT.
 
-الواجهة اليومية الموصى بها هي مساحة عمل الويب المستضافة ذاتيًا (الدردشة والمشاريع وصفحات التحكم في LSM). يتم نشره بشكل منفصل عن وحدة التحكم. يُعد Docker، وملحق VS Code، وثنائيات الإصدار، وعمليات تثبيت Python، ووضع stdio طرقًا لتشغيل وحدة التحكم؛ تظل تطبيقات الدردشة الخارجية عملاء اختياريين.
+**نوصي بتوزيع Controller في ملف تنفيذي واحد** دون الحاجة إلى Python أو Docker أو المصدر. الخيارات الأخرى متاحة.
 
 ```text
 Runtime layer                      Exposure layer                 Client layer
@@ -40,11 +40,11 @@ Local MCP client
 
 | وقت التشغيل | الأفضل ل | حد العزلة | مصدر سلسلة الأدوات | الوصول الخارجي لـ MCP | الصفحة |
 |---|---|---|---|---|---|
-| **المصدر مباشرة (موصى به)** / `pipx` | استخدام Python-native وdebugging وdevelopment | Host virtualenv or VM | Python package مع أدوات host | أضف HTTPS proxy أو tunnel | [Python install](../installation/python.md) |
+| **ملف واحد (موصى به)** | معظم المنصات المدعومة | Host or VM | أدوات host مع executable مضبوط | أضف HTTPS proxy أو tunnel | [Standalone binary](../installation/binary.md) |
 | عامل الميناء يؤلف | حاويات معزولة ومؤقتة | حاوية | صورة وحدة التحكم الهزيلة؛ تثبيت سلاسل الأدوات الخاصة بالمهمة بشكل منفصل | أضف وكيل أو نفق HTTPS | [Docker Compose](../installation/docker.md) |
 | Docker Compose + عربة جانبية للنفق | غير موصى به: إعادة التوجيه عبر خادم عام؛ وCloudflare Tunnel حل أخير | حاوية | صورة المشروع | إعادة التوجيه عبر خادم عام؛ وCloudflare Tunnel حل أخير | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | بدء/إيقاف server من editor workspace | عادة process على host | أدوات host مع executable مضبوط | أضف HTTPS tunnel/proxy خارجيًا لـ ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
-| Standalone binary | Hosts أو VM بدون Docker | Host or VM | أدوات host مع executable مضبوط | أضف HTTPS proxy أو tunnel | [Standalone binary](../installation/binary.md) |
+| المصدر / pipx | التطوير والتعديل | Host virtualenv or VM | Python package مع أدوات host | أضف HTTPS proxy أو tunnel | [Python install](../installation/python.md) |
 | Stdio mode | MCP clients محليون يشغّلون العمليات مباشرة | Client process boundary | أدوات host مع executable مضبوط | غير قابل للاستخدام مع ChatGPT web/app | [Stdio mode](../installation/stdio.md) |
 
 ## مصفوفة اتصال Client
@@ -84,11 +84,11 @@ Local MCP client
 
 ## الاختيار الموصى به
 
-ننصح **بالنشر المباشر من الشيفرة المصدرية** في بيئة معزولة. راجع [دليل Python والمصدر](../installation/python.md). يظل Docker Compose بديلاً مناسباً للحاويات المؤقتة.
+**اختر الملف التنفيذي الواحد**: نزّل النسخة الملائمة وشغّلها بحساب محدود ومجلد مخصص. [دليل الملف](../installation/binary.md).
 
 استخدم **ملحق VS Code** عندما يبدأ سير العمل من محرر وتريد مشغلًا محليًا. لا يزال وقت التشغيل. يحتاج عملاء الويب عن بعد إلى وكيل HTTPS أو نفق يمكن الوصول إليه.
 
-استخدم **standalone binary** عندما لا يتوفر Docker لكن VM أو container host أو dedicated user account يوفر boundary بالفعل.
+**المصدر** مخصص للتطوير والتصحيح والتعديل باستخدام بيئة Python. [دليل Python](../installation/python.md).
 
 استخدم **`pipx` أو source install** لتطوير/debugging `local-shell-mcp` نفسه أو عندما تكون بيئة Python أسهل في الإدارة.
 

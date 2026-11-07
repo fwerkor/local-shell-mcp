@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
+<!-- i18n-source-sha256: f769f579039e6eae80c7c955b80248ae0919448b2f5ca18ea4588ee66b0beba1 -->
 # Docker Compose runtime
 
-Docker Compose は隔離コンテナー向けの代替手段です。**ソースからの直接デプロイを推奨**します。[Python/ソースのガイド](python.md)を参照してください。
+ほとんどの場合 [単一実行ファイル](binary.md) を推奨します。Docker Compose は隔離コンテナー用の代替手段です。
 
 これは runtime の選択です。ChatGPT、generic HTTP MCP client に接続することも、local testing のみに使うこともできます。
 

@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 42daa6d3dd931530a1d2e86d6a36fc6424b7494ff078626157c158b38b1f4b1e -->
+<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
 # Standalone binary runtime
 
-Release binaries `local-shell-mcp` को Docker और Python environment के बिना चलाती हैं। इस runtime का उपयोग तब करें जब Docker उपलब्ध न हो या dedicated VM, container host, lab server या restricted user account पहले से safety boundary देता हो।
+GitHub Releases से **Controller की एकल executable फ़ाइल** उपयोग करना अनुशंसित है। Python, Docker या source checkout की जरूरत नहीं।
 
 यह runtime choice है। ChatGPT access अलग से HTTPS `/mcp` endpoint के माध्यम से configure होता है।
 
@@ -19,16 +19,20 @@ GitHub Releases सामान्य platforms के लिए self-contained 
 
 हर archive में executable, README, license और छोटा quickstart file होता है।
 
+**एकल executable फ़ाइल** भी सीधे उपलब्ध है। इसमें केवल Controller और मूल WebUI हैं; चैट, डेटाबेस, Worker, टूल्स और ब्राउज़र अलग से स्थापित होते हैं।
+
 ## Install
 
-1. GitHub Releases से अपने platform का archive download करें।
-2. उसे extract करें।
+1. अपने प्लेटफ़ॉर्म की फ़ाइल या आर्काइव [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest) से डाउनलोड करें।
+2. आर्काइव होने पर उसे निकालें।
 3. Executable को `PATH` पर रखें या उसका absolute path लिख लें।
 4. `local-shell-mcp --help` चलाकर binary start होने की पुष्टि करें।
 
-Linux और macOS को सामान्यतः executable bit चाहिए:
+उदाहरण: Linux x86_64 की फ़ाइल सीधे डाउनलोड करें; अन्य प्लेटफ़ॉर्म पर उपयुक्त रिलीज़ चुनें:
 
 ```bash
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
 chmod +x local-shell-mcp
 ./local-shell-mcp --help
 ```
@@ -40,7 +44,7 @@ Windows users PowerShell से `local-shell-mcp.exe` चलाएँ या con
 ```bash
 mkdir -p ~/local-shell-mcp-workspace
 export LOCAL_SHELL_MCP_WORKSPACE_ROOT=~/local-shell-mcp-workspace
-local-shell-mcp --mode mcp
+~/lsm/local-shell-mcp --mode mcp
 ```
 
 दूसरे terminal में:
@@ -104,7 +108,7 @@ Binary Python application package करता है, हर developer tool न
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-यदि आप यह host toolchain maintain नहीं करना चाहते तो Docker Compose उपयोग करें।
+बाइनरी में Controller शामिल है; बाहरी टूल और ब्राउज़र वैकल्पिक हैं। चैट और हिस्ट्री के लिए अलग [वेब वर्कस्पेस](../getting-started/web-workspace.md) और डेटाबेस चाहिए।
 
 ## Long-running service
 
@@ -119,7 +123,7 @@ Persistent public deployment के लिए binary को OS process superviso
 
 ## Updates
 
-1. अपने platform का नया release archive download करें।
+1. नया executable बदलें और Controller पुनः शुरू करें:
 2. चाहें तो checksums verify करें।
 3. Executable replace करें।
 4. Process manager restart करें।

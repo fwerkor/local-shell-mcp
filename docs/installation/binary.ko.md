@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 42daa6d3dd931530a1d2e86d6a36fc6424b7494ff078626157c158b38b1f4b1e -->
+<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
 # Standalone binary runtime
 
-Release binary는 Docker나 Python environment 없이 `local-shell-mcp`를 실행합니다. Docker를 사용할 수 없거나 dedicated VM, container host, lab server 또는 restricted user account가 이미 안전 경계를 제공할 때 이 runtime을 사용하십시오.
+GitHub Releases의 **Controller 단일 실행 파일** 배포를 권장합니다. Python, Docker, 소스 체크아웃이 필요 없습니다.
 
 이는 runtime 선택입니다. ChatGPT access는 HTTPS `/mcp` endpoint를 통해 별도로 구성합니다.
 
@@ -19,16 +19,20 @@ GitHub Releases는 일반 platform용 self-contained executable을 build합니�
 
 각 archive에는 executable, README, license, 짧은 quickstart file이 포함됩니다.
 
+**단일 실행 파일**도 배포됩니다. Controller와 기본 WebUI만 포함하며 채팅, 데이터베이스, Worker, 개발 도구 및 브라우저는 별도 구성입니다.
+
 ## Install
 
-1. GitHub Releases에서 platform에 맞는 archive를 download합니다.
-2. 압축을 풉니다.
+1. [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest)에서 플랫폼에 맞는 실행 파일 또는 압축 파일을 다운로드하세요.
+2. 압축 파일을 선택했다면 압축을 해제하세요.
 3. executable을 `PATH`에 두거나 absolute path를 기록합니다.
 4. `local-shell-mcp --help`를 실행해 binary가 시작되는지 확인합니다.
 
-Linux와 macOS에서는 일반적으로 executable bit가 필요합니다.
+예시: Linux x86_64 단일 파일을 직접 다운로드합니다. 다른 플랫폼은 호환 파일을 선택하세요:
 
 ```bash
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
 chmod +x local-shell-mcp
 ./local-shell-mcp --help
 ```
@@ -40,7 +44,7 @@ Windows 사용자는 PowerShell에서 `local-shell-mcp.exe`를 실행하거나 �
 ```bash
 mkdir -p ~/local-shell-mcp-workspace
 export LOCAL_SHELL_MCP_WORKSPACE_ROOT=~/local-shell-mcp-workspace
-local-shell-mcp --mode mcp
+~/lsm/local-shell-mcp --mode mcp
 ```
 
 다른 terminal에서:
@@ -104,7 +108,7 @@ binary는 Python application을 package하지만 모든 developer tool을 포함
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-이 host toolchain을 유지하고 싶지 않다면 Docker Compose를 사용하십시오.
+바이너리에는 Controller만 포함됩니다. 외부 도구와 브라우저는 필요할 때 설치하세요. 채팅 및 기록은 별도 [웹 워크스페이스](../getting-started/web-workspace.md)와 데이터베이스가 필요합니다.
 
 ## Long-running service
 
@@ -119,7 +123,7 @@ persistent public deployment에서는 OS process supervisor 아래에서 binary�
 
 ## Updates
 
-1. platform용 새 release archive를 download합니다.
+1. 새 실행 파일로 교체한 뒤 Controller를 다시 시작하세요:
 2. 필요하면 checksum을 verify합니다.
 3. executable을 교체합니다.
 4. process manager를 restart합니다.

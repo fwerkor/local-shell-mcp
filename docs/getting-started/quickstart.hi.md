@@ -1,34 +1,33 @@
-<!-- i18n-source-sha256: 3575b9b50708261678473f74b66076f0c14807ccd7f7c3e60b4d1e897ac778df -->
+<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
 # त्वरित शुरुआत
 
 यह मार्गदर्शिका एक एलएसएम नियंत्रक प्रारंभ करती है और उसका ब्राउज़र इंटरफ़ेस खोलती है। [unified web workspace](web-workspace.md) अनुशंसित दैनिक अनुभव है; यह एक अलग से तैनात, वैकल्पिक चैट स्टैक है। चैटजीपीटी, जेमिनी और अन्य बाहरी एमसीपी क्लाइंट एक ही नियंत्रक से जुड़ सकते हैं। [runtime choices and deployment model](../guides/deployment.md) देखें.
 
-अलग वातावरण में **सीधे स्रोत कोड से डिप्लॉय करना** अनुशंसित है। Docker Compose वैकल्पिक है।
+[GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest) से **Controller की एकल executable फ़ाइल** उपयोग करना अनुशंसित है। Python, Docker या source checkout की जरूरत नहीं। उदाहरण **Linux x86_64** के लिए है; अन्य प्लेटफ़ॉर्म: [बाइनरी गाइड](../installation/binary.md)।
 
 ## आवश्यकताएँ
 
-- Git और Python 3.11+ के साथ `venv` तथा `pip`.
-- बाहरी MCP क्लाइंट या दूरस्थ उपयोगकर्ताओं के लिए ही सार्वजनिक HTTPS.
-- सीमित अधिकारों वाली अलग workspace डायरेक्टरी.
-- मजबूत OAuth admin PIN और यादृच्छिक JWT secret.
+- संगत executable फ़ाइल और `curl` (Linux x86_64 उदाहरण)।
+- बाहरी MCP क्लाइंट या दूरस्थ उपयोगकर्ता होने पर ही सार्वजनिक HTTPS।
+- सीमित अधिकार वाली अलग workspace।
+- मजबूत OAuth admin PIN और यादृच्छिक JWT secret।
 
 !!! warning
     Connected model configured workspace पर काम कर सकता है। Service को disposable container या VM में चलाएँ और host-control resources mount न करें।
 
-## 1. Clone और configure करें
+## 1. एकल executable डाउनलोड और कॉन्फ़िगर करें
+
+एकल फ़ाइल डाउनलोड करें और JWT secret बनाएँ:
 
 ```bash
-git clone https://github.com/fwerkor/local-shell-mcp.git
-cd local-shell-mcp
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e .
-cp .env.example .env
-chmod 600 .env
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
+chmod +x local-shell-mcp
+./local-shell-mcp --help
 openssl rand -hex 32
 ```
 
-`.env` में नमूना PIN और JWT secret बदलें (`openssl rand -hex 32` का उपयोग करें)। स्रोत से चलाने पर `.env` स्वतः लोड नहीं होता।
+`.env` बनाएँ और उदाहरण PIN तथा JWT secret बदलें (`openssl rand -hex 32` का उपयोग करें)। बाइनरी `.env` को **स्वतः लोड नहीं करती**।
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
@@ -39,23 +38,25 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
 
 ## 2. Server शुरू करें
 
+डाउनलोड की गई फ़ाइल सीधे चलाएँ:
+
 ```bash
-mkdir -p workspaces/default
+chmod 600 .env
 set -a
 . ./.env
 set +a
-. .venv/bin/activate
-export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
-local-shell-mcp --mode mcp
+mkdir -p workspace
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
+./local-shell-mcp --mode mcp
 ```
 
-दूसरे टर्मिनल से स्थिति जाँचें:
+दूसरे टर्मिनल में स्थिति जाँचें:
 
 ```bash
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-सही उत्तर HTTP `200` है। लंबे समय तक चलाने के लिए सर्विस मैनेजर का उपयोग करें।
+सही उत्तर HTTP `200` है। लंबे समय तक चलाने के लिए सेवा प्रबंधक और सीमित खाता उपयोग करें।
 
 ## 3. HTTPS expose करें
 
@@ -114,16 +115,19 @@ Failing test ठीक करें। पहले संबंधित files 
 
 ## अपडेट
 
-स्रोत अपडेट करें, editable पैकेज पुनः इंस्टॉल करें और Controller पुनः शुरू करें:
+नया executable बदलें और Controller पुनः शुरू करें:
 
 ```bash
-git pull --ff-only
-python -m pip install -e .
-# Restart the Controller process or service after updating.
+# Stop the running Controller before replacing the executable.
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp.new
+chmod +x local-shell-mcp.new
+./local-shell-mcp.new --version
+mv local-shell-mcp.new local-shell-mcp
+# Restart the Controller process or service.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Docker Compose होने पर कंटेनर अपडेट करें:
+Docker Compose के लिए कंटेनर अपडेट करें। Source संस्करण: [Python](../installation/python.md)।
 
 ```bash
 docker compose pull
