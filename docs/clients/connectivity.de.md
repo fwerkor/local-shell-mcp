@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 3986da6ff877609189b0d88d363aff1f5f45445f0cfe5ffa608a31929078542c -->
+<!-- i18n-source-sha256: 4eb43e1a065d72171aad5493848eb2f8c57361b110237c8816928e28f227a3d8 -->
 # Netzwerkverbindung
 
 HTTP-MCP-client außerhalb der Maschine benötigen einen erreichbaren HTTPS-Origin. Diese Seite behandelt das Netzwerk-Routing, nicht die Wahl des Runtime.
@@ -19,13 +19,18 @@ Nehmen Sie `/mcp` nicht in diese base URL auf.
 
 ## Verbindungsoptionen
 
+**Empfohlen:** Für öffentlichen Zugriff einen öffentlichen Server oder eine Weiterleitung über einen öffentlichen Server mit HTTPS-Reverse-Proxy verwenden.
+
+**Nicht empfohlen:** Bei Cloudflare Tunnel kann der clientseitige Upload sehr langsam sein, sodass Datei-Uploads und -Übertragungen kaum nutzbar sind. Nur verwenden, wenn direkte Bereitstellung oder Weiterleitung über einen öffentlichen Server nicht möglich ist.
+
+
 | Option | Einsatz |
 |---|---|
-| Compose tunnel sidecar | Docker Compose mit dem eingebauten `tunnel`-Profile |
-| Externer Tunnel | Jeder Runtime, der außerhalb des lokalen Netzes erreichbar sein muss |
 | Caddy | Einfaches automatisches TLS |
 | Nginx oder Nginx Proxy Manager | Vorhandene Nginx-Infrastruktur |
 | Traefik | Vorhandenes container-natives Routing |
+| Weiterleitung über öffentlichen Server | Für öffentlichen Zugriff einen öffentlichen Server oder eine Weiterleitung über einen öffentlichen Server mit HTTPS-Reverse-Proxy verwenden. |
+| Cloudflare Tunnel (nicht empfohlen) | Über öffentlichen Server weiterleiten; Cloudflare Tunnel nur als Notlösung |
 
 ## Pfade
 
@@ -64,9 +69,9 @@ curl -i https://your-public-host.example.com/healthz
 
 | Runtime | Netzwerkmuster |
 |---|---|
-| Docker Compose auf einem Server | Vorhandener Reverse Proxy oder Compose tunnel profile |
-| Docker Compose auf einem Heimrechner | Outbound tunnel |
-| VS Code extension auf einem Laptop | Temporärer Tunnel für die Sitzung |
+| Docker Compose auf einem Server | HTTPS-Reverse-Proxy |
+| Docker Compose auf einem Heimrechner | Über öffentlichen Server weiterleiten; Cloudflare Tunnel nur als Notlösung |
+| VS Code extension auf einem Laptop | Weiterleitung über öffentlichen Server |
 | Binary auf einer VM | Reverse Proxy auf der VM oder am Netzwerkrand |
 | Python/source-Entwicklungsserver | Normalerweise nur localhost |
 | Stdio mode | Kein HTTP-Netzpfad; lokalen MCP client verwenden |

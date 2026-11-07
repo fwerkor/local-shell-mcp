@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
+<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
 # Lựa chọn runtime và mô hình deployment
 
 `local-shell-mcp` có hai quyết định bổ sung:
@@ -34,12 +34,14 @@ Local MCP client
   -> controlled workspace
 ```
 
+**Khuyến nghị:** Để truy cập công khai, hãy triển khai trên máy chủ công khai hoặc chuyển tiếp lưu lượng qua máy chủ công khai bằng reverse proxy HTTPS. **Không khuyến nghị:** Tốc độ tải lên phía máy khách qua Cloudflare Tunnel có thể rất chậm, khiến việc tải lên và truyền tệp khó sử dụng. Chỉ dùng khi không thể triển khai hoặc chuyển tiếp qua máy chủ công khai. ([Public HTTPS exposure](../clients/connectivity.md))
+
 ## Ma trận lựa chọn runtime
 
 | Thời gian chạy | Tốt nhất cho | Ranh giới cách ly | Nguồn chuỗi công cụ | Truy cập MCP bên ngoài | Trang |
 |---|---|---|---|---|---|
 | Docker Soạn | Hầu hết khối lượng công việc của tác nhân mã hóa và không gian làm việc có thể lặp lại | thùng chứa | Hình ảnh Bộ điều khiển tinh gọn; cài đặt riêng các chuỗi công cụ dành riêng cho nhiệm vụ | Thêm proxy hoặc đường hầm HTTPS | [Docker Compose](../installation/docker.md) |
-| Docker Compose + xe sidecar đường hầm | Triển khai Bộ điều khiển công cộng với Đường hầm Cloudflare | thùng chứa | Hình ảnh dự án | Được tích hợp vào hồ sơ Compose `tunnel` | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| Docker Compose + xe sidecar đường hầm | Không khuyến nghị: Chuyển tiếp qua máy chủ công khai; Cloudflare Tunnel chỉ là phương án cuối | thùng chứa | Hình ảnh dự án | Chuyển tiếp qua máy chủ công khai; Cloudflare Tunnel chỉ là phương án cuối | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Start/stop server từ editor workspace | Thường là host process | Host tools cộng executable cấu hình | Thêm HTTPS tunnel/proxy ngoài cho ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Host hoặc VM không có Docker | Host or VM | Host tools cộng executable cấu hình | Thêm HTTPS proxy hoặc tunnel | [Standalone binary](../installation/binary.md) |
 | `pipx` / source install | Dùng Python-native, debugging, development | Host virtualenv or VM | Python package cộng host tools | Thêm HTTPS proxy hoặc tunnel | [Python install](../installation/python.md) |

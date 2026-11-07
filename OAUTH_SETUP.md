@@ -25,7 +25,9 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-With Cloudflare Tunnel only:
+For public access, **prefer a public server with HTTPS reverse proxy**, or forwarding through a public server. **Cloudflare Tunnel is not recommended for file uploads and transfers** because its client-side upload speeds may be very slow; use it only as a fallback.
+
+With the optional Cloudflare Tunnel fallback:
 
 ```bash
 docker compose --profile tunnel up -d --build

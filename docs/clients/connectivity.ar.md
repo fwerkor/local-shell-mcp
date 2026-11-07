@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 3986da6ff877609189b0d88d363aff1f5f45445f0cfe5ffa608a31929078542c -->
+<!-- i18n-source-sha256: 4eb43e1a065d72171aad5493848eb2f8c57361b110237c8816928e28f227a3d8 -->
 # الاتصال بالشبكة
 
 تحتاج MCP client عبر HTTP الموجودة خارج الجهاز إلى HTTPS origin يمكن الوصول إليه. تتناول هذه الصفحة توجيه الشبكة، وليس اختيار runtime.
@@ -19,13 +19,18 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 
 ## خيارات الاتصال
 
+**موصى به:** استخدم خادمًا ذا عنوان عام، أو أعد توجيه حركة المرور عبر خادم عام باستخدام وكيل HTTPS عكسي.
+
+**غير موصى به:** قد تكون سرعة الرفع من جهة العميل عبر Cloudflare Tunnel بطيئة جدًا، مما يجعل رفع الملفات ونقلها صعب الاستخدام. استخدمه فقط عند تعذّر النشر العام أو التوجيه عبر خادم عام.
+
+
 | الخيار | متى يُستخدم |
 |---|---|
-| Compose tunnel sidecar | Docker Compose مع profile `tunnel` المدمج |
-| Tunnel خارجي | أي runtime يجب الوصول إليه من خارج الشبكة المحلية |
 | Caddy | TLS تلقائي وبسيط |
 | Nginx أو Nginx Proxy Manager | بنية Nginx موجودة |
 | Traefik | توجيه container-native موجود |
+| توجيه عبر خادم عام | استخدم خادمًا ذا عنوان عام، أو أعد توجيه حركة المرور عبر خادم عام باستخدام وكيل HTTPS عكسي. |
+| Cloudflare Tunnel (غير موصى به) | إعادة التوجيه عبر خادم عام؛ وCloudflare Tunnel حل أخير |
 
 ## المسارات
 
@@ -64,9 +69,9 @@ curl -i https://your-public-host.example.com/healthz
 
 | Runtime | نمط الشبكة |
 |---|---|
-| Docker Compose على خادم | Reverse proxy موجود أو Compose tunnel profile |
-| Docker Compose على جهاز منزلي | Outbound tunnel |
-| VS Code extension على حاسوب محمول | Tunnel مؤقت للجلسة |
+| Docker Compose على خادم | وكيل HTTPS عكسي |
+| Docker Compose على جهاز منزلي | إعادة التوجيه عبر خادم عام؛ وCloudflare Tunnel حل أخير |
+| VS Code extension على حاسوب محمول | توجيه عبر خادم عام |
 | Binary على VM | Reverse proxy على VM أو حافة الشبكة |
 | خادم تطوير Python/source | عادةً localhost فقط |
 | Stdio mode | لا يوجد مسار HTTP؛ استخدم MCP client محلياً |

@@ -28,7 +28,6 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 LOCAL_SHELL_MCP_AUTH_MODE=oauth
 LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me-long-random-pin
 LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
-CLOUDFLARE_TUNNEL_TOKEN=
 ```
 
 ## 2. Start the server
@@ -50,7 +49,9 @@ A healthy response returns HTTP `200`.
 
 ## 3. Expose HTTPS
 
-For Cloudflare Tunnel sidecar:
+**Recommended:** Deploy on a public server with HTTPS, or forward traffic from a private Controller through a public server. Use Caddy, Nginx, Traefik, Nginx Proxy Manager, or another reverse proxy to route requests to `127.0.0.1:8765` or the container network address. Preserve request bodies and streaming for file transfers.
+
+**Cloudflare Tunnel is not recommended:** Its client-side upload speed can be very slow, making the file upload and transfer features hard to use. Use the optional sidecar only when direct public deployment or public-server forwarding is impractical. First set `CLOUDFLARE_TUNNEL_TOKEN` in `.env`, then run:
 
 ```bash
 docker compose --profile tunnel up -d
@@ -61,8 +62,6 @@ In Cloudflare Zero Trust, point the public hostname to:
 ```text
 http://local-shell-mcp:8765
 ```
-
-For Caddy, Nginx, Traefik, Nginx Proxy Manager, or another reverse proxy, forward HTTPS traffic to `127.0.0.1:8765` or the container network address.
 
 ## 4. Open the browser workspace
 

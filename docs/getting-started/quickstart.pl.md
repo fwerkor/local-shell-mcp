@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
+<!-- i18n-source-sha256: a9820f08198cf8e823f59550928c07346f9669f2dbec46d3b8cd523c34034e01 -->
 # Szybki start
 
 Ten przewodnik uruchamia kontroler LSM i otwiera interfejs przeglądarki. [unified web workspace](web-workspace.md) to zalecane codzienne doświadczenie; jest to oddzielnie wdrażany, opcjonalny stos czatów. ChatGPT, Gemini i inni zewnętrzni klienci MCP mogą łączyć się z tym samym kontrolerem. Zobacz [runtime choices and deployment model](../guides/deployment.md).
@@ -29,7 +29,6 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 LOCAL_SHELL_MCP_AUTH_MODE=oauth
 LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me-long-random-pin
 LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
-CLOUDFLARE_TUNNEL_TOKEN=
 ```
 
 ## 2. Uruchomienie serwera
@@ -50,6 +49,10 @@ curl -i http://127.0.0.1:8765/healthz
 Poprawna odpowiedź zwraca HTTP `200`.
 
 ## 3. Udostępnienie HTTPS
+
+**Zalecane:** Do dostępu publicznego użyj serwera z publicznym adresem lub przekierowania przez serwer publiczny z odwrotnym proxy HTTPS.
+
+**Niezalecane:** Przesyłanie danych od klienta przez Cloudflare Tunnel może być bardzo wolne, co utrudnia wysyłanie i transfer plików. Używaj tylko wtedy, gdy serwer publiczny lub przekierowanie nie są dostępne. Configure `CLOUDFLARE_TUNNEL_TOKEN` in `.env` only when choosing the optional tunnel sidecar.
 
 Dla sidecar Cloudflare Tunnel:
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
+<!-- i18n-source-sha256: f44188b1e2f3b4d79d97c78edb15270aa338ddf7989d85df1559168a0678eaa8 -->
 # Runtime Docker Compose
 
 Docker Compose adalah runtime yang direkomendasikan untuk sebagian besar pengguna. Ia memberi model workspace Linux terkontrol, toolchain reproducible, persistent credentials, dukungan browser automation, dan jalur upgrade yang mudah.
@@ -82,6 +82,8 @@ https://your-public-host.example.com/mcp
 
 ## Cloudflare Tunnel sidecar
 
+**Tidak direkomendasikan:** Kecepatan unggah sisi klien Cloudflare Tunnel bisa sangat lambat, sehingga fitur unggah dan transfer berkas sulit digunakan. Gunakan hanya jika server publik atau penerusan tidak memungkinkan. Untuk akses publik, gunakan server publik atau teruskan lalu lintas melalui server publik dengan reverse proxy HTTPS. ([network connectivity](../clients/connectivity.md))
+
 Compose file menyertakan optional `cloudflared` service di balik profile `tunnel`. Ini menjalankan tunnel di samping MCP server.
 
 Konfigurasikan `.env`:
@@ -110,6 +112,8 @@ Ini Cloudflare Tunnel, bukan Cloudflare Access. `local-shell-mcp` tetap menangan
 Compose service mempercayai forwarded headers karena published port dibatasi ke localhost; ini mempertahankan public caller address untuk OAuth PIN rate limiting. Jika container port diekspos langsung, ganti `LOCAL_SHELL_MCP_FORWARDED_ALLOW_IPS=*` dengan alamat eksplisit trusted reverse proxies.
 
 ## Reverse proxy tanpa tunnel sidecar
+
+**Direkomendasikan:** Untuk akses publik, gunakan server publik atau teruskan lalu lintas melalui server publik dengan reverse proxy HTTPS.
 
 Jika sudah memakai Caddy, Nginx, Traefik, atau Nginx Proxy Manager, pertahankan normal Compose service dan forward HTTPS ke:
 

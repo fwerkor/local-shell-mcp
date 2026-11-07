@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
+<!-- i18n-source-sha256: a9820f08198cf8e823f59550928c07346f9669f2dbec46d3b8cd523c34034e01 -->
 # 快速开始
 
 本指南启动 LSM 控制器并打开其浏览器界面。 [unified web workspace](web-workspace.md)为推荐日常体验；它是一个单独部署的、可选的聊天堆栈。 ChatGPT、Gemini 和其他外部 MCP 客户端可以连接到同一控制器。请参阅 [runtime choices and deployment model](../guides/deployment.md)。
@@ -29,7 +29,6 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 LOCAL_SHELL_MCP_AUTH_MODE=oauth
 LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me-long-random-pin
 LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
-CLOUDFLARE_TUNNEL_TOKEN=
 ```
 
 ## 2. 启动服务
@@ -50,6 +49,10 @@ curl -i http://127.0.0.1:8765/healthz
 健康响应会返回 HTTP `200`。
 
 ## 3. 暴露 HTTPS
+
+**推荐：** 有条件时应直接部署到具有公网地址的服务器，或通过公网服务器配合 HTTPS 反向代理转发流量。
+
+**不推荐：** Cloudflare Tunnel 客户端的上传速度可能非常慢，导致文件上传与传输功能难以正常使用。仅在无法公网部署或通过公网服务器转发时，才将其作为备选方案。 只有选择可选的 Tunnel sidecar 时，才需要在 `.env` 配置 `CLOUDFLARE_TUNNEL_TOKEN`。
 
 如果使用 Cloudflare Tunnel sidecar：
 
