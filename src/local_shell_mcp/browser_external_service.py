@@ -25,6 +25,7 @@ async def _serve(state_dir: Path, *, input_stream=None, output_stream=None) -> N
     output_stream = output_stream if output_stream is not None else sys.stdout
     write_lock = asyncio.Lock()
     pending: set[asyncio.Task[None]] = set()
+    inflight: dict[int, asyncio.Task[None]] = {}
 
     async def respond(line: bytes) -> None:
         request_id = None
@@ -49,11 +50,28 @@ async def _serve(state_dir: Path, *, input_stream=None, output_stream=None) -> N
             output_stream.write(f"{len(payload)}\n{payload}")
             output_stream.flush()
 
+    def on_done(task: asyncio.Task[None], request_id: int | None) -> None:
+        pending.discard(task)
+        if request_id is not None and inflight.get(request_id) is task:
+            inflight.pop(request_id, None)
+
     try:
         while line := await asyncio.to_thread(input_stream.readline):
+            try:
+                message = json.loads(line)
+            except (ValueError, TypeError):
+                message = None
+            if isinstance(message, dict) and isinstance(message.get("cancel"), int):
+                task = inflight.get(message["cancel"])
+                if task is not None:
+                    task.cancel()
+                continue
+            request_id = message.get("id") if isinstance(message, dict) else None
             task = asyncio.create_task(respond(line))
             pending.add(task)
-            task.add_done_callback(pending.discard)
+            if isinstance(request_id, int):
+                inflight[request_id] = task
+            task.add_done_callback(lambda done, rid=request_id: on_done(done, rid))
     finally:
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)

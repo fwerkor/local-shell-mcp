@@ -145,3 +145,56 @@ def test_external_frozen_sidecar_path(tmp_path: Path, monkeypatch: pytest.Monkey
     assert ExternalBrowserSessionManager._service_path() == (
         tmp_path / "local_shell_mcp" / "browser_external" / "browser_external_service.py"
     )
+
+
+@pytest.mark.asyncio
+async def test_external_service_forwards_cancel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import io
+    from queue import Queue
+
+    from local_shell_mcp import browser_external_service
+
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    class FakeManager:
+        def __init__(self, state_dir):
+            pass
+
+        async def act(self, session_id, actions):
+            started.set()
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        async def manage(self, **kwargs):
+            return {"closed": 0}
+
+    class Input:
+        lines: Queue[bytes] = Queue()
+
+        def readline(self):
+            return self.lines.get()
+
+    monkeypatch.setattr(browser_external_service, "BrowserSessionManager", FakeManager)
+    input_stream = Input()
+    input_stream.lines.put(
+        json.dumps({"id": 7, "method": "act", "args": ["slow", []], "kwargs": {}}).encode() + b"\n"
+    )
+    output_stream = io.StringIO()
+    service = asyncio.create_task(
+        browser_external_service._serve(
+            tmp_path, input_stream=input_stream, output_stream=output_stream
+        )
+    )
+    try:
+        await asyncio.wait_for(started.wait(), timeout=3)
+        input_stream.lines.put(b'{"cancel":7}\n')
+        await asyncio.wait_for(cancelled.wait(), timeout=3)
+        input_stream.lines.put(b'{"cancel":999}\n')
+    finally:
+        input_stream.lines.put(b"")
+        await asyncio.wait_for(service, timeout=3)
+    assert not output_stream.getvalue()

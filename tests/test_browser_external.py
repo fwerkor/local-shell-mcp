@@ -215,7 +215,14 @@ class FakeBrowserSessionManager:
     async def act(self, session_id, actions, **kwargs):
         if session_id == "slow":
             Path(__file__).with_suffix(".ready").write_text("started")
-        await asyncio.sleep(2.0)
+        try:
+            await asyncio.sleep(2.0)
+        except asyncio.CancelledError:
+            if session_id == "cancelled":
+                Path(__file__).with_suffix(".cancelled").write_text("stopped")
+            raise
+        if session_id == "cancelled":
+            Path(__file__).with_suffix(".finished").write_text("unexpected")
         return {"session_id": session_id}
 
     async def snapshot(self, session_id, **kwargs):
@@ -249,6 +256,13 @@ asyncio.run(browser_external_service._serve(Path(sys.argv[1])))
         cancelled.cancel()
         with pytest.raises(asyncio.CancelledError):
             await cancelled
+        cancelled_marker = script.with_suffix(".cancelled")
+        for _ in range(200):
+            if cancelled_marker.exists():
+                break
+            await asyncio.sleep(0.025)
+        assert cancelled_marker.exists(), "cancel did not reach the service task"
+        assert not script.with_suffix(".finished").exists()
         assert await manager.snapshot("still-alive") == {"text": "still-alive"}
     finally:
         await manager._discard()

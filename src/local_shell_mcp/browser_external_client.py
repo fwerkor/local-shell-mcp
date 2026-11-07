@@ -117,6 +117,18 @@ class ExternalBrowserSessionManager:
         if process is not None:
             await process.wait()
 
+    async def _cancel_request(self, request_id: int) -> None:
+        # Only cancel the operation associated with this request ID.
+        async with self._lock:
+            process = self._process
+            if process is None or process.returncode is not None or process.stdin is None:
+                return
+            try:
+                process.stdin.write(f'{{"cancel":{request_id}}}\n'.encode("ascii"))
+                await process.stdin.drain()
+            except OSError:
+                pass
+
     async def _request(self, method: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
         request_id: int | None = None
         future: asyncio.Future[dict[str, Any]] | None = None
@@ -141,6 +153,8 @@ class ExternalBrowserSessionManager:
                 self._pending.pop(request_id, None)
             if future is not None:
                 future.cancel()
+            if request_id is not None:
+                await self._cancel_request(request_id)
             raise
         except Exception:
             if request_id is not None:
@@ -157,6 +171,7 @@ class ExternalBrowserSessionManager:
         except asyncio.CancelledError:
             self._pending.pop(request_id, None)
             future.cancel()
+            await self._cancel_request(request_id)
             raise
         if not reply["ok"]:
             message = reply.get("message") or "External browser request failed"
