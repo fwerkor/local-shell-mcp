@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # GitHub's Ubuntu images contain large SDKs that are unrelated to this Docker
-# build. The local-shell-mcp image intentionally includes several development
-# toolchains, so reclaim the hosted-runner copies before BuildKit expands them.
+# build. Reclaim the hosted-runner SDK copies before BuildKit expands its
+# browser runtime and cross-platform tmux helper build stages.
 sudo rm -rf \
   /usr/local/lib/android \
   /usr/share/dotnet \

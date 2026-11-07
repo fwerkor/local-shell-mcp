@@ -319,7 +319,7 @@ def _registration_response(client: OAuthClient, *, reused: bool) -> JSONResponse
         {
             "client_id": client.client_id,
             "client_id_issued_at": client.created_at,
-            "client_name": client.client_name or "ChatGPT",
+            "client_name": client.client_name or "OAuth client",
             "redirect_uris": client.redirect_uris,
             "grant_types": ["authorization_code"],
             "response_types": ["code"],
@@ -357,7 +357,7 @@ def _persist_legacy_client(client_id: str, redirect_uri: str) -> OAuthClient | N
         client = OAuthClient(
             client_id=client_id,
             redirect_uris=[redirect_uri],
-            client_name="ChatGPT",
+            client_name=None,
             approved=True,
         )
         _CLIENTS[client_id] = client
@@ -555,45 +555,6 @@ def _oauth_logo_data_uri() -> str:
     return f"data:image/svg+xml;base64,{encoded}"
 
 
-_SCOPE_DETAILS = {
-    "shell:read": (
-        "Read workspace",
-        "Inspect files, directories, terminal output, and runtime state.",
-    ),
-    "shell:write": (
-        "Change workspace",
-        "Create, edit, move, or delete files in the configured workspace.",
-    ),
-    "shell:execute": ("Run commands", "Execute commands and manage persistent terminal sessions."),
-    "browser:use": (
-        "Use browser tools",
-        "Open pages, automate browser actions, and capture page output.",
-    ),
-    "file:share": (
-        "Share files",
-        "Create temporary links for files from the configured workspace.",
-    ),
-    "remote:use": ("Use remote workers", "Access configured remote machines through this service."),
-}
-
-
-def _scope_items(scope: str) -> str:
-    items: list[str] = []
-    for name in dict.fromkeys(item for item in scope.split() if item):
-        title, description = _SCOPE_DETAILS.get(
-            name, (name, "Access requested by this OAuth client.")
-        )
-        escaped_title = html_lib.escape(title)
-        escaped_description = html_lib.escape(description)
-        items.append(
-            f"""<li class="permission">
-              <span class="permission-icon" aria-hidden="true">✓</span>
-              <span><strong>{escaped_title}</strong><small>{escaped_description}</small></span>
-            </li>"""
-        )
-    return "\n".join(items)
-
-
 def _authorize_form(
     params: dict[str, str],
     error: str | None = None,
@@ -603,41 +564,32 @@ def _authorize_form(
 ) -> HTMLResponse:
     settings = get_settings()
     scope = _scope_value()
-    resource = params.get("resource") or resource_url()
     client = _get_client(params.get("client_id", ""))
-    client_name = client.client_name if client and client.client_name else "ChatGPT"
+    client_name = client.client_name if client and client.client_name else "OAuth client"
     error_html = (
-        f'<div class="notice notice-error" role="alert"><strong>Authorization failed</strong><span>{html_lib.escape(error)}</span></div>'
+        f'<div class="notice notice-error" role="alert">{html_lib.escape(error)}</div>'
         if error
         else ""
     )
     if settings.oauth_admin_pin:
         pin_field = """<label class="field" for="pin">
           <span>Admin PIN</span>
-          <input id="pin" type="password" name="pin" autocomplete="current-password" required
-                 aria-describedby="pin-help" placeholder="Enter the configured admin PIN" />
-        </label>
-        <p class="field-help" id="pin-help">Use the value configured in <code>LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN</code>.</p>"""
-        security_notice = "Only approve this request if you initiated it from a trusted client."
+          <input id="pin" type="password" name="pin" autocomplete="current-password"
+                 placeholder="Enter your PIN" required />
+        </label>"""
     else:
         pin_field = """<div class="notice notice-warning" role="status">
-          <strong>No admin PIN is configured</strong>
-          <span>This request can be approved without a PIN. Configure one before exposing this service publicly.</span>
+          No admin PIN is configured. Approval is unprotected.
         </div>"""
-        security_notice = "This service currently allows approval without an admin PIN."
     normalized_params = {**params, "scope": scope}
     logo_data_uri = html_lib.escape(_oauth_logo_data_uri(), quote=True)
     html = _authorize_template().substitute(
         logo_url=logo_data_uri,
         favicon_url=logo_data_uri,
         client_name=html_lib.escape(client_name),
-        scope_items=_scope_items(scope),
-        resource_title=html_lib.escape(resource, quote=True),
-        resource=html_lib.escape(resource),
         error_html=error_html,
         hidden_inputs=_hidden_inputs(normalized_params),
         pin_field=pin_field,
-        security_notice=html_lib.escape(security_notice),
     )
     response_headers = {"Cache-Control": "no-store", **(headers or {})}
     return HTMLResponse(html, status_code=status_code, headers=response_headers)
