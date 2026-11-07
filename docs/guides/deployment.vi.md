@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
+<!-- i18n-source-sha256: d7d01bc3f36f434c8e66c3fb6f65c2934937c5b2937dd9e8ba7beefc018fd14f -->
 # Lựa chọn runtime và mô hình deployment
 
 `local-shell-mcp` có hai quyết định bổ sung:
@@ -40,11 +40,11 @@ Local MCP client
 
 | Thời gian chạy | Tốt nhất cho | Ranh giới cách ly | Nguồn chuỗi công cụ | Truy cập MCP bên ngoài | Trang |
 |---|---|---|---|---|---|
-| Docker Soạn | Hầu hết khối lượng công việc của tác nhân mã hóa và không gian làm việc có thể lặp lại | thùng chứa | Hình ảnh Bộ điều khiển tinh gọn; cài đặt riêng các chuỗi công cụ dành riêng cho nhiệm vụ | Thêm proxy hoặc đường hầm HTTPS | [Docker Compose](../installation/docker.md) |
+| **Source checkout (khuyến nghị)** / `pipx` | Dùng Python-native, debugging, development | Host virtualenv or VM | Python package cộng host tools | Thêm HTTPS proxy hoặc tunnel | [Python install](../installation/python.md) |
+| Docker Soạn | Container cách ly và dùng tạm | thùng chứa | Hình ảnh Bộ điều khiển tinh gọn; cài đặt riêng các chuỗi công cụ dành riêng cho nhiệm vụ | Thêm proxy hoặc đường hầm HTTPS | [Docker Compose](../installation/docker.md) |
 | Docker Compose + xe sidecar đường hầm | Không khuyến nghị: Chuyển tiếp qua máy chủ công khai; Cloudflare Tunnel chỉ là phương án cuối | thùng chứa | Hình ảnh dự án | Chuyển tiếp qua máy chủ công khai; Cloudflare Tunnel chỉ là phương án cuối | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Start/stop server từ editor workspace | Thường là host process | Host tools cộng executable cấu hình | Thêm HTTPS tunnel/proxy ngoài cho ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Host hoặc VM không có Docker | Host or VM | Host tools cộng executable cấu hình | Thêm HTTPS proxy hoặc tunnel | [Standalone binary](../installation/binary.md) |
-| `pipx` / source install | Dùng Python-native, debugging, development | Host virtualenv or VM | Python package cộng host tools | Thêm HTTPS proxy hoặc tunnel | [Python install](../installation/python.md) |
 | Stdio mode | MCP client cục bộ spawn process trực tiếp | Client process boundary | Host tools cộng executable cấu hình | Không dùng được với ChatGPT web/app | [Stdio mode](../installation/stdio.md) |
 
 ## Ma trận kết nối client
@@ -84,7 +84,7 @@ Khác biệt không nằm ở abstract API mà ở **operating environment** ph�
 
 ## Lựa chọn khuyến nghị
 
-Trước tiên hãy sử dụng **Docker Compose** trừ khi bạn có lý do để không làm vậy. Nó đưa ra ranh giới an toàn rõ ràng mà không yêu cầu chuỗi công cụ phát triển được cài đặt sẵn lớn.
+Khuyến nghị **triển khai trực tiếp từ mã nguồn** trong môi trường cách ly; xem [hướng dẫn Python/source](../installation/python.md). Docker Compose là phương án khác.
 
 Sử dụng **tiện ích mở rộng Mã VS** khi quy trình làm việc bắt đầu từ trình chỉnh sửa và bạn muốn có trình khởi chạy cục bộ. Nó vẫn là một thời gian chạy. Máy khách web từ xa cần có proxy hoặc đường hầm HTTPS có thể truy cập được.
 

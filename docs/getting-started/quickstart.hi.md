@@ -1,14 +1,16 @@
-<!-- i18n-source-sha256: a9820f08198cf8e823f59550928c07346f9669f2dbec46d3b8cd523c34034e01 -->
+<!-- i18n-source-sha256: 3575b9b50708261678473f74b66076f0c14807ccd7f7c3e60b4d1e897ac778df -->
 # त्वरित शुरुआत
 
 यह मार्गदर्शिका एक एलएसएम नियंत्रक प्रारंभ करती है और उसका ब्राउज़र इंटरफ़ेस खोलती है। [unified web workspace](web-workspace.md) अनुशंसित दैनिक अनुभव है; यह एक अलग से तैनात, वैकल्पिक चैट स्टैक है। चैटजीपीटी, जेमिनी और अन्य बाहरी एमसीपी क्लाइंट एक ही नियंत्रक से जुड़ सकते हैं। [runtime choices and deployment model](../guides/deployment.md) देखें.
 
+अलग वातावरण में **सीधे स्रोत कोड से डिप्लॉय करना** अनुशंसित है। Docker Compose वैकल्पिक है।
+
 ## आवश्यकताएँ
 
-- Compose v2 सहित Docker Engine।
-- यदि दूरस्थ उपयोगकर्ताओं या बाहरी MCP क्लाइंट को कनेक्ट होना चाहिए तो एक सार्वजनिक HTTPS एंडपॉइंट।
-- एक dedicated workspace directory।
-- लंबा random OAuth admin PIN और JWT secret।
+- Git और Python 3.11+ के साथ `venv` तथा `pip`.
+- बाहरी MCP क्लाइंट या दूरस्थ उपयोगकर्ताओं के लिए ही सार्वजनिक HTTPS.
+- सीमित अधिकारों वाली अलग workspace डायरेक्टरी.
+- मजबूत OAuth admin PIN और यादृच्छिक JWT secret.
 
 !!! warning
     Connected model configured workspace पर काम कर सकता है। Service को disposable container या VM में चलाएँ और host-control resources mount न करें।
@@ -18,11 +20,15 @@
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e .
 cp .env.example .env
-python scripts/init_compose_env.py
+chmod 600 .env
+openssl rand -hex 32
 ```
 
-`.env` संपादित करें:
+`.env` में नमूना PIN और JWT secret बदलें (`openssl rand -hex 32` का उपयोग करें)। स्रोत से चलाने पर `.env` स्वतः लोड नहीं होता।
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
@@ -35,38 +41,37 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
 
 ```bash
 mkdir -p workspaces/default
-docker compose up -d
+set -a
+. ./.env
+set +a
+. .venv/bin/activate
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
+local-shell-mcp --mode mcp
 ```
 
-Status जाँचें:
+दूसरे टर्मिनल से स्थिति जाँचें:
 
 ```bash
-docker compose ps
-docker compose logs --tail=100 local-shell-mcp
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-स्वस्थ response HTTP `200` लौटाता है।
+सही उत्तर HTTP `200` है। लंबे समय तक चलाने के लिए सर्विस मैनेजर का उपयोग करें।
 
 ## 3. HTTPS expose करें
 
-**अनुशंसित:** सार्वजनिक पहुँच के लिए सार्वजनिक सर्वर पर तैनात करें या HTTPS रिवर्स प्रॉक्सी के साथ सार्वजनिक सर्वर से ट्रैफ़िक फ़ॉरवर्ड करें।
-
-**अनुशंसित नहीं:** Cloudflare Tunnel में क्लाइंट-साइड अपलोड बहुत धीमे हो सकते हैं, जिससे फ़ाइल अपलोड और स्थानांतरण का उपयोग कठिन हो जाता है। इसे केवल तभी अपनाएँ जब सार्वजनिक सर्वर या फ़ॉरवर्डिंग उपलब्ध न हो। Configure `CLOUDFLARE_TUNNEL_TOKEN` in `.env` only when choosing the optional tunnel sidecar.
-
-Cloudflare Tunnel sidecar के लिए:
-
-```bash
-docker compose --profile tunnel up -d
-```
-
-Cloudflare Zero Trust में public hostname को यहाँ point करें:
+दूरस्थ पहुँच के लिए सार्वजनिक सर्वर या HTTPS रिवर्स प्रॉक्सी (Caddy, Nginx, Traefik) प्रयोग करें। अपलोड/डाउनलोड सहित पूरे साइट को यहाँ अग्रेषित करें:
 
 ```text
-http://local-shell-mcp:8765
+http://127.0.0.1:8765
 ```
 
-Caddy, Nginx, Traefik, Nginx Proxy Manager या किसी अन्य reverse proxy के लिए HTTPS traffic को `127.0.0.1:8765` या container network address पर forward करें।
+HTTPS जाँचें:
+
+```bash
+curl -i https://your-public-host.example.com/healthz
+```
+
+फ़ाइल ट्रांसफ़र के लिए **Cloudflare Tunnel अनुशंसित नहीं है**: क्लाइंट अपलोड धीमे हो सकते हैं। सार्वजनिक सर्वर या सामान्य प्रॉक्सी/पोर्ट फ़ॉरवर्डिंग को प्राथमिकता दें और OAuth चालू रखें। विकल्प: [Docker](../installation/docker.md).
 
 ## 4. ब्राउज़र कार्यक्षेत्र खोलें
 
@@ -109,17 +114,20 @@ Failing test ठीक करें। पहले संबंधित files 
 
 ## अपडेट
 
+स्रोत अपडेट करें, editable पैकेज पुनः इंस्टॉल करें और Controller पुनः शुरू करें:
+
 ```bash
-docker compose pull
-docker compose up -d
+git pull --ff-only
+python -m pip install -e .
+# Restart the Controller process or service after updating.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-यदि tunnel profile उपयोग करते हैं:
+Docker Compose होने पर कंटेनर अपडेट करें:
 
 ```bash
-docker compose --profile tunnel pull
-docker compose --profile tunnel up -d
+docker compose pull
+docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 

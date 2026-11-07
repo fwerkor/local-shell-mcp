@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
+<!-- i18n-source-sha256: d7d01bc3f36f434c8e66c3fb6f65c2934937c5b2937dd9e8ba7beefc018fd14f -->
 # Runtime seçenekleri ve deployment modeli
 
 `local-shell-mcp`'in iki tamamlayıcı kararı vardır:
@@ -40,11 +40,11 @@ Local MCP client
 
 | Çalışma zamanı | Şunun için en iyisi: | İzolasyon sınırı | Araç zinciri kaynağı | Harici MCP erişimi | Sayfa |
 |---|---|---|---|---|---|
-| Docker Oluşturma | Çoğu kodlama aracısı iş yükü ve tekrarlanabilir çalışma alanı | Konteyner | Yalın Kontrolör görüntüsü; göreve özgü araç zincirlerini ayrı olarak kurun | HTTPS proxy'si veya tüneli ekleyin | [Docker Compose](../installation/docker.md) |
+| **Kaynak checkout (önerilir)** / `pipx` | Python-native kullanım, debugging, development | Host virtualenv or VM | Python package ve host tools | HTTPS proxy veya tunnel ekle | [Python install](../installation/python.md) |
+| Docker Oluşturma | Yalıtılmış geçici konteynerler | Konteyner | Yalın Kontrolör görüntüsü; göreve özgü araç zincirlerini ayrı olarak kurun | HTTPS proxy'si veya tüneli ekleyin | [Docker Compose](../installation/docker.md) |
 | Docker Compose + tünel sepeti | Önerilmez: Genel sunucu üzerinden yönlendirin; Cloudflare Tunnel son çare olsun | Konteyner | Proje resmi | Genel sunucu üzerinden yönlendirin; Cloudflare Tunnel son çare olsun | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Editor workspace içinden server start/stop | Genellikle host process | Host tools ve configured executable | ChatGPT için harici HTTPS tunnel/proxy ekle | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Docker olmayan host veya VM | Host or VM | Host tools ve configured executable | HTTPS proxy veya tunnel ekle | [Standalone binary](../installation/binary.md) |
-| `pipx` / source install | Python-native kullanım, debugging, development | Host virtualenv or VM | Python package ve host tools | HTTPS proxy veya tunnel ekle | [Python install](../installation/python.md) |
 | Stdio mode | Process’i doğrudan spawn eden local MCP client’lar | Client process boundary | Host tools ve configured executable | ChatGPT web/app ile kullanılamaz | [Stdio mode](../installation/stdio.md) |
 
 ## Client bağlantı matrisi
@@ -84,7 +84,7 @@ Fark abstract API değil, arkasındaki **operating environment**’dır.
 
 ## Önerilen seçim
 
-Kullanmamak için bir nedeniniz olmadığı sürece öncelikle **Docker Compose**'u kullanın. Önceden kurulmuş büyük bir geliştirme araç zinciri gerektirmeden net bir güvenlik sınırı sağlar.
+Yalıtılmış ortamda **doğrudan kaynak koddan dağıtım** önerilir; [Python/kaynak kılavuzu](../installation/python.md) bölümüne bakın. Docker Compose bir alternatiftir.
 
 İş akışı bir düzenleyiciden başlatıldığında ve yerel bir başlatıcı istediğinizde **VS Code uzantısını** kullanın. Bu hala bir çalışma zamanıdır. Uzak web istemcilerinin ulaşılabilir bir HTTPS proxy'sine veya tüneline ihtiyacı vardır.
 

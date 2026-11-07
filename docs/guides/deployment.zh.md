@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
+<!-- i18n-source-sha256: d7d01bc3f36f434c8e66c3fb6f65c2934937c5b2937dd9e8ba7beefc018fd14f -->
 # 运行时选择与部署模型
 
 `local-shell-mcp` 有两个互补的决定：
@@ -40,11 +40,11 @@ pipx / 源码 checkout             远程 worker 出站加入           REST 风
 
 | 运行时 | 最适合 | 隔离边界 | 工具链源码 | 外部 MCP 访问 | 页面 |
 |---|---|---|---|---|---|
-| Docker 组合 | 大多数编码代理工作负载和可重复的工作空间 | 集装箱 | 精益控制器形象；单独安装特定于任务的工具链 | 添加 HTTPS 代理或隧道 | [Docker Compose](../installation/docker.md) |
+| **源码 checkout（最推荐）** / `pipx` | Python 原生使用、调试、开发 | 宿主机 virtualenv 或 VM | Python 包加宿主机工具 | 添加 HTTPS 代理或隧道 | [Python 安装](../installation/python.md) |
+| Docker 组合 | 一次性隔离容器和可重建工作区 | 集装箱 | 精益控制器形象；单独安装特定于任务的工具链 | 添加 HTTPS 代理或隧道 | [Docker Compose](../installation/docker.md) |
 | Docker Compose + 隧道 sidecar | 不推荐: 通过公网服务器转发；Cloudflare Tunnel 仅作备选 | 集装箱 | 项目形象 | 通过公网服务器转发；Cloudflare Tunnel 仅作备选 | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code 扩展 | 从编辑器工作区启动或停止服务 | 通常是宿主机进程 | 宿主机工具，以及配置的可执行文件 | 为 ChatGPT 添加外部 HTTPS 隧道或代理 | [VS Code 扩展](../installation/vscode-extension.md) |
 | 独立二进制 | Docker 不可用，但已有 VM、容器宿主机或专用账号作为边界 | 宿主机或 VM | 宿主机工具 | 添加 HTTPS 代理或隧道 | [独立二进制](../installation/binary.md) |
-| `pipx` / 源码安装 | Python 原生使用、调试、开发 | 宿主机 virtualenv 或 VM | Python 包加宿主机工具 | 添加 HTTPS 代理或隧道 | [Python 安装](../installation/python.md) |
 | stdio 模式 | 由本地 MCP 客户端直接拉起工具进程 | 客户端进程边界 | 宿主机工具 | ChatGPT 网页或 App 不能直接使用 | [stdio 模式](../installation/stdio.md) |
 
 ## 客户端连接矩阵
@@ -84,7 +84,7 @@ pipx / 源码 checkout             远程 worker 出站加入           REST 风
 
 ## 推荐选择
 
-首先使用**Docker Compose**，除非您有理由不这样做。它提供了明确的安全边界，而不需要大型预安装的开发工具链。
+**最推荐直接从源码仓库部署** Controller，并使用隔离的虚拟机、容器或受限账号。参见 [Python/源码安装指南](../installation/python.md)。Docker Compose 适合需要一次性隔离环境的场景。
 
 当工作流程从编辑器启动并且您需要本地启动器时，请使用 **VS Code 扩展**。它仍然是一个运行时。远程 Web 客户端需要可访问的 HTTPS 代理或隧道。
 

@@ -1,14 +1,16 @@
-<!-- i18n-source-sha256: a9820f08198cf8e823f59550928c07346f9669f2dbec46d3b8cd523c34034e01 -->
+<!-- i18n-source-sha256: 3575b9b50708261678473f74b66076f0c14807ccd7f7c3e60b4d1e897ac778df -->
 # Inicio rápido
 
 Esta guía inicia un controlador LSM y abre su interfaz de navegador. El [unified web workspace](web-workspace.md) es la experiencia diaria recomendada; es una pila de chat opcional implementada por separado. ChatGPT, Gemini y otros clientes MCP externos pueden conectarse al mismo controlador. Ver [runtime choices and deployment model](../guides/deployment.md).
 
+Se recomienda **desplegar directamente desde el código fuente** en un entorno aislado. Docker Compose es una alternativa.
+
 ## Requisitos
 
-- Docker Engine con Compose v2.
-- Un punto final HTTPS público si deben conectarse usuarios remotos o clientes MCP externos.
-- Un directorio de workspace dedicado.
-- Un OAuth admin PIN y JWT secret largos y aleatorios.
+- Git y Python 3.11+ con `venv` y `pip`.
+- HTTPS público solo si acceden usuarios remotos o clientes MCP externos.
+- Un directorio de trabajo dedicado y limitado.
+- PIN de administrador OAuth fuerte y secreto JWT aleatorio.
 
 !!! warning
     El modelo conectado puede operar el workspace configurado. Ejecute el servicio en un container o VM desechable y evite montar recursos de control del host.
@@ -18,11 +20,15 @@ Esta guía inicia un controlador LSM y abre su interfaz de navegador. El [unifie
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e .
 cp .env.example .env
-python scripts/init_compose_env.py
+chmod 600 .env
+openssl rand -hex 32
 ```
 
-Edite `.env`:
+Edite `.env` y sustituya el PIN y el secreto JWT de ejemplo (use `openssl rand -hex 32`). La ejecución desde el código fuente no carga `.env` automáticamente.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
@@ -35,38 +41,37 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
 
 ```bash
 mkdir -p workspaces/default
-docker compose up -d
+set -a
+. ./.env
+set +a
+. .venv/bin/activate
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
+local-shell-mcp --mode mcp
 ```
 
-Compruebe el estado:
+Compruebe el estado desde otra terminal:
 
 ```bash
-docker compose ps
-docker compose logs --tail=100 local-shell-mcp
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Una respuesta sana devuelve HTTP `200`.
+La respuesta correcta es HTTP `200`. Mantenga el proceso activo o use un gestor de servicios.
 
 ## 3. Exponer HTTPS
 
-**Recomendado:** Para el acceso público, usa un servidor público o reenvía el tráfico a través de uno con un proxy inverso HTTPS.
-
-**No recomendado:** Las subidas del cliente por Cloudflare Tunnel pueden ser muy lentas, lo que dificulta el uso de las funciones de carga y transferencia de archivos. Úsalo solo si no es viable desplegar o reenviar mediante un servidor público. Configure `CLOUDFLARE_TUNNEL_TOKEN` in `.env` only when choosing the optional tunnel sidecar.
-
-Para el sidecar de Cloudflare Tunnel:
-
-```bash
-docker compose --profile tunnel up -d
-```
-
-En Cloudflare Zero Trust, apunte el public hostname a:
+Para acceso remoto, use un servidor público o un proxy inverso HTTPS (Caddy, Nginx o Traefik) y reenvíe todo el origen, incluidas las transferencias, a:
 
 ```text
-http://local-shell-mcp:8765
+http://127.0.0.1:8765
 ```
 
-Con Caddy, Nginx, Traefik, Nginx Proxy Manager u otro reverse proxy, reenvíe el tráfico HTTPS a `127.0.0.1:8765` o a la dirección de red del container.
+Compruebe el acceso HTTPS:
+
+```bash
+curl -i https://your-public-host.example.com/healthz
+```
+
+**No se recomienda Cloudflare Tunnel** para transferir archivos: las cargas desde el cliente pueden ser lentas. Prefiera un servidor público o proxy inverso/redirección de puertos. Mantenga OAuth en endpoints públicos. Alternativa: [Docker](../installation/docker.md).
 
 ## 4. Abra el espacio de trabajo del navegador.
 
@@ -109,17 +114,20 @@ Corrige el test que falla. Lee primero los archivos relevantes, haz el patch má
 
 ## Actualización
 
+Actualice el código, reinstale el paquete editable y reinicie el Controller:
+
 ```bash
-docker compose pull
-docker compose up -d
+git pull --ff-only
+python -m pip install -e .
+# Restart the Controller process or service after updating.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Si usa el perfil tunnel:
+Si usa Docker Compose, actualice los contenedores:
 
 ```bash
-docker compose --profile tunnel pull
-docker compose --profile tunnel up -d
+docker compose pull
+docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 

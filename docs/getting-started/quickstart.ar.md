@@ -1,14 +1,16 @@
-<!-- i18n-source-sha256: a9820f08198cf8e823f59550928c07346f9669f2dbec46d3b8cd523c34034e01 -->
+<!-- i18n-source-sha256: 3575b9b50708261678473f74b66076f0c14807ccd7f7c3e60b4d1e897ac778df -->
 # البدء السريع
 
 يبدأ هذا الدليل تشغيل وحدة تحكم LSM ويفتح واجهة المتصفح الخاصة بها. [unified web workspace](web-workspace.md) هي التجربة اليومية الموصى بها؛ إنها عبارة عن مكدس دردشة اختياري تم نشره بشكل منفصل. يمكن لعملاء ChatGPT وGemini وعملاء MCP الخارجيين الآخرين الاتصال بنفس وحدة التحكم. انظر [runtime choices and deployment model](../guides/deployment.md).
 
+الطريقة الموصى بها هي **النشر المباشر من الشيفرة المصدرية** في بيئة معزولة؛ Docker Compose خيار بديل.
+
 ## المتطلبات
 
-- Docker Engine مع Compose v2.
-- نقطة نهاية HTTPS عامة إذا كان يجب على المستخدمين البعيدين أو عملاء MCP الخارجيين الاتصال.
-- دليل workspace مخصص.
-- OAuth admin PIN وJWT secret طويلان وعشوائيان.
+- Git وPython 3.11+ مع `venv` و`pip`.
+- عنوان HTTPS عام فقط عند الحاجة إلى وصول عن بُعد أو عملاء MCP خارجيين.
+- مجلد عمل مخصص بصلاحيات محدودة.
+- رمز PIN قوي لمسؤول OAuth وسر JWT عشوائي.
 
 !!! warning
     يمكن للنموذج المتصل تشغيل الـ workspace المضبوط. شغّل الخدمة داخل container أو VM قابل للتخلص منه وتجنب mount موارد التحكم في host.
@@ -18,11 +20,15 @@
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e .
 cp .env.example .env
-python scripts/init_compose_env.py
+chmod 600 .env
+openssl rand -hex 32
 ```
 
-عدّل `.env`:
+عدّل `.env` واستبدل PIN وسر JWT الافتراضيين (استخدم `openssl rand -hex 32`). التشغيل من المصدر لا يحمّل `.env` تلقائياً.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
@@ -35,38 +41,37 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
 
 ```bash
 mkdir -p workspaces/default
-docker compose up -d
+set -a
+. ./.env
+set +a
+. .venv/bin/activate
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
+local-shell-mcp --mode mcp
 ```
 
-تحقق من الحالة:
+تحقق من الحالة في طرفية ثانية:
 
 ```bash
-docker compose ps
-docker compose logs --tail=100 local-shell-mcp
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-تعيد الاستجابة السليمة HTTP `200`.
+الاستجابة السليمة هي HTTP `200`. استخدم مدير خدمات للتشغيل المستمر.
 
 ## 3. إتاحة HTTPS
 
-**موصى به:** استخدم خادمًا ذا عنوان عام، أو أعد توجيه حركة المرور عبر خادم عام باستخدام وكيل HTTPS عكسي.
-
-**غير موصى به:** قد تكون سرعة الرفع من جهة العميل عبر Cloudflare Tunnel بطيئة جدًا، مما يجعل رفع الملفات ونقلها صعب الاستخدام. استخدمه فقط عند تعذّر النشر العام أو التوجيه عبر خادم عام. Configure `CLOUDFLARE_TUNNEL_TOKEN` in `.env` only when choosing the optional tunnel sidecar.
-
-لاستخدام Cloudflare Tunnel sidecar:
-
-```bash
-docker compose --profile tunnel up -d
-```
-
-في Cloudflare Zero Trust وجّه public hostname إلى:
+للوصول البعيد، استخدم خادماً عاماً أو وكيلاً عكسياً HTTPS مثل Caddy أو Nginx أو Traefik، مع تمرير الموقع كاملاً بما فيه الملفات إلى:
 
 ```text
-http://local-shell-mcp:8765
+http://127.0.0.1:8765
 ```
 
-مع Caddy أو Nginx أو Traefik أو Nginx Proxy Manager أو أي reverse proxy آخر، مرّر HTTPS traffic إلى `127.0.0.1:8765` أو عنوان شبكة الـ container.
+تحقق من HTTPS:
+
+```bash
+curl -i https://your-public-host.example.com/healthz
+```
+
+**لا يُنصح باستخدام Cloudflare Tunnel** لنقل الملفات لأن الرفع من العميل قد يكون بطيئاً. يُفضّل خادم عام أو وكيل عكسي/تحويل منافذ مع إبقاء OAuth مفعّلاً. البديل: [Docker](../installation/docker.md).
 
 ## 4. افتح مساحة عمل المتصفح
 
@@ -109,17 +114,20 @@ https://your-public-host.example.com/ui
 
 ## التحديث
 
+حدّث المصدر وأعد تثبيت الحزمة ثم أعد تشغيل Controller:
+
 ```bash
-docker compose pull
-docker compose up -d
+git pull --ff-only
+python -m pip install -e .
+# Restart the Controller process or service after updating.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-إذا كنت تستخدم profile tunnel:
+لنشر Docker Compose، حدّث الحاويات بدلاً من ذلك:
 
 ```bash
-docker compose --profile tunnel pull
-docker compose --profile tunnel up -d
+docker compose pull
+docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 

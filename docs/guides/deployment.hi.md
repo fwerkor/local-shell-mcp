@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
+<!-- i18n-source-sha256: d7d01bc3f36f434c8e66c3fb6f65c2934937c5b2937dd9e8ba7beefc018fd14f -->
 # Runtime विकल्प और deployment model
 
 `local-shell-mcp` के दो पूरक निर्णय हैं:
@@ -40,11 +40,11 @@ Local MCP client
 
 | रनटाइम | के लिए सर्वोत्तम | अलगाव सीमा | टूलचेन स्रोत | बाहरी एमसीपी पहुंच | पेज |
 |---|---|---|---|---|---|
-| डॉकर कम्पोज़ | अधिकांश कोडिंग-एजेंट कार्यभार और दोहराए जाने योग्य कार्यस्थान | कंटेनर | लीन नियंत्रक छवि; कार्य-विशिष्ट टूलचेन अलग से स्थापित करें | HTTPS प्रॉक्सी या टनल जोड़ें | [Docker Compose](../installation/docker.md) |
+| **स्रोत checkout (अनुशंसित)** / `pipx` | Python-native use, debugging, development | Host virtualenv or VM | Python package और host tools | HTTPS proxy या tunnel जोड़ें | [Python install](../installation/python.md) |
+| डॉकर कम्पोज़ | अलग, अस्थायी कंटेनर | कंटेनर | लीन नियंत्रक छवि; कार्य-विशिष्ट टूलचेन अलग से स्थापित करें | HTTPS प्रॉक्सी या टनल जोड़ें | [Docker Compose](../installation/docker.md) |
 | डॉकर कंपोज़ + टनल साइडकार | अनुशंसित नहीं: सार्वजनिक सर्वर से फ़ॉरवर्ड करें; Cloudflare Tunnel केवल अंतिम विकल्प | कंटेनर | प्रोजेक्ट छवि | सार्वजनिक सर्वर से फ़ॉरवर्ड करें; Cloudflare Tunnel केवल अंतिम विकल्प | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Editor workspace से server start/stop | आमतौर पर host process | Host tools और configured executable | ChatGPT के लिए external HTTPS tunnel/proxy जोड़ें | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Host/VM जहाँ Docker उपलब्ध नहीं | Host or VM | Host tools और configured executable | HTTPS proxy या tunnel जोड़ें | [Standalone binary](../installation/binary.md) |
-| `pipx` / source install | Python-native use, debugging, development | Host virtualenv or VM | Python package और host tools | HTTPS proxy या tunnel जोड़ें | [Python install](../installation/python.md) |
 | Stdio mode | Local MCP clients जो process सीधे spawn करते हैं | Client process boundary | Host tools और configured executable | ChatGPT web/app में उपयोग नहीं | [Stdio mode](../installation/stdio.md) |
 
 ## Client connection matrix
@@ -84,7 +84,7 @@ Local MCP client
 
 ## अनुशंसित चयन
 
-पहले **डॉकर कंपोज़** का उपयोग करें जब तक कि आपके पास ऐसा न करने का कोई कारण न हो। यह एक बड़े पूर्वस्थापित विकास टूलचेन की आवश्यकता के बिना एक स्पष्ट सुरक्षा सीमा देता है।
+अलग वातावरण में **सीधे स्रोत कोड से डिप्लॉय करना** अनुशंसित है; [Python/source गाइड](../installation/python.md) देखें। Docker Compose वैकल्पिक है।
 
 जब वर्कफ़्लो एक संपादक से शुरू होता है और आप एक स्थानीय लॉन्चर चाहते हैं तो **वीएस कोड एक्सटेंशन** का उपयोग करें। यह अभी भी एक रनटाइम है. दूरस्थ वेब क्लाइंट को पहुंच योग्य HTTPS प्रॉक्सी या सुरंग की आवश्यकता होती है।
 

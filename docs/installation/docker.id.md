@@ -1,13 +1,13 @@
-<!-- i18n-source-sha256: f44188b1e2f3b4d79d97c78edb15270aa338ddf7989d85df1559168a0678eaa8 -->
+<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
 # Runtime Docker Compose
 
-Docker Compose adalah runtime yang direkomendasikan untuk sebagian besar pengguna. Ia memberi model workspace Linux terkontrol, toolchain reproducible, persistent credentials, dukungan browser automation, dan jalur upgrade yang mudah.
+Docker Compose adalah alternatif untuk container terisolasi. **Deployment langsung dari source direkomendasikan**; lihat [panduan Python/source](python.md).
 
 Ini adalah pilihan runtime. Dapat dihubungkan ke ChatGPT, generic HTTP MCP client, atau tetap lokal untuk testing.
 
 ## Isi Docker image
 
-Image berbasis Playwright Python image dan memasang development toolchain yang luas. Tujuannya agar AI coding agent dapat menangani banyak repository tanpa meminta rebuild runtime untuk setiap project.
+Image berbasis python:3.12-slim dan hanya berisi utilitas runtime dasar. Toolchain pengembangan, Playwright/browser, dan peralatan office tidak terpasang.
 
 Category yang termasuk:
 
@@ -15,12 +15,12 @@ Category yang termasuk:
 |---|---|
 | Shell dan inspection | Bash, curl, wget, jq, ripgrep, tree, tmux, patch, file |
 | Git dan credentials | Git, GitHub CLI, OpenSSH client, credential persistence volume |
-| C/C++ build | build-essential, clang, cmake, ninja, autoconf, automake, gdb, lldb |
-| Python | Python, pip, venv, pipx, package development dependencies |
-| JavaScript/TypeScript | Node.js, npm, yarn, pnpm, TypeScript, ts-node |
-| Bahasa lain | Go, Rust, Java, Ruby, PHP, Perl, Lua, R |
-| Browser automation | Playwright browsers and browser dependencies |
-| Document tooling | LibreOffice, Pandoc, Poppler utilities, OCR tooling |
+| C/C++ build | Tidak disertakan; instal jika perlu |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | Tidak disertakan; instal jika perlu |
+| Bahasa lain | Tidak disertakan; instal jika perlu |
+| Browser automation | Tidak disertakan; instal jika perlu |
+| Document tooling | Tidak disertakan; instal jika perlu |
 
 Exact image content adalah convenience layer, bukan stable API. Project-specific dependencies tetap harus berada di workspace atau project build scripts.
 
@@ -114,7 +114,6 @@ Compose service mempercayai forwarded headers karena published port dibatasi ke 
 ## Reverse proxy tanpa tunnel sidecar
 
 **Direkomendasikan:** Untuk akses publik, gunakan server publik atau teruskan lalu lintas melalui server publik dengan reverse proxy HTTPS.
-
 Jika sudah memakai Caddy, Nginx, Traefik, atau Nginx Proxy Manager, pertahankan normal Compose service dan forward HTTPS ke:
 
 ```text

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: a66d491558f07c419c8b5958d36c47cd90b081fc1c81f015bb62398cfd573e55 -->
+<!-- i18n-source-sha256: 276e9356b895a85759d31467512bdc530c9baa216a368df4ef1bccce39530d0e -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">مساحة عمل الذكاء الاصطناعي ذاتية الاستضافة · طائرة التحكم MCP</span>
 
@@ -53,7 +53,7 @@ Remote workers اختيارية: outbound machine connections
 | السيناريو | ابدأ هنا | لماذا |
 |---|---|---|
 | مساحة عمل المتصفح الأساسية | [Unified web workspace](getting-started/web-workspace.md) | صفحات التحكم في الدردشة والمشاريع وLSM مع تسجيل دخول مشترك |
-| نشر وحدة التحكم الأولى | [Quickstart](getting-started/quickstart.md) | Docker Compose وOAuth وجلسة المتصفح الأولى |
+| نشر وحدة التحكم الأولى | [Quickstart](getting-started/quickstart.md) | النشر من المصدر، OAuth وواجهة المتصفح الأولى. |
 | اختيار runtime layer | [Runtime choices](guides/deployment.md) | يشرح Docker وVS Code وbinary وPython وstdio كخيارات runtime منفصلة |
 | ربط الجوزاء سبارك | [Gemini Custom Apps](getting-started/gemini-spark.md) | الأهلية وعنوان URL الخاص بـ HTTPS MCP وOAuth والاختبار |
 | إضافة ChatGPT كـ client | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint وOAuth وأول prompt آمن وtool discovery |

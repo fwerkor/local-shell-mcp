@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
+<!-- i18n-source-sha256: d7d01bc3f36f434c8e66c3fb6f65c2934937c5b2937dd9e8ba7beefc018fd14f -->
 # Choix du runtime et modèle de déploiement
 
 `local-shell-mcp` a deux décisions complémentaires :
@@ -40,11 +40,11 @@ Local MCP client
 
 | Durée d'exécution | Idéal pour | Limite d'isolement | Source de la chaîne d'outils | Accès MCP externe | Pages |
 |---|---|---|---|---|---|
+| **Sources (recommandé)** / `pipx` | Usage Python-native, debugging, développement | Host virtualenv or VM | Package Python plus outils host | Ajouter proxy HTTPS ou tunnel | [Python install](../installation/python.md) |
 | Docker Composer | La plupart des charges de travail d'agent de codage et des espaces de travail reproductibles | Conteneur | Image du contrôleur Lean ; installer séparément les chaînes d'outils spécifiques à une tâche | Ajouter un proxy ou un tunnel HTTPS | [Docker Compose](../installation/docker.md) |
 | Docker Compose + side-car tunnel | Déconseillé: Relais via serveur public ; Cloudflare Tunnel uniquement en dernier recours | Conteneur | Image du projet | Relais via serveur public ; Cloudflare Tunnel uniquement en dernier recours | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Démarrer/arrêter le serveur depuis un workspace éditeur | Généralement processus host | Outils host plus executable configuré | Ajouter tunnel/proxy HTTPS externe pour ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Hosts ou VM sans Docker | Host or VM | Outils host plus executable configuré | Ajouter proxy HTTPS ou tunnel | [Standalone binary](../installation/binary.md) |
-| `pipx` / source install | Usage Python-native, debugging, développement | Host virtualenv or VM | Package Python plus outils host | Ajouter proxy HTTPS ou tunnel | [Python install](../installation/python.md) |
 | Stdio mode | MCP clients locaux lançant directement des processus | Client process boundary | Outils host plus executable configuré | Inutilisable par ChatGPT web/app | [Stdio mode](../installation/stdio.md) |
 
 ## Matrice de connexion client
@@ -84,7 +84,7 @@ La différence ne porte pas sur l’API abstraite mais sur l’**operating envir
 
 ## Sélection recommandée
 
-Utilisez **Docker Compose** d'abord, sauf si vous avez une raison de ne pas le faire. Il donne une limite de sécurité claire sans nécessiter une grande chaîne d'outils de développement préinstallée.
+Le **déploiement direct depuis les sources** dans un environnement isolé est recommandé ; voir le [guide Python/sources](../installation/python.md). Docker Compose reste une alternative.
 
 Utilisez l'**extension VS Code** lorsque le flux de travail démarre à partir d'un éditeur et que vous souhaitez un lanceur local. C'est toujours un runtime. Les clients Web distants ont besoin d’un proxy ou d’un tunnel HTTPS accessible.
 

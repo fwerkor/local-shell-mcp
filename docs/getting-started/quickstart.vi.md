@@ -1,14 +1,16 @@
-<!-- i18n-source-sha256: a9820f08198cf8e823f59550928c07346f9669f2dbec46d3b8cd523c34034e01 -->
+<!-- i18n-source-sha256: 3575b9b50708261678473f74b66076f0c14807ccd7f7c3e60b4d1e897ac778df -->
 # Bắt đầu nhanh
 
 Hướng dẫn này khởi động Bộ điều khiển LSM và mở giao diện trình duyệt của nó. [unified web workspace](web-workspace.md) là trải nghiệm hàng ngày được đề xuất; nó là một ngăn xếp trò chuyện tùy chọn, được triển khai riêng. ChatGPT, Gemini và các máy khách MCP bên ngoài khác có thể kết nối với cùng một Bộ điều khiển. Xem [runtime choices and deployment model](../guides/deployment.md).
 
+Nên **triển khai trực tiếp từ mã nguồn** trong môi trường cách ly. Docker Compose là một phương án thay thế.
+
 ## Yêu cầu
 
-- Docker Engine với Compose v2.
-- Điểm cuối HTTPS công khai nếu người dùng từ xa hoặc máy khách MCP bên ngoài phải kết nối.
-- Một thư mục workspace riêng.
-- OAuth admin PIN và JWT secret dài, ngẫu nhiên.
+- Git và Python 3.11+ cùng `venv` / `pip`.
+- HTTPS công khai chỉ khi người dùng từ xa hoặc MCP client ngoài cần truy cập.
+- Thư mục workspace riêng, giới hạn quyền.
+- PIN quản trị OAuth mạnh và JWT secret ngẫu nhiên.
 
 !!! warning
     Model đã kết nối có thể thao tác workspace đã cấu hình. Chạy dịch vụ trong container hoặc VM dùng một lần và tránh mount tài nguyên điều khiển host.
@@ -18,11 +20,15 @@ Hướng dẫn này khởi động Bộ điều khiển LSM và mở giao diện
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e .
 cp .env.example .env
-python scripts/init_compose_env.py
+chmod 600 .env
+openssl rand -hex 32
 ```
 
-Sửa `.env`:
+Chỉnh `.env` và thay PIN, JWT secret mẫu (dùng `openssl rand -hex 32`). Khi chạy từ source, `.env` không được tự động nạp.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
@@ -35,38 +41,37 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
 
 ```bash
 mkdir -p workspaces/default
-docker compose up -d
+set -a
+. ./.env
+set +a
+. .venv/bin/activate
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
+local-shell-mcp --mode mcp
 ```
 
-Kiểm tra trạng thái:
+Kiểm tra trạng thái từ terminal khác:
 
 ```bash
-docker compose ps
-docker compose logs --tail=100 local-shell-mcp
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Phản hồi khỏe mạnh trả về HTTP `200`.
+Phản hồi hợp lệ là HTTP `200`. Dùng trình quản lý dịch vụ nếu cần chạy lâu dài.
 
 ## 3. Công khai HTTPS
 
-**Khuyến nghị:** Để truy cập công khai, hãy triển khai trên máy chủ công khai hoặc chuyển tiếp lưu lượng qua máy chủ công khai bằng reverse proxy HTTPS.
-
-**Không khuyến nghị:** Tốc độ tải lên phía máy khách qua Cloudflare Tunnel có thể rất chậm, khiến việc tải lên và truyền tệp khó sử dụng. Chỉ dùng khi không thể triển khai hoặc chuyển tiếp qua máy chủ công khai. Configure `CLOUDFLARE_TUNNEL_TOKEN` in `.env` only when choosing the optional tunnel sidecar.
-
-Với Cloudflare Tunnel sidecar:
-
-```bash
-docker compose --profile tunnel up -d
-```
-
-Trong Cloudflare Zero Trust, trỏ public hostname tới:
+Để truy cập từ xa, dùng máy chủ công khai hoặc HTTPS reverse proxy (Caddy, Nginx, Traefik), chuyển tiếp toàn bộ origin gồm upload/download đến:
 
 ```text
-http://local-shell-mcp:8765
+http://127.0.0.1:8765
 ```
 
-Với Caddy, Nginx, Traefik, Nginx Proxy Manager hoặc reverse proxy khác, chuyển tiếp HTTPS traffic tới `127.0.0.1:8765` hoặc địa chỉ mạng của container.
+Kiểm tra HTTPS:
+
+```bash
+curl -i https://your-public-host.example.com/healthz
+```
+
+**Không khuyến nghị Cloudflare Tunnel** cho truyền tệp: upload từ client có thể chậm. Ưu tiên máy chủ công khai hoặc proxy/chuyển tiếp cổng thông thường và giữ OAuth. Phương án khác: [Docker](../installation/docker.md).
 
 ## 4. Mở không gian làm việc của trình duyệt
 
@@ -109,17 +114,20 @@ Sửa test bị lỗi. Đọc các file liên quan trước, tạo patch nhỏ n
 
 ## Cập nhật
 
+Cập nhật source, cài lại gói editable rồi khởi động lại Controller:
+
 ```bash
-docker compose pull
-docker compose up -d
+git pull --ff-only
+python -m pip install -e .
+# Restart the Controller process or service after updating.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Nếu dùng profile tunnel:
+Nếu dùng Docker Compose, hãy cập nhật container:
 
 ```bash
-docker compose --profile tunnel pull
-docker compose --profile tunnel up -d
+docker compose pull
+docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 

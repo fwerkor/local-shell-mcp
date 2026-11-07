@@ -1,13 +1,13 @@
-<!-- i18n-source-sha256: f44188b1e2f3b4d79d97c78edb15270aa338ddf7989d85df1559168a0678eaa8 -->
+<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
 # Docker Compose runtime
 
-Docker Compose अधिकांश उपयोगकर्ताओं के लिए अनुशंसित runtime है। यह model को controlled Linux workspace, reproducible toolchain, persistent credentials, browser automation support और आसान upgrade path देता है।
+Docker Compose अलग कंटेनर के लिए विकल्प है। **स्रोत से सीधे डिप्लॉय करना अनुशंसित है**; [Python/source गाइड](python.md) देखें।
 
 यह runtime choice है। इसे ChatGPT, generic HTTP MCP client से जोड़ा जा सकता है या local testing के लिए रखा जा सकता है।
 
 ## Docker image में क्या शामिल है
 
-Image Playwright Python image पर आधारित है और व्यापक development toolchain install करती है। उद्देश्य है कि AI coding agent हर project के लिए runtime rebuild किए बिना कई repositories पर काम कर सके।
+इमेज python:3.12-slim पर आधारित है और केवल आवश्यक runtime tools शामिल करती है। बड़े development toolchains, Playwright/browser और office tools पहले से इंस्टॉल नहीं होते।
 
 शामिल categories:
 
@@ -15,12 +15,12 @@ Image Playwright Python image पर आधारित है और व्य�
 |---|---|
 | Shell और inspection | Bash, curl, wget, jq, ripgrep, tree, tmux, patch, file |
 | Git और credentials | Git, GitHub CLI, OpenSSH client, credential persistence volume |
-| C/C++ build | build-essential, clang, cmake, ninja, autoconf, automake, gdb, lldb |
-| Python | Python, pip, venv, pipx, package development dependencies |
-| JavaScript/TypeScript | Node.js, npm, yarn, pnpm, TypeScript, ts-node |
-| अन्य languages | Go, Rust, Java, Ruby, PHP, Perl, Lua, R |
-| Browser automation | Playwright browsers and browser dependencies |
-| Document tooling | LibreOffice, Pandoc, Poppler utilities, OCR tooling |
+| C/C++ build | शामिल नहीं; जरूरत पर इंस्टॉल करें |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | शामिल नहीं; जरूरत पर इंस्टॉल करें |
+| अन्य languages | शामिल नहीं; जरूरत पर इंस्टॉल करें |
+| Browser automation | शामिल नहीं; जरूरत पर इंस्टॉल करें |
+| Document tooling | शामिल नहीं; जरूरत पर इंस्टॉल करें |
 
 Image का exact content convenience layer है, stable API नहीं। Project-specific dependencies workspace या project build scripts में ही रहनी चाहिए।
 
@@ -114,7 +114,6 @@ Compose service forwarded headers पर trust करती है क्यो�
 ## Tunnel sidecar के बिना reverse proxy
 
 **अनुशंसित:** सार्वजनिक पहुँच के लिए सार्वजनिक सर्वर पर तैनात करें या HTTPS रिवर्स प्रॉक्सी के साथ सार्वजनिक सर्वर से ट्रैफ़िक फ़ॉरवर्ड करें।
-
 यदि Caddy, Nginx, Traefik या Nginx Proxy Manager पहले से चलता है, normal Compose service रखें और HTTPS यहाँ forward करें:
 
 ```text

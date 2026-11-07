@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: a66d491558f07c419c8b5958d36c47cd90b081fc1c81f015bb62398cfd573e55 -->
+<!-- i18n-source-sha256: 276e9356b895a85759d31467512bdc530c9baa216a368df4ef1bccce39530d0e -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">Ruang kerja AI yang dihosting sendiri · Bidang kendali MCP</span>
 
@@ -53,7 +53,7 @@ Isolation boundary yang dimaksud adalah container atau VM tempat service berjala
 | Skenario | Mulai di sini | Alasan |
 |---|---|---|
 | Ruang kerja browser utama | [Unified web workspace](getting-started/web-workspace.md) | Obrolan, proyek, dan halaman kontrol LSM dengan login bersama |
-| Penerapan Pengendali pertama | [Quickstart](getting-started/quickstart.md) | Docker Compose, OAuth dan sesi browser pertama |
+| Penerapan Pengendali pertama | [Quickstart](getting-started/quickstart.md) | Source checkout yang direkomendasikan, OAuth dan sesi browser pertama. |
 | Memilih runtime layer | [Runtime choices](guides/deployment.md) | Menjelaskan Docker, VS Code, binary, Python, dan stdio sebagai opsi runtime terpisah |
 | Menghubungkan Percikan Gemini | [Gemini Custom Apps](getting-started/gemini-spark.md) | Kelayakan, URL HTTPS MCP, OAuth, dan pengujian |
 | Menambahkan ChatGPT sebagai client | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, prompt aman pertama, tool discovery |

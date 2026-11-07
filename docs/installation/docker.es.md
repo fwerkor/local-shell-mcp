@@ -1,13 +1,13 @@
-<!-- i18n-source-sha256: f44188b1e2f3b4d79d97c78edb15270aa338ddf7989d85df1559168a0678eaa8 -->
+<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
 # Runtime Docker Compose
 
-Docker Compose es el runtime recomendado para la mayoría de usuarios. Da al modelo un workspace Linux controlado, un toolchain reproducible, credenciales persistentes, soporte de browser automation y una ruta de actualización sencilla.
+Docker Compose es una alternativa para contenedores aislados. **Recomendamos el despliegue directo desde fuentes**; consulte la [guía de Python/fuentes](python.md).
 
 Es una elección de runtime. Puede conectarse a ChatGPT, a un MCP client HTTP genérico o mantenerse local para pruebas.
 
 ## Qué incluye la imagen Docker
 
-La imagen se basa en la imagen Python de Playwright e instala un toolchain de desarrollo amplio. La intención es que un AI coding agent pueda trabajar con muchos repositories sin pedir reconstruir el runtime para cada proyecto.
+La imagen usa python:3.12-slim e incluye solo herramientas esenciales. No preinstala toolchains de desarrollo, Playwright/navegadores ni suites ofimáticas.
 
 Categorías incluidas:
 
@@ -15,12 +15,12 @@ Categorías incluidas:
 |---|---|
 | Shell e inspección | Bash, curl, wget, jq, ripgrep, tree, tmux, patch, file |
 | Git y credenciales | Git, GitHub CLI, OpenSSH client, credential persistence volume |
-| C/C++ build | build-essential, clang, cmake, ninja, autoconf, automake, gdb, lldb |
-| Python | Python, pip, venv, pipx, package development dependencies |
-| JavaScript/TypeScript | Node.js, npm, yarn, pnpm, TypeScript, ts-node |
-| Otros lenguajes | Go, Rust, Java, Ruby, PHP, Perl, Lua, R |
-| Browser automation | Playwright browsers and browser dependencies |
-| Herramientas de documentos | LibreOffice, Pandoc, Poppler utilities, OCR tooling |
+| C/C++ build | No incluido; instálelo si hace falta |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | No incluido; instálelo si hace falta |
+| Otros lenguajes | No incluido; instálelo si hace falta |
+| Browser automation | No incluido; instálelo si hace falta |
+| Herramientas de documentos | No incluido; instálelo si hace falta |
 
 El contenido exacto de la imagen es una capa de conveniencia, no una API estable. Las dependencias específicas del proyecto deben seguir en el workspace o en sus scripts de build.
 
@@ -114,7 +114,6 @@ El servicio Compose confía en forwarded headers porque su puerto publicado est�
 ## Reverse proxy sin tunnel sidecar
 
 **Recomendado:** Para el acceso público, usa un servidor público o reenvía el tráfico a través de uno con un proxy inverso HTTPS.
-
 Si ya usa Caddy, Nginx, Traefik o Nginx Proxy Manager, mantenga el servicio Compose normal y reenvíe HTTPS a:
 
 ```text

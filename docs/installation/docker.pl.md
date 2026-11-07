@@ -1,13 +1,13 @@
-<!-- i18n-source-sha256: f44188b1e2f3b4d79d97c78edb15270aa338ddf7989d85df1559168a0678eaa8 -->
+<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
 # Runtime Docker Compose
 
-Docker Compose to runtime zalecany większości użytkowników. Daje modelowi kontrolowany Linux workspace, reproducible toolchain, persistent credentials, browser automation support i łatwą ścieżkę upgrade.
+Docker Compose to alternatywa dla izolowanych kontenerów. **Zalecamy bezpośrednie wdrożenie ze źródeł**; zobacz [poradnik Python/źródła](python.md).
 
 To wybór runtime. Można go połączyć z ChatGPT, generic HTTP MCP client albo zachować lokalnie do testing.
 
 ## Co zawiera Docker image
 
-Image opiera się na Playwright Python image i instaluje szeroki development toolchain. Celem jest umożliwienie AI coding agent pracy z wieloma repositories bez rebuild runtime dla każdego project.
+Obraz bazuje na python:3.12-slim i zawiera tylko podstawowe narzędzia. Nie zawiera gotowych toolchainów, Playwright/przeglądarek ani pakietów biurowych.
 
 Dostępne category:
 
@@ -15,12 +15,12 @@ Dostępne category:
 |---|---|
 | Shell i inspection | Bash, curl, wget, jq, ripgrep, tree, tmux, patch, file |
 | Git i credentials | Git, GitHub CLI, OpenSSH client, credential persistence volume |
-| C/C++ build | build-essential, clang, cmake, ninja, autoconf, automake, gdb, lldb |
-| Python | Python, pip, venv, pipx, package development dependencies |
-| JavaScript/TypeScript | Node.js, npm, yarn, pnpm, TypeScript, ts-node |
-| Inne języki | Go, Rust, Java, Ruby, PHP, Perl, Lua, R |
-| Browser automation | Playwright browsers and browser dependencies |
-| Document tooling | LibreOffice, Pandoc, Poppler utilities, OCR tooling |
+| C/C++ build | Brak; instaluj w razie potrzeby |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | Brak; instaluj w razie potrzeby |
+| Inne języki | Brak; instaluj w razie potrzeby |
+| Browser automation | Brak; instaluj w razie potrzeby |
+| Document tooling | Brak; instaluj w razie potrzeby |
 
 Exact image content jest convenience layer, a nie stable API. Project-specific dependencies nadal należą do workspace lub project build scripts.
 
@@ -114,7 +114,6 @@ Compose service ufa forwarded headers, ponieważ published port jest ograniczony
 ## Reverse proxy bez tunnel sidecar
 
 **Zalecane:** Do dostępu publicznego użyj serwera z publicznym adresem lub przekierowania przez serwer publiczny z odwrotnym proxy HTTPS.
-
 Jeśli używasz już Caddy, Nginx, Traefik lub Nginx Proxy Manager, zachowaj normal Compose service i forward HTTPS do:
 
 ```text

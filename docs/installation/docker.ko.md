@@ -1,13 +1,13 @@
-<!-- i18n-source-sha256: f44188b1e2f3b4d79d97c78edb15270aa338ddf7989d85df1559168a0678eaa8 -->
+<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
 # Docker Compose runtime
 
-Docker Compose는 대부분의 사용자에게 권장되는 runtime입니다. 모델에 제어된 Linux workspace, 재현 가능한 toolchain, persistent credentials, browser automation support, 쉬운 upgrade path를 제공합니다.
+Docker Compose는 격리 컨테이너용 대안입니다. **소스에서 직접 배포하는 방식을 권장**합니다. [Python/소스 안내](python.md)를 참조하세요.
 
 이는 runtime 선택입니다. ChatGPT, generic HTTP MCP client에 연결하거나 local testing에만 사용할 수 있습니다.
 
 ## Docker image 포함 항목
 
-Image는 Playwright Python image를 기반으로 하며 폭넓은 development toolchain을 설치합니다. AI coding agent가 project마다 runtime을 다시 build하지 않고 다양한 repository를 다루도록 하는 것이 목적입니다.
+이미지는 python:3.12-slim 기반이며 최소 런타임 도구만 포함합니다. 개발 툴체인, Playwright/브라우저, 오피스 도구는 사전 설치되지 않습니다.
 
 포함 category:
 
@@ -15,12 +15,12 @@ Image는 Playwright Python image를 기반으로 하며 폭넓은 development to
 |---|---|
 | Shell 및 inspection | Bash, curl, wget, jq, ripgrep, tree, tmux, patch, file |
 | Git 및 credentials | Git, GitHub CLI, OpenSSH client, credential persistence volume |
-| C/C++ build | build-essential, clang, cmake, ninja, autoconf, automake, gdb, lldb |
-| Python | Python, pip, venv, pipx, package development dependencies |
-| JavaScript/TypeScript | Node.js, npm, yarn, pnpm, TypeScript, ts-node |
-| 기타 언어 | Go, Rust, Java, Ruby, PHP, Perl, Lua, R |
-| Browser automation | Playwright browsers and browser dependencies |
-| Document tooling | LibreOffice, Pandoc, Poppler utilities, OCR tooling |
+| C/C++ build | 미포함, 필요 시 설치 |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | 미포함, 필요 시 설치 |
+| 기타 언어 | 미포함, 필요 시 설치 |
+| Browser automation | 미포함, 필요 시 설치 |
+| Document tooling | 미포함, 필요 시 설치 |
 
 정확한 image content는 convenience layer이지 stable API가 아닙니다. Project-specific dependencies는 workspace나 project build scripts에 두어야 합니다.
 
@@ -114,7 +114,6 @@ Published port가 localhost로 제한되므로 Compose service는 forwarded head
 ## Tunnel sidecar 없는 reverse proxy
 
 **권장:** 공개 접속에는 공인 서버에 직접 배포하거나 HTTPS 역방향 프록시를 통해 공인 서버에서 트래픽을 전달하세요.
-
 이미 Caddy, Nginx, Traefik 또는 Nginx Proxy Manager를 사용한다면 일반 Compose service를 유지하고 HTTPS를 다음으로 forward합니다:
 
 ```text

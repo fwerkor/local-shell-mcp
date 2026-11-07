@@ -51,59 +51,35 @@ The intended safety boundary is the container or VM, not the host.
 
 ## Quick start
 
-Install the official launcher or Python package when you want a host runtime:
-
-```bash
-npx local-shell-mcp --help
-pipx install local-shell-mcp
-lsm --help
-```
-
-The npm and Python distributions both expose `local-shell-mcp`; installed packages also expose `lsm` as the short command. The npm distribution is only a verified launcher for the matching standalone release binary, not a second server implementation.
-
-Clone the repository and prepare configuration:
+**Recommended deployment: run directly from a source checkout** in a dedicated VM, container, or restricted user environment with Python 3.11+. This keeps the Controller easy to update and gives the workspace direct access to the host tools you explicitly install. Docker Compose, prebuilt binaries, and package-manager installs remain supported alternatives.
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e .
 cp .env.example .env
-python scripts/init_compose_env.py
+chmod 600 .env
+openssl rand -hex 32
 ```
 
-Set at least these values in `.env`:
-
-```env
-LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
-LOCAL_SHELL_MCP_AUTH_MODE=oauth
-LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me-long-random-pin
-LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
-```
-
-Start the server:
+Edit `.env` with a real public origin (if needed), a strong OAuth admin PIN, and the generated JWT secret. The Controller does not automatically load this file outside Docker Compose; export it before starting:
 
 ```bash
+set -a
+. ./.env
+set +a
 mkdir -p workspaces/default
-docker compose up -d
-curl -i http://127.0.0.1:8765/healthz
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
+local-shell-mcp --mode mcp
 ```
 
-For public HTTPS access, **prefer deploying on a public server with a reverse proxy**, or forwarding traffic from a private machine through a public server. See [network connectivity](https://fwerkor.github.io/local-shell-mcp/clients/connectivity/).
+In another terminal, check `curl -i http://127.0.0.1:8765/healthz` and open `http://127.0.0.1:8765/ui`. For remote access, use a public HTTPS server or a reverse proxy to the local port; **direct public-server deployment/forwarding is preferred to Cloudflare Tunnel**, whose client uploads can be slow enough to impair file transfers. Do not expose the Controller without authentication.
 
-**Cloudflare Tunnel is not recommended for file-transfer workflows**: its client-side upload throughput can be very slow, making file uploads and transfers impractical. If a public server or forwarding setup is unavailable, the bundled sidecar remains an optional fallback. Set `CLOUDFLARE_TUNNEL_TOKEN` in `.env` before starting it:
+For integrated **chat, projects and Controller pages**, deploy the optional [unified web workspace](https://fwerkor.github.io/local-shell-mcp/getting-started/web-workspace/). The Controller-only browser UI also works without the chat stack. External clients such as Gemini or ChatGPT connect at `https://your-public-host.example.com/mcp`.
 
-```bash
-docker compose --profile tunnel up -d
-```
-
-Open the LSM browser login at `http://127.0.0.1:8765/ui` (or the configured HTTPS origin's `/ui`). For integrated **chat, projects and Controller pages**, deploy the [unified web workspace](https://fwerkor.github.io/local-shell-mcp/getting-started/web-workspace/); the Controller-only browser UI remains available without the optional chat stack.
-
-External clients such as Gemini or ChatGPT can connect to the public MCP endpoint:
-
-```text
-https://your-public-host.example.com/mcp
-```
-
-Full setup instructions are in the [documentation](https://fwerkor.github.io/local-shell-mcp/). Runtime choices are documented separately from client connections.
+Other deployment methods: [Docker Compose](https://fwerkor.github.io/local-shell-mcp/installation/docker/), [standalone binary](https://fwerkor.github.io/local-shell-mcp/installation/binary/), or [Python/pipx](https://fwerkor.github.io/local-shell-mcp/installation/python/). See the [quickstart](https://fwerkor.github.io/local-shell-mcp/getting-started/quickstart/) for configuration and update steps.
 
 ## Human interface
 

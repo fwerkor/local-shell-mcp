@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: a66d491558f07c419c8b5958d36c47cd90b081fc1c81f015bb62398cfd573e55 -->
+<!-- i18n-source-sha256: 276e9356b895a85759d31467512bdc530c9baa216a368df4ef1bccce39530d0e -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">자체 호스팅 AI 작업 공간 · MCP 제어 평면</span>
 
@@ -53,7 +53,7 @@ Optional remote workers: outbound machine connections
 | 시나리오 | 시작 페이지 | 이유 |
 |---|---|---|
 | 기본 브라우저 작업공간 | [Unified web workspace](getting-started/web-workspace.md) | 공유 로그인이 포함된 채팅, 프로젝트 및 LSM 제어 페이지 |
-| 첫 번째 컨트롤러 배포 | [Quickstart](getting-started/quickstart.md) | Docker Compose, OAuth 및 첫 번째 브라우저 세션 |
+| 첫 번째 컨트롤러 배포 | [Quickstart](getting-started/quickstart.md) | 권장 소스 배포, OAuth 및 첫 브라우저 세션. |
 | runtime layer 선택 | [Runtime choices](guides/deployment.md) | Docker, VS Code, binary, Python, stdio를 별도 runtime option으로 설명 |
 | Gemini Spark 연결하기 | [Gemini Custom Apps](getting-started/gemini-spark.md) | 자격, HTTPS MCP URL, OAuth 및 테스트 |
 | ChatGPT를 client로 추가 | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, 첫 안전 prompt, tool discovery |

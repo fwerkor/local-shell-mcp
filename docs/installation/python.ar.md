@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 19347ba1d8d3f26f227506397f4093281319e6a2a59833ced1da286c1d46f21a -->
+<!-- i18n-source-sha256: c8c0d8ebdbb123b9ac4af1fd288f30e8ca69037ca086486cb8027e2592f4b75a -->
 # Python وpipx وsource runtimes
 
-تفيد Python runtimes في التطوير وتصحيح الأخطاء والبيئات التي تكون فيها إدارة حزم Python أسهل من Docker. وهي تشغّل server نفسه الذي تشغله Docker وbinary runtimes.
+**النشر المباشر من نسخة المصدر هو الخيار الموصى به**. استخدم بيئة Python افتراضية ومساحة عمل محدودة؛ Docker Compose بديل.
 
 استخدم هذه الصفحة لثلاث حالات مترابطة:
 
@@ -48,7 +48,7 @@ local-shell-mcp --mode mcp
 
 ## Editable source checkout
 
-استخدمه لتطوير المشروع:
+استخدم هذا الخيار للنشر المعتاد أو التطوير. لإعداد الوصول العام راجع [quickstart](../getting-started/quickstart.md).
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git
@@ -56,13 +56,21 @@ cd local-shell-mcp
 python -m venv .venv
 . .venv/bin/activate
 pip install --upgrade pip
-pip install -e '.[dev,docs]'
-LOCAL_SHELL_MCP_WORKSPACE_ROOT=/tmp/local-shell-mcp-workspace local-shell-mcp --mode mcp
+pip install -e .
+cp .env.example .env
+# Replace the example OAuth secrets in .env before starting.
+set -a
+. ./.env
+set +a
+mkdir -p workspaces/default
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
+local-shell-mcp --mode mcp
 ```
 
 شغّل الفحوص:
 
 ```bash
+python -m pip install -e '.[dev,docs]'
 ruff check .
 pytest -q
 mkdocs build --strict
@@ -70,13 +78,14 @@ mkdocs build --strict
 
 ## إعداد المتصفح
 
-تعتمد Python package على Playwright، لكن قد تحتاج browser binaries إلى التثبيت على host:
+Playwright ميزة اختيارية؛ يمكن تثبيتها مع المتصفح عند الحاجة.
 
 ```bash
+python -m pip install -e '.[browser]'
 python -m playwright install chromium
 ```
 
-تحتاج بعض Linux hosts إلى browser dependencies إضافية. يتجنب Docker معظم ذلك لأن image تبدأ من Playwright base image.
+تثبيت المتصفح اختياري؛ لا تحتوي صورة Docker الأساسية على Playwright أو متصفحات.
 
 ## الاستخدام العام لـ HTTP MCP
 

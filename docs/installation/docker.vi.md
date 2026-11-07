@@ -1,13 +1,13 @@
-<!-- i18n-source-sha256: f44188b1e2f3b4d79d97c78edb15270aa338ddf7989d85df1559168a0678eaa8 -->
+<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
 # Runtime Docker Compose
 
-Docker Compose là runtime khuyến nghị cho phần lớn người dùng. Nó cung cấp cho model workspace Linux được kiểm soát, toolchain tái lập, persistent credentials, hỗ trợ browser automation và đường upgrade dễ dàng.
+Docker Compose là lựa chọn khác cho container cách ly. **Nên triển khai trực tiếp từ mã nguồn**; xem [hướng dẫn Python/source](python.md).
 
 Đây là lựa chọn runtime. Có thể kết nối với ChatGPT, generic HTTP MCP client hoặc giữ local để testing.
 
 ## Docker image bao gồm gì
 
-Image dựa trên Playwright Python image và cài development toolchain rộng. Mục tiêu là để AI coding agent xử lý nhiều repository mà không cần rebuild runtime cho từng project.
+Image dựa trên python:3.12-slim, chỉ chứa các công cụ runtime cơ bản. Toolchain phát triển, Playwright/trình duyệt và bộ office không được cài sẵn.
 
 Các category có sẵn:
 
@@ -15,12 +15,12 @@ Các category có sẵn:
 |---|---|
 | Shell và inspection | Bash, curl, wget, jq, ripgrep, tree, tmux, patch, file |
 | Git và credentials | Git, GitHub CLI, OpenSSH client, credential persistence volume |
-| C/C++ build | build-essential, clang, cmake, ninja, autoconf, automake, gdb, lldb |
-| Python | Python, pip, venv, pipx, package development dependencies |
-| JavaScript/TypeScript | Node.js, npm, yarn, pnpm, TypeScript, ts-node |
-| Ngôn ngữ khác | Go, Rust, Java, Ruby, PHP, Perl, Lua, R |
-| Browser automation | Playwright browsers and browser dependencies |
-| Document tooling | LibreOffice, Pandoc, Poppler utilities, OCR tooling |
+| C/C++ build | Không có; cài thêm khi cần |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | Không có; cài thêm khi cần |
+| Ngôn ngữ khác | Không có; cài thêm khi cần |
+| Browser automation | Không có; cài thêm khi cần |
+| Document tooling | Không có; cài thêm khi cần |
 
 Exact image content là convenience layer, không phải stable API. Project-specific dependencies vẫn thuộc workspace hoặc project build scripts.
 
@@ -114,7 +114,6 @@ Compose service tin forwarded headers vì published port giới hạn ở localh
 ## Reverse proxy không có tunnel sidecar
 
 **Khuyến nghị:** Để truy cập công khai, hãy triển khai trên máy chủ công khai hoặc chuyển tiếp lưu lượng qua máy chủ công khai bằng reverse proxy HTTPS.
-
 Nếu đã dùng Caddy, Nginx, Traefik hoặc Nginx Proxy Manager, giữ normal Compose service và forward HTTPS tới:
 
 ```text

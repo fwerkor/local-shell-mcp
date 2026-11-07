@@ -1,14 +1,16 @@
-<!-- i18n-source-sha256: a9820f08198cf8e823f59550928c07346f9669f2dbec46d3b8cd523c34034e01 -->
+<!-- i18n-source-sha256: 3575b9b50708261678473f74b66076f0c14807ccd7f7c3e60b4d1e897ac778df -->
 # 快速開始
 
 本指南啟動 LSM 控制器並開啟其瀏覽器介面。 [unified web workspace](web-workspace.md)為推薦日常體驗；它是一個單獨部署的、可選的聊天堆疊。 ChatGPT、Gemini 和其他外部 MCP 用戶端可以連接到相同控制器。請參閱 [runtime choices and deployment model](../guides/deployment.md)。
 
+最推薦的 Controller 部署方式是**直接從原始碼儲存庫執行**，並使用獨立、受限的執行環境。Docker Compose 為可選方案。
+
 ## 要求
 
-- Docker Engine 與 Compose v2。
-- 如果遠端使用者或外部 MCP 用戶端必須連接，則為公共 HTTPS 端點。
-- 一個專用工作區目錄。
-- 較長的隨機 OAuth 管理 PIN 和 JWT 密鑰。
+- Git、Python 3.11+，以及可用的 `venv` / `pip`。
+- 只有遠端使用者或外部 MCP 用戶端需要連線時，才需要公開 HTTPS 網址。
+- 獨立且權限範圍明確的工作區。
+- 強隨機 OAuth 管理 PIN 與 JWT 金鑰。
 
 !!! warning
     接入的模型可以操作配置的工作區。建議在一次性容器或虛擬機中運行服務，並避免掛載宿主機控制資源。
@@ -18,11 +20,15 @@
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e .
 cp .env.example .env
-python scripts/init_compose_env.py
+chmod 600 .env
+openssl rand -hex 32
 ```
 
-編輯 `.env`：
+編輯 `.env`，取代範例 PIN 與 JWT 金鑰（可使用 `openssl rand -hex 32` 的輸出）。原始碼執行時**不會自動載入** `.env`。
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
@@ -35,38 +41,37 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
 
 ```bash
 mkdir -p workspaces/default
-docker compose up -d
+set -a
+. ./.env
+set +a
+. .venv/bin/activate
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
+local-shell-mcp --mode mcp
 ```
 
-檢查狀態：
+另開終端機檢查狀態：
 
 ```bash
-docker compose ps
-docker compose logs --tail=100 local-shell-mcp
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-健康響應會返回 HTTP `200`。
+正常回應為 HTTP `200`。第一個終端機需保持執行；長期部署請使用服務管理程式。
 
 ## 3. 暴露 HTTPS
 
-**推薦：** 有條件時，應直接部署到具有公網位址的伺服器，或透過公網伺服器搭配 HTTPS 反向代理轉發流量。
-
-**不推薦：** Cloudflare Tunnel 用戶端的上傳速度可能非常慢，導致檔案上傳與傳輸功能難以正常使用。僅在無法進行公網部署或透過公網伺服器轉發時，才考慮作為備選方案。 只有选择可选的 Tunnel sidecar 时，才需要在 `.env` 配置 `CLOUDFLARE_TUNNEL_TOKEN`。
-
-如果使用 Cloudflare Tunnel sidecar：
-
-```bash
-docker compose --profile tunnel up -d
-```
-
-在 Cloudflare Zero Trust 中，把公開 hostname 指向：
+遠端存取建議直接部署在公網伺服器，或以 Caddy、Nginx、Traefik 等 HTTPS 反向代理／連接埠轉送，將完整站點（含上傳與下載）轉送到：
 
 ```text
-http://local-shell-mcp:8765
+http://127.0.0.1:8765
 ```
 
-如果使用 Caddy、Nginx、Traefik、Nginx Proxy Manager 或其它反向代理，把 HTTPS 流量轉發到 `127.0.0.1:8765` 或容器網絡地址。
+設定 HTTPS 後檢查：
+
+```bash
+curl -i https://your-public-host.example.com/healthz
+```
+
+**不推薦 Cloudflare Tunnel** 用於大量檔案傳輸：其用戶端上傳可能非常緩慢。條件允許時，優先使用公網伺服器或一般反向代理／轉送。公開端點須啟用 OAuth。Docker 方式見 [Docker 指南](../installation/docker.md)。
 
 ## 4.開啟瀏覽器工作區
 
@@ -109,17 +114,20 @@ Fix the failing test. Read the relevant files first, make the smallest patch, ru
 
 ## 更新
 
+更新原始碼、重新安裝可編輯套件，然後重新啟動 Controller：
+
 ```bash
-docker compose pull
-docker compose up -d
+git pull --ff-only
+python -m pip install -e .
+# Restart the Controller process or service after updating.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-如果使用 tunnel profile：
+若選用 Docker Compose，請更新容器：
 
 ```bash
-docker compose --profile tunnel pull
-docker compose --profile tunnel up -d
+docker compose pull
+docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 

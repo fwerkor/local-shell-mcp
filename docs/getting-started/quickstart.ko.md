@@ -1,14 +1,16 @@
-<!-- i18n-source-sha256: a9820f08198cf8e823f59550928c07346f9669f2dbec46d3b8cd523c34034e01 -->
+<!-- i18n-source-sha256: 3575b9b50708261678473f74b66076f0c14807ccd7f7c3e60b4d1e897ac778df -->
 # 빠른 시작
 
 이 가이드는 LSM 컨트롤러를 시작하고 해당 브라우저 인터페이스를 엽니다. [unified web workspace](web-workspace.md)는 권장되는 일일 경험입니다. 이는 별도로 배포된 선택적 채팅 스택입니다. ChatGPT, Gemini 및 기타 외부 MCP 클라이언트는 동일한 컨트롤러에 연결할 수 있습니다. [runtime choices and deployment model](../guides/deployment.md)를 참조하세요.
 
+격리된 환경에서 **소스 체크아웃으로 직접 배포**하는 방식을 권장합니다. Docker Compose는 대안입니다.
+
 ## 요구 사항
 
-- Compose v2가 포함된 Docker Engine.
-- 원격 사용자 또는 외부 MCP 클라이언트가 연결되어야 하는 경우 공용 HTTPS 엔드포인트.
-- 전용 workspace directory.
-- 충분히 긴 임의의 OAuth admin PIN과 JWT secret.
+- Git, Python 3.11 이상 및 `venv` / `pip`.
+- 원격 사용자나 외부 MCP 클라이언트가 필요할 때만 공개 HTTPS.
+- 권한을 제한한 전용 작업 공간.
+- 강력한 OAuth 관리자 PIN과 임의 JWT 비밀키.
 
 !!! warning
     연결된 모델은 구성된 workspace를 조작할 수 있습니다. 일회용 container 또는 VM에서 서비스를 실행하고 host-control resources를 mount하지 마십시오.
@@ -18,11 +20,15 @@
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git
 cd local-shell-mcp
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e .
 cp .env.example .env
-python scripts/init_compose_env.py
+chmod 600 .env
+openssl rand -hex 32
 ```
 
-`.env`를 편집합니다:
+`.env`에서 샘플 PIN과 JWT 비밀키를 교체하세요 (`openssl rand -hex 32`). 소스 실행 시 `.env`가 자동 로드되지 않습니다.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
@@ -35,38 +41,37 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
 
 ```bash
 mkdir -p workspaces/default
-docker compose up -d
+set -a
+. ./.env
+set +a
+. .venv/bin/activate
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
+local-shell-mcp --mode mcp
 ```
 
-상태를 확인합니다:
+별도의 터미널에서 상태 확인:
 
 ```bash
-docker compose ps
-docker compose logs --tail=100 local-shell-mcp
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-정상 응답은 HTTP `200`을 반환합니다.
+정상이면 HTTP `200`이 반환됩니다. 장기 실행은 서비스 관리자를 사용하세요.
 
 ## 3. HTTPS 공개
 
-**권장:** 공개 접속에는 공인 서버에 직접 배포하거나 HTTPS 역방향 프록시를 통해 공인 서버에서 트래픽을 전달하세요.
-
-**비권장:** Cloudflare Tunnel은 클라이언트 측 업로드 속도가 매우 느릴 수 있어 파일 업로드와 전송 기능을 사용하기 어려울 수 있습니다. 공인 서버 배포나 전달이 불가능할 때만 사용하세요. Configure `CLOUDFLARE_TUNNEL_TOKEN` in `.env` only when choosing the optional tunnel sidecar.
-
-Cloudflare Tunnel sidecar를 사용하는 경우:
-
-```bash
-docker compose --profile tunnel up -d
-```
-
-Cloudflare Zero Trust에서 public hostname의 대상을 다음으로 설정합니다:
+원격 액세스는 공용 서버 또는 HTTPS 역방향 프록시(Caddy, Nginx, Traefik)를 사용하고 업로드와 다운로드를 포함한 전체 사이트를 다음으로 전달하세요:
 
 ```text
-http://local-shell-mcp:8765
+http://127.0.0.1:8765
 ```
 
-Caddy, Nginx, Traefik, Nginx Proxy Manager 또는 다른 reverse proxy를 사용한다면 HTTPS traffic을 `127.0.0.1:8765` 또는 container network address로 전달합니다.
+HTTPS 연결 확인:
+
+```bash
+curl -i https://your-public-host.example.com/healthz
+```
+
+파일 전송에는 **Cloudflare Tunnel을 권장하지 않습니다**. 클라이언트 업로드가 느릴 수 있습니다. 가능하면 공용 서버나 일반 역방향 프록시를 사용하고 OAuth를 유지하세요. Docker: [안내](../installation/docker.md).
 
 ## 4. 브라우저 작업 공간을 엽니다
 
@@ -109,17 +114,20 @@ local-shell-mcp를 사용하세요. 먼저 environment_get를 호출한 다음 w
 
 ## 업데이트
 
+소스를 업데이트하고 editable 패키지를 다시 설치한 후 Controller를 재시작하세요:
+
 ```bash
-docker compose pull
-docker compose up -d
+git pull --ff-only
+python -m pip install -e .
+# Restart the Controller process or service after updating.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-tunnel profile을 사용한다면:
+Docker Compose 배포라면 컨테이너를 업데이트하세요:
 
 ```bash
-docker compose --profile tunnel pull
-docker compose --profile tunnel up -d
+docker compose pull
+docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 
