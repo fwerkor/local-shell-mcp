@@ -67,20 +67,16 @@ def render(source: Path, destination: Path, environment: Mapping[str, str]) -> N
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             stream.write(result)
-        # The runtime drops privileges to node (UID/GID 1000). A protected
-        # root-owned 0600 bind mount is unreadable inside that container.
+        # The container runs as UID/GID 1000. A root-run deployment can
+        # grant group read without exposing the private bridge secret globally.
+        # Unprivileged builds/tests must not attempt to chown to an unrelated
+        # group; keep their output owner-only instead.
         if os.name != "nt":
-            if os.geteuid() == 1000:
-                os.chmod(temporary, 0o600)
-            else:
-                try:
-                    os.chown(temporary, -1, 1000)
-                except OSError as exc:
-                    raise PermissionError(
-                        "Cannot grant the LibreChat node group access to its private config; "
-                        "render as root or as a user in group 1000"
-                    ) from exc
+            if os.geteuid() == 0:
+                os.chown(temporary, -1, 1000)
                 os.chmod(temporary, 0o640)
+            else:
+                os.chmod(temporary, 0o600)
         os.replace(temporary, destination)
     finally:
         if os.path.exists(temporary):

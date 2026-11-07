@@ -1,5 +1,5 @@
 import type { ServerRequest } from '~/types';
-import { createAgentExecutionContext, createRequestAgentExecutionContext, filterLsmChatTools } from './runtime';
+import { createAgentExecutionContext, createRequestAgentExecutionContext, denyProviderWebSearch, filterLsmChatTools } from './runtime';
 
 describe('createRequestAgentExecutionContext', () => {
   afterEach(() => jest.restoreAllMocks());
@@ -54,8 +54,8 @@ describe('LSM per-conversation saved Agent policies', () => {
 
   it('exposes only the nested MCP gateway when LSM native access is off', () => {
     expect(filterLsmChatTools(candidates, { web: true, lsm: false, mcp: true, memory: false })).toEqual([
-      'web_search', 'mcp_tool_search_mcp_LSM', 'mcp_tool_inspect_mcp_LSM',
-      'mcp_tool_call_mcp_LSM', 'ask_user_question',
+      'web_search', 'ask_user_question', 'mcp_tool_search_mcp_LSM',
+      'mcp_tool_inspect_mcp_LSM', 'mcp_tool_call_mcp_LSM',
     ]);
   });
 
@@ -73,5 +73,40 @@ describe('LSM per-conversation saved Agent policies', () => {
     const prefs = { web: false, lsm: false, mcp: false, memory: false };
     const runtime = createAgentExecutionContext({ requestBody: {}, lsmChatPrefs: prefs });
     expect(runtime.lsmChatPrefs).toBe(prefs);
+  });
+});
+
+describe('provider-native web search denial', () => {
+  it('blocks Google and OpenRouter native search when the conversation disables web', async () => {
+    const resolveGrant = jest.fn().mockResolvedValue(true);
+    expect(await denyProviderWebSearch({
+      builtInSearch: true,
+      conversationWebAllowed: false,
+      resolveGrant,
+    })).toBe(true);
+    expect(resolveGrant).not.toHaveBeenCalled();
+  });
+
+  it('also blocks provider-native search when the role denies permission', async () => {
+    expect(await denyProviderWebSearch({
+      builtInSearch: true,
+      conversationWebAllowed: true,
+      resolveGrant: async () => false,
+    })).toBe(true);
+  });
+
+  it('allows a role-granted provider search unless the conversation denies it', async () => {
+    const resolveGrant = jest.fn().mockResolvedValue(true);
+    expect(await denyProviderWebSearch({
+      builtInSearch: true,
+      conversationWebAllowed: true,
+      resolveGrant,
+    })).toBe(false);
+    expect(await denyProviderWebSearch({
+      builtInSearch: false,
+      conversationWebAllowed: false,
+      resolveGrant,
+    })).toBe(false);
+    expect(resolveGrant).toHaveBeenCalledTimes(1);
   });
 });

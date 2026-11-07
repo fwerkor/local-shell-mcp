@@ -43,6 +43,24 @@ export function filterLsmChatTools(
   return selected;
 }
 
+/**
+ * Check the conversation's search denial before consulting role permissions.
+ * A provider can enable native search without registering LibreChat's web_search tool.
+ */
+export async function denyProviderWebSearch({
+  builtInSearch,
+  conversationWebAllowed,
+  resolveGrant,
+}: {
+  builtInSearch: boolean;
+  conversationWebAllowed: boolean | undefined;
+  resolveGrant: () => Promise<boolean>;
+}): Promise<boolean> {
+  if (!builtInSearch) return false;
+  if (conversationWebAllowed === false) return true;
+  return !(await resolveGrant());
+}
+
 export interface AgentExecutionContext {
   /** Effective server-authorized capabilities for this specific conversation. */
   lsmChatPrefs?: LsmChatPreferences;

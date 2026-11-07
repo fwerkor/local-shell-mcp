@@ -25,6 +25,7 @@ export default function Files() {
   const [selected, setSelected] = useState('');
   const [preview, setPreview] = useState<Preview | null>(null);
   const [editor, setEditor] = useState<EditSession | null>(null);
+  const [editorLoading, setEditorLoading] = useState(false);
   const requestVersion = useRef(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -37,7 +38,7 @@ export default function Files() {
   }, []);
   const refresh = async (nextPath = path, nextMachine = machine) => {
     const version = ++requestVersion.current;
-    setSelected(''); setPreview(null); setEditor(null); setListing(null);
+    setSelected(''); setPreview(null); setEditor(null); setEditorLoading(false); setListing(null);
     setBusy(true);
     try {
       const data = await read<Listing>('files', { machine: nextMachine, path: nextPath });
@@ -54,7 +55,7 @@ export default function Files() {
     if (entry.type === 'dir' || entry.is_dir) { await refresh(next); return; }
     const version = ++requestVersion.current;
     const selectedMachine = machine;
-    setSelected(next); setPreview(null); setEditor(null);
+    setSelected(next); setPreview(null); setEditor(null); setEditorLoading(false);
     try {
       const result = await read<Preview>('files/preview', { machine: selectedMachine, path: next });
       if (requestVersion.current !== version) return;
@@ -66,7 +67,7 @@ export default function Files() {
     const version = requestVersion.current;
     const selectedMachine = machine;
     const selectedPath = selected;
-    setBusy(true);
+    setEditorLoading(true);
     try {
       const full = await read<Preview>('files/content', { machine: selectedMachine, path: selectedPath });
       if (requestVersion.current !== version) return;
@@ -77,7 +78,7 @@ export default function Files() {
       setEditor({ machine: selectedMachine, path: selectedPath, content: full.content, sha256: full.sha256 });
       setError('');
     } catch (e) { if (requestVersion.current === version) setError(String(e)); }
-    finally { if (requestVersion.current === version) setBusy(false); }
+    finally { if (requestVersion.current === version) setEditorLoading(false); }
   };
   const saveEdit = async () => {
     if (!editor || editor.machine !== machine || editor.path !== selected) return;
@@ -138,7 +139,7 @@ export default function Files() {
     </div>
     <div className="flex flex-wrap items-center gap-2">
       <label className="text-xs text-text-secondary" htmlFor="lsm-file-machine">{localize('com_lsm_machine')}</label>
-      <select id="lsm-file-machine" value={machine} onChange={e => { ++requestVersion.current; setSelected(''); setPreview(null); setEditor(null); setListing(null); setMachine(e.target.value); setPath('.'); }}
+      <select id="lsm-file-machine" value={machine} onChange={e => { ++requestVersion.current; setSelected(''); setPreview(null); setEditor(null); setEditorLoading(false); setListing(null); setMachine(e.target.value); setPath('.'); }}
         className={control}>{machines.map(m => <option key={m} value={m}>{m}</option>)}</select>
       <form className="flex min-w-[220px] flex-1 gap-2" onSubmit={e => { e.preventDefault(); void refresh(inputPath); }}>
         <input aria-label={localize('com_lsm_directory_path')} value={inputPath} onChange={e => setInputPath(e.target.value)}

@@ -24,8 +24,8 @@ def test_render_config_resolves_mcp_credentials_privately(tmp_path):
     assert 'searxngInstanceUrl: "${SEARXNG_INSTANCE_URL}"' in text
     assert "${" not in text.replace("${SEARXNG_INSTANCE_URL}", "")
     if os.name != "nt":
-        assert dest.stat().st_mode & 0o777 == (0o600 if os.geteuid() == 1000 else 0o640)
-        if os.geteuid() != 1000:
+        assert dest.stat().st_mode & 0o777 == (0o640 if os.geteuid() == 0 else 0o600)
+        if os.geteuid() == 0:
             assert dest.stat().st_gid == 1000
     assert secret not in (ROOT / "librechat.yaml").read_text()
 

@@ -115,7 +115,7 @@ import { registerMemoryTools, memoryToolUsageGuard } from './memory';
 import { applyIntentLabels, sanitizeIntentLabels } from './intent';
 import { ContentFilterError } from '../middleware/contentFilter';
 import { resolveToolRoleGrants } from '~/tools/rolePermissions';
-import { createRequestAgentExecutionContext, filterLsmChatTools } from './runtime';
+import { createRequestAgentExecutionContext, denyProviderWebSearch, filterLsmChatTools } from './runtime';
 import { resolveTurnDeliveryRouting } from './files/delivery';
 import { filterFilesByEndpointRuntimeConfig } from '~/files';
 import { hasActiveFileFieldPolicy } from '~/protection';
@@ -598,7 +598,7 @@ function resolveProviderToolConflicts({
   if (removed > 0) {
     logger.debug(
       webSearchDenied
-        ? `[initializeAgent] Removed ${removed} ${provider} native web search tool(s); role denies WEB_SEARCH.`
+        ? `[initializeAgent] Removed ${removed} ${provider} native web search tool(s); conversation or role denies web search.`
         : `[initializeAgent] Removed ${removed} ${provider} native web search tool(s); LibreChat web_search is enabled.`,
     );
   }
@@ -1322,17 +1322,19 @@ export async function initializeAgent(
   });
 
   const llmConfig = options.llmConfig as Record<string, unknown>;
-  const webSearchDenied =
-    hasProviderWebSearch(options.tools, llmConfig) &&
-    !(await resolveWebSearchGrant({
+  const webSearchDenied = await denyProviderWebSearch({
+    builtInSearch: hasProviderWebSearch(options.tools, llmConfig),
+    conversationWebAllowed: runtime.lsmChatPrefs?.web,
+    resolveGrant: () => resolveWebSearchGrant({
       req: params.req as Request | undefined,
       user,
       resolve: params.resolveWebSearchGrant,
       getRoleByName: db.getRoleByName,
-    }));
+    }),
+  });
   if (webSearchDenied && stripWebSearchPlugin(llmConfig) > 0) {
     logger.debug(
-      `[initializeAgent] Removed the OpenRouter web search plugin; role denies WEB_SEARCH.`,
+      `[initializeAgent] Removed the OpenRouter web search plugin; conversation or role denies web search.`,
     );
   }
   const tokensModel =

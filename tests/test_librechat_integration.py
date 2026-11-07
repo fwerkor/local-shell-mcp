@@ -271,7 +271,10 @@ def test_noauth_mcp_installs_bridge_auth_when_librechat_is_enabled(tmp_path, mon
 
 def test_versioned_chat_policy_rejects_out_of_order_updates(tmp_path, monkeypatch):
     from local_shell_mcp.librechat_integration import (
-        issue_chat_ticket, register_identity, set_chat_tool_policy, may_chat_call_lsm,
+        issue_chat_ticket,
+        may_chat_call_lsm,
+        register_identity,
+        set_chat_tool_policy,
     )
     from local_shell_mcp.state_store import FileStateStore
     monkeypatch.setattr("local_shell_mcp.state_store.get_state_store",
