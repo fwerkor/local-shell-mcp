@@ -311,3 +311,15 @@ def test_generated_oauth_secret_is_not_marked_pending(configured, monkeypatch):
         assert field["value"] is None
         assert not field["pending"]
         assert not any(field["pending"] for field in snapshot["fields"])
+
+
+def test_invalid_persisted_oauth_secret_rejected_before_saving(configured, monkeypatch):
+    secret_path = configured / ".local-shell-mcp" / "oauth-jwt-secret"
+    secret_path.parent.mkdir(parents=True, exist_ok=True)
+    secret_path.write_text("invalid-secret", encoding="utf-8")
+    initial = config_snapshot()
+    monkeypatch.delenv("LOCAL_SHELL_MCP_AUTH_MODE", raising=False)
+    with pytest.raises(ValueError, match="Invalid configuration"):
+        save_config({"auth_mode": "oauth"}, initial["revision"])
+    assert not config_file().exists()
+    assert secret_path.read_text(encoding="utf-8") == "invalid-secret"
