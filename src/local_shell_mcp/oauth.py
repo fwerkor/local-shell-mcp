@@ -698,10 +698,16 @@ async def oauth_authorize_post(request: Request) -> Response:
             return _authorize_form(params, error="OAuth client registry is full")
 
     code = secrets.token_urlsafe(32)
-    # A management scope is only issued to the controller's own WebUI callback.
-    ui_callback = f"{public_base_url(request)}{get_settings().ui_path}/callback"
+    # Management scope is restricted to the WebUI's callback. Direct localhost
+    # access may use a different origin from the advertised public OAuth URL.
+    from .auth import _is_direct_localhost_request
+
+    ui_path = get_settings().ui_path
+    ui_callbacks = {f"{public_base_url(request)}{ui_path}/callback"}
+    if _is_direct_localhost_request(request):
+        ui_callbacks.add(f"{request.url.scheme}://{request.url.netloc}{ui_path}/callback")
     ui_admin = (
-        params.get("redirect_uri") == ui_callback
+        params.get("redirect_uri") in ui_callbacks
         and "admin:config" in params.get("scope", "").split()
     )
     auth_code = AuthCode(
