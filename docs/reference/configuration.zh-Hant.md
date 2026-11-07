@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
+<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
 # 設定
 
 儲存庫提供一個可直接複製的起始檔案：[`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example)。Docker Compose 會自動讀取由此產生的 `.env`，其他 runtime 也可使用相同的 `LOCAL_SHELL_MCP_` 環境變數。YAML 仍是 binary 或原始碼部署的可選進階輸入；請明確建立設定檔，並以 `LOCAL_SHELL_MCP_CONFIG` 或 `--config` 選取。環境變數會覆寫 YAML，因此除非確實需要 override，否則不要在兩處重複定義同一設定。YAML key 使用下表列出的欄位名稱。
@@ -6,9 +6,15 @@
 ## 優先順序
 
 1. `Settings` 中的內建預設值。
-2. 由 `LOCAL_SHELL_MCP_CONFIG` 或 `--config` 選取的 YAML 設定。
+2. 由 `LOCAL_SHELL_MCP_CONFIG` 或 `--config` 選取的 YAML 設定。 LSM 也會自動讀取 `<state_dir>/config.yaml`，不必手動指定設定檔。
 3. 以 `LOCAL_SHELL_MCP_` 為前綴的環境變數。
 4. `--mode`、`--config`、`--remote`、`--no-remote` 等 CLI flag；它們會在載入 settings 前設定對應環境值。
+
+## 在 WebUI 中編輯設定
+
+WebUI 的 **Settings** 頁面可搜尋、編輯、重設及儲存控制器設定。系統在 Unix 類平台上以只有擁有者可讀寫的權限原子寫入 YAML；原有註解可能重新排版。環境變數覆寫的欄位唯讀，敏感資訊不會傳回瀏覽器。儲存前會驗證設定並偵測外部並行變更。
+
+**Save** 僅儲存，**Save & restart** 儲存後重啟，**Restart controller** 則直接重啟。重啟時會正常關閉服務並重新執行原 Python 命令，中斷現有連線。更改網址、埠號、認證或狀態目錄後，可能需要手動恢復存取。管理操作需要 WebUI 專用的 `admin:config` OAuth 權限；無認證模式僅允許直接從本機迴圈介面存取。
 
 ## 最小公開設定
 

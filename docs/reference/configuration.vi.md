@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
+<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
 # Cấu hình
 
 Repository cung cấp một starter file có thể copy: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose tự động đọc `.env` được tạo, và runtime khác có thể dùng cùng environment variables `LOCAL_SHELL_MCP_`. YAML vẫn là optional advanced input cho binary/source deployments; tạo file rõ ràng và chọn bằng `LOCAL_SHELL_MCP_CONFIG` hoặc `--config`. Environment variables override YAML values, vì vậy tránh định nghĩa cùng setting ở cả hai nơi trừ khi override là chủ ý. YAML keys dùng các field names bên dưới.
@@ -6,9 +6,15 @@ Repository cung cấp một starter file có thể copy: [`.env.example`](https:
 ## Độ ưu tiên
 
 1. Built-in defaults từ `Settings`.
-2. YAML config được chọn bởi `LOCAL_SHELL_MCP_CONFIG` hoặc `--config`.
+2. YAML config được chọn bởi `LOCAL_SHELL_MCP_CONFIG` hoặc `--config`. LSM cũng tự động đọc `<state_dir>/config.yaml` nếu tập tin tồn tại.
 3. Environment variables với prefix `LOCAL_SHELL_MCP_`.
 4. CLI flags như `--mode`, `--config`, `--remote`, `--no-remote`, đặt environment values tương ứng trước khi settings load.
+
+## Chỉnh sửa cấu hình trong WebUI
+
+Trang **Settings** trong WebUI cho phép tìm kiếm, chỉnh sửa, đặt lại và lưu cấu hình bộ điều khiển. Trên Unix, YAML được ghi nguyên tử với quyền chỉ dành cho chủ sở hữu; các chú thích hiện có có thể bị định dạng lại. Trường do biến môi trường ghi đè chỉ được đọc. Giá trị bí mật không được gửi về trình duyệt. Các giá trị được kiểm tra và phát hiện xung đột thay đổi trước khi lưu.
+
+**Save** chỉ lưu; **Save & restart** lưu rồi khởi động lại; **Restart controller** khởi động lại riêng. Dịch vụ được tắt đúng cách rồi chạy lại lệnh Python ban đầu, làm gián đoạn các kết nối. Thay đổi địa chỉ, cổng, xác thực hoặc thư mục trạng thái có thể cần phục hồi thủ công. Quản lý yêu cầu quyền OAuth `admin:config` riêng cho WebUI; khi không xác thực, chỉ cho phép truy cập trực tiếp qua loopback.
 
 ## Minimal public configuration
 

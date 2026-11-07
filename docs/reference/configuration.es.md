@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
+<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
 # Configuración
 
 El repositorio incluye un único archivo inicial copiable: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose lee automáticamente el `.env` resultante, y otros runtimes pueden usar las mismas variables de entorno `LOCAL_SHELL_MCP_`. YAML sigue siendo una entrada avanzada opcional para deployments binary o source; cree un archivo explícitamente y selecciónelo con `LOCAL_SHELL_MCP_CONFIG` o `--config`. Las variables de entorno sobrescriben los valores YAML, así que evite definir el mismo ajuste en ambos salvo que la sobrescritura sea intencional. Las claves YAML usan los nombres de campo de abajo.
@@ -6,9 +6,15 @@ El repositorio incluye un único archivo inicial copiable: [`.env.example`](http
 ## Precedencia
 
 1. Defaults integrados de `Settings`.
-2. Config YAML seleccionada por `LOCAL_SHELL_MCP_CONFIG` o `--config`.
+2. Config YAML seleccionada por `LOCAL_SHELL_MCP_CONFIG` o `--config`. LSM también carga automáticamente `<state_dir>/config.yaml` cuando existe.
 3. Variables de entorno con prefijo `LOCAL_SHELL_MCP_`.
 4. Flags CLI como `--mode`, `--config`, `--remote` y `--no-remote`, que fijan los valores de entorno correspondientes antes de cargar settings.
+
+## Editar la configuración en WebUI
+
+La página **Settings** de WebUI permite buscar, editar, restablecer y guardar la configuración del controlador. En Unix, el archivo YAML se escribe de forma atómica con permisos exclusivos del propietario; los comentarios existentes pueden reformatearse. Los valores definidos mediante variables de entorno son de solo lectura. Los secretos nunca se envían al navegador. Se validan los cambios y se detectan ediciones externas simultáneas.
+
+**Save** solo guarda; **Save & restart** guarda y reinicia; **Restart controller** reinicia por separado. El servicio se cierra ordenadamente y vuelve a ejecutar el comando Python original, lo que interrumpe las conexiones. Cambiar la dirección, el puerto, la autenticación o el directorio de estado puede requerir recuperación manual. La gestión exige el permiso OAuth `admin:config` exclusivo de WebUI; sin autenticación, solo se admite acceso directo por loopback.
 
 ## Configuración pública mínima
 

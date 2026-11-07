@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
+<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
 # Configuração
 
 O repository fornece um único arquivo inicial copiável: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose lê automaticamente o `.env` resultante, e outros runtimes podem usar as mesmas variáveis de ambiente `LOCAL_SHELL_MCP_`. YAML continua sendo input avançado opcional para deployments binary ou source; crie um arquivo explicitamente e selecione com `LOCAL_SHELL_MCP_CONFIG` ou `--config`. Variáveis de ambiente sobrescrevem valores YAML, então evite definir o mesmo setting em ambos, salvo quando o override for intencional. YAML keys usam os field names abaixo.
@@ -6,9 +6,15 @@ O repository fornece um único arquivo inicial copiável: [`.env.example`](https
 ## Precedência
 
 1. Defaults embutidos de `Settings`.
-2. Config YAML selecionada por `LOCAL_SHELL_MCP_CONFIG` ou `--config`.
+2. Config YAML selecionada por `LOCAL_SHELL_MCP_CONFIG` ou `--config`. O LSM também carrega automaticamente `<state_dir>/config.yaml` quando presente.
 3. Variáveis de ambiente com prefixo `LOCAL_SHELL_MCP_`.
 4. CLI flags como `--mode`, `--config`, `--remote` e `--no-remote`, que definem os environment values correspondentes antes de carregar settings.
+
+## Editar configurações na WebUI
+
+A página **Settings** da WebUI permite pesquisar, editar, redefinir e salvar configurações do controlador. Em Unix, o YAML é gravado de forma atômica com permissões exclusivas do proprietário; comentários existentes podem ser reformatados. Valores definidos por variáveis de ambiente são somente leitura. Segredos não são enviados ao navegador. As alterações são validadas e conflitos de edição externa são detectados.
+
+**Save** apenas salva, **Save & restart** salva e reinicia, **Restart controller** reinicia separadamente. O serviço é encerrado de forma controlada e o comando Python original é reexecutado, interrompendo conexões ativas. Alterações de endereço, porta, autenticação ou diretório de estado podem exigir recuperação manual. O gerenciamento requer a permissão OAuth `admin:config` exclusiva da WebUI; sem autenticação, apenas conexões diretas via loopback são aceitas.
 
 ## Configuração pública mínima
 

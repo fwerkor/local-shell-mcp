@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
+<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
 # Konfiguracja
 
 Repository dostarcza jeden kopiowalny starter file: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose automatycznie odczytuje wynikowy `.env`, a inne runtimes mogą używać tych samych `LOCAL_SHELL_MCP_` environment variables. YAML pozostaje optional advanced input dla binary/source deployments; utwórz file explicit i wybierz go przez `LOCAL_SHELL_MCP_CONFIG` lub `--config`. Environment variables override YAML values, więc nie definiuj tego samego setting w obu miejscach, chyba że override jest zamierzony. YAML keys używają field names poniżej.
@@ -6,9 +6,15 @@ Repository dostarcza jeden kopiowalny starter file: [`.env.example`](https://git
 ## Priorytet
 
 1. Built-in defaults z `Settings`.
-2. YAML config wybrana przez `LOCAL_SHELL_MCP_CONFIG` lub `--config`.
+2. YAML config wybrana przez `LOCAL_SHELL_MCP_CONFIG` lub `--config`. LSM automatycznie ładuje też `<state_dir>/config.yaml`, jeśli plik istnieje.
 3. Environment variables z prefix `LOCAL_SHELL_MCP_`.
 4. CLI flags takie jak `--mode`, `--config`, `--remote`, `--no-remote`, które ustawiają odpowiednie environment values przed settings load.
+
+## Edycja ustawień w WebUI
+
+Strona **Settings** w WebUI umożliwia wyszukiwanie, edytowanie, resetowanie i zapisywanie ustawień kontrolera. W systemach Unix plik YAML jest zapisywany atomowo z uprawnieniami właściciela; istniejące komentarze mogą zostać przeformatowane. Ustawienia narzucone przez zmienne środowiskowe są tylko do odczytu. Sekrety nie trafiają do przeglądarki. Przed zapisem następuje walidacja i sprawdzenie równoległych zmian.
+
+**Save** tylko zapisuje, **Save & restart** zapisuje i restartuje, **Restart controller** restartuje osobno. Usługa jest poprawnie zamykana i uruchamiana ponownie tym samym poleceniem Python, co przerywa połączenia. Zmiana adresu, portu, uwierzytelniania lub katalogu stanu może wymagać ręcznego przywrócenia dostępu. Zarządzanie wymaga uprawnienia OAuth `admin:config` dostępnego tylko dla WebUI; bez uwierzytelniania dozwolone jest wyłącznie bezpośrednie połączenie loopback.
 
 ## Minimal public configuration
 

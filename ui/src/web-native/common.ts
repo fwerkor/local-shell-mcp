@@ -1,7 +1,7 @@
 import { actionButton, formDialog, type ActionOptions, type FormDialogOptions } from "../web-controls"
 import type { FileEntry, FilePreview, Machine } from "../types"
 
-export type NativeViewName = "files" | "terminals" | "desktop" | "sessions" | "remotes" | "audit" | "hosted-chat"
+export type NativeViewName = "files" | "terminals" | "desktop" | "sessions" | "remotes" | "audit" | "settings" | "hosted-chat"
 export type NoticeTone = "info" | "success" | "warning" | "error"
 
 export interface NativeApi {
@@ -20,6 +20,7 @@ export interface NativePageContext {
   selectedRemote?: string
   notify: (message: string, tone?: NoticeTone) => void
   refreshChrome: () => Promise<void>
+  reauthorize?: () => void | Promise<void>
 }
 
 export interface NativePageController {

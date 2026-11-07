@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
+<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
 # الإعدادات
 
 يوفر repository ملف بدء واحدًا قابلًا للنسخ: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). يقرأ Docker Compose ملف `.env` الناتج تلقائيًا، ويمكن لبقية runtimes استخدام environment variables نفسها ذات prefix `LOCAL_SHELL_MCP_`. يبقى YAML input متقدمًا اختياريًا لـ binary/source deployments؛ أنشئ ملفًا صراحة واختره عبر `LOCAL_SHELL_MCP_CONFIG` أو `--config`. تتغلب environment variables على قيم YAML، لذا تجنب تعريف setting نفسه في الاثنين إلا إذا كان override مقصودًا. تستخدم YAML keys أسماء fields المبينة أدناه.
@@ -6,9 +6,15 @@
 ## الأولوية
 
 1. Built-in defaults من `Settings`.
-2. YAML config المختار عبر `LOCAL_SHELL_MCP_CONFIG` أو `--config`.
+2. YAML config المختار عبر `LOCAL_SHELL_MCP_CONFIG` أو `--config`. يحمّل LSM أيضًا الملف `<state_dir>/config.yaml` تلقائيًا إن كان موجودًا.
 3. Environment variables ذات prefix `LOCAL_SHELL_MCP_`.
 4. CLI flags مثل `--mode` و`--config` و`--remote` و`--no-remote`، والتي تضبط environment values المقابلة قبل تحميل settings.
+
+## تعديل الإعدادات عبر WebUI
+
+تتيح صفحة **Settings** في WebUI البحث عن إعدادات المتحكم وتعديلها وإعادة ضبطها وحفظها. على أنظمة Unix تُكتب ملفات YAML كتابة ذرية بصلاحيات المالك فقط، وقد يُعاد تنسيق التعليقات الموجودة. الإعدادات التي تتجاوزها متغيرات البيئة للقراءة فقط، ولا تُرسل القيم السرية إلى المتصفح. يجري التحقق من القيم واكتشاف تعارض التعديلات الخارجية قبل الحفظ.
+
+يعمل **Save** على الحفظ فقط، و**Save & restart** على الحفظ وإعادة التشغيل، و**Restart controller** على إعادة التشغيل وحدها. تُغلق الخدمة بصورة سليمة ثم يُعاد تنفيذ أمر Python الأصلي، مما يقطع الاتصالات القائمة. قد تتطلب تغييرات العنوان أو المنفذ أو المصادقة أو مجلد الحالة استردادًا يدويًا. تتطلب الإدارة صلاحية OAuth المسماة `admin:config` والمخصصة لـ WebUI؛ وعند تعطيل المصادقة يُسمح بالاتصال المباشر عبر loopback فقط.
 
 ## الحد الأدنى للإعداد العام
 

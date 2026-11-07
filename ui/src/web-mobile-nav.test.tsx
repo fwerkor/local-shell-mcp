@@ -4,10 +4,10 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { ApplicationShell } from "./web-app"
 
 describe("WebUI navigation", () => {
-  test("keeps all seven destinations accessible in the shared navigation", () => {
+  test("keeps all eight destinations accessible in the shared navigation", () => {
     const markup = renderToStaticMarkup(<ApplicationShell />)
     const views = [...markup.matchAll(/data-view="([^"]+)" aria-label="([^"]+)"/g)]
-    expect(views.map(([,view]) => view)).toEqual(["overview","files","terminals","desktop","sessions","remotes","audit"])
+    expect(views.map(([,view]) => view)).toEqual(["overview","files","terminals","desktop","sessions","remotes","audit","settings"])
     expect(views.every(([, ,label]) => label.length > 0)).toBe(true)
     expect(markup).toContain('data-interface-mode="chat" aria-pressed="false" hidden')
     expect(markup).toContain('>Workspace</strong>')

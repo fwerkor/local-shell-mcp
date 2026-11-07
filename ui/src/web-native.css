@@ -763,3 +763,29 @@ body:has(.lsm-librechat) #view-root > .controller-page {
   background:var(--surface, #fff); color:var(--text, #222);
 }
 .lsm-librechat [data-chat-reconnect][hidden] { display:none; }
+/* Controller configuration */
+.settings-page { display: grid; gap: 14px; padding-bottom: 30px; }
+.settings-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+.settings-heading h2 { margin: 0 0 4px; font-size: 20px; }
+.settings-heading p { margin: 0; max-width: 760px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.settings-actions { display: flex; gap: 7px; flex-wrap: wrap; }
+.settings-notice { margin: 0; padding: 10px 12px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 13px; }
+.settings-filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.settings-filters input, .settings-filters select, .settings-field-input input, .settings-field-input select, .settings-field-input textarea { min-height: 34px; border: 1px solid var(--line); border-radius: 2px; background: var(--panel); color: var(--text); padding: 7px 9px; font: inherit; font-size: 13px; }
+.settings-filters input { flex: 1; min-width: 180px; }
+.settings-filters span { color: var(--muted); font-size: 12px; }
+.settings-group > div { display: grid; }
+.settings-field { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(200px, 1fr); gap: 16px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.settings-field:last-child { border-bottom: 0; }
+.settings-field.pending { box-shadow: inset 3px 0 0 var(--accent); }
+.settings-field-info { display: grid; min-width: 0; gap: 4px; }
+.settings-field-info label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 600; }
+.settings-field-info code { color: var(--muted); font-size: 11px; font-weight: 400; }
+.settings-field-info span, .settings-field-info small { color: var(--muted); font-size: 12px; }
+.settings-field-input { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.settings-field-input input, .settings-field-input select, .settings-field-input textarea { flex: 1; width: 100%; min-width: 0; }
+.settings-field-input textarea { resize: vertical; }
+.settings-field.locked { opacity: .65; }
+@media (max-width: 760px) { .settings-field { grid-template-columns: minmax(0, 1fr); gap: 8px; } .settings-actions { width: 100%; } }
+
+.settings-page [hidden] { display: none !important; }

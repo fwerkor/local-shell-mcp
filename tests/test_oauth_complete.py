@@ -397,6 +397,43 @@ def test_pin_failure_sources_are_bounded(tmp_path, monkeypatch):
     assert list(oauth._PIN_FAILURES) == ["source-a", "source-c"]
 
 
+def test_localhost_webui_can_reauthorize_with_external_public_url(tmp_path, monkeypatch):
+    _configure(
+        tmp_path,
+        monkeypatch,
+        LOCAL_SHELL_MCP_PUBLIC_BASE_URL="https://controller.example.test",
+    )
+    localhost = TestClient(_app(), base_url="http://127.0.0.1:8765", client=("127.0.0.1", 44001))
+    callback = "http://127.0.0.1:8765/ui/callback"
+    client_id = _register(localhost, callback)
+    params = {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": callback,
+        "scope": "shell:read admin:config",
+        "resource": "https://controller.example.test",
+        "code_challenge": "challenge",
+        "code_challenge_method": "S256",
+        "pin": "correct-admin-pin",
+    }
+    approved = localhost.post("/oauth/authorize", data=params, follow_redirects=False)
+    assert approved.status_code == 302
+    code = parse_qs(urlsplit(approved.headers["location"]).query)["code"][0]
+    assert "admin:config" in oauth._CODES[code].scope.split()
+
+    remote = TestClient(_app(), base_url="https://evil.example.test", client=("203.0.113.55", 44002))
+    remote_callback = "https://evil.example.test/ui/callback"
+    remote_id = _register(remote, remote_callback)
+    denied = remote.post(
+        "/oauth/authorize",
+        data={**params, "client_id": remote_id, "redirect_uri": remote_callback},
+        follow_redirects=False,
+    )
+    assert denied.status_code == 302
+    remote_code = parse_qs(urlsplit(denied.headers["location"]).query)["code"][0]
+    assert "admin:config" not in oauth._CODES[remote_code].scope.split()
+
+
 def test_complete_authorization_code_flow_and_token_failures(tmp_path, monkeypatch):
     _configure(
         tmp_path,

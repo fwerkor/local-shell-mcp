@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
+<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
 # Konfiguration
 
 Das Repository liefert eine kopierbare Startdatei: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose liest die resultierende `.env` automatisch, und andere Runtimes können dieselben `LOCAL_SHELL_MCP_`-Umgebungsvariablen verwenden. YAML bleibt ein optionaler fortgeschrittener Input für Binary- oder Source-Deployments; erstellen Sie explizit eine Datei und wählen Sie sie mit `LOCAL_SHELL_MCP_CONFIG` oder `--config`. Umgebungsvariablen überschreiben YAML-Werte. Definieren Sie daher denselben Setting nicht an beiden Stellen, außer der Override ist beabsichtigt. YAML-Keys verwenden die unten gezeigten Feldnamen.
@@ -6,9 +6,15 @@ Das Repository liefert eine kopierbare Startdatei: [`.env.example`](https://gith
 ## Priorität
 
 1. Eingebaute Defaults aus `Settings`.
-2. YAML-Konfiguration, gewählt über `LOCAL_SHELL_MCP_CONFIG` oder `--config`.
+2. YAML-Konfiguration, gewählt über `LOCAL_SHELL_MCP_CONFIG` oder `--config`. LSM liest außerdem `<state_dir>/config.yaml` automatisch, auch ohne explizite Pfadangabe.
 3. Umgebungsvariablen mit Präfix `LOCAL_SHELL_MCP_`.
 4. CLI-Flags wie `--mode`, `--config`, `--remote` und `--no-remote`, die die entsprechenden Umgebungswerte vor dem Laden der Settings setzen.
+
+## Einstellungen in der WebUI bearbeiten
+
+Über **Settings** in der WebUI lassen sich Controller-Einstellungen suchen, bearbeiten, zurücksetzen und speichern. Unter Unix erfolgt das atomare Schreiben der YAML-Datei mit Berechtigungen nur für den Eigentümer; bestehende Kommentare können neu formatiert werden. Durch Umgebungsvariablen vorgegebene Werte sind schreibgeschützt. Geheimnisse werden nicht an den Browser gesendet. Vor dem Speichern werden die Werte validiert und parallele Änderungen erkannt.
+
+**Save** speichert nur, **Save & restart** speichert und startet neu, **Restart controller** startet separat neu. Der Prozess wird kontrolliert beendet und mit dem ursprünglichen Python-Befehl neu ausgeführt; Verbindungen werden unterbrochen. Änderungen von Adresse, Port, Authentifizierung oder Zustandsverzeichnis können eine manuelle Wiederherstellung erfordern. Die Verwaltung benötigt die WebUI-spezifische OAuth-Berechtigung `admin:config`; ohne Authentifizierung ist nur direkter Loopback-Zugriff erlaubt.
 
 ## Minimale öffentliche Konfiguration
 

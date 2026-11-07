@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
+<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
 # Configuration
 
 Le repository fournit un seul fichier de démarrage copiable : [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example). Docker Compose lit automatiquement le `.env` obtenu, et les autres runtimes peuvent utiliser les mêmes variables d’environnement `LOCAL_SHELL_MCP_`. YAML reste une entrée avancée optionnelle pour les deployments binary ou source ; créez explicitement un fichier et sélectionnez-le avec `LOCAL_SHELL_MCP_CONFIG` ou `--config`. Les variables d’environnement remplacent les valeurs YAML ; évitez donc de définir le même réglage dans les deux sauf si l’override est voulu. Les clés YAML utilisent les noms de champs ci-dessous.
@@ -6,9 +6,15 @@ Le repository fournit un seul fichier de démarrage copiable : [`.env.example`](
 ## Priorité
 
 1. Defaults intégrés de `Settings`.
-2. Configuration YAML sélectionnée par `LOCAL_SHELL_MCP_CONFIG` ou `--config`.
+2. Configuration YAML sélectionnée par `LOCAL_SHELL_MCP_CONFIG` ou `--config`. LSM charge aussi automatiquement `<state_dir>/config.yaml` lorsqu’il existe.
 3. Variables d’environnement préfixées `LOCAL_SHELL_MCP_`.
 4. Flags CLI comme `--mode`, `--config`, `--remote` et `--no-remote`, qui définissent les valeurs d’environnement correspondantes avant le chargement des settings.
+
+## Modifier la configuration dans la WebUI
+
+La page **Settings** de la WebUI permet de rechercher, modifier, réinitialiser et enregistrer les paramètres du contrôleur. Sous Unix, le YAML est écrit de façon atomique avec des droits réservés au propriétaire ; les commentaires peuvent être reformatés. Les valeurs imposées par les variables d’environnement sont en lecture seule. Les secrets ne sont jamais transmis au navigateur. Les paramètres sont validés et les modifications concurrentes détectées.
+
+**Save** enregistre uniquement, **Save & restart** enregistre et redémarre, **Restart controller** redémarre séparément. Le service s’arrête proprement puis réexécute la commande Python initiale, interrompant les connexions. Modifier l’adresse, le port, l’authentification ou le répertoire d’état peut nécessiter une intervention manuelle. Cette gestion exige l’autorisation OAuth `admin:config` propre à la WebUI ; sans authentification, seul l’accès direct en boucle locale est autorisé.
 
 ## Configuration publique minimale
 

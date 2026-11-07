@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 5d2de552ba0ba0d1c76319ad9f87ab68e217fee6c607687f8260e14872e7dbcc -->
+<!-- i18n-source-sha256: 5714d41ac26e62d3d05f4e9e5786a01f402fa770b764a410ddbfd7988aa65cf8 -->
 # Configuration
 
 Repository एक copyable starter file देता है: [`.env.example`](https://github.com/fwerkor/local-shell-mcp/blob/main/.env.example)। Docker Compose उससे बने `.env` को automatically पढ़ता है, और अन्य runtimes वही `LOCAL_SHELL_MCP_` environment variables उपयोग कर सकते हैं। YAML binary/source deployments के लिए optional advanced input रहता है; file explicitly बनाएँ और `LOCAL_SHELL_MCP_CONFIG` या `--config` से चुनें। Environment variables YAML values को override करती हैं, इसलिए intentional override के अलावा वही setting दोनों जगह define न करें। YAML keys नीचे दिखाए field names उपयोग करती हैं।
@@ -6,9 +6,15 @@ Repository एक copyable starter file देता है: [`.env.example`](ht
 ## Precedence
 
 1. `Settings` के built-in defaults।
-2. `LOCAL_SHELL_MCP_CONFIG` या `--config` से चुनी YAML config।
+2. `LOCAL_SHELL_MCP_CONFIG` या `--config` से चुनी YAML config। LSM `<state_dir>/config.yaml` को मौजूद होने पर बिना अलग से चुनने के भी पढ़ता है।
 3. `LOCAL_SHELL_MCP_` prefix वाली environment variables।
 4. `--mode`, `--config`, `--remote`, `--no-remote` जैसे CLI flags, जो settings load से पहले corresponding environment values set करते हैं।
+
+## WebUI में सेटिंग बदलना
+
+WebUI के **Settings** पृष्ठ से controller की सेटिंग खोजी, बदली, रीसेट और सहेजी जा सकती हैं। Unix पर YAML फ़ाइल केवल स्वामी की अनुमति से atomically लिखी जाती है; पुरानी टिप्पणियों का स्वरूप बदल सकता है। Environment variables से निर्धारित विकल्प केवल पढ़े जा सकते हैं। गुप्त मान browser को नहीं भेजे जाते। सहेजने से पहले मान जाँचे जाते हैं और दूसरी जगह किए गए बदलावों का टकराव पहचाना जाता है।
+
+**Save** केवल सहेजता है, **Save & restart** सहेजकर पुनः शुरू करता है और **Restart controller** अलग से पुनः शुरू करता है। सेवा पहले सही तरीके से बंद होकर मूल Python command से चलती है, जिससे मौजूदा कनेक्शन टूटते हैं। Address, port, authentication या state directory बदलने पर मैन्युअल सुधार ज़रूरी हो सकता है। प्रबंधन के लिए WebUI का विशेष `admin:config` OAuth अधिकार चाहिए; authentication बंद हो तो केवल सीधा loopback प्रवेश मान्य है।
 
 ## Minimal public configuration
 

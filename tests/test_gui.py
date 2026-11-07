@@ -2369,12 +2369,15 @@ async def test_gui_action_rechecks_state_ttl_between_batch_actions(tmp_path, mon
 
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setattr(base, "GUI_STATE_TTL_S", 0.02)
+    now = [100.0]
+    monkeypatch.setattr(base, "time", SimpleNamespace(monotonic=lambda: now[0]))
 
     class WaitBackend(FakeBackend):
         async def perform_action(self, window, locator, action):
             self.actions.append((window, locator, action))
             if action["type"] == "wait":
-                await asyncio.sleep(float(action["seconds"]))
+                now[0] += float(action["seconds"])
+                await asyncio.sleep(0)
             return {"performed": True}
 
     backend = WaitBackend()

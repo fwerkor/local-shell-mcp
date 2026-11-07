@@ -563,7 +563,7 @@ def _authorize_form(
     headers: dict[str, str] | None = None,
 ) -> HTMLResponse:
     settings = get_settings()
-    scope = _scope_value()
+    scope = _scope_value() + (" admin:config" if "admin:config" in params.get("scope", "").split() else "")
     client = _get_client(params.get("client_id", ""))
     client_name = client.client_name if client and client.client_name else "OAuth client"
     error_html = (
@@ -698,11 +698,23 @@ async def oauth_authorize_post(request: Request) -> Response:
             return _authorize_form(params, error="OAuth client registry is full")
 
     code = secrets.token_urlsafe(32)
+    # Management scope is restricted to the WebUI's callback. Direct localhost
+    # access may use a different origin from the advertised public OAuth URL.
+    from .auth import _is_direct_localhost_request
+
+    ui_path = get_settings().ui_path
+    ui_callbacks = {f"{public_base_url(request)}{ui_path}/callback"}
+    if _is_direct_localhost_request(request):
+        ui_callbacks.add(f"{request.url.scheme}://{request.url.netloc}{ui_path}/callback")
+    ui_admin = (
+        params.get("redirect_uri") in ui_callbacks
+        and "admin:config" in params.get("scope", "").split()
+    )
     auth_code = AuthCode(
         code=code,
         client_id=params["client_id"],
         redirect_uri=params["redirect_uri"],
-        scope=_scope_value(),
+        scope=_scope_value() + (" admin:config" if ui_admin else ""),
         resource=params.get("resource") or resource_url(request),
         code_challenge=params.get("code_challenge"),
         code_challenge_method=params.get("code_challenge_method"),

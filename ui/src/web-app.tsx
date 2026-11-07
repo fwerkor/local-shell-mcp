@@ -9,7 +9,7 @@ import type { NativePageController } from "./web-native/common"
 const destinations = [
   ["overview", "Overview", "≡"], ["files", "Files", "▱"],
   ["terminals", "Terminals", ">_"], ["desktop", "Desktop", "▣"],
-  ["sessions", "Sessions", "▤"], ["remotes", "Remotes", "▥"], ["audit", "Audit", "☷"],
+  ["sessions", "Sessions", "▤"], ["remotes", "Remotes", "▥"], ["audit", "Audit", "☷"], ["settings", "Settings", "⚙"],
 ] as const
 
 function NavigationIcon({ view }: { view: string }) {
@@ -21,6 +21,7 @@ function NavigationIcon({ view }: { view: string }) {
     sessions: "M6 3h12v18H6zM9 7h6M9 11h6M9 15h4",
     remotes: "M3 3h18v7H3zM3 14h18v7H3zM7 6.5h.01M7 17.5h.01M11 6.5h6M11 17.5h6",
     audit: "M5 3h14v18H5zM8 7h8M8 11h8M8 15h5",
+    settings: "M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1M12 8a4 4 0 1 0 0 8a4 4 0 0 0 0-8z",
     "hosted-chat": "M4 5h16v12H8l-4 3V5zM8 9h8M8 13h5",
   }
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={paths[view] || paths.terminals} /></svg>
