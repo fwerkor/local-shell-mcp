@@ -600,9 +600,20 @@ jobs:
         run: |
           set -euxo pipefail
           scripts/build-tmux-helper.sh /tmp/local-shell-mcp-tmux "${{ matrix.platform }}"
-          /tmp/local-shell-mcp-tmux -L local-shell-mcp-ci new-session -d -s smoke "sh -lc 'printf ready; sleep 5'"
-          sleep 1
-          /tmp/local-shell-mcp-tmux -L local-shell-mcp-ci capture-pane -p -t smoke | grep ready
+          /tmp/local-shell-mcp-tmux -L local-shell-mcp-ci new-session -d -s smoke "sh -lc 'echo ready; sleep 15'"
+          found_ready=false
+          for attempt in {1..20}; do
+            if /tmp/local-shell-mcp-tmux -L local-shell-mcp-ci capture-pane -p -t smoke 2>/dev/null | grep -q ready; then
+              found_ready=true
+              break
+            fi
+            sleep 0.5
+          done
+          if [[ "$found_ready" != true ]]; then
+            /tmp/local-shell-mcp-tmux -L local-shell-mcp-ci list-panes -a || true
+            /tmp/local-shell-mcp-tmux -L local-shell-mcp-ci capture-pane -p -t smoke || true
+            exit 1
+          fi
           /tmp/local-shell-mcp-tmux -L local-shell-mcp-ci kill-server
 
 

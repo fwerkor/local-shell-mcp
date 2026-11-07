@@ -19,6 +19,8 @@ def test_render_config_resolves_mcp_credentials_privately(tmp_path):
     MODULE.render(ROOT / "librechat.yaml", dest, {"LSM_LIBRECHAT_BRIDGE_SECRET": secret})
     text = dest.read_text()
     assert 'requiresOAuth: false' in text
+    assert 'timeout: 3810000' in text
+    assert 'sseReadTimeout: 3810000' in text
     assert 'url: "http://local-shell-mcp:8765/mcp"' in text
     assert f'Authorization: "Bearer {secret}"' in text
     assert 'searxngInstanceUrl: "${SEARXNG_INSTANCE_URL}"' in text

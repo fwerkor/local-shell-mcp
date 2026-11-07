@@ -29,13 +29,25 @@ def test_http_exception_uses_consistent_error_envelope(tmp_path, monkeypatch):
 
     response = TestClient(build_http_app()).post(
         "/tools/run_shell",
-        json={"command": "echo ok", "timeout_s": 3600},
+        json={"command": "echo ok", "timeout_s": 3601},
     )
 
     assert response.status_code == 400
     assert response.json()["ok"] is False
     assert response.json()["error"] == "http_error"
-    assert "timeout_s must be <= 120 seconds" in response.json()["message"]
+    assert "timeout_s must be <= 3600 seconds" in response.json()["message"]
+
+
+def test_http_shell_accepts_one_hour_timeout(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    get_settings.cache_clear()
+
+    response = TestClient(build_http_app()).post(
+        "/tools/run_shell", json={"command": "echo ok", "timeout_s": 3600}
+    )
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
 
 
 def test_http_write_file_accepts_base64_binary_content(tmp_path, monkeypatch):
