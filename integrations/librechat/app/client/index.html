@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en-US">
+  <head>
+    <meta charset="utf-8" />
+    <base href="/" />
+    <meta name="theme-color" content="#171717" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta
+      name="description"
+      content="local-shell-mcp — chat and remote control workspace"
+    />
+    <title>local-shell-mcp</title>
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon-180x180.png" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, interactive-widget=resizes-content"
+    />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+      }
+    </style>
+    <script>
+      let theme = null;
+      try {
+        theme = localStorage.getItem('color-theme');
+      } catch (e) {
+        /* Web Storage denied by browser policy: the shell falls back to the system theme. */
+      }
+      const loadingContainerStyle = document.createElement('style');
+      let backgroundColor;
+
+      if (theme === 'high-contrast-dark') {
+        backgroundColor = '#000000';
+      } else if (theme === 'high-contrast-light') {
+        backgroundColor = '#ffffff';
+      } else if (theme === 'dark') {
+        backgroundColor = '#0d0d0d';
+      } else if (theme === 'light') {
+        backgroundColor = '#ffffff';
+      } else {
+        /* `system`, and anything unset or unrecognised, which ThemeProvider also
+         * resolves as `system`. The OS decides the scheme and the contrast, and
+         * a contrast request moves the dark canvas to pure black, so keying off
+         * the scheme alone would flash #0d0d0d behind the black palette.
+         * The three contrast queries mirror ThemeProvider's `CONTRAST_QUERIES`:
+         * a Windows Contrast Theme reports `forced-colors: active` with
+         * `prefers-contrast: custom`, never `more`. */
+        const prefersDarkScheme = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const prefersMoreContrast = [
+          '(prefers-contrast: more)',
+          '(prefers-contrast: custom)',
+          '(forced-colors: active)',
+        ].some(function (query) {
+          return window.matchMedia(query).matches;
+        });
+        backgroundColor = prefersDarkScheme
+          ? prefersMoreContrast
+            ? '#000000'
+            : '#0d0d0d'
+          : '#ffffff';
+      }
+
+      loadingContainerStyle.innerHTML = `
+        #loading-container {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          height: 100vh;
+          background-color: ${backgroundColor};
+        }
+      `;
+      document.head.appendChild(loadingContainerStyle);
+    </script>
+    <script>
+      // Keep the PWA's stale-chunk recovery without the disabled upstream RUM SDK.
+      (function () {
+        const key = 'lsm-asset-recovery-at';
+        function recover() {
+          try {
+            if (Date.now() - Number(sessionStorage.getItem(key) || 0) < 60000) return;
+            sessionStorage.setItem(key, String(Date.now()));
+          } catch { return; }
+          const reload = () => window.location.reload();
+          if (!navigator.serviceWorker) { reload(); return; }
+          const base = new URL('./', document.baseURI || location.href).href;
+          navigator.serviceWorker.getRegistrations().then((registrations) =>
+            Promise.all(registrations.filter((registration) =>
+              registration.scope.startsWith(base)).map((registration) => registration.unregister())),
+          ).then(reload, reload);
+        }
+        window.__lcRecoverStaleAssets = recover;
+        if (navigator.serviceWorker) {
+          navigator.serviceWorker.addEventListener('message', (event) => {
+            if (event.data?.type !== 'LC_SW_PING') return;
+            (event.source || navigator.serviceWorker.controller)?.postMessage({ type: 'LC_SW_PONG' });
+          });
+        }
+        window.addEventListener('error', (event) => {
+          const el = event.target;
+          if (el?.tagName === 'SCRIPT' && el.src ||
+              el?.tagName === 'LINK' && /preload/.test(el.rel || '') && /\.js$/.test(el.href || '')) {
+            recover();
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', (event) => {
+          const message = event.reason?.message;
+          if (typeof message === 'string' && /dynamically imported module|Importing a module script failed/.test(message)) recover();
+        });
+      })();
+    </script>
+    <script defer type="module" src="/src/main.jsx"></script>
+  </head>
+  <body>
+    <div id="root">
+      <div id="loading-container"></div>
+    </div>
+  </body>
+</html>

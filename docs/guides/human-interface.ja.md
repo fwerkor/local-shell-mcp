@@ -1,7 +1,9 @@
-<!-- i18n-source-sha256: c1206f28e9661a542c4c26bae628647a355f6ed1b12ca740574add7374666d57 -->
+<!-- i18n-source-sha256: 6016eb5d8df658fb00756d5c57f193eaf92c07b958809b85e4d19d795281d398 -->
 # ヒューマンインターフェース
 
-`local-shell-mcp` は、同じ service API、workspace、persistent terminal registry、remote-worker registry、MCP audit log の上に、互換性のある2つの human interface を提供します。
+[unified web workspace](../getting-started/web-workspace.md) は、推奨されるブラウザー インターフェイスです。同じ LSM 認証とツール API を使用して、AI チャット、プロジェクト、LSM コントローラー ページを 1 つの修正された LibreChat UI に結合します。別途導入されるオプションサービスです。
+
+軽量のコントローラーは、同じ API、ワークスペース、永続ターミナル レジストリ、リモート ワーカー レジストリ、および MCP 監査ログ上に 2 つの互換性のあるフォールバック ヒューマン インターフェイスも保持します。
 
 - **Web UI** は、運用状態を素早く確認するために最適化されたネイティブブラウザーダッシュボードです。
 - **OpenTUI** は完全なターミナル指向アプリケーションで、ブラウザー内とネイティブターミナルコマンドの両方で利用できます。

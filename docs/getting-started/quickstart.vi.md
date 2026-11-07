@@ -1,12 +1,12 @@
-<!-- i18n-source-sha256: a3fdf9088031e6903b15497a3df881a8e6ed2f6f2b34dd4d0b68b0414a2ca81e -->
+<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
 # Bắt đầu nhanh
 
-Hướng dẫn này dùng Docker Compose làm runtime đầu tiên và ChatGPT làm client đầu tiên. Đây là hai lựa chọn độc lập: Docker, VS Code extension, binary, Python và stdio là các lựa chọn runtime; ChatGPT và client MCP chung là các lựa chọn client. Xem [lựa chọn runtime và mô hình deployment](../guides/deployment.md) để có sơ đồ đầy đủ.
+Hướng dẫn này khởi động Bộ điều khiển LSM và mở giao diện trình duyệt của nó. [unified web workspace](web-workspace.md) là trải nghiệm hàng ngày được đề xuất; nó là một ngăn xếp trò chuyện tùy chọn, được triển khai riêng. ChatGPT, Gemini và các máy khách MCP bên ngoài khác có thể kết nối với cùng một Bộ điều khiển. Xem [runtime choices and deployment model](../guides/deployment.md).
 
 ## Yêu cầu
 
 - Docker Engine với Compose v2.
-- Endpoint HTTPS công khai nếu ChatGPT cần kết nối từ Web.
+- Điểm cuối HTTPS công khai nếu người dùng từ xa hoặc máy khách MCP bên ngoài phải kết nối.
 - Một thư mục workspace riêng.
 - OAuth admin PIN và JWT secret dài, ngẫu nhiên.
 
@@ -65,15 +65,15 @@ http://local-shell-mcp:8765
 
 Với Caddy, Nginx, Traefik, Nginx Proxy Manager hoặc reverse proxy khác, chuyển tiếp HTTPS traffic tới `127.0.0.1:8765` hoặc địa chỉ mạng của container.
 
-## 4. Kết nối ChatGPT
+## 4. Mở không gian làm việc của trình duyệt
 
-Dùng MCP endpoint:
+Mở thông tin đăng nhập Bộ điều khiển:
 
 ```text
-https://your-public-host.example.com/mcp
+https://your-public-host.example.com/ui
 ```
 
-Làm theo [hướng dẫn connector ChatGPT](chatgpt-connector.md) để hoàn tất OAuth và phê duyệt tools.
+Đối với các trang trò chuyện, dự án và điều khiển tích hợp, hãy làm theo [unified web workspace guide](web-workspace.md). WebUI nhẹ ban đầu có sẵn khi chưa cài đặt trò chuyện.
 
 ## 5. Xác nhận an toàn quyền truy cập tools
 
@@ -129,6 +129,8 @@ curl -i http://127.0.0.1:8765/healthz
 | Chạy từ VS Code | [VS Code extension runtime](../installation/vscode-extension.md) |
 | Chạy bằng release binary | [Runtime binary độc lập](../installation/binary.md) |
 | Chạy bằng Python hoặc source checkout | [Python runtimes](../installation/python.md) |
+| Sử dụng giao diện điều khiển và trò chuyện thống nhất | [Unified web workspace](web-workspace.md) |
+| Thêm Gemini Spark làm khách hàng | [Gemini Custom Apps](gemini-spark.md) |
 | Thêm ChatGPT làm client | [ChatGPT connector](chatgpt-connector.md) |
 | Chọn tools và viết prompt tốt hơn | [Mẫu sử dụng](../guides/usage-patterns.md) |
 | Gắn máy HPC, NPU/GPU hoặc NAT | [Worker từ xa](../guides/remote-workers.md) |

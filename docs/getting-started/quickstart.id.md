@@ -1,12 +1,12 @@
-<!-- i18n-source-sha256: a3fdf9088031e6903b15497a3df881a8e6ed2f6f2b34dd4d0b68b0414a2ca81e -->
+<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
 # Mulai cepat
 
-Panduan ini memakai Docker Compose sebagai runtime pertama dan ChatGPT sebagai client pertama. Keduanya adalah pilihan terpisah: Docker, VS Code extension, binary, Python, dan stdio adalah opsi runtime; ChatGPT dan client MCP generik adalah opsi client. Lihat [pilihan runtime dan model deployment](../guides/deployment.md) untuk gambaran lengkap.
+Panduan ini memulai Pengontrol LSM dan membuka antarmuka browsernya. [unified web workspace](web-workspace.md) adalah pengalaman harian yang direkomendasikan; ini adalah tumpukan obrolan opsional yang diterapkan secara terpisah. ChatGPT, Gemini, dan klien MCP eksternal lainnya dapat terhubung ke Pengontrol yang sama. Lihat [runtime choices and deployment model](../guides/deployment.md).
 
 ## Persyaratan
 
 - Docker Engine dengan Compose v2.
-- Endpoint HTTPS publik jika ChatGPT harus terhubung dari Web.
+- Titik akhir HTTPS publik jika pengguna jarak jauh atau klien MCP eksternal harus terhubung.
 - Direktori workspace khusus.
 - OAuth admin PIN dan JWT secret acak yang panjang.
 
@@ -65,15 +65,15 @@ http://local-shell-mcp:8765
 
 Untuk Caddy, Nginx, Traefik, Nginx Proxy Manager, atau reverse proxy lain, teruskan traffic HTTPS ke `127.0.0.1:8765` atau alamat jaringan container.
 
-## 4. Hubungkan ChatGPT
+## 4. Buka ruang kerja browser
 
-Gunakan endpoint MCP:
+Buka login Pengontrol:
 
 ```text
-https://your-public-host.example.com/mcp
+https://host-publik-anda.example.com/ui
 ```
 
-Ikuti [panduan konektor ChatGPT](chatgpt-connector.md) untuk menyelesaikan OAuth dan persetujuan tools.
+Untuk obrolan, proyek, dan halaman kontrol terintegrasi, ikuti [unified web workspace guide](web-workspace.md). WebUI ringan asli tersedia saat obrolan tidak diinstal.
 
 ## 5. Konfirmasi akses tools dengan aman
 
@@ -129,6 +129,8 @@ curl -i http://127.0.0.1:8765/healthz
 | Jalankan dari VS Code | [VS Code extension runtime](../installation/vscode-extension.md) |
 | Jalankan dengan binary release | [Runtime binary mandiri](../installation/binary.md) |
 | Jalankan dengan Python atau source checkout | [Python runtimes](../installation/python.md) |
+| Gunakan antarmuka obrolan dan kontrol terpadu | [Unified web workspace](web-workspace.md) |
+| Tambahkan Gemini Spark sebagai klien | [Gemini Custom Apps](gemini-spark.md) |
 | Tambahkan ChatGPT sebagai client | [ChatGPT connector](chatgpt-connector.md) |
 | Pilih tools dan tulis prompt lebih baik | [Pola penggunaan](../guides/usage-patterns.md) |
 | Hubungkan mesin HPC, NPU/GPU, atau NAT | [Worker jarak jauh](../guides/remote-workers.md) |

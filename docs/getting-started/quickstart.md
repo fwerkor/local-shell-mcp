@@ -1,11 +1,11 @@
 # Quickstart
 
-This guide uses Docker Compose as the first runtime and ChatGPT as the first client. These are separate choices: Docker, VS Code extension, binary, Python, and stdio are runtime options; ChatGPT and generic MCP clients are client options. See [runtime choices and deployment model](../guides/deployment.md) for the full map.
+This guide starts an LSM Controller and opens its browser interface. The [unified web workspace](web-workspace.md) is the recommended daily experience; it is a separately deployed, optional chat stack. ChatGPT, Gemini and other external MCP clients can connect to the same Controller. See [runtime choices and deployment model](../guides/deployment.md).
 
 ## Requirements
 
 - Docker Engine with Compose v2.
-- A public HTTPS endpoint if ChatGPT must connect from the web.
+- A public HTTPS endpoint if remote users or external MCP clients must connect.
 - A dedicated workspace directory.
 - A long random OAuth admin PIN and JWT secret.
 
@@ -64,15 +64,15 @@ http://local-shell-mcp:8765
 
 For Caddy, Nginx, Traefik, Nginx Proxy Manager, or another reverse proxy, forward HTTPS traffic to `127.0.0.1:8765` or the container network address.
 
-## 4. Connect ChatGPT
+## 4. Open the browser workspace
 
-Use the MCP endpoint:
+Open the Controller login:
 
 ```text
-https://your-public-host.example.com/mcp
+https://your-public-host.example.com/ui
 ```
 
-Follow the [ChatGPT connector guide](chatgpt-connector.md) to finish OAuth and tool approval.
+For chat, projects and integrated control pages, follow the [unified web workspace guide](web-workspace.md). The original lightweight WebUI is available when chat is not installed.
 
 ## 5. Confirm tool access safely
 
@@ -128,6 +128,8 @@ curl -i http://127.0.0.1:8765/healthz
 | Run from VS Code | [VS Code extension runtime](../installation/vscode-extension.md) |
 | Run with a release binary | [Standalone binary runtime](../installation/binary.md) |
 | Run with Python or source checkout | [Python runtimes](../installation/python.md) |
+| Use the unified chat and control interface | [Unified web workspace](web-workspace.md) |
+| Add Gemini Spark as a client | [Gemini Custom Apps](gemini-spark.md) |
 | Add ChatGPT as a client | [ChatGPT connector](chatgpt-connector.md) |
 | Choose tools and write better prompts | [Usage patterns](../guides/usage-patterns.md) |
 | Attach an HPC, NPU/GPU, or NAT machine | [Remote workers](../guides/remote-workers.md) |

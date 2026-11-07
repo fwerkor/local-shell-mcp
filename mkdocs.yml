@@ -1,5 +1,5 @@
 site_name: local-shell-mcp
-site_description: ChatGPT-compatible MCP server for controlled local shell, filesystem, git, browser, and remote-worker access.
+site_description: Self-hosted AI web workspace and MCP control plane for shell, files, browsers and remote machines.
 site_url: https://fwerkor.github.io/local-shell-mcp/
 repo_url: https://github.com/fwerkor/local-shell-mcp
 repo_name: fwerkor/local-shell-mcp
@@ -7,6 +7,7 @@ nav:
   - Home: index.md
   - Getting started:
       - Quickstart: getting-started/quickstart.md
+      - Unified web workspace: getting-started/web-workspace.md
       - Runtime vs client model: guides/deployment.md
   - Runtime installation:
       - Choose a runtime: guides/deployment.md
@@ -16,6 +17,7 @@ nav:
       - Python / pipx / source: installation/python.md
       - Stdio mode: installation/stdio.md
   - Client connections:
+      - Gemini Spark / Custom Apps: getting-started/gemini-spark.md
       - ChatGPT connector: getting-started/chatgpt-connector.md
       - DeepSeek Harness (DSH): clients/deepseek-harness.md
       - Generic MCP clients: clients/generic-mcp.md
@@ -70,6 +72,7 @@ plugins:
             Home: 首页
             Getting started: 快速开始
             Quickstart: 快速开始
+            Unified web workspace: 统一网页工作区
             Runtime vs client model: Runtime 与 Client 模型
             Runtime installation: Runtime 安装
             Choose a runtime: 选择 Runtime
@@ -80,6 +83,7 @@ plugins:
             Stdio mode: stdio 模式
             Client connections: Client 接入
             ChatGPT connector: ChatGPT 连接器
+            Gemini Spark / Custom Apps: Gemini Spark / 自定义应用
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: 通用 MCP Client
             Network connectivity: 网络连通性
@@ -107,6 +111,7 @@ plugins:
             Home: 首頁
             Getting started: 快速開始
             Quickstart: 快速開始
+            Unified web workspace: 統一網頁工作區
             Runtime vs client model: Runtime 與 Client 模型
             Runtime installation: Runtime 安裝
             Choose a runtime: 選擇 Runtime
@@ -117,6 +122,7 @@ plugins:
             Stdio mode: stdio 模式
             Client connections: Client 連線
             ChatGPT connector: ChatGPT 連接器
+            Gemini Spark / Custom Apps: Gemini Spark / 自訂應用程式
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: 通用 MCP Client
             Network connectivity: 網路連通性
@@ -144,6 +150,7 @@ plugins:
             Home: ホーム
             Getting started: はじめに
             Quickstart: クイックスタート
+            Unified web workspace: 統合 Web ワークスペース
             Runtime vs client model: Runtime と Client のモデル
             Runtime installation: Runtime のインストール
             Choose a runtime: Runtime を選ぶ
@@ -154,6 +161,7 @@ plugins:
             Stdio mode: stdio モード
             Client connections: Client 接続
             ChatGPT connector: ChatGPT コネクタ
+            Gemini Spark / Custom Apps: Gemini Spark / カスタムアプリ
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: 汎用 MCP Client
             Network connectivity: ネットワーク接続
@@ -181,6 +189,7 @@ plugins:
             Home: 홈
             Getting started: 시작하기
             Quickstart: 빠른 시작
+            Unified web workspace: 통합 웹 작업 공간
             Runtime vs client model: Runtime 및 Client 모델
             Runtime installation: Runtime 설치
             Choose a runtime: Runtime 선택
@@ -191,6 +200,7 @@ plugins:
             Stdio mode: stdio 모드
             Client connections: Client 연결
             ChatGPT connector: ChatGPT 커넥터
+            Gemini Spark / Custom Apps: Gemini Spark / 맞춤 앱
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: 일반 MCP Client
             Network connectivity: 네트워크 연결
@@ -218,6 +228,7 @@ plugins:
             Home: Inicio
             Getting started: Primeros pasos
             Quickstart: Inicio rápido
+            Unified web workspace: Espacio web unificado
             Runtime vs client model: Modelo de Runtime y Client
             Runtime installation: Instalación del Runtime
             Choose a runtime: Elegir un Runtime
@@ -228,6 +239,7 @@ plugins:
             Stdio mode: Modo stdio
             Client connections: Conexiones de Client
             ChatGPT connector: Conector de ChatGPT
+            Gemini Spark / Custom Apps: Gemini Spark / aplicaciones personalizadas
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Clientes MCP genéricos
             Network connectivity: Conectividad de red
@@ -255,6 +267,7 @@ plugins:
             Home: Accueil
             Getting started: Premiers pas
             Quickstart: Démarrage rapide
+            Unified web workspace: Espace web unifié
             Runtime vs client model: Modèle Runtime et Client
             Runtime installation: Installation du Runtime
             Choose a runtime: Choisir un Runtime
@@ -265,6 +278,7 @@ plugins:
             Stdio mode: Mode stdio
             Client connections: Connexions Client
             ChatGPT connector: Connecteur ChatGPT
+            Gemini Spark / Custom Apps: Gemini Spark / applications personnalisées
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Clients MCP génériques
             Network connectivity: Connectivité réseau
@@ -292,6 +306,7 @@ plugins:
             Home: Start
             Getting started: Einstieg
             Quickstart: Schnellstart
+            Unified web workspace: Einheitlicher Web-Arbeitsbereich
             Runtime vs client model: Runtime- und Client-Modell
             Runtime installation: Runtime-Installation
             Choose a runtime: Runtime auswählen
@@ -302,6 +317,7 @@ plugins:
             Stdio mode: stdio-Modus
             Client connections: Client-Verbindungen
             ChatGPT connector: ChatGPT-Connector
+            Gemini Spark / Custom Apps: Gemini Spark / benutzerdefinierte Apps
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Generische MCP-Clients
             Network connectivity: Netzwerkverbindung
@@ -329,6 +345,7 @@ plugins:
             Home: Главная
             Getting started: Начало работы
             Quickstart: Быстрый старт
+            Unified web workspace: Единое веб-пространство
             Runtime vs client model: Модель Runtime и Client
             Runtime installation: Установка Runtime
             Choose a runtime: Выбор Runtime
@@ -339,6 +356,7 @@ plugins:
             Stdio mode: Режим stdio
             Client connections: Подключения Client
             ChatGPT connector: Коннектор ChatGPT
+            Gemini Spark / Custom Apps: Gemini Spark / пользовательские приложения
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Общие MCP-клиенты
             Network connectivity: Сетевая доступность
@@ -366,6 +384,7 @@ plugins:
             Home: Início
             Getting started: Primeiros passos
             Quickstart: Início rápido
+            Unified web workspace: Espaço web unificado
             Runtime vs client model: Modelo Runtime e Client
             Runtime installation: Instalação do Runtime
             Choose a runtime: Escolher um Runtime
@@ -376,6 +395,7 @@ plugins:
             Stdio mode: Modo stdio
             Client connections: Conexões Client
             ChatGPT connector: Conector ChatGPT
+            Gemini Spark / Custom Apps: Gemini Spark / apps personalizados
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Clientes MCP genéricos
             Network connectivity: Conectividade de rede
@@ -403,6 +423,7 @@ plugins:
             Home: Home
             Getting started: Per iniziare
             Quickstart: Avvio rapido
+            Unified web workspace: Area di lavoro web unificata
             Runtime vs client model: Modello Runtime e Client
             Runtime installation: Installazione del Runtime
             Choose a runtime: Scegliere un Runtime
@@ -413,6 +434,7 @@ plugins:
             Stdio mode: Modalità stdio
             Client connections: Connessioni Client
             ChatGPT connector: Connettore ChatGPT
+            Gemini Spark / Custom Apps: Gemini Spark / app personalizzate
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Client MCP generici
             Network connectivity: Connettività di rete
@@ -440,6 +462,7 @@ plugins:
             Home: الرئيسية
             Getting started: البدء
             Quickstart: البدء السريع
+            Unified web workspace: مساحة عمل ويب موحدة
             Runtime vs client model: نموذج Runtime و Client
             Runtime installation: تثبيت Runtime
             Choose a runtime: اختيار Runtime
@@ -450,6 +473,7 @@ plugins:
             Stdio mode: وضع stdio
             Client connections: اتصالات Client
             ChatGPT connector: موصل ChatGPT
+            Gemini Spark / Custom Apps: Gemini Spark / تطبيقات مخصصة
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: عملاء MCP عامون
             Network connectivity: اتصال الشبكة
@@ -477,6 +501,7 @@ plugins:
             Home: मुखपृष्ठ
             Getting started: शुरुआत
             Quickstart: त्वरित शुरुआत
+            Unified web workspace: एकीकृत वेब कार्यक्षेत्र
             Runtime vs client model: Runtime और Client मॉडल
             Runtime installation: Runtime स्थापना
             Choose a runtime: Runtime चुनें
@@ -487,6 +512,7 @@ plugins:
             Stdio mode: stdio मोड
             Client connections: Client कनेक्शन
             ChatGPT connector: ChatGPT कनेक्टर
+            Gemini Spark / Custom Apps: Gemini Spark / कस्टम ऐप्स
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: सामान्य MCP Client
             Network connectivity: नेटवर्क कनेक्टिविटी
@@ -514,6 +540,7 @@ plugins:
             Home: Beranda
             Getting started: Mulai
             Quickstart: Mulai cepat
+            Unified web workspace: Ruang kerja web terpadu
             Runtime vs client model: Model Runtime dan Client
             Runtime installation: Instalasi Runtime
             Choose a runtime: Pilih Runtime
@@ -524,6 +551,7 @@ plugins:
             Stdio mode: Mode stdio
             Client connections: Koneksi Client
             ChatGPT connector: Konektor ChatGPT
+            Gemini Spark / Custom Apps: Gemini Spark / aplikasi khusus
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Client MCP generik
             Network connectivity: Konektivitas jaringan
@@ -551,6 +579,7 @@ plugins:
             Home: Trang chủ
             Getting started: Bắt đầu
             Quickstart: Bắt đầu nhanh
+            Unified web workspace: Không gian web hợp nhất
             Runtime vs client model: Mô hình Runtime và Client
             Runtime installation: Cài đặt Runtime
             Choose a runtime: Chọn Runtime
@@ -561,6 +590,7 @@ plugins:
             Stdio mode: Chế độ stdio
             Client connections: Kết nối Client
             ChatGPT connector: Trình kết nối ChatGPT
+            Gemini Spark / Custom Apps: Gemini Spark / ứng dụng tùy chỉnh
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Client MCP chung
             Network connectivity: Kết nối mạng
@@ -588,6 +618,7 @@ plugins:
             Home: Ana sayfa
             Getting started: Başlangıç
             Quickstart: Hızlı başlangıç
+            Unified web workspace: Birleşik web çalışma alanı
             Runtime vs client model: Runtime ve Client modeli
             Runtime installation: Runtime kurulumu
             Choose a runtime: Runtime seç
@@ -598,6 +629,7 @@ plugins:
             Stdio mode: stdio modu
             Client connections: Client bağlantıları
             ChatGPT connector: ChatGPT bağlayıcısı
+            Gemini Spark / Custom Apps: Gemini Spark / özel uygulamalar
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Genel MCP Client
             Network connectivity: Ağ bağlantısı
@@ -625,6 +657,7 @@ plugins:
             Home: Strona główna
             Getting started: Pierwsze kroki
             Quickstart: Szybki start
+            Unified web workspace: Zintegrowany obszar roboczy
             Runtime vs client model: Model Runtime i Client
             Runtime installation: Instalacja Runtime
             Choose a runtime: Wybierz Runtime
@@ -635,6 +668,7 @@ plugins:
             Stdio mode: Tryb stdio
             Client connections: Połączenia Client
             ChatGPT connector: Łącznik ChatGPT
+            Gemini Spark / Custom Apps: Gemini Spark / aplikacje niestandardowe
             DeepSeek Harness (DSH): DeepSeek Harness (DSH)
             Generic MCP clients: Ogólne klienty MCP
             Network connectivity: Łączność sieciowa

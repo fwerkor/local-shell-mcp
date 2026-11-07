@@ -1,0 +1,43 @@
+import * as React from 'react';
+import { Check } from 'lucide-react';
+import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
+import { cn } from '~/utils';
+
+type BaseCheckboxProps = Omit<
+  React.ComponentPropsWithoutRef<typeof CheckboxPrimitive.Root>,
+  'aria-label' | 'aria-labelledby'
+> & {
+  asChild?: boolean;
+};
+
+export type CheckboxProps =
+  | (BaseCheckboxProps & {
+      'aria-label': string;
+      'aria-labelledby'?: never;
+    })
+  | (BaseCheckboxProps & {
+      'aria-labelledby': string;
+      'aria-label'?: never;
+    });
+
+const Checkbox: React.ForwardRefExoticComponent<
+  CheckboxProps & React.RefAttributes<HTMLButtonElement>
+> = React.forwardRef<React.ElementRef<typeof CheckboxPrimitive.Root>, CheckboxProps>(
+  ({ className = '', ...props }, ref) => (
+    <CheckboxPrimitive.Root
+      ref={ref}
+      className={cn(
+        'peer h-4 w-4 shrink-0 rounded-sm border border-border-xheavy ring-offset-surface-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-surface-inverted data-[state=checked]:text-text-inverted',
+        className,
+      )}
+      {...props}
+    >
+      <CheckboxPrimitive.Indicator className={cn('flex items-center justify-center')}>
+        <Check className="h-4 w-4" />
+      </CheckboxPrimitive.Indicator>
+    </CheckboxPrimitive.Root>
+  ),
+);
+Checkbox.displayName = CheckboxPrimitive.Root.displayName;
+
+export { Checkbox };

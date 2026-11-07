@@ -1,12 +1,12 @@
-<!-- i18n-source-sha256: a3fdf9088031e6903b15497a3df881a8e6ed2f6f2b34dd4d0b68b0414a2ca81e -->
+<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
 # クイックスタート
 
-このガイドでは最初の runtime として Docker Compose、最初の client として ChatGPT を使用します。これらは別々の選択です。Docker、VS Code extension、binary、Python、stdio は runtime の選択肢で、ChatGPT と汎用 MCP client は client の選択肢です。全体像は [runtime の選択とデプロイモデル](../guides/deployment.md) を参照してください。
+このガイドでは、LSM コントローラーを起動し、そのブラウザー インターフェイスを開きます。 [unified web workspace](web-workspace.md) は、毎日の推奨エクスペリエンスです。これは、個別にデプロイされるオプションのチャット スタックです。 ChatGPT、Gemini、およびその他の外部 MCP クライアントは、同じコントローラーに接続できます。 [runtime choices and deployment model](../guides/deployment.md)を参照してください。
 
 ## 要件
 
 - Compose v2 を備えた Docker Engine。
-- ChatGPT が Web から接続する場合は公開 HTTPS endpoint。
+- リモート ユーザーまたは外部 MCP クライアントが接続する必要がある場合のパブリック HTTPS エンドポイント。
 - 専用の workspace directory。
 - 十分に長いランダムな OAuth admin PIN と JWT secret。
 
@@ -65,15 +65,15 @@ http://local-shell-mcp:8765
 
 Caddy、Nginx、Traefik、Nginx Proxy Manager などの reverse proxy では、HTTPS traffic を `127.0.0.1:8765` または container network address に転送します。
 
-## 4. ChatGPT を接続
+## 4. ブラウザのワークスペースを開きます
 
-次の MCP endpoint を使います：
+コントローラーのログインを開きます。
 
 ```text
-https://your-public-host.example.com/mcp
+https://your-public-host.example.com/ui
 ```
 
-[ChatGPT connector ガイド](chatgpt-connector.md) に従って OAuth と tool approval を完了します。
+チャット、プロジェクト、統合コントロール ページについては、[unified web workspace guide](web-workspace.md) に従ってください。チャットがインストールされていない場合は、独自の軽量 WebUI を使用できます。
 
 ## 5. 安全に tool access を確認
 
@@ -129,6 +129,8 @@ curl -i http://127.0.0.1:8765/healthz
 | VS Code から実行する | [VS Code extension runtime](../installation/vscode-extension.md) |
 | release binary で実行する | [Standalone binary runtime](../installation/binary.md) |
 | Python または source checkout で実行する | [Python runtimes](../installation/python.md) |
+| 統合されたチャットと制御インターフェイスを使用する | [Unified web workspace](web-workspace.md) |
+| Gemini Spark をクライアントとして追加する | [Gemini Custom Apps](gemini-spark.md) |
 | ChatGPT を client として追加する | [ChatGPT connector](chatgpt-connector.md) |
 | tool を選び、より良い prompt を書く | [Usage patterns](../guides/usage-patterns.md) |
 | HPC、NPU/GPU、NAT machine を接続する | [Remote workers](../guides/remote-workers.md) |

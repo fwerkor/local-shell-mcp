@@ -1,30 +1,29 @@
-<!-- i18n-source-sha256: 8b4e2e48e58e65721bf5ebf9f7b1d8aedf34d62d5a7948d36d6b9102ee1f6cc3 -->
+<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
 # خيارات Runtime ونموذج النشر
 
-لدى `local-shell-mcp` قراران مستقلان:
+يحتوي `local-shell-mcp` على قرارين متكاملين:
 
 1. **Runtime**: كيفية تشغيل عملية الخادم وما الـ workspace الذي تتحكم فيه.
-2. **Client connection**: كيفية وصول ChatGPT أو أي MCP client آخر إلى ذلك الخادم.
+2. **الواجهة**: استخدم [unified web workspace](../getting-started/web-workspace.md) الاختياري، أو قم بتوصيل عميل MCP خارجي مثل Gemini أو ChatGPT.
 
-لا تعتبر ChatGPT طريقة نشر. ChatGPT هو client. Docker وVS Code extension وrelease binaries وتثبيتات Python وstdio mode هي خيارات runtime.
+الواجهة اليومية الموصى بها هي مساحة عمل الويب المستضافة ذاتيًا (الدردشة والمشاريع وصفحات التحكم في LSM). يتم نشره بشكل منفصل عن وحدة التحكم. يُعد Docker، وملحق VS Code، وثنائيات الإصدار، وعمليات تثبيت Python، ووضع stdio طرقًا لتشغيل وحدة التحكم؛ تظل تطبيقات الدردشة الخارجية عملاء اختياريين.
 
 ```text
 Runtime layer                      Exposure layer                 Client layer
 -------------------------------    ---------------------------    ----------------------
-Docker Compose                     local HTTP only                ChatGPT custom MCP
+يقوم Docker بإنشاء مساحة عمل ويب موحدة فقط لـ HTTP المحلي
 VS Code extension                  HTTPS reverse proxy/tunnel     Generic MCP client
 Standalone binary                  stdio process pipe             VS Code extension UI
 pipx / source checkout             remote-worker outbound join    REST-style diagnostics
 ```
 
-إعداد عام شائع:
+الإعداد الشائع للاستضافة الذاتية هو:
 
 ```text
-ChatGPT
-  -> https://mcp.example.com/mcp
-  -> reverse proxy or tunnel
-  -> local-shell-mcp runtime
-  -> controlled workspace
+المتصفح -> https://chat.example.com (مساحة عمل الويب الموحدة)
+        -> وحدة التحكم المحلية Shell-mcp المصادق عليها
+        -> مساحة العمل الخاضعة للرقابة والعمال الخارجيين
+عميل خارجي اختياري -> https://mcp.example.com/mcp
 ```
 
 يمكن أن يكون إعداد MCP client محلي أبسط:
@@ -37,10 +36,10 @@ Local MCP client
 
 ## مصفوفة اختيار Runtime
 
-| Runtime | الأنسب لـ | حد العزل | مصدر toolchain | وصول ChatGPT العام | الصفحة |
+| وقت التشغيل | الأفضل ل | حد العزلة | مصدر سلسلة الأدوات | الوصول الخارجي لـ MCP | الصفحة |
 |---|---|---|---|---|---|
-| Docker Compose | معظم أعباء coding-agent وworkspaces القابلة لإعادة الإنتاج | Container | Project image يتضمن toolchain افتراضيًا واسعًا | أضف HTTPS proxy أو tunnel | [Docker Compose](../installation/docker.md) |
-| Docker Compose + tunnel sidecar | نشر عام في stack واحدة مع Cloudflare Tunnel | Container | Project image | مدمج في profile Compose `tunnel` | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| عامل الميناء يؤلف | معظم أعباء عمل وكيل الترميز ومساحات العمل القابلة للتكرار | حاوية | صورة وحدة التحكم الهزيلة؛ تثبيت سلاسل الأدوات الخاصة بالمهمة بشكل منفصل | أضف وكيل أو نفق HTTPS | [Docker Compose](../installation/docker.md) |
+| Docker Compose + عربة جانبية للنفق | نشر وحدة التحكم العامة باستخدام Cloudflare Tunnel | حاوية | صورة المشروع | مدمج في ملف تعريف Compose `tunnel` | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | بدء/إيقاف server من editor workspace | عادة process على host | أدوات host مع executable مضبوط | أضف HTTPS tunnel/proxy خارجيًا لـ ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Hosts أو VM بدون Docker | Host or VM | أدوات host مع executable مضبوط | أضف HTTPS proxy أو tunnel | [Standalone binary](../installation/binary.md) |
 | `pipx` / source install | استخدام Python-native وdebugging وdevelopment | Host virtualenv or VM | Python package مع أدوات host | أضف HTTPS proxy أو tunnel | [Python install](../installation/python.md) |
@@ -48,14 +47,16 @@ Local MCP client
 
 ## مصفوفة اتصال Client
 
-| مسار Client | يتطلب HTTPS عامًا | يستخدم `/mcp` | يتطلب OAuth | Runtime نموذجي |
+| واجهة | يتطلب HTTPS العام | يستخدم `/mcp` | يتطلب OAuth | وقت التشغيل النموذجي |
 |---|---:|---:|---:|---|
+| مساحة عمل الويب LSM الموحدة | نعم للوصول عن بعد؛ الوكيل المحلي ممكن أيضا | داخليا | تسجيل دخول LSM | وحدة تحكم بالإضافة إلى مكدس ويب منفصل |
+| الجوزاء سبارك / تطبيقات مخصصة | نعم | نعم | نعم للاستخدام العام | أي وحدة تحكم HTTP |
 | ChatGPT custom MCP connector | نعم | نعم | نعم للاستخدام العام | Docker, VS Code extension, binary, or Python |
 | Generic local MCP client over stdio | لا | لا | لا | `local-shell-mcp --mode stdio` |
 | Generic HTTP MCP client | غالبًا لا على localhost؛ نعم عبر الشبكات | نعم | موصى به خارج localhost | Any HTTP runtime |
 | VS Code extension helper flow | فقط إذا كان ChatGPT سيتصل | نعم عند نسخ ChatGPT URL | موصى به لـ ChatGPT | VS Code-launched runtime |
 
-راجع [ChatGPT connector](../getting-started/chatgpt-connector.md), [generic MCP clients](../clients/generic-mcp.md), [network connectivity](../clients/connectivity.md).
+راجع [unified web workspace](../getting-started/web-workspace.md)، و[Gemini Spark](../getting-started/gemini-spark.md)، و[ChatGPT connector](../getting-started/chatgpt-connector.md)، و[generic MCP clients](../clients/generic-mcp.md)، و[network connectivity](../clients/connectivity.md).
 
 ## ما الذي يتحكم فيه كل Runtime
 
@@ -75,15 +76,15 @@ Local MCP client
 |---|---|---|---|
 | أين تعمل الأوامر؟ | داخل container | عادة في host workspace | في process environment على host أو VM |
 | Default workspace؟ | Mounted `/workspace` | مجلد VS Code الحالي أو path مضبوط | `LOCAL_SHELL_MCP_WORKSPACE_ROOT` |
-| هل compilers/browsers مثبّتة؟ | نعم، على نطاق واسع | فقط ما هو مثبت على host | فقط ما هو مثبت على host |
+| هل المترجمات والمتصفحات مثبتة مسبقًا؟ | لا؛ تثبيت ما تحتاجه المهمة | فقط إذا تم تثبيته على المضيف | فقط إذا تم تثبيته على المضيف |
 | هل reset سهل؟ | أعد إنشاء container وworkspace volume | يعتمد على workspace | يعتمد على host/VM |
 | مناسب لتثبيت packages عشوائية؟ | نعم إذا كان disposable | أكثر خطورة على host | أكثر خطورة خارج VM |
 
 ## الاختيار الموصى به
 
-استخدم **Docker Compose** أولًا ما لم يكن لديك سبب يمنع ذلك. فهو يوفر أوضح safety boundary وأكمل toolchain افتراضي.
+استخدم **Docker Compose** أولاً ما لم يكن لديك سبب لعدم القيام بذلك. إنه يوفر حدود أمان واضحة دون الحاجة إلى سلسلة أدوات تطوير كبيرة مثبتة مسبقًا.
 
-استخدم **VS Code extension** عندما يبدأ workflow من editor وتريد launcher محليًا. وهو يظل runtime. لا يجعل server قابلًا للوصول من ChatGPT بمفرده؛ أضف tunnel أو reverse proxy لـ ChatGPT web/app.
+استخدم **ملحق VS Code** عندما يبدأ سير العمل من محرر وتريد مشغلًا محليًا. لا يزال وقت التشغيل. يحتاج عملاء الويب عن بعد إلى وكيل HTTPS أو نفق يمكن الوصول إليه.
 
 استخدم **standalone binary** عندما لا يتوفر Docker لكن VM أو container host أو dedicated user account يوفر boundary بالفعل.
 
@@ -93,7 +94,7 @@ Local MCP client
 
 ## قاعدة Public endpoint
 
-لعملاء HTTP MCP مثل ChatGPT يكون MCP endpoint:
+بالنسبة لعملاء HTTP MCP الخارجيين مثل Gemini وChatGPT، فإن نقطة نهاية MCP هي:
 
 ```text
 https://your-public-host.example.com/mcp
@@ -117,6 +118,8 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 
 ## صفحات Client
 
+- [Unified web workspace](../getting-started/web-workspace.md)
+- [Gemini Spark / Custom Apps](../getting-started/gemini-spark.md)
 - [ChatGPT connector](../getting-started/chatgpt-connector.md)
 - [Generic MCP clients](../clients/generic-mcp.md)
 - [Public HTTPS exposure](../clients/connectivity.md)
