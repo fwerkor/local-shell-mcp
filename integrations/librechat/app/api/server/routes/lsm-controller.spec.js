@@ -3,6 +3,8 @@ const { isAllowedPath } = require('./lsm-controller');
 describe('LSM controller proxy allowlist', () => {
   test.each([
     ['dashboard', 'GET'],
+    ['nested-mcp', 'GET'],
+    ['nested-mcp', 'POST'],
     ['files', 'GET'],
     ['files/preview', 'GET'],
     ['files/download-ticket', 'POST'],
@@ -32,6 +34,7 @@ describe('LSM controller proxy allowlist', () => {
     ['files/%2e%2e/auth', 'GET'],
     ['files/../../mcp', 'GET'],
     ['mcp', 'POST'],
+    ['nested-mcp', 'PUT'],
     ['terminals/kill', 'GET'],
     ['remotes', 'DELETE'],
   ])('rejects %s %s', (path, method) => {

@@ -536,8 +536,20 @@ class AuthMiddleware:
             user_id = request.headers.get("x-lsm-chat-user-id", "")
             conversation_id = request.headers.get("x-lsm-conversation-id", "")
             try:
-                permitted = may_chat_call_lsm(user_id, conversation_id)
-            except (ValueError, PermissionError):
+                messages = json.loads(body or b"null")
+                if not isinstance(messages, list):
+                    messages = [messages]
+                tool_calls = [
+                    message for message in messages
+                    if isinstance(message, dict) and message.get("method") == "tools/call"
+                ]
+                permitted = bool(tool_calls) and all(
+                    isinstance(call.get("params"), dict)
+                    and isinstance(call["params"].get("name"), str)
+                    and may_chat_call_lsm(user_id, conversation_id, call["params"]["name"])
+                    for call in tool_calls
+                )
+            except (ValueError, PermissionError, TypeError):
                 permitted = False
             if not permitted:
                 response = JSONResponse(

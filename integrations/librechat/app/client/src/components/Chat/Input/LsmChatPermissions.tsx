@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { request } from 'librechat-data-provider';
 
-type Preferences = { web: boolean; lsm: boolean; memory: boolean };
-const DEFAULTS: Preferences = { web: true, lsm: true, memory: true };
+type Preferences = { web: boolean; lsm: boolean; mcp: boolean; memory: boolean };
+const DEFAULTS: Preferences = { web: true, lsm: true, mcp: true, memory: true };
 
 export default function LsmChatPermissions({ conversationId }: { conversationId?: string | null }) {
   const [prefs, setPrefs] = useState<Preferences>(DEFAULTS);
@@ -47,9 +47,9 @@ export default function LsmChatPermissions({ conversationId }: { conversationId?
       <summary className="cursor-pointer rounded-lg border border-border-medium px-2 py-1.5">Permissions</summary>
       <div className="absolute bottom-full right-0 z-50 mb-2 min-w-52 rounded-lg border border-border-medium bg-surface-primary p-3 shadow-lg">
         <strong className="mb-2 block">This conversation</strong>
-        {(['web', 'lsm', 'memory'] as const).map((field) => (
+        {(['web', 'lsm', 'mcp', 'memory'] as const).map((field) => (
           <label className="my-2 flex cursor-pointer items-center justify-between gap-4" key={field}>
-            <span>{field === 'web' ? 'Web search' : field === 'lsm' ? 'LSM tools' : 'Cross-chat memory'}</span>
+            <span>{field === 'web' ? 'Web search' : field === 'lsm' ? 'LSM tools' : field === 'mcp' ? 'External MCP' : 'Cross-chat memory'}</span>
             <input
               type="checkbox"
               checked={prefs[field]}
@@ -58,7 +58,7 @@ export default function LsmChatPermissions({ conversationId }: { conversationId?
             />
           </label>
         ))}
-        <p className="text-text-secondary">LSM tools require web access. Memory off prevents this chat from loading long-term memories.</p>
+        <p className="text-text-secondary">External MCP is independent of LSM native tools. It exposes search, inspect and call only; server management stays in the MCP sidebar.</p>
         {error && <p role="alert" className="mt-2 text-red-500">{error}</p>}
       </div>
     </details>

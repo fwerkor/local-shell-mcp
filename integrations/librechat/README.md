@@ -33,7 +33,8 @@ standalone Python/binary or minimal Docker Controller image.
 | Chat, messages, projects, archives, settings | LibreChat MongoDB (server-side) |
 | Chat and project search | Meilisearch |
 | Web search | LibreChat with SearXNG |
-| LSM tool execution | Nested LSM MCP gateway |
+| LSM native and external MCP tool execution | LSM Controller and its nested MCP gateway |
+| LibreChat MCP management sidebar | LSM Controller nested MCP registry (not LibreChat's MCP DB) |
 | Controller metrics, file/terminal/GUI/remote/session operations | Existing LSM Controller APIs |
 | Chat attachment storage | Controller local workspace |
 
@@ -77,9 +78,13 @@ hooks as the original WebUI. Requests for shell execution, remote access or
 file modification still require their original scopes. The terminal and GUI
 components do not bypass these authorization checks.
 
-Per-conversation web/LSM/memory toggles are stored in LibreChat's MongoDB.
-LSM MCP calls and LSM per-chat tool denials are enforced again at the
-Controller boundary. A chat attachment is an authenticated, streaming,
+Per-conversation **web / LSM native tools / external MCP / memory** toggles
+are stored in LibreChat's MongoDB. LSM native and external MCP permissions
+are independent: with LSM disabled but external MCP enabled, the model only
+receives `mcp_tool_search`, `mcp_tool_inspect` and `mcp_tool_call` through
+LSM's MCP gateway. It never receives `mcp_manage` in that mode. The Controller
+enforces this allowlist again for every MCP `tools/call`, including JSON-RPC
+batches, so saved Agents and wildcard tool selections cannot bypass it. A chat attachment is an authenticated, streaming,
 size-limited upload (maximum 32 MiB) to:
 
 ```text
@@ -89,9 +94,15 @@ size-limited upload (maximum 32 MiB) to:
 Its absolute path is inserted into the composer for inspection through
 the LSM tools. Uploading does not grant new read or tool permissions.
 
-LibreChat's original file-search, code runner, skill marketplace and
-duplicate external MCP editor are disabled. The supported MCP server is LSM;
-web search and LSM tools are enabled by default. Ask User, delegated agents
+LibreChat's original file-search, code runner and skill marketplace are
+disabled. Its MCP **sidebar** now manages LSM's *nested* MCP registry through
+the authenticated Controller `/api/ui/nested-mcp` endpoint. It can register,
+enable/disable, refresh or remove stdio/HTTP servers and set/unset their
+private environment variables and headers. No additional MCP servers are
+persisted in LibreChat's own MCP database. Controller-scope validation and
+secret redaction remain active. The only LibreChat-side MCP connection is
+the LSM parent, so nested tools stay behind `mcp_tool_*`. Web search and
+LSM/external MCP tools are enabled by default; Ask User, delegated agents
 and handoff are retained.
 
 ## Configuration

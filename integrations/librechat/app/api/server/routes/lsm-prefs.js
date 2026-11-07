@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const { requireJwtAuth } = require('~/server/middleware');
 
 const router = express.Router();
-const DEFAULTS = Object.freeze({ web: true, lsm: true, memory: true });
+const DEFAULTS = Object.freeze({ web: true, lsm: true, mcp: true, memory: true });
 const collection = () => mongoose.connection.collection('lsm_chat_preferences');
 
 const conversationIdIsValid = (id) =>
@@ -34,7 +34,7 @@ const getPreferences = async (userId, conversationId) => {
   return stored ? normalized(stored) : { ...DEFAULTS };
 };
 
-const syncToolPolicy = async (userId, conversationId, enabled) => {
+const syncToolPolicy = async (userId, conversationId, permissions) => {
   const controllerUrl = process.env.LSM_CONTROLLER_INTERNAL_URL;
   const secret = process.env.LSM_LIBRECHAT_BRIDGE_SECRET;
   if (!controllerUrl || !secret || Buffer.byteLength(secret, 'utf8') < 32) {
@@ -46,7 +46,7 @@ const syncToolPolicy = async (userId, conversationId, enabled) => {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${secret}`,
     },
-    body: JSON.stringify({ user_id: userId, conversation_id: conversationId, lsm: enabled }),
+    body: JSON.stringify({ user_id: userId, conversation_id: conversationId, lsm: permissions.lsm, mcp: permissions.mcp }),
     signal: AbortSignal.timeout(10000),
   });
   if (!response.ok) throw new Error('LSM authorization update failed');
@@ -74,14 +74,14 @@ router.put('/:conversationId', async (req, res) => {
   try {
     // Fail closed while reconciling: disable first, write Mongo, then enable
     // only after the durable chat preference has committed.
-    await syncToolPolicy(req.user.id, conversationId, false);
+    await syncToolPolicy(req.user.id, conversationId, { lsm: false, mcp: false });
     await collection().createIndex({ userId: 1, conversationId: 1 }, { unique: true });
     await collection().updateOne(
       { userId: req.user.id, conversationId },
       { $set: { ...prefs }, $setOnInsert: { userId: req.user.id, conversationId } },
       { upsert: true },
     );
-    if (prefs.lsm) await syncToolPolicy(req.user.id, conversationId, true);
+    if (prefs.lsm || prefs.mcp) await syncToolPolicy(req.user.id, conversationId, prefs);
     return res.json(prefs);
   } catch {
     return res.status(503).json({ error: 'Chat permission update failed; LSM tools remain disabled until retry' });
@@ -107,7 +107,7 @@ const loadForAgentRequest = async (req, res, next) => {
     if (req.body?.ephemeralAgent) {
       const agent = req.body.ephemeralAgent;
       const selected = Array.isArray(agent.mcp) ? agent.mcp : [];
-      agent.mcp = req.lsmChatPrefs.lsm ? ['LSM'] : selected.filter((name) => name !== 'LSM');
+      agent.mcp = (req.lsmChatPrefs.lsm || req.lsmChatPrefs.mcp) ? ['LSM'] : selected.filter((name) => name !== 'LSM');
       agent.web_search = req.lsmChatPrefs.web;
       agent.memory = req.lsmChatPrefs.memory && agent.memory === true;
       agent.execute_code = false;

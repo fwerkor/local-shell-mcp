@@ -170,25 +170,38 @@ def _chat_policy_key(librechat_id: str, conversation_id: str) -> str:
     return f"librechat-bridge/policies/{librechat_id}/{conversation_id}.json"
 
 
-def set_chat_tool_policy(librechat_id: str, conversation_id: str, lsm_enabled: bool) -> None:
+EXTERNAL_MCP_CALL_TOOLS = frozenset({
+    "mcp_tool_search", "mcp_tool_inspect", "mcp_tool_call",
+})
+
+
+def set_chat_tool_policy(
+    librechat_id: str, conversation_id: str, lsm_enabled: bool,
+    mcp_enabled: bool = True,
+) -> None:
     from .state_store import get_state_store
 
-    if type(lsm_enabled) is not bool:
-        raise ValueError("Invalid LSM tool permission")
+    if type(lsm_enabled) is not bool or type(mcp_enabled) is not bool:
+        raise ValueError("Invalid chat tool permission")
     principal_for_chat_user(librechat_id)
     key = _chat_policy_key(librechat_id, conversation_id)
     store = get_state_store()
     with store.lock(key):
         store.write_bytes(
-            key, json.dumps({"lsm": lsm_enabled}, separators=(",", ":")).encode("utf-8")
+            key, json.dumps({"lsm": lsm_enabled, "mcp": mcp_enabled}, separators=(",", ":")).encode("utf-8")
         )
 
 
-def may_chat_call_lsm(librechat_id: str, conversation_id: str) -> bool:
+def may_chat_call_lsm(
+    librechat_id: str, conversation_id: str, tool_name: str | None = None,
+) -> bool:
     from .state_store import get_state_store
 
     principal_for_chat_user(librechat_id)
     if conversation_id == "new":
         return True
     value = get_state_store().read_bytes(_chat_policy_key(librechat_id, conversation_id))
-    return value is None or json.loads(value).get("lsm") is True
+    policy = json.loads(value) if value is not None else {}
+    if tool_name in EXTERNAL_MCP_CALL_TOOLS:
+        return policy.get("mcp", True) is True
+    return policy.get("lsm", True) is True

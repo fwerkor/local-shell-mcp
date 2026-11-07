@@ -5,7 +5,7 @@ const { Readable } = require('node:stream');
 const { requireJwtAuth } = require('~/server/middleware');
 
 const router = express.Router();
-const SAFE_PATH = /^(?:bootstrap|dashboard|machines|files(?:\/(?:preview|content|download-ticket|download\/[a-zA-Z0-9_-]+|upload|(?:mkdir|touch|rename|copy|move|delete|write)))?|gui\/(?:windows|frame|action)|librechat\/upload|terminals(?:\/(?:read|start|send|resize|kill))?|logical-sessions(?:\/(?:detail|start|finish|cancel|delete))?|audit(?:\/detail)?|remotes(?:\/(?:rename|reset|revoke))?)$/;
+const SAFE_PATH = /^(?:nested-mcp|bootstrap|dashboard|machines|files(?:\/(?:preview|content|download-ticket|download\/[a-zA-Z0-9_-]+|upload|(?:mkdir|touch|rename|copy|move|delete|write)))?|gui\/(?:windows|frame|action)|librechat\/upload|terminals(?:\/(?:read|start|send|resize|kill))?|logical-sessions(?:\/(?:detail|start|finish|cancel|delete))?|audit(?:\/detail)?|remotes(?:\/(?:rename|reset|revoke))?)$/;
 const MAX_BODY = 32 * 1024 * 1024;
 
 const isAllowedPath = (value, method) => {
@@ -13,7 +13,7 @@ const isAllowedPath = (value, method) => {
       !SAFE_PATH.test(value) || !['GET', 'POST', 'HEAD'].includes(method)) return false;
   if (method === 'HEAD') return /^files\/download\//.test(value);
   if (method === 'POST') {
-    return /^(?:files\/(?:download-ticket|upload|mkdir|touch|rename|copy|move|delete|write)|librechat\/upload|gui\/action|terminals\/(?:start|send|resize|kill)|logical-sessions\/(?:start|finish|cancel|delete)|remotes(?:\/(?:rename|reset|revoke))?)$/.test(value);
+    return /^(?:nested-mcp|files\/(?:download-ticket|upload|mkdir|touch|rename|copy|move|delete|write)|librechat\/upload|gui\/action|terminals\/(?:start|send|resize|kill)|logical-sessions\/(?:start|finish|cancel|delete)|remotes(?:\/(?:rename|reset|revoke))?)$/.test(value);
   }
   return !/^(?:files\/(?:download-ticket|upload|mkdir|touch|rename|copy|move|delete|write)|librechat\/upload|gui\/action|terminals\/(?:start|send|resize|kill)|logical-sessions\/(?:start|finish|cancel|delete)|remotes\/(?:rename|reset|revoke))$/.test(value);
 };

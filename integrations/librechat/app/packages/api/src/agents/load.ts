@@ -51,7 +51,7 @@ export interface LoadAgentDeps {
 
 export interface LoadAgentParams {
   req: {
-    lsmChatPrefs?: { web: boolean; lsm: boolean; memory: boolean };
+    lsmChatPrefs?: { web: boolean; lsm: boolean; mcp?: boolean; memory: boolean };
     user?: { id?: string; role?: string };
     config?: AppConfig;
     body?: {
@@ -95,7 +95,11 @@ export async function loadEphemeralAgent(
       mcpServers.add(mcpServer);
     }
   }
-  if (req.lsmChatPrefs?.lsm === false) mcpServers.delete('LSM');
+  if (req.lsmChatPrefs?.lsm !== false || req.lsmChatPrefs?.mcp !== false) {
+    mcpServers.add('LSM');
+  } else {
+    mcpServers.delete('LSM');
+  }
   /** Publish the servers this request will actually use back onto the body. The
    *  instruction path reads `req.body.ephemeralAgent.mcp` directly and prefers
    *  it over the agent's tools, so it would otherwise both inject a hidden
@@ -139,6 +143,15 @@ export async function loadEphemeralAgent(
         overlayConfig && requiresEphemeralUserConnection(overlayConfig)
           ? null
           : await deps.getMCPServerTools(userId, mcpServer, overlayConfig);
+      if (mcpServer === 'LSM' && req.lsmChatPrefs?.lsm === false) {
+        if (req.lsmChatPrefs?.mcp !== false) {
+          const allowed = ['mcp_tool_search', 'mcp_tool_inspect', 'mcp_tool_call']
+            .map(name => `${name}${mcp_delimiter}LSM`);
+          tools.push(...allowed.filter(name => !serverTools || Object.hasOwn(serverTools, name)));
+        }
+        addedServers.add(mcpServer);
+        continue;
+      }
       if (!serverTools) {
         tools.push(`${mcp_all}${mcp_delimiter}${mcpServer}`);
         addedServers.add(mcpServer);

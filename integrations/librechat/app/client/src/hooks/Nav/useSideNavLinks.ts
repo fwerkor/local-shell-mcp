@@ -22,11 +22,10 @@ import type { TInterfaceConfig, TEndpointsConfig } from 'librechat-data-provider
 import type { NavLink } from '~/common';
 import {
   useAgentCapabilities,
-  useMCPServerManager,
   useGetAgentsConfig,
   useHasAccess,
 } from '~/hooks';
-import MCPBuilderPanel from '~/components/SidePanel/MCPBuilder/MCPBuilderPanel';
+import LsmNestedMcpPanel from '~/components/SidePanel/MCPBuilder/LsmNestedMcpPanel';
 import AgentPanelSwitch from '~/components/SidePanel/Agents/AgentPanelSwitch';
 import BookmarkPanel from '~/components/SidePanel/Bookmarks/BookmarkPanel';
 import PanelSwitch from '~/components/SidePanel/Builder/PanelSwitch';
@@ -82,19 +81,10 @@ export default function useSideNavLinks({
     permissionType: PermissionTypes.AGENTS,
     permission: Permissions.CREATE,
   });
-  const hasAccessToUseMCPSettings = useHasAccess({
-    permissionType: PermissionTypes.MCP_SERVERS,
-    permission: Permissions.USE,
-  });
-  const hasAccessToCreateMCP = useHasAccess({
-    permissionType: PermissionTypes.MCP_SERVERS,
-    permission: Permissions.CREATE,
-  });
   const hasAccessToSchedules = useHasAccess({
     permissionType: PermissionTypes.SCHEDULES,
     permission: Permissions.USE,
   });
-  const { availableMCPServers } = useMCPServerManager();
 
   const { agentsConfig } = useGetAgentsConfig({ endpointsConfig });
   const { skillsEnabled } = useAgentCapabilities(agentsConfig?.capabilities);
@@ -219,18 +209,13 @@ export default function useSideNavLinks({
       });
     }
 
-    if (
-      (hasAccessToUseMCPSettings && availableMCPServers && availableMCPServers.length > 0) ||
-      hasAccessToCreateMCP
-    ) {
-      links.push({
-        title: 'com_nav_setting_mcp',
-        label: '',
-        icon: MCPIcon,
-        id: 'mcp-builder',
-        Component: MCPBuilderPanel,
-      });
-    }
+    links.push({
+      title: 'com_nav_setting_mcp',
+      label: '',
+      icon: MCPIcon,
+      id: 'mcp-builder',
+      Component: LsmNestedMcpPanel,
+    });
 
     if (includeHidePanel && hidePanel) {
       links.push({
@@ -259,9 +244,6 @@ export default function useSideNavLinks({
     interfaceConfig.parameters,
     endpointType,
     hasAccessToBookmarks,
-    availableMCPServers,
-    hasAccessToUseMCPSettings,
-    hasAccessToCreateMCP,
     includeHidePanel,
     hidePanel,
   ]);

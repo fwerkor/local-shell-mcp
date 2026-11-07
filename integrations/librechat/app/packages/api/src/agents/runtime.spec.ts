@@ -41,7 +41,7 @@ describe('LSM per-conversation saved Agent policies', () => {
     'file_search',
   ];
   it('filters saved-Agent capabilities even if they were enabled in an earlier chat', () => {
-    expect(filterLsmChatTools(candidates, { web: false, lsm: false, memory: false })).toEqual([
+    expect(filterLsmChatTools(candidates, { web: false, lsm: false, mcp: false, memory: false })).toEqual([
       'ask_user_question',
     ]);
   });
@@ -52,12 +52,25 @@ describe('LSM per-conversation saved Agent policies', () => {
     ]);
   });
 
+  it('exposes only the nested MCP gateway when LSM native access is off', () => {
+    expect(filterLsmChatTools(candidates, { web: true, lsm: false, mcp: true, memory: false })).toEqual([
+      'web_search', 'mcp_tool_search_mcp_LSM', 'mcp_tool_inspect_mcp_LSM',
+      'mcp_tool_call_mcp_LSM', 'ask_user_question',
+    ]);
+  });
+
+  it('disables nested MCP independently of LSM native tools', () => {
+    expect(filterLsmChatTools(candidates, { web: true, lsm: true, mcp: false, memory: false })).toEqual([
+      'web_search', 'mcp_all_mcp_LSM', 'run_shell_mcp_LSM', 'ask_user_question',
+    ]);
+  });
+
   it('does not modify standalone LibreChat deployments', () => {
     expect(filterLsmChatTools(candidates, undefined)).toBe(candidates);
   });
 
   it('propagates per-conversation permissions into the tool initializer', () => {
-    const prefs = { web: false, lsm: false, memory: false };
+    const prefs = { web: false, lsm: false, mcp: false, memory: false };
     const runtime = createAgentExecutionContext({ requestBody: {}, lsmChatPrefs: prefs });
     expect(runtime.lsmChatPrefs).toBe(prefs);
   });

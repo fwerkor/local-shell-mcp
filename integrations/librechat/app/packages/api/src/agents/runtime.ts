@@ -9,7 +9,7 @@ import type { RequestBody, ServerRequest } from '~/types';
  * may derive it from HTTP, while future execution hosts can rehydrate it from
  * an authenticated principal and deployment configuration.
  */
-export type LsmChatPreferences = { web: boolean; lsm: boolean; memory: boolean };
+export type LsmChatPreferences = { web: boolean; lsm: boolean; mcp?: boolean; memory: boolean };
 
 /** Limit saved and ephemeral agents to the server-authorized conversation tools. */
 export function filterLsmChatTools(
@@ -18,15 +18,29 @@ export function filterLsmChatTools(
 ): string[] | undefined {
   if (!permissions || !tools) return tools;
   const { web, lsm, memory } = permissions;
-  return tools.filter((name) => {
+  const mcp = permissions.mcp !== false;
+  const external = ['mcp_tool_search', 'mcp_tool_inspect', 'mcp_tool_call'];
+  const suffix = `${Constants.mcp_delimiter}LSM`;
+  const selected = tools.filter((name) => {
     if (name === Tools.execute_code || name === Tools.file_search) return false;
     if (!web && name === Tools.web_search) return false;
     if (!memory && name === Tools.memory) return false;
     if (name.includes(Constants.mcp_delimiter)) {
-      return lsm && name.endsWith(`${Constants.mcp_delimiter}LSM`);
+      if (!name.endsWith(suffix)) return false;
+      if (external.some(gateway => name === `${gateway}${suffix}`)) return mcp;
+      return lsm;
     }
     return true;
   });
+  // Saved Agents may select all LSM tools via the wildcard. Expand the
+  // gateway to exactly three named tools when native LSM access is disabled.
+  if (!lsm && mcp && tools.some(name => name.endsWith(suffix))) {
+    for (const gateway of external) {
+      const name = `${gateway}${suffix}`;
+      if (!selected.includes(name)) selected.push(name);
+    }
+  }
+  return selected;
 }
 
 export interface AgentExecutionContext {

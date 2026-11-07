@@ -3210,6 +3210,49 @@ async def ui_root_redirect(request: Request) -> RedirectResponse:  # noqa: ARG00
     return RedirectResponse(f"./{ui_path}/", status_code=307)
 
 
+async def api_nested_mcp(request: Request) -> Response:
+    """Manage the Controller's nested MCP registry from the LibreChat UI.
+
+    All state lives in LSM; no LibreChat MCP server records are created.
+    The UI may manage servers independently of an Agent's LSM tool toggle.
+    """
+    from .dynamic_mcp import DynamicMCPManager
+
+    try:
+        if request.method == "GET":
+            _require_ui_scopes(request, "shell:read")
+            action = "list"
+            parameters: dict[str, Any] = {}
+        else:
+            _require_ui_scopes(request, "shell:read", "shell:execute")
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                raise ValueError("Expected an MCP action object")
+            allowed = {
+                "action", "name", "transport", "command", "args", "cwd", "url",
+                "env", "headers", "enabled", "overwrite", "refresh", "key", "value",
+            }
+            if set(payload) - allowed:
+                raise ValueError("Unsupported MCP management field")
+            action = payload.get("action")
+            if not isinstance(action, str) or action not in {
+                "list", "register", "get", "enable", "disable", "remove",
+                "refresh", "env_set", "env_unset", "header_set", "header_unset",
+            }:
+                raise ValueError("Unsupported nested MCP action")
+            parameters = {key: value for key, value in payload.items() if key != "action"}
+        settings = get_settings()
+        manager = DynamicMCPManager(settings.state_dir, max_timeout_s=settings.max_timeout_s)
+        result = await manager.manage(action=action, **parameters)
+        if request.method == "POST":
+            from .audit import audit
+
+            audit("nested_mcp_manage", action=action, name=parameters.get("name"))
+        return _json_ok(result)
+    except Exception as exc:
+        return _json_error(exc)
+
+
 async def api_librechat_policy(request: Request) -> Response:
     """Mirror per-conversation LSM tool authorization into the controller's own state."""
     from .librechat_integration import is_bridge_service, set_chat_tool_policy
@@ -3224,6 +3267,7 @@ async def api_librechat_policy(request: Request) -> Response:
             str(payload.get("user_id") or ""),
             str(payload.get("conversation_id") or ""),
             payload.get("lsm"),
+            payload.get("mcp", True),
         )
         return _json_ok({"updated": True})
     except Exception as exc:
@@ -3741,6 +3785,7 @@ def ui_routes() -> list[Any]:
         WebSocketRoute(ui_path + "/ws/shell", ui_shell_websocket),
         WebSocketRoute(ui_path + "/ws/desktop", ui_desktop_websocket),
         Route(UI_API_PREFIX + "/librechat/upload", api_librechat_upload, methods=["POST"]),
+        Route(UI_API_PREFIX + "/nested-mcp", api_nested_mcp, methods=["GET", "POST"]),
         Route(UI_API_PREFIX + "/librechat/policy", api_librechat_policy, methods=["POST"]),
         Route(UI_API_PREFIX + "/librechat/identity", api_librechat_identity, methods=["POST"]),
         Route(UI_API_PREFIX + "/librechat/session", api_librechat_session, methods=["POST"]),
