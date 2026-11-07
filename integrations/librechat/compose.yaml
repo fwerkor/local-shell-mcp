@@ -9,7 +9,7 @@ services:
     image: lsm-librechat:0.8.8
     restart: unless-stopped
     environment:
-      APP_TITLE: WebUI
+      APP_TITLE: local-shell-mcp
       LSM_SINGLE_USER: 'true'
       HOST: 0.0.0.0
       PORT: "3080"

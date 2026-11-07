@@ -127,7 +127,7 @@ function AccountSettings({ collapsed = false }: { collapsed?: boolean }) {
             className="mt-2 grow overflow-hidden text-ellipsis whitespace-nowrap text-left text-text-primary"
             style={{ marginTop: '0', marginLeft: '0' }}
           >
-            Local Shell MCP
+            local-shell-mcp
           </div>
         )}
       </Menu.MenuButton>
@@ -140,7 +140,7 @@ function AccountSettings({ collapsed = false }: { collapsed?: boolean }) {
         }}
       >
         <div className="text-token-text-secondary ml-3 mr-2 py-2 text-sm" role="note">
-          Local Shell MCP · Single-user workspace
+          local-shell-mcp · Single-user workspace
         </div>
         <DropdownMenuSeparator />
         {startupConfig?.balance?.enabled === true && balanceQuery.data != null && (

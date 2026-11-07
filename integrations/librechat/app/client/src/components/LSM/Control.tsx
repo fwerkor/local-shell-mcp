@@ -26,7 +26,7 @@ export function ControlSidebar() {
     <div className="flex h-full flex-col gap-1 overflow-y-auto px-2 py-4">
       <div className="mb-2 flex items-center gap-2 px-2 text-sm font-semibold text-text-primary">
         <img src="/assets/logo.svg" alt="" className="size-7 rounded-lg" />
-        Local Shell MCP
+        local-shell-mcp
       </div>
       <p className="px-2 pb-2 text-xs font-medium uppercase tracking-wider text-text-secondary">Control plane</p>
       {SECTIONS.map(({ id, title, icon: Icon }) => (

@@ -155,7 +155,7 @@ function ExpandedPanel({
 
   return (
     <div className="flex h-full flex-shrink-0 flex-col gap-2 border-r border-border-light bg-surface-primary-alt px-2 py-2">
-      <Link to="/control/overview" title="Local Shell MCP" aria-label="Controller home"
+      <Link to="/control/overview" title="local-shell-mcp" aria-label="Controller home"
         className="flex h-9 w-9 items-center justify-center rounded-lg hover:bg-surface-hover">
         <img src="/assets/logo.svg" alt="" className="size-7 rounded-lg" />
       </Link>

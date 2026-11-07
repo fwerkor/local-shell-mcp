@@ -5,7 +5,7 @@ export default function Login() {
   return (
     <div className="space-y-4 text-center">
       <p className="text-sm text-text-secondary">
-        Access to this workspace is controlled by Local Shell MCP.
+        Access to this workspace is controlled by local-shell-mcp.
       </p>
       <a
         href={url}

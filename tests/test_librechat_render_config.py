@@ -56,11 +56,18 @@ def test_render_config_rejects_missing_secret_and_modified_template(tmp_path):
     assert not dest.exists()
 
 
-def test_embedded_webui_uses_product_name_not_vendor_name():
+def test_embedded_webui_uses_product_brand_not_oauth_client_name():
     root = Path(__file__).resolve().parents[1] / "integrations" / "librechat"
     compose = (root / "compose.yaml").read_text()
     config = (root / "app" / "api" / "server" / "routes" / "config.js").read_text()
     html = (root / "app" / "client" / "index.html").read_text()
-    assert "APP_TITLE: WebUI" in compose
-    assert "appTitle: process.env.APP_TITLE || 'WebUI'" in config
-    assert "<title>WebUI</title>" in html
+    assert "APP_TITLE: local-shell-mcp" in compose
+    assert "appTitle: process.env.APP_TITLE || 'local-shell-mcp'" in config
+    assert "<title>local-shell-mcp</title>" in html
+    client = root / "app" / "client" / "src"
+    title = (client / "utils" / "documentTitle.ts").read_text()
+    startup = (client / "routes" / "Layouts" / "Startup.tsx").read_text()
+    assert "DEFAULT_APP_TITLE = 'local-shell-mcp'" in title
+    assert "startupConfig?.appTitle || 'local-shell-mcp'" in startup
+    web = (root.parent.parent / "ui" / "src" / "web.ts").read_text()
+    assert 'client_name: "WebUI"' in web
