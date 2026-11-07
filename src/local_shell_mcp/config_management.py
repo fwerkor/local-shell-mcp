@@ -12,8 +12,10 @@ import yaml
 
 from .settings import (
     _WEAK_OAUTH_SECRET_VALUES,
+    OAUTH_JWT_SECRET_FILE_NAME,
     SENSITIVE_SETTING_KEYS,
     Settings,
+    _read_oauth_secret,
     _without_environment_overrides,
     controller_config_path,
     get_settings,
@@ -172,10 +174,14 @@ def _validate_candidate(document: dict[str, Any], changed: set[str]) -> Settings
                     or explicit_secret in {"dev-change-me", "change-me-64-hex-random-secret"}):
                 raise ValueError("stateless OAuth requires an explicit strong oauth_jwt_secret")
         elif candidate.auth_mode == "oauth" and candidate.oauth_jwt_secret in _WEAK_OAUTH_SECRET_VALUES:
-            # Stateful startup generates and persists a strong secret. Simulate
-            # that validation without writing state or reusing a weak secret
-            # from a currently unauthenticated process.
-            candidate = candidate.model_copy(update={"oauth_jwt_secret": secrets.token_urlsafe(48)})
+            # Stateful startup uses a persisted generated secret when present.
+            # For first startup, validate against a synthetic strong secret
+            # without creating persistent state during a snapshot or save.
+            secret_file = candidate.state_dir / OAUTH_JWT_SECRET_FILE_NAME
+            secret = _read_oauth_secret(secret_file)
+            if secret is None and secret_file.exists():
+                raise ValueError("Existing OAuth secret file is invalid")
+            candidate = candidate.model_copy(update={"oauth_jwt_secret": secret or secrets.token_urlsafe(48)})
         validate_public_oauth_configuration(candidate)
     except Exception as exc:
         if isinstance(exc, ValueError) and str(exc).startswith("stateless OAuth requires"):

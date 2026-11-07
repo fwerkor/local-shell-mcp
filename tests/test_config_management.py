@@ -298,3 +298,16 @@ def test_default_config_path_expands_environment_variables(configured, monkeypat
     assert controller_config_path() == configured / "workspace" / ".local-shell-mcp" / "config.yaml"
     monkeypatch.setenv("LOCAL_SHELL_MCP_CONFIG", "$CONFIG_TEST_BASE/custom.yaml")
     assert controller_config_path() == configured / "custom.yaml"
+
+
+def test_generated_oauth_secret_is_not_marked_pending(configured, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "oauth")
+    get_settings.cache_clear()
+    running = get_settings()
+    assert (running.state_dir / "oauth-jwt-secret").is_file()
+    for _ in range(2):
+        snapshot = config_snapshot()
+        field = next(field for field in snapshot["fields"] if field["name"] == "oauth_jwt_secret")
+        assert field["value"] is None
+        assert not field["pending"]
+        assert not any(field["pending"] for field in snapshot["fields"])
