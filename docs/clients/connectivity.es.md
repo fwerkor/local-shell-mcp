@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 3986da6ff877609189b0d88d363aff1f5f45445f0cfe5ffa608a31929078542c -->
+<!-- i18n-source-sha256: 4eb43e1a065d72171aad5493848eb2f8c57361b110237c8816928e28f227a3d8 -->
 # Conectividad de red
 
 Los MCP client HTTP que estén fuera de la máquina necesitan un HTTPS origin accesible. Esta página trata del enrutamiento de red, no de qué runtime elegir.
@@ -19,13 +19,18 @@ No incluya `/mcp` en esa base URL.
 
 ## Opciones de conectividad
 
+**Recomendado:** Para el acceso público, usa un servidor público o reenvía el tráfico a través de uno con un proxy inverso HTTPS.
+
+**No recomendado:** Las subidas del cliente por Cloudflare Tunnel pueden ser muy lentas, lo que dificulta el uso de las funciones de carga y transferencia de archivos. Úsalo solo si no es viable desplegar o reenviar mediante un servidor público.
+
+
 | Opción | Cuándo usarla |
 |---|---|
-| Compose tunnel sidecar | Docker Compose con el profile `tunnel` integrado |
-| Tunnel externo | Cualquier runtime que deba ser accesible desde fuera de la red local |
 | Caddy | TLS automático sencillo |
 | Nginx o Nginx Proxy Manager | Infraestructura Nginx existente |
 | Traefik | Enrutamiento container-native existente |
+| Reenvío mediante servidor público | Para el acceso público, usa un servidor público o reenvía el tráfico a través de uno con un proxy inverso HTTPS. |
+| Cloudflare Tunnel (no recomendado) | Reenviar mediante servidor público; Cloudflare Tunnel solo como último recurso |
 
 ## Rutas
 
@@ -64,9 +69,9 @@ curl -i https://your-public-host.example.com/healthz
 
 | Runtime | Patrón de red |
 |---|---|
-| Docker Compose en un servidor | Reverse proxy existente o profile tunnel de Compose |
-| Docker Compose en una máquina doméstica | Outbound tunnel |
-| VS Code extension en un portátil | Tunnel temporal para la sesión |
+| Docker Compose en un servidor | Proxy inverso HTTPS |
+| Docker Compose en una máquina doméstica | Reenviar mediante servidor público; Cloudflare Tunnel solo como último recurso |
+| VS Code extension en un portátil | Reenvío mediante servidor público |
 | Binary en una VM | Reverse proxy en la VM o en el borde de red |
 | Servidor de desarrollo Python/source | Normalmente solo localhost |
 | Stdio mode | Sin ruta HTTP; usar un MCP client local |

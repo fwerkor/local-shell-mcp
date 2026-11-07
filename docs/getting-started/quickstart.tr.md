@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
+<!-- i18n-source-sha256: a9820f08198cf8e823f59550928c07346f9669f2dbec46d3b8cd523c34034e01 -->
 # Hızlı başlangıç
 
 Bu kılavuz bir LSM Denetleyicisini başlatır ve tarayıcı arayüzünü açar. [unified web workspace](web-workspace.md) önerilen günlük deneyimdir; ayrı olarak konuşlandırılmış, isteğe bağlı bir sohbet yığınıdır. ChatGPT, Gemini ve diğer harici MCP istemcileri aynı Denetleyiciye bağlanabilir. Bkz. [runtime choices and deployment model](../guides/deployment.md).
@@ -29,7 +29,6 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 LOCAL_SHELL_MCP_AUTH_MODE=oauth
 LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me-long-random-pin
 LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
-CLOUDFLARE_TUNNEL_TOKEN=
 ```
 
 ## 2. Sunucuyu başlatma
@@ -50,6 +49,10 @@ curl -i http://127.0.0.1:8765/healthz
 Sağlıklı yanıt HTTP `200` döndürür.
 
 ## 3. HTTPS yayınlama
+
+**Önerilir:** Genel erişim için herkese açık bir sunucuya dağıtın veya trafiği HTTPS ters vekiliyle herkese açık bir sunucu üzerinden iletin.
+
+**Önerilmez:** Cloudflare Tunnel üzerinden istemci tarafındaki yükleme hızı çok düşük olabilir; bu da dosya yükleme ve aktarımı işlevlerini kullanmayı zorlaştırır. Yalnızca genel sunucu veya yönlendirme mümkün değilse kullanın. Configure `CLOUDFLARE_TUNNEL_TOKEN` in `.env` only when choosing the optional tunnel sidecar.
 
 Cloudflare Tunnel sidecar için:
 

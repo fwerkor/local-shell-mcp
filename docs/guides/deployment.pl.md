@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
+<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
 # Wybór runtime i model deploymentu
 
 `local-shell-mcp` ma dwie uzupełniające się decyzje:
@@ -34,12 +34,14 @@ Local MCP client
   -> controlled workspace
 ```
 
+**Zalecane:** Do dostępu publicznego użyj serwera z publicznym adresem lub przekierowania przez serwer publiczny z odwrotnym proxy HTTPS. **Niezalecane:** Przesyłanie danych od klienta przez Cloudflare Tunnel może być bardzo wolne, co utrudnia wysyłanie i transfer plików. Używaj tylko wtedy, gdy serwer publiczny lub przekierowanie nie są dostępne. ([Public HTTPS exposure](../clients/connectivity.md))
+
 ## Macierz wyboru runtime
 
 | Czas wykonania | Najlepsze dla | Granica izolacji | Źródło łańcucha narzędzi | Zewnętrzny dostęp do MCP | Strona |
 |---|---|---|---|---|---|
 | Tworzenie Dockera | Większość obciążeń agenta kodowania i powtarzalnych obszarów roboczych | Pojemnik | Obraz kontrolera Lean; zainstaluj osobno łańcuchy narzędzi specyficzne dla zadania | Dodaj serwer proxy lub tunel HTTPS | [Docker Compose](../installation/docker.md) |
-| Docker Compose + wózek boczny z tunelem | Wdrożenie kontrolera publicznego za pomocą tunelu Cloudflare | Pojemnik | Obraz projektu | Wbudowany w profil Compose `tunnel` | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| Docker Compose + wózek boczny z tunelem | Niezalecane: Przekierowanie przez serwer publiczny; Cloudflare Tunnel tylko awaryjnie | Pojemnik | Obraz projektu | Przekierowanie przez serwer publiczny; Cloudflare Tunnel tylko awaryjnie | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Start/stop server z editor workspace | Zwykle host process | Host tools plus configured executable | Dodaj zewnętrzny HTTPS tunnel/proxy dla ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Host lub VM bez Docker | Host or VM | Host tools plus configured executable | Dodaj HTTPS proxy lub tunnel | [Standalone binary](../installation/binary.md) |
 | `pipx` / source install | Użycie Python-native, debugging, development | Host virtualenv or VM | Python package plus host tools | Dodaj HTTPS proxy lub tunnel | [Python install](../installation/python.md) |

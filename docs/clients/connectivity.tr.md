@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 3986da6ff877609189b0d88d363aff1f5f45445f0cfe5ffa608a31929078542c -->
+<!-- i18n-source-sha256: 4eb43e1a065d72171aad5493848eb2f8c57361b110237c8816928e28f227a3d8 -->
 # Ağ bağlantısı
 
 Makine dışındaki HTTP MCP client’ların erişilebilir bir HTTPS origin’e ihtiyacı vardır. Bu sayfa ağ yönlendirmesini açıklar; hangi runtime’ın seçileceğini değil.
@@ -19,13 +19,18 @@ Bu base URL’ye `/mcp` eklemeyin.
 
 ## Bağlantı seçenekleri
 
+**Önerilir:** Genel erişim için herkese açık bir sunucuya dağıtın veya trafiği HTTPS ters vekiliyle herkese açık bir sunucu üzerinden iletin.
+
+**Önerilmez:** Cloudflare Tunnel üzerinden istemci tarafındaki yükleme hızı çok düşük olabilir; bu da dosya yükleme ve aktarımı işlevlerini kullanmayı zorlaştırır. Yalnızca genel sunucu veya yönlendirme mümkün değilse kullanın.
+
+
 | Seçenek | Ne zaman kullanılır |
 |---|---|
-| Compose tunnel sidecar | Yerleşik `tunnel` profile ile Docker Compose |
-| Harici tunnel | Yerel ağ dışından erişilmesi gereken herhangi bir runtime |
 | Caddy | Basit otomatik TLS |
 | Nginx veya Nginx Proxy Manager | Mevcut Nginx altyapısı |
 | Traefik | Mevcut container-native yönlendirme |
+| Genel sunucu üzerinden yönlendirme | Genel erişim için herkese açık bir sunucuya dağıtın veya trafiği HTTPS ters vekiliyle herkese açık bir sunucu üzerinden iletin. |
+| Cloudflare Tunnel (önerilmez) | Genel sunucu üzerinden yönlendirin; Cloudflare Tunnel son çare olsun |
 
 ## Yollar
 
@@ -64,9 +69,9 @@ curl -i https://your-public-host.example.com/healthz
 
 | Runtime | Ağ deseni |
 |---|---|
-| Sunucuda Docker Compose | Mevcut reverse proxy veya Compose tunnel profile |
-| Ev makinesinde Docker Compose | Outbound tunnel |
-| Dizüstünde VS Code extension | Oturum için geçici tunnel |
+| Sunucuda Docker Compose | HTTPS ters vekili |
+| Ev makinesinde Docker Compose | Genel sunucu üzerinden yönlendirin; Cloudflare Tunnel son çare olsun |
+| Dizüstünde VS Code extension | Genel sunucu üzerinden yönlendirme |
 | VM’de binary | VM veya ağ sınırında reverse proxy |
 | Python/source dev server | Genellikle yalnızca localhost |
 | Stdio mode | HTTP ağı yok; yerel MCP client kullanın |

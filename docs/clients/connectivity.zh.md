@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 3986da6ff877609189b0d88d363aff1f5f45445f0cfe5ffa608a31929078542c -->
+<!-- i18n-source-sha256: 4eb43e1a065d72171aad5493848eb2f8c57361b110237c8816928e28f227a3d8 -->
 # 网络连通性
 
 机器外部的 HTTP MCP 客户端需要可访问的 HTTPS origin。本页讨论网络路由，不讨论选择哪种运行时。
@@ -19,13 +19,18 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 
 ## 连通性选项
 
+**推荐：** 有条件时应直接部署到具有公网地址的服务器，或通过公网服务器配合 HTTPS 反向代理转发流量。
+
+**不推荐：** Cloudflare Tunnel 客户端的上传速度可能非常慢，导致文件上传与传输功能难以正常使用。仅在无法公网部署或通过公网服务器转发时，才将其作为备选方案。
+
+
 | 选项 | 适用场景 |
 |---|---|
-| Compose tunnel sidecar | 使用内置 `tunnel` profile 的 Docker Compose |
-| 外部隧道 | 任意需要从局域网外访问的运行时 |
 | Caddy | 简单自动 TLS |
 | Nginx 或 Nginx Proxy Manager | 已有 Nginx 基础设施 |
 | Traefik | 已有容器原生路由 |
+| 通过公网服务器转发 | 有条件时应直接部署到具有公网地址的服务器，或通过公网服务器配合 HTTPS 反向代理转发流量。 |
+| Cloudflare Tunnel（不推荐） | 通过公网服务器转发；Cloudflare Tunnel 仅作备选 |
 
 ## 路径
 
@@ -64,9 +69,9 @@ curl -i https://your-public-host.example.com/healthz
 
 | 运行时 | 网络模式 |
 |---|---|
-| 服务器上的 Docker Compose | 现有反向代理或 Compose tunnel profile |
-| 家用机器上的 Docker Compose | 出站隧道 |
-| 笔记本上的 VS Code 扩展 | 当前会话临时隧道 |
+| 服务器上的 Docker Compose | HTTPS 反向代理 |
+| 家用机器上的 Docker Compose | 通过公网服务器转发；Cloudflare Tunnel 仅作备选 |
+| 笔记本上的 VS Code 扩展 | 通过公网服务器转发 |
 | VM 上的二进制 | VM 或网络边缘上的反向代理 |
 | Python / 源码开发服务 | 通常只用 localhost |
 | stdio 模式 | 无 HTTP 网络路径；使用本地 MCP 客户端 |

@@ -33,12 +33,14 @@ Local MCP client
   -> controlled workspace
 ```
 
+**For public HTTP access, prefer a direct deployment on a public server or forwarding through one** with an HTTPS reverse proxy. **Cloudflare Tunnel is not recommended** for file-intensive workflows: slow client-side uploads can make file uploads and transfers impractical. Keep it as a fallback when a public server or forwarding path is unavailable. See [network connectivity](../clients/connectivity.md).
+
 ## Runtime choice matrix
 
 | Runtime | Best for | Isolation boundary | Toolchain source | External MCP access | Page |
 |---|---|---|---|---|---|
 | Docker Compose | Most coding-agent workloads and repeatable workspaces | Container | Lean Controller image; install task-specific toolchains separately | Add HTTPS proxy or tunnel | [Docker Compose](../installation/docker.md) |
-| Docker Compose + tunnel sidecar | Public Controller deployment with Cloudflare Tunnel | Container | Project image | Built into Compose `tunnel` profile | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| Docker Compose + tunnel sidecar | Fallback only; not recommended for file transfers | Container | Project image | Optional Compose `tunnel` profile; potentially slow uploads | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Starting/stopping a server from an editor workspace | Usually host process | Host tools, plus configured executable | Add external HTTPS tunnel/proxy for ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Hosts or VMs where Docker is unavailable | Host or VM | Host tools | Add HTTPS proxy/tunnel | [Standalone binary](../installation/binary.md) |
 | `pipx` / source install | Python-native use, debugging, development | Host virtualenv or VM | Python package plus host tools | Add HTTPS proxy/tunnel | [Python install](../installation/python.md) |

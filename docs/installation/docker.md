@@ -81,6 +81,8 @@ https://your-public-host.example.com/mcp
 
 ## Cloudflare Tunnel sidecar
 
+**Not recommended for file transfers:** Cloudflare Tunnel can have very slow client-side upload throughput, which can make LSM's file upload and transfer features impractical. **Prefer deploying directly on a public server or forwarding through one with an HTTPS reverse proxy**, as described in [network connectivity](../clients/connectivity.md). Use the sidecar only as a fallback.
+
 The Compose file includes an optional `cloudflared` service behind the `tunnel` profile. This runs the tunnel next to the MCP server.
 
 Configure `.env`:
@@ -109,6 +111,8 @@ This is Cloudflare Tunnel, not Cloudflare Access. `local-shell-mcp` still handle
 The Compose service trusts forwarded headers because its published port is restricted to localhost; this preserves the public caller address for OAuth PIN rate limiting. If you expose the container port directly, replace `LOCAL_SHELL_MCP_FORWARDED_ALLOW_IPS=*` with the explicit addresses of your trusted reverse proxies.
 
 ## Reverse proxy without tunnel sidecar
+
+**Recommended for public access.** Deploy the Controller on a public server, or use a public server to forward traffic to a private Controller. Terminate HTTPS at a trusted reverse proxy and preserve request bodies and streaming responses for file transfers.
 
 If you already run Caddy, Nginx, Traefik, or Nginx Proxy Manager, keep the normal Compose service and forward HTTPS to:
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
+<!-- i18n-source-sha256: a9820f08198cf8e823f59550928c07346f9669f2dbec46d3b8cd523c34034e01 -->
 # Bắt đầu nhanh
 
 Hướng dẫn này khởi động Bộ điều khiển LSM và mở giao diện trình duyệt của nó. [unified web workspace](web-workspace.md) là trải nghiệm hàng ngày được đề xuất; nó là một ngăn xếp trò chuyện tùy chọn, được triển khai riêng. ChatGPT, Gemini và các máy khách MCP bên ngoài khác có thể kết nối với cùng một Bộ điều khiển. Xem [runtime choices and deployment model](../guides/deployment.md).
@@ -29,7 +29,6 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 LOCAL_SHELL_MCP_AUTH_MODE=oauth
 LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me-long-random-pin
 LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
-CLOUDFLARE_TUNNEL_TOKEN=
 ```
 
 ## 2. Khởi động server
@@ -50,6 +49,10 @@ curl -i http://127.0.0.1:8765/healthz
 Phản hồi khỏe mạnh trả về HTTP `200`.
 
 ## 3. Công khai HTTPS
+
+**Khuyến nghị:** Để truy cập công khai, hãy triển khai trên máy chủ công khai hoặc chuyển tiếp lưu lượng qua máy chủ công khai bằng reverse proxy HTTPS.
+
+**Không khuyến nghị:** Tốc độ tải lên phía máy khách qua Cloudflare Tunnel có thể rất chậm, khiến việc tải lên và truyền tệp khó sử dụng. Chỉ dùng khi không thể triển khai hoặc chuyển tiếp qua máy chủ công khai. Configure `CLOUDFLARE_TUNNEL_TOKEN` in `.env` only when choosing the optional tunnel sidecar.
 
 Với Cloudflare Tunnel sidecar:
 

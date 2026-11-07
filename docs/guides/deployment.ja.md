@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
+<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
 # Runtime の選択とデプロイモデル
 
 `local-shell-mcp` には 2 つの相補的な決定があります。
@@ -34,12 +34,14 @@ Local MCP client
   -> controlled workspace
 ```
 
+**推奨:** 公開アクセスには、公開サーバーへの直接デプロイ、または公開サーバー経由の転送と HTTPS リバースプロキシを使用してください。 **非推奨:** Cloudflare Tunnel はクライアント側のアップロード速度が非常に遅くなる場合があり、ファイルのアップロードや転送が実用的でなくなります。公開サーバーや転送経路を用意できない場合のみ使用してください。 ([Public HTTPS exposure](../clients/connectivity.md))
+
 ## Runtime 選択マトリクス
 
 | ランタイム | こんな方に最適 | 分離境界 | ツールチェーンのソース | 外部 MCP アクセス | ページ |
 |---|---|---|---|---|---|
 | Docker Compose | ほとんどのコーディング エージェントのワークロードと反復可能なワークスペース | コンテナ | 無駄のないコントローラーのイメージ。タスク固有のツールチェーンを個別にインストールする | HTTPS プロキシまたはトンネルを追加する | [Docker Compose](../installation/docker.md) |
-| Docker Compose + トンネル サイドカー | Cloudflareトンネルを使用したパブリックコントローラーのデプロイメント | コンテナ | プロジェクトイメージ | Compose `tunnel` プロファイルに組み込まれています | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| Docker Compose + トンネル サイドカー | 非推奨: 公開サーバー経由で転送し、Cloudflare Tunnel は最終手段にする | コンテナ | プロジェクトイメージ | 公開サーバー経由で転送し、Cloudflare Tunnel は最終手段にする | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | editor workspace から server を start/stop | 通常 host process | host tools と設定済み executable | ChatGPT 用に外部 HTTPS tunnel/proxy を追加 | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Docker が使えない host/VM | Host or VM | host tools と設定済み executable | HTTPS proxy または tunnel を追加 | [Standalone binary](../installation/binary.md) |
 | `pipx` / source install | Python-native 利用、debug、development | Host virtualenv or VM | Python package と host tools | HTTPS proxy または tunnel を追加 | [Python install](../installation/python.md) |

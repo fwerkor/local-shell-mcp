@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 3986da6ff877609189b0d88d363aff1f5f45445f0cfe5ffa608a31929078542c -->
+<!-- i18n-source-sha256: 4eb43e1a065d72171aad5493848eb2f8c57361b110237c8816928e28f227a3d8 -->
 # Łączność sieciowa
 
 HTTP MCP client znajdujące się poza maszyną potrzebują osiągalnego HTTPS origin. Ta strona dotyczy routingu sieciowego, a nie wyboru runtime.
@@ -19,13 +19,18 @@ Nie dodawaj `/mcp` do tego base URL.
 
 ## Opcje łączności
 
+**Zalecane:** Do dostępu publicznego użyj serwera z publicznym adresem lub przekierowania przez serwer publiczny z odwrotnym proxy HTTPS.
+
+**Niezalecane:** Przesyłanie danych od klienta przez Cloudflare Tunnel może być bardzo wolne, co utrudnia wysyłanie i transfer plików. Używaj tylko wtedy, gdy serwer publiczny lub przekierowanie nie są dostępne.
+
+
 | Opcja | Kiedy używać |
 |---|---|
-| Compose tunnel sidecar | Docker Compose z wbudowanym profile `tunnel` |
-| Zewnętrzny tunnel | Dowolny runtime, który musi być osiągalny spoza sieci lokalnej |
 | Caddy | Prosty automatyczny TLS |
 | Nginx lub Nginx Proxy Manager | Istniejąca infrastruktura Nginx |
 | Traefik | Istniejący routing container-native |
+| Przekierowanie przez serwer publiczny | Do dostępu publicznego użyj serwera z publicznym adresem lub przekierowania przez serwer publiczny z odwrotnym proxy HTTPS. |
+| Cloudflare Tunnel (niezalecane) | Przekierowanie przez serwer publiczny; Cloudflare Tunnel tylko awaryjnie |
 
 ## Ścieżki
 
@@ -64,9 +69,9 @@ curl -i https://your-public-host.example.com/healthz
 
 | Runtime | Schemat sieci |
 |---|---|
-| Docker Compose na serwerze | Istniejący reverse proxy lub Compose tunnel profile |
-| Docker Compose na komputerze domowym | Outbound tunnel |
-| VS Code extension na laptopie | Tymczasowy tunnel na czas sesji |
+| Docker Compose na serwerze | Odwrotne proxy HTTPS |
+| Docker Compose na komputerze domowym | Przekierowanie przez serwer publiczny; Cloudflare Tunnel tylko awaryjnie |
+| VS Code extension na laptopie | Przekierowanie przez serwer publiczny |
 | Binary na VM | Reverse proxy na VM lub brzegu sieci |
 | Python/source dev server | Zwykle tylko localhost |
 | Stdio mode | Brak ścieżki HTTP; użyj lokalnego MCP client |

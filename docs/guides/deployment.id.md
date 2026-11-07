@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
+<!-- i18n-source-sha256: d699e8855ee01b72db68087e8a5d8f3957c702641e7e6956f268604b8b1f9d2b -->
 # Pilihan runtime dan model deployment
 
 `local-shell-mcp` memiliki dua keputusan yang saling melengkapi:
@@ -34,12 +34,14 @@ Local MCP client
   -> controlled workspace
 ```
 
+**Direkomendasikan:** Untuk akses publik, gunakan server publik atau teruskan lalu lintas melalui server publik dengan reverse proxy HTTPS. **Tidak direkomendasikan:** Kecepatan unggah sisi klien Cloudflare Tunnel bisa sangat lambat, sehingga fitur unggah dan transfer berkas sulit digunakan. Gunakan hanya jika server publik atau penerusan tidak memungkinkan. ([Public HTTPS exposure](../clients/connectivity.md))
+
 ## Matriks pilihan runtime
 
 | Waktu proses | Terbaik untuk | Batas isolasi | Sumber rantai alat | Akses MCP eksternal | Halaman |
 |---|---|---|---|---|---|
 | Penulisan Docker | Sebagian besar beban kerja agen pengkodean dan ruang kerja yang dapat diulang | Wadah | Gambar Pengontrol Ramping; instal rantai alat khusus tugas secara terpisah | Tambahkan proksi atau terowongan HTTPS | [Docker Compose](../installation/docker.md) |
-| Docker Compose + sespan terowongan | Penerapan Pengontrol Publik dengan Cloudflare Tunnel | Wadah | Gambar proyek | Dibangun ke dalam profil Compose `tunnel` | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| Docker Compose + sespan terowongan | Tidak direkomendasikan: Teruskan lewat server publik; Cloudflare Tunnel hanya pilihan terakhir | Wadah | Gambar proyek | Teruskan lewat server publik; Cloudflare Tunnel hanya pilihan terakhir | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Start/stop server dari editor workspace | Biasanya host process | Host tools plus executable yang dikonfigurasi | Tambahkan HTTPS tunnel/proxy eksternal untuk ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
 | Standalone binary | Host atau VM tanpa Docker | Host or VM | Host tools plus executable yang dikonfigurasi | Tambahkan HTTPS proxy atau tunnel | [Standalone binary](../installation/binary.md) |
 | `pipx` / source install | Penggunaan Python-native, debugging, development | Host virtualenv or VM | Python package plus host tools | Tambahkan HTTPS proxy atau tunnel | [Python install](../installation/python.md) |
