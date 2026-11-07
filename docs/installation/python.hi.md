@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: c8c0d8ebdbb123b9ac4af1fd288f30e8ca69037ca086486cb8027e2592f4b75a -->
+<!-- i18n-source-sha256: 1d80cfbe14747fb0691e91065f582d1e47eb36921d8b27da1648dcd26114a2e5 -->
 # Python, pipx और source runtimes
 
-**सीधे स्रोत कोड से इंस्टॉल करना अनुशंसित है।** Python वर्चुअल एनवायरनमेंट और सीमित workspace का उपयोग करें; Docker Compose विकल्प है।
+सामान्य डिप्लॉयमेंट के लिए [एकल executable](binary.md) अनुशंसित है। Python और स्रोत संस्करण विकास व अनुकूलन के लिए हैं।
 
 यह page तीन संबंधित cases के लिए है:
 
@@ -48,7 +48,7 @@ Process host पर installed tools उपयोग करता है। Pytho
 
 ## Editable source checkout
 
-इसे सामान्य deployment और development के लिए उपयोग करें। सार्वजनिक पहुँच के लिए देखें [quickstart](../getting-started/quickstart.md).
+स्रोत इंस्टॉल विकास के लिए है; सामान्य उपयोग में [बाइनरी](binary.md) चुनें। OAuth/HTTPS: [त्वरित शुरू](../getting-started/quickstart.md)।
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git

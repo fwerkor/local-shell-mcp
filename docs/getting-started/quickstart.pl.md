@@ -1,34 +1,33 @@
-<!-- i18n-source-sha256: 3575b9b50708261678473f74b66076f0c14807ccd7f7c3e60b4d1e897ac778df -->
+<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
 # Szybki start
 
 Ten przewodnik uruchamia kontroler LSM i otwiera interfejs przeglądarki. [unified web workspace](web-workspace.md) to zalecane codzienne doświadczenie; jest to oddzielnie wdrażany, opcjonalny stos czatów. ChatGPT, Gemini i inni zewnętrzni klienci MCP mogą łączyć się z tym samym kontrolerem. Zobacz [runtime choices and deployment model](../guides/deployment.md).
 
-Zalecane jest **wdrożenie bezpośrednio ze źródeł** w odizolowanym środowisku. Docker Compose to alternatywa.
+Zalecamy **pojedynczy plik wykonywalny Controllera** z [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest), bez Python, Dockera i źródeł. Przykład dla **Linux x86_64**; inne platformy: [instalacja binarna](../installation/binary.md).
 
 ## Wymagania
 
-- Git i Python 3.11+ z `venv` i `pip`.
-- Publiczny HTTPS tylko dla użytkowników zdalnych lub zewnętrznych klientów MCP.
-- Oddzielny katalog roboczy z ograniczonym dostępem.
-- Silny PIN administratora OAuth i losowy sekret JWT.
+- Zgodny plik wykonywalny i `curl` (przykład Linux x86_64).
+- Publiczny HTTPS tylko dla zdalnych użytkowników lub klientów MCP.
+- Oddzielny i ograniczony workspace.
+- Silny PIN OAuth i losowy sekret JWT.
 
 !!! warning
     Połączony model może operować skonfigurowanym workspace. Uruchamiaj usługę w jednorazowym container lub VM i unikaj mountowania zasobów sterujących hostem.
 
-## 1. Clone i konfiguracja
+## 1. Pobranie pliku i konfiguracja
+
+Pobierz jeden plik wykonywalny i wygeneruj sekret JWT:
 
 ```bash
-git clone https://github.com/fwerkor/local-shell-mcp.git
-cd local-shell-mcp
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e .
-cp .env.example .env
-chmod 600 .env
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
+chmod +x local-shell-mcp
+./local-shell-mcp --help
 openssl rand -hex 32
 ```
 
-Edytuj `.env`, zastępując przykładowy PIN i sekret JWT (użyj `openssl rand -hex 32`). Uruchomienie ze źródeł nie wczytuje `.env` automatycznie.
+Utwórz `.env` i zastąp przykładowe PIN oraz sekret JWT (użyj `openssl rand -hex 32`). Plik binarny **nie wczytuje automatycznie** `.env`.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
@@ -39,14 +38,16 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
 
 ## 2. Uruchomienie serwera
 
+Uruchom pobrany plik bezpośrednio:
+
 ```bash
-mkdir -p workspaces/default
+chmod 600 .env
 set -a
 . ./.env
 set +a
-. .venv/bin/activate
-export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
-local-shell-mcp --mode mcp
+mkdir -p workspace
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
+./local-shell-mcp --mode mcp
 ```
 
 Sprawdź stan w drugim terminalu:
@@ -55,7 +56,7 @@ Sprawdź stan w drugim terminalu:
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Prawidłowa odpowiedź to HTTP `200`. Do stałego uruchomienia użyj menedżera usług.
+Poprawna odpowiedź to HTTP `200`. Do ciągłej pracy użyj menedżera usług i ograniczonego konta.
 
 ## 3. Udostępnienie HTTPS
 
@@ -114,16 +115,19 @@ Napraw failing test. Najpierw przeczytaj odpowiednie pliki, wykonaj najmniejszy 
 
 ## Aktualizacja
 
-Zaktualizuj źródła, ponownie zainstaluj pakiet editable i uruchom Controller ponownie:
+Zastąp plik wykonywalny i uruchom Controller ponownie:
 
 ```bash
-git pull --ff-only
-python -m pip install -e .
-# Restart the Controller process or service after updating.
+# Stop the running Controller before replacing the executable.
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp.new
+chmod +x local-shell-mcp.new
+./local-shell-mcp.new --version
+mv local-shell-mcp.new local-shell-mcp
+# Restart the Controller process or service.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Dla Docker Compose zaktualizuj kontenery:
+W Docker Compose aktualizuj kontener; źródła: [Python](../installation/python.md).
 
 ```bash
 docker compose pull

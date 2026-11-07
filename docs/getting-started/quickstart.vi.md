@@ -1,34 +1,33 @@
-<!-- i18n-source-sha256: 3575b9b50708261678473f74b66076f0c14807ccd7f7c3e60b4d1e897ac778df -->
+<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
 # Bắt đầu nhanh
 
 Hướng dẫn này khởi động Bộ điều khiển LSM và mở giao diện trình duyệt của nó. [unified web workspace](web-workspace.md) là trải nghiệm hàng ngày được đề xuất; nó là một ngăn xếp trò chuyện tùy chọn, được triển khai riêng. ChatGPT, Gemini và các máy khách MCP bên ngoài khác có thể kết nối với cùng một Bộ điều khiển. Xem [runtime choices and deployment model](../guides/deployment.md).
 
-Nên **triển khai trực tiếp từ mã nguồn** trong môi trường cách ly. Docker Compose là một phương án thay thế.
+Khuyến nghị **tệp thực thi Controller duy nhất** từ [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest), không cần Python, Docker hay mã nguồn. Ví dụ cho **Linux x86_64**; nền tảng khác xem [hướng dẫn binary](../installation/binary.md).
 
 ## Yêu cầu
 
-- Git và Python 3.11+ cùng `venv` / `pip`.
-- HTTPS công khai chỉ khi người dùng từ xa hoặc MCP client ngoài cần truy cập.
-- Thư mục workspace riêng, giới hạn quyền.
+- File thực thi phù hợp và `curl` (ví dụ Linux x86_64).
+- HTTPS công khai chỉ khi người dùng từ xa hoặc client MCP ngoài cần.
+- Workspace riêng có quyền giới hạn.
 - PIN quản trị OAuth mạnh và JWT secret ngẫu nhiên.
 
 !!! warning
     Model đã kết nối có thể thao tác workspace đã cấu hình. Chạy dịch vụ trong container hoặc VM dùng một lần và tránh mount tài nguyên điều khiển host.
 
-## 1. Clone và cấu hình
+## 1. Tải file thực thi và cấu hình
+
+Tải tệp đơn và tạo JWT secret:
 
 ```bash
-git clone https://github.com/fwerkor/local-shell-mcp.git
-cd local-shell-mcp
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e .
-cp .env.example .env
-chmod 600 .env
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
+chmod +x local-shell-mcp
+./local-shell-mcp --help
 openssl rand -hex 32
 ```
 
-Chỉnh `.env` và thay PIN, JWT secret mẫu (dùng `openssl rand -hex 32`). Khi chạy từ source, `.env` không được tự động nạp.
+Tạo `.env` và thay PIN, JWT secret mẫu (dùng `openssl rand -hex 32`). Binary **không tự động nạp** `.env`.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
@@ -39,23 +38,25 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
 
 ## 2. Khởi động server
 
+Chạy trực tiếp file đã tải:
+
 ```bash
-mkdir -p workspaces/default
+chmod 600 .env
 set -a
 . ./.env
 set +a
-. .venv/bin/activate
-export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
-local-shell-mcp --mode mcp
+mkdir -p workspace
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
+./local-shell-mcp --mode mcp
 ```
 
-Kiểm tra trạng thái từ terminal khác:
+Kiểm tra ở terminal khác:
 
 ```bash
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Phản hồi hợp lệ là HTTP `200`. Dùng trình quản lý dịch vụ nếu cần chạy lâu dài.
+Phản hồi đúng là HTTP `200`. Để chạy liên tục hãy dùng trình quản lý dịch vụ và tài khoản giới hạn.
 
 ## 3. Công khai HTTPS
 
@@ -114,16 +115,19 @@ Sửa test bị lỗi. Đọc các file liên quan trước, tạo patch nhỏ n
 
 ## Cập nhật
 
-Cập nhật source, cài lại gói editable rồi khởi động lại Controller:
+Thay file thực thi mới rồi khởi động lại Controller:
 
 ```bash
-git pull --ff-only
-python -m pip install -e .
-# Restart the Controller process or service after updating.
+# Stop the running Controller before replacing the executable.
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp.new
+chmod +x local-shell-mcp.new
+./local-shell-mcp.new --version
+mv local-shell-mcp.new local-shell-mcp
+# Restart the Controller process or service.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Nếu dùng Docker Compose, hãy cập nhật container:
+Nếu dùng Docker Compose hãy cập nhật container. Cài source: [Python](../installation/python.md).
 
 ```bash
 docker compose pull

@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 42daa6d3dd931530a1d2e86d6a36fc6424b7494ff078626157c158b38b1f4b1e -->
+<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
 # Автономный binary runtime
 
-Release binaries запускают `local-shell-mcp` без Docker и Python environment. Используйте этот runtime, когда Docker недоступен либо dedicated VM, container host, lab server или restricted user account уже обеспечивает границу безопасности.
+Рекомендуется **один исполняемый файл Controller** из GitHub Releases: Python, Docker и исходники не нужны.
 
 Это выбор runtime. Доступ ChatGPT настраивается отдельно через HTTPS endpoint `/mcp`.
 
@@ -19,16 +19,20 @@ GitHub Releases собирает self-contained executable для распрос
 
 Каждый archive содержит executable, README, license и краткий quickstart file.
 
+Также доступен **единый исполняемый файл**. Он включает только Controller и штатный WebUI; чат, базы данных, Worker, инструменты и браузеры устанавливаются отдельно.
+
 ## Установка
 
-1. Скачайте с GitHub Releases archive для вашей платформы.
-2. Распакуйте его.
+1. Скачайте файл или архив для своей платформы из [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest).
+2. Если скачан архив, распакуйте его.
 3. Поместите executable в `PATH` или сохраните его absolute path.
 4. Запустите `local-shell-mcp --help`, чтобы проверить запуск binary.
 
-Linux и macOS обычно требуют executable bit:
+Пример: скачивание единого файла для Linux x86_64; для других систем выберите соответствующий выпуск:
 
 ```bash
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
 chmod +x local-shell-mcp
 ./local-shell-mcp --help
 ```
@@ -40,7 +44,7 @@ chmod +x local-shell-mcp
 ```bash
 mkdir -p ~/local-shell-mcp-workspace
 export LOCAL_SHELL_MCP_WORKSPACE_ROOT=~/local-shell-mcp-workspace
-local-shell-mcp --mode mcp
+~/lsm/local-shell-mcp --mode mcp
 ```
 
 В другом terminal:
@@ -104,7 +108,7 @@ Binary включает Python application, но не все developer tools. MC
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-Если не хотите поддерживать этот host toolchain, используйте Docker Compose.
+Бинарник содержит Controller; внешние инструменты и браузеры устанавливаются при необходимости. Чат и история требуют отдельного [веб-пространства](../getting-started/web-workspace.md) с базой данных.
 
 ## Долгоживущий сервис
 
@@ -119,7 +123,7 @@ Binary включает Python application, но не все developer tools. MC
 
 ## Updates
 
-1. Скачайте новый release archive для платформы.
+1. Замените исполняемый файл и перезапустите Controller:
 2. При желании verify checksums.
 3. Замените executable.
 4. Restart process manager.

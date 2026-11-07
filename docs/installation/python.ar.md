@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: c8c0d8ebdbb123b9ac4af1fd288f30e8ca69037ca086486cb8027e2592f4b75a -->
+<!-- i18n-source-sha256: 1d80cfbe14747fb0691e91065f582d1e47eb36921d8b27da1648dcd26114a2e5 -->
 # Python وpipx وsource runtimes
 
-**النشر المباشر من نسخة المصدر هو الخيار الموصى به**. استخدم بيئة Python افتراضية ومساحة عمل محدودة؛ Docker Compose بديل.
+يُنصح باستخدام [ملف تنفيذي واحد](binary.md) للنشر المعتاد. Python والمصدر مخصصان للتطوير والتعديل.
 
 استخدم هذه الصفحة لثلاث حالات مترابطة:
 
@@ -48,7 +48,7 @@ local-shell-mcp --mode mcp
 
 ## Editable source checkout
 
-استخدم هذا الخيار للنشر المعتاد أو التطوير. لإعداد الوصول العام راجع [quickstart](../getting-started/quickstart.md).
+التثبيت من المصدر مناسب للتطوير؛ للنشر العادي استخدم [الملف التنفيذي](binary.md). إعداد OAuth/HTTPS: [البداية السريعة](../getting-started/quickstart.md).
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git

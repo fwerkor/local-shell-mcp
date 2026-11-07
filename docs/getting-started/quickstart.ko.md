@@ -1,34 +1,33 @@
-<!-- i18n-source-sha256: 3575b9b50708261678473f74b66076f0c14807ccd7f7c3e60b4d1e897ac778df -->
+<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
 # 빠른 시작
 
 이 가이드는 LSM 컨트롤러를 시작하고 해당 브라우저 인터페이스를 엽니다. [unified web workspace](web-workspace.md)는 권장되는 일일 경험입니다. 이는 별도로 배포된 선택적 채팅 스택입니다. ChatGPT, Gemini 및 기타 외부 MCP 클라이언트는 동일한 컨트롤러에 연결할 수 있습니다. [runtime choices and deployment model](../guides/deployment.md)를 참조하세요.
 
-격리된 환경에서 **소스 체크아웃으로 직접 배포**하는 방식을 권장합니다. Docker Compose는 대안입니다.
+[GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest)의 **Controller 단일 실행 파일** 배포를 권장합니다. Python, Docker, 소스 체크아웃이 필요 없습니다. 예시는 **Linux x86_64**이며 다른 플랫폼은 [바이너리 안내](../installation/binary.md)를 참고하세요.
 
 ## 요구 사항
 
-- Git, Python 3.11 이상 및 `venv` / `pip`.
+- 호환 실행 파일과 `curl` (Linux x86_64 예시).
 - 원격 사용자나 외부 MCP 클라이언트가 필요할 때만 공개 HTTPS.
-- 권한을 제한한 전용 작업 공간.
+- 권한이 제한된 전용 작업 공간.
 - 강력한 OAuth 관리자 PIN과 임의 JWT 비밀키.
 
 !!! warning
     연결된 모델은 구성된 workspace를 조작할 수 있습니다. 일회용 container 또는 VM에서 서비스를 실행하고 host-control resources를 mount하지 마십시오.
 
-## 1. clone 및 구성
+## 1. 실행 파일 다운로드 및 설정
+
+단일 파일을 다운로드하고 JWT 비밀키를 생성하세요:
 
 ```bash
-git clone https://github.com/fwerkor/local-shell-mcp.git
-cd local-shell-mcp
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e .
-cp .env.example .env
-chmod 600 .env
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
+chmod +x local-shell-mcp
+./local-shell-mcp --help
 openssl rand -hex 32
 ```
 
-`.env`에서 샘플 PIN과 JWT 비밀키를 교체하세요 (`openssl rand -hex 32`). 소스 실행 시 `.env`가 자동 로드되지 않습니다.
+`.env` 파일을 만들고 샘플 PIN과 JWT 비밀키를 교체하세요 (`openssl rand -hex 32`). 바이너리는 `.env`를 **자동 로드하지 않습니다**.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
@@ -39,23 +38,25 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
 
 ## 2. 서버 시작
 
+다운로드한 파일을 직접 실행하세요:
+
 ```bash
-mkdir -p workspaces/default
+chmod 600 .env
 set -a
 . ./.env
 set +a
-. .venv/bin/activate
-export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
-local-shell-mcp --mode mcp
+mkdir -p workspace
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
+./local-shell-mcp --mode mcp
 ```
 
-별도의 터미널에서 상태 확인:
+다른 터미널에서 상태 확인:
 
 ```bash
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-정상이면 HTTP `200`이 반환됩니다. 장기 실행은 서비스 관리자를 사용하세요.
+정상 응답은 HTTP `200`입니다. 장기 실행에는 제한된 서비스 계정을 사용하세요.
 
 ## 3. HTTPS 공개
 
@@ -114,16 +115,19 @@ local-shell-mcp를 사용하세요. 먼저 environment_get를 호출한 다음 w
 
 ## 업데이트
 
-소스를 업데이트하고 editable 패키지를 다시 설치한 후 Controller를 재시작하세요:
+새 실행 파일로 교체한 뒤 Controller를 다시 시작하세요:
 
 ```bash
-git pull --ff-only
-python -m pip install -e .
-# Restart the Controller process or service after updating.
+# Stop the running Controller before replacing the executable.
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp.new
+chmod +x local-shell-mcp.new
+./local-shell-mcp.new --version
+mv local-shell-mcp.new local-shell-mcp
+# Restart the Controller process or service.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Docker Compose 배포라면 컨테이너를 업데이트하세요:
+Docker Compose는 컨테이너를 업데이트하세요. 소스 설치: [Python 안내](../installation/python.md).
 
 ```bash
 docker compose pull

@@ -1,34 +1,33 @@
-<!-- i18n-source-sha256: 3575b9b50708261678473f74b66076f0c14807ccd7f7c3e60b4d1e897ac778df -->
+<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
 # Mulai cepat
 
 Panduan ini memulai Pengontrol LSM dan membuka antarmuka browsernya. [unified web workspace](web-workspace.md) adalah pengalaman harian yang direkomendasikan; ini adalah tumpukan obrolan opsional yang diterapkan secara terpisah. ChatGPT, Gemini, dan klien MCP eksternal lainnya dapat terhubung ke Pengontrol yang sama. Lihat [runtime choices and deployment model](../guides/deployment.md).
 
-Metode yang direkomendasikan adalah **deploy langsung dari source checkout** dalam lingkungan terisolasi. Docker Compose adalah alternatif.
+Direkomendasikan **satu berkas executable Controller** dari [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest) tanpa Python, Docker atau checkout source. Contoh **Linux x86_64**; platform lain: [panduan binary](../installation/binary.md).
 
 ## Persyaratan
 
-- Git dan Python 3.11+ dengan `venv` serta `pip`.
-- HTTPS publik hanya bila pengguna jarak jauh atau klien MCP eksternal perlu akses.
-- Direktori workspace khusus dengan izin terbatas.
+- Executable sesuai platform dan `curl` (contoh Linux x86_64).
+- HTTPS publik hanya jika pengguna jarak jauh atau klien MCP eksternal membutuhkannya.
+- Workspace khusus dengan izin terbatas.
 - PIN admin OAuth kuat dan secret JWT acak.
 
 !!! warning
     Model yang terhubung dapat mengoperasikan workspace yang dikonfigurasi. Jalankan layanan dalam container atau VM yang dapat dibuang dan hindari mount resource pengendali host.
 
-## 1. Clone dan konfigurasi
+## 1. Unduh executable dan konfigurasi
+
+Unduh executable satu berkas dan buat secret JWT:
 
 ```bash
-git clone https://github.com/fwerkor/local-shell-mcp.git
-cd local-shell-mcp
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e .
-cp .env.example .env
-chmod 600 .env
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
+chmod +x local-shell-mcp
+./local-shell-mcp --help
 openssl rand -hex 32
 ```
 
-Edit `.env` dan ganti contoh PIN serta JWT secret (pakai `openssl rand -hex 32`). Runtime source tidak memuat `.env` secara otomatis.
+Buat `.env` dan ganti contoh PIN dan secret JWT (gunakan `openssl rand -hex 32`). Binary **tidak memuat** `.env` secara otomatis.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
@@ -39,14 +38,16 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
 
 ## 2. Mulai server
 
+Jalankan executable secara langsung:
+
 ```bash
-mkdir -p workspaces/default
+chmod 600 .env
 set -a
 . ./.env
 set +a
-. .venv/bin/activate
-export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
-local-shell-mcp --mode mcp
+mkdir -p workspace
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
+./local-shell-mcp --mode mcp
 ```
 
 Periksa status dari terminal lain:
@@ -55,7 +56,7 @@ Periksa status dari terminal lain:
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Respons sehat adalah HTTP `200`. Gunakan pengelola layanan untuk proses permanen.
+Respons sehat adalah HTTP `200`. Gunakan supervisor layanan dan akun terbatas untuk produksi.
 
 ## 3. Publikasikan HTTPS
 
@@ -114,16 +115,19 @@ Perbaiki test yang gagal. Baca file terkait terlebih dahulu, buat patch sekecil 
 
 ## Pembaruan
 
-Perbarui source, instal ulang paket editable, lalu restart Controller:
+Ganti executable lalu restart Controller:
 
 ```bash
-git pull --ff-only
-python -m pip install -e .
-# Restart the Controller process or service after updating.
+# Stop the running Controller before replacing the executable.
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp.new
+chmod +x local-shell-mcp.new
+./local-shell-mcp.new --version
+mv local-shell-mcp.new local-shell-mcp
+# Restart the Controller process or service.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Jika memakai Docker Compose, perbarui kontainer:
+Docker Compose diperbarui lewat kontainer; source: [Python](../installation/python.md).
 
 ```bash
 docker compose pull

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d7d01bc3f36f434c8e66c3fb6f65c2934937c5b2937dd9e8ba7beefc018fd14f -->
+<!-- i18n-source-sha256: cef0a90f9de3e2806e2a6bd8925217ea44ea6d6e6bce911eea09b1d4192a82d9 -->
 # Runtime の選択とデプロイモデル
 
 `local-shell-mcp` には 2 つの相補的な決定があります。
@@ -6,7 +6,7 @@
 1. **Runtime**: server process をどのように実行し、どの workspace を制御するか。
 2. **インターフェイス**: オプションの [unified web workspace](../getting-started/web-workspace.md) を使用するか、Gemini や ChatGPT などの外部 MCP クライアントに接続します。
 
-推奨される毎日のインターフェイスは、自己ホスト型 Web ワークスペース (チャット、プロジェクト、LSM コントロール ページ) です。コントローラーとは別にデプロイされます。 Docker、VS Code 拡張機能、リリース バイナリ、Python インストール、および stdio モードは、コントローラーを実行する方法です。外部チャット アプリはオプションのクライアントのままです。
+**Controller は単一実行ファイルによる配布を推奨します。** Python、Docker、ソース checkout は不要です。その他の方式も使えます。
 
 ```text
 Runtime layer                      Exposure layer                 Client layer
@@ -40,11 +40,11 @@ Local MCP client
 
 | ランタイム | こんな方に最適 | 分離境界 | ツールチェーンのソース | 外部 MCP アクセス | ページ |
 |---|---|---|---|---|---|
-| **ソース checkout（推奨）** / `pipx` | Python-native 利用、debug、development | Host virtualenv or VM | Python package と host tools | HTTPS proxy または tunnel を追加 | [Python install](../installation/python.md) |
+| **単一実行ファイル（推奨）** | 対応する多くの環境 | Host or VM | host tools と設定済み executable | HTTPS proxy または tunnel を追加 | [Standalone binary](../installation/binary.md) |
 | Docker Compose | 隔離された使い捨てコンテナー | コンテナ | 無駄のないコントローラーのイメージ。タスク固有のツールチェーンを個別にインストールする | HTTPS プロキシまたはトンネルを追加する | [Docker Compose](../installation/docker.md) |
 | Docker Compose + トンネル サイドカー | 非推奨: 公開サーバー経由で転送し、Cloudflare Tunnel は最終手段にする | コンテナ | プロジェクトイメージ | 公開サーバー経由で転送し、Cloudflare Tunnel は最終手段にする | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | editor workspace から server を start/stop | 通常 host process | host tools と設定済み executable | ChatGPT 用に外部 HTTPS tunnel/proxy を追加 | [VS Code extension](../installation/vscode-extension.md) |
-| Standalone binary | Docker が使えない host/VM | Host or VM | host tools と設定済み executable | HTTPS proxy または tunnel を追加 | [Standalone binary](../installation/binary.md) |
+| ソース / pipx | 開発・カスタマイズ | Host virtualenv or VM | Python package と host tools | HTTPS proxy または tunnel を追加 | [Python install](../installation/python.md) |
 | Stdio mode | tool process を直接 spawn する local MCP client | Client process boundary | host tools と設定済み executable | ChatGPT web/app では使用不可 | [Stdio mode](../installation/stdio.md) |
 
 ## Client 接続マトリクス
@@ -84,11 +84,11 @@ Local MCP client
 
 ## 推奨選択
 
-隔離された環境で**ソースコードから直接デプロイ**する方法を推奨します。[Python/ソースのガイド](../installation/python.md)を参照してください。Docker Compose は代替手段です。
+**単一実行ファイルを優先**し、対応する版を制限されたアカウントと専用ワークスペースで実行します。[バイナリガイド](../installation/binary.md)。
 
 ワークフローがエディターから開始され、ローカル ランチャーが必要な場合は、**VS Code 拡張機能** を使用します。まだランタイムです。リモート Web クライアントには、到達可能な HTTPS プロキシまたはトンネルが必要です。
 
-Docker が使えず、VM/container host/dedicated user account が boundary を提供する場合は **standalone binary** を使います。
+**ソース版**は Python 仮想環境での開発・デバッグ・カスタマイズ向けです。[Python ガイド](../installation/python.md)。
 
 `local-shell-mcp` 自体の development/debug、または Python-based environment が管理しやすい場合は **`pipx` または source install** を使います。
 

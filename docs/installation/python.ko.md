@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: c8c0d8ebdbb123b9ac4af1fd288f30e8ca69037ca086486cb8027e2592f4b75a -->
+<!-- i18n-source-sha256: 1d80cfbe14747fb0691e91065f582d1e47eb36921d8b27da1648dcd26114a2e5 -->
 # Python, pipx 및 source runtimes
 
-**소스 저장소에서 직접 설치하는 방식을 권장합니다.** Python 가상 환경과 권한을 제한한 작업 공간을 사용하세요. Docker Compose도 사용할 수 있습니다.
+일반 배포에는 [단일 실행 파일](binary.md)을 권장합니다. Python과 소스 설치는 개발 및 사용자 지정에 적합합니다.
 
 이 페이지는 세 가지 관련 경우를 다룹니다.
 
@@ -48,7 +48,7 @@ process는 host에 설치된 tool을 사용합니다. Python package가 compiler
 
 ## Editable source checkout
 
-일반 배포 및 개발에 사용하세요. 공개 접근 설정은 [quickstart](../getting-started/quickstart.md).
+소스 설치는 개발용입니다. 일반 배포는 [단일 바이너리](binary.md)를 사용하고 OAuth/HTTPS는 [빠른 시작](../getting-started/quickstart.md)을 참고하세요.
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git

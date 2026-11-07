@@ -1,34 +1,33 @@
-<!-- i18n-source-sha256: 3575b9b50708261678473f74b66076f0c14807ccd7f7c3e60b4d1e897ac778df -->
+<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
 # البدء السريع
 
 يبدأ هذا الدليل تشغيل وحدة تحكم LSM ويفتح واجهة المتصفح الخاصة بها. [unified web workspace](web-workspace.md) هي التجربة اليومية الموصى بها؛ إنها عبارة عن مكدس دردشة اختياري تم نشره بشكل منفصل. يمكن لعملاء ChatGPT وGemini وعملاء MCP الخارجيين الآخرين الاتصال بنفس وحدة التحكم. انظر [runtime choices and deployment model](../guides/deployment.md).
 
-الطريقة الموصى بها هي **النشر المباشر من الشيفرة المصدرية** في بيئة معزولة؛ Docker Compose خيار بديل.
+نوصي **بملف Controller تنفيذي واحد** من [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest)، دون Python أو Docker أو نسخة مصدر. المثال خاص بـ **Linux x86_64**؛ للأنظمة الأخرى انظر [دليل الملف التنفيذي](../installation/binary.md).
 
 ## المتطلبات
 
-- Git وPython 3.11+ مع `venv` و`pip`.
-- عنوان HTTPS عام فقط عند الحاجة إلى وصول عن بُعد أو عملاء MCP خارجيين.
-- مجلد عمل مخصص بصلاحيات محدودة.
-- رمز PIN قوي لمسؤول OAuth وسر JWT عشوائي.
+- الملف التنفيذي المتوافق و`curl` (مثال Linux x86_64).
+- HTTPS عام فقط عند وصول مستخدمين عن بُعد أو عملاء MCP خارجيين.
+- مجلد عمل منفصل بصلاحيات محدودة.
+- PIN قوي لمسؤول OAuth وسر JWT عشوائي.
 
 !!! warning
     يمكن للنموذج المتصل تشغيل الـ workspace المضبوط. شغّل الخدمة داخل container أو VM قابل للتخلص منه وتجنب mount موارد التحكم في host.
 
-## 1. الاستنساخ والإعداد
+## 1. تنزيل الملف التنفيذي وإعداده
+
+نزّل الملف التنفيذي الواحد وأنشئ سر JWT:
 
 ```bash
-git clone https://github.com/fwerkor/local-shell-mcp.git
-cd local-shell-mcp
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e .
-cp .env.example .env
-chmod 600 .env
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
+chmod +x local-shell-mcp
+./local-shell-mcp --help
 openssl rand -hex 32
 ```
 
-عدّل `.env` واستبدل PIN وسر JWT الافتراضيين (استخدم `openssl rand -hex 32`). التشغيل من المصدر لا يحمّل `.env` تلقائياً.
+أنشئ `.env` وغيّر PIN وسر JWT الافتراضيين (باستخدام `openssl rand -hex 32`). الملف التنفيذي **لا يحمّل** `.env` تلقائياً.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
@@ -39,23 +38,25 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
 
 ## 2. تشغيل الخادم
 
+شغّل الملف التنفيذي مباشرة:
+
 ```bash
-mkdir -p workspaces/default
+chmod 600 .env
 set -a
 . ./.env
 set +a
-. .venv/bin/activate
-export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
-local-shell-mcp --mode mcp
+mkdir -p workspace
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
+./local-shell-mcp --mode mcp
 ```
 
-تحقق من الحالة في طرفية ثانية:
+تحقق من الحالة في طرفية أخرى:
 
 ```bash
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-الاستجابة السليمة هي HTTP `200`. استخدم مدير خدمات للتشغيل المستمر.
+الاستجابة الصحيحة HTTP `200`. استخدم مدير خدمات وحساباً محدود الصلاحيات للتشغيل الدائم.
 
 ## 3. إتاحة HTTPS
 
@@ -114,16 +115,19 @@ https://your-public-host.example.com/ui
 
 ## التحديث
 
-حدّث المصدر وأعد تثبيت الحزمة ثم أعد تشغيل Controller:
+استبدل الملف التنفيذي ثم أعد تشغيل Controller:
 
 ```bash
-git pull --ff-only
-python -m pip install -e .
-# Restart the Controller process or service after updating.
+# Stop the running Controller before replacing the executable.
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp.new
+chmod +x local-shell-mcp.new
+./local-shell-mcp.new --version
+mv local-shell-mcp.new local-shell-mcp
+# Restart the Controller process or service.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-لنشر Docker Compose، حدّث الحاويات بدلاً من ذلك:
+لـ Docker Compose حدّث الحاوية؛ تثبيت المصدر: [Python](../installation/python.md).
 
 ```bash
 docker compose pull

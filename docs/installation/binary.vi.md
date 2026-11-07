@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 42daa6d3dd931530a1d2e86d6a36fc6424b7494ff078626157c158b38b1f4b1e -->
+<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
 # Runtime binary độc lập
 
-Release binary chạy `local-shell-mcp` mà không cần Docker hay môi trường Python. Dùng runtime này khi Docker không khả dụng hoặc khi dedicated VM, container host, lab server hay restricted user account đã cung cấp biên an toàn.
+Khuyến nghị **tệp thực thi Controller duy nhất** từ GitHub Releases, không cần Python, Docker hay mã nguồn.
 
 Đây là lựa chọn runtime. Truy cập ChatGPT được cấu hình riêng qua endpoint HTTPS `/mcp`.
 
@@ -19,16 +19,20 @@ GitHub Releases build executable tự chứa cho các nền tảng phổ biến:
 
 Mỗi archive chứa executable, README, license và file quickstart ngắn.
 
+Có thể tải trực tiếp **một tệp thực thi duy nhất**. Tệp chỉ chứa Controller và WebUI gốc; chat, cơ sở dữ liệu, Worker, công cụ và trình duyệt cần cài riêng.
+
 ## Cài đặt
 
-1. Download archive cho nền tảng của bạn từ GitHub Releases.
-2. Giải nén.
+1. Tải tệp thực thi hoặc gói nén phù hợp từ [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest).
+2. Nếu chọn gói nén, hãy giải nén.
 3. Đặt executable trên `PATH` hoặc ghi lại absolute path.
 4. Chạy `local-shell-mcp --help` để xác nhận binary khởi động.
 
-Linux và macOS thường yêu cầu executable bit:
+Ví dụ: tải trực tiếp tệp Linux x86_64; nền tảng khác chọn tệp phù hợp:
 
 ```bash
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
 chmod +x local-shell-mcp
 ./local-shell-mcp --help
 ```
@@ -40,7 +44,7 @@ Người dùng Windows nên chạy `local-shell-mcp.exe` từ PowerShell hoặc 
 ```bash
 mkdir -p ~/local-shell-mcp-workspace
 export LOCAL_SHELL_MCP_WORKSPACE_ROOT=~/local-shell-mcp-workspace
-local-shell-mcp --mode mcp
+~/lsm/local-shell-mcp --mode mcp
 ```
 
 Trong terminal khác:
@@ -104,7 +108,7 @@ Cài những gì task của bạn cần:
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-Nếu không muốn duy trì host toolchain này, hãy dùng Docker Compose.
+Binary chứa Controller; công cụ bên ngoài và trình duyệt là tùy chọn. Chat và lịch sử cần [không gian web](../getting-started/web-workspace.md) với cơ sở dữ liệu riêng.
 
 ## Dịch vụ chạy lâu dài
 
@@ -119,7 +123,7 @@ Với persistent public deployment, chạy binary dưới process supervisor c�
 
 ## Cập nhật
 
-1. Download release archive mới cho nền tảng.
+1. Thay file thực thi mới rồi khởi động lại Controller:
 2. Verify checksum nếu muốn.
 3. Thay executable.
 4. Restart process manager.

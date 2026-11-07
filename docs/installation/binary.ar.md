@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 42daa6d3dd931530a1d2e86d6a36fc6424b7494ff078626157c158b38b1f4b1e -->
+<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
 # Standalone binary runtime
 
-تشغّل release binaries ‏`local-shell-mcp` من دون Docker ومن دون Python environment. استخدم هذا runtime عندما لا يكون Docker متاحاً أو عندما توفر dedicated VM أو container host أو lab server أو restricted user account حدود الأمان بالفعل.
+نوصي **بملف Controller تنفيذي واحد** من GitHub Releases، دون Python أو Docker أو نسخة مصدر.
 
 هذا اختيار runtime. يتم إعداد وصول ChatGPT بشكل منفصل عبر HTTPS endpoint ‏`/mcp`.
 
@@ -19,16 +19,20 @@
 
 يحتوي كل archive على executable وREADME وlicense وquickstart file مختصر.
 
+يتوفر أيضاً **ملف تنفيذي واحد** مباشرةً. يضم Controller وواجهة WebUI فقط؛ وتبقى خدمات الدردشة وقواعد البيانات وWorker والأدوات والمتصفحات منفصلة.
+
 ## التثبيت
 
-1. نزّل archive الخاص بمنصتك من GitHub Releases.
-2. فكّه.
+1. نزّل الملف أو الأرشيف المناسب من [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest).
+2. إذا اخترت أرشيفاً، فك ضغطه.
 3. ضع executable على `PATH` أو سجّل absolute path له.
 4. شغّل `local-shell-mcp --help` للتحقق من أن binary يبدأ.
 
-عادة ما يحتاج Linux وmacOS إلى executable bit:
+مثال: نزّل ملف Linux x86_64 مباشرةً؛ اختر الملف المناسب للمنصات الأخرى:
 
 ```bash
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
 chmod +x local-shell-mcp
 ./local-shell-mcp --help
 ```
@@ -40,7 +44,7 @@ chmod +x local-shell-mcp
 ```bash
 mkdir -p ~/local-shell-mcp-workspace
 export LOCAL_SHELL_MCP_WORKSPACE_ROOT=~/local-shell-mcp-workspace
-local-shell-mcp --mode mcp
+~/lsm/local-shell-mcp --mode mcp
 ```
 
 في terminal آخر:
@@ -104,7 +108,7 @@ local-shell-mcp --config /path/to/config.yaml
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-إذا كنت لا تريد صيانة هذا host toolchain، فاستخدم Docker Compose.
+يتضمن الملف Controller؛ الأدوات الخارجية والمتصفح اختيارية. تتطلب الدردشة والسجل [مساحة ويب](../getting-started/web-workspace.md) وقاعدة بيانات منفصلتين.
 
 ## Long-running service
 
@@ -119,7 +123,7 @@ local-shell-mcp --config /path/to/config.yaml
 
 ## Updates
 
-1. نزّل release archive الجديد لمنصتك.
+1. استبدل الملف التنفيذي ثم أعد تشغيل Controller:
 2. Verify checksums إذا رغبت.
 3. استبدل executable.
 4. Restart process manager.
