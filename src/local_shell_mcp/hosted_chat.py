@@ -15,6 +15,7 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
+from .remote import remote_execution_rpc_timeout_s
 from .settings import get_settings
 
 MAX_STEPS = 8
@@ -27,7 +28,8 @@ MCP_TOOL_TIMEOUT_GRACE_S = 60
 
 def _mcp_tool_timeout_seconds() -> int:
     settings = get_settings()
-    return max(3600, settings.remote_job_timeout_s, settings.remote_peer_transfer_timeout_s) + MCP_TOOL_TIMEOUT_GRACE_S
+    execution_budget = max(3600, settings.remote_job_timeout_s, settings.remote_peer_transfer_timeout_s)
+    return int(remote_execution_rpc_timeout_s(execution_budget) + MCP_TOOL_TIMEOUT_GRACE_S)
 
 
 def validate_api_key(key: str) -> None:
