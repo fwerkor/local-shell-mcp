@@ -269,7 +269,9 @@ def _dashboard_alerts(
             {
                 "severity": "warning",
                 "title": f"Job {job.get('name') or job.get('job_id')} {job.get('status')}",
-                "detail": str(job.get("error") or job.get("command") or "Tracked job needs attention"),
+                "detail": str(
+                    job.get("error") or job.get("command") or "Tracked job needs attention"
+                ),
                 "node": "local",
                 "age_s": max(0.0, now - float(job.get("updated_at") or now)),
             }
@@ -349,9 +351,7 @@ def _logical_session_subject(request: Request, *, create: bool = False) -> str |
     return "local-mcp-client"
 
 
-def _require_ui_scopes(
-    request: Request, *scopes: str, machine: str | None = None
-) -> None:
+def _require_ui_scopes(request: Request, *scopes: str, machine: str | None = None) -> None:
     required = list(scopes)
     if machine and machine != "local":
         required.append("remote:use")
@@ -424,7 +424,14 @@ _AUDIT_EXECUTE_TOOLS = frozenset(
     }
 )
 _AUDIT_FILE_SHARE_TOOLS = frozenset(
-    {"link_create", "link_list", "link_revoke", "create_file_link", "list_file_links", "revoke_file_link"}
+    {
+        "link_create",
+        "link_list",
+        "link_revoke",
+        "create_file_link",
+        "list_file_links",
+        "revoke_file_link",
+    }
 )
 
 
@@ -570,7 +577,9 @@ def _ui_index_html() -> str:
     path = _assets_dir() / "index.html"
     if path.exists():
         html = path.read_text(encoding="utf-8")
-        config = json.dumps({"uiPath": ui_path, "apiPrefix": UI_API_PREFIX, "tuiAvailable": tui_runtime_available()})
+        config = json.dumps(
+            {"uiPath": ui_path, "apiPrefix": UI_API_PREFIX, "tuiAvailable": tui_runtime_available()}
+        )
         return (
             html.replace("__LSM_UI_PATH__", ui_path)
             .replace("__LSM_UI_ASSET_VERSION__", __version__)
@@ -651,7 +660,9 @@ async def ui_wallpaper(request: Request) -> Response:  # noqa: ARG001
             return Response(status_code=204)
         stamp_path.write_text(today, encoding="utf-8")
 
-    return FileResponse(image_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
+    return FileResponse(
+        image_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"}
+    )
 
 
 def _machine_rows() -> dict[str, Any]:
@@ -698,18 +709,24 @@ async def _remote_call(
         rpc_timeout_s = max(180.0, REMOTE_QUEUE_TIMEOUT_S + REMOTE_RESULT_GRACE_S)
     else:
         rpc_timeout_s = (
-            max(1, int(timeout_s)) if timeout_s is not None
+            max(1, int(timeout_s))
+            if timeout_s is not None
             else max(1, get_settings().ui_remote_request_timeout_s)
         )
     result = await remote_manager().call(
-        machine, tool, worker_args, execution_timeout_s=execution_timeout_s,
+        machine,
+        tool,
+        worker_args,
+        execution_timeout_s=execution_timeout_s,
         rpc_timeout_s=rpc_timeout_s,
     )
     if not result.get("ok", False):
         raise RuntimeError(result.get("message") or f"Remote operation failed: {tool}")
     data = result.get("data")
     if isinstance(data, dict) and data.get("status") == "error":
-        raise RuntimeError(str(data.get("message") or data.get("error_type") or "Remote operation failed"))
+        raise RuntimeError(
+            str(data.get("message") or data.get("error_type") or "Remote operation failed")
+        )
     return data
 
 
@@ -799,7 +816,11 @@ async def api_bootstrap(request: Request) -> Response:
             "machines": machines,
             "features": {
                 "remote": settings.remote_enabled,
-                "hosted_chat": (settings.hosted_chat_enabled and settings.mode != "http" and settings.state_backend != "memory"),
+                "hosted_chat": (
+                    settings.hosted_chat_enabled
+                    and settings.mode != "http"
+                    and settings.state_backend != "memory"
+                ),
                 "live_workspace": settings.live_workspace_enabled,
                 "tui": tui_runtime_available(),
                 "wallpaper": settings.ui_wallpaper,
@@ -895,7 +916,9 @@ async def api_dashboard(request: Request) -> Response:
     active_jobs = [job for job in jobs if job.get("status") in active_statuses]
     job_session_ids = {str(job.get("session_id") or "") for job in active_jobs}
     standalone_sessions = [
-        session for session in sessions if str(session.get("session_id") or "") not in job_session_ids
+        session
+        for session in sessions
+        if str(session.get("session_id") or "") not in job_session_ids
     ]
     severity_rank = {"info": 0, "warning": 1, "critical": 2}
     alerts.sort(
@@ -967,7 +990,9 @@ async def api_files(request: Request) -> Response:
                 "path": path,
                 "parent": parent,
                 "entries": _normalize_file_entries(list(entries or []), windows_paths),
-                "parent_entries": _normalize_file_entries(list(parent_entries or []), windows_paths),
+                "parent_entries": _normalize_file_entries(
+                    list(parent_entries or []), windows_paths
+                ),
                 "truncated": len(entries or []) >= limit,
             }
         )
@@ -989,7 +1014,9 @@ async def api_file_preview(request: Request) -> Response:
                 return _json_ok(
                     {
                         "kind": "directory",
-                        "entries": _normalize_file_entries(list_dir(path, False, 100), windows_paths),
+                        "entries": _normalize_file_entries(
+                            list_dir(path, False, 100), windows_paths
+                        ),
                     }
                 )
         else:
@@ -1001,7 +1028,10 @@ async def api_file_preview(request: Request) -> Response:
                 )
                 if isinstance(listed, list):
                     return _json_ok(
-                        {"kind": "directory", "entries": _normalize_file_entries(listed, windows_paths)}
+                        {
+                            "kind": "directory",
+                            "entries": _normalize_file_entries(listed, windows_paths),
+                        }
                     )
 
         if path.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
@@ -1047,7 +1077,13 @@ async def api_file_preview(request: Request) -> Response:
             machine,
             lambda: read_text(path, 1, 240, "hex", 256),
             "read_file",
-            {"path": path, "start_line": 1, "end_line": 240, "binary_preview": "hex", "binary_preview_bytes": 256},
+            {
+                "path": path,
+                "start_line": 1,
+                "end_line": 240,
+                "binary_preview": "hex",
+                "binary_preview_bytes": 256,
+            },
         )
         if not isinstance(content, dict):
             content = {"content": str(content)}
@@ -1061,7 +1097,12 @@ async def api_file_preview(request: Request) -> Response:
                 "list_files",
                 {"path": path, "recursive": False, "max_entries": 100},
             )
-            return _json_ok({"kind": "directory", "entries": _normalize_file_entries(list(entries or []), windows_paths)})
+            return _json_ok(
+                {
+                    "kind": "directory",
+                    "entries": _normalize_file_entries(list(entries or []), windows_paths),
+                }
+            )
         except Exception as exc:
             return _json_error(exc)
     except Exception as exc:
@@ -1094,8 +1135,6 @@ async def api_file_content(request: Request) -> Response:
         return _json_error(exc)
 
 
-
-
 # Short-lived, browser-only download grants. These do not create share links.
 _UI_DOWNLOAD_LOCK = threading.Lock()
 _UI_DOWNLOAD_GRANTS: dict[str, tuple[float, str, str, int, str]] = {}
@@ -1111,7 +1150,9 @@ async def api_file_download_ticket(request: Request) -> Response:
             raise ValueError("path is required")
         _require_ui_scopes(request, "shell:read", machine=machine)
         info = await _machine_dispatch(
-            machine, lambda: transfer_stat(path, False), "transfer_stat",
+            machine,
+            lambda: transfer_stat(path, False),
+            "transfer_stat",
             {"path": path, "sha256": False},
         )
         if info.get("type") != "file":
@@ -1156,13 +1197,18 @@ async def _remote_ui_file_chunks(machine: str, path: str, size: int, start: int,
     offset = start
     while offset <= end:
         packet = await _remote_call(
-            machine, "transfer_read_chunk",
+            machine,
+            "transfer_read_chunk",
             {"path": path, "offset": offset, "chunk_size": min(_UI_FILE_CHUNK, end - offset + 1)},
         )
         data = base64.b64decode(packet["data_b64"], validate=True)
-        if (not data or int(packet["offset"]) != offset or int(packet["size"]) != size
-                or int(packet["bytes"]) != len(data)
-                or hashlib.sha256(data).hexdigest() != packet["sha256"]):
+        if (
+            not data
+            or int(packet["offset"]) != offset
+            or int(packet["size"]) != size
+            or int(packet["bytes"]) != len(data)
+            or hashlib.sha256(data).hexdigest() != packet["sha256"]
+        ):
             raise OSError("Remote file changed or yielded an invalid chunk during download")
         offset += len(data)
         yield data
@@ -1189,6 +1235,7 @@ async def api_file_download(request: Request) -> Response:
         file_range = _file_download_range(request.headers.get("range"), size)
         start, end = file_range if file_range else (0, size - 1)
         from urllib.parse import quote
+
         disposition = f"attachment; filename*=UTF-8''{quote(name, safe='')}"
         headers = {"Content-Disposition": disposition, "Accept-Ranges": "bytes"}
         if file_range:
@@ -1197,12 +1244,14 @@ async def api_file_download(request: Request) -> Response:
         if request.method == "HEAD":
             return Response(
                 status_code=206 if file_range else 200,
-                headers=headers, media_type="application/octet-stream",
+                headers=headers,
+                media_type="application/octet-stream",
             )
         return StreamingResponse(
             _remote_ui_file_chunks(machine, path, size, start, end),
             status_code=206 if file_range else 200,
-            headers=headers, media_type="application/octet-stream",
+            headers=headers,
+            media_type="application/octet-stream",
         )
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=416)
@@ -1223,22 +1272,32 @@ async def api_file_upload(request: Request) -> Response:
         if expected < 0:
             raise ValueError("Content-Length is required for binary upload")
         begin = await _machine_dispatch(
-            machine, lambda: transfer_begin_write(path, False, expected),
-            "transfer_begin_write", {"path": path, "overwrite": False, "expected_bytes": expected},
+            machine,
+            lambda: transfer_begin_write(path, False, expected),
+            "transfer_begin_write",
+            {"path": path, "overwrite": False, "expected_bytes": expected},
         )
         transfer_id = str(begin["transfer_id"])
         offset = 0
         digest = hashlib.sha256()
         buffer = bytearray()
+
         async def write_chunk(chunk: bytes, at: int) -> None:
             if machine == "local":
                 await asyncio.to_thread(transfer_write_bytes, path, transfer_id, at, chunk)
             else:
-                await _remote_call(machine, "transfer_write_chunk", {
-                    "path": path, "transfer_id": transfer_id, "offset": at,
-                    "data_b64": base64.b64encode(chunk).decode("ascii"),
-                    "expected_sha256": hashlib.sha256(chunk).hexdigest(),
-                })
+                await _remote_call(
+                    machine,
+                    "transfer_write_chunk",
+                    {
+                        "path": path,
+                        "transfer_id": transfer_id,
+                        "offset": at,
+                        "data_b64": base64.b64encode(chunk).decode("ascii"),
+                        "expected_sha256": hashlib.sha256(chunk).hexdigest(),
+                    },
+                )
+
         async for data in request.stream():
             if offset + len(buffer) + len(data) > expected:
                 raise ValueError("Upload exceeds declared Content-Length")
@@ -1257,9 +1316,15 @@ async def api_file_upload(request: Request) -> Response:
         if offset != expected:
             raise ValueError("Incomplete upload")
         result = await _machine_dispatch(
-            machine, lambda: transfer_finish_write(path, transfer_id, expected, digest.hexdigest()),
-            "transfer_finish_write", {"path": path, "transfer_id": transfer_id,
-                                     "expected_bytes": expected, "expected_sha256": digest.hexdigest()},
+            machine,
+            lambda: transfer_finish_write(path, transfer_id, expected, digest.hexdigest()),
+            "transfer_finish_write",
+            {
+                "path": path,
+                "transfer_id": transfer_id,
+                "expected_bytes": expected,
+                "expected_sha256": digest.hexdigest(),
+            },
         )
         transfer_id = None
         _record_live_human_action(live_id, "file.upload", machine=machine, path=path)
@@ -1268,8 +1333,10 @@ async def api_file_upload(request: Request) -> Response:
         if transfer_id:
             with contextlib.suppress(Exception):
                 await _machine_dispatch(
-                    machine, lambda: transfer_abort_write(path, transfer_id),
-                    "transfer_abort_write", {"path": path, "transfer_id": transfer_id},
+                    machine,
+                    lambda: transfer_abort_write(path, transfer_id),
+                    "transfer_abort_write",
+                    {"path": path, "transfer_id": transfer_id},
                 )
         if isinstance(exc, asyncio.CancelledError):
             raise
@@ -1402,9 +1469,7 @@ async def api_gui_frame(request: Request) -> Response:
         window = data.get("window") if isinstance(data.get("window"), dict) else {}
         bounds = window.get("bounds") if isinstance(window.get("bounds"), dict) else {}
         capabilities = (
-            data.get("capabilities")
-            if isinstance(data.get("capabilities"), dict)
-            else {}
+            data.get("capabilities") if isinstance(data.get("capabilities"), dict) else {}
         )
         headers = {
             "Cache-Control": "no-store",
@@ -1414,9 +1479,7 @@ async def api_gui_frame(request: Request) -> Response:
             "X-LSM-GUI-Window-Height": str(bounds.get("height") or 0),
             "X-LSM-GUI-Backend": str(data.get("backend") or ""),
             "X-LSM-GUI-Observation-ID": str(data.get("observation_id") or ""),
-            "X-LSM-GUI-Observation-TTL-S": str(
-                data.get("observation_ttl_s") or 0
-            ),
+            "X-LSM-GUI-Observation-TTL-S": str(data.get("observation_ttl_s") or 0),
             "X-LSM-GUI-Coordinate-Input": (
                 "1" if capabilities.get("coordinate_input") is True else "0"
             ),
@@ -1498,8 +1561,7 @@ async def api_gui_action(request: Request) -> Response:
         from .tools import GuiAction
 
         actions = [
-            GuiAction.model_validate(item).model_dump(exclude_none=True)
-            for item in raw_actions
+            GuiAction.model_validate(item).model_dump(exclude_none=True) for item in raw_actions
         ]
         if machine == "local":
             from .gui import get_gui_manager
@@ -1585,7 +1647,9 @@ async def api_terminal_action(request: Request) -> Response:
             }
             result = await _machine_dispatch(
                 machine,
-                lambda: start_shell(args["cwd"], args["name"], args["command"], args["idempotency_key"]),
+                lambda: start_shell(
+                    args["cwd"], args["name"], args["command"], args["idempotency_key"]
+                ),
                 "shell_start",
                 args,
             )
@@ -1871,7 +1935,9 @@ async def api_remote_action(request: Request) -> Response:
 
 
 def _websocket_token(websocket: WebSocket) -> str | None:
-    protocols = [item.strip() for item in websocket.headers.get("sec-websocket-protocol", "").split(",")]
+    protocols = [
+        item.strip() for item in websocket.headers.get("sec-websocket-protocol", "").split(",")
+    ]
     for protocol in protocols:
         if not protocol.startswith("bearer."):
             continue
@@ -1975,7 +2041,10 @@ def tui_runtime_available() -> bool:
     command = get_settings().ui_tui_command
     if command:
         try:
-            return shutil.which(_split_tui_command(command)[0]) is not None
+            executable = _split_tui_command(command)[0]
+            return (os.name == "nt" and Path(executable).is_file()) or shutil.which(
+                executable
+            ) is not None
         except ValueError:
             return False
     if embedded_tui_payload() is not None:
@@ -2099,11 +2168,7 @@ class _UnixPtyProcess:
         if code is not None:
             return int(code)
         try:
-            return int(
-                await asyncio.wait_for(
-                    asyncio.to_thread(self.process.wait), timeout=0.25
-                )
-            )
+            return int(await asyncio.wait_for(asyncio.to_thread(self.process.wait), timeout=0.25))
         except TimeoutError:
             return None
 
@@ -2238,7 +2303,9 @@ class _PollingShellProcess:
         self._last_output: str | None = None
         self._consecutive_errors = 0
 
-    async def _dispatch(self, local_call: Callable[[], Any | Awaitable[Any]], tool: str, args: dict[str, Any]) -> Any:
+    async def _dispatch(
+        self, local_call: Callable[[], Any | Awaitable[Any]], tool: str, args: dict[str, Any]
+    ) -> Any:
         return await _machine_dispatch(self.machine, local_call, tool, args)
 
     async def read(self) -> bytes:
@@ -2259,7 +2326,11 @@ class _PollingShellProcess:
                 await asyncio.sleep(0.25)
                 continue
 
-            output = str((result or {}).get("output") or "") if isinstance(result, dict) else str(result or "")
+            output = (
+                str((result or {}).get("output") or "")
+                if isinstance(result, dict)
+                else str(result or "")
+            )
             if output != self._last_output:
                 self._last_output = output
                 return ("\x1b[?25l\x1b[3J\x1b[H\x1b[2J" + output + "\x1b[?25h").encode(
@@ -2296,7 +2367,9 @@ class _PollingShellProcess:
 
 async def _spawn_shell_process(machine: str, session_id: str, cols: int, rows: int):  # noqa: ANN201
     sessions = await _machine_dispatch(machine, list_shells, "shell_list", {})
-    rows_payload = list((sessions or {}).get("sessions") or []) if isinstance(sessions, dict) else []
+    rows_payload = (
+        list((sessions or {}).get("sessions") or []) if isinstance(sessions, dict) else []
+    )
     session = next(
         (row for row in rows_payload if str(row.get("session_id") or "") == session_id),
         None,
@@ -2331,13 +2404,19 @@ async def _spawn_shell_process(machine: str, session_id: str, cols: int, rows: i
             )
             process._tmux_session_id = session_id
             return process
-    if machine != "local" and backend.startswith("tmux-") and not _machine_uses_windows_paths(machine):
+    if (
+        machine != "local"
+        and backend.startswith("tmux-")
+        and not _machine_uses_windows_paths(machine)
+    ):
         from .remote_terminal_stream import open_remote_terminal
 
         try:
             return await open_remote_terminal(machine, session_id, cols, rows)
         except Exception:
-            _LOGGER.debug("Remote PTY transport unavailable, using snapshot compatibility mode", exc_info=True)
+            _LOGGER.debug(
+                "Remote PTY transport unavailable, using snapshot compatibility mode", exc_info=True
+            )
     return _PollingShellProcess(machine, session_id, cols, rows)
 
 
@@ -2364,9 +2443,7 @@ def _parse_tmux_scrollback_state(parts: list[str]) -> dict[str, Any]:
     }
 
 
-async def _tmux_scrollback_state(
-    process: Any, pane_id: str | None = None
-) -> dict[str, Any]:
+async def _tmux_scrollback_state(process: Any, pane_id: str | None = None) -> dict[str, Any]:
     session_id = getattr(process, "_tmux_session_id", None)
     if not session_id:
         return {
@@ -2406,7 +2483,9 @@ async def _tmux_scrollback_baseline(process: Any) -> tuple[dict[str, Any], str]:
         ]
     )
     if not result.ok:
-        raise RuntimeError(result.stderr or result.stdout or "Unable to read tmux scrollback baseline")
+        raise RuntimeError(
+            result.stderr or result.stdout or "Unable to read tmux scrollback baseline"
+        )
     parts = result.stdout.rstrip("\r\n").split("\t")
     if len(parts) != 4 or not parts[0].startswith("%"):
         raise RuntimeError("Unexpected tmux scrollback baseline")
@@ -2433,7 +2512,9 @@ async def _tmux_scroll_to(
                 ["send-keys", "-X", "-t", tmux_target, "cancel"]
             )
             if not result.ok:
-                raise RuntimeError(result.stderr or result.stdout or "Unable to leave tmux copy mode")
+                raise RuntimeError(
+                    result.stderr or result.stdout or "Unable to leave tmux copy mode"
+                )
         return await _tmux_scrollback_state(process, pane_id)
 
     if target == current and copy_mode:
@@ -2471,11 +2552,11 @@ async def _tmux_restore_copy_mode_position(
         result = await _tmux_scrollback_command(["copy-mode", "-t", target])
         if not result.ok:
             raise RuntimeError(result.stderr or result.stdout or "Unable to restore tmux copy mode")
-    result = await _tmux_scrollback_command(
-        ["send-keys", "-X", "-t", target, "history-bottom"]
-    )
+    result = await _tmux_scrollback_command(["send-keys", "-X", "-t", target, "history-bottom"])
     if not result.ok:
-        raise RuntimeError(result.stderr or result.stdout or "Unable to restore tmux scrollback position")
+        raise RuntimeError(
+            result.stderr or result.stdout or "Unable to restore tmux scrollback position"
+        )
     if requested:
         result = await _tmux_scrollback_command(
             ["send-keys", "-N", str(requested), "-X", "-t", target, "scroll-up"]
@@ -2514,9 +2595,7 @@ async def _tmux_restore_attachment_baseline(
         if group.owned_copy_mode and copy_mode:
             await _tmux_scroll_to(process, 0, group.pane_id)
     elif not copy_mode or position != group.initial_position:
-        await _tmux_restore_copy_mode_position(
-            process, group.initial_position, group.pane_id
-        )
+        await _tmux_restore_copy_mode_position(process, group.initial_position, group.pane_id)
     group.owned_copy_mode = False
 
 
@@ -2651,9 +2730,7 @@ async def _tmux_claim_scrollback_state(
 ) -> dict[str, Any]:
     _, group = registration
     async with group.lock:
-        return await _tmux_sync_attachment_pane(
-            process, group, claim_copy_mode=True
-        )
+        return await _tmux_sync_attachment_pane(process, group, claim_copy_mode=True)
 
 
 async def _tmux_write_terminal_input(
@@ -2763,9 +2840,7 @@ def run_tui_cli(argv: list[str] | None = None) -> None:
     raise SystemExit(completed.returncode)
 
 
-def _idle_timeout_remaining(
-    last_activity: float, idle_timeout: float, now: float
-) -> float:
+def _idle_timeout_remaining(last_activity: float, idle_timeout: float, now: float) -> float:
     return max(0.0, idle_timeout - max(0.0, now - last_activity))
 
 
@@ -2798,7 +2873,9 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
         return
     _ACTIVE_UI_TERMINALS.add(marker)
 
-    offered = [item.strip() for item in websocket.headers.get("sec-websocket-protocol", "").split(",")]
+    offered = [
+        item.strip() for item in websocket.headers.get("sec-websocket-protocol", "").split(",")
+    ]
     subprotocol = UI_SUBPROTOCOL if UI_SUBPROTOCOL in offered else None
     try:
         await websocket.accept(subprotocol=subprotocol)
@@ -2853,9 +2930,7 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
             data = await process.read()
             if not data:
                 if await process.exit_code() == 0:
-                    await websocket.close(
-                        code=UI_TUI_EXIT_CODE, reason="TUI process exited"
-                    )
+                    await websocket.close(code=UI_TUI_EXIT_CODE, reason="TUI process exited")
                 return
             last_activity = loop.time()
             await websocket.send_bytes(data)
@@ -2865,26 +2940,16 @@ async def ui_terminal_websocket(websocket: WebSocket) -> None:
         idle_timeout = max(0, settings.ui_terminal_idle_timeout_s)
         while True:
             if idle_timeout:
-                remaining = _idle_timeout_remaining(
-                    last_activity, idle_timeout, loop.time()
-                )
+                remaining = _idle_timeout_remaining(last_activity, idle_timeout, loop.time())
                 if remaining <= 0:
-                    await websocket.close(
-                        code=4408, reason="WebUI terminal session idle timeout"
-                    )
+                    await websocket.close(code=4408, reason="WebUI terminal session idle timeout")
                     return
                 try:
-                    message = await asyncio.wait_for(
-                        websocket.receive(), timeout=remaining
-                    )
+                    message = await asyncio.wait_for(websocket.receive(), timeout=remaining)
                 except TimeoutError:
-                    if _idle_timeout_remaining(
-                        last_activity, idle_timeout, loop.time()
-                    ) > 0:
+                    if _idle_timeout_remaining(last_activity, idle_timeout, loop.time()) > 0:
                         continue
-                    await websocket.close(
-                        code=4408, reason="WebUI terminal session idle timeout"
-                    )
+                    await websocket.close(code=4408, reason="WebUI terminal session idle timeout")
                     return
             else:
                 message = await websocket.receive()
@@ -2957,7 +3022,9 @@ async def ui_shell_websocket(websocket: WebSocket) -> None:
         return
     _ACTIVE_UI_TERMINALS.add(marker)
 
-    offered = [item.strip() for item in websocket.headers.get("sec-websocket-protocol", "").split(",")]
+    offered = [
+        item.strip() for item in websocket.headers.get("sec-websocket-protocol", "").split(",")
+    ]
     subprotocol = UI_SUBPROTOCOL if UI_SUBPROTOCOL in offered else None
     try:
         await websocket.accept(subprotocol=subprotocol)
@@ -2972,9 +3039,7 @@ async def ui_shell_websocket(websocket: WebSocket) -> None:
         "true",
         "yes",
     }
-    live_id = (
-        initial_live_credentials[0] if initial_live_credentials is not None else None
-    )
+    live_id = initial_live_credentials[0] if initial_live_credentials is not None else None
     live_token = initial_live_credentials[1] if initial_live_credentials is not None else None
     try:
         if not session_id:
@@ -3035,6 +3100,7 @@ async def ui_shell_websocket(websocket: WebSocket) -> None:
         remaining = 0.75 - (now - scrollback_updated_at)
         if not force and remaining > 0:
             if scrollback_refresh_task is None or scrollback_refresh_task.done():
+
                 async def delayed_refresh() -> None:
                     nonlocal scrollback_refresh_task
                     try:
@@ -3149,7 +3215,11 @@ async def ui_shell_websocket(websocket: WebSocket) -> None:
                 if asyncio.iscoroutine(resized):
                     await resized
                 await send_scrollback_state()
-            elif scrollback_available and scrollback_registration is not None and control.get("type") == "scrollback":
+            elif (
+                scrollback_available
+                and scrollback_registration is not None
+                and control.get("type") == "scrollback"
+            ):
                 try:
                     state = await _tmux_apply_scrollback_request(
                         process, scrollback_registration, control
@@ -3180,9 +3250,7 @@ async def ui_shell_websocket(websocket: WebSocket) -> None:
                 and control.get("type") == "scrollback-sync"
             ):
                 try:
-                    state = await _tmux_claim_scrollback_state(
-                        process, scrollback_registration
-                    )
+                    state = await _tmux_claim_scrollback_state(process, scrollback_registration)
                 except Exception:
                     _LOGGER.debug(
                         "Unable to synchronize Native WebUI terminal scrollback",
@@ -3232,9 +3300,14 @@ async def api_hosted_chat(request: Request) -> Response:
     try:
         settings = get_settings()
         if not settings.hosted_chat_enabled or settings.mode == "http":
-            raise HTTPException(status_code=404, detail="Hosted Chat requires an MCP-enabled controller")
+            raise HTTPException(
+                status_code=404, detail="Hosted Chat requires an MCP-enabled controller"
+            )
         if settings.state_backend == "memory":
-            raise HTTPException(status_code=503, detail="Hosted Chat requires persistent file or Redis state storage")
+            raise HTTPException(
+                status_code=503,
+                detail="Hosted Chat requires persistent file or Redis state storage",
+            )
         _require_ui_scopes(request, "shell:read")
         from .hosted_chat_store import hosted_chat_runner, hosted_chat_store
 
@@ -3251,7 +3324,8 @@ async def api_hosted_chat(request: Request) -> Response:
                 result = await asyncio.to_thread(hosted_chat_store.archived_conversations, subject)
             elif action == "archive":
                 result = await asyncio.to_thread(
-                    hosted_chat_store.archived_conversation, subject,
+                    hosted_chat_store.archived_conversation,
+                    subject,
                     str(request.query_params.get("id") or ""),
                 )
             elif action == "conversation":
@@ -3278,8 +3352,10 @@ async def api_hosted_chat(request: Request) -> Response:
                     get_session_runtime_manager().get, session_id, subject=subject
                 )
             result = await asyncio.to_thread(
-                hosted_chat_store.create_conversation, subject,
-                profile_id=str(data["profile_id"]), session_id=session_id,
+                hosted_chat_store.create_conversation,
+                subject,
+                profile_id=str(data["profile_id"]),
+                session_id=session_id,
             )
         elif action == "conversation-compact":
             result = await hosted_chat_store.compact_conversation(subject, str(data["id"]))
@@ -3306,6 +3382,7 @@ async def api_hosted_chat(request: Request) -> Response:
             await asyncio.to_thread(hosted_chat_store.delete_conversation, subject, cid)
             result = {}
         elif action == "conversation-update":
+
             def change(record: dict) -> dict:
                 if record["status"] == "running":
                     raise ValueError("Cannot modify a running conversation")
@@ -3321,8 +3398,11 @@ async def api_hosted_chat(request: Request) -> Response:
                         get_session_runtime_manager().get(session_id, subject=subject)
                     record["session_id"] = session_id
                 return record
+
             result = await asyncio.to_thread(
-                hosted_chat_store.update_conversation, subject, str(data["id"]),
+                hosted_chat_store.update_conversation,
+                subject,
+                str(data["id"]),
                 updater=change,
             )
         elif action == "send":
@@ -3330,14 +3410,23 @@ async def api_hosted_chat(request: Request) -> Response:
             if get_settings().auth_mode != "none" and not bearer.startswith("Bearer "):
                 raise HTTPException(status_code=401, detail="OAuth bearer token required")
             settings = get_settings()
-            host = "[::1]" if settings.host in {"::", "[::]"} else "127.0.0.1" if settings.host == "0.0.0.0" else settings.host
+            host = (
+                "[::1]"
+                if settings.host in {"::", "[::]"}
+                else "127.0.0.1"
+                if settings.host == "0.0.0.0"
+                else settings.host
+            )
             if ":" in host and not host.startswith("["):
                 host = f"[{host}]"
             from .oauth import public_base_url
 
             result = await hosted_chat_runner.start(
-                subject, str(data["id"]), str(data.get("text") or ""),
-                f"http://{host}:{settings.port}", bearer,
+                subject,
+                str(data["id"]),
+                str(data.get("text") or ""),
+                f"http://{host}:{settings.port}",
+                bearer,
                 public_origin=public_base_url(request) if settings.auth_mode == "oauth" else None,
             )
         elif action == "stop":
@@ -3350,31 +3439,43 @@ async def api_hosted_chat(request: Request) -> Response:
             if get_settings().auth_mode != "none" and not bearer.startswith("Bearer "):
                 raise HTTPException(status_code=401, detail="OAuth bearer token required")
             settings = get_settings()
-            host = "[::1]" if settings.host in {"::", "[::]"} else "127.0.0.1" if settings.host == "0.0.0.0" else settings.host
+            host = (
+                "[::1]"
+                if settings.host in {"::", "[::]"}
+                else "127.0.0.1"
+                if settings.host == "0.0.0.0"
+                else settings.host
+            )
             if ":" in host and not host.startswith("["):
                 host = f"[{host}]"
             base_url = f"http://{host}:{settings.port}"
             from .oauth import public_base_url
 
             origin_arg = (
-                {"public_origin": public_base_url(request)}
-                if settings.auth_mode == "oauth" else {}
+                {"public_origin": public_base_url(request)} if settings.auth_mode == "oauth" else {}
             )
             if action == "tool":
-                if str(data.get("name") or "") not in {"workspace_open", "live_workspace_reconnect"}:
-                    raise PermissionError("Only Workspace app tools are available to the host bridge")
+                if str(data.get("name") or "") not in {
+                    "workspace_open",
+                    "live_workspace_reconnect",
+                }:
+                    raise PermissionError(
+                        "Only Workspace app tools are available to the host bridge"
+                    )
                 if not isinstance(data.get("arguments"), dict):
                     raise ValueError("Tool arguments must be an object")
                 result = await hosted_chat.call_mcp(
-                    base_url, bearer, str(data["name"]), data["arguments"], **origin_arg,
+                    base_url,
+                    bearer,
+                    str(data["name"]),
+                    data["arguments"],
+                    **origin_arg,
                 )
             else:
                 uri = str(data.get("uri") or "")
                 if not uri.startswith("ui://local-shell-mcp/live-workspace"):
                     raise PermissionError("Unknown MCP App resource")
-                result = await hosted_chat.read_mcp_resource(
-                    base_url, bearer, uri, **origin_arg
-                )
+                result = await hosted_chat.read_mcp_resource(base_url, bearer, uri, **origin_arg)
         else:
             raise HTTPException(status_code=404, detail="Unknown Hosted Chat action")
         return _json_ok(result)
@@ -3387,6 +3488,7 @@ async def api_hosted_chat(request: Request) -> Response:
         return _json_error(
             HTTPException(status_code=502, detail="Hosted Chat storage or MCP request failed")
         )
+
 
 async def ui_desktop_websocket(websocket: WebSocket) -> None:
     """Dedicated human control channel; frames/actions are not tool calls."""
@@ -3426,7 +3528,9 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
     live_credentials = _live_websocket_credentials(websocket)
     # Reserve capacity before the websocket handshake yields.
     STREAMS[stream.key] = stream
-    protocols = [item.strip() for item in websocket.headers.get("sec-websocket-protocol", "").split(",")]
+    protocols = [
+        item.strip() for item in websocket.headers.get("sec-websocket-protocol", "").split(",")
+    ]
     try:
         await websocket.accept(subprotocol=UI_SUBPROTOCOL if UI_SUBPROTOCOL in protocols else None)
     except BaseException:
@@ -3452,7 +3556,9 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
                 metadata = dict(metadata)
                 queued_at = metadata.pop("_queued_at", time.monotonic())
                 metadata["ttl_s"] = max(0.0, metadata["ttl_s"] - (time.monotonic() - queued_at))
-            await websocket.send_text(json.dumps({**metadata, "image": bool(image)}, separators=(",", ":")))
+            await websocket.send_text(
+                json.dumps({**metadata, "image": bool(image)}, separators=(",", ":"))
+            )
             if image:
                 await websocket.send_bytes(image)
 
@@ -3462,8 +3568,11 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
             action_type = stream.pending_live_actions.pop(ack.get("request_id"), None)
             if ack.get("ok") is True and action_type and live_credentials is not None:
                 _record_live_human_action(
-                    live_credentials[0], "gui.action",
-                    machine=machine, window_id=window_id, actions=[action_type],
+                    live_credentials[0],
+                    "gui.action",
+                    machine=machine,
+                    window_id=window_id,
+                    actions=[action_type],
                 )
             await send_control(ack)
 
@@ -3471,23 +3580,33 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
         while True:
             await asyncio.sleep(DESKTOP_CREDENTIAL_WATCH_INTERVAL_S)
             if not live_credential_valid():
-                await websocket.close(code=4401, reason="Live workspace credential expired or rotated")
+                await websocket.close(
+                    code=4401, reason="Live workspace credential expired or rotated"
+                )
                 return
 
     async def sender() -> None:
         if is_remote:
             await _remote_call(
-                machine, "gui_stream_start",
+                machine,
+                "gui_stream_start",
                 {"stream_id": stream.key, "secret": stream.secret, "window_id": window_id},
                 int(REMOTE_QUEUE_TIMEOUT_S + 180 + REMOTE_RESULT_GRACE_S),
             )
             await send_control({"type": "ready"})
             while True:
                 try:
-                    metadata, image = await asyncio.wait_for(stream.frames.get(), timeout=DESKTOP_FRAME_WAIT_S)
+                    metadata, image = await asyncio.wait_for(
+                        stream.frames.get(), timeout=DESKTOP_FRAME_WAIT_S
+                    )
                 except TimeoutError:
-                    if stream.last_contact is not None and time.monotonic() - stream.last_contact > STREAM_IDLE_S:
-                        await send_control({"type": "error", "message": "Remote desktop worker stopped responding"})
+                    if (
+                        stream.last_contact is not None
+                        and time.monotonic() - stream.last_contact > STREAM_IDLE_S
+                    ):
+                        await send_control(
+                            {"type": "error", "message": "Remote desktop worker stopped responding"}
+                        )
                         return
                     await send_control({"type": "heartbeat"})
                     continue
@@ -3496,10 +3615,13 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
                     return
         else:
             from .gui import get_gui_manager
+
             nonlocal manager
             manager = get_gui_manager()
             await send_control({"type": "ready"})
-            focus_sensitive = (await manager.list_windows()).get("capabilities", {}).get("capture_requires_focus") is True
+            focus_sensitive = (await manager.list_windows()).get("capabilities", {}).get(
+                "capture_requires_focus"
+            ) is True
             refresh_event = asyncio.Event()
             refresh_event.set()
             stream.refresh_event = refresh_event
@@ -3523,7 +3645,9 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
                     digest = hashlib.blake2s(image).digest()
                     force_frame = stream.force_frame
                     stream.force_frame = False
-                    await emit(frame_metadata(data), image if digest != last_digest or force_frame else b"")
+                    await emit(
+                        frame_metadata(data), image if digest != last_digest or force_frame else b""
+                    )
                     last_digest = digest
                     await asyncio.sleep(max(0.05, FRAME_INTERVAL_S - (time.monotonic() - started)))
             finally:
@@ -3533,12 +3657,15 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
 
     async def receiver() -> None:
         from .tools import GuiAction
+
         while True:
             message = await websocket.receive()
             if message["type"] == "websocket.disconnect":
                 return
             if not live_credential_valid():
-                await websocket.close(code=4401, reason="Live workspace credential expired or rotated")
+                await websocket.close(
+                    code=4401, reason="Live workspace credential expired or rotated"
+                )
                 return
             raw = message.get("text")
             if not isinstance(raw, str) or len(raw) > 16_384:
@@ -3554,23 +3681,42 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
                     continue
                 if control.get("type") != "action":
                     continue
-                action = GuiAction.model_validate(control.get("action")).model_dump(exclude_none=True)
+                action = GuiAction.model_validate(control.get("action")).model_dump(
+                    exclude_none=True
+                )
                 observation_id = control["observation_id"]
                 bounds = control["bounds"]
-                if not isinstance(observation_id, str) or len(observation_id) > 128 or not isinstance(bounds, dict):
+                if (
+                    not isinstance(observation_id, str)
+                    or len(observation_id) > 128
+                    or not isinstance(bounds, dict)
+                ):
                     raise ValueError("Invalid desktop observation")
                 entry = {"observation_id": observation_id, "bounds": bounds, "action": action}
                 request_id = control.get("request_id")
-                if isinstance(request_id, int) and not isinstance(request_id, bool) and 0 < request_id < 2**53:
+                if (
+                    isinstance(request_id, int)
+                    and not isinstance(request_id, bool)
+                    and 0 < request_id < 2**53
+                ):
                     entry["request_id"] = request_id
                 else:
                     request_id = None
                 if is_remote:
                     if stream.actions.full():
                         if request_id is not None:
-                            stream.acknowledgements.put_nowait({"type": "action-ack", "request_id": request_id, "ok": False, "message": "Desktop input queue is full"})
+                            stream.acknowledgements.put_nowait(
+                                {
+                                    "type": "action-ack",
+                                    "request_id": request_id,
+                                    "ok": False,
+                                    "message": "Desktop input queue is full",
+                                }
+                            )
                         else:
-                            await send_control({"type": "error", "message": "Desktop input queue is full"})
+                            await send_control(
+                                {"type": "error", "message": "Desktop input queue is full"}
+                            )
                     else:
                         stream.actions.put_nowait(entry)
                         if request_id is not None and live_credentials is not None:
@@ -3583,26 +3729,53 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
                             stream.refresh_event.set()
                     except Exception as exc:
                         if request_id is not None:
-                            stream.acknowledgements.put_nowait({"type": "action-ack", "request_id": request_id, "ok": False, "refresh": True, "message": str(exc)[:240]})
+                            stream.acknowledgements.put_nowait(
+                                {
+                                    "type": "action-ack",
+                                    "request_id": request_id,
+                                    "ok": False,
+                                    "refresh": True,
+                                    "message": str(exc)[:240],
+                                }
+                            )
                         else:
                             await send_control({"type": "error", "message": str(exc)[:240]})
                     else:
                         _record_live_human_action(
                             live_credentials[0] if live_credentials is not None else None,
-                            "gui.action", machine=machine, window_id=window_id,
+                            "gui.action",
+                            machine=machine,
+                            window_id=window_id,
                             actions=[str(action.get("type") or "")],
                         )
                         if request_id is not None:
-                            stream.acknowledgements.put_nowait({"type": "action-ack", "request_id": request_id, "ok": True})
+                            stream.acknowledgements.put_nowait(
+                                {"type": "action-ack", "request_id": request_id, "ok": True}
+                            )
             except (KeyError, TypeError, ValueError) as exc:
                 request_id = control.get("request_id") if isinstance(control, dict) else None
-                if (isinstance(control, dict) and control.get("type") == "action"
-                        and isinstance(request_id, int) and not isinstance(request_id, bool)):
-                    await send_control({"type": "action-ack", "request_id": request_id, "ok": False, "message": str(exc)[:240]})
+                if (
+                    isinstance(control, dict)
+                    and control.get("type") == "action"
+                    and isinstance(request_id, int)
+                    and not isinstance(request_id, bool)
+                ):
+                    await send_control(
+                        {
+                            "type": "action-ack",
+                            "request_id": request_id,
+                            "ok": False,
+                            "message": str(exc)[:240],
+                        }
+                    )
                 else:
                     await send_control({"type": "error", "message": str(exc)[:240]})
 
-    tasks = [asyncio.create_task(sender()), asyncio.create_task(receiver()), asyncio.create_task(ack_sender())]
+    tasks = [
+        asyncio.create_task(sender()),
+        asyncio.create_task(receiver()),
+        asyncio.create_task(ack_sender()),
+    ]
     if live_credentials is not None:
         tasks.append(asyncio.create_task(credential_watcher()))
     try:
@@ -3613,7 +3786,9 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
         for task in done:
             if not task.cancelled() and task.exception() is not None:
                 with contextlib.suppress(RuntimeError, WebSocketDisconnect):
-                    await websocket.send_text(json.dumps({"type": "error", "message": str(task.exception())[:240]}))
+                    await websocket.send_text(
+                        json.dumps({"type": "error", "message": str(task.exception())[:240]})
+                    )
     finally:
         STREAMS.pop(stream.key, None)
         if is_remote:
@@ -3621,7 +3796,6 @@ async def ui_desktop_websocket(websocket: WebSocket) -> None:
                 await _remote_call(machine, "gui_stream_stop", {"stream_id": stream.key}, 15)
         with contextlib.suppress(RuntimeError, WebSocketDisconnect):
             await websocket.close()
-
 
 
 def ui_routes() -> list[Any]:
@@ -3647,7 +3821,9 @@ def ui_routes() -> list[Any]:
         Route(UI_API_PREFIX + "/files/preview", api_file_preview, methods=["GET"]),
         Route(UI_API_PREFIX + "/files/content", api_file_content, methods=["GET"]),
         Route(UI_API_PREFIX + "/files/download-ticket", api_file_download_ticket, methods=["POST"]),
-        Route(UI_API_PREFIX + "/files/download/{token}", api_file_download, methods=["GET", "HEAD"]),
+        Route(
+            UI_API_PREFIX + "/files/download/{token}", api_file_download, methods=["GET", "HEAD"]
+        ),
         Route(UI_API_PREFIX + "/files/upload", api_file_upload, methods=["POST"]),
         Route(UI_API_PREFIX + "/files/{action}", api_file_action, methods=["POST"]),
         Route(UI_API_PREFIX + "/gui/windows", api_gui_windows, methods=["GET"]),
@@ -3662,8 +3838,14 @@ def ui_routes() -> list[Any]:
         Route(UI_API_PREFIX + "/terminals/read", api_terminal_read, methods=["GET"]),
         Route(UI_API_PREFIX + "/terminals/{action}", api_terminal_action, methods=["POST"]),
         Route(UI_API_PREFIX + "/logical-sessions", api_logical_sessions, methods=["GET"]),
-        Route(UI_API_PREFIX + "/logical-sessions/detail", api_logical_session_detail, methods=["GET"]),
-        Route(UI_API_PREFIX + "/logical-sessions/{action}", api_logical_session_action, methods=["POST"]),
+        Route(
+            UI_API_PREFIX + "/logical-sessions/detail", api_logical_session_detail, methods=["GET"]
+        ),
+        Route(
+            UI_API_PREFIX + "/logical-sessions/{action}",
+            api_logical_session_action,
+            methods=["POST"],
+        ),
         Route(UI_API_PREFIX + "/audit", api_audit, methods=["GET"]),
         Route(UI_API_PREFIX + "/audit/detail", api_audit_detail, methods=["GET"]),
         Route(UI_API_PREFIX + "/remotes", api_remotes, methods=["GET", "POST"]),
