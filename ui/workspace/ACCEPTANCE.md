@@ -107,12 +107,12 @@ as soon as permissions change. This remains an acceptance blocker. Arbitrary
 | --- | --- | --- |
 | Python + SQLite single service | Native Python routes; React build embedded for Controller; no Node or Mongo service at runtime | Full distribution acceptance on current head |
 | Providers | OpenAI-compatible, Anthropic, Gemini text SSE; native tool SSE adapters for all three | New Anthropic/Gemini adapters tested with mock HTTP/SSE; live vendor validation and advanced thinking/multimodal variants pending |
-| Tool execution | Original MCP registry, permission filtering and original executor; durable stream steps | Full rich/non-text MCP result rendering; history endpoint still incomplete |
-| Agents/subagents/handoff | Owner-scoped configured child lookup, bounded delegation, persisted lifecycle and handoff events | Child tool execution, richer context transfer, complete retained editor/runtime contract |
+| Tool execution | Original MCP registry/executor; source tool step/completion fields; tool cards/results retained in history and verified after React reload | Full rich/non-text MCP results and complete event-actor lifecycle |
+| Agents/subagents/handoff | Original optional subagent config/schema, isolated shared native child executor; original transfer tools switch the current Agent; owned Builder validation/references | Graph teams, parallel handoff recipients, background/child threads, full actor/progress/resume manifest parity |
 | Ask User | Source-ported 1–4 question schema and ID-keyed answers; original React batch interaction verified | Full graph checkpoint/retained-answer/admin gating parity |
-| Nested MCP | Existing discovery/config/execution; durable human approval | Batched/edited/remembered approvals and complete management UI walkthrough |
+| Nested MCP | Existing registry discovery/config/execution; optional source endpoint approval policy; durable batch decisions and native edited/rejected execution | Full hook/eager policy layers, remembered review/context semantics and management UI walkthrough |
 | Conversations/projects | CRUD, search, archive, fork, complete message graph, project aliases, active-branch model history | Comprehensive retained-client contract suite, search/prompt/preset/tag parity |
-| Context | Bounded active ancestry; persistent generation replay and orphan recovery | Automatic/manual semantic compact, context checkpoint recovery and memories |
+| Context | Active ancestry; owned SQLite node cursor/pending writes, sibling-result replay, completed-node restart tests | Full graph actor/orphan continuation, automatic/manual semantic compact and memories |
 | Attachments | Controller private directory, real local path, owner metadata; streaming size/path checks | Full project/remote attachment lifecycle and deletion/download browser coverage |
 | Native control pages | Reuse existing Python Files/Terminal/GUI/Remote/Settings/Audit handlers | End-to-end validation of each page, GUI permissions and mobile/dark-mode walkthrough |
 | SQLite migration | Default backend; transactional incremental legacy import; original files retained; DB writes win over old files | Production-scale legacy snapshot, rollback rehearsal, oversized legacy entry policy |
@@ -129,6 +129,9 @@ as soon as permissions change. This remains an acceptance blocker. Arbitrary
 - React production build and TypeScript check: passed before restored tests;
   source-aligned Zod/declaration/path build and type-check now pass with tests included.
 - Native UI PTY smoke and browser smoke: passed after local dependency build.
+- Shared-runtime local full gate: **2287 passed, 2 skipped**, **95.30% total**, all modules at least90%; HTTP/MCP/PTY/browser smoke passed.
+- Original React Ask User plus native tool card/output/reload E2E: **2 passed** (native variant added after that full collection).
+- CI at `f9480228` and `20830300` passed all platforms before these newer runtime changes.
 - Current full regression, branch coverage gate, updated React/browser CI and
   release matrix: consult the current PR checks; previous green runs do not
   validate later source changes. Do not lower 95% total / 90% per-module gates.

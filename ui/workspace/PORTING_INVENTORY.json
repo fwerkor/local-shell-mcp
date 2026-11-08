@@ -438,7 +438,7 @@
       "python_lsm": "webui/generation_routes.py:_run_model",
       "status": "部分",
       "reviewed_mapping": true,
-      "difference": "手工生成部分事件，非原版callbacks完整移植"
+      "difference": "工具name/args/completion/result字段对齐React并持久化；完整callbacks、子运行progress和actor生命周期未全部移植"
     },
     {
       "repository": "LibreChat",
@@ -510,7 +510,7 @@
       "python_lsm": "webui/generation_routes.py:resume_generation",
       "status": "部分",
       "reviewed_mapping": true,
-      "difference": "当前仅单action及自研resumeHistory；无原版checkpoint/actor恢复链"
+      "difference": "批审批claim、已审核证据、owner/generation checkpoint与pending tools重放已接入；完整actor/steer/子中断聚合仍缺失"
     },
     {
       "repository": "LibreChat",
@@ -6150,10 +6150,10 @@
       "repository": "LibreChat",
       "path": "client/src/components/SidePanel/Agents/Advanced/AgentSubagents.tsx",
       "sha256": "ed394ccdae6cb3f9cd0db858a1d4acbf8a00dfe2635328c693fde643ef5f38d1",
-      "python_lsm": "ui/workspace/client/src/components/SidePanel/Agents/Advanced/AgentSubagents.tsx",
+      "python_lsm": "ui/workspace/client/src/components/SidePanel/Agents/Advanced/AgentSubagents.tsx; webui/subagents.py",
       "status": "部分",
       "reviewed_mapping": true,
-      "difference": "原React配置保留；Python目前误读为id数组"
+      "difference": "原版配置保留，Python已正确消费enabled/allowSelf/agent_ids；graph子团队尚未执行"
     },
     {
       "repository": "LibreChat",
@@ -7824,10 +7824,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/checkpointer.ts",
       "sha256": "63f0390a025a550ec4a572145f6db7dcb190797d181ac11d0bb707f364d75302",
-      "python_lsm": "sqlite_store.py; webui/generations.py",
+      "python_lsm": "webui/checkpoints.py; agent_runner.py",
       "status": "部分",
       "reviewed_mapping": true,
-      "difference": "SQLite保存事件与history不等于LangGraph checkpoint/channel/task语义"
+      "difference": "统一SQLite tuple/pending-write存储、owner/generation隔离、proposal/结果/完成状态恢复已接入；完整LangChain类序列化与graph actor链未实现"
     },
     {
       "repository": "LibreChat",
@@ -16050,10 +16050,10 @@
       "repository": "LibreChat",
       "path": "packages/data-schemas/src/schema/agent.ts",
       "sha256": "c085d6ac3aaa1f69adc6eef942a1086cbd38397ad12fa4a05683cbd9d9c48ead",
-      "python_lsm": "webui/agents.py",
+      "python_lsm": "webui/agents.py; agent_validation.py",
       "status": "部分",
       "reviewed_mapping": true,
-      "difference": "保存部分JSON字段；原版验证/继承/version/图配置未完整移植"
+      "difference": "原版HTTP validation.ts、参数sanitizer与owner引用约束已移植；完整资源能力/模型catalog/skill加载策略仍不完整"
     },
     {
       "repository": "LibreChat",
@@ -17121,19 +17121,19 @@
       "repository": "agents",
       "path": "src/graphs/Graph.ts",
       "sha256": "6b86604cdc1eb48873217561697f2e31538aea8ade1c8c78f76da6f31c5ceaae",
-      "python_lsm": "webui/generation_routes.py",
-      "status": "未实现",
+      "python_lsm": "webui/agent_runtime.py; agent_runner.py",
+      "status": "部分",
       "reviewed_mapping": true,
-      "difference": "当前手写循环不是源码级图执行移植"
+      "difference": "标准model/tools节点循环与checkpoint游标已接入；summary节点、完整reducers/actor事件与breaker仍不完整"
     },
     {
       "repository": "agents",
       "path": "src/graphs/MultiAgentGraph.ts",
       "sha256": "f1f76b86d07833f6635d27eb77d599361c1be7487317ee2cdd54ff5c16e09a55",
-      "python_lsm": "webui/delegation.py",
-      "status": "未实现",
+      "python_lsm": "webui/handoff.py; agent_runner.py",
+      "status": "部分",
       "reviewed_mapping": true,
-      "difference": "handoff机制未等价"
+      "difference": "原生transfer工具与单目标Agent切换已接入；parallel Send、direct-edge fanout/fanin尚未完整集成"
     },
     {
       "repository": "agents",
@@ -17175,10 +17175,10 @@
       "repository": "agents",
       "path": "src/graphs/handoff.ts",
       "sha256": "0c9b395137b86f4fc6e217284445fd821582808b0f42d497017328e75754d173",
-      "python_lsm": "webui/delegation.py",
-      "status": "未实现",
+      "python_lsm": "webui/handoff.py; agent_runner.py",
+      "status": "部分",
       "reviewed_mapping": true,
-      "difference": "缺预算、作用域、幂等transition、持久handoff结果"
+      "difference": "路由预算/transition幂等/状态已源码差分验证并接入单目标切换；全图并行调度仍待完成"
     },
     {
       "repository": "agents",
@@ -17211,19 +17211,19 @@
       "repository": "agents",
       "path": "src/hitl/askUserQuestions.ts",
       "sha256": "22c16a1873982a6a7c473541ae900ccff9baa50e401f7ebf36a756f7a521afb6",
-      "python_lsm": "webui/ask_user_tools.py; generations.py",
-      "status": "未实现",
+      "python_lsm": "webui/ask_user_tools.py; agent_runner.py; checkpoints.py",
+      "status": "部分",
       "reviewed_mapping": true,
-      "difference": "应完整保留1–4问题和按id回答，不是拼接自由字符串"
+      "difference": "原schema/批答案/恢复校验和checkpoint pending-call重放已接入；子中断聚合、retained answers与完整actor链未完成"
     },
     {
       "repository": "agents",
       "path": "src/hitl/askUserQuestionsInterrupt.ts",
       "sha256": "073f202835da2625cc430f62bea92c4241c56b63a2946ab25a26fc4634f72bca",
       "python_lsm": "webui/ask_user_tools.py",
-      "status": "未实现",
+      "status": "部分",
       "reviewed_mapping": true,
-      "difference": "当前未移植原版类型守卫"
+      "difference": "原请求校验、payload与批次UI已验证；完整SDK图级中断/恢复语义仍待补齐"
     },
     {
       "repository": "agents",
@@ -18471,19 +18471,19 @@
       "repository": "agents",
       "path": "src/tools/SubagentTool.ts",
       "sha256": "b8bb7584c42a92af212b479e753e0f5aeae5c5e9961eb218bf1145a8bf1b5621",
-      "python_lsm": "webui/delegation.py",
-      "status": "未实现",
+      "python_lsm": "webui/subagents.py; agent_runner.py",
+      "status": "部分",
       "reviewed_mapping": true,
-      "difference": "原版subagent_type/description/config动态枚举，当前自研工具不等价"
+      "difference": "原生subagent schema、可选配置、隔离上下文和共享原生工具执行已接入；graph团队、后台/线程宿主与完整子运行事件仍缺失"
     },
     {
       "repository": "agents",
       "path": "src/tools/ToolNode.ts",
       "sha256": "6396274178fe8d245bb61a3dd06bdf9e1847bc10e1066acaecfd7b7d33448c02",
-      "python_lsm": "webui/generation_routes.py",
-      "status": "未实现",
+      "python_lsm": "webui/agent_execution.py; approval_runtime.py; agent_runner.py",
+      "status": "部分",
       "reviewed_mapping": true,
-      "difference": "当前串行循环，未移植原版并发/中断/回放行为"
+      "difference": "直接批工具并发、interrupt-first和结果重放已接入；eager/event paths、引用、完整hook与多子中断合并仍缺失"
     },
     {
       "repository": "agents",
