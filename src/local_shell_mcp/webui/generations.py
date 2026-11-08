@@ -226,6 +226,48 @@ class GenerationStore:
                        (_json(state), _now(), run_id))
             return self._run(row), history, partial_text
 
+    def pause_for_approval(self, owner: str, run_id: str, pending: dict,
+                           history: list[dict], partial_text: str) -> bool:
+        return self.pause_for_question(owner, run_id, pending, history, partial_text)
+
+    def claim_approval(self, owner: str, run_id: str, action_id: str,
+                       decisions: list[dict]) -> tuple[Generation, list[dict], str, dict, str]:
+        if not isinstance(decisions, list) or len(decisions) != 1 or not isinstance(decisions[0], dict):
+            raise ValueError("Exactly one external MCP decision is required")
+        decision = decisions[0]
+        kind = decision.get("decision")
+        if kind not in {"approve", "reject"}:
+            raise ValueError("MCP tool calls can only be approved or rejected")
+        with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='requires_action'", (run_id, owner),
+            ).fetchone()
+            if row is None:
+                raise KeyError("No pending tool approval")
+            state = json.loads(row["state"])
+            pending = state.get("pendingAction")
+            if not isinstance(pending, dict) or pending.get("actionId") != action_id:
+                raise ValueError("Stale tool approval action")
+            payload = pending.get("payload") or {}
+            calls = payload.get("action_requests") or []
+            if payload.get("type") != "tool_approval" or len(calls) != 1:
+                raise ValueError("Unexpected approval format")
+            requested = calls[0]
+            if decision.get("tool_call_id") != requested.get("tool_call_id"):
+                raise ValueError("Mismatched tool call decision")
+            history = state.get("resumeHistory")
+            if not isinstance(history, list):
+                raise ValueError("Missing model continuation history")
+            prior = state.get("partialText", "")
+            state.pop("pendingAction", None)
+            state.pop("resumeHistory", None)
+            state.pop("partialText", None)
+            db.execute("UPDATE runs SET state=?,status='running',updated_at=? WHERE id=?",
+                       (_json(state), _now(), run_id))
+            return self._run(row), history, prior, requested, kind
+
     def append(self, owner: str, run_id: str, event: dict) -> int:
         encoded = _json(event)
         if len(encoded.encode("utf-8")) > 256 * 1024:

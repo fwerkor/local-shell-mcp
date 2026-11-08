@@ -35,7 +35,7 @@
 | React SPA hosting | Implemented and browser-verified | First-party `ui/workspace` React build, deterministic compressed assets, safe Python extraction, real Chromium startup and chat tests |
 | Provider endpoints and credentials | Partial | OpenAI-compatible, Anthropic and Gemini text streaming through lazy httpx, secret isolation verified; credentials configuration and usage accounting incomplete |
 | Agent runtime + resumable event protocol | Partial and browser-verified | Python SQLite text generation, SSE delta/replay, idempotency, abort, startup-orphan recovery; tool callbacks/steering/approvals incomplete |
-| MCP and native tool execution | Partial | Per-machine `none/read/write` grants with global → project → conversation defaults in shared SQLite. `file_list`, `file_read`, `file_write` run locally or via existing Worker RPC, with scope checks, revocation, path confinement, audit, and bounded tool outputs. Arbitrary shell, nested MCP approval and multi-provider function calling remain pending. |
+| MCP and native tool execution | Partial | Per-machine `none/read/write` grants with global → project → conversation defaults in SQLite. `file_list`, `file_read`, `file_write` run locally or via Workers. Nested MCP search/inspect/call use the existing registry; external execution requires SQLite-persisted, one-shot user approval. Arbitrary shell, batched approvals and multi-provider function calling remain pending. |
 | Ask User, handoff and delegated subagents | Partial | SQLite-backed single Ask User prompt pause/answer/resume with durable action ID, original SSE event and exact generation retention; multi-question batches, tool approval, handoff and delegated subagents remain pending |
 | Prompt/context, memory, attachments and projects | Not started | Full conversation functionality and client compatibility |
 | LSM Controller control routes | Implemented at routing level | Existing `/api/ui/*` handlers mounted directly under `/api/lsm/controller/*`, without Node proxy; remaining browser control flows require E2E parity |
@@ -66,6 +66,15 @@
   WebUI persistence layer are deferred until used. If SQLite itself cannot
   load, set `LOCAL_SHELL_MCP_STATE_BACKEND=file` to recover the Controller;
   do not edit or delete the database until a verified backup exists.
+- Nested MCP tool discovery is wired to the existing DynamicMCPManager, gated
+  by the conversation's `mcp` setting and OAuth scopes. The Agent sees only
+  `mcp_tool_search`, `mcp_tool_inspect`, and `mcp_tool_call`; `mcp_manage` is
+  never exposed to the model. External calls pause with a durable
+  `tool_approval` action, and require an authenticated, generation-fenced
+  `approve` decision and `shell:execute` scope before execution. A rejection
+  continues the model without executing the tool. The first slice supports
+  a single tool decision at a time; batch/edited/remembered approvals remain
+  for later.
 - For Agents configured with `ask_user`, the Python model loop can pause
   durably on a single question, persist the pending action and model history in
   SQLite, deliver `on_pending_action` to React, then resume the same generation

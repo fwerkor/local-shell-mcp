@@ -70,8 +70,9 @@ async def _run_model(
     owner: str, generation: Generation, profile: ProviderConfig,
     *, instructions: str = "", parameters: dict | None = None,
     native_file_tools: bool = False, write_tools: bool = False,
-    ask_user_enabled: bool = False,
+    ask_user_enabled: bool = False, mcp_enabled: bool = False,
     resume_history: list[dict] | None = None, partial_text: str = "",
+    approved_mcp: tuple[ModelToolCall, str] | None = None,
     granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
 ) -> None:
     repo = _generation_store()
@@ -114,8 +115,34 @@ async def _run_model(
                          "delta": {"content": {"type": "text", "text": chunk, "phase": "final_answer"}}},
             })
 
-        if (native_file_tools or ask_user_enabled) and profile.provider == "openai":
+        if approved_mcp is not None:
+            from .nested_mcp import approved_call
+
+            call, decision = approved_mcp
+            if decision == "approve":
+                try:
+                    result = await asyncio.wait_for(
+                        approved_call(owner, generation.conversation_id, set(granted_scopes), call), timeout=120,
+                    )
+                except Exception as exc:
+                    log.warning("Approved external MCP call failed: %s", type(exc).__name__)
+                    result = "External MCP tool failed (" + type(exc).__name__ + ")"
+            else:
+                result = "User rejected the external MCP tool call."
+            history.append({"role": "tool", "tool_call_id": call.call_id, "content": result})
+            repo.append(owner, generation.run_id, {
+                "event": "on_run_step",
+                "data": {"type": "tool_calls", "id": "step_" + call.call_id,
+                         "index": 1, "status": "completed",
+                         "stepDetails": {"type": "tool_calls", "tool_calls": [{
+                             "id": call.call_id, "type": "function",
+                             "function": {"name": call.name, "arguments": "<redacted>"},
+                             "status": "completed",
+                         }]}}
+            })
+        if (native_file_tools or ask_user_enabled or mcp_enabled) and profile.provider == "openai":
             from .native_tools import ASK_USER_TOOLS, READ_ONLY_TOOLS, WRITE_TOOLS, run_machine_tool
+            from .nested_mcp import MCP_TOOLS, discover
 
             for round_number in range(3):
                 calls: list[ModelToolCall] = []
@@ -123,7 +150,8 @@ async def _run_model(
                     profile, history, tools=(
                         (READ_ONLY_TOOLS if native_file_tools else []) +
                         (WRITE_TOOLS if write_tools else []) +
-                        (ASK_USER_TOOLS if ask_user_enabled else [])
+                        (ASK_USER_TOOLS if ask_user_enabled else []) +
+                        (MCP_TOOLS if mcp_enabled else [])
                     ), max_tokens=max_tokens,
                     temperature=temperature,
                 ):
@@ -135,6 +163,57 @@ async def _run_model(
                     break
                 if round_number == 2 or len(calls) > 4:
                     raise ValueError("Model tool-call budget exceeded")
+                external_calls = [call for call in calls if call.name == "mcp_tool_call"]
+                if external_calls:
+                    if not mcp_enabled or len(calls) != 1:
+                        raise ValueError("Only one external MCP call can be approved per pause")
+                    from .nested_mcp import _check_mcp_access
+
+                    _check_mcp_access(owner, generation.conversation_id, set(granted_scopes))
+                    calling = external_calls[0]
+                    if (not isinstance(calling.arguments.get("name"), str) or
+                        ":" not in calling.arguments["name"] or
+                        not isinstance(calling.arguments.get("arguments", {}), dict)):
+                        raise ValueError("Invalid external MCP tool arguments")
+                    pending = {
+                        "actionId": "action_" + uuid.uuid4().hex,
+                        "streamId": generation.conversation_id,
+                        "conversationId": generation.conversation_id,
+                        "runId": generation.run_id,
+                        "responseMessageId": generation.response_message_id,
+                        "createdAt": int(time.time() * 1000),
+                        "payload": {
+                            "type": "tool_approval",
+                            "action_requests": [{
+                                "name": calling.name, "arguments": calling.arguments,
+                                "tool_call_id": calling.call_id,
+                                "description": "Approve an external MCP tool call",
+                            }],
+                            "review_configs": [{"action_name": calling.name,
+                                                "tool_call_id": calling.call_id,
+                                                "allowed_decisions": ["approve", "reject"]}],
+                        },
+                    }
+                    history.append({
+                        "role": "assistant", "content": None,
+                        "tool_calls": [{"id": calling.call_id, "type": "function",
+                                        "function": {"name": calling.name,
+                                                     "arguments": json.dumps(calling.arguments)}}],
+                    })
+                    repo.append(owner, generation.run_id, {
+                        "event": "on_run_step",
+                        "data": {"type": "tool_calls", "id": "step_" + calling.call_id,
+                                 "index": round_number + 1, "status": "in_progress",
+                                 "stepDetails": {"type": "tool_calls", "tool_calls": [{
+                                     "id": calling.call_id, "type": "function",
+                                     "function": {"name": calling.name,
+                                                  "arguments": json.dumps(calling.arguments)},
+                                 }]}}
+                    })
+                    if not repo.pause_for_approval(owner, generation.run_id, pending, history,
+                                                   "".join(text_parts)):
+                        raise RuntimeError("Unable to park external MCP approval")
+                    return
                 asking = [call for call in calls if call.name == "ask_user"]
                 if asking:
                     if not ask_user_enabled or len(calls) != 1:
@@ -183,6 +262,12 @@ async def _run_model(
                                    for call in calls],
                 })
                 for call in calls:
+                    if call.name in {"mcp_tool_search", "mcp_tool_inspect"}:
+                        result = await asyncio.wait_for(
+                            discover(owner, generation.conversation_id, set(granted_scopes), call), timeout=10,
+                        )
+                        history.append({"role": "tool", "tool_call_id": call.call_id, "content": result})
+                        continue
                     # Never run mutating or arbitrary MCP actions through this
                     # implicit read-only path. Recheck current SQLite policy
                     # immediately before execution, including after an SSE retry.
@@ -229,8 +314,9 @@ async def _run_model(
 
 async def _start_task(owner: str, generation: Generation, profile: ProviderConfig,
                       agent: dict | None, native_file_tools: bool = False, write_tools: bool = False,
-                      ask_user_enabled: bool = False,
+                      ask_user_enabled: bool = False, mcp_enabled: bool = False,
                       resume_history: list[dict] | None = None, partial_text: str = "",
+                      approved_mcp: tuple[ModelToolCall, str] | None = None,
                       granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None) -> None:
     async with _TASK_GUARD:
         existing = _TASKS.get(generation.run_id)
@@ -241,8 +327,9 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
                        instructions=str((agent or {}).get("instructions") or ""),
                        parameters=(agent or {}).get("model_parameters") or {},
                        native_file_tools=native_file_tools, write_tools=write_tools,
-                       ask_user_enabled=ask_user_enabled,
+                       ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
                        resume_history=resume_history, partial_text=partial_text,
+                       approved_mcp=approved_mcp,
                        granted_scopes=granted_scopes, grant_expires=grant_expires),
             name="webui-generation-" + generation.run_id,
         )
@@ -282,7 +369,7 @@ async def start_generation(request: Request):
         raise HTTPException(404, detail=str(exc)) from exc
     requested_tools = any(level in {"read", "write"} for level in policy.values())
     principal = getattr(request.state, "principal", None)
-    scopes = ({"shell:read", "shell:write", "remote:use"}
+    scopes = ({"shell:read", "shell:write", "shell:execute", "remote:use"}
               if get_settings().auth_mode == "none" else
               principal_scopes(principal) if principal is not None and hasattr(principal, "claims") else set())
     grant_expires = None if get_settings().auth_mode == "none" else (
@@ -307,9 +394,13 @@ async def start_generation(request: Request):
         raise HTTPException(400, detail=str(exc)) from exc
     if fresh:
         ask_user_enabled = bool(agent and "ask_user" in (agent.get("tools") or []))
+        from .routes import _repo
+
+        flags = _repo().setting(owner, "conversation.permissions." + result.conversation_id, {})
+        mcp_enabled = isinstance(flags, dict) and flags.get("mcp") is True
         await _start_task(owner, result, profile, agent, native_file_tools=requested_tools,
                           write_tools=any(level == "write" for level in policy.values()),
-                          ask_user_enabled=ask_user_enabled,
+                          ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
                           granted_scopes=frozenset(scopes), grant_expires=grant_expires)
     return JSONResponse(_generation_body(result, status="stream" if fresh else "resumed",
                                          resumed=not fresh), status_code=202,
@@ -448,7 +539,7 @@ async def resume_generation(request: Request):
         from .machine_permissions import require_machine_scope, resolve_access
 
         principal = getattr(request.state, "principal", None)
-        scopes = ({"shell:read", "shell:write", "remote:use"}
+        scopes = ({"shell:read", "shell:write", "shell:execute", "remote:use"}
                   if get_settings().auth_mode == "none" else
                   principal_scopes(principal) if principal is not None and hasattr(principal, "claims") else set())
         expiry = None if get_settings().auth_mode == "none" else (
@@ -471,16 +562,38 @@ async def resume_generation(request: Request):
         paused_task = _TASKS.get(generation.run_id)
         if paused_task and not paused_task.done():
             await asyncio.wait_for(asyncio.shield(paused_task), timeout=5)
-        resumed, history, previous_text = store.answer_question(owner, generation.run_id, action_id, answer)
+        approval = pending.get("payload", {}).get("type") == "tool_approval"
+        approved_mcp = None
+        if approval:
+            from .nested_mcp import _check_mcp_access
+
+            decisions = payload.get("decisions")
+            if not isinstance(decisions, list) or len(decisions) != 1 or not isinstance(decisions[0], dict):
+                raise HTTPException(400, detail="Exactly one tool approval decision is required")
+            if decisions[0].get("decision") == "approve":
+                _check_mcp_access(owner, cid, scopes, execution=True)
+            resumed, history, previous_text, requested, decision = store.claim_approval(
+                owner, generation.run_id, action_id, decisions,
+            )
+            approved_mcp = (ModelToolCall(requested["tool_call_id"], requested["name"],
+                                          requested["arguments"]), decision)
+        else:
+            resumed, history, previous_text = store.answer_question(
+                owner, generation.run_id, action_id, answer,
+            )
     except PermissionError as exc:
         raise HTTPException(403, detail=str(exc)) from exc
     except (ValueError, KeyError) as exc:
         raise HTTPException(400, detail=str(exc)) from exc
+    from .routes import _repo
+
     await _start_task(owner, resumed, profile, agent,
                       native_file_tools=any(level in {"read", "write"} for level in machine_policy.values()),
                       write_tools=any(level == "write" for level in machine_policy.values()),
                       ask_user_enabled=bool(state.get("askUserEnabled")),
+                      mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp")),
                       resume_history=history, partial_text=previous_text,
+                      approved_mcp=approved_mcp,
                       granted_scopes=frozenset(scopes), grant_expires=expiry)
     return JSONResponse(_generation_body(resumed, status="resumed", resumed=True),
                         headers=_generator_headers())
