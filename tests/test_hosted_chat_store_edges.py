@@ -149,7 +149,11 @@ async def test_runner_handles_failed_turn_and_restart_reconciliation(store, monk
         with pytest.raises(ValueError, match="Message must contain"):
             await runner.start("alice", record["id"], bad, "http://localhost", "")
     await runner.start("alice", record["id"], "failure test", "http://localhost", "")
-    await asyncio.sleep(0.1)
+    # Failure persistence runs in a separate task and uses to_thread I/O.
+    # A fixed 100 ms sleep races slow Windows CI workers. Observe task
+    # completion before checking its final durable status instead.
+    task = runner._tasks[("alice", record["id"])]
+    await asyncio.wait_for(asyncio.shield(task), timeout=30)
     state = store.conversation("alice", record["id"])
     assert state["status"] == "failed"
     assert state["error"] == "RuntimeError: Hosted Chat turn failed"
