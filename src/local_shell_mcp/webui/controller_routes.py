@@ -14,6 +14,8 @@ _PRIVATE_PREFIXES = ("librechat", "hosted-chat")
 
 
 def controller_routes() -> list[Route]:
+    from .attachments import attachment_routes
+
     target = "/api/lsm/controller"
     output: list[Route] = []
     seen: set[tuple[str, tuple[str, ...]]] = set()
@@ -30,4 +32,4 @@ def controller_routes() -> list[Route]:
             continue
         seen.add(key)
         output.append(Route(dest, item.endpoint, methods=list(methods), name=item.name))
-    return output
+    return [*attachment_routes(), *output]

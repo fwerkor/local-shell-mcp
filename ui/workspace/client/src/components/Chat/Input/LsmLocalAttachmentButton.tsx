@@ -14,7 +14,7 @@ export default function LsmLocalAttachmentButton() {
     setBusy(true);
     setError('');
     try {
-      const response = await fetch('/api/lsm/controller/librechat/upload?name=' + encodeURIComponent(file.name), {
+      const response = await fetch('/api/lsm/controller/attachments/upload?name=' + encodeURIComponent(file.name), {
         method: 'POST',
         credentials: 'same-origin',
         headers: {
