@@ -51,35 +51,33 @@ The intended safety boundary is the container or VM, not the host.
 
 ## Quick start
 
-**Recommended deployment: run directly from a source checkout** in a dedicated VM, container, or restricted user environment with Python 3.11+. This keeps the Controller easy to update and gives the workspace direct access to the host tools you explicitly install. Docker Compose, prebuilt binaries, and package-manager installs remain supported alternatives.
+**Recommended deployment: the standalone single-file Controller executable** from [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest). It bundles the Controller and native WebUI, runs without a system Python installation or Docker, and needs no repository checkout. Choose the matching binary for your OS/architecture; the following example is for **Linux x86_64**:
 
 ```bash
-git clone https://github.com/fwerkor/local-shell-mcp.git
-cd local-shell-mcp
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e .
-cp .env.example .env
-chmod 600 .env
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
+chmod +x local-shell-mcp
+./local-shell-mcp --help
 openssl rand -hex 32
 ```
 
-Edit `.env` with a real public origin (if needed), a strong OAuth admin PIN, and the generated JWT secret. The Controller does not automatically load this file outside Docker Compose; export it before starting:
+Create a private `.env` file with the necessary `LOCAL_SHELL_MCP_` variables (see the [quickstart](https://fwerkor.github.io/local-shell-mcp/getting-started/quickstart/)). Use a strong OAuth PIN and the generated JWT secret, then start the executable with those variables explicitly exported:
 
 ```bash
+chmod 600 .env
 set -a
 . ./.env
 set +a
-mkdir -p workspaces/default
-export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
-local-shell-mcp --mode mcp
+mkdir -p workspace
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
+./local-shell-mcp --mode mcp
 ```
 
-In another terminal, check `curl -i http://127.0.0.1:8765/healthz` and open `http://127.0.0.1:8765/ui`. For remote access, use a public HTTPS server or a reverse proxy to the local port; **direct public-server deployment/forwarding is preferred to Cloudflare Tunnel**, whose client uploads can be slow enough to impair file transfers. Do not expose the Controller without authentication.
+Check `http://127.0.0.1:8765/healthz` and open the native UI at `http://127.0.0.1:8765/ui`. For remote access, prefer a public HTTPS server or reverse proxy; Cloudflare Tunnel is not recommended for file-heavy transfers. Keep OAuth enabled on publicly accessible endpoints.
 
-For integrated **chat, projects and Controller pages**, deploy the optional [unified web workspace](https://fwerkor.github.io/local-shell-mcp/getting-started/web-workspace/). The Controller-only browser UI also works without the chat stack. External clients such as Gemini or ChatGPT connect at `https://your-public-host.example.com/mcp`.
+The one-file executable is the **Controller distribution**, not an all-inclusive operating-system image. It uses host-installed task tools and optional external Playwright/browser dependencies. Integrated **chat and projects** use the separately deployed [unified web workspace](https://fwerkor.github.io/local-shell-mcp/getting-started/web-workspace/) (Node.js, MongoDB, Meilisearch, and SearXNG); the remote **Worker** is distributed separately. No chat backend or database is claimed to be embedded in the Controller binary.
 
-Other deployment methods: [Docker Compose](https://fwerkor.github.io/local-shell-mcp/installation/docker/), [standalone binary](https://fwerkor.github.io/local-shell-mcp/installation/binary/), or [Python/pipx](https://fwerkor.github.io/local-shell-mcp/installation/python/). See the [quickstart](https://fwerkor.github.io/local-shell-mcp/getting-started/quickstart/) for configuration and update steps.
+Other deployment methods remain supported: [Docker Compose](https://fwerkor.github.io/local-shell-mcp/installation/docker/), [Python/pipx/source](https://fwerkor.github.io/local-shell-mcp/installation/python/), and the [VS Code extension](https://fwerkor.github.io/local-shell-mcp/installation/vscode-extension/). See [platform-specific binary installation](https://fwerkor.github.io/local-shell-mcp/installation/binary/) for Windows, macOS, ARM64 and updates.
 
 ## Human interface
 

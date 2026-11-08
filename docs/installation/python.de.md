@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: c8c0d8ebdbb123b9ac4af1fd288f30e8ca69037ca086486cb8027e2592f4b75a -->
+<!-- i18n-source-sha256: 1d80cfbe14747fb0691e91065f582d1e47eb36921d8b27da1648dcd26114a2e5 -->
 # Python-, pipx- und Source-Runtimes
 
-**Die direkte Installation aus dem Quellcode wird empfohlen.** Verwenden Sie eine virtuelle Python-Umgebung und einen begrenzten Workspace. Docker Compose bleibt eine Alternative.
+Für normale Bereitstellung wird die [Einzeldatei-Binärversion](binary.md) empfohlen. Python, pipx und Quellcode dienen Entwicklung und Anpassungen.
 
 Diese Seite behandelt drei verwandte Fälle:
 
@@ -48,7 +48,7 @@ Der Prozess verwendet die auf dem Host installierten Werkzeuge. Das Python-Paket
 
 ## Editable source checkout
 
-Für reguläre Bereitstellung und Entwicklung verwenden. Öffentlichen Zugang konfigurieren gemäß [quickstart](../getting-started/quickstart.md).
+Quellcodeinstallationen eignen sich zur Entwicklung; für reguläre Systeme die [Binärversion](binary.md) verwenden. OAuth/HTTPS: [Schnellstart](../getting-started/quickstart.md).
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git

@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: c8c0d8ebdbb123b9ac4af1fd288f30e8ca69037ca086486cb8027e2592f4b75a -->
+<!-- i18n-source-sha256: 1d80cfbe14747fb0691e91065f582d1e47eb36921d8b27da1648dcd26114a2e5 -->
 # Python、pipx 与源码运行时
 
-**直接从源码部署是最推荐的方式。** 请使用独立的 Python 虚拟环境及受限工作区。Docker Compose 可作为替代方案。
+日常部署优先使用 [单文件二进制](binary.md)。Python、pipx 和源码安装用于开发、调试、定制等场景。
 
 本页覆盖三个相关场景：
 
@@ -48,7 +48,7 @@ local-shell-mcp --mode mcp
 
 ## 可编辑源码 checkout
 
-常规源码部署和开发均使用此方式。公网 OAuth 与 HTTPS 配置见 [quickstart](../getting-started/quickstart.md).
+源码方式主要用于开发和定制；普通部署应使用 [单文件二进制](binary.md)。公网认证与 HTTPS 配置见 [快速开始](../getting-started/quickstart.md)。
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git

@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 42daa6d3dd931530a1d2e86d6a36fc6424b7494ff078626157c158b38b1f4b1e -->
+<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
 # Runtime binary mandiri
 
-Release binary menjalankan `local-shell-mcp` tanpa Docker dan tanpa lingkungan Python. Gunakan runtime ini ketika Docker tidak tersedia atau dedicated VM, container host, lab server, atau restricted user account sudah menyediakan batas keamanan.
+Direkomendasikan **satu berkas executable Controller** dari GitHub Releases tanpa Python, Docker atau checkout source.
 
 Ini adalah pilihan runtime. Akses ChatGPT dikonfigurasi terpisah melalui endpoint HTTPS `/mcp`.
 
@@ -19,16 +19,20 @@ GitHub Releases membangun executable mandiri untuk platform umum:
 
 Setiap archive berisi executable, README, license, dan file quickstart singkat.
 
+Tersedia juga **satu berkas executable**. Hanya Controller dan WebUI bawaan yang disertakan; chat, database, Worker, alat dan browser dipasang terpisah.
+
 ## Instalasi
 
-1. Download archive untuk platform Anda dari GitHub Releases.
-2. Ekstrak.
+1. Unduh executable atau arsip yang sesuai dari [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest).
+2. Jika memilih arsip, ekstrak dahulu.
 3. Letakkan executable di `PATH` atau catat absolute path-nya.
 4. Jalankan `local-shell-mcp --help` untuk memastikan binary dapat dimulai.
 
-Linux dan macOS biasanya memerlukan executable bit:
+Contoh: unduh langsung berkas Linux x86_64; pilih berkas yang sesuai untuk platform lain:
 
 ```bash
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
 chmod +x local-shell-mcp
 ./local-shell-mcp --help
 ```
@@ -40,7 +44,7 @@ Pengguna Windows sebaiknya menjalankan `local-shell-mcp.exe` dari PowerShell ata
 ```bash
 mkdir -p ~/local-shell-mcp-workspace
 export LOCAL_SHELL_MCP_WORKSPACE_ROOT=~/local-shell-mcp-workspace
-local-shell-mcp --mode mcp
+~/lsm/local-shell-mcp --mode mcp
 ```
 
 Di terminal lain:
@@ -104,7 +108,7 @@ Pasang apa yang dibutuhkan task Anda:
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-Jika Anda tidak ingin memelihara host toolchain ini, gunakan Docker Compose.
+Binary berisi Controller; alat eksternal dan browser bersifat opsional. Chat dan riwayat memerlukan [web workspace](../getting-started/web-workspace.md) dan database terpisah.
 
 ## Layanan jangka panjang
 
@@ -119,7 +123,7 @@ Untuk persistent public deployment, jalankan binary di bawah process supervisor 
 
 ## Update
 
-1. Download release archive baru untuk platform Anda.
+1. Ganti executable lalu restart Controller:
 2. Verify checksum jika diinginkan.
 3. Ganti executable.
 4. Restart process manager.

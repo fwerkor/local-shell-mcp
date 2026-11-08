@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
+<!-- i18n-source-sha256: f769f579039e6eae80c7c955b80248ae0919448b2f5ca18ea4588ee66b0beba1 -->
 # Runtime Docker Compose
 
-Docker Compose to alternatywa dla izolowanych kontenerów. **Zalecamy bezpośrednie wdrożenie ze źródeł**; zobacz [poradnik Python/źródła](python.md).
+Zalecany jest [jeden plik binarny](binary.md); Docker Compose pozostaje opcją dla izolowanych kontenerów.
 
 To wybór runtime. Można go połączyć z ChatGPT, generic HTTP MCP client albo zachować lokalnie do testing.
 

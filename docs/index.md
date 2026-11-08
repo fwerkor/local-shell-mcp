@@ -52,7 +52,7 @@ The intended isolation boundary is the container or VM running the service.
 | Scenario | Start here | Why |
 |---|---|---|
 | Primary browser workspace | [Unified web workspace](getting-started/web-workspace.md) | Chat, projects and LSM control pages with a shared login |
-| First Controller deployment | [Quickstart](getting-started/quickstart.md) | Recommended source checkout, OAuth and the first browser session |
+| First Controller deployment | [Quickstart](getting-started/quickstart.md) | Recommended single-file binary, OAuth and the first browser session |
 | Choosing the runtime layer | [Runtime choices](guides/deployment.md) | Explains Docker, VS Code, binary, Python, and stdio as separate runtime options |
 | Connecting Gemini Spark | [Gemini Custom Apps](getting-started/gemini-spark.md) | Eligibility, HTTPS MCP URL, OAuth and testing |
 | Adding ChatGPT as a client | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, first safe prompt, tool discovery |

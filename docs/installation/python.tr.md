@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: c8c0d8ebdbb123b9ac4af1fd288f30e8ca69037ca086486cb8027e2592f4b75a -->
+<!-- i18n-source-sha256: 1d80cfbe14747fb0691e91065f582d1e47eb36921d8b27da1648dcd26114a2e5 -->
 # Python, pipx ve source runtimes
 
-**Kaynak depodan doğrudan kurulum önerilir.** Python sanal ortamı ve sınırlı çalışma alanı kullanın. Docker Compose kullanılabilir.
+Normal dağıtım için [tek dosyalık ikili](binary.md) önerilir. Python ve kaynak sürümleri geliştirme ve özelleştirme içindir.
 
 Bu sayfa üç ilgili durumu kapsar:
 
@@ -48,7 +48,7 @@ Process host üzerinde kurulu araçları kullanır. Python package sizin için c
 
 ## Editable source checkout
 
-Normal dağıtım ve geliştirme için kullanın. Genel erişim için bkz. [quickstart](../getting-started/quickstart.md).
+Kaynak kurulum geliştirmeye uygundur; normal dağıtımda [ikili](binary.md) kullanın. OAuth/HTTPS: [hızlı başlangıç](../getting-started/quickstart.md).
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git

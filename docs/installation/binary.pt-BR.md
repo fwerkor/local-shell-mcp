@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 42daa6d3dd931530a1d2e86d6a36fc6424b7494ff078626157c158b38b1f4b1e -->
+<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
 # Runtime binário independente
 
-Release binaries executam `local-shell-mcp` sem Docker e sem ambiente Python. Use este runtime quando Docker não estiver disponível ou quando uma VM dedicada, container host, servidor de laboratório ou conta de usuário restrita já fornecer a fronteira de segurança.
+Recomendamos o **executável único do Controller** do GitHub Releases, sem Python, Docker ou checkout do código.
 
 Esta é uma escolha de runtime. O acesso do ChatGPT é configurado separadamente por um endpoint HTTPS `/mcp`.
 
@@ -19,16 +19,20 @@ GitHub Releases cria executables autocontidos para plataformas comuns:
 
 Cada archive contém o executable, README, license e um arquivo quickstart curto.
 
+Também há um **executável único**. Somente Controller e WebUI nativa são incluídos; chat, bancos de dados, Worker, ferramentas e navegadores são separados.
+
 ## Instalação
 
-1. Baixe do GitHub Releases o archive da sua plataforma.
-2. Extraia-o.
+1. Baixe o executável ou arquivo compactado para sua plataforma em [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest).
+2. Se escolheu um arquivo compactado, extraia-o.
 3. Coloque o executable no `PATH` ou registre o caminho absoluto.
 4. Execute `local-shell-mcp --help` para confirmar que o binary inicia.
 
-Linux e macOS normalmente exigem o executable bit:
+Exemplo: baixar o arquivo Linux x86_64 diretamente; outras plataformas devem usar o arquivo correspondente:
 
 ```bash
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
 chmod +x local-shell-mcp
 ./local-shell-mcp --help
 ```
@@ -40,7 +44,7 @@ No Windows, execute `local-shell-mcp.exe` pelo PowerShell ou adicione o diretór
 ```bash
 mkdir -p ~/local-shell-mcp-workspace
 export LOCAL_SHELL_MCP_WORKSPACE_ROOT=~/local-shell-mcp-workspace
-local-shell-mcp --mode mcp
+~/lsm/local-shell-mcp --mode mcp
 ```
 
 Em outro terminal:
@@ -104,7 +108,7 @@ Instale o que suas tarefas exigem:
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-Se não quiser manter esse host toolchain, use Docker Compose.
+O binário inclui o Controller; ferramentas e navegadores são opcionais. Chat e histórico exigem [workspace web](../getting-started/web-workspace.md) e bancos de dados separados.
 
 ## Serviço de longa duração
 
@@ -119,7 +123,7 @@ Para um deployment público persistente, execute o binary sob o process supervis
 
 ## Atualizações
 
-1. Baixe o novo release archive para sua plataforma.
+1. Substitua o executável e reinicie o Controller:
 2. Verifique checksums se desejar.
 3. Substitua o executable.
 4. Reinicie o process manager.

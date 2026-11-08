@@ -1,6 +1,6 @@
 # Docker Compose runtime
 
-Docker Compose is an alternative for disposable or isolated deployments. **Direct source-checkout deployment is recommended for most users**; see the [Python/source runtime guide](python.md). Docker provides a controlled Linux workspace and convenient rebuilds, but its image is deliberately lightweight and task-specific tools must be installed separately.
+Docker Compose is an alternative for disposable or isolated deployments. **Standalone single-file binary deployment is recommended for most users**; see the [binary runtime guide](binary.md). Docker provides a controlled Linux workspace and convenient rebuilds, but its image is deliberately lightweight and task-specific tools must be installed separately.
 
 This is a runtime choice. It can be connected to ChatGPT, a generic HTTP MCP client, or kept local for testing.
 

@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: c8c0d8ebdbb123b9ac4af1fd288f30e8ca69037ca086486cb8027e2592f4b75a -->
+<!-- i18n-source-sha256: 1d80cfbe14747fb0691e91065f582d1e47eb36921d8b27da1648dcd26114a2e5 -->
 # Runtime Python, pipx và source
 
-**Nên cài đặt trực tiếp từ repository mã nguồn.** Sử dụng Python virtual environment và workspace có giới hạn quyền. Docker Compose vẫn khả dụng.
+Nên dùng [binary một tệp](binary.md) cho triển khai thường xuyên. Python và source dành cho phát triển và tùy biến.
 
 Dùng trang này cho ba trường hợp liên quan:
 
@@ -48,7 +48,7 @@ Process dùng các tool đã cài trên host. Package Python không tự cài co
 
 ## Editable source checkout
 
-Dùng cho triển khai thông thường và phát triển. Để truy cập công khai, xem [quickstart](../getting-started/quickstart.md).
+Source thích hợp cho phát triển; triển khai thông thường nên dùng [binary](binary.md). OAuth/HTTPS: [bắt đầu nhanh](../getting-started/quickstart.md).
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git

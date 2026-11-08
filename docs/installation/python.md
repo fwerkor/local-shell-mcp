@@ -1,12 +1,12 @@
 # Python, pipx, and source runtimes
 
-**Direct installation from a source checkout is the recommended Controller deployment method.** Use a dedicated virtual environment and an explicitly scoped workspace, preferably inside a VM/container or under a restricted account. This is also useful for development and debugging. Python, Docker, and binary runtimes run the same Controller.
+**The standalone single-file binary is recommended for normal Controller deployment**; see the [binary installation guide](binary.md). Python and source runtimes remain available for development, debugging, customization, and environments that prefer package management. They run the same Controller.
 
 Use this page for three related cases:
 
 - `pipx install local-shell-mcp`: user-level executable install.
 - `pip install local-shell-mcp`: install into an existing virtual environment.
-- Editable source checkout (recommended): install and update the running Controller directly from the repository.
+- Editable source checkout: develop, debug, or customize the Controller directly from the repository.
 
 ## pipx install
 
@@ -47,7 +47,7 @@ The process uses the tools installed on the host. The Python package does not in
 
 ## Editable source checkout
 
-Use this for normal source deployments as well as development. For public access, configure OAuth and an HTTPS reverse proxy as described in the [quickstart](../getting-started/quickstart.md):
+Use this when developing or customizing the project. For ordinary deployments, prefer the [single-file binary](binary.md); for public access, configure OAuth and an HTTPS reverse proxy as described in the [quickstart](../getting-started/quickstart.md):
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git

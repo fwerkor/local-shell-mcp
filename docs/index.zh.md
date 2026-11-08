@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 276e9356b895a85759d31467512bdc530c9baa216a368df4ef1bccce39530d0e -->
+<!-- i18n-source-sha256: f8fefdb11bbe7b5b755fd59ee829b2771e8c2e9694d5b9db40f8693f53c16960 -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">自托管AI工作区·MCP控制平面</span>
 
@@ -53,7 +53,7 @@
 | 场景 | 阅读页面 | 原因 |
 |---|---|---|
 | 主浏览器工作区 | [Unified web workspace](getting-started/web-workspace.md) | 具有共享登录名的聊天、项目和 LSM 控制页面 |
-| 第一个控制器部署 | [Quickstart](getting-started/quickstart.md) | 推荐的源码部署、OAuth 与首次浏览器使用。 |
+| 第一个控制器部署 | [Quickstart](getting-started/quickstart.md) | 单文件二进制部署、OAuth 与首次浏览器使用 |
 | 选择运行时层 | [运行时选择](guides/deployment.md) | 把 Docker、VS Code、二进制、Python 和 stdio 与客户端接入分开说明 |
 | 连接 Gemini Spark | [Gemini Custom Apps](getting-started/gemini-spark.md) | 资格、HTTPS MCP URL、OAuth 和测试 |
 | 把 ChatGPT 作为客户端接入 | [ChatGPT 连接器](getting-started/chatgpt-connector.md) | 端点、OAuth、首次安全提示和工具发现 |

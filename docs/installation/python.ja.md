@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: c8c0d8ebdbb123b9ac4af1fd288f30e8ca69037ca086486cb8027e2592f4b75a -->
+<!-- i18n-source-sha256: 1d80cfbe14747fb0691e91065f582d1e47eb36921d8b27da1648dcd26114a2e5 -->
 # Python、pipx、source runtimes
 
-**ソースチェックアウトからの直接インストールを推奨します。** Python 仮想環境と権限を制限したワークスペースを使用してください。Docker Compose も利用できます。
+通常のデプロイには [単一実行ファイル](binary.md) を推奨します。Python とソース版は開発・カスタマイズ向けです。
 
 このページは次の 3 つの関連ケースを扱います。
 
@@ -48,7 +48,7 @@ process は host にインストールされた tool を使用します。Python
 
 ## Editable source checkout
 
-通常のデプロイと開発に使用します。公開アクセスの設定は [quickstart](../getting-started/quickstart.md).
+ソース版は開発向けです。通常は [単一実行ファイル](binary.md) を使い、OAuth/HTTPS は [クイックスタート](../getting-started/quickstart.md) を参照してください。
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git

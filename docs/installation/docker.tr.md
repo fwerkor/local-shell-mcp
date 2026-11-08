@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
+<!-- i18n-source-sha256: f769f579039e6eae80c7c955b80248ae0919448b2f5ca18ea4588ee66b0beba1 -->
 # Docker Compose runtime
 
-Docker Compose yalıtılmış konteynerler için bir alternatiftir. **Kaynak koddan doğrudan dağıtım önerilir**; [Python/kaynak kılavuzu](python.md) bölümüne bakın.
+[Tek dosyalık ikili](binary.md) önerilir; Docker Compose yalıtılmış konteynerler için alternatiftir.
 
 Bu bir runtime seçimidir. ChatGPT’ye, generic HTTP MCP client’a bağlanabilir veya local testing için yerel tutulabilir.
 
