@@ -17,7 +17,7 @@ RUN apk add --no-cache \
     pkgconf
 
 WORKDIR /build
-RUN curl -fsSL "https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz" -o tmux.tar.gz \
+RUN curl --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 15 -fsSL "https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz" -o tmux.tar.gz \
     && echo "${TMUX_SHA256}  tmux.tar.gz" | sha256sum -c - \
     && tar -xzf tmux.tar.gz
 

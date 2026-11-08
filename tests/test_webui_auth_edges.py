@@ -37,6 +37,19 @@ def test_ticket_expiration_tampering_and_session_limits(tmp_path, monkeypatch):
     assert store.session(raw) is None
 
 
+@pytest.fixture(autouse=True)
+def _isolated_real_oauth_settings(tmp_path, monkeypatch):
+    # OAuth token helpers read the actual global settings, independently of
+    # these tests' mocked auth settings. Never touch the CI host /workspace.
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @pytest.mark.asyncio
 async def test_auth_routes_reject_unauthorized_and_expire_oauth_grants(tmp_path, monkeypatch):
     now = int(time.time())

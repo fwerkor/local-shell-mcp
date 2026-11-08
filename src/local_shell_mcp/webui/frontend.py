@@ -14,7 +14,7 @@ import tarfile
 import tempfile
 import threading
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
 from starlette.requests import Request
@@ -46,9 +46,14 @@ def _extract_frontend(archive: Path, state_dir: Path) -> Path:
             total = 0
             with tarfile.open(archive, "r:gz") as contents:
                 for item in contents:
-                    parts = Path(item.name).parts
-                    if (not item.isfile() or not parts or any(part in {"..", "."} or part.startswith(".")
-                        for part in parts) or Path(item.name).is_absolute()):
+                    parts = PurePosixPath(item.name).parts
+                    # Tar paths are POSIX paths even on Windows. pathlib.Path
+                    # follows the host platform and misses /absolute entries
+                    # on Windows, allowing unexpected extraction locations.
+                    if (not item.isfile() or not parts or "\\" in item.name or
+                        PurePosixPath(item.name).is_absolute() or
+                        (parts[0].endswith(":") or (len(parts[0]) > 1 and parts[0][1] == ":")) or
+                        any(part in {"..", "."} or part.startswith(".") for part in parts)):
                         raise ValueError("Unsafe WebUI asset in release payload")
                     total += item.size
                     if item.size > _MAX_FILE_BYTES or total > _MAX_ASSET_BYTES:

@@ -271,7 +271,10 @@ def test_invalid_utf8_filenames_do_not_block_controller_bootstrap(tmp_path: Path
     import os
 
     name = os.fsdecode(b"invalid-\xff-name.json")
-    (tmp_path / name).write_bytes(b"should-be-skipped")
+    try:
+        (tmp_path / name).write_bytes(b"should-be-skipped")
+    except (OSError, UnicodeError):
+        pytest.skip("Host filesystem cannot represent surrogate-escaped filename")
     (tmp_path / "jobs.json").write_bytes(b"valid")
     store = SQLiteStateStore(tmp_path)
     assert store.read_bytes("jobs.json") == b"valid"
