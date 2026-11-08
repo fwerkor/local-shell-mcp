@@ -129,10 +129,9 @@ class WorkspaceRepository:
             filters.append("project_id=?")
             params.append(project_id)
         if search:
-            filters.append("(title LIKE ? ESCAPE '\\' OR id IN "
-                           "(SELECT conversation_id FROM messages WHERE id IN "
-                           "(SELECT message_id FROM message_search WHERE text LIKE ? ESCAPE '\\')))" )
             escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            filters.append("(title LIKE ? ESCAPE '\\' OR id IN "
+                           "(SELECT conversation_id FROM messages WHERE text LIKE ? ESCAPE '\\'))")
             params += [f"%{escaped}%", f"%{escaped}%"]
         last = _cursor_decode(cursor)
         if last:

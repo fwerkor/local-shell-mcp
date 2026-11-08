@@ -511,8 +511,10 @@ def _store_transaction():  # noqa: ANN201
         try:
             with state_lock("jobs"):
                 store = _load_store()
+                deferred_paths = _reconcile_managed_deferred_updates(store)
                 yield store
                 _save_store(store)
+                _remove_managed_deferred_updates(deferred_paths)
         finally:
             _JOB_STORE_THREAD_LOCK.release()
         return

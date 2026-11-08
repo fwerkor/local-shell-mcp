@@ -81,3 +81,29 @@ def test_legacy_auth_and_worker_metadata_survive_automatic_import(sqlite_control
     for name, data in files.items():
         assert get_state_store().read_bytes(name) == data
         assert (sqlite_controller / name).read_bytes() == data
+
+
+def test_deferred_job_updates_recover_after_sqlite_cutover(sqlite_controller: Path) -> None:
+    from local_shell_mcp import jobs
+
+    job = {
+        "job_id": "job_recover01", "status": "running", "output_bytes": 0,
+        "log_truncated": False, "updated_at": 0,
+    }
+    jobs._save_store({"version": jobs.JOB_STORE_VERSION, "jobs": [job]})
+    deferred_dir = sqlite_controller / "jobs" / "deferred"
+    deferred_dir.mkdir(parents=True)
+    identifier = "000001-rollback"
+    deferred = deferred_dir / f"{identifier}.json"
+    deferred.write_text(json.dumps({
+        "version": jobs.MANAGED_DEFERRED_UPDATE_VERSION,
+        "update_id": identifier,
+        "job_id": job["job_id"],
+        "operation": "append_log",
+        "payload": {"bytes": 123, "truncated": False},
+    }))
+    with jobs._store_transaction() as store:
+        assert store["jobs"][0]["output_bytes"] == 123
+    assert jobs._load_store()["jobs"][0]["output_bytes"] == 123
+    assert not deferred.exists()
+    assert (sqlite_controller / "jobs" / "deferred").is_dir()

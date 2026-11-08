@@ -292,3 +292,19 @@ def test_unreleased_hosted_chat_state_is_not_migrated(tmp_path: Path) -> None:
     assert store.read_bytes("chat/old-conversations/snapshot.json") is None
     assert store.read_bytes("remote-workers.json") == b"active-worker"
     assert (tmp_path / "hosted-chat" / "profiles" / "old.json").is_file()
+
+
+def test_conversation_title_and_message_search_works_without_fts5(tmp_path: Path) -> None:
+    from local_shell_mcp.webui.storage import WorkspaceRepository
+
+    store = SQLiteStateStore(tmp_path)
+    repo = WorkspaceRepository(store.database)
+    cid = repo.create_conversation("local", {"title": "Research"})["conversationId"]
+    repo.add_message("local", cid, {"role": "user", "text": "NJU software engineering"})
+    previous = store.database.fts_enabled
+    try:
+        store.database.fts_enabled = False
+        assert repo.conversations("local", search="NJU")["conversations"][0]["conversationId"] == cid
+        assert repo.conversations("local", search="Research")["conversations"][0]["conversationId"] == cid
+    finally:
+        store.database.fts_enabled = previous

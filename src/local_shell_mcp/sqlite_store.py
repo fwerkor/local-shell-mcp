@@ -165,7 +165,9 @@ class SQLiteDatabase:
             try:
                 db.executescript(_FTS_SCHEMA)
             except sqlite3.OperationalError as exc:
-                if "no such module: fts5" not in str(exc).lower():
+                if not any(marker in str(exc).lower() for marker in (
+                    "no such module: fts5", "error in tokenizer constructor", "no such tokenizer",
+                )):
                     raise
                 self.fts_enabled = False
             else:
