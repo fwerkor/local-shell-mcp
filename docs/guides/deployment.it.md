@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
+<!-- i18n-source-sha256: cef0a90f9de3e2806e2a6bd8925217ea44ea6d6e6bce911eea09b1d4192a82d9 -->
 # Scelte del runtime e modello di deployment
 
 `local-shell-mcp` ha due decisioni complementari:
@@ -6,7 +6,7 @@
 1. **Runtime**: come viene eseguito il processo server e quale workspace controlla.
 2. **Interfaccia**: utilizza [unified web workspace](../getting-started/web-workspace.md) opzionale o collega un client MCP esterno come Gemini o ChatGPT.
 
-L'interfaccia quotidiana consigliata è lo spazio di lavoro web self-hosted (chat, progetti e pagine di controllo LSM). Viene distribuito separatamente dal Controller. Docker, l'estensione VS Code, i file binari di rilascio, le installazioni Python e la modalità stdio sono modi per eseguire il controller; le app di chat esterne rimangono client opzionali.
+**Il Controller viene consigliato come eseguibile singolo**, senza Python, Docker o sorgenti. Le altre modalità restano disponibili.
 
 ```text
 Runtime layer                      Exposure layer                 Client layer
@@ -34,15 +34,17 @@ Local MCP client
   -> controlled workspace
 ```
 
+**Consigliato:** Per l'accesso pubblico, distribuisci su un server pubblico oppure inoltra il traffico tramite un server pubblico con reverse proxy HTTPS. **Sconsigliato:** La velocità di upload lato client di Cloudflare Tunnel può essere molto bassa, rendendo difficili caricamenti e trasferimenti di file. Usalo solo se non sono possibili un server pubblico o un inoltro tramite esso. ([Public HTTPS exposure](../clients/connectivity.md))
+
 ## Matrice di scelta del runtime
 
 | Durata | Meglio per | Confine di isolamento | Fonte della catena di strumenti | Accesso MCP esterno | Pagina |
 |---|---|---|---|---|---|
+| **Eseguibile singolo (consigliato)** | La maggior parte delle piattaforme | Host or VM | Strumenti host più executable configurato | Aggiungi proxy HTTPS o tunnel | [Standalone binary](../installation/binary.md) |
 | Docker Componi | La maggior parte dei carichi di lavoro dell'agente di codifica e delle aree di lavoro ripetibili | Contenitore | Immagine del controllore snello; installare separatamente le toolchain specifiche per attività | Aggiungi proxy o tunnel HTTPS | [Docker Compose](../installation/docker.md) |
-| Docker Compose + sidecar tunnel | Distribuzione del controller pubblico con Cloudflare Tunnel | Contenitore | Immagine del progetto | Integrato nel profilo Compose `tunnel` | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| Docker Compose + sidecar tunnel | Sconsigliato: Inoltro tramite server pubblico; Cloudflare Tunnel solo come ripiego | Contenitore | Immagine del progetto | Inoltro tramite server pubblico; Cloudflare Tunnel solo come ripiego | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Avvio/arresto server da editor workspace | Di solito processo host | Strumenti host più executable configurato | Aggiungi tunnel/proxy HTTPS esterno per ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
-| Standalone binary | Host o VM senza Docker | Host or VM | Strumenti host più executable configurato | Aggiungi proxy HTTPS o tunnel | [Standalone binary](../installation/binary.md) |
-| `pipx` / source install | Uso Python-native, debugging, development | Host virtualenv or VM | Package Python più strumenti host | Aggiungi proxy HTTPS o tunnel | [Python install](../installation/python.md) |
+| Sorgenti / pipx | Sviluppo e personalizzazione | Host virtualenv or VM | Package Python più strumenti host | Aggiungi proxy HTTPS o tunnel | [Python install](../installation/python.md) |
 | Stdio mode | MCP client locali che avviano processi direttamente | Client process boundary | Strumenti host più executable configurato | Non utilizzabile da ChatGPT web/app | [Stdio mode](../installation/stdio.md) |
 
 ## Matrice connessione client
@@ -82,11 +84,11 @@ La differenza non è l’API astratta ma l’**operating environment** dietro di
 
 ## Selezione consigliata
 
-Utilizza prima **Docker Compose**, a meno che tu non abbia un motivo per non farlo. Fornisce un chiaro confine di sicurezza senza richiedere una grande toolchain di sviluppo preinstallata.
+**Preferire l’eseguibile singolo**: scaricare quello adatto e usare un account limitato e uno spazio dedicato. [Guida binaria](../installation/binary.md).
 
 Utilizza l'**estensione VS Code** quando il flusso di lavoro inizia da un editor e desideri un launcher locale. È ancora in fase di esecuzione. I client Web remoti necessitano di un proxy o tunnel HTTPS raggiungibile.
 
-Usa **standalone binary** quando Docker non è disponibile ma VM, container host o account dedicato forniscono già un confine.
+**I sorgenti** servono a sviluppo, debug e modifiche con ambiente virtuale Python. [Guida Python](../installation/python.md).
 
 Usa **`pipx` o source install** per development/debugging di `local-shell-mcp` o quando un ambiente Python è più facile da mantenere.
 

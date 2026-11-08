@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
+<!-- i18n-source-sha256: cef0a90f9de3e2806e2a6bd8925217ea44ea6d6e6bce911eea09b1d4192a82d9 -->
 # Runtime 선택과 deployment 모델
 
 `local-shell-mcp`에는 두 가지 보완적인 결정이 있습니다.
@@ -6,7 +6,7 @@
 1. **Runtime**: server process를 어떻게 실행하고 어떤 workspace를 제어할지.
 2. **인터페이스**: [unified web workspace](../getting-started/web-workspace.md) 옵션을 사용하거나 Gemini 또는 ChatGPT와 같은 외부 MCP 클라이언트를 연결하세요.
 
-권장되는 일일 인터페이스는 자체 호스팅 웹 작업 공간(채팅, 프로젝트 및 LSM 제어 페이지)입니다. 컨트롤러와 별도로 배포됩니다. Docker, VS Code 확장, 릴리스 바이너리, Python 설치 및 stdio 모드는 컨트롤러를 실행하는 방법입니다. 외부 채팅 앱은 선택적인 클라이언트로 남아 있습니다.
+**Controller는 단일 실행 파일 배포를 권장합니다.** Python, Docker 또는 소스 체크아웃이 필요 없습니다. 다른 방식도 사용할 수 있습니다.
 
 ```text
 Runtime layer                      Exposure layer                 Client layer
@@ -34,15 +34,17 @@ Local MCP client
   -> controlled workspace
 ```
 
+**권장:** 공개 접속에는 공인 서버에 직접 배포하거나 HTTPS 역방향 프록시를 통해 공인 서버에서 트래픽을 전달하세요. **비권장:** Cloudflare Tunnel은 클라이언트 측 업로드 속도가 매우 느릴 수 있어 파일 업로드와 전송 기능을 사용하기 어려울 수 있습니다. 공인 서버 배포나 전달이 불가능할 때만 사용하세요. ([Public HTTPS exposure](../clients/connectivity.md))
+
 ## Runtime 선택 매트릭스
 
 | 런타임 | 다음에 가장 적합 | 격리 경계 | 툴체인 소스 | 외부 MCP 액세스 | 페이지 |
 |---|---|---|---|---|---|
-| 도커 작성 | 대부분의 코딩 에이전트 작업 부하 및 반복 가능한 작업 공간 | 컨테이너 | 린 컨트롤러 이미지; 작업별 툴체인을 별도로 설치 | HTTPS 프록시 또는 터널 추가 | [Docker Compose](../installation/docker.md) |
-| Docker Compose + 터널 사이드카 | Cloudflare Tunnel을 사용한 Public Controller 배포 | 컨테이너 | 프로젝트 이미지 | Compose `tunnel` 프로필에 내장됨 | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| **단일 실행 파일(권장)** | 대부분의 지원 플랫폼 | Host or VM | host tools와 설정된 executable | HTTPS proxy 또는 tunnel 추가 | [Standalone binary](../installation/binary.md) |
+| 도커 작성 | 격리된 임시 컨테이너 | 컨테이너 | 린 컨트롤러 이미지; 작업별 툴체인을 별도로 설치 | HTTPS 프록시 또는 터널 추가 | [Docker Compose](../installation/docker.md) |
+| Docker Compose + 터널 사이드카 | 비권장: 공인 서버를 통해 전달하고 Cloudflare Tunnel은 최후의 수단으로 사용 | 컨테이너 | 프로젝트 이미지 | 공인 서버를 통해 전달하고 Cloudflare Tunnel은 최후의 수단으로 사용 | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | editor workspace에서 server 시작/중지 | 대개 host process | host tools와 설정된 executable | ChatGPT용 외부 HTTPS tunnel/proxy 추가 | [VS Code extension](../installation/vscode-extension.md) |
-| Standalone binary | Docker를 사용할 수 없는 host/VM | Host or VM | host tools와 설정된 executable | HTTPS proxy 또는 tunnel 추가 | [Standalone binary](../installation/binary.md) |
-| `pipx` / source install | Python-native 사용, debug, development | Host virtualenv or VM | Python package와 host tools | HTTPS proxy 또는 tunnel 추가 | [Python install](../installation/python.md) |
+| 소스 / pipx | 개발 및 사용자 지정 | Host virtualenv or VM | Python package와 host tools | HTTPS proxy 또는 tunnel 추가 | [Python install](../installation/python.md) |
 | Stdio mode | tool process를 직접 spawn하는 local MCP client | Client process boundary | host tools와 설정된 executable | ChatGPT web/app에서는 사용 불가 | [Stdio mode](../installation/stdio.md) |
 
 ## Client 연결 매트릭스
@@ -82,11 +84,11 @@ Local MCP client
 
 ## 권장 선택
 
-특별한 이유가 없는 한 **Docker Compose**를 먼저 사용하세요. 사전 설치된 대규모 개발 툴체인 없이도 명확한 안전 경계를 제공합니다.
+**단일 실행 파일 우선**: 플랫폼에 맞는 파일을 다운로드하고 제한된 계정과 전용 작업 공간에서 실행하세요. [바이너리 안내](../installation/binary.md).
 
 워크플로가 편집기에서 시작되고 로컬 실행 프로그램이 필요한 경우 **VS Code 확장**을 사용하세요. 아직은 런타임입니다. 원격 웹 클라이언트에는 연결 가능한 HTTPS 프록시 또는 터널이 필요합니다.
 
-Docker를 사용할 수 없지만 VM/container host/dedicated user account가 boundary를 제공한다면 **standalone binary**를 사용하십시오.
+**소스 설치**는 Python 가상 환경을 사용하는 개발, 디버깅, 사용자 지정에 적합합니다. [Python 안내](../installation/python.md).
 
 `local-shell-mcp` 자체 development/debug 또는 Python-based environment 관리가 더 쉽다면 **`pipx` 또는 source install**을 사용하십시오.
 

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 3986da6ff877609189b0d88d363aff1f5f45445f0cfe5ffa608a31929078542c -->
+<!-- i18n-source-sha256: 4eb43e1a065d72171aad5493848eb2f8c57361b110237c8816928e28f227a3d8 -->
 # नेटवर्क कनेक्टिविटी
 
 मशीन से बाहर स्थित HTTP MCP client को पहुँच योग्य HTTPS origin चाहिए। यह पृष्ठ network routing के बारे में है, runtime चुनने के बारे में नहीं।
@@ -19,13 +19,18 @@ LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 
 ## कनेक्टिविटी विकल्प
 
+**अनुशंसित:** सार्वजनिक पहुँच के लिए सार्वजनिक सर्वर पर तैनात करें या HTTPS रिवर्स प्रॉक्सी के साथ सार्वजनिक सर्वर से ट्रैफ़िक फ़ॉरवर्ड करें।
+
+**अनुशंसित नहीं:** Cloudflare Tunnel में क्लाइंट-साइड अपलोड बहुत धीमे हो सकते हैं, जिससे फ़ाइल अपलोड और स्थानांतरण का उपयोग कठिन हो जाता है। इसे केवल तभी अपनाएँ जब सार्वजनिक सर्वर या फ़ॉरवर्डिंग उपलब्ध न हो।
+
+
 | विकल्प | कब उपयोग करें |
 |---|---|
-| Compose tunnel sidecar | built-in `tunnel` profile वाला Docker Compose |
-| External tunnel | कोई भी runtime जिसे local network के बाहर से पहुँच योग्य होना चाहिए |
 | Caddy | सरल automatic TLS |
 | Nginx या Nginx Proxy Manager | मौजूदा Nginx infrastructure |
 | Traefik | मौजूदा container-native routing |
+| सार्वजनिक सर्वर के माध्यम से फ़ॉरवर्डिंग | सार्वजनिक पहुँच के लिए सार्वजनिक सर्वर पर तैनात करें या HTTPS रिवर्स प्रॉक्सी के साथ सार्वजनिक सर्वर से ट्रैफ़िक फ़ॉरवर्ड करें। |
+| Cloudflare Tunnel (अनुशंसित नहीं) | सार्वजनिक सर्वर से फ़ॉरवर्ड करें; Cloudflare Tunnel केवल अंतिम विकल्प |
 
 ## Paths
 
@@ -64,9 +69,9 @@ curl -i https://your-public-host.example.com/healthz
 
 | Runtime | Network pattern |
 |---|---|
-| Server पर Docker Compose | Existing reverse proxy या Compose tunnel profile |
-| Home machine पर Docker Compose | Outbound tunnel |
-| Laptop पर VS Code extension | Session के लिए temporary tunnel |
+| Server पर Docker Compose | HTTPS रिवर्स प्रॉक्सी |
+| Home machine पर Docker Compose | सार्वजनिक सर्वर से फ़ॉरवर्ड करें; Cloudflare Tunnel केवल अंतिम विकल्प |
+| Laptop पर VS Code extension | सार्वजनिक सर्वर के माध्यम से फ़ॉरवर्डिंग |
 | VM पर binary | VM या network edge पर reverse proxy |
 | Python/source dev server | सामान्यतः केवल localhost |
 | Stdio mode | कोई HTTP path नहीं; local MCP client उपयोग करें |

@@ -1,69 +1,78 @@
-<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
+<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
 # Início rápido
 
 Este guia inicia um controlador LSM e abre sua interface do navegador. O [unified web workspace](web-workspace.md) é a experiência diária recomendada; é uma pilha de chat opcional implantada separadamente. ChatGPT, Gemini e outros clientes MCP externos podem se conectar ao mesmo controlador. Consulte [runtime choices and deployment model](../guides/deployment.md).
 
+Recomendamos o **executável único do Controller** do [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest), sem Python, Docker ou checkout do código. Exemplo para **Linux x86_64**; outras plataformas: [binários](../installation/binary.md).
+
 ## Requisitos
 
-- Docker Engine com Compose v2.
-- Um ponto final HTTPS público se usuários remotos ou clientes MCP externos precisarem se conectar.
-- Um diretório de workspace dedicado.
-- Um OAuth admin PIN e JWT secret longos e aleatórios.
+- Executável compatível e `curl` (exemplo Linux x86_64).
+- HTTPS público apenas para usuários remotos ou clientes MCP externos.
+- Workspace dedicado e restrito.
+- PIN de administrador OAuth forte e segredo JWT aleatório.
 
 !!! warning
     O modelo conectado pode operar o workspace configurado. Execute o serviço em um container ou VM descartável e evite montar recursos de controle do host.
 
-## 1. Clonar e configurar
+## 1. Baixar o executável e configurar
+
+Baixe o executável único e gere o segredo JWT:
 
 ```bash
-git clone https://github.com/fwerkor/local-shell-mcp.git
-cd local-shell-mcp
-cp .env.example .env
-python scripts/init_compose_env.py
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
+chmod +x local-shell-mcp
+./local-shell-mcp --help
+openssl rand -hex 32
 ```
 
-Edite `.env`:
+Crie `.env` e substitua o PIN e o segredo JWT de exemplo (use `openssl rand -hex 32`). O binário **não carrega automaticamente** `.env`.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 LOCAL_SHELL_MCP_AUTH_MODE=oauth
 LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me-long-random-pin
 LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
-CLOUDFLARE_TUNNEL_TOKEN=
 ```
 
 ## 2. Iniciar o servidor
 
+Execute diretamente o binário:
+
 ```bash
-mkdir -p workspaces/default
-docker compose up -d
+chmod 600 .env
+set -a
+. ./.env
+set +a
+mkdir -p workspace
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
+./local-shell-mcp --mode mcp
 ```
 
-Verifique o status:
+Verifique o status em outro terminal:
 
 ```bash
-docker compose ps
-docker compose logs --tail=100 local-shell-mcp
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Uma resposta saudável retorna HTTP `200`.
+Uma resposta válida retorna HTTP `200`. Para operação contínua, use um supervisor e uma conta restrita.
 
 ## 3. Expor HTTPS
 
-Para o sidecar do Cloudflare Tunnel:
-
-```bash
-docker compose --profile tunnel up -d
-```
-
-No Cloudflare Zero Trust, aponte o public hostname para:
+Para acesso remoto, use servidor público ou proxy reverso HTTPS (Caddy, Nginx, Traefik), encaminhando todo o site, inclusive uploads e downloads, para:
 
 ```text
-http://local-shell-mcp:8765
+http://127.0.0.1:8765
 ```
 
-Com Caddy, Nginx, Traefik, Nginx Proxy Manager ou outro reverse proxy, encaminhe o tráfego HTTPS para `127.0.0.1:8765` ou para o endereço de rede do container.
+Verifique HTTPS:
+
+```bash
+curl -i https://your-public-host.example.com/healthz
+```
+
+**Cloudflare Tunnel não é recomendado** para arquivos: uploads do cliente podem ser lentos. Prefira servidor público ou proxy reverso/redirecionamento de portas com OAuth ativo. Alternativa: [Docker](../installation/docker.md).
 
 ## 4. Abra a área de trabalho do navegador
 
@@ -106,17 +115,23 @@ Corrija o teste que está falhando. Leia primeiro os arquivos relevantes, faça 
 
 ## Atualização
 
+Substitua o executável e reinicie o Controller:
+
 ```bash
-docker compose pull
-docker compose up -d
+# Stop the running Controller before replacing the executable.
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp.new
+chmod +x local-shell-mcp.new
+./local-shell-mcp.new --version
+mv local-shell-mcp.new local-shell-mcp
+# Restart the Controller process or service.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Se você usa o perfil tunnel:
+Para Docker Compose, atualize o contêiner; para código fonte, veja [Python](../installation/python.md).
 
 ```bash
-docker compose --profile tunnel pull
-docker compose --profile tunnel up -d
+docker compose pull
+docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 

@@ -1,13 +1,13 @@
-<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
+<!-- i18n-source-sha256: f769f579039e6eae80c7c955b80248ae0919448b2f5ca18ea4588ee66b0beba1 -->
 # Docker Compose runtime
 
-Docker Compose अधिकांश उपयोगकर्ताओं के लिए अनुशंसित runtime है। यह model को controlled Linux workspace, reproducible toolchain, persistent credentials, browser automation support और आसान upgrade path देता है।
+[एकल बाइनरी](binary.md) अनुशंसित है; Docker Compose अलग कंटेनर के लिए विकल्प है।
 
 यह runtime choice है। इसे ChatGPT, generic HTTP MCP client से जोड़ा जा सकता है या local testing के लिए रखा जा सकता है।
 
 ## Docker image में क्या शामिल है
 
-Image Playwright Python image पर आधारित है और व्यापक development toolchain install करती है। उद्देश्य है कि AI coding agent हर project के लिए runtime rebuild किए बिना कई repositories पर काम कर सके।
+इमेज python:3.12-slim पर आधारित है और केवल आवश्यक runtime tools शामिल करती है। बड़े development toolchains, Playwright/browser और office tools पहले से इंस्टॉल नहीं होते।
 
 शामिल categories:
 
@@ -15,12 +15,12 @@ Image Playwright Python image पर आधारित है और व्य�
 |---|---|
 | Shell और inspection | Bash, curl, wget, jq, ripgrep, tree, tmux, patch, file |
 | Git और credentials | Git, GitHub CLI, OpenSSH client, credential persistence volume |
-| C/C++ build | build-essential, clang, cmake, ninja, autoconf, automake, gdb, lldb |
-| Python | Python, pip, venv, pipx, package development dependencies |
-| JavaScript/TypeScript | Node.js, npm, yarn, pnpm, TypeScript, ts-node |
-| अन्य languages | Go, Rust, Java, Ruby, PHP, Perl, Lua, R |
-| Browser automation | Playwright browsers and browser dependencies |
-| Document tooling | LibreOffice, Pandoc, Poppler utilities, OCR tooling |
+| C/C++ build | शामिल नहीं; जरूरत पर इंस्टॉल करें |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | शामिल नहीं; जरूरत पर इंस्टॉल करें |
+| अन्य languages | शामिल नहीं; जरूरत पर इंस्टॉल करें |
+| Browser automation | शामिल नहीं; जरूरत पर इंस्टॉल करें |
+| Document tooling | शामिल नहीं; जरूरत पर इंस्टॉल करें |
 
 Image का exact content convenience layer है, stable API नहीं। Project-specific dependencies workspace या project build scripts में ही रहनी चाहिए।
 
@@ -82,6 +82,8 @@ https://your-public-host.example.com/mcp
 
 ## Cloudflare Tunnel sidecar
 
+**अनुशंसित नहीं:** Cloudflare Tunnel में क्लाइंट-साइड अपलोड बहुत धीमे हो सकते हैं, जिससे फ़ाइल अपलोड और स्थानांतरण का उपयोग कठिन हो जाता है। इसे केवल तभी अपनाएँ जब सार्वजनिक सर्वर या फ़ॉरवर्डिंग उपलब्ध न हो। सार्वजनिक पहुँच के लिए सार्वजनिक सर्वर पर तैनात करें या HTTPS रिवर्स प्रॉक्सी के साथ सार्वजनिक सर्वर से ट्रैफ़िक फ़ॉरवर्ड करें। ([network connectivity](../clients/connectivity.md))
+
 Compose file में `tunnel` profile के पीछे optional `cloudflared` service शामिल है। यह MCP server के साथ tunnel चलाती है।
 
 `.env` configure करें:
@@ -111,6 +113,7 @@ Compose service forwarded headers पर trust करती है क्यो�
 
 ## Tunnel sidecar के बिना reverse proxy
 
+**अनुशंसित:** सार्वजनिक पहुँच के लिए सार्वजनिक सर्वर पर तैनात करें या HTTPS रिवर्स प्रॉक्सी के साथ सार्वजनिक सर्वर से ट्रैफ़िक फ़ॉरवर्ड करें।
 यदि Caddy, Nginx, Traefik या Nginx Proxy Manager पहले से चलता है, normal Compose service रखें और HTTPS यहाँ forward करें:
 
 ```text

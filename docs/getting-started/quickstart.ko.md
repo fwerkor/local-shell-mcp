@@ -1,69 +1,78 @@
-<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
+<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
 # 빠른 시작
 
 이 가이드는 LSM 컨트롤러를 시작하고 해당 브라우저 인터페이스를 엽니다. [unified web workspace](web-workspace.md)는 권장되는 일일 경험입니다. 이는 별도로 배포된 선택적 채팅 스택입니다. ChatGPT, Gemini 및 기타 외부 MCP 클라이언트는 동일한 컨트롤러에 연결할 수 있습니다. [runtime choices and deployment model](../guides/deployment.md)를 참조하세요.
 
+[GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest)의 **Controller 단일 실행 파일** 배포를 권장합니다. Python, Docker, 소스 체크아웃이 필요 없습니다. 예시는 **Linux x86_64**이며 다른 플랫폼은 [바이너리 안내](../installation/binary.md)를 참고하세요.
+
 ## 요구 사항
 
-- Compose v2가 포함된 Docker Engine.
-- 원격 사용자 또는 외부 MCP 클라이언트가 연결되어야 하는 경우 공용 HTTPS 엔드포인트.
-- 전용 workspace directory.
-- 충분히 긴 임의의 OAuth admin PIN과 JWT secret.
+- 호환 실행 파일과 `curl` (Linux x86_64 예시).
+- 원격 사용자나 외부 MCP 클라이언트가 필요할 때만 공개 HTTPS.
+- 권한이 제한된 전용 작업 공간.
+- 강력한 OAuth 관리자 PIN과 임의 JWT 비밀키.
 
 !!! warning
     연결된 모델은 구성된 workspace를 조작할 수 있습니다. 일회용 container 또는 VM에서 서비스를 실행하고 host-control resources를 mount하지 마십시오.
 
-## 1. clone 및 구성
+## 1. 실행 파일 다운로드 및 설정
+
+단일 파일을 다운로드하고 JWT 비밀키를 생성하세요:
 
 ```bash
-git clone https://github.com/fwerkor/local-shell-mcp.git
-cd local-shell-mcp
-cp .env.example .env
-python scripts/init_compose_env.py
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
+chmod +x local-shell-mcp
+./local-shell-mcp --help
+openssl rand -hex 32
 ```
 
-`.env`를 편집합니다:
+`.env` 파일을 만들고 샘플 PIN과 JWT 비밀키를 교체하세요 (`openssl rand -hex 32`). 바이너리는 `.env`를 **자동 로드하지 않습니다**.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 LOCAL_SHELL_MCP_AUTH_MODE=oauth
 LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me-long-random-pin
 LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
-CLOUDFLARE_TUNNEL_TOKEN=
 ```
 
 ## 2. 서버 시작
 
+다운로드한 파일을 직접 실행하세요:
+
 ```bash
-mkdir -p workspaces/default
-docker compose up -d
+chmod 600 .env
+set -a
+. ./.env
+set +a
+mkdir -p workspace
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
+./local-shell-mcp --mode mcp
 ```
 
-상태를 확인합니다:
+다른 터미널에서 상태 확인:
 
 ```bash
-docker compose ps
-docker compose logs --tail=100 local-shell-mcp
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-정상 응답은 HTTP `200`을 반환합니다.
+정상 응답은 HTTP `200`입니다. 장기 실행에는 제한된 서비스 계정을 사용하세요.
 
 ## 3. HTTPS 공개
 
-Cloudflare Tunnel sidecar를 사용하는 경우:
-
-```bash
-docker compose --profile tunnel up -d
-```
-
-Cloudflare Zero Trust에서 public hostname의 대상을 다음으로 설정합니다:
+원격 액세스는 공용 서버 또는 HTTPS 역방향 프록시(Caddy, Nginx, Traefik)를 사용하고 업로드와 다운로드를 포함한 전체 사이트를 다음으로 전달하세요:
 
 ```text
-http://local-shell-mcp:8765
+http://127.0.0.1:8765
 ```
 
-Caddy, Nginx, Traefik, Nginx Proxy Manager 또는 다른 reverse proxy를 사용한다면 HTTPS traffic을 `127.0.0.1:8765` 또는 container network address로 전달합니다.
+HTTPS 연결 확인:
+
+```bash
+curl -i https://your-public-host.example.com/healthz
+```
+
+파일 전송에는 **Cloudflare Tunnel을 권장하지 않습니다**. 클라이언트 업로드가 느릴 수 있습니다. 가능하면 공용 서버나 일반 역방향 프록시를 사용하고 OAuth를 유지하세요. Docker: [안내](../installation/docker.md).
 
 ## 4. 브라우저 작업 공간을 엽니다
 
@@ -106,17 +115,23 @@ local-shell-mcp를 사용하세요. 먼저 environment_get를 호출한 다음 w
 
 ## 업데이트
 
+새 실행 파일로 교체한 뒤 Controller를 다시 시작하세요:
+
 ```bash
-docker compose pull
-docker compose up -d
+# Stop the running Controller before replacing the executable.
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp.new
+chmod +x local-shell-mcp.new
+./local-shell-mcp.new --version
+mv local-shell-mcp.new local-shell-mcp
+# Restart the Controller process or service.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-tunnel profile을 사용한다면:
+Docker Compose는 컨테이너를 업데이트하세요. 소스 설치: [Python 안내](../installation/python.md).
 
 ```bash
-docker compose --profile tunnel pull
-docker compose --profile tunnel up -d
+docker compose pull
+docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 

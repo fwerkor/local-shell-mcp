@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
+<!-- i18n-source-sha256: cef0a90f9de3e2806e2a6bd8925217ea44ea6d6e6bce911eea09b1d4192a82d9 -->
 # Runtime seçenekleri ve deployment modeli
 
 `local-shell-mcp`'in iki tamamlayıcı kararı vardır:
@@ -6,7 +6,7 @@
 1. **Runtime**: server process’in nasıl çalıştığı ve hangi workspace’i kontrol ettiği.
 2. **Arayüz**: İsteğe bağlı [unified web workspace](../getting-started/web-workspace.md)'yi kullanın veya Gemini ya da ChatGPT gibi harici bir MCP istemcisine bağlanın.
 
-Önerilen günlük arayüz, şirket içinde barındırılan web çalışma alanıdır (sohbet, projeler ve LSM kontrol sayfaları). Denetleyiciden ayrı olarak dağıtılır. Docker, VS Code uzantısı, sürüm ikili dosyaları, Python kurulumları ve stdio modu Denetleyiciyi çalıştırmanın yollarıdır; harici sohbet uygulamaları isteğe bağlı istemciler olarak kalır.
+**Controller için tek çalıştırılabilir dosya önerilir**, Python, Docker veya kaynak kod gerekmez. Diğer yöntemler de desteklenir.
 
 ```text
 Runtime layer                      Exposure layer                 Client layer
@@ -34,15 +34,17 @@ Local MCP client
   -> controlled workspace
 ```
 
+**Önerilir:** Genel erişim için herkese açık bir sunucuya dağıtın veya trafiği HTTPS ters vekiliyle herkese açık bir sunucu üzerinden iletin. **Önerilmez:** Cloudflare Tunnel üzerinden istemci tarafındaki yükleme hızı çok düşük olabilir; bu da dosya yükleme ve aktarımı işlevlerini kullanmayı zorlaştırır. Yalnızca genel sunucu veya yönlendirme mümkün değilse kullanın. ([Public HTTPS exposure](../clients/connectivity.md))
+
 ## Runtime seçim matrisi
 
 | Çalışma zamanı | Şunun için en iyisi: | İzolasyon sınırı | Araç zinciri kaynağı | Harici MCP erişimi | Sayfa |
 |---|---|---|---|---|---|
-| Docker Oluşturma | Çoğu kodlama aracısı iş yükü ve tekrarlanabilir çalışma alanı | Konteyner | Yalın Kontrolör görüntüsü; göreve özgü araç zincirlerini ayrı olarak kurun | HTTPS proxy'si veya tüneli ekleyin | [Docker Compose](../installation/docker.md) |
-| Docker Compose + tünel sepeti | Cloudflare Tüneli ile Kamu Denetleyici dağıtımı | Konteyner | Proje resmi | Compose `tunnel` profiline yerleşik | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| **Tek dosya (önerilen)** | Desteklenen çoğu platform | Host or VM | Host tools ve configured executable | HTTPS proxy veya tunnel ekle | [Standalone binary](../installation/binary.md) |
+| Docker Oluşturma | Yalıtılmış geçici konteynerler | Konteyner | Yalın Kontrolör görüntüsü; göreve özgü araç zincirlerini ayrı olarak kurun | HTTPS proxy'si veya tüneli ekleyin | [Docker Compose](../installation/docker.md) |
+| Docker Compose + tünel sepeti | Önerilmez: Genel sunucu üzerinden yönlendirin; Cloudflare Tunnel son çare olsun | Konteyner | Proje resmi | Genel sunucu üzerinden yönlendirin; Cloudflare Tunnel son çare olsun | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Editor workspace içinden server start/stop | Genellikle host process | Host tools ve configured executable | ChatGPT için harici HTTPS tunnel/proxy ekle | [VS Code extension](../installation/vscode-extension.md) |
-| Standalone binary | Docker olmayan host veya VM | Host or VM | Host tools ve configured executable | HTTPS proxy veya tunnel ekle | [Standalone binary](../installation/binary.md) |
-| `pipx` / source install | Python-native kullanım, debugging, development | Host virtualenv or VM | Python package ve host tools | HTTPS proxy veya tunnel ekle | [Python install](../installation/python.md) |
+| Kaynak / pipx | Geliştirme ve özelleştirme | Host virtualenv or VM | Python package ve host tools | HTTPS proxy veya tunnel ekle | [Python install](../installation/python.md) |
 | Stdio mode | Process’i doğrudan spawn eden local MCP client’lar | Client process boundary | Host tools ve configured executable | ChatGPT web/app ile kullanılamaz | [Stdio mode](../installation/stdio.md) |
 
 ## Client bağlantı matrisi
@@ -82,11 +84,11 @@ Fark abstract API değil, arkasındaki **operating environment**’dır.
 
 ## Önerilen seçim
 
-Kullanmamak için bir nedeniniz olmadığı sürece öncelikle **Docker Compose**'u kullanın. Önceden kurulmuş büyük bir geliştirme araç zinciri gerektirmeden net bir güvenlik sınırı sağlar.
+**Tek dosyalık sürümü tercih edin**: platformunuza uygun dosyayı indirip sınırlı hesap ve ayrı workspace ile çalıştırın. [İkili kılavuzu](../installation/binary.md).
 
 İş akışı bir düzenleyiciden başlatıldığında ve yerel bir başlatıcı istediğinizde **VS Code uzantısını** kullanın. Bu hala bir çalışma zamanıdır. Uzak web istemcilerinin ulaşılabilir bir HTTPS proxy'sine veya tüneline ihtiyacı vardır.
 
-Docker yoksa ancak VM, container host veya dedicated user account zaten boundary sağlıyorsa **standalone binary** kullanın.
+**Kaynak kurulumu** Python ortamında geliştirme, hata ayıklama ve özelleştirme içindir. [Python kılavuzu](../installation/python.md).
 
 `local-shell-mcp` development/debugging veya Python-based environment daha kolay yönetiliyorsa **`pipx` veya source install** kullanın.
 

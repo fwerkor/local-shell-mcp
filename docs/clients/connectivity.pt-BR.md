@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 3986da6ff877609189b0d88d363aff1f5f45445f0cfe5ffa608a31929078542c -->
+<!-- i18n-source-sha256: 4eb43e1a065d72171aad5493848eb2f8c57361b110237c8816928e28f227a3d8 -->
 # Conectividade de rede
 
 MCP client HTTP fora da máquina precisam de um HTTPS origin acessível. Esta página trata do roteamento de rede, não da escolha do runtime.
@@ -19,13 +19,18 @@ Não inclua `/mcp` nessa base URL.
 
 ## Opções de conectividade
 
+**Recomendado:** Para acesso público, implante em um servidor público ou encaminhe o tráfego por um servidor público com proxy reverso HTTPS.
+
+**Não recomendado:** O upload do lado do cliente via Cloudflare Tunnel pode ser muito lento, dificultando o envio e a transferência de arquivos. Use apenas se não houver opção de implantação ou encaminhamento por servidor público.
+
+
 | Opção | Quando usar |
 |---|---|
-| Compose tunnel sidecar | Docker Compose com o profile `tunnel` integrado |
-| Tunnel externo | Qualquer runtime que precise ser acessível fora da rede local |
 | Caddy | TLS automático simples |
 | Nginx ou Nginx Proxy Manager | Infraestrutura Nginx existente |
 | Traefik | Roteamento container-native existente |
+| Encaminhamento por servidor público | Para acesso público, implante em um servidor público ou encaminhe o tráfego por um servidor público com proxy reverso HTTPS. |
+| Cloudflare Tunnel (não recomendado) | Encaminhe por servidor público; Cloudflare Tunnel apenas como último recurso |
 
 ## Caminhos
 
@@ -64,9 +69,9 @@ curl -i https://your-public-host.example.com/healthz
 
 | Runtime | Padrão de rede |
 |---|---|
-| Docker Compose em servidor | Reverse proxy existente ou Compose tunnel profile |
-| Docker Compose em máquina doméstica | Outbound tunnel |
-| VS Code extension em notebook | Tunnel temporário para a sessão |
+| Docker Compose em servidor | Proxy reverso HTTPS |
+| Docker Compose em máquina doméstica | Encaminhe por servidor público; Cloudflare Tunnel apenas como último recurso |
+| VS Code extension em notebook | Encaminhamento por servidor público |
 | Binary em VM | Reverse proxy na VM ou na borda da rede |
 | Servidor de desenvolvimento Python/source | Normalmente apenas localhost |
 | Stdio mode | Sem caminho HTTP; usar MCP client local |

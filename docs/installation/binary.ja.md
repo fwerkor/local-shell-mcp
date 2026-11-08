@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 42daa6d3dd931530a1d2e86d6a36fc6424b7494ff078626157c158b38b1f4b1e -->
+<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
 # Standalone binary runtime
 
-Release binary を使うと、Docker や Python environment なしで `local-shell-mcp` を実行できます。Docker を利用できない場合、または dedicated VM、container host、lab server、restricted user account がすでに安全境界を提供している場合に、この runtime を使用します。
+GitHub Releases の **Controller 単一実行ファイル**によるデプロイを推奨します。Python、Docker、ソース checkout は不要です。
 
 これは runtime の選択です。ChatGPT access は HTTPS `/mcp` endpoint を通じて別途設定します。
 
@@ -19,16 +19,20 @@ GitHub Releases では一般的な platform 向けに self-contained executable 
 
 各 archive には executable、README、license、短い quickstart file が含まれます。
 
+**単一実行ファイル**も直接配布されています。含まれるのは Controller とネイティブ WebUI のみで、チャット、データベース、Worker、開発ツールやブラウザーは別途用意します。
+
 ## Install
 
-1. GitHub Releases から platform に合う archive を download します。
-2. 展開します。
+1. [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest) からプラットフォームに合う実行ファイルまたはアーカイブをダウンロードします。
+2. アーカイブを選んだ場合は展開します。
 3. executable を `PATH` に置くか、absolute path を記録します。
 4. `local-shell-mcp --help` を実行し、binary が起動することを確認します。
 
-Linux/macOS では通常 executable bit が必要です。
+例：Linux x86_64 版の単一ファイルを直接ダウンロードします。その他の環境では対応するファイルを選択してください：
 
 ```bash
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
 chmod +x local-shell-mcp
 ./local-shell-mcp --help
 ```
@@ -40,7 +44,7 @@ Windows では PowerShell から `local-shell-mcp.exe` を実行するか、含�
 ```bash
 mkdir -p ~/local-shell-mcp-workspace
 export LOCAL_SHELL_MCP_WORKSPACE_ROOT=~/local-shell-mcp-workspace
-local-shell-mcp --mode mcp
+~/lsm/local-shell-mcp --mode mcp
 ```
 
 別の terminal で：
@@ -104,7 +108,7 @@ binary が package するのは Python application であり、すべての deve
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-この host toolchain を自分で管理したくない場合は Docker Compose を使用してください。
+実行ファイルは Controller のみを内蔵します。外部ツールとブラウザーは必要に応じて導入してください。チャットと履歴には別途 [Web ワークスペース](../getting-started/web-workspace.md) とデータベースが必要です。
 
 ## Long-running service
 
@@ -119,7 +123,7 @@ persistent public deployment では、OS の process supervisor の下で binary
 
 ## Updates
 
-1. platform 用の新しい release archive を download します。
+1. リリース実行ファイルを入れ替え Controller を再起動します：
 2. 必要なら checksum を verify します。
 3. executable を置き換えます。
 4. process manager を restart します。

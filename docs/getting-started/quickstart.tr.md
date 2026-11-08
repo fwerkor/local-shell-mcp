@@ -1,69 +1,78 @@
-<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
+<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
 # Hızlı başlangıç
 
 Bu kılavuz bir LSM Denetleyicisini başlatır ve tarayıcı arayüzünü açar. [unified web workspace](web-workspace.md) önerilen günlük deneyimdir; ayrı olarak konuşlandırılmış, isteğe bağlı bir sohbet yığınıdır. ChatGPT, Gemini ve diğer harici MCP istemcileri aynı Denetleyiciye bağlanabilir. Bkz. [runtime choices and deployment model](../guides/deployment.md).
 
+Önerilen yöntem, [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest) üzerinden **tek dosyalık Controller çalıştırılabilirini** kullanmaktır. Python, Docker veya kaynak checkout gerekmez. Örnek **Linux x86_64** içindir; diğerleri: [ikili kurulum](../installation/binary.md).
+
 ## Gereksinimler
 
-- Compose v2 ile Docker Engine.
-- Uzak kullanıcıların veya harici MCP istemcilerinin bağlanması gerekiyorsa genel bir HTTPS uç noktası.
-- Özel bir workspace directory.
-- Uzun ve rastgele OAuth admin PIN ile JWT secret.
+- Uygun çalıştırılabilir dosya ve `curl` (Linux x86_64 örneği).
+- Uzak kullanıcılar veya harici MCP istemcileri için gerektiğinde genel HTTPS.
+- Ayrı ve sınırlı çalışma alanı.
+- Güçlü OAuth yönetici PIN’i ve rastgele JWT sırrı.
 
 !!! warning
     Bağlı model yapılandırılmış workspace üzerinde işlem yapabilir. Servisi disposable container veya VM içinde çalıştırın ve host-control resources bağlamayın.
 
-## 1. Clone ve yapılandırma
+## 1. Çalıştırılabilir dosyayı indirme ve yapılandırma
+
+Tek dosyayı indirin ve JWT sırrı üretin:
 
 ```bash
-git clone https://github.com/fwerkor/local-shell-mcp.git
-cd local-shell-mcp
-cp .env.example .env
-python scripts/init_compose_env.py
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
+chmod +x local-shell-mcp
+./local-shell-mcp --help
+openssl rand -hex 32
 ```
 
-`.env` dosyasını düzenleyin:
+`.env` oluşturup örnek PIN ve JWT sırrını değiştirin (`openssl rand -hex 32`). İkili `.env` dosyasını **otomatik yüklemez**.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 LOCAL_SHELL_MCP_AUTH_MODE=oauth
 LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me-long-random-pin
 LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
-CLOUDFLARE_TUNNEL_TOKEN=
 ```
 
 ## 2. Sunucuyu başlatma
 
+İndirilen dosyayı doğrudan başlatın:
+
 ```bash
-mkdir -p workspaces/default
-docker compose up -d
+chmod 600 .env
+set -a
+. ./.env
+set +a
+mkdir -p workspace
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
+./local-shell-mcp --mode mcp
 ```
 
-Durumu kontrol edin:
+Durumu başka bir terminalde kontrol edin:
 
 ```bash
-docker compose ps
-docker compose logs --tail=100 local-shell-mcp
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Sağlıklı yanıt HTTP `200` döndürür.
+Sağlıklı yanıt HTTP `200` döndürür. Kalıcı çalıştırma için servis yöneticisi kullanın.
 
 ## 3. HTTPS yayınlama
 
-Cloudflare Tunnel sidecar için:
-
-```bash
-docker compose --profile tunnel up -d
-```
-
-Cloudflare Zero Trust içinde public hostname’i şuraya yönlendirin:
+Uzak erişim için genel sunucu veya HTTPS ters proxy (Caddy, Nginx, Traefik) kullanın. Dosya transferleri dahil tüm siteyi şu adrese yönlendirin:
 
 ```text
-http://local-shell-mcp:8765
+http://127.0.0.1:8765
 ```
 
-Caddy, Nginx, Traefik, Nginx Proxy Manager veya başka bir reverse proxy için HTTPS traffic’i `127.0.0.1:8765` ya da container network address’e iletin.
+HTTPS bağlantısını denetleyin:
+
+```bash
+curl -i https://your-public-host.example.com/healthz
+```
+
+Dosya aktarımı için **Cloudflare Tunnel önerilmez**: istemci yüklemeleri yavaş olabilir. OAuth açık kalmak kaydıyla genel sunucu veya normal proxy/port yönlendirme tercih edin. Alternatif: [Docker](../installation/docker.md).
 
 ## 4. Tarayıcı çalışma alanını açın
 
@@ -106,17 +115,23 @@ Başarısız testi düzelt. Önce ilgili dosyaları oku, en küçük patch’i y
 
 ## Güncelleme
 
+Yeni sürüm dosyasını değiştirip Controller’ı yeniden başlatın:
+
 ```bash
-docker compose pull
-docker compose up -d
+# Stop the running Controller before replacing the executable.
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp.new
+chmod +x local-shell-mcp.new
+./local-shell-mcp.new --version
+mv local-shell-mcp.new local-shell-mcp
+# Restart the Controller process or service.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Tunnel profile kullanıyorsanız:
+Docker Compose için konteyneri güncelleyin; kaynak kurulum: [Python](../installation/python.md).
 
 ```bash
-docker compose --profile tunnel pull
-docker compose --profile tunnel up -d
+docker compose pull
+docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 

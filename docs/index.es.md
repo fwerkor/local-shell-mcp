@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: a66d491558f07c419c8b5958d36c47cd90b081fc1c81f015bb62398cfd573e55 -->
+<!-- i18n-source-sha256: f8fefdb11bbe7b5b755fd59ee829b2771e8c2e9694d5b9db40f8693f53c16960 -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">Espacio de trabajo de IA autohospedado · Plano de control MCP</span>
 
@@ -53,7 +53,7 @@ El límite de aislamiento previsto es el container o VM que ejecuta el servicio.
 | Escenario | Empiece aquí | Por qué |
 |---|---|---|
 | Espacio de trabajo del navegador principal | [Unified web workspace](getting-started/web-workspace.md) | Chat, proyectos y páginas de control de LSM con un inicio de sesión compartido |
-| Implementación del primer controlador | [Quickstart](getting-started/quickstart.md) | Docker Compose, OAuth y la primera sesión del navegador |
+| Implementación del primer controlador | [Quickstart](getting-started/quickstart.md) | Binario recomendado, OAuth y primer inicio en navegador |
 | Elegir la capa runtime | [Runtime choices](guides/deployment.md) | Explica Docker, VS Code, binary, Python y stdio como opciones separadas de runtime |
 | Conectando la chispa de Géminis | [Gemini Custom Apps](getting-started/gemini-spark.md) | Elegibilidad, URL HTTPS MCP, OAuth y pruebas |
 | Añadir ChatGPT como client | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, primer prompt seguro y tool discovery |

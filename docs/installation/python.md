@@ -1,12 +1,12 @@
 # Python, pipx, and source runtimes
 
-Python runtimes are useful for development, debugging, and environments where Python package management is easier than Docker. They run the same server as the Docker and binary runtimes.
+**The standalone single-file binary is recommended for normal Controller deployment**; see the [binary installation guide](binary.md). Python and source runtimes remain available for development, debugging, customization, and environments that prefer package management. They run the same Controller.
 
 Use this page for three related cases:
 
 - `pipx install local-shell-mcp`: user-level executable install.
 - `pip install local-shell-mcp`: install into an existing virtual environment.
-- Editable source checkout: develop or debug the project itself.
+- Editable source checkout: develop, debug, or customize the Controller directly from the repository.
 
 ## pipx install
 
@@ -47,7 +47,7 @@ The process uses the tools installed on the host. The Python package does not in
 
 ## Editable source checkout
 
-Use this for project development:
+Use this when developing or customizing the project. For ordinary deployments, prefer the [single-file binary](binary.md); for public access, configure OAuth and an HTTPS reverse proxy as described in the [quickstart](../getting-started/quickstart.md):
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git
@@ -55,13 +55,23 @@ cd local-shell-mcp
 python -m venv .venv
 . .venv/bin/activate
 pip install --upgrade pip
-pip install -e '.[dev,docs]'
-LOCAL_SHELL_MCP_WORKSPACE_ROOT=/tmp/local-shell-mcp-workspace local-shell-mcp --mode mcp
+pip install -e .
+cp .env.example .env
+# Edit .env and replace its sample secrets before starting.
+set -a
+. ./.env
+set +a
+mkdir -p workspaces/default
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
+local-shell-mcp --mode mcp
 ```
+
+For development-only checks, install the additional dependencies with `pip install -e '.[dev,docs]'`. Keep the virtual environment active when launching the Controller. After `git pull --ff-only`, reinstall with `pip install -e .` and restart the process. The `.env` file is read by Docker Compose automatically, **not** by the source runtime; export it explicitly as above.
 
 Run checks:
 
 ```bash
+python -m pip install -e '.[dev,docs]'
 ruff check .
 pytest -q
 mkdocs build --strict
@@ -69,13 +79,14 @@ mkdocs build --strict
 
 ## Browser setup
 
-The Python package depends on Playwright, but browser binaries may still need installation on the host:
+Playwright is optional; install its Python package and browser binaries only when browser automation is needed.
 
 ```bash
+python -m pip install -e '.[browser]'
 python -m playwright install chromium
 ```
 
-Some Linux hosts need additional browser dependencies. Docker avoids most of this because the image starts from a Playwright base image.
+Browser installation is optional. The base Docker image does not include Playwright or browser binaries; install them separately when needed.
 
 ## Public HTTP MCP use
 

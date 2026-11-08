@@ -15,6 +15,7 @@ import local_shell_mcp.tools as tools
 from local_shell_mcp.fs_ops import prune_temp_dir, temp_dir
 from local_shell_mcp.jobs import retry_job, run_job_with_timeout, tail_job
 from local_shell_mcp.settings import get_settings
+from local_shell_mcp.shell_ops import PUBLIC_RUN_SHELL_TIMEOUT_CAP_S
 
 
 @pytest.fixture
@@ -209,7 +210,7 @@ async def test_completed_output_is_captured_before_zero_retention_pruning(
 async def test_python_invalid_calls_leave_no_durable_script(runner, isolated_job_workspace):
     entrypoint = tools._run_python if runner == "local" else remote._run_python
     with pytest.raises(ValueError, match="timeout_s"):
-        await entrypoint("print('x')", ".", 121, True)
+        await entrypoint("print('x')", ".", PUBLIC_RUN_SHELL_TIMEOUT_CAP_S + 1, True)
     with pytest.raises(Exception, match="missing|not found|exist"):
         await entrypoint("print('x')", "nonexistent-subdirectory", 3, True)
     assert not list((get_settings().state_dir / "jobs" / "scripts").glob("*.py"))
@@ -321,7 +322,7 @@ async def test_invalid_public_timeout_does_not_start_job(monkeypatch, isolated_j
 
     monkeypatch.setattr(jobs, "start_job", should_not_start)
     with pytest.raises(ValueError, match="timeout_s must be"):
-        await run_job_with_timeout("echo no", ".", 121)
+        await run_job_with_timeout("echo no", ".", PUBLIC_RUN_SHELL_TIMEOUT_CAP_S + 1)
 
 
 @pytest.mark.asyncio

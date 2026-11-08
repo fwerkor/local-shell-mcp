@@ -1,13 +1,13 @@
-<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
+<!-- i18n-source-sha256: f769f579039e6eae80c7c955b80248ae0919448b2f5ca18ea4588ee66b0beba1 -->
 # Runtime عبر Docker Compose
 
-Docker Compose هو runtime الموصى به لمعظم المستخدمين. يمنح النموذج workspace Linux مضبوطًا وtoolchain قابلًا لإعادة الإنتاج وcredentials دائمة ودعم browser automation ومسار upgrade سهلًا.
+يوصى باستخدام [الملف التنفيذي الواحد](binary.md)؛ ويظل Docker Compose خياراً للحاويات المعزولة.
 
 هذا اختيار runtime. يمكن وصله بـ ChatGPT أو MCP client عام عبر HTTP أو إبقاؤه محليًا للاختبار.
 
 ## ما الذي تتضمنه Docker image
 
-تعتمد image على Playwright Python image وتثبّت development toolchain واسعًا. الهدف أن يتمكن AI coding agent من العمل على repositories كثيرة دون إعادة بناء runtime لكل project.
+تحتوي الصورة المبنية على python:3.12-slim على أدوات تشغيل أساسية فقط. لا تتضمن أدوات التطوير الكبيرة أو Playwright والمتصفحات أو برامج المكتب.
 
 الفئات المتضمنة:
 
@@ -15,12 +15,12 @@ Docker Compose هو runtime الموصى به لمعظم المستخدمين. �
 |---|---|
 | Shell والفحص | Bash, curl, wget, jq, ripgrep, tree, tmux, patch, file |
 | Git وcredentials | Git, GitHub CLI, OpenSSH client, credential persistence volume |
-| C/C++ build | build-essential, clang, cmake, ninja, autoconf, automake, gdb, lldb |
-| Python | Python, pip, venv, pipx, package development dependencies |
-| JavaScript/TypeScript | Node.js, npm, yarn, pnpm, TypeScript, ts-node |
-| لغات أخرى | Go, Rust, Java, Ruby, PHP, Perl, Lua, R |
-| Browser automation | Playwright browsers and browser dependencies |
-| Document tooling | LibreOffice, Pandoc, Poppler utilities, OCR tooling |
+| C/C++ build | غير مضمن؛ ثبّته عند الحاجة |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | غير مضمن؛ ثبّته عند الحاجة |
+| لغات أخرى | غير مضمن؛ ثبّته عند الحاجة |
+| Browser automation | غير مضمن؛ ثبّته عند الحاجة |
+| Document tooling | غير مضمن؛ ثبّته عند الحاجة |
 
 يجب اعتبار محتوى image الدقيق convenience layer وليس stable API. تبقى project-specific dependencies داخل workspace أو project build scripts.
 
@@ -82,6 +82,8 @@ https://your-public-host.example.com/mcp
 
 ## Cloudflare Tunnel sidecar
 
+**غير موصى به:** قد تكون سرعة الرفع من جهة العميل عبر Cloudflare Tunnel بطيئة جدًا، مما يجعل رفع الملفات ونقلها صعب الاستخدام. استخدمه فقط عند تعذّر النشر العام أو التوجيه عبر خادم عام. استخدم خادمًا ذا عنوان عام، أو أعد توجيه حركة المرور عبر خادم عام باستخدام وكيل HTTPS عكسي. ([network connectivity](../clients/connectivity.md))
+
 يتضمن Compose file خدمة `cloudflared` اختيارية خلف profile `tunnel`. تشغّل tunnel بجانب MCP server.
 
 اضبط `.env`:
@@ -111,6 +113,7 @@ http://local-shell-mcp:8765
 
 ## Reverse proxy بدون tunnel sidecar
 
+**موصى به:** استخدم خادمًا ذا عنوان عام، أو أعد توجيه حركة المرور عبر خادم عام باستخدام وكيل HTTPS عكسي.
 إذا كنت تستخدم Caddy أو Nginx أو Traefik أو Nginx Proxy Manager بالفعل، فاحتفظ بخدمة Compose العادية ومرر HTTPS إلى:
 
 ```text

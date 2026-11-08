@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 19347ba1d8d3f26f227506397f4093281319e6a2a59833ced1da286c1d46f21a -->
+<!-- i18n-source-sha256: 1d80cfbe14747fb0691e91065f582d1e47eb36921d8b27da1648dcd26114a2e5 -->
 # Python, pipx 및 source runtimes
 
-Python runtime은 개발, 디버깅 또는 Docker보다 Python package management가 쉬운 환경에 적합합니다. Docker 및 binary runtime과 동일한 server를 실행합니다.
+일반 배포에는 [단일 실행 파일](binary.md)을 권장합니다. Python과 소스 설치는 개발 및 사용자 지정에 적합합니다.
 
 이 페이지는 세 가지 관련 경우를 다룹니다.
 
@@ -48,7 +48,7 @@ process는 host에 설치된 tool을 사용합니다. Python package가 compiler
 
 ## Editable source checkout
 
-project 개발에는 다음을 사용합니다.
+소스 설치는 개발용입니다. 일반 배포는 [단일 바이너리](binary.md)를 사용하고 OAuth/HTTPS는 [빠른 시작](../getting-started/quickstart.md)을 참고하세요.
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git
@@ -56,13 +56,21 @@ cd local-shell-mcp
 python -m venv .venv
 . .venv/bin/activate
 pip install --upgrade pip
-pip install -e '.[dev,docs]'
-LOCAL_SHELL_MCP_WORKSPACE_ROOT=/tmp/local-shell-mcp-workspace local-shell-mcp --mode mcp
+pip install -e .
+cp .env.example .env
+# Replace the example OAuth secrets in .env before starting.
+set -a
+. ./.env
+set +a
+mkdir -p workspaces/default
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
+local-shell-mcp --mode mcp
 ```
 
 검사 실행:
 
 ```bash
+python -m pip install -e '.[dev,docs]'
 ruff check .
 pytest -q
 mkdocs build --strict
@@ -70,13 +78,14 @@ mkdocs build --strict
 
 ## Browser setup
 
-Python package는 Playwright에 의존하지만 browser binary는 host에 별도 설치가 필요할 수 있습니다.
+Playwright는 선택 사항입니다. 필요할 때만 라이브러리와 브라우저를 설치하세요.
 
 ```bash
+python -m pip install -e '.[browser]'
 python -m playwright install chromium
 ```
 
-일부 Linux host에는 추가 browser dependency도 필요합니다. Docker는 Playwright base image에서 시작하므로 대부분의 작업을 피할 수 있습니다.
+브라우저 설치는 선택 사항입니다. 기본 Docker 이미지에는 Playwright나 브라우저가 포함되지 않습니다.
 
 ## Public HTTP MCP use
 

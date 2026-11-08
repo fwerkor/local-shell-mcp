@@ -1,13 +1,13 @@
-<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
+<!-- i18n-source-sha256: f769f579039e6eae80c7c955b80248ae0919448b2f5ca18ea4588ee66b0beba1 -->
 # Runtime Docker Compose
 
-Docker Compose là runtime khuyến nghị cho phần lớn người dùng. Nó cung cấp cho model workspace Linux được kiểm soát, toolchain tái lập, persistent credentials, hỗ trợ browser automation và đường upgrade dễ dàng.
+Khuyến nghị [binary một tệp](binary.md); Docker Compose là lựa chọn cho container cách ly.
 
 Đây là lựa chọn runtime. Có thể kết nối với ChatGPT, generic HTTP MCP client hoặc giữ local để testing.
 
 ## Docker image bao gồm gì
 
-Image dựa trên Playwright Python image và cài development toolchain rộng. Mục tiêu là để AI coding agent xử lý nhiều repository mà không cần rebuild runtime cho từng project.
+Image dựa trên python:3.12-slim, chỉ chứa các công cụ runtime cơ bản. Toolchain phát triển, Playwright/trình duyệt và bộ office không được cài sẵn.
 
 Các category có sẵn:
 
@@ -15,12 +15,12 @@ Các category có sẵn:
 |---|---|
 | Shell và inspection | Bash, curl, wget, jq, ripgrep, tree, tmux, patch, file |
 | Git và credentials | Git, GitHub CLI, OpenSSH client, credential persistence volume |
-| C/C++ build | build-essential, clang, cmake, ninja, autoconf, automake, gdb, lldb |
-| Python | Python, pip, venv, pipx, package development dependencies |
-| JavaScript/TypeScript | Node.js, npm, yarn, pnpm, TypeScript, ts-node |
-| Ngôn ngữ khác | Go, Rust, Java, Ruby, PHP, Perl, Lua, R |
-| Browser automation | Playwright browsers and browser dependencies |
-| Document tooling | LibreOffice, Pandoc, Poppler utilities, OCR tooling |
+| C/C++ build | Không có; cài thêm khi cần |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | Không có; cài thêm khi cần |
+| Ngôn ngữ khác | Không có; cài thêm khi cần |
+| Browser automation | Không có; cài thêm khi cần |
+| Document tooling | Không có; cài thêm khi cần |
 
 Exact image content là convenience layer, không phải stable API. Project-specific dependencies vẫn thuộc workspace hoặc project build scripts.
 
@@ -82,6 +82,8 @@ https://your-public-host.example.com/mcp
 
 ## Cloudflare Tunnel sidecar
 
+**Không khuyến nghị:** Tốc độ tải lên phía máy khách qua Cloudflare Tunnel có thể rất chậm, khiến việc tải lên và truyền tệp khó sử dụng. Chỉ dùng khi không thể triển khai hoặc chuyển tiếp qua máy chủ công khai. Để truy cập công khai, hãy triển khai trên máy chủ công khai hoặc chuyển tiếp lưu lượng qua máy chủ công khai bằng reverse proxy HTTPS. ([network connectivity](../clients/connectivity.md))
+
 Compose file có optional `cloudflared` service sau profile `tunnel`. Nó chạy tunnel cạnh MCP server.
 
 Cấu hình `.env`:
@@ -111,6 +113,7 @@ Compose service tin forwarded headers vì published port giới hạn ở localh
 
 ## Reverse proxy không có tunnel sidecar
 
+**Khuyến nghị:** Để truy cập công khai, hãy triển khai trên máy chủ công khai hoặc chuyển tiếp lưu lượng qua máy chủ công khai bằng reverse proxy HTTPS.
 Nếu đã dùng Caddy, Nginx, Traefik hoặc Nginx Proxy Manager, giữ normal Compose service và forward HTTPS tới:
 
 ```text

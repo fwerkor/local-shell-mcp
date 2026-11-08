@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
+<!-- i18n-source-sha256: cef0a90f9de3e2806e2a6bd8925217ea44ea6d6e6bce911eea09b1d4192a82d9 -->
 # 運行時選擇與部署模型
 
 `local-shell-mcp` 有兩個互補的決定：
@@ -6,7 +6,7 @@
 1. **運行時**：服務進程如何運行，以及它控制哪個工作區。
 2. **介面**：使用可選的 [unified web workspace](../getting-started/web-workspace.md)，或連接外部 MCP 用戶端，例如 Gemini 或 ChatGPT。
 
-建議的日常介面是自架網站 Web 工作區（聊天、專案和 LSM 控制頁面）。它與控制器分開部署。 Docker、VS Code 擴充功能、發布二進位檔案、Python 安裝和 stdio 模式都是運行控制器的方式；外部聊天應用程式仍然是可選用戶端。
+**Controller 最推薦單檔二進位部署**，不需 Python、Docker 或複製原始碼。其他執行方式及 MCP 用戶端仍支援。
 
 ```text
 運行時層                         暴露層                         客戶端層
@@ -34,15 +34,17 @@ pipx / 源碼 checkout             遠程 worker 出站加入           REST 風
   -> 受控工作區
 ```
 
+**推薦：** 有條件時，應直接部署到具有公網位址的伺服器，或透過公網伺服器搭配 HTTPS 反向代理轉發流量。 **不推薦：** Cloudflare Tunnel 用戶端的上傳速度可能非常慢，導致檔案上傳與傳輸功能難以正常使用。僅在無法進行公網部署或透過公網伺服器轉發時，才考慮作為備選方案。 （[公開 HTTPS 暴露](../clients/connectivity.md)）
+
 ## 運行時選擇矩陣
 
 | 運行時 | 最適合 | 隔離邊界 | 工具鏈源碼 | 外部 MCP 訪問 | 頁面 |
 |---|---|---|---|---|---|
-| Docker 組合 | 大多數編碼代理工作負載和可重複的工作空間 | 貨櫃 | 精實控制器形象；單獨安裝特定於任務的工具鏈 | 新增 HTTPS 代理或隧道 | [Docker Compose](../installation/docker.md) |
-| Docker Compose + 隧道 sidecar | 使用 Cloudflare Tunnel 部署公用控制器 | 貨櫃 | 項目形象 | 內建於 Compose `tunnel` 設定檔中 | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| **單檔二進位（最推薦）** | 多數受支援平台 | 宿主機或 VM | 宿主機工具 | 添加 HTTPS 代理或隧道 | [獨立二進制](../installation/binary.md) |
+| Docker 組合 | 一次性隔離容器與可重建工作區 | 貨櫃 | 精實控制器形象；單獨安裝特定於任務的工具鏈 | 新增 HTTPS 代理或隧道 | [Docker Compose](../installation/docker.md) |
+| Docker Compose + 隧道 sidecar | 不推薦: 透過公網伺服器轉發；Cloudflare Tunnel 僅作備選 | 貨櫃 | 項目形象 | 透過公網伺服器轉發；Cloudflare Tunnel 僅作備選 | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code 擴展 | 從編輯器工作區啓動或停止服務 | 通常是宿主機進程 | 宿主機工具，以及配置的可執行文件 | 爲 ChatGPT 添加外部 HTTPS 隧道或代理 | [VS Code 擴展](../installation/vscode-extension.md) |
-| 獨立二進制 | Docker 不可用，但已有 VM、容器宿主機或專用賬號作爲邊界 | 宿主機或 VM | 宿主機工具 | 添加 HTTPS 代理或隧道 | [獨立二進制](../installation/binary.md) |
-| `pipx` / 源碼安裝 | Python 原生使用、調試、開發 | 宿主機 virtualenv 或 VM | Python 包加宿主機工具 | 添加 HTTPS 代理或隧道 | [Python 安裝](../installation/python.md) |
+| 原始碼 checkout / pipx | 開發、除錯與定制 | 宿主機 virtualenv 或 VM | Python 包加宿主機工具 | 添加 HTTPS 代理或隧道 | [Python 安裝](../installation/python.md) |
 | stdio 模式 | 由本地 MCP 客戶端直接拉起工具進程 | 客戶端進程邊界 | 宿主機工具 | ChatGPT 網頁或 App 不能直接使用 | [stdio 模式](../installation/stdio.md) |
 
 ## 客戶端連接矩陣
@@ -82,11 +84,11 @@ pipx / 源碼 checkout             遠程 worker 出站加入           REST 風
 
 ## 推薦選擇
 
-首先使用**Docker Compose**，除非您有理由不這樣做。它提供了明確的安全邊界，而不需要大型預先安裝的開發工具鏈。
+**優先使用單檔二進位**：下載平台對應程式，在受限帳號下設定獨立工作區。參見 [二進位指南](../installation/binary.md)。
 
 當工作流程從編輯器啟動並且您需要本機啟動器時，請使用 **VS Code 擴充功能**。它仍然是一個運行時。遠端 Web 用戶端需要可存取的 HTTPS 代理或隧道。
 
-當 Docker 不可用，但已有 VM、容器宿主機或專用用戶賬號提供邊界時，使用**獨立二進制**。
+**原始碼安裝**適合開發、除錯及定制，須自行管理 Python 虛擬環境。參見 [Python/原始碼指南](../installation/python.md)。
 
 當你在開發或調試 `local-shell-mcp` 本身，或 Python 環境更容易維護時，使用 **`pipx` 或源碼安裝**。
 

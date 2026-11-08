@@ -36,6 +36,7 @@ from .playwright_ops import browser_capture, browser_get_text, playwright_run_sc
 from .search_ops import grep, tree
 from .settings import get_settings
 from .shell_ops import (
+    PUBLIC_RUN_SHELL_TIMEOUT_CAP_S,
     PUBLIC_TOOL_WATCHDOG_TIMEOUT_S,
     kill_shell,
     list_shells,
@@ -54,7 +55,11 @@ from .version import version_info
 PUBLIC_TOOL_TIMEOUT_S = PUBLIC_TOOL_WATCHDOG_TIMEOUT_S
 DEFAULT_HTTP_TOOL_WATCHDOG_TIMEOUT_S = 30
 BROWSER_HTTP_TOOL_WATCHDOG_TIMEOUT_S = 75
-LONG_HTTP_TOOL_WATCHDOG_TIMEOUT_S = PUBLIC_TOOL_WATCHDOG_TIMEOUT_S
+LONG_HTTP_TOOL_WATCHDOG_TIMEOUT_S = PUBLIC_RUN_SHELL_TIMEOUT_CAP_S + 15
+LONG_RUNNING_HTTP_ROUTES = frozenset({
+    ("POST", "/tools/run_shell"),
+    ("POST", "/tools/playwright/run_script"),
+})
 NON_CANCELLABLE_HTTP_MUTATIONS = frozenset(
     {
         ("POST", "/tools/shell_start"),
@@ -197,8 +202,13 @@ def _install_tool_timeout_middleware(app: FastAPI) -> None:
         route_timeout_s = HTTP_TOOL_WATCHDOG_TIMEOUTS_S[route_key]
         if route_timeout_s is None:
             return await call_next(request)
-        # Keep the old constant as a ceiling and a convenient short-timeout test hook.
-        timeout_s = min(route_timeout_s, PUBLIC_TOOL_TIMEOUT_S)
+        # Long-running explicit shell/script requests must not inherit the
+        # short watchdog used for ordinary REST tools.
+        timeout_s = (
+            route_timeout_s
+            if route_key in LONG_RUNNING_HTTP_ROUTES
+            else min(route_timeout_s, PUBLIC_TOOL_TIMEOUT_S)
+        )
         try:
             return await asyncio.wait_for(call_next(request), timeout=timeout_s)
         except TimeoutError:

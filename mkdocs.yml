@@ -11,9 +11,9 @@ nav:
       - Runtime vs client model: guides/deployment.md
   - Runtime installation:
       - Choose a runtime: guides/deployment.md
+      - Standalone binary: installation/binary.md
       - Docker Compose: installation/docker.md
       - VS Code extension: installation/vscode-extension.md
-      - Standalone binary: installation/binary.md
       - Python / pipx / source: installation/python.md
       - Stdio mode: installation/stdio.md
   - Client connections:

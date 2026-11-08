@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 3986da6ff877609189b0d88d363aff1f5f45445f0cfe5ffa608a31929078542c -->
+<!-- i18n-source-sha256: 4eb43e1a065d72171aad5493848eb2f8c57361b110237c8816928e28f227a3d8 -->
 # Connettività di rete
 
 Gli MCP client HTTP esterni alla macchina richiedono un HTTPS origin raggiungibile. Questa pagina riguarda il routing di rete, non la scelta del runtime.
@@ -19,13 +19,18 @@ Non includere `/mcp` in questa base URL.
 
 ## Opzioni di connettività
 
+**Consigliato:** Per l'accesso pubblico, distribuisci su un server pubblico oppure inoltra il traffico tramite un server pubblico con reverse proxy HTTPS.
+
+**Sconsigliato:** La velocità di upload lato client di Cloudflare Tunnel può essere molto bassa, rendendo difficili caricamenti e trasferimenti di file. Usalo solo se non sono possibili un server pubblico o un inoltro tramite esso.
+
+
 | Opzione | Quando usarla |
 |---|---|
-| Compose tunnel sidecar | Docker Compose con il profile `tunnel` integrato |
-| Tunnel esterno | Qualsiasi runtime che debba essere raggiungibile fuori dalla rete locale |
 | Caddy | TLS automatico semplice |
 | Nginx o Nginx Proxy Manager | Infrastruttura Nginx esistente |
 | Traefik | Routing container-native esistente |
+| Inoltro tramite server pubblico | Per l'accesso pubblico, distribuisci su un server pubblico oppure inoltra il traffico tramite un server pubblico con reverse proxy HTTPS. |
+| Cloudflare Tunnel (sconsigliato) | Inoltro tramite server pubblico; Cloudflare Tunnel solo come ripiego |
 
 ## Percorsi
 
@@ -64,9 +69,9 @@ curl -i https://your-public-host.example.com/healthz
 
 | Runtime | Schema di rete |
 |---|---|
-| Docker Compose su server | Reverse proxy esistente o Compose tunnel profile |
-| Docker Compose su macchina domestica | Outbound tunnel |
-| VS Code extension su laptop | Tunnel temporaneo per la sessione |
+| Docker Compose su server | Reverse proxy HTTPS |
+| Docker Compose su macchina domestica | Inoltro tramite server pubblico; Cloudflare Tunnel solo come ripiego |
+| VS Code extension su laptop | Inoltro tramite server pubblico |
 | Binary su VM | Reverse proxy sulla VM o al bordo della rete |
 | Server di sviluppo Python/source | Di solito solo localhost |
 | Stdio mode | Nessun percorso HTTP; usare un MCP client locale |

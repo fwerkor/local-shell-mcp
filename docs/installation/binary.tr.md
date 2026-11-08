@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 42daa6d3dd931530a1d2e86d6a36fc6424b7494ff078626157c158b38b1f4b1e -->
+<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
 # Bağımsız binary runtime
 
-Release binary’leri `local-shell-mcp`’yi Docker ve Python environment olmadan çalıştırır. Docker kullanılamıyorsa veya dedicated VM, container host, lab server ya da restricted user account zaten güvenlik sınırı sağlıyorsa bu runtime’ı kullanın.
+Önerilen yöntem, GitHub Releases üzerinden **tek dosyalık Controller çalıştırılabilirini** kullanmaktır. Python, Docker veya kaynak checkout gerekmez.
 
 Bu bir runtime seçimidir. ChatGPT erişimi ayrıca HTTPS `/mcp` endpoint üzerinden yapılandırılır.
 
@@ -19,16 +19,20 @@ GitHub Releases yaygın platformlar için self-contained executables oluşturur:
 
 Her archive executable, README, license ve kısa quickstart file içerir.
 
+Doğrudan indirilebilen **tek çalıştırılabilir dosya** da vardır. Yalnızca Controller ve yerel WebUI dahildir; sohbet, veritabanı, Worker, araçlar ve tarayıcı ayrıdır.
+
 ## Kurulum
 
-1. Platformunuz için archive’ı GitHub Releases’tan indirin.
-2. Açın.
+1. Platformunuza uygun dosyayı veya arşivi [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest) üzerinden indirin.
+2. Arşiv indirdiyseniz çıkarın.
 3. Executable’ı `PATH` üzerine koyun veya absolute path’ini kaydedin.
 4. Binary’nin başladığını doğrulamak için `local-shell-mcp --help` çalıştırın.
 
-Linux ve macOS genellikle executable bit gerektirir:
+Örnek: Linux x86_64 tek dosyasını doğrudan indirin; diğer platformlarda uygun dosyayı seçin:
 
 ```bash
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
 chmod +x local-shell-mcp
 ./local-shell-mcp --help
 ```
@@ -40,7 +44,7 @@ Windows kullanıcıları `local-shell-mcp.exe` dosyasını PowerShell’den çal
 ```bash
 mkdir -p ~/local-shell-mcp-workspace
 export LOCAL_SHELL_MCP_WORKSPACE_ROOT=~/local-shell-mcp-workspace
-local-shell-mcp --mode mcp
+~/lsm/local-shell-mcp --mode mcp
 ```
 
 Başka bir terminalde:
@@ -104,7 +108,7 @@ Task’larınızın ihtiyaç duyduklarını kurun:
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-Bu host toolchain’i sürdürmek istemiyorsanız Docker Compose kullanın.
+İkili yalnızca Controller içerir; harici araçlar ve tarayıcılar isteğe bağlıdır. Sohbet ve geçmiş ayrı [web çalışma alanı](../getting-started/web-workspace.md) ve veritabanı gerektirir.
 
 ## Uzun süre çalışan service
 
@@ -119,7 +123,7 @@ Persistent public deployment için binary’yi işletim sisteminizin process sup
 
 ## Updates
 
-1. Platformunuz için yeni release archive’ı indirin.
+1. Yeni sürüm dosyasını değiştirip Controller’ı yeniden başlatın:
 2. İsterseniz checksum’ları verify edin.
 3. Executable’ı değiştirin.
 4. Process manager’ı restart edin.

@@ -35,10 +35,15 @@ def _mcp_error_text(result: CallToolResult) -> str:
 
 
 def test_public_tool_watchdog_allows_shell_timeout_cleanup():
-    assert PUBLIC_RUN_SHELL_TIMEOUT_CAP_S == 120
+    assert PUBLIC_RUN_SHELL_TIMEOUT_CAP_S == 3600
     assert PUBLIC_TOOL_WATCHDOG_TIMEOUT_S == 130
     assert tools_module.PUBLIC_TOOL_TIMEOUT_S == 130
     assert http_app_module.PUBLIC_TOOL_TIMEOUT_S == 130
+    assert tools_module._public_tool_timeout_s("run_shell", {"timeout_s": 3600}) == 3615
+    assert (
+        tools_module._public_tool_timeout_s("run_shell", {"timeout_s": 3600, "machine": "worker"})
+        == 3750
+    )
 
 
 @pytest.mark.asyncio
@@ -69,13 +74,33 @@ async def test_run_shell_tool_rejects_timeout_above_public_cap(tmp_path, monkeyp
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     get_settings.cache_clear()
 
-    response = await build_mcp().call_tool(
-        "run_shell", {"command": "echo ok", "timeout_s": 3600}
-    )
+    response = await build_mcp().call_tool("run_shell", {"command": "echo ok", "timeout_s": 3601})
     assert isinstance(response, CallToolResult)
     payload = _mcp_error_text(response)
 
-    assert "timeout_s must be <= 120 seconds for public run_shell" in payload
+    assert "timeout_s must be <= 3600 seconds for public run_shell" in payload
+
+
+@pytest.mark.asyncio
+async def test_run_shell_tool_accepts_one_hour_timeout(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+
+    response = await build_mcp().call_tool(
+        "run_shell", {"command": python_shell_command("print('ok')"), "timeout_s": 3600}
+    )
+    assert response[1]["data"]["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_python_tool_accepts_one_hour_timeout(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
+
+    response = await build_mcp().call_tool(
+        "run_python", {"code": "print('ok')", "timeout_s": 3600}
+    )
+    assert response[1]["data"]["ok"] is True
 
 
 @pytest.mark.asyncio
@@ -162,7 +187,7 @@ def test_public_run_shell_timeout_allows_explicit_cap(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     get_settings.cache_clear()
 
-    assert public_run_shell_timeout(120) == 120
+    assert public_run_shell_timeout(3600) == 3600
 
 
 @pytest.mark.asyncio

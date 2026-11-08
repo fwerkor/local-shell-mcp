@@ -1,13 +1,13 @@
-<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
+<!-- i18n-source-sha256: f769f579039e6eae80c7c955b80248ae0919448b2f5ca18ea4588ee66b0beba1 -->
 # Runtime Docker Compose
 
-Docker Compose es el runtime recomendado para la mayoría de usuarios. Da al modelo un workspace Linux controlado, un toolchain reproducible, credenciales persistentes, soporte de browser automation y una ruta de actualización sencilla.
+Para la mayoría se recomienda el [binario único](binary.md); Docker Compose sirve para contenedores aislados.
 
 Es una elección de runtime. Puede conectarse a ChatGPT, a un MCP client HTTP genérico o mantenerse local para pruebas.
 
 ## Qué incluye la imagen Docker
 
-La imagen se basa en la imagen Python de Playwright e instala un toolchain de desarrollo amplio. La intención es que un AI coding agent pueda trabajar con muchos repositories sin pedir reconstruir el runtime para cada proyecto.
+La imagen usa python:3.12-slim e incluye solo herramientas esenciales. No preinstala toolchains de desarrollo, Playwright/navegadores ni suites ofimáticas.
 
 Categorías incluidas:
 
@@ -15,12 +15,12 @@ Categorías incluidas:
 |---|---|
 | Shell e inspección | Bash, curl, wget, jq, ripgrep, tree, tmux, patch, file |
 | Git y credenciales | Git, GitHub CLI, OpenSSH client, credential persistence volume |
-| C/C++ build | build-essential, clang, cmake, ninja, autoconf, automake, gdb, lldb |
-| Python | Python, pip, venv, pipx, package development dependencies |
-| JavaScript/TypeScript | Node.js, npm, yarn, pnpm, TypeScript, ts-node |
-| Otros lenguajes | Go, Rust, Java, Ruby, PHP, Perl, Lua, R |
-| Browser automation | Playwright browsers and browser dependencies |
-| Herramientas de documentos | LibreOffice, Pandoc, Poppler utilities, OCR tooling |
+| C/C++ build | No incluido; instálelo si hace falta |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | No incluido; instálelo si hace falta |
+| Otros lenguajes | No incluido; instálelo si hace falta |
+| Browser automation | No incluido; instálelo si hace falta |
+| Herramientas de documentos | No incluido; instálelo si hace falta |
 
 El contenido exacto de la imagen es una capa de conveniencia, no una API estable. Las dependencias específicas del proyecto deben seguir en el workspace o en sus scripts de build.
 
@@ -82,6 +82,8 @@ https://your-public-host.example.com/mcp
 
 ## Cloudflare Tunnel sidecar
 
+**No recomendado:** Las subidas del cliente por Cloudflare Tunnel pueden ser muy lentas, lo que dificulta el uso de las funciones de carga y transferencia de archivos. Úsalo solo si no es viable desplegar o reenviar mediante un servidor público. Para el acceso público, usa un servidor público o reenvía el tráfico a través de uno con un proxy inverso HTTPS. ([network connectivity](../clients/connectivity.md))
+
 El Compose file incluye un servicio `cloudflared` opcional detrás del profile `tunnel`. Ejecuta el tunnel junto al MCP server.
 
 Configure `.env`:
@@ -111,6 +113,7 @@ El servicio Compose confía en forwarded headers porque su puerto publicado est�
 
 ## Reverse proxy sin tunnel sidecar
 
+**Recomendado:** Para el acceso público, usa un servidor público o reenvía el tráfico a través de uno con un proxy inverso HTTPS.
 Si ya usa Caddy, Nginx, Traefik o Nginx Proxy Manager, mantenga el servicio Compose normal y reenvíe HTTPS a:
 
 ```text

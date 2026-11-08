@@ -1,69 +1,78 @@
-<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
+<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
 # البدء السريع
 
 يبدأ هذا الدليل تشغيل وحدة تحكم LSM ويفتح واجهة المتصفح الخاصة بها. [unified web workspace](web-workspace.md) هي التجربة اليومية الموصى بها؛ إنها عبارة عن مكدس دردشة اختياري تم نشره بشكل منفصل. يمكن لعملاء ChatGPT وGemini وعملاء MCP الخارجيين الآخرين الاتصال بنفس وحدة التحكم. انظر [runtime choices and deployment model](../guides/deployment.md).
 
+نوصي **بملف Controller تنفيذي واحد** من [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest)، دون Python أو Docker أو نسخة مصدر. المثال خاص بـ **Linux x86_64**؛ للأنظمة الأخرى انظر [دليل الملف التنفيذي](../installation/binary.md).
+
 ## المتطلبات
 
-- Docker Engine مع Compose v2.
-- نقطة نهاية HTTPS عامة إذا كان يجب على المستخدمين البعيدين أو عملاء MCP الخارجيين الاتصال.
-- دليل workspace مخصص.
-- OAuth admin PIN وJWT secret طويلان وعشوائيان.
+- الملف التنفيذي المتوافق و`curl` (مثال Linux x86_64).
+- HTTPS عام فقط عند وصول مستخدمين عن بُعد أو عملاء MCP خارجيين.
+- مجلد عمل منفصل بصلاحيات محدودة.
+- PIN قوي لمسؤول OAuth وسر JWT عشوائي.
 
 !!! warning
     يمكن للنموذج المتصل تشغيل الـ workspace المضبوط. شغّل الخدمة داخل container أو VM قابل للتخلص منه وتجنب mount موارد التحكم في host.
 
-## 1. الاستنساخ والإعداد
+## 1. تنزيل الملف التنفيذي وإعداده
+
+نزّل الملف التنفيذي الواحد وأنشئ سر JWT:
 
 ```bash
-git clone https://github.com/fwerkor/local-shell-mcp.git
-cd local-shell-mcp
-cp .env.example .env
-python scripts/init_compose_env.py
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
+chmod +x local-shell-mcp
+./local-shell-mcp --help
+openssl rand -hex 32
 ```
 
-عدّل `.env`:
+أنشئ `.env` وغيّر PIN وسر JWT الافتراضيين (باستخدام `openssl rand -hex 32`). الملف التنفيذي **لا يحمّل** `.env` تلقائياً.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 LOCAL_SHELL_MCP_AUTH_MODE=oauth
 LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me-long-random-pin
 LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
-CLOUDFLARE_TUNNEL_TOKEN=
 ```
 
 ## 2. تشغيل الخادم
 
+شغّل الملف التنفيذي مباشرة:
+
 ```bash
-mkdir -p workspaces/default
-docker compose up -d
+chmod 600 .env
+set -a
+. ./.env
+set +a
+mkdir -p workspace
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
+./local-shell-mcp --mode mcp
 ```
 
-تحقق من الحالة:
+تحقق من الحالة في طرفية أخرى:
 
 ```bash
-docker compose ps
-docker compose logs --tail=100 local-shell-mcp
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-تعيد الاستجابة السليمة HTTP `200`.
+الاستجابة الصحيحة HTTP `200`. استخدم مدير خدمات وحساباً محدود الصلاحيات للتشغيل الدائم.
 
 ## 3. إتاحة HTTPS
 
-لاستخدام Cloudflare Tunnel sidecar:
-
-```bash
-docker compose --profile tunnel up -d
-```
-
-في Cloudflare Zero Trust وجّه public hostname إلى:
+للوصول البعيد، استخدم خادماً عاماً أو وكيلاً عكسياً HTTPS مثل Caddy أو Nginx أو Traefik، مع تمرير الموقع كاملاً بما فيه الملفات إلى:
 
 ```text
-http://local-shell-mcp:8765
+http://127.0.0.1:8765
 ```
 
-مع Caddy أو Nginx أو Traefik أو Nginx Proxy Manager أو أي reverse proxy آخر، مرّر HTTPS traffic إلى `127.0.0.1:8765` أو عنوان شبكة الـ container.
+تحقق من HTTPS:
+
+```bash
+curl -i https://your-public-host.example.com/healthz
+```
+
+**لا يُنصح باستخدام Cloudflare Tunnel** لنقل الملفات لأن الرفع من العميل قد يكون بطيئاً. يُفضّل خادم عام أو وكيل عكسي/تحويل منافذ مع إبقاء OAuth مفعّلاً. البديل: [Docker](../installation/docker.md).
 
 ## 4. افتح مساحة عمل المتصفح
 
@@ -106,17 +115,23 @@ https://your-public-host.example.com/ui
 
 ## التحديث
 
+استبدل الملف التنفيذي ثم أعد تشغيل Controller:
+
 ```bash
-docker compose pull
-docker compose up -d
+# Stop the running Controller before replacing the executable.
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp.new
+chmod +x local-shell-mcp.new
+./local-shell-mcp.new --version
+mv local-shell-mcp.new local-shell-mcp
+# Restart the Controller process or service.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-إذا كنت تستخدم profile tunnel:
+لـ Docker Compose حدّث الحاوية؛ تثبيت المصدر: [Python](../installation/python.md).
 
 ```bash
-docker compose --profile tunnel pull
-docker compose --profile tunnel up -d
+docker compose pull
+docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 

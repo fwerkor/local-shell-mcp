@@ -51,58 +51,33 @@ The intended safety boundary is the container or VM, not the host.
 
 ## Quick start
 
-Install the official launcher or Python package when you want a host runtime:
+**Recommended deployment: the standalone single-file Controller executable** from [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest). It bundles the Controller and native WebUI, runs without a system Python installation or Docker, and needs no repository checkout. Choose the matching binary for your OS/architecture; the following example is for **Linux x86_64**:
 
 ```bash
-npx local-shell-mcp --help
-pipx install local-shell-mcp
-lsm --help
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
+chmod +x local-shell-mcp
+./local-shell-mcp --help
+openssl rand -hex 32
 ```
 
-The npm and Python distributions both expose `local-shell-mcp`; installed packages also expose `lsm` as the short command. The npm distribution is only a verified launcher for the matching standalone release binary, not a second server implementation.
-
-Clone the repository and prepare configuration:
+Create a private `.env` file with the necessary `LOCAL_SHELL_MCP_` variables (see the [quickstart](https://fwerkor.github.io/local-shell-mcp/getting-started/quickstart/)). Use a strong OAuth PIN and the generated JWT secret, then start the executable with those variables explicitly exported:
 
 ```bash
-git clone https://github.com/fwerkor/local-shell-mcp.git
-cd local-shell-mcp
-cp .env.example .env
-python scripts/init_compose_env.py
+chmod 600 .env
+set -a
+. ./.env
+set +a
+mkdir -p workspace
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
+./local-shell-mcp --mode mcp
 ```
 
-Set at least these values in `.env`:
+Check `http://127.0.0.1:8765/healthz` and open the native UI at `http://127.0.0.1:8765/ui`. For remote access, prefer a public HTTPS server or reverse proxy; Cloudflare Tunnel is not recommended for file-heavy transfers. Keep OAuth enabled on publicly accessible endpoints.
 
-```env
-LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
-LOCAL_SHELL_MCP_AUTH_MODE=oauth
-LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me-long-random-pin
-LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
-CLOUDFLARE_TUNNEL_TOKEN=
-```
+The one-file executable is the **Controller distribution**, not an all-inclusive operating-system image. It uses host-installed task tools and optional external Playwright/browser dependencies. Integrated **chat and projects** use the separately deployed [unified web workspace](https://fwerkor.github.io/local-shell-mcp/getting-started/web-workspace/) (Node.js, MongoDB, Meilisearch, and SearXNG); the remote **Worker** is distributed separately. No chat backend or database is claimed to be embedded in the Controller binary.
 
-Start the server:
-
-```bash
-mkdir -p workspaces/default
-docker compose up -d
-curl -i http://127.0.0.1:8765/healthz
-```
-
-Start the bundled Cloudflare Tunnel sidecar when you need public HTTPS access:
-
-```bash
-docker compose --profile tunnel up -d
-```
-
-Open the LSM browser login at `http://127.0.0.1:8765/ui` (or the configured HTTPS origin's `/ui`). For integrated **chat, projects and Controller pages**, deploy the [unified web workspace](https://fwerkor.github.io/local-shell-mcp/getting-started/web-workspace/); the Controller-only browser UI remains available without the optional chat stack.
-
-External clients such as Gemini or ChatGPT can connect to the public MCP endpoint:
-
-```text
-https://your-public-host.example.com/mcp
-```
-
-Full setup instructions are in the [documentation](https://fwerkor.github.io/local-shell-mcp/). Runtime choices are documented separately from client connections.
+Other deployment methods remain supported: [Docker Compose](https://fwerkor.github.io/local-shell-mcp/installation/docker/), [Python/pipx/source](https://fwerkor.github.io/local-shell-mcp/installation/python/), and the [VS Code extension](https://fwerkor.github.io/local-shell-mcp/installation/vscode-extension/). See [platform-specific binary installation](https://fwerkor.github.io/local-shell-mcp/installation/binary/) for Windows, macOS, ARM64 and updates.
 
 ## Human interface
 

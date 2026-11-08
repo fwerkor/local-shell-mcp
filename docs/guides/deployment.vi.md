@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 594169d44520f8abd7cebee1bfa42c5ff0ca31f424115d438107ed01b77fa604 -->
+<!-- i18n-source-sha256: cef0a90f9de3e2806e2a6bd8925217ea44ea6d6e6bce911eea09b1d4192a82d9 -->
 # Lựa chọn runtime và mô hình deployment
 
 `local-shell-mcp` có hai quyết định bổ sung:
@@ -6,7 +6,7 @@
 1. **Runtime**: process server chạy như thế nào và kiểm soát workspace nào.
 2. **Giao diện**: sử dụng [unified web workspace](../getting-started/web-workspace.md) tùy chọn hoặc kết nối ứng dụng khách MCP bên ngoài như Gemini hoặc ChatGPT.
 
-Giao diện hàng ngày được đề xuất là không gian làm việc web tự lưu trữ (trò chuyện, dự án và trang kiểm soát LSM). Nó được triển khai riêng biệt với Bộ điều khiển. Docker, phần mở rộng VS Code, các tệp nhị phân phát hành, các bản cài đặt Python và chế độ stdio là những cách để chạy Bộ điều khiển; các ứng dụng trò chuyện bên ngoài vẫn là ứng dụng khách tùy chọn.
+**Controller được khuyến nghị triển khai bằng một tệp thực thi**, không cần Python, Docker hay source. Các cách khác vẫn được hỗ trợ.
 
 ```text
 Runtime layer                      Exposure layer                 Client layer
@@ -34,15 +34,17 @@ Local MCP client
   -> controlled workspace
 ```
 
+**Khuyến nghị:** Để truy cập công khai, hãy triển khai trên máy chủ công khai hoặc chuyển tiếp lưu lượng qua máy chủ công khai bằng reverse proxy HTTPS. **Không khuyến nghị:** Tốc độ tải lên phía máy khách qua Cloudflare Tunnel có thể rất chậm, khiến việc tải lên và truyền tệp khó sử dụng. Chỉ dùng khi không thể triển khai hoặc chuyển tiếp qua máy chủ công khai. ([Public HTTPS exposure](../clients/connectivity.md))
+
 ## Ma trận lựa chọn runtime
 
 | Thời gian chạy | Tốt nhất cho | Ranh giới cách ly | Nguồn chuỗi công cụ | Truy cập MCP bên ngoài | Trang |
 |---|---|---|---|---|---|
-| Docker Soạn | Hầu hết khối lượng công việc của tác nhân mã hóa và không gian làm việc có thể lặp lại | thùng chứa | Hình ảnh Bộ điều khiển tinh gọn; cài đặt riêng các chuỗi công cụ dành riêng cho nhiệm vụ | Thêm proxy hoặc đường hầm HTTPS | [Docker Compose](../installation/docker.md) |
-| Docker Compose + xe sidecar đường hầm | Triển khai Bộ điều khiển công cộng với Đường hầm Cloudflare | thùng chứa | Hình ảnh dự án | Được tích hợp vào hồ sơ Compose `tunnel` | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
+| **Binary một tệp (khuyến nghị)** | Đa số nền tảng được hỗ trợ | Host or VM | Host tools cộng executable cấu hình | Thêm HTTPS proxy hoặc tunnel | [Standalone binary](../installation/binary.md) |
+| Docker Soạn | Container cách ly và dùng tạm | thùng chứa | Hình ảnh Bộ điều khiển tinh gọn; cài đặt riêng các chuỗi công cụ dành riêng cho nhiệm vụ | Thêm proxy hoặc đường hầm HTTPS | [Docker Compose](../installation/docker.md) |
+| Docker Compose + xe sidecar đường hầm | Không khuyến nghị: Chuyển tiếp qua máy chủ công khai; Cloudflare Tunnel chỉ là phương án cuối | thùng chứa | Hình ảnh dự án | Chuyển tiếp qua máy chủ công khai; Cloudflare Tunnel chỉ là phương án cuối | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Start/stop server từ editor workspace | Thường là host process | Host tools cộng executable cấu hình | Thêm HTTPS tunnel/proxy ngoài cho ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
-| Standalone binary | Host hoặc VM không có Docker | Host or VM | Host tools cộng executable cấu hình | Thêm HTTPS proxy hoặc tunnel | [Standalone binary](../installation/binary.md) |
-| `pipx` / source install | Dùng Python-native, debugging, development | Host virtualenv or VM | Python package cộng host tools | Thêm HTTPS proxy hoặc tunnel | [Python install](../installation/python.md) |
+| Source / pipx | Phát triển và tùy biến | Host virtualenv or VM | Python package cộng host tools | Thêm HTTPS proxy hoặc tunnel | [Python install](../installation/python.md) |
 | Stdio mode | MCP client cục bộ spawn process trực tiếp | Client process boundary | Host tools cộng executable cấu hình | Không dùng được với ChatGPT web/app | [Stdio mode](../installation/stdio.md) |
 
 ## Ma trận kết nối client
@@ -82,11 +84,11 @@ Khác biệt không nằm ở abstract API mà ở **operating environment** ph�
 
 ## Lựa chọn khuyến nghị
 
-Trước tiên hãy sử dụng **Docker Compose** trừ khi bạn có lý do để không làm vậy. Nó đưa ra ranh giới an toàn rõ ràng mà không yêu cầu chuỗi công cụ phát triển được cài đặt sẵn lớn.
+**Ưu tiên tệp thực thi duy nhất**: tải đúng nền tảng và chạy bằng tài khoản giới hạn với workspace riêng. [Hướng dẫn binary](../installation/binary.md).
 
 Sử dụng **tiện ích mở rộng Mã VS** khi quy trình làm việc bắt đầu từ trình chỉnh sửa và bạn muốn có trình khởi chạy cục bộ. Nó vẫn là một thời gian chạy. Máy khách web từ xa cần có proxy hoặc đường hầm HTTPS có thể truy cập được.
 
-Dùng **standalone binary** khi Docker không khả dụng nhưng VM, container host hoặc dedicated user account đã tạo boundary.
+**Cài từ source** phù hợp để phát triển, gỡ lỗi và tùy biến trong môi trường Python. [Hướng dẫn Python](../installation/python.md).
 
 Dùng **`pipx` hoặc source install** để development/debugging `local-shell-mcp` hoặc khi Python-based environment dễ duy trì hơn.
 

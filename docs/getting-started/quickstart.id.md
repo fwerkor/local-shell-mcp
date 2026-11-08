@@ -1,69 +1,78 @@
-<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
+<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
 # Mulai cepat
 
 Panduan ini memulai Pengontrol LSM dan membuka antarmuka browsernya. [unified web workspace](web-workspace.md) adalah pengalaman harian yang direkomendasikan; ini adalah tumpukan obrolan opsional yang diterapkan secara terpisah. ChatGPT, Gemini, dan klien MCP eksternal lainnya dapat terhubung ke Pengontrol yang sama. Lihat [runtime choices and deployment model](../guides/deployment.md).
 
+Direkomendasikan **satu berkas executable Controller** dari [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest) tanpa Python, Docker atau checkout source. Contoh **Linux x86_64**; platform lain: [panduan binary](../installation/binary.md).
+
 ## Persyaratan
 
-- Docker Engine dengan Compose v2.
-- Titik akhir HTTPS publik jika pengguna jarak jauh atau klien MCP eksternal harus terhubung.
-- Direktori workspace khusus.
-- OAuth admin PIN dan JWT secret acak yang panjang.
+- Executable sesuai platform dan `curl` (contoh Linux x86_64).
+- HTTPS publik hanya jika pengguna jarak jauh atau klien MCP eksternal membutuhkannya.
+- Workspace khusus dengan izin terbatas.
+- PIN admin OAuth kuat dan secret JWT acak.
 
 !!! warning
     Model yang terhubung dapat mengoperasikan workspace yang dikonfigurasi. Jalankan layanan dalam container atau VM yang dapat dibuang dan hindari mount resource pengendali host.
 
-## 1. Clone dan konfigurasi
+## 1. Unduh executable dan konfigurasi
+
+Unduh executable satu berkas dan buat secret JWT:
 
 ```bash
-git clone https://github.com/fwerkor/local-shell-mcp.git
-cd local-shell-mcp
-cp .env.example .env
-python scripts/init_compose_env.py
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
+chmod +x local-shell-mcp
+./local-shell-mcp --help
+openssl rand -hex 32
 ```
 
-Edit `.env`:
+Buat `.env` dan ganti contoh PIN dan secret JWT (gunakan `openssl rand -hex 32`). Binary **tidak memuat** `.env` secara otomatis.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 LOCAL_SHELL_MCP_AUTH_MODE=oauth
 LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me-long-random-pin
 LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
-CLOUDFLARE_TUNNEL_TOKEN=
 ```
 
 ## 2. Mulai server
 
+Jalankan executable secara langsung:
+
 ```bash
-mkdir -p workspaces/default
-docker compose up -d
+chmod 600 .env
+set -a
+. ./.env
+set +a
+mkdir -p workspace
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
+./local-shell-mcp --mode mcp
 ```
 
-Periksa status:
+Periksa status dari terminal lain:
 
 ```bash
-docker compose ps
-docker compose logs --tail=100 local-shell-mcp
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Respons yang sehat mengembalikan HTTP `200`.
+Respons sehat adalah HTTP `200`. Gunakan supervisor layanan dan akun terbatas untuk produksi.
 
 ## 3. Publikasikan HTTPS
 
-Untuk sidecar Cloudflare Tunnel:
-
-```bash
-docker compose --profile tunnel up -d
-```
-
-Di Cloudflare Zero Trust, arahkan public hostname ke:
+Untuk akses jarak jauh gunakan server publik atau reverse proxy HTTPS (Caddy, Nginx, Traefik), arahkan seluruh origin termasuk transfer file ke:
 
 ```text
-http://local-shell-mcp:8765
+http://127.0.0.1:8765
 ```
 
-Untuk Caddy, Nginx, Traefik, Nginx Proxy Manager, atau reverse proxy lain, teruskan traffic HTTPS ke `127.0.0.1:8765` atau alamat jaringan container.
+Periksa HTTPS:
+
+```bash
+curl -i https://your-public-host.example.com/healthz
+```
+
+**Cloudflare Tunnel tidak direkomendasikan** untuk transfer file karena upload dari klien dapat lambat. Utamakan server publik atau proxy/forwarding biasa dengan OAuth tetap aktif. Alternatif: [Docker](../installation/docker.md).
 
 ## 4. Buka ruang kerja browser
 
@@ -106,17 +115,23 @@ Perbaiki test yang gagal. Baca file terkait terlebih dahulu, buat patch sekecil 
 
 ## Pembaruan
 
+Ganti executable lalu restart Controller:
+
 ```bash
-docker compose pull
-docker compose up -d
+# Stop the running Controller before replacing the executable.
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp.new
+chmod +x local-shell-mcp.new
+./local-shell-mcp.new --version
+mv local-shell-mcp.new local-shell-mcp
+# Restart the Controller process or service.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Jika menggunakan profil tunnel:
+Docker Compose diperbarui lewat kontainer; source: [Python](../installation/python.md).
 
 ```bash
-docker compose --profile tunnel pull
-docker compose --profile tunnel up -d
+docker compose pull
+docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 

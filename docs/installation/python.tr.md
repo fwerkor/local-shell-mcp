@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 19347ba1d8d3f26f227506397f4093281319e6a2a59833ced1da286c1d46f21a -->
+<!-- i18n-source-sha256: 1d80cfbe14747fb0691e91065f582d1e47eb36921d8b27da1648dcd26114a2e5 -->
 # Python, pipx ve source runtimes
 
-Python runtime’ları geliştirme, hata ayıklama ve Python package management’ın Docker’dan daha kolay olduğu ortamlar için kullanışlıdır. Docker ve binary runtime’larla aynı server’ı çalıştırırlar.
+Normal dağıtım için [tek dosyalık ikili](binary.md) önerilir. Python ve kaynak sürümleri geliştirme ve özelleştirme içindir.
 
 Bu sayfa üç ilgili durumu kapsar:
 
@@ -48,7 +48,7 @@ Process host üzerinde kurulu araçları kullanır. Python package sizin için c
 
 ## Editable source checkout
 
-Project geliştirme için:
+Kaynak kurulum geliştirmeye uygundur; normal dağıtımda [ikili](binary.md) kullanın. OAuth/HTTPS: [hızlı başlangıç](../getting-started/quickstart.md).
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git
@@ -56,13 +56,21 @@ cd local-shell-mcp
 python -m venv .venv
 . .venv/bin/activate
 pip install --upgrade pip
-pip install -e '.[dev,docs]'
-LOCAL_SHELL_MCP_WORKSPACE_ROOT=/tmp/local-shell-mcp-workspace local-shell-mcp --mode mcp
+pip install -e .
+cp .env.example .env
+# Replace the example OAuth secrets in .env before starting.
+set -a
+. ./.env
+set +a
+mkdir -p workspaces/default
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
+local-shell-mcp --mode mcp
 ```
 
 Kontrolleri çalıştırın:
 
 ```bash
+python -m pip install -e '.[dev,docs]'
 ruff check .
 pytest -q
 mkdocs build --strict
@@ -70,13 +78,14 @@ mkdocs build --strict
 
 ## Tarayıcı kurulumu
 
-Python package Playwright’a bağlıdır, ancak browser binary’lerin host üzerinde ayrıca kurulması gerekebilir:
+Playwright isteğe bağlıdır; gerekirse kitaplığı ve tarayıcıyı yükleyin.
 
 ```bash
+python -m pip install -e '.[browser]'
 python -m playwright install chromium
 ```
 
-Bazı Linux host’ları ek browser dependency gerektirir. Docker, Playwright base image ile başladığı için bunun çoğunu önler.
+Tarayıcı kurulumu isteğe bağlıdır; temel Docker imajında Playwright veya tarayıcı yoktur.
 
 ## Genel HTTP MCP kullanımı
 

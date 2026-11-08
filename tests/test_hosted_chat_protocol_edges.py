@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from local_shell_mcp import hosted_chat
+from local_shell_mcp.remote import remote_execution_rpc_timeout_s
 from local_shell_mcp.settings import get_settings
 
 
@@ -117,6 +118,12 @@ def test_tool_visibility_schema_and_private_metadata():
     schema = hosted_chat.tool_schema(Tool())
     assert schema["function"]["name"] == "run_shell"
     assert "secret" not in hosted_chat.safe_tool_message(Result())
+
+
+def test_hosted_chat_waits_for_one_hour_remote_tool_and_result_grace():
+    assert hosted_chat._mcp_tool_timeout_seconds() >= (
+        remote_execution_rpc_timeout_s(3600) + hosted_chat.MCP_TOOL_TIMEOUT_GRACE_S
+    )
 
 
 @pytest.mark.asyncio

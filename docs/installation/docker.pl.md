@@ -1,13 +1,13 @@
-<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
+<!-- i18n-source-sha256: f769f579039e6eae80c7c955b80248ae0919448b2f5ca18ea4588ee66b0beba1 -->
 # Runtime Docker Compose
 
-Docker Compose to runtime zalecany większości użytkowników. Daje modelowi kontrolowany Linux workspace, reproducible toolchain, persistent credentials, browser automation support i łatwą ścieżkę upgrade.
+Zalecany jest [jeden plik binarny](binary.md); Docker Compose pozostaje opcją dla izolowanych kontenerów.
 
 To wybór runtime. Można go połączyć z ChatGPT, generic HTTP MCP client albo zachować lokalnie do testing.
 
 ## Co zawiera Docker image
 
-Image opiera się na Playwright Python image i instaluje szeroki development toolchain. Celem jest umożliwienie AI coding agent pracy z wieloma repositories bez rebuild runtime dla każdego project.
+Obraz bazuje na python:3.12-slim i zawiera tylko podstawowe narzędzia. Nie zawiera gotowych toolchainów, Playwright/przeglądarek ani pakietów biurowych.
 
 Dostępne category:
 
@@ -15,12 +15,12 @@ Dostępne category:
 |---|---|
 | Shell i inspection | Bash, curl, wget, jq, ripgrep, tree, tmux, patch, file |
 | Git i credentials | Git, GitHub CLI, OpenSSH client, credential persistence volume |
-| C/C++ build | build-essential, clang, cmake, ninja, autoconf, automake, gdb, lldb |
-| Python | Python, pip, venv, pipx, package development dependencies |
-| JavaScript/TypeScript | Node.js, npm, yarn, pnpm, TypeScript, ts-node |
-| Inne języki | Go, Rust, Java, Ruby, PHP, Perl, Lua, R |
-| Browser automation | Playwright browsers and browser dependencies |
-| Document tooling | LibreOffice, Pandoc, Poppler utilities, OCR tooling |
+| C/C++ build | Brak; instaluj w razie potrzeby |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | Brak; instaluj w razie potrzeby |
+| Inne języki | Brak; instaluj w razie potrzeby |
+| Browser automation | Brak; instaluj w razie potrzeby |
+| Document tooling | Brak; instaluj w razie potrzeby |
 
 Exact image content jest convenience layer, a nie stable API. Project-specific dependencies nadal należą do workspace lub project build scripts.
 
@@ -82,6 +82,8 @@ https://your-public-host.example.com/mcp
 
 ## Cloudflare Tunnel sidecar
 
+**Niezalecane:** Przesyłanie danych od klienta przez Cloudflare Tunnel może być bardzo wolne, co utrudnia wysyłanie i transfer plików. Używaj tylko wtedy, gdy serwer publiczny lub przekierowanie nie są dostępne. Do dostępu publicznego użyj serwera z publicznym adresem lub przekierowania przez serwer publiczny z odwrotnym proxy HTTPS. ([network connectivity](../clients/connectivity.md))
+
 Compose file zawiera optional `cloudflared` service za profile `tunnel`. Uruchamia tunnel obok MCP server.
 
 Skonfiguruj `.env`:
@@ -111,6 +113,7 @@ Compose service ufa forwarded headers, ponieważ published port jest ograniczony
 
 ## Reverse proxy bez tunnel sidecar
 
+**Zalecane:** Do dostępu publicznego użyj serwera z publicznym adresem lub przekierowania przez serwer publiczny z odwrotnym proxy HTTPS.
 Jeśli używasz już Caddy, Nginx, Traefik lub Nginx Proxy Manager, zachowaj normal Compose service i forward HTTPS do:
 
 ```text

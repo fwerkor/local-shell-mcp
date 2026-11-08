@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 42daa6d3dd931530a1d2e86d6a36fc6424b7494ff078626157c158b38b1f4b1e -->
+<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
 # 独立二进制运行时
 
-Release 二进制可以在没有 Docker、也没有 Python 环境的情况下运行 `local-shell-mcp`。当 Docker 不可用，或你已经有专用 VM、容器宿主机、实验室服务器、受限用户账号作为边界时，可以使用这个运行时。
+推荐从 GitHub Releases 下载 **Controller 单文件可执行程序**直接部署。Controller 无需预装 Python、Docker 或克隆源码。
 
 这是运行时选择。ChatGPT 访问需要另外通过 HTTPS `/mcp` 端点配置。
 
@@ -19,16 +19,20 @@ GitHub Releases 会为常见平台构建自包含可执行文件：
 
 每个压缩包包含可执行文件、README、license 和简短 quickstart 文件。
 
+也可以直接下载**单文件可执行程序**。该文件只包含 Controller 和原生 WebUI；聊天、数据库、Worker、宿主机工具链及浏览器运行时需单独部署。
+
 ## 安装
 
-1. 从 GitHub Releases 下载适合你平台的压缩包。
-2. 解压。
+1. 从 [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest) 下载对应平台的单文件程序或压缩包。
+2. 如果下载的是压缩包，先解压。
 3. 把可执行文件放到 `PATH` 中，或记录其绝对路径。
 4. 运行 `local-shell-mcp --help`，确认二进制能启动。
 
-Linux 和 macOS 通常需要设置可执行位：
+以下演示直接下载 Linux x86_64 单文件程序；其他平台请选择对应发布产物：
 
 ```bash
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
 chmod +x local-shell-mcp
 ./local-shell-mcp --help
 ```
@@ -40,7 +44,7 @@ Windows 用户应在 PowerShell 中运行 `local-shell-mcp.exe`，或把所在�
 ```bash
 mkdir -p ~/local-shell-mcp-workspace
 export LOCAL_SHELL_MCP_WORKSPACE_ROOT=~/local-shell-mcp-workspace
-local-shell-mcp --mode mcp
+~/lsm/local-shell-mcp --mode mcp
 ```
 
 另开一个终端检查：
@@ -104,7 +108,7 @@ local-shell-mcp --config /path/to/config.yaml
 | 浏览器自动化 | Playwright 浏览器二进制和系统依赖 |
 | 文档转换 | LibreOffice、Pandoc、Poppler 工具 |
 
-如果你不想维护这套宿主机工具链，使用 Docker Compose。
+单文件程序包含 Controller，实际任务所需工具仍由宿主机提供；浏览器自动化依赖可按需安装。集成聊天和历史记录需另外部署 [统一 Web 工作区](../getting-started/web-workspace.md) 及其数据库。
 
 ## 长时间服务
 
@@ -119,7 +123,7 @@ local-shell-mcp --config /path/to/config.yaml
 
 ## 更新
 
-1. 下载新版本对应平台的 release 压缩包。
+1. 替换发布版可执行文件，然后重启 Controller 进程或服务：
 2. 如有需要，校验 checksum。
 3. 替换可执行文件。
 4. 重启进程管理器。

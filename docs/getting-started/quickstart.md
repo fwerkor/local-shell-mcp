@@ -2,67 +2,76 @@
 
 This guide starts an LSM Controller and opens its browser interface. The [unified web workspace](web-workspace.md) is the recommended daily experience; it is a separately deployed, optional chat stack. ChatGPT, Gemini and other external MCP clients can connect to the same Controller. See [runtime choices and deployment model](../guides/deployment.md).
 
+Download the standalone **single-file Controller executable** from [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest). This is the recommended deployment. No Python, Docker, or repository checkout is required for the Controller. The commands below target **Linux x86_64**; for Windows, macOS or ARM64 see [binary installation](../installation/binary.md).
+
 ## Requirements
 
-- Docker Engine with Compose v2.
-- A public HTTPS endpoint if remote users or external MCP clients must connect.
-- A dedicated workspace directory.
-- A long random OAuth admin PIN and JWT secret.
+- A compatible release executable and `curl` (Linux x86_64 example).
+- A public HTTPS endpoint only when remote users or external MCP clients must connect.
+- A dedicated, narrowly scoped workspace.
+- A strong OAuth admin PIN and a randomly generated JWT secret.
 
 !!! warning
     The connected model can operate the configured workspace. Run the service in a disposable container or VM and avoid mounting host-control resources.
 
-## 1. Clone and configure
+## 1. Download the executable and configure
+
+Download the raw single-file executable. Generate a JWT secret and keep it private:
 
 ```bash
-git clone https://github.com/fwerkor/local-shell-mcp.git
-cd local-shell-mcp
-cp .env.example .env
-python scripts/init_compose_env.py
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
+chmod +x local-shell-mcp
+./local-shell-mcp --help
+openssl rand -hex 32
 ```
 
-Edit `.env`:
+Create a `.env` file with these variables. Replace the placeholder PIN and JWT secret (use the output of `openssl rand -hex 32`). The binary **does not automatically load** `.env`; export it before launching.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 LOCAL_SHELL_MCP_AUTH_MODE=oauth
 LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me-long-random-pin
 LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
-CLOUDFLARE_TUNNEL_TOKEN=
 ```
 
 ## 2. Start the server
 
+Start the downloaded executable directly:
+
 ```bash
-mkdir -p workspaces/default
-docker compose up -d
+chmod 600 .env
+set -a
+. ./.env
+set +a
+mkdir -p workspace
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
+./local-shell-mcp --mode mcp
 ```
 
-Check status:
+Check status in another terminal:
 
 ```bash
-docker compose ps
-docker compose logs --tail=100 local-shell-mcp
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-A healthy response returns HTTP `200`.
+A healthy response returns HTTP `200`. For a persistent deployment, use a process supervisor and a restricted service account.
 
 ## 3. Expose HTTPS
 
-For Cloudflare Tunnel sidecar:
-
-```bash
-docker compose --profile tunnel up -d
-```
-
-In Cloudflare Zero Trust, point the public hostname to:
+For remote access, deploy on a publicly reachable server or forward port 8765 through an HTTPS reverse proxy (Caddy, Nginx, Traefik or equivalent). Forward the entire origin, including uploads and downloads, to:
 
 ```text
-http://local-shell-mcp:8765
+http://127.0.0.1:8765
 ```
 
-For Caddy, Nginx, Traefik, Nginx Proxy Manager, or another reverse proxy, forward HTTPS traffic to `127.0.0.1:8765` or the container network address.
+After configuring HTTPS, verify the endpoint:
+
+```bash
+curl -i https://your-public-host.example.com/healthz
+```
+
+**Cloudflare Tunnel is not recommended** for deployments that transfer files: its client-side upload path can be slow. Prefer direct public-server deployment or a conventional reverse proxy/port forwarding where possible. Keep OAuth enabled on public endpoints. Docker Compose instructions remain in the [Docker runtime guide](../installation/docker.md).
 
 ## 4. Open the browser workspace
 
@@ -105,17 +114,23 @@ Fix the failing test. Read the relevant files first, make the smallest patch, ru
 
 ## Updating
 
+Replace the release executable, then restart the Controller process/service:
+
 ```bash
-docker compose pull
-docker compose up -d
+# Stop the running Controller before replacing the executable.
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp.new
+chmod +x local-shell-mcp.new
+./local-shell-mcp.new --version
+mv local-shell-mcp.new local-shell-mcp
+# Restart the Controller process or service.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-If you use the tunnel profile:
+For Docker Compose deployments, update the container instead. For source builds see the [Python/source guide](../installation/python.md).
 
 ```bash
-docker compose --profile tunnel pull
-docker compose --profile tunnel up -d
+docker compose pull
+docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 

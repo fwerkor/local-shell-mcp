@@ -1,13 +1,13 @@
-<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
+<!-- i18n-source-sha256: f769f579039e6eae80c7c955b80248ae0919448b2f5ca18ea4588ee66b0beba1 -->
 # Docker Compose runtime
 
-Docker Compose çoğu kullanıcı için önerilen runtime’dır. Modele kontrollü Linux workspace, reproducible toolchain, persistent credentials, browser automation desteği ve kolay upgrade yolu sağlar.
+[Tek dosyalık ikili](binary.md) önerilir; Docker Compose yalıtılmış konteynerler için alternatiftir.
 
 Bu bir runtime seçimidir. ChatGPT’ye, generic HTTP MCP client’a bağlanabilir veya local testing için yerel tutulabilir.
 
 ## Docker image içeriği
 
-Image, Playwright Python image tabanlıdır ve geniş development toolchain kurar. Amaç, AI coding agent’ın her project için runtime rebuild etmeden birçok repository üzerinde çalışabilmesidir.
+İmaj python:3.12-slim tabanlıdır ve yalnızca temel çalışma zamanı araçlarını içerir. Geliştirme araçları, Playwright/tarayıcılar ve ofis paketleri önceden kurulu değildir.
 
 Dahil category’ler:
 
@@ -15,12 +15,12 @@ Dahil category’ler:
 |---|---|
 | Shell ve inspection | Bash, curl, wget, jq, ripgrep, tree, tmux, patch, file |
 | Git ve credentials | Git, GitHub CLI, OpenSSH client, credential persistence volume |
-| C/C++ build | build-essential, clang, cmake, ninja, autoconf, automake, gdb, lldb |
-| Python | Python, pip, venv, pipx, package development dependencies |
-| JavaScript/TypeScript | Node.js, npm, yarn, pnpm, TypeScript, ts-node |
-| Diğer diller | Go, Rust, Java, Ruby, PHP, Perl, Lua, R |
-| Browser automation | Playwright browsers and browser dependencies |
-| Document tooling | LibreOffice, Pandoc, Poppler utilities, OCR tooling |
+| C/C++ build | Dahil değil; gerekirse kurun |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | Dahil değil; gerekirse kurun |
+| Diğer diller | Dahil değil; gerekirse kurun |
+| Browser automation | Dahil değil; gerekirse kurun |
+| Document tooling | Dahil değil; gerekirse kurun |
 
 Exact image content bir convenience layer’dır, stable API değildir. Project-specific dependencies workspace veya project build scripts içinde kalmalıdır.
 
@@ -82,6 +82,8 @@ https://your-public-host.example.com/mcp
 
 ## Cloudflare Tunnel sidecar
 
+**Önerilmez:** Cloudflare Tunnel üzerinden istemci tarafındaki yükleme hızı çok düşük olabilir; bu da dosya yükleme ve aktarımı işlevlerini kullanmayı zorlaştırır. Yalnızca genel sunucu veya yönlendirme mümkün değilse kullanın. Genel erişim için herkese açık bir sunucuya dağıtın veya trafiği HTTPS ters vekiliyle herkese açık bir sunucu üzerinden iletin. ([network connectivity](../clients/connectivity.md))
+
 Compose file `tunnel` profile arkasında optional `cloudflared` service içerir. Tunnel’ı MCP server yanında çalıştırır.
 
 `.env` yapılandırın:
@@ -111,6 +113,7 @@ Compose service, published port localhost ile sınırlı olduğundan forwarded h
 
 ## Tunnel sidecar olmadan reverse proxy
 
+**Önerilir:** Genel erişim için herkese açık bir sunucuya dağıtın veya trafiği HTTPS ters vekiliyle herkese açık bir sunucu üzerinden iletin.
 Caddy, Nginx, Traefik veya Nginx Proxy Manager zaten kullanıyorsanız normal Compose service’i koruyup HTTPS’i şuraya forward edin:
 
 ```text

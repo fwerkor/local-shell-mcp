@@ -1,13 +1,13 @@
-<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
+<!-- i18n-source-sha256: f769f579039e6eae80c7c955b80248ae0919448b2f5ca18ea4588ee66b0beba1 -->
 # Runtime Docker Compose
 
-Docker Compose — рекомендуемый runtime для большинства пользователей. Он даёт модели контролируемый Linux workspace, воспроизводимый toolchain, persistent credentials, поддержку browser automation и простой путь обновления.
+Рекомендуется [единый исполняемый файл](binary.md); Docker Compose подходит для изолированных контейнеров.
 
 Это выбор runtime. Его можно подключить к ChatGPT, универсальному HTTP MCP client или оставить локальным для тестирования.
 
 ## Что входит в Docker image
 
-Image основан на Playwright Python image и устанавливает широкий development toolchain. Цель — позволить AI coding agent работать с разными repositories без пересборки runtime для каждого проекта.
+Образ основан на python:3.12-slim и включает только базовые утилиты. Инструменты разработки, Playwright/браузеры и офисные приложения не предустановлены.
 
 Включённые категории:
 
@@ -15,12 +15,12 @@ Image основан на Playwright Python image и устанавливает 
 |---|---|
 | Shell и inspection | Bash, curl, wget, jq, ripgrep, tree, tmux, patch, file |
 | Git и credentials | Git, GitHub CLI, OpenSSH client, credential persistence volume |
-| C/C++ build | build-essential, clang, cmake, ninja, autoconf, automake, gdb, lldb |
-| Python | Python, pip, venv, pipx, package development dependencies |
-| JavaScript/TypeScript | Node.js, npm, yarn, pnpm, TypeScript, ts-node |
-| Другие языки | Go, Rust, Java, Ruby, PHP, Perl, Lua, R |
-| Browser automation | Playwright browsers and browser dependencies |
-| Document tooling | LibreOffice, Pandoc, Poppler utilities, OCR tooling |
+| C/C++ build | Нет в образе; установите при необходимости |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | Нет в образе; установите при необходимости |
+| Другие языки | Нет в образе; установите при необходимости |
+| Browser automation | Нет в образе; установите при необходимости |
+| Document tooling | Нет в образе; установите при необходимости |
 
 Точный состав image — convenience layer, а не стабильный API. Project-specific dependencies должны оставаться в workspace или project build scripts.
 
@@ -82,6 +82,8 @@ https://your-public-host.example.com/mcp
 
 ## Cloudflare Tunnel sidecar
 
+**Не рекомендуется:** Скорость загрузки со стороны клиента через Cloudflare Tunnel может быть очень низкой, из-за чего отправка и передача файлов становятся неудобными. Используйте только при отсутствии возможности развертывания или пересылки через публичный сервер. Для публичного доступа используйте сервер с публичным адресом или пересылку трафика через публичный сервер с обратным HTTPS-прокси. ([network connectivity](../clients/connectivity.md))
+
 Compose file содержит optional service `cloudflared` за profile `tunnel`. Он запускает tunnel рядом с MCP server.
 
 Настройте `.env`:
@@ -111,6 +113,7 @@ Compose service доверяет forwarded headers, потому что publishe
 
 ## Reverse proxy без tunnel sidecar
 
+**Рекомендуется:** Для публичного доступа используйте сервер с публичным адресом или пересылку трафика через публичный сервер с обратным HTTPS-прокси.
 Если уже используется Caddy, Nginx, Traefik или Nginx Proxy Manager, оставьте обычный Compose service и перенаправьте HTTPS на:
 
 ```text

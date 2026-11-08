@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 19347ba1d8d3f26f227506397f4093281319e6a2a59833ced1da286c1d46f21a -->
+<!-- i18n-source-sha256: 1d80cfbe14747fb0691e91065f582d1e47eb36921d8b27da1648dcd26114a2e5 -->
 # Runtime Python, pipx i source
 
-Runtime Python są przydatne do programowania, debugowania i środowisk, w których zarządzanie pakietami Python jest łatwiejsze niż Docker. Uruchamiają ten sam server co runtime Docker i binary.
+Do zwykłego wdrożenia zalecamy [jeden plik wykonywalny](binary.md). Python i źródła służą programowaniu i dostosowaniu.
 
 Ta strona obejmuje trzy powiązane przypadki:
 
@@ -48,7 +48,7 @@ Process używa narzędzi zainstalowanych na host. Pakiet Python nie instaluje za
 
 ## Editable source checkout
 
-Do rozwoju projektu:
+Źródła są przeznaczone do rozwoju; zwykle wybieraj [binarne wydanie](binary.md). OAuth/HTTPS: [szybki start](../getting-started/quickstart.md).
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git
@@ -56,13 +56,21 @@ cd local-shell-mcp
 python -m venv .venv
 . .venv/bin/activate
 pip install --upgrade pip
-pip install -e '.[dev,docs]'
-LOCAL_SHELL_MCP_WORKSPACE_ROOT=/tmp/local-shell-mcp-workspace local-shell-mcp --mode mcp
+pip install -e .
+cp .env.example .env
+# Replace the example OAuth secrets in .env before starting.
+set -a
+. ./.env
+set +a
+mkdir -p workspaces/default
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
+local-shell-mcp --mode mcp
 ```
 
 Uruchom kontrole:
 
 ```bash
+python -m pip install -e '.[dev,docs]'
 ruff check .
 pytest -q
 mkdocs build --strict
@@ -70,13 +78,14 @@ mkdocs build --strict
 
 ## Konfiguracja przeglądarki
 
-Pakiet Python zależy od Playwright, ale browser binaries mogą nadal wymagać instalacji na host:
+Playwright jest opcjonalny; zainstaluj bibliotekę i przeglądarkę w razie potrzeby.
 
 ```bash
+python -m pip install -e '.[browser]'
 python -m playwright install chromium
 ```
 
-Niektóre hosty Linux wymagają dodatkowych browser dependencies. Docker omija większość tego, ponieważ image bazuje na Playwright base image.
+Instalacja przeglądarki jest opcjonalna; bazowy obraz Docker nie zawiera Playwright ani przeglądarek.
 
 ## Publiczne użycie HTTP MCP
 

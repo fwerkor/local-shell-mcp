@@ -39,7 +39,7 @@ from .state_store import get_state_store, state_lock
 from .tmux_helper import resolve_tmux, tmux_socket_name
 
 PUBLIC_RUN_SHELL_DEFAULT_TIMEOUT_S = 10
-PUBLIC_RUN_SHELL_TIMEOUT_CAP_S = 120
+PUBLIC_RUN_SHELL_TIMEOUT_CAP_S = 3600
 PUBLIC_TOOL_WATCHDOG_TIMEOUT_S = 130
 GRACEFUL_TERMINATION_TIMEOUT_S = 5
 KILL_TERMINATION_TIMEOUT_S = 2

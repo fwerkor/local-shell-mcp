@@ -1,69 +1,78 @@
-<!-- i18n-source-sha256: 8c51015fb3cc5269af4d5bf07eddfa8deac64e90f0063ee8cd1fc661439f7679 -->
+<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
 # クイックスタート
 
 このガイドでは、LSM コントローラーを起動し、そのブラウザー インターフェイスを開きます。 [unified web workspace](web-workspace.md) は、毎日の推奨エクスペリエンスです。これは、個別にデプロイされるオプションのチャット スタックです。 ChatGPT、Gemini、およびその他の外部 MCP クライアントは、同じコントローラーに接続できます。 [runtime choices and deployment model](../guides/deployment.md)を参照してください。
 
+[GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest) の **Controller 単一実行ファイル**によるデプロイを推奨します。Python、Docker、ソース checkout は不要です。例は **Linux x86_64** 用です。その他は [バイナリガイド](../installation/binary.md) を参照してください。
+
 ## 要件
 
-- Compose v2 を備えた Docker Engine。
-- リモート ユーザーまたは外部 MCP クライアントが接続する必要がある場合のパブリック HTTPS エンドポイント。
-- 専用の workspace directory。
-- 十分に長いランダムな OAuth admin PIN と JWT secret。
+- 対応するリリース実行ファイルと `curl`（Linux x86_64 の例）。
+- リモート利用者や外部 MCP クライアントが必要な場合のみ公開 HTTPS。
+- 専用で権限を制限したワークスペース。
+- 強い OAuth 管理 PIN とランダムな JWT 秘密鍵。
 
 !!! warning
     接続されたモデルは設定済み workspace を操作できます。使い捨て container または VM でサービスを実行し、host-control resources を mount しないでください。
 
-## 1. clone と設定
+## 1. 実行ファイルの取得と設定
+
+単一ファイルをダウンロードし JWT 秘密鍵を生成します：
 
 ```bash
-git clone https://github.com/fwerkor/local-shell-mcp.git
-cd local-shell-mcp
-cp .env.example .env
-python scripts/init_compose_env.py
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
+chmod +x local-shell-mcp
+./local-shell-mcp --help
+openssl rand -hex 32
 ```
 
-`.env` を編集します：
+`.env` を作成し、サンプル PIN と JWT 秘密鍵を変更します（`openssl rand -hex 32` を使用）。バイナリは `.env` を**自動読み込みしません**。
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
 LOCAL_SHELL_MCP_AUTH_MODE=oauth
 LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN=change-me-long-random-pin
 LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
-CLOUDFLARE_TUNNEL_TOKEN=
 ```
 
 ## 2. サーバーを起動
 
+ダウンロードした実行ファイルを直接起動します：
+
 ```bash
-mkdir -p workspaces/default
-docker compose up -d
+chmod 600 .env
+set -a
+. ./.env
+set +a
+mkdir -p workspace
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
+./local-shell-mcp --mode mcp
 ```
 
-状態を確認します：
+別のターミナルで状態を確認します：
 
 ```bash
-docker compose ps
-docker compose logs --tail=100 local-shell-mcp
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-正常な応答は HTTP `200` を返します。
+正常な応答は HTTP `200` です。常駐には制限されたアカウントとサービスマネージャーを使用してください。
 
 ## 3. HTTPS で公開
 
-Cloudflare Tunnel sidecar を使う場合：
-
-```bash
-docker compose --profile tunnel up -d
-```
-
-Cloudflare Zero Trust で public hostname の転送先を次に設定します：
+リモートアクセスには公開サーバーまたは HTTPS リバースプロキシ（Caddy、Nginx、Traefik）を使い、アップロードとダウンロードを含むサイト全体を転送します：
 
 ```text
-http://local-shell-mcp:8765
+http://127.0.0.1:8765
 ```
 
-Caddy、Nginx、Traefik、Nginx Proxy Manager などの reverse proxy では、HTTPS traffic を `127.0.0.1:8765` または container network address に転送します。
+HTTPS を確認します：
+
+```bash
+curl -i https://your-public-host.example.com/healthz
+```
+
+**Cloudflare Tunnel は推奨しません**。クライアントからのアップロードが遅く、ファイル転送を妨げる場合があります。可能であれば公開サーバーまたは通常のリバースプロキシを使用し、OAuth を有効にしてください。Docker: [ガイド](../installation/docker.md)。
 
 ## 4. ブラウザのワークスペースを開きます
 
@@ -106,17 +115,23 @@ local-shell-mcp を使用してください。まず environment_get を呼び�
 
 ## 更新
 
+リリース実行ファイルを入れ替え Controller を再起動します：
+
 ```bash
-docker compose pull
-docker compose up -d
+# Stop the running Controller before replacing the executable.
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp.new
+chmod +x local-shell-mcp.new
+./local-shell-mcp.new --version
+mv local-shell-mcp.new local-shell-mcp
+# Restart the Controller process or service.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-tunnel profile を使っている場合：
+Docker Compose の場合はコンテナーを更新します。ソース版：[Python ガイド](../installation/python.md)。
 
 ```bash
-docker compose --profile tunnel pull
-docker compose --profile tunnel up -d
+docker compose pull
+docker compose up -d
 curl -i http://127.0.0.1:8765/healthz
 ```
 

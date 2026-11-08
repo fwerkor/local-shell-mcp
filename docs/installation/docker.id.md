@@ -1,13 +1,13 @@
-<!-- i18n-source-sha256: 4c3299fd088eb91a592f4954ad96804fa9cea6e61cc1b214739001dc64b8be1e -->
+<!-- i18n-source-sha256: f769f579039e6eae80c7c955b80248ae0919448b2f5ca18ea4588ee66b0beba1 -->
 # Runtime Docker Compose
 
-Docker Compose adalah runtime yang direkomendasikan untuk sebagian besar pengguna. Ia memberi model workspace Linux terkontrol, toolchain reproducible, persistent credentials, dukungan browser automation, dan jalur upgrade yang mudah.
+[Binary satu berkas](binary.md) direkomendasikan; Docker Compose untuk container terisolasi.
 
 Ini adalah pilihan runtime. Dapat dihubungkan ke ChatGPT, generic HTTP MCP client, atau tetap lokal untuk testing.
 
 ## Isi Docker image
 
-Image berbasis Playwright Python image dan memasang development toolchain yang luas. Tujuannya agar AI coding agent dapat menangani banyak repository tanpa meminta rebuild runtime untuk setiap project.
+Image berbasis python:3.12-slim dan hanya berisi utilitas runtime dasar. Toolchain pengembangan, Playwright/browser, dan peralatan office tidak terpasang.
 
 Category yang termasuk:
 
@@ -15,12 +15,12 @@ Category yang termasuk:
 |---|---|
 | Shell dan inspection | Bash, curl, wget, jq, ripgrep, tree, tmux, patch, file |
 | Git dan credentials | Git, GitHub CLI, OpenSSH client, credential persistence volume |
-| C/C++ build | build-essential, clang, cmake, ninja, autoconf, automake, gdb, lldb |
-| Python | Python, pip, venv, pipx, package development dependencies |
-| JavaScript/TypeScript | Node.js, npm, yarn, pnpm, TypeScript, ts-node |
-| Bahasa lain | Go, Rust, Java, Ruby, PHP, Perl, Lua, R |
-| Browser automation | Playwright browsers and browser dependencies |
-| Document tooling | LibreOffice, Pandoc, Poppler utilities, OCR tooling |
+| C/C++ build | Tidak disertakan; instal jika perlu |
+| Python | Python 3.12, pip, virtualenv |
+| JavaScript/TypeScript | Tidak disertakan; instal jika perlu |
+| Bahasa lain | Tidak disertakan; instal jika perlu |
+| Browser automation | Tidak disertakan; instal jika perlu |
+| Document tooling | Tidak disertakan; instal jika perlu |
 
 Exact image content adalah convenience layer, bukan stable API. Project-specific dependencies tetap harus berada di workspace atau project build scripts.
 
@@ -82,6 +82,8 @@ https://your-public-host.example.com/mcp
 
 ## Cloudflare Tunnel sidecar
 
+**Tidak direkomendasikan:** Kecepatan unggah sisi klien Cloudflare Tunnel bisa sangat lambat, sehingga fitur unggah dan transfer berkas sulit digunakan. Gunakan hanya jika server publik atau penerusan tidak memungkinkan. Untuk akses publik, gunakan server publik atau teruskan lalu lintas melalui server publik dengan reverse proxy HTTPS. ([network connectivity](../clients/connectivity.md))
+
 Compose file menyertakan optional `cloudflared` service di balik profile `tunnel`. Ini menjalankan tunnel di samping MCP server.
 
 Konfigurasikan `.env`:
@@ -111,6 +113,7 @@ Compose service mempercayai forwarded headers karena published port dibatasi ke 
 
 ## Reverse proxy tanpa tunnel sidecar
 
+**Direkomendasikan:** Untuk akses publik, gunakan server publik atau teruskan lalu lintas melalui server publik dengan reverse proxy HTTPS.
 Jika sudah memakai Caddy, Nginx, Traefik, atau Nginx Proxy Manager, pertahankan normal Compose service dan forward HTTPS ke:
 
 ```text
