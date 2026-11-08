@@ -11,7 +11,6 @@ import contextlib
 import json
 import logging
 import time
-import uuid
 from collections.abc import AsyncIterator
 
 from starlette.exceptions import HTTPException
@@ -24,7 +23,6 @@ from .ask_user_tools import ask_user_requested
 from .generation_protocol import request_protocol
 from .generations import Generation, GenerationConflict, GenerationStore
 from .providers import (
-    ModelToolCall,
     ProviderConfig,
     provider_config,
     selected_provider,
@@ -76,7 +74,7 @@ async def _run_model(
     ask_user_enabled: bool = False, mcp_enabled: bool = False,
     parent_agent: dict | None = None,
     resume_history: list[dict] | None = None, partial_text: str = "",
-    approved_mcp: tuple[ModelToolCall, str] | None = None,
+    approved_batch=None, resume_namespace: str = "",
     granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
 ) -> None:
     repo = _generation_store()
@@ -85,248 +83,59 @@ async def _run_model(
     step_id = "step_" + generation.run_id
     now_ms = int(time.time() * 1000)
     try:
-        history = resume_history if resume_history is not None else repo.history(owner, generation.conversation_id, message_id=generation.user_message_id)
+        from .agent_runner import AgentRunner
+        from .agent_runtime import AgentSuspended
+
+        history = resume_history if resume_history is not None else repo.history(
+            owner, generation.conversation_id, message_id=generation.user_message_id,
+        )
         if instructions and resume_history is None:
             history.insert(0, {"role": "system", "content": instructions})
         if resume_history is None:
             repo.append(owner, generation.run_id, {
-                "event": "on_run_step",
-                "data": {
+                "event": "on_run_step", "data": {
                     "type": "message_creation", "id": step_id,
-                    "runId": generation.response_message_id,
-                    "index": 0, "created_at": now_ms, "status": "in_progress",
-                    "stepDetails": {
-                        "type": "message_creation",
-                        "message_creation": {
-                            "message_id": generation.response_message_id,
-                            "content_type": "text", "phase": "final_answer",
-                        },
-                    },
+                    "runId": generation.response_message_id, "index": 0,
+                    "created_at": now_ms, "status": "in_progress",
+                    "stepDetails": {"type": "message_creation", "message_creation": {
+                        "message_id": generation.response_message_id,
+                        "content_type": "text", "phase": "final_answer",
+                    }},
                 },
             })
-        raw_max_tokens = params.get("max_tokens") or params.get("max_output_tokens") or 2048
-        max_tokens = max(1, min(int(raw_max_tokens), 16384))
-        temperature = params.get("temperature")
-        if temperature is not None:
-            temperature = max(0.0, min(float(temperature), 2.0))
-        async def append_text(chunk: str) -> None:
+
+        async def append_text(chunk):
             if not chunk:
                 return
             text_parts.append(chunk)
             repo.append(owner, generation.run_id, {
-                "event": "on_message_delta",
-                "data": {"id": step_id,
-                         "delta": {"content": {"type": "text", "text": chunk, "phase": "final_answer"}}},
+                "event": "on_message_delta", "data": {
+                    "id": step_id, "delta": {"content": {
+                        "type": "text", "text": chunk, "phase": "final_answer",
+                    }},
+                },
             })
 
-        if approved_mcp is not None:
-            from .nested_mcp import approved_call
-
-            call, decision = approved_mcp
-            if decision == "approve":
-                try:
-                    result = await approved_call(
-                        owner, generation.conversation_id, set(granted_scopes), call,
-                    )
-                except Exception as exc:
-                    log.warning("Approved external MCP call failed: %s", type(exc).__name__)
-                    result = "External MCP tool failed (" + type(exc).__name__ + ")"
-            else:
-                result = "User rejected the external MCP tool call."
-            history.append({"role": "tool", "tool_call_id": call.call_id, "content": result})
-            repo.append(owner, generation.run_id, {
-                "event": "on_run_step",
-                "data": {"type": "tool_calls", "id": "step_" + call.call_id,
-                         "index": 1, "status": "completed",
-                         "stepDetails": {"type": "tool_calls", "tool_calls": [{
-                             "id": call.call_id, "type": "function", **call.history_metadata(),
-                             "function": {"name": call.name, "arguments": "<redacted>"},
-                             "status": "completed",
-                         }]}}
-            })
-        model_tools = []
-        if profile.provider in {"openai", "anthropic", "google"}:
-            from .ask_user_tools import ASK_USER_TOOLS
-            from .delegation import delegation_tools
-            from .lsm_tool_registry import available_tools
-            from .nested_mcp import nested_tools
-
-            model_tools = (
-                available_tools(owner, generation.conversation_id,
-                                scopes=set(granted_scopes), expires=grant_expires) +
-                (ASK_USER_TOOLS if ask_user_enabled else []) +
-                (nested_tools() if mcp_enabled else []) +
-                delegation_tools(parent_agent)
-            )
-        if model_tools:
-            from .delegation import run_subagent
-            from .lsm_tool_registry import call_tool
-            from .nested_mcp import discover
-
-            for round_number in range(3):
-                calls: list[ModelToolCall] = []
-                async for item in stream_model_with_tools(
-                    profile, history, tools=model_tools,
-                    max_tokens=max_tokens, temperature=temperature,
-                ):
-                    if isinstance(item, ModelToolCall):
-                        calls.append(item)
-                    else:
-                        await append_text(item)
-                if not calls:
-                    break
-                if round_number == 2 or len(calls) > 4:
-                    raise ValueError("Model tool-call budget exceeded")
-                external_calls = [call for call in calls if call.name == "mcp_tool_call"]
-                if external_calls:
-                    if not mcp_enabled or len(calls) != 1:
-                        raise ValueError("Only one external MCP call can be approved per pause")
-                    from .nested_mcp import _check_mcp_access
-
-                    _check_mcp_access(owner, generation.conversation_id, set(granted_scopes))
-                    calling = external_calls[0]
-                    if (not isinstance(calling.arguments.get("name"), str) or
-                        ":" not in calling.arguments["name"] or
-                        not isinstance(calling.arguments.get("arguments", {}), dict)):
-                        raise ValueError("Invalid external MCP tool arguments")
-                    pending = {
-                        "actionId": "action_" + uuid.uuid4().hex,
-                        "streamId": generation.conversation_id,
-                        "conversationId": generation.conversation_id,
-                        "runId": generation.run_id,
-                        "responseMessageId": generation.response_message_id,
-                        "createdAt": int(time.time() * 1000),
-                        "payload": {
-                            "type": "tool_approval",
-                            "action_requests": [{
-                                "name": calling.name, "arguments": calling.arguments,
-                                "tool_call_id": calling.call_id,
-                                "description": "Approve an external MCP tool call",
-                            }],
-                            "review_configs": [{"action_name": calling.name,
-                                                "tool_call_id": calling.call_id,
-                                                "allowed_decisions": ["approve", "reject"]}],
-                        },
-                    }
-                    history.append({
-                        "role": "assistant", "content": None,
-                        "tool_calls": [{"id": calling.call_id, "type": "function", **calling.history_metadata(),
-                                        "function": {"name": calling.name,
-                                                     "arguments": json.dumps(calling.arguments)}}],
-                    })
-                    repo.append(owner, generation.run_id, {
-                        "event": "on_run_step",
-                        "data": {"type": "tool_calls", "id": "step_" + calling.call_id,
-                                 "index": round_number + 1, "status": "in_progress",
-                                 "stepDetails": {"type": "tool_calls", "tool_calls": [{
-                                     "id": calling.call_id, "type": "function", **calling.history_metadata(),
-                                     "function": {"name": calling.name,
-                                                  "arguments": json.dumps(calling.arguments)},
-                                 }]}}
-                    })
-                    if not repo.pause_for_approval(owner, generation.run_id, pending, history,
-                                                   "".join(text_parts)):
-                        raise RuntimeError("Unable to park external MCP approval")
-                    return
-                delegated = [call for call in calls if call.name in {"delegate_agent", "handoff_agent"}]
-                if delegated:
-                    if len(calls) != 1:
-                        raise ValueError("Only one subagent delegation is supported per model step")
-                    deleg = delegated[0]
-                    result = await run_subagent(owner, generation, parent_agent, deleg, _database())
-                    repo.append(owner, generation.run_id, {
-                        "event": "on_run_step",
-                        "data": {"type": "tool_calls", "id": "step_" + deleg.call_id,
-                                 "index": round_number + 1, "status": "completed",
-                                 "stepDetails": {"type": "tool_calls", "tool_calls": [{
-                                     "id": deleg.call_id, "type": "function", **deleg.history_metadata(),
-                                     "function": {"name": deleg.name, "arguments": "<redacted>"},
-                                     "status": "completed",
-                                 }]}}
-                    })
-                    if deleg.name == "handoff_agent":
-                        child_text = json.loads(result)["output"]
-                        await append_text(child_text)
-                        break
-                    history.append({
-                        "role": "assistant", "content": None,
-                        "tool_calls": [{"id": deleg.call_id, "type": "function", **deleg.history_metadata(),
-                                        "function": {"name": deleg.name,
-                                                     "arguments": json.dumps(deleg.arguments)}}],
-                    })
-                    history.append({"role": "tool", "tool_call_id": deleg.call_id, "content": result})
-                    continue
-                asking = [call for call in calls if call.name == "ask_user_question"]
-                if asking:
-                    if not ask_user_enabled or len(calls) != 1:
-                        raise ValueError("Only one Ask User question can be pending at a time")
-                    from .ask_user_tools import build_ask_user_payload
-
-                    question_payload = build_ask_user_payload(asking[0].arguments, asking[0].call_id)
-                    history.append({
-                        "role": "assistant", "content": None,
-                        "tool_calls": [{"id": asking[0].call_id, "type": "function",
-                                        "function": {"name": "ask_user_question",
-                                                     "arguments": json.dumps(asking[0].arguments)}}],
-                    })
-                    pending = {
-                        "actionId": "action_" + uuid.uuid4().hex,
-                        "streamId": generation.conversation_id,
-                        "conversationId": generation.conversation_id,
-                        "runId": generation.run_id,
-                        "responseMessageId": generation.response_message_id,
-                        "createdAt": int(time.time() * 1000),
-                        "payload": question_payload,
-                    }
-                    if not repo.pause_for_question(owner, generation.run_id, pending, history,
-                                                   "".join(text_parts)):
-                        raise RuntimeError("Unable to park Ask User generation")
-                    return
-                history.append({
-                    "role": "assistant", "content": None,
-                    "tool_calls": [{"id": call.call_id, "type": "function", **call.history_metadata(),
-                                    "function": {"name": call.name,
-                                                 "arguments": json.dumps(call.arguments)}}
-                                   for call in calls],
-                })
-                for call in calls:
-                    if call.name in {"mcp_tool_search", "mcp_tool_inspect"}:
-                        result = await asyncio.wait_for(
-                            discover(owner, generation.conversation_id, set(granted_scopes), call), timeout=10,
-                        )
-                        history.append({"role": "tool", "tool_call_id": call.call_id, "content": result})
-                        continue
-                    # Execute the original registered MCP callable. Its own
-                    # argument validation, watchdog and Worker routing are
-                    # retained; per-machine permission is checked first.
-                    result = await call_tool(
-                        owner, generation.conversation_id, call,
-                        granted_scopes=set(granted_scopes), grant_expires=grant_expires,
-                    )
-                    repo.append(owner, generation.run_id, {
-                        "event": "on_run_step",
-                        "data": {"type": "tool_calls", "id": "step_" + call.call_id,
-                                 "index": round_number + 1, "status": "completed",
-                                 "stepDetails": {"type": "tool_calls", "tool_calls": [{
-                                     "id": call.call_id, "type": "function", **call.history_metadata(),
-                                     "function": {"name": call.name,
-                                                  "arguments": "<redacted>"},
-                                     "status": "completed",
-                                 }]}}
-                    })
-                    history.append({"role": "tool", "tool_call_id": call.call_id, "content": result})
-        else:
-            async for chunk in stream_model(profile, history, max_tokens=max_tokens, temperature=temperature):
-                await append_text(chunk)
+        runner = AgentRunner(owner, generation, _database(), repo,
+                             scopes=granted_scopes, grant_expires=grant_expires,
+                             stream_tools=stream_model_with_tools, stream_text=stream_model,
+                             on_text=append_text, agent=parent_agent, profile=profile,
+                             parameters=params, ask_user_enabled=ask_user_enabled,
+                             mcp_enabled=mcp_enabled, resume_history=resume_history,
+                             resume_namespace=resume_namespace, partial_text=partial_text,
+                             approved_batch=approved_batch)
+        try:
+            await runner.run(history)
+        except AgentSuspended:
+            return
         repo.append(owner, generation.run_id, {
-            "event": "on_run_step_closed",
-            "data": {
+            "event": "on_run_step_closed", "data": {
                 "id": step_id, "index": 0, "type": "message_creation",
                 "status": "completed", "runId": generation.response_message_id,
                 "created_at": now_ms, "closed_at": int(time.time() * 1000),
             },
         })
-        repo.finish(owner, generation.run_id, status="complete", text="".join(text_parts))
+        repo.finish(owner, generation.run_id, status="complete", text=runner.partial_text)
     except asyncio.CancelledError:
         repo.finish(owner, generation.run_id, status="aborted", text="".join(text_parts))
         raise
@@ -344,7 +153,7 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
                       agent: dict | None, native_file_tools: bool = False, write_tools: bool = False,
                       ask_user_enabled: bool = False, mcp_enabled: bool = False,
                       resume_history: list[dict] | None = None, partial_text: str = "",
-                      approved_mcp: tuple[ModelToolCall, str] | None = None,
+                      approved_batch=None, resume_namespace: str = "",
                       granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None) -> None:
     async with _TASK_GUARD:
         existing = _TASKS.get(generation.run_id)
@@ -358,7 +167,7 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
                        ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
                        parent_agent=agent,
                        resume_history=resume_history, partial_text=partial_text,
-                       approved_mcp=approved_mcp,
+                       approved_batch=approved_batch, resume_namespace=resume_namespace,
                        granted_scopes=granted_scopes, grant_expires=grant_expires),
             name="webui-generation-" + generation.run_id,
         )
@@ -604,20 +413,22 @@ async def resume_generation(request: Request):
         if paused_task and not paused_task.done():
             await asyncio.wait_for(asyncio.shield(paused_task), timeout=5)
         approval = pending.get("payload", {}).get("type") == "tool_approval"
-        approved_mcp = None
+        approved_batch = None
+        resume_namespace = pending.get("namespace", "")
         if approval:
             from .nested_mcp import _check_mcp_access
 
             decisions = payload.get("decisions")
-            if not isinstance(decisions, list) or len(decisions) != 1 or not isinstance(decisions[0], dict):
-                raise HTTPException(400, detail="Exactly one tool approval decision is required")
-            if decisions[0].get("decision") == "approve":
-                _check_mcp_access(owner, cid, scopes, execution=True)
-            resumed, history, previous_text, requested, decision = store.claim_approval(
+            if not isinstance(decisions, list):
+                raise HTTPException(400, detail="Tool approval decisions are required")
+            if any(isinstance(decision, dict) and decision.get("decision") in {"approve", "edit"}
+                   for decision in decisions):
+                _check_mcp_access(owner, cid, scopes, execution=True) if any(
+                    item.get("name") == "mcp_tool_call" for item in pending["payload"].get("action_requests", [])
+                ) else None
+            resumed, history, previous_text, approved_batch = store.claim_approval(
                 owner, generation.run_id, action_id, decisions,
             )
-            approved_mcp = (ModelToolCall(requested["tool_call_id"], requested["name"],
-                                          requested["arguments"]), decision)
         else:
             resumed, history, previous_text = store.answer_question(
                 owner, generation.run_id, action_id, payload,
@@ -634,7 +445,7 @@ async def resume_generation(request: Request):
                       ask_user_enabled=bool(state.get("askUserEnabled")),
                       mcp_enabled=bool((_repo().setting(owner, "conversation.permissions." + cid, {}) or {}).get("mcp")),
                       resume_history=history, partial_text=previous_text,
-                      approved_mcp=approved_mcp,
+                      approved_batch=approved_batch, resume_namespace=resume_namespace,
                       granted_scopes=frozenset(scopes), grant_expires=expiry)
     return JSONResponse(_generation_body(resumed, status="resumed", resumed=True, protocol_version=protocol),
                         headers=_generator_headers(protocol))

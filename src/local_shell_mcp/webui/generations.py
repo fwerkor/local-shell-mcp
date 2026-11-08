@@ -273,6 +273,7 @@ class GenerationStore:
             prior = state.get("partialText", "")
             state["approvedToolBatch"] = {
                 "actionId": action_id,
+                "namespace": pending.get("namespace", ""),
                 "payload": payload,
                 "resolutions": decisions,
             }
@@ -400,16 +401,28 @@ class GenerationStore:
                 return False
             generation = self._run(row)
             now = _now()
+            # Preserve source React tool-call parts in history and final SSE,
+            # rather than erasing them when the assistant text is committed.
+            tool_parts = {}
+            for event in db.execute("SELECT data FROM generation_events WHERE run_id=? ORDER BY seq", (run_id,)):
+                value = json.loads(event["data"])
+                if value.get("event") == "on_run_step_completed":
+                    result = value.get("data", {}).get("result", {})
+                    if isinstance(result.get("tool_call"), dict):
+                        tool_parts[result["id"]] = {"type": "tool_call", "tool_call": {
+                            **result["tool_call"], "stepId": result["id"],
+                        }}
+            content = ([{"type": "text", "text": text, "phase": "final_answer"}] if text else []) + list(tool_parts.values())
             response_message = {
                 "messageId": generation.response_message_id,
                 "conversationId": generation.conversation_id,
                 "parentMessageId": generation.user_message_id,
                 "sender": "Assistant", "isCreatedByUser": False,
                 "text": text,
-                "content": [{"type": "text", "text": text, "phase": "final_answer"}] if text else [],
+                "content": content,
                 "unfinished": status != "complete",
             }
-            if text:
+            if content:
                 db.execute(
                     "INSERT INTO messages(id,conversation_id,parent_id,role,text,content,metadata,created_at,updated_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?)",

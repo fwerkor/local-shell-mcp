@@ -66,7 +66,7 @@ async def test_mcp_discovery_and_tool_call_requires_human_approval(tmp_path, mon
                 assert "echo:approved" in history[-1]["content"]
                 yield "External MCP returned echo:approved."
             else:
-                assert "rejected" in history[-1]["content"]
+                assert history[-1]["content"].startswith("Blocked: ")
                 yield "External MCP was rejected by the user."
 
     monkeypatch.setattr(generation_routes, "stream_model_with_tools", model)
@@ -77,6 +77,9 @@ async def test_mcp_discovery_and_tool_call_requires_human_approval(tmp_path, mon
             from local_shell_mcp.webui.routes import _repo
 
             _repo().save_setting("local", "conversation.permissions." + cid, {"mcp": True})
+            _repo().save_setting("local", "endpoints", {"agents": {"toolApproval": {
+                "enabled": True, "ask": ["mcp_tool_call"], "allow": ["mcp_tool_search", "mcp_tool_inspect"],
+            }}})
             submitted = await client.post("/api/agents/chat", json={"text": "Find and use echo", "conversationId": cid})
             assert submitted.status_code == 202, submitted.text
             for _ in range(120):

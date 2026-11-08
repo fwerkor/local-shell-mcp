@@ -25,7 +25,7 @@ def _oracle(script, cases):
     fixture = Path(__file__).parent / "fixtures/librechat/approval_runtime_reference.cjs"
     program = "const p=require(process.argv[1]); const fs=require('fs'); const cases=JSON.parse(fs.readFileSync(0,'utf8')); " + script
     result = subprocess.run([node, "-e", program, str(fixture.resolve())],
-                            input=json.dumps(cases), text=True, capture_output=True, check=True)
+                            input=json.dumps(cases), text=True, encoding="utf-8", capture_output=True, check=True)
     return json.loads(result.stdout)
 
 

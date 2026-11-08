@@ -8,7 +8,7 @@ import pytest
 
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.sqlite_store import shared_database
-from local_shell_mcp.webui import delegation, generation_routes
+from local_shell_mcp.webui import agent_runner, generation_routes
 from local_shell_mcp.webui.agents import AgentRepository
 from local_shell_mcp.webui.generations import GenerationStore
 from local_shell_mcp.webui.providers import ModelToolCall, ProviderConfig
@@ -28,47 +28,57 @@ def active_generation(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("tool_name", ["delegate_agent", "handoff_agent"])
-async def test_real_generation_run_loop_delegates_and_handoffs(active_generation, monkeypatch, tool_name):
+@pytest.mark.parametrize("mode", ["subagent", "handoff"])
+async def test_real_generation_run_loop_uses_original_subagent_and_handoff(active_generation, monkeypatch, mode):
     database, store, profile = active_generation
-    child = AgentRepository(database).create("local", {"name": "Child", "provider": "openAI",
-                                                       "model": "fake", "instructions": "Help with reports"})
-    parent = {"id": "agent_parent", "subagents": [child["id"]], "instructions": "Use a subagent"}
-    generation, fresh = store.begin("local", {"conversationId": "new", "text": "Summarize"})
-    assert fresh
-    prompts = []
+    agents = AgentRepository(database)
+    child = agents.create("local", {"name": "Child", "provider": "openAI", "model": "child",
+                                      "instructions": "Help with reports"})
+    fields = {"name": "Parent", "provider": "openAI", "model": "fake", "instructions": "Use a specialist"}
+    if mode == "subagent":
+        fields["subagents"] = {"enabled": True, "allowSelf": False, "agent_ids": [child["id"]]}
+    else:
+        fields["edges"] = [{"from": "", "to": child["id"], "edgeType": "handoff"}]
+    parent = agents.create("local", fields)
+    generation, _ = store.begin("local", {"text": "Summarize private parent context"}, parent)
+    observed = []
 
-    async def fake_parent(profile, history, **kwargs):
-        prompts.append(history.copy())
-        if not any(message.get("role") == "tool" for message in history):
-            assert "delegate_agent" in {item["function"]["name"] for item in kwargs["tools"]}
-            yield ModelToolCall("call-child", tool_name,
-                                {"agent_id": child["id"], "task": "Give a concise summary"})
-        else:
-            assert tool_name == "delegate_agent"
+    async def model(profile, history, **kwargs):
+        names = {item["function"]["name"] for item in kwargs["tools"]}
+        assert "delegate_agent" not in names and "handoff_agent" not in names
+        observed.append((profile.model, history.copy()))
+        if profile.model == "child":
+            if mode == "subagent":
+                assert history[-1]["content"] == "Give a concise summary"
+                assert all("private parent context" not in str(message) for message in history)
+            yield "Child summary."
+        elif any(message.get("role") == "tool" for message in history):
+            assert history[-1]["content"] == "Child summary."
             yield "Final parent summary."
+        elif mode == "subagent":
+            assert "subagent" in names
+            schema = next(tool["function"]["parameters"] for tool in kwargs["tools"]
+                          if tool["function"]["name"] == "subagent")
+            child_type = schema["properties"]["subagent_type"]["enum"][0]
+            yield ModelToolCall("call-child", "subagent", {
+                "subagent_type": child_type, "description": "Give a concise summary",
+            })
+        else:
+            name = "transfer_to_" + child["id"]
+            assert name in names
+            yield ModelToolCall("call-child", name, {})
 
-    async def fake_child(profile, history, **kwargs):
-        yield "Child summary."
-
-    monkeypatch.setattr(generation_routes, "stream_model_with_tools", fake_parent)
-    monkeypatch.setattr(delegation, "stream_model", fake_child)
-    monkeypatch.setattr(delegation, "provider_config", lambda *_: profile)
-    await generation_routes._run_model(
-        "local", generation, profile, parent_agent=parent, instructions="Use a subagent",
-        parameters={"temperature": 0.5}, granted_scopes=frozenset({"shell:read"}),
-    )
+    monkeypatch.setattr(generation_routes, "stream_model_with_tools", model)
+    monkeypatch.setattr(agent_runner, "provider_config", lambda kind, model: ProviderConfig(
+        "openai", model, "https://test.invalid", ""))
+    await generation_routes._run_model("local", generation, profile, parent_agent=parent,
+                                       instructions=parent["instructions"], granted_scopes=frozenset({"shell:read"}))
     assert store.latest("local", generation.conversation_id).status == "complete"
-    events = store.events("local", generation.run_id)
-    final = events[-1][1]["responseMessage"]["text"]
-    assert final == ("Child summary." if tool_name == "handoff_agent" else "Final parent summary.")
-    assert any(event.get("event") == "on_run_step" and
-               event.get("data", {}).get("type") == "tool_calls" for _, event in events)
-    assert prompts[0][0] == {"role": "system", "content": "Use a subagent"}
-    with database.connect() as conn:
-        record = conn.execute("SELECT kind,status,result FROM agent_delegations").fetchone()
-    assert record["kind"] == ("handoff" if tool_name == "handoff_agent" else "delegate")
-    assert record["status"] == "complete" and record["result"] == "Child summary."
+    final = store.events("local", generation.run_id)[-1][1]["responseMessage"]["text"]
+    assert final == ("Child summary." if mode == "handoff" else "Final parent summary.")
+    assert any(model == "child" for model, _ in observed)
+    with database.connect() as connection:
+        assert connection.execute("SELECT count(*) FROM agent_checkpoints").fetchone()[0] >= 3
 
 
 @pytest.mark.asyncio
@@ -114,30 +124,26 @@ async def test_generation_rejects_invalid_model_tool_actions(active_generation, 
 
 
 @pytest.mark.asyncio
-async def test_resuming_approved_external_tool_records_failure_without_leaking_secrets(
-    active_generation, monkeypatch,
-):
+async def test_external_tool_failure_is_returned_without_leaking_secrets(active_generation, monkeypatch):
     _, store, profile = active_generation
-    generation, _ = store.begin("local", {"conversationId": "new", "text": "Use tool"})
+    generation, _ = store.begin("local", {"text": "Use tool"})
 
     async def rejected_call(*args, **kwargs):
         raise RuntimeError("Bearer a-private-secret")
 
-    async def answer(profile, history, **kwargs):
-        assert history[-1]["role"] == "tool"
-        assert "RuntimeError" in history[-1]["content"]
-        yield "The external tool could not be called."
+    async def model(profile, history, **kwargs):
+        if history[-1].get("role") == "tool":
+            assert "RuntimeError" in history[-1]["content"]
+            yield "The external tool could not be called."
+        else:
+            yield ModelToolCall("call-one", "mcp_tool_call", {"name": "test:tool", "arguments": {}})
 
     from local_shell_mcp.webui import nested_mcp
 
     monkeypatch.setattr(nested_mcp, "approved_call", rejected_call)
-    monkeypatch.setattr(generation_routes, "stream_model_with_tools", answer)
-    await generation_routes._run_model(
-        "local", generation, profile, mcp_enabled=True,
-        approved_mcp=(ModelToolCall("call-one", "mcp_tool_call",
-                                     {"name": "test:tool", "arguments": {}}), "approve"),
-        granted_scopes=frozenset({"shell:read", "shell:execute"}),
-    )
+    monkeypatch.setattr(generation_routes, "stream_model_with_tools", model)
+    await generation_routes._run_model("local", generation, profile, mcp_enabled=True,
+                                       granted_scopes=frozenset({"shell:read", "shell:execute"}))
     assert store.latest("local", generation.conversation_id).status == "complete"
     final_events = json.dumps(store.events("local", generation.run_id))
     assert "Bearer a-private-secret" not in final_events

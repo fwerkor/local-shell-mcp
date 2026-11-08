@@ -102,7 +102,7 @@ def db(tmp_path):
 
 
 def _agent(db, owner="alice", **body):
-    return AgentRepository(db).create(owner, {"provider": "openai", "name": "Worker", **body})
+    return AgentRepository(db).create(owner, {"provider": "openai", "model": None, "name": "Worker", **body})
 
 
 def test_optional_config_self_defaults_children_cycle_pruning_and_own_tools(db):
@@ -164,6 +164,10 @@ async def test_shared_child_execution_is_isolated_and_scope_bound(db):
     child = _agent(db, instructions="Be precise", additional_instructions="Use source", tools=["file_read", "ask_user_question"])
     parent = _agent(db, instructions="PARENT PRIVATE", subagents={"enabled": True, "allowSelf": False, "agent_ids": [child["id"]]})
     configs = build_subagent_configs("alice", parent, db)
+    # additional_instructions is assembled by source runtime loading, not an
+    # authoring-schema field. Recreate that post-load input explicitly.
+    assert "additional_instructions" not in child
+    configs[0].agent["additional_instructions"] = "Use source"
     call = ModelToolCall("call-1", "subagent", {"subagent_type": child["id"], "description": "Review this file"})
     expiry = int(time.time()) + 60
 
