@@ -203,6 +203,21 @@ def main() -> int:
         print("GitHub releases must publish SHA256SUMS for npm launcher verification.")
         return 1
 
+    if any(step.get("name") == "Create release notes" for step in github_release_job.get("steps", [])):
+        print("GitHub releases must not prepend a static release-notes body.")
+        return 1
+    release_step = next(
+        (step for step in github_release_job.get("steps", []) if step.get("name") == "Publish GitHub release"),
+        {},
+    )
+    release_options = release_step.get("with", {})
+    if release_options.get("generate_release_notes") is not True:
+        print("GitHub releases must generate their change log from merged changes.")
+        return 1
+    if "body" in release_options or "body_path" in release_options:
+        print("GitHub releases must not prepend deployment instructions to the generated change log.")
+        return 1
+
     npm_job = jobs.get("publish-npm", {})
     npm_publish_script = step_script(npm_job, "Publish npm launcher")
     if "npm publish" not in npm_publish_script or npm_job.get("environment") != "npm":
