@@ -50,6 +50,11 @@ fs.writeFileSync(path.join(out, 'hitl_reference.cjs'), '// Original LibreChat fu
 const protocol = fs.readFileSync(path.join(lc, 'api/server/controllers/agents/protocol.js'));
 fs.writeFileSync(path.join(out, 'protocol.cjs'), protocol);
 provenance['api/server/controllers/agents/protocol.js'] = crypto.createHash('sha256').update(protocol).digest('hex');
+const toolBatch = pick(agents, 'src/tools/ToolNode.ts', ['directReplayKey']);
+const argumentEquality = pick(agents, 'src/tools/eagerEventExecution.ts', ['stableStringify', 'recordArgsEqual']);
+fs.writeFileSync(path.join(out, 'tool_batch_reference.cjs'),
+  '// Original agents functions; see LICENSE.agents and source_hashes.json.\n' +
+  transpile(toolBatch + '\n' + argumentEquality + '\nexports.directReplayKey = directReplayKey;'));
 fs.writeFileSync(path.join(out, 'source_hashes.json'), JSON.stringify(provenance, null, 2) + '\n');
 fs.copyFileSync(path.join(lc, 'LICENSE'), path.join(out, 'LICENSE.LibreChat'));
 fs.copyFileSync(path.join(agents, 'LICENSE'), path.join(out, 'LICENSE.agents'));

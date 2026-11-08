@@ -4,5 +4,7 @@
   "api/app/clients/tools/manifest.json": "b4f0d29b21f000881a403180f24a24c6146c0015f76dc7b2806d028a3630d629",
   "packages/api/src/agents/hitl/resume.ts": "9fb798731c45a310d3deb88407e9f74d74116c006f8fc21186686dc0aad00ec5",
   "packages/api/src/agents/hitl/policy.ts": "30ca40677e43c5d12fe539da85262bf6d335eb238836ad8705b480789e0661ce",
-  "api/server/controllers/agents/protocol.js": "adfe8d44544d4deb37be528c6600a4a41e4e30095141fdd3ec0af421da4aff5f"
+  "api/server/controllers/agents/protocol.js": "adfe8d44544d4deb37be528c6600a4a41e4e30095141fdd3ec0af421da4aff5f",
+  "src/tools/ToolNode.ts": "6396274178fe8d245bb61a3dd06bdf9e1847bc10e1066acaecfd7b7d33448c02",
+  "src/tools/eagerEventExecution.ts": "23f11e4cefd4d812d1eab4ed4edae0c99cd6537beaeecc54d969d84943ecd61e"
 }
