@@ -120,7 +120,7 @@ async def test_streaming_generation_http_reconnect_and_token_isolation(database,
         await app(scope, receive, send)
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=authenticated), base_url="http://lsm") as client:
-        alice, bob = {"x-test-owner": "alice"}, {"x-test-owner": "bob"}
+        alice, bob = {"x-test-owner": "alice", "x-librechat-generation-protocol": "2"}, {"x-test-owner": "bob"}
         assert (await client.post("/api/agents/chat", json={"text": "Hello"})).status_code == 401
         start = await client.post("/api/agents/chat", headers=alice, json={
             "conversationId": "new", "text": "Hello", "model": "test", "clientRequestId": "first"
@@ -148,3 +148,47 @@ async def test_streaming_generation_http_reconnect_and_token_isolation(database,
         assert (await client.get(f"/api/agents/chat/stream/{cid}", headers=alice,
                                  params={"generationCreatedAt": "1"})).status_code == 409
     await generation_routes.shutdown_generations()
+
+
+@pytest.mark.asyncio
+async def test_http_negotiation_persists_first_protocol_and_never_upgrades(database, monkeypatch):
+    monkeypatch.setattr(generation_routes, "_database", lambda: database)
+    monkeypatch.setattr(generation_routes, "_owner", lambda request: "alice")
+    monkeypatch.setattr(generation_routes, "provider_config",
+                        lambda kind, model: ProviderConfig("openai", "test", "https://test.invalid", "secret"))
+
+    async def parked(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(generation_routes, "_start_task", parked)
+    app = Starlette(routes=generation_routes.generation_routes())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        for index, (body_version, query, header, expected) in enumerate([
+            (None, {}, {}, 1),
+            (2, {}, {}, 2),
+            (2, {"generationProtocolVersion": "1"}, {}, 1),
+            (None, {}, {"x-librechat-generation-protocol": "2"}, 2),
+            (2, {}, {"x-librechat-generation-protocol": "invalid"}, 1),
+        ]):
+            payload = {"text": "hello", "clientRequestId": "negotiation-" + str(index)}
+            if body_version is not None:
+                payload["generationProtocolVersion"] = body_version
+            started = await client.post("/api/agents/chat", json=payload, params=query, headers=header)
+            assert started.status_code == 202, started.text
+            assert started.json()["generationProtocolVersion"] == expected
+            assert started.headers["x-librechat-generation-protocol"] == str(expected)
+            cid = started.json()["conversationId"]
+            stored = GenerationStore(database).latest("alice", cid)
+            assert stored.protocol_version == expected
+            retried = await client.post("/api/agents/chat", json={**payload, "generationProtocolVersion": 2})
+            assert retried.json()["generationProtocolVersion"] == expected
+            abort = await client.post("/api/agents/chat/abort", json={
+                "conversationId": cid, "generationProtocolVersion": 2,
+            })
+            assert abort.json()["generationProtocolVersion"] == expected
+            stream = await client.get("/api/agents/chat/stream/" + cid,
+                                      params={"generationProtocolVersion": "2"})
+            assert stream.headers["x-librechat-generation-protocol"] == str(expected)
+            status = await client.get("/api/agents/chat/status/" + cid,
+                                      params={"generationProtocolVersion": "2"})
+            assert status.json()["generationProtocolVersion"] == expected

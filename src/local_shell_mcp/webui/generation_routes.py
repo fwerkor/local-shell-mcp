@@ -21,6 +21,7 @@ from starlette.routing import Route
 
 from .agents import AgentRepository
 from .ask_user_tools import ask_user_requested
+from .generation_protocol import request_protocol
 from .generations import Generation, GenerationConflict, GenerationStore
 from .providers import (
     ModelToolCall,
@@ -33,7 +34,6 @@ from .providers import (
 from .routes import _body, _owner
 
 log = logging.getLogger(__name__)
-_PROTOCOL = "2"
 _TASKS: dict[str, asyncio.Task] = {}
 _TASK_GUARD = asyncio.Lock()
 
@@ -49,20 +49,21 @@ def _generation_store() -> GenerationStore:
     return GenerationStore(_database())
 
 
-def _generation_body(job: Generation, *, status: str = "stream", resumed: bool = False) -> dict:
+def _generation_body(job: Generation, *, status: str = "stream", resumed: bool = False,
+                     protocol_version: int | None = None) -> dict:
     return {
         "status": status,
         "streamId": job.conversation_id,
         "conversationId": job.conversation_id,
         "generationCreatedAt": job.generation_created_at,
-        "generationProtocolVersion": 2,
+        "generationProtocolVersion": job.protocol_version if protocol_version is None else protocol_version,
         "resumed": resumed,
     }
 
 
-def _generator_headers() -> dict[str, str]:
+def _generator_headers(protocol_version: int = 2) -> dict[str, str]:
     return {
-        "X-LibreChat-Generation-Protocol": _PROTOCOL,
+        "X-LibreChat-Generation-Protocol": str(protocol_version),
         "Cache-Control": "no-cache, no-store",
         "X-Accel-Buffering": "no",
     }
@@ -372,6 +373,7 @@ async def start_generation(request: Request):
         payload["projectId"] = payload["chatProjectId"]
     if not payload.get("provider"):
         payload["provider"] = selected_provider({**payload, "endpoint": payload.get("endpoint") or request.path_params.get("endpoint")})
+    protocol = request_protocol(request, payload)
     agent_id = payload.get("agent_id")
     agent = None
     if agent_id is not None:
@@ -417,14 +419,16 @@ async def start_generation(request: Request):
             raise HTTPException(403, detail=str(exc)) from exc
     try:
         profile = provider_config(kind, model)
-        result, fresh = _generation_store().begin(owner, payload, agent)
+        result, fresh = _generation_store().begin(owner, payload, agent, protocol_version=protocol)
     except GenerationConflict as exc:
-        return JSONResponse(_generation_body(exc.existing, status="replaced"),
-                            status_code=409, headers=_generator_headers())
+        return JSONResponse(_generation_body(exc.existing, status="replaced",
+                                               protocol_version=min(protocol, exc.existing.protocol_version)),
+                            status_code=409, headers=_generator_headers(min(protocol, exc.existing.protocol_version)))
     except KeyError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
+    protocol = min(protocol, result.protocol_version)
     if fresh:
         ask_user_enabled = ask_user_requested(agent, payload)
         from .routes import _repo
@@ -436,8 +440,8 @@ async def start_generation(request: Request):
                           ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
                           granted_scopes=frozenset(scopes), grant_expires=grant_expires)
     return JSONResponse(_generation_body(result, status="stream" if fresh else "resumed",
-                                         resumed=not fresh), status_code=202,
-                        headers=_generator_headers())
+                                         resumed=not fresh, protocol_version=protocol), status_code=202,
+                        headers=_generator_headers(protocol))
 
 
 async def _events(owner: str, generation: Generation, after: int = 0) -> AsyncIterator[bytes]:
@@ -479,15 +483,16 @@ async def stream_generation(request: Request):
     except ValueError as exc:
         raise HTTPException(400, detail="Invalid SSE replay cursor") from exc
     return StreamingResponse(_events(owner, generation, after), media_type="text/event-stream",
-                             headers=_generator_headers())
+                             headers=_generator_headers(request_protocol(request, stored_version=generation.protocol_version)))
 
 
 async def generation_status(request: Request):
     owner = _owner(request)
     generation = _generation_store().latest(owner, request.path_params["conversation_id"])
+    protocol = request_protocol(request, stored_version=generation.protocol_version if generation else None)
     if generation is None:
-        return JSONResponse({"active": False, "generationProtocolVersion": 2},
-                            headers=_generator_headers())
+        return JSONResponse({"active": False, "generationProtocolVersion": protocol},
+                            headers=_generator_headers(protocol))
     active = generation.status in {"running", "requires_action"}
     pending = _generation_store().pending_action(owner, generation.run_id)
     return JSONResponse({
@@ -497,8 +502,8 @@ async def generation_status(request: Request):
         "streamId": generation.conversation_id,
         "createdAt": generation.generation_created_at,
         "elapsedMs": max(0, int(time.time() * 1000) - generation.generation_created_at),
-        "generationProtocolVersion": 2,
-    }, headers=_generator_headers())
+        "generationProtocolVersion": protocol,
+    }, headers=_generator_headers(protocol))
 
 
 async def active_generations(request: Request):
@@ -509,10 +514,14 @@ async def active_generations(request: Request):
             "WHERE c.owner=? AND r.status IN ('running','requires_action') ORDER BY r.created_at DESC",
             (owner,),
         ).fetchall()
-    running = [_generation_body(GenerationStore._run(row), status="running") for row in rows]
+    protocol = request_protocol(request)
+    jobs = [GenerationStore._run(row) for row in rows]
+    running = [_generation_body(job, status="running",
+                                protocol_version=min(protocol, job.protocol_version))
+               for job in jobs]
     return JSONResponse({"jobs": running, "activeJobs": running,
                          "activeJobIds": [job["conversationId"] for job in running],
-                         "generationProtocolVersion": 2}, headers=_generator_headers())
+                         "generationProtocolVersion": protocol}, headers=_generator_headers(protocol))
 
 
 async def abort_generation(request: Request):
@@ -525,6 +534,7 @@ async def abort_generation(request: Request):
     generation = store.latest(owner, cid)
     if generation is None:
         raise HTTPException(404, detail="Generation not found")
+    protocol = request_protocol(request, payload, stored_version=generation.protocol_version)
     expected = payload.get("generationCreatedAt")
     if expected is not None and str(generation.generation_created_at) != str(expected):
         raise HTTPException(409, detail="Generation identity mismatch")
@@ -533,8 +543,8 @@ async def abort_generation(request: Request):
         task.cancel()
     else:
         store.finish(owner, generation.run_id, status="aborted")
-    return JSONResponse({"success": True, "generationProtocolVersion": 2},
-                        headers=_generator_headers())
+    return JSONResponse({"success": True, "generationProtocolVersion": protocol},
+                        headers=_generator_headers(protocol))
 
 
 async def resume_generation(request: Request):
@@ -547,12 +557,13 @@ async def resume_generation(request: Request):
     generation = store.latest(owner, cid)
     if generation is None:
         raise HTTPException(404, detail="Generation not found")
+    protocol = request_protocol(request, payload, stored_version=generation.protocol_version)
     action_id = payload.get("actionId")
     if action_id is None:
         if generation.status != "running":
             raise HTTPException(409, detail="Generation cannot be resumed")
-        return JSONResponse(_generation_body(generation, status="resumed", resumed=True),
-                            headers=_generator_headers())
+        return JSONResponse(_generation_body(generation, status="resumed", resumed=True, protocol_version=protocol),
+                            headers=_generator_headers(protocol))
 
     if not isinstance(action_id, str) or not action_id:
         raise HTTPException(400, detail="Invalid human action id")
@@ -625,8 +636,8 @@ async def resume_generation(request: Request):
                       resume_history=history, partial_text=previous_text,
                       approved_mcp=approved_mcp,
                       granted_scopes=frozenset(scopes), grant_expires=expiry)
-    return JSONResponse(_generation_body(resumed, status="resumed", resumed=True),
-                        headers=_generator_headers())
+    return JSONResponse(_generation_body(resumed, status="resumed", resumed=True, protocol_version=protocol),
+                        headers=_generator_headers(protocol))
 
 
 async def shutdown_generations() -> None:

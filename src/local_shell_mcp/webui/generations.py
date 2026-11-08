@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .ask_user_tools import ask_user_requested
+from .generation_protocol import job_generation_protocol
 from .providers import selected_provider
 from .storage import _json, _now
 
@@ -34,6 +35,7 @@ class Generation:
     user_message_id: str
     status: str
     agent_id: str | None = None
+    protocol_version: int = 2
 
 
 class GenerationConflict(Exception):
@@ -54,6 +56,7 @@ class GenerationStore:
             generation_created_at=state["generationCreatedAt"],
             response_message_id=state["responseMessageId"],
             user_message_id=state["userMessageId"], status=row["status"], agent_id=row["agent_id"],
+            protocol_version=job_generation_protocol(state),
         )
 
     def latest(self, owner: str, conversation_id: str) -> Generation | None:
@@ -71,7 +74,8 @@ class GenerationStore:
                              "WHERE c.owner=? AND r.id=?", (owner, run_id)).fetchone()
             return self._run(row) if row else None
 
-    def begin(self, owner: str, payload: dict, agent: dict | None = None) -> tuple[Generation, bool]:
+    def begin(self, owner: str, payload: dict, agent: dict | None = None, *,
+              protocol_version: int = 2) -> tuple[Generation, bool]:
         client_request_id = payload.get("clientRequestId")
         if client_request_id is not None and (not isinstance(client_request_id, str) or
                                                not 1 <= len(client_request_id) <= 160):
@@ -97,6 +101,7 @@ class GenerationStore:
             "responseMessageId": response_message_id,
             "generationCreatedAt": stamp_ms,
             "clientRequestId": client_request_id,
+            "generationProtocolVersion": protocol_version,
             "provider": selected_provider(payload, agent),
             "model": str((agent or {}).get("model") or payload.get("model") or ""),
             "askUserEnabled": ask_user_requested(agent, payload),
@@ -163,7 +168,7 @@ class GenerationStore:
             }
             db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)", (run_id, _json(created)))
         return Generation(run_id, conversation_id, stamp_ms, response_message_id,
-                          user_message_id, "running", (agent or {}).get("id") or payload.get("agent_id")), True
+                          user_message_id, "running", (agent or {}).get("id") or payload.get("agent_id"), protocol_version), True
 
     def pending_action(self, owner: str, run_id: str) -> dict | None:
         with self.database.connect() as db:
@@ -371,7 +376,7 @@ class GenerationStore:
             db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, generation.conversation_id))
             final = {
                 "final": True,
-                "generationProtocolVersion": 2,
+                "generationProtocolVersion": generation.protocol_version,
                 "conversation": {"conversationId": generation.conversation_id},
                 "responseMessage": response_message,
                 **({"aborted": True} if status == "aborted" else {}),

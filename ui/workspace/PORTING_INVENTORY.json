@@ -471,10 +471,10 @@
       "repository": "LibreChat",
       "path": "api/server/controllers/agents/protocol.js",
       "sha256": "adfe8d44544d4deb37be528c6600a4a41e4e30095141fdd3ec0af421da4aff5f",
-      "python_lsm": "webui/generation_routes.py",
-      "status": "部分",
+      "python_lsm": "webui/generation_protocol.py; generations.py; generation_routes.py",
+      "status": "完成（协议协商函数）",
       "reviewed_mapping": true,
-      "difference": "当前固定v2；未移植多标记降级及已有job协议锁定"
+      "difference": "2197组body/query/header组合与原版Node函数差分一致；SQLite固定首次job版本，HTTP/SSE入口使用协商结果。整个request/resume controller及图级恢复仍不完整。"
     },
     {
       "repository": "LibreChat",

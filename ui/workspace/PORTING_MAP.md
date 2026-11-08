@@ -33,7 +33,7 @@ Subagents 使用 `agent.subagents.enabled/allowSelf/agent_ids` 配置和动态�
 
 | LibreChat/agents 原实现 | Python/LSM 对应 | 状态 | 具体差异 |
 | --- | --- | --- | --- |
-| `LibreChat:api/server/controllers/agents/protocol.js` — `getRequestedGenerationProtocol / negotiate*` | `webui/generation_routes.py` | 部分 | 当前固定v2；未移植多标记降级及已有job协议锁定 |
+| `LibreChat:api/server/controllers/agents/protocol.js` — `getRequestedGenerationProtocol / negotiate*` | `webui/generation_protocol.py; generations.py; generation_routes.py` | 完成（协议协商函数） | 2197组原Node差分与SQLite/HTTP不可升级测试；完整controller恢复仍缺失 |
 | `LibreChat:api/server/controllers/agents/request.js` — `generation ingress / disconnect` | `webui/generation_routes.py:start_generation` | 部分 | 缺失完整入口预检及断线处置语义 |
 | `LibreChat:api/server/controllers/agents/resume.js` — `resume / checkpoint ownership CAS` | `webui/generation_routes.py:resume_generation` | 部分 | 当前仅单action及自研resumeHistory；无原版checkpoint/actor恢复链 |
 | `LibreChat:api/server/controllers/agents/callbacks.js` — `Agent execution events` | `webui/generation_routes.py:_run_model` | 部分 | 手工生成部分事件，非原版callbacks完整移植 |
@@ -59,14 +59,14 @@ Subagents 使用 `agent.subagents.enabled/allowSelf/agent_ids` 配置和动态�
 | `LibreChat:packages/data-schemas/src/schema/chatProject.ts` — `project membership and resources` | `webui/storage.py` | 部分 | 项目关联/默认权限；完整资源与消息语义待移植 |
 | `LibreChat:packages/data-provider/src/createPayload.ts` — `React request payload` | `ui/workspace/packages/data-provider/src/createPayload.ts` | 部分 | 前端复用；后端尚未消费所有原版字段 |
 | `LibreChat:packages/data-provider/src/runSteps.ts` — `execution event types` | `ui/workspace/packages/data-provider/src/runSteps.ts; generation_routes.py` | 部分 | 共享前端类型复用；后端事件仅子集 |
-| `LibreChat:client/src/components/Chat/Messages/Content/AskUserQuestions.tsx` — `batched questions UI` | `ui/workspace/client/src/components/Chat/Messages/Content/AskUserQuestions.tsx` | 部分 | React原组件保留；Python当前无批问题协议 |
+| `LibreChat:client/src/components/Chat/Messages/Content/AskUserQuestions.tsx` — `batched questions UI` | `ui/workspace/client/src/components/Chat/Messages/Content/AskUserQuestions.tsx` | 部分 | React原组件保留；批问题/回答协议和真实React E2E已验证，图级恢复仍缺失 |
 | `LibreChat:client/src/components/SidePanel/Agents/Advanced/AgentSubagents.tsx` — `optional subagent configuration` | `ui/workspace/client/src/components/SidePanel/Agents/Advanced/AgentSubagents.tsx` | 部分 | 原React配置保留；Python目前误读为id数组 |
 | `agents:src/graphs/Graph.ts` — `agent graph / tools / checkpoint` | `webui/generation_routes.py` | 未实现 | 当前手写循环不是源码级图执行移植 |
 | `agents:src/graphs/MultiAgentGraph.ts` — `multi-agent routing / commands` | `webui/delegation.py` | 未实现 | handoff机制未等价 |
 | `agents:src/graphs/handoff.ts` — `HandoffRouting / mergeHandoffState` | `webui/delegation.py` | 未实现 | 缺预算、作用域、幂等transition、持久handoff结果 |
 | `agents:src/tools/SubagentTool.ts` — `buildSubagentToolParams / createSubagentToolDefinition` | `webui/delegation.py` | 未实现 | 原版subagent_type/description/config动态枚举，当前自研工具不等价 |
-| `agents:src/hitl/askUserQuestions.ts` — `askUserQuestions / interrupt / resolution` | `webui/ask_user_tools.py; generations.py` | 未实现 | 应完整保留1–4问题和按id回答，不是拼接自由字符串 |
-| `agents:src/hitl/askUserQuestionsInterrupt.ts` — `request/interrupt guards` | `webui/ask_user_tools.py` | 未实现 | 当前未移植原版类型守卫 |
+| `agents:src/hitl/askUserQuestions.ts` — `askUserQuestions / interrupt / resolution` | `webui/ask_user_tools.py; generations.py` | 部分 | 已移植1–4问题及按id回答；SDK图级interrupt/checkpoint尚未等价 |
+| `agents:src/hitl/askUserQuestionsInterrupt.ts` — `request/interrupt guards` | `webui/ask_user_tools.py` | 部分 | 已移植请求校验与批次payload，完整SDK中断状态机仍待移植 |
 | `agents:src/tools/ToolNode.ts` — `parallel tool execution / interruption` | `webui/generation_routes.py` | 未实现 | 当前串行循环，未移植原版并发/中断/回放行为 |
 
 ## 后续审计范围
@@ -114,6 +114,27 @@ Memory、Context、资源生命周期、Agent Builder全部设置、完整conver
 首批详细映射还新增了PluginController和原Ask User manifest两个来源，问答目录与临时
 Agent的可选开关已接通；这与LSM机器执行权限是相互独立的检查。
 
-发行审计另外发现原CI/Release引用未生成的React压缩包、Docker未打包React源码。
+发行审计另外发现原CI/Release依赖已提交的旧React压缩包，未随当前源码重新构建、Docker未打包React源码。
 已补充build-only React构建和确定性archive步骤，并使单二进制smoke检查`/c/new`。
 这些发行调整须以实际build/start/restart结果验收，不能仅以YAML存在判定完成。
+
+## 2026-11-09 发行与权限回归
+
+- `2c693afb`恢复原生write操作同时要求shell:read和shell:write的scope关系，不能仅凭机器write授权绕过原执行入口。
+- `08d545d9`将React archive打入wheel；安装到独立virtualenv后的真实CLI启动、`/c/new`、API与PTY/WebSocket smoke通过。
+- 原archive是已跟踪文件，本轮更新了它；此前“未生成”的表述不准确，实际缺陷是CI未刷新旧archive，以及wheel完全未包含它。
+- `20830300`补齐锁文件中同版本Rolldown、Lightning CSS和Rollup的各平台native包。14个optionalDependencies记录已逐一对照registry元数据，冻结安装通过；跨平台构建仍以最新CI结果为准。
+- 本地完整coverage脚本：2202 passed、2 skipped；HTTP/MCP/PTY/browser smoke通过，总覆盖率95.13%，所有模块至少90%。
+- CI `42498081888`中五个平台wheel启动验证通过，但Windows binary及ARM64 Docker曾继续暴露Lightning CSS缺失。该运行不是全绿；`20830300`对应的新CI尚待最终验收。
+
+高级Agent运行时的未完成项保持不变，不能用上述发行验证代替LibreChat行为等价验收。
+
+## 生成协议源码移植
+
+已逐函数移植`controllers/agents/protocol.js`的版本解析、三通道协商及已有job版本上限。
+2197组body/query/header组合与已固定的原Node模块差分一致；另验证重复HTTP标记、
+冲突标记、SQLite幂等重试、数据库重开及缺失旧metadata时保持v1。
+生产入口在首次事务中固定协商版本，后续重试、SSE、状态查询、停止和恢复不能升级它。
+
+这只完成协议协商模块。`request.js`的完整preflight、actor、steer恢复、v1历史适配与
+LangGraph checkpoint仍未完整移植，不能因此宣称conversation恢复整体等价。
