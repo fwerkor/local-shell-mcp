@@ -40,3 +40,7 @@ ui/workspace/node_modules/
 ui/workspace/**/node_modules/
 ui/workspace/**/dist/
 ui/workspace/.turbo/
+
+# React unit-test artifacts
+ui/workspace/client/coverage/
+ui/workspace/client/junit.xml

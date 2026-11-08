@@ -23,9 +23,14 @@ from local_shell_mcp.webui.storage import WorkspaceRepository
 
 @pytest.fixture
 def repository(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    get_settings.cache_clear()
     config = SimpleNamespace(auth_mode="none", state_dir=tmp_path)
     monkeypatch.setattr(routes, "get_settings", lambda: config)
-    return WorkspaceRepository(SQLiteDatabase(tmp_path))
+    yield WorkspaceRepository(SQLiteDatabase(tmp_path))
+    get_settings.cache_clear()
 
 
 @pytest.mark.parametrize("endpoint", ["anthropic", "google", "gemini", "openai"])
@@ -119,6 +124,7 @@ async def test_spa_does_not_intercept_mcp_or_other_inner_routes():
 
 def test_controller_alias_rejects_cross_origin_none_auth(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path))
     get_settings.cache_clear()
     try:

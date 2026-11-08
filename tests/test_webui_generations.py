@@ -16,6 +16,19 @@ from local_shell_mcp.webui.generations import GenerationConflict, GenerationStor
 from local_shell_mcp.webui.providers import ProviderConfig
 
 
+@pytest.fixture(autouse=True)
+def native_settings_environment(tmp_path, monkeypatch):
+    # Native modules retain their imported accessor; configure its environment
+    # as well as the endpoint accessor mocks, on non-root CI runners too.
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @pytest.fixture
 def database(tmp_path):
     return SQLiteDatabase(tmp_path / ".local-shell-mcp")
