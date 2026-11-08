@@ -50,7 +50,7 @@ def test_agent_create_update_revision_and_restore(tmp_path):
 def test_agent_query_cursor_and_allowlist(tmp_path):
     repo = AgentRepository(SQLiteDatabase(tmp_path))
     for i in range(5):
-        repo.create("local", {"name": f"NJU Agent {i}", "category": "research", "provider": "openAI",
+        repo.create("local", {"name": f"NJU Agent {i}", "category": "research", "provider": "openAI", "model": None,
                               "api_key": "secret-should-never-be-persisted", "password": "secret"})
     seen = []
     cursor = None
@@ -89,7 +89,7 @@ async def test_agent_http_routes_enforce_identity(tmp_path, monkeypatch):
         alice = {"x-test-principal": "alice"}
         bob = {"x-test-principal": "bob"}
         assert (await client.get("/api/agents")).status_code == 401
-        response = await client.post("/api/agents", headers=alice, json={"provider": "openAI", "name": "Research"})
+        response = await client.post("/api/agents", headers=alice, json={"provider": "openAI", "model": None, "name": "Research"})
         assert response.status_code == 201, response.text
         aid = response.json()["id"]
         assert (await client.get(f"/api/agents/{aid}", headers=bob)).status_code == 404

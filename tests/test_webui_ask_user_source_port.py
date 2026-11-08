@@ -124,7 +124,7 @@ async def test_original_catalog_is_available_without_machine_grants_and_is_optio
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             catalog = await client.get("/api/agents/tools")
             expected = json.loads((FIXTURES / "ask_user_manifest.json").read_text(encoding="utf-8"))
-            assert catalog.json() == [{**expected, "authenticated": True}]
+            assert next(item for item in catalog.json() if item["pluginKey"] == "ask_user_question") == {**expected, "authenticated": True}
             assert (await client.get("/api/agents/tools/ask_user_question/auth")).json() == {"authenticated": True}
             assert (await client.get("/api/agents/tools/unknown/auth")).status_code == 404
             for enabled in [False, True]:

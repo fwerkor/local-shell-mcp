@@ -6,24 +6,17 @@ MongoDB, autonomous Node service, or independent authorization database.
 
 from __future__ import annotations
 
+import copy
 import json
 import secrets
 from typing import Any
 
+from .agent_validation import (
+    clean_agent_config,
+    replace_agent_references,
+    sanitize_model_parameters,
+)
 from .storage import _cursor_decode, _cursor_encode, _json, _now
-
-# Explicit allowlist prevents an arbitrary browser object from being persisted
-# as executable configuration or leaking API credentials into the database.
-_AGENT_FIELDS = frozenset({
-    "name", "description", "avatar", "instructions", "additional_instructions",
-    "provider", "model", "model_parameters", "tools", "tool_kwargs", "tool_resources",
-    "file_ids", "agent_ids", "edges", "end_after_tools", "hide_sequential_outputs",
-    "stateful_code_sessions", "stateful_code_environment", "code_environment_id",
-    "code_workspace_id", "repositoryInstructions", "git_identity", "artifacts",
-    "recursion_limit", "category", "support_contact", "owner_contact",
-    "tool_options", "actions", "skills", "skills_enabled", "skill_authoring_enabled",
-    "skills_scope", "subagents", "memory_scope", "conversation_starters",
-})
 
 
 class AgentRepository:
@@ -31,19 +24,46 @@ class AgentRepository:
         self.database = database
 
     @staticmethod
-    def _clean(payload: dict) -> dict:
-        values = {key: value for key, value in payload.items() if key in _AGENT_FIELDS}
-        if "name" in values and values["name"] is not None:
-            values["name"] = str(values["name"]).strip()[:200]
-        if "description" in values and values["description"] is not None:
-            values["description"] = str(values["description"])[:3000]
-        if "instructions" in values and values["instructions"] is not None:
-            values["instructions"] = str(values["instructions"])[:80000]
-        if "tools" in values and not isinstance(values["tools"], list):
-            raise ValueError("Agent tools must be an array")
-        if "model_parameters" in values and not isinstance(values["model_parameters"], dict):
-            raise ValueError("Model parameters must be an object")
-        return values
+    def _clean(payload: dict, *, create: bool = False) -> dict:
+        payload = copy.deepcopy(payload)
+        resources = payload.get("tool_resources")
+        if isinstance(resources, dict):
+            for key in ("image_edit", "execute_code", "file_search", "context", "ocr"):
+                resource = resources.get(key)
+                if not isinstance(resource, dict):
+                    continue
+                ids = list(resource["file_ids"]) if isinstance(resource.get("file_ids"), list) else []
+                if isinstance(resource.get("files"), list):
+                    for file in resource["files"]:
+                        if isinstance(file, dict) and isinstance(file.get("file_id"), str) and file["file_id"] not in ids:
+                            ids.append(file["file_id"])
+                if ids or isinstance(resource.get("file_ids"), list):
+                    resource["file_ids"] = ids
+                resource.pop("files", None)
+        return clean_agent_config(payload, create=create)
+
+    @staticmethod
+    def _references(db: Any, owner: str, values: dict, own_id: str) -> None:
+        for resource in values.get("tool_resources", {}).values():
+            if "file_ids" in resource:
+                resource["file_ids"] = [identity for identity in resource["file_ids"] if db.execute(
+                    "SELECT 1 FROM attachments WHERE id=? AND owner=?", (identity, owner),
+                ).fetchone()]
+        references = set()
+        for edge in values.get("edges", []):
+            for key in ("from", "to"):
+                references.update(edge[key] if isinstance(edge[key], list) else [edge[key]])
+        subagents = values.get("subagents", {})
+        if subagents.get("enabled") is True:
+            references.update(subagents.get("agent_ids", []))
+            for graph in subagents.get("graphs", []):
+                references.update(graph["agent_ids"])
+        for identity in sorted(references - {own_id}):
+            row = db.execute("SELECT owner FROM agents WHERE id=?", (identity,)).fetchone()
+            if row is None:
+                raise ValueError("Referenced Agent does not exist")
+            if row["owner"] != owner:
+                raise PermissionError("Referenced Agent is not accessible")
 
     @staticmethod
     def _from_row(row: Any) -> dict:
@@ -61,15 +81,21 @@ class AgentRepository:
         return value
 
     def create(self, owner: str, body: dict) -> dict:
-        values = self._clean(body)
-        if not values.get("provider") or not isinstance(values.get("provider"), str):
-            raise ValueError("Agent provider is required")
+        values = self._clean(body, create=True)
         agent_id = "agent_" + secrets.token_hex(12)
         now = _now()
-        values.setdefault("model", None)
+        values = replace_agent_references(values, "", agent_id)
         values.setdefault("model_parameters", {})
+        values.setdefault("edges", [])
+        values.setdefault("tool_resources", {})
+        values.setdefault("conversation_starters", [])
+        values.setdefault("category", "general")
+        values["category"] = values["category"].strip()
+        values["model_parameters"] = sanitize_model_parameters(values["model_parameters"])
         values["_version"] = 1
         with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._references(db, owner, values, agent_id)
             db.execute(
                 "INSERT INTO agents(id,owner,name,description,config,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
                 (agent_id, owner, str(values.get("name") or ""),
@@ -121,6 +147,12 @@ class AgentRepository:
             row = db.execute("SELECT * FROM agents WHERE owner=? AND id=?", (owner, agent_id)).fetchone()
             if row is None:
                 return None
+            values = replace_agent_references(values, "", agent_id)
+            self._references(db, owner, values, agent_id)
+            if "model_parameters" in values:
+                values["model_parameters"] = sanitize_model_parameters(values["model_parameters"])
+            if "category" in values:
+                values["category"] = values["category"].strip()
             config = json.loads(row["config"])
             config.update(values)
             version = int(config.get("_version", 1)) + 1
@@ -166,6 +198,7 @@ class AgentRepository:
         if current is None:
             return None
         values = self._clean(current)
+        values = replace_agent_references(values, agent_id, "")
         values["name"] = (values.get("name") or "Agent") + " (copy)"
         duplicate = self.create(owner, values)
         return {"agent": duplicate, "actions": []}
