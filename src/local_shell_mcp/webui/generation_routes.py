@@ -141,24 +141,31 @@ async def _run_model(
                              "status": "completed",
                          }]}}
             })
-        if (native_file_tools or ask_user_enabled or mcp_enabled or parent_agent) and profile.provider == "openai":
+        model_tools = []
+        if profile.provider == "openai":
             from .ask_user_tools import ASK_USER_TOOLS
-            from .delegation import delegation_tools, run_subagent
-            from .lsm_tool_registry import available_tools, call_tool
-            from .nested_mcp import discover, nested_tools
+            from .delegation import delegation_tools
+            from .lsm_tool_registry import available_tools
+            from .nested_mcp import nested_tools
+
+            model_tools = (
+                (available_tools(owner, generation.conversation_id,
+                                 scopes=set(granted_scopes), expires=grant_expires)
+                 if native_file_tools else []) +
+                (ASK_USER_TOOLS if ask_user_enabled else []) +
+                (nested_tools() if mcp_enabled else []) +
+                delegation_tools(parent_agent)
+            )
+        if model_tools:
+            from .delegation import run_subagent
+            from .lsm_tool_registry import call_tool
+            from .nested_mcp import discover
 
             for round_number in range(3):
                 calls: list[ModelToolCall] = []
                 async for item in stream_model_with_tools(
-                    profile, history, tools=(
-                        (available_tools(owner, generation.conversation_id,
-                                         scopes=set(granted_scopes), expires=grant_expires)
-                         if native_file_tools else []) +
-                        (ASK_USER_TOOLS if ask_user_enabled else []) +
-                        (nested_tools() if mcp_enabled else []) +
-                        delegation_tools(parent_agent)
-                    ), max_tokens=max_tokens,
-                    temperature=temperature,
+                    profile, history, tools=model_tools,
+                    max_tokens=max_tokens, temperature=temperature,
                 ):
                     if isinstance(item, ModelToolCall):
                         calls.append(item)

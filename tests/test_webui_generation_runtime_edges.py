@@ -191,3 +191,25 @@ async def test_generation_resume_rejects_invalid_human_action_and_inactive_state
         assert (await client.post(url, json={"conversationId": generation.conversation_id,
                                              "actionId": "outdated"})).status_code == 409
         assert store.pending_action("local", generation.run_id)["actionId"] == "one"
+
+
+@pytest.mark.asyncio
+async def test_agent_without_enabled_tools_uses_plain_text_stream(active_generation, monkeypatch):
+    _, store, profile = active_generation
+    generation, _ = store.begin("local", {"conversationId": "new", "text": "Respond plainly"})
+
+    async def only_plain_model(profile, history, **kwargs):
+        yield "Plain chat works."
+
+    async def unexpected_tools(*args, **kwargs):
+        raise AssertionError("Tool-enabled model stream must not be used for an Agent without tools")
+        yield "unreachable"
+
+    monkeypatch.setattr(generation_routes, "stream_model", only_plain_model)
+    monkeypatch.setattr(generation_routes, "stream_model_with_tools", unexpected_tools)
+    await generation_routes._run_model(
+        "local", generation, profile,
+        parent_agent={"id": "agent_empty", "subagents": [], "instructions": "Act normally"},
+    )
+    assert store.latest("local", generation.conversation_id).status == "complete"
+    assert store.events("local", generation.run_id)[-1][1]["responseMessage"]["text"] == "Plain chat works."
