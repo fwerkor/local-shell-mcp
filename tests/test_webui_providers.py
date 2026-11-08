@@ -111,3 +111,12 @@ async def test_provider_error_does_not_echo_secrets(monkeypatch):
     with pytest.raises(RuntimeError, match="Model provider rejected") as exc:
         await _collect(stream_model(config, [{"role": "user", "content": "Hello"}]))
     assert "very-private" not in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_loopback_openai_with_no_key_omits_authorization(monkeypatch):
+    captured = {}
+    _mock_client(monkeypatch, ['data: {"choices":[{"delta":{"content":"ok"}}]}', 'data: [DONE]'], captured)
+    config = ProviderConfig("openai", "local", "http://127.0.0.1:11434/v1/chat/completions", "")
+    assert await _collect(stream_model(config, [{"role": "user", "content": "hi"}])) == ["ok"]
+    assert "authorization" not in captured["request"].headers

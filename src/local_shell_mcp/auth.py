@@ -22,7 +22,7 @@ from .ui_security import (
 )
 
 PUBLIC_PATHS = {
-    "/healthz",
+    "/health", "/healthz",
     "/readyz",
     "/docs",
     "/openapi.json",

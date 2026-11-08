@@ -106,7 +106,10 @@ async def stream_model(
     headers = {"accept": "text/event-stream", "content-type": "application/json"}
     body: dict = {"model": config.model, "stream": True}
     if config.provider == "openai":
-        headers["Authorization"] = f"Bearer {config.token}"
+        if config.token:
+            headers["Authorization"] = f"Bearer {config.token}"
+        # Local OpenAI-compatible servers may run without an API key. An
+        # empty `Bearer ` value is illegal HTTP and breaks streaming.
         body["messages"] = messages
         body["max_completion_tokens"] = max_tokens
         if temperature is not None:

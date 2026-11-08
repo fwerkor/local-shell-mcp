@@ -130,7 +130,8 @@ def _frontend_user(session: WebSession) -> dict:
     return {
         "id": owner_id, "_id": owner_id, "username": "workspace", "name": "local-shell-mcp",
         "email": "workspace@local-shell-mcp.invalid",
-        "role": "ADMIN" if "admin:config" in session.scopes.split() else "USER",
+        "role": "ADMIN" if (get_settings().auth_mode == "none" and session.owner == "local")
+        or "admin:config" in session.scopes.split() else "USER",
         "provider": "local-shell-mcp",
         "emailVerified": True, "avatar": "", "personalization": {},
     }
@@ -162,6 +163,14 @@ async def authenticate(request: Request) -> Response:
 async def refresh(request: Request) -> Response:
     _same_origin(request)
     session = _store().session(request.cookies.get(COOKIE, ""))
+    if session is None and get_settings().auth_mode == "none":
+        # The Controller itself is explicitly unauthenticated. Make the
+        # first-party React frontend usable directly without an extra login
+        # page, cookie, or redundant LibreChat identity database.
+        from ..oauth import ALL_OAUTH_SCOPES
+
+        session = WebSession("local", " ".join(sorted(ALL_OAUTH_SCOPES)),
+                             int(time.time()) + SESSION_TTL)
     if session is None:
         raise HTTPException(401, detail="WebUI login expired")
     # JWT is already an LSM OAuth dependency but is not needed merely to serve

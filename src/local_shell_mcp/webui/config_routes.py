@@ -67,6 +67,7 @@ async def startup_config(request: Request):
     # limited to render-only fields; do not expose credential/model inventory.
     settings = {
         "appTitle": "local-shell-mcp",
+        "customFooter": "local-shell-mcp",
         "serverDomain": _domain(request),
         "discordLoginEnabled": False,
         "facebookLoginEnabled": False,

@@ -73,3 +73,21 @@ async def test_cookie_login_csrf_and_refresh(tmp_path, monkeypatch) -> None:
         assert refreshed.json()["user"]["id"]
         await client.post("/api/auth/logout")
         assert (await client.post("/api/auth/refresh")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_controller_without_auth_opens_react_without_second_login(tmp_path, monkeypatch) -> None:
+    settings = SimpleNamespace(auth_mode="none", state_dir=tmp_path,
+                               oauth_jwt_secret="a" * 48, public_base_url="http://localhost")
+    monkeypatch.setattr(auth, "get_settings", lambda: settings)
+    app = Starlette(routes=auth.auth_routes())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                base_url="http://localhost") as client:
+        first = await client.post("/api/auth/refresh")
+        assert first.status_code == 200, first.text
+        assert first.json()["token"]
+        assert first.json()["user"]["role"] == "ADMIN"
+        second = await client.post("/api/auth/refresh")
+        assert second.status_code == 200
+        assert first.json()["user"]["id"] == second.json()["user"]["id"]
+        assert "set-cookie" not in first.headers

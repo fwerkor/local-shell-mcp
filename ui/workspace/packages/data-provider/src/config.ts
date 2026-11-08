@@ -525,7 +525,7 @@ type SchemaShape<T> = T extends z.ZodObject<infer U> ? U : never;
 
 // Helper type to determine the default value or undefined based on whether the field has a default
 type DefaultValue<T> =
-  T extends z.ZodDefault<z.ZodTypeAny> ? ReturnType<T['_def']['defaultValue']> : undefined;
+  T extends z.ZodDefault<z.ZodTypeAny> ? z.infer<T> : undefined;
 
 // Extract default values or undefined from the schema shape
 type ExtractDefaults<T> = {
@@ -542,8 +542,9 @@ export function getSchemaDefaults<Schema extends z.AnyZodObject>(
   const shape = schema.shape;
   const entries = Object.entries(shape).map(([key, value]) => {
     if (value instanceof z.ZodDefault) {
-      // Extract default value if it exists
-      return [key, value._def.defaultValue()];
+      // Zod 4 stores a value rather than the Zod 3 defaultValue() factory.
+      // Parsing undefined applies the schema's default across both versions.
+      return [key, value.parse(undefined)];
     }
     return [key, undefined];
   });
