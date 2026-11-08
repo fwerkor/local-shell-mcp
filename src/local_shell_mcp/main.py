@@ -153,11 +153,13 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
     if settings.ui_enabled:
         routes[2:2] = ui_routes()
         if settings.state_backend == "sqlite":
+            from .webui.agent_routes import agent_routes
             from .webui.auth import auth_routes
             from .webui.routes import webui_routes
 
             routes[2:2] = webui_routes()
             routes[2:2] = auth_routes()
+            routes[2:2] = agent_routes()
     if settings.remote_enabled:
         routes[2:2] = remote_routes()
     if settings.ui_enabled and settings.state_backend == "sqlite":

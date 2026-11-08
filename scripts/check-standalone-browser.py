@@ -12,6 +12,9 @@ from pathlib import Path
 
 from PyInstaller.archive.readers import CArchiveReader
 
+EXPECTED_WEBUI_PAYLOAD = "local_shell_mcp/webui/frontend.tar.gz"
+
+
 EXPECTED_SIDECAR = {
     "local_shell_mcp/browser_external/browser_sessions.py",
     "local_shell_mcp/browser_external/browser_external_service.py",
@@ -28,6 +31,7 @@ def main() -> None:
     contents = {name.replace("\\", "/") for name in archive.toc}
     missing = EXPECTED_SIDECAR - contents
     assert not missing, f"External browser source is absent from executable: {sorted(missing)}"
+    assert EXPECTED_WEBUI_PAYLOAD in contents, "Compiled first-party React WebUI missing from executable"
     assert not any(path.startswith("playwright/") for path in contents), (
         "Playwright package leaked into the standalone executable"
     )

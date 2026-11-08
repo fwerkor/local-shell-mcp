@@ -2,7 +2,7 @@
 
 The **unified LSM web workspace** is the recommended way to use local-shell-mcp day to day. It combines AI chat, project history and the LSM control plane in one responsive interface, based on a modified, vendored LibreChat frontend. You can still connect external MCP clients such as [ChatGPT](chatgpt-connector.md) or [Gemini](gemini-spark.md).
 
-The workspace is **self-hosted and optional to install**: it is a separate web service, not part of the minimal Controller image, standalone executable or remote Worker bundle. Controller-only deployments retain the original browser UI and OpenTUI.
+The workspace is included with the single LSM Controller, not deployed as a separate service. Python and SQLite own all server data.
 
 ## What is in the workspace?
 
@@ -22,44 +22,32 @@ The Controller routes are `/control/overview`, `/control/files`, `/control/termi
 
 ## Deploy the optional chat stack
 
-1. [Install and start an LSM Controller](quickstart.md) with OAuth, an appropriately isolated workspace and persistent `file` or `redis` state storage. Install Docker Compose and clone the repository to the host running the web stack.
-2. Provide **two HTTPS origins on the same site**, such as `https://lsm.example.org` for Controller and `https://chat.example.org` for the workspace. The chat service is not exposed directly on an untrusted network.
-3. Generate one bridge secret with `openssl rand -hex 32`. Configure these environment variables on the **Controller service**, using that secret, then restart it:
+1. [Install and start an LSM Controller](quickstart.md) with SQLite (now the default). On startup, durable historical state is imported automatically, retaining the original files for rollback.
+2. Configure one HTTP/HTTPS Controller origin, for example `https://lsm.example.org`. Chat, terminals, files and remote controls share the same Python server and authentication.
+3. To override the defaults, configure the Controller service environment:
 
 ```env
-LOCAL_SHELL_MCP_LIBRECHAT_URL=https://chat.example.org
-LOCAL_SHELL_MCP_LIBRECHAT_BRIDGE_SECRET=paste-the-same-64-hex-character-secret-on-both-services
+LOCAL_SHELL_MCP_STATE_BACKEND=sqlite
+LOCAL_SHELL_MCP_UI_ENABLED=true
 ```
 
-4. In the repository checkout, configure the optional web stack. Use a private environment file, or export the values shown below; generate unique strong secrets, and do not commit them:
+4. Start the Controller from its Python package or standalone executable:
 
 ```sh
-export LSM_PUBLIC_ORIGIN=https://lsm.example.org
-export LIBRECHAT_PUBLIC_URL=https://chat.example.org
-export LSM_LIBRECHAT_BRIDGE_SECRET="paste-the-secret-from-controller-config"
-export JWT_SECRET="$(openssl rand -hex 32)"
-export JWT_REFRESH_SECRET="$(openssl rand -hex 32)"
-export CREDS_KEY="$(openssl rand -hex 32)"
-export CREDS_IV="$(openssl rand -hex 16)"
-export MEILI_MASTER_KEY="$(openssl rand -hex 32)"
-export LSM_DOCKER_NETWORK=local-shell-mcp_default
+local-shell-mcp --mode mcp
 ```
 
-5. Render the private config, then build and start the separately deployed chat stack:
+5. The original React client is maintained in `ui/workspace/`. Bun is only required for building and releases; consult the [first-party WebUI build and security notes](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md).
 
-```sh
-python3 integrations/librechat/render_config.py
-docker compose -f integrations/librechat/compose.yaml build chat
-docker compose -f integrations/librechat/compose.yaml up -d
-```
+Node.js, MongoDB, Meilisearch and the separate LibreChat Compose stack are no longer required at runtime. Workers remain ordinary Python packages.
 
-When using the root Docker Compose deployment, the Controller variables above belong in the root `.env` and are forwarded to the container. The chat service values can be provided through shell exports or a private environment file. The Controller container must be reachable from the chat container at `http://local-shell-mcp:8765` on the named Docker network. Reverse-proxy port `127.0.0.1:3080` to the chat HTTPS origin, preserve the external host, and follow the [deployment and security notes](https://github.com/fwerkor/local-shell-mcp/blob/main/integrations/librechat/README.md) in the repository. The web stack runs Node.js, MongoDB, Meilisearch and SearXNG; they are **not** included in Workers. This separate deployment is not started by a plain `docker compose up -d` in the repository root.
+**Migration status:** The Python Agent generation engine, SSE resume and tool approvals are still being ported. Do not deploy the draft branch as a replacement for a working production Controller.
 
 ## Sign in and use chat
 
-1. Open `https://lsm.example.org/ui`, authenticate using the **LSM Controller** login, and follow the one-time handoff into the web workspace. You do not create a second LibreChat user account.
-2. Configure a model provider. The optional web stack exposes OpenAI, Anthropic and Google credentials as `user_provided` by default: enter your own provider key in the chat endpoint settings, or set `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `GOOGLE_KEY` in the chat Compose environment before starting. Choose a supported model in chat. **LSM does not include models or API credits.** Gemini Spark's external MCP connection is separate from configuring a Gemini model here.
-3. Create a conversation. Web search and LSM tools are enabled by default, subject to Controller permissions. Use the per-conversation **Web**, **LSM**, **External MCP** and **Memory** controls as needed.
+1. Open the LSM Controller `/ui` entrypoint and authenticate with its existing PIN or OAuth credentials. React and Controller APIs share this identity.
+2. Configure an available model endpoint/API credential in LSM. The Python Agent provider engine is being migrated; the draft branch does not yet provide complete generation support.
+3. Start a conversation after the Python Agent endpoints and SSE protocol pass the acceptance suite. Nested MCP, LSM tools and file uploads follow existing Controller permissions.
 4. Start with a read-only request: “Check Controller status and list the workspace root. Do not modify files.”
 5. Navigate to **Files**, **Terminals**, **Desktop**, **Sessions**, **Remotes** or **Audit** for direct inspection and control.
 
@@ -69,16 +57,16 @@ Chat uploads (up to 32 MiB) are stored under the Controller workspace and their 
 
 Use the workspace MCP sidebar to manage nested external MCP servers. This supports local stdio servers and HTTP servers, including separate private environment variables and request headers. Secrets are not returned to the browser. The **External MCP** chat toggle allows search, inspection and invocation of nested tools; it does not grant the model `mcp_manage` when native LSM tools are disabled. UI management is protected by normal Controller authorization.
 
-Chat messages, projects and archives are stored server-side in the web stack's MongoDB; search uses Meilisearch. The Controller separately owns tool permissions, Worker identities, session state and audit. Back up both data stores if you need to retain all history. The chat backend is single-user under LSM's login; do not expose its internal API or databases to the public.
+Chats, projects, Agents, sessions, audits and Worker metadata share `.local-shell-mcp/lsm.sqlite3`; SQLite FTS5 provides local search. Non-database artifacts remain under `.local-shell-mcp/`.
 
-The UI is a top-level app, **not an iframe**. If the optional chat service is not configured, `/ui` continues to serve the original LSM WebUI. Native OpenTUI and external clients remain supported.
+The workspace is a first-party React application, not an iframe or separately hosted Web service. Python Workers and external MCP clients remain compatible.
 
 ## Troubleshooting
 
-- **Redirect remains on the original UI:** check `LOCAL_SHELL_MCP_LIBRECHAT_URL`, a persistent Controller state backend and the web stack's HTTPS reverse proxy.
-- **Login or handoff fails:** verify the exact same 32-byte-or-longer bridge secret on both sides, matching same-site origins, HTTPS and server clocks.
-- **Chat loads but cannot answer:** set up an actual model endpoint or API credential and check chat container logs.
-- **MCP tools are missing:** verify Controller scopes and per-conversation toggles; the nested server registry is separate from the LibreChat MCP database.
-- **Files or sessions appear empty:** verify that chat reaches the correct Controller and workspace, and inspect its API authentication logs.
+- **Unable to start the WebUI:** check the Controller Python logs, SQLite initialization and bundled frontend archive. `LOCAL_SHELL_MCP_STATE_BACKEND=file` is an emergency storage recovery option.
+- **Authentication fails:** use the existing Controller PIN/OAuth login. The React UI does not require a separate LibreChat account or bridge secret.
+- **Chat loads but cannot answer:** the Python Agent generation and SSE port is still incomplete in this draft branch; do not deploy it to production.
+- **Missing MCP tools:** check Controller authorization and the nested MCP registry; never expose `mcp_manage` to external-only model tools.
+- **Files or sessions appear empty:** verify the Controller workspace, SQLite migration and authorized principal in its logs.
 
-For implementation details and updates, see [the vendored integration README](https://github.com/fwerkor/local-shell-mcp/blob/main/integrations/librechat/README.md) and the [human interface guide](../guides/human-interface.md).
+For implementation details and updates, see [the vendored integration README](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md) and the [human interface guide](../guides/human-interface.md).

@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: e75cf6e4ffc3fe904983cd63b99b43c2877c4bdd99174b2d4a96393eff5d9e3f -->
+<!-- i18n-source-sha256: 521e0f39c8823597b1468b2d63af978794cb28fda8c8e60230da0a96cff2d5c2 -->
 # Ruang kerja web terpadu
 
 **Ruang kerja web LSM terpadu** adalah cara yang disarankan untuk menggunakan local-shell-mcp sehari-hari. Ini menggabungkan obrolan AI, riwayat proyek, dan bidang kendali LSM dalam satu antarmuka responsif, berdasarkan antarmuka LibreChat yang dimodifikasi dan dibuat oleh vendor. Anda masih dapat menghubungkan klien MCP eksternal seperti [ChatGPT](chatgpt-connector.md) atau [Gemini](gemini-spark.md).
@@ -23,46 +23,34 @@ Rute Pengontrol adalah `/control/overview`, `/control/files`, `/control/terminal
 
 ## Terapkan tumpukan obrolan opsional
 
-1. [Install and start an LSM Controller](quickstart.md) dengan OAuth, ruang kerja yang diisolasi dengan tepat dan penyimpanan status `file` atau `redis` yang persisten. Instal Docker Compose dan kloning repositori ke host yang menjalankan tumpukan web.
-2. Berikan **dua asal HTTPS di situs yang sama**, seperti `https://lsm.example.org` untuk Pengontrol dan `https://chat.example.org` untuk ruang kerja. Layanan obrolan tidak terekspos secara langsung pada jaringan yang tidak tepercaya.
-3. Hasilkan satu rahasia jembatan dengan `openssl rand -hex 32`. Konfigurasikan variabel lingkungan berikut pada **Layanan pengontrol**, menggunakan rahasia tersebut, lalu mulai ulang:
+1. [Install and start an LSM Controller](quickstart.md) with SQLite (now the default). On startup, durable historical state is imported automatically, retaining the original files for rollback.
+2. Configure one HTTP/HTTPS Controller origin, for example `https://lsm.example.org`. Chat, terminals, files and remote controls share the same Python server and authentication.
+3. To override the defaults, configure the Controller service environment:
 
 ```env
-LOCAL_SHELL_MCP_LIBRECHAT_URL=https://chat.example.org
-LOCAL_SHELL_MCP_LIBRECHAT_BRIDGE_SECRET=paste-the-same-64-hex-character-secret-on-both-services
+LOCAL_SHELL_MCP_STATE_BACKEND=sqlite
+LOCAL_SHELL_MCP_UI_ENABLED=true
 ```
 
-4. Di checkout repositori, konfigurasikan tumpukan web opsional. Gunakan file lingkungan pribadi, atau ekspor nilai yang ditunjukkan di bawah ini; hasilkan rahasia kuat yang unik, dan jangan lakukan:
+4. Start the Controller from its Python package or standalone executable:
 
 ```sh
-export LSM_PUBLIC_ORIGIN=https://lsm.example.org
-export LIBRECHAT_PUBLIC_URL=https://chat.example.org
-export LSM_LIBRECHAT_BRIDGE_SECRET="paste-the-secret-from-controller-config"
-export JWT_SECRET="$(openssl rand -hex 32)"
-export JWT_REFRESH_SECRET="$(openssl rand -hex 32)"
-export CREDS_KEY="$(openssl rand -hex 32)"
-export CREDS_IV="$(openssl rand -hex 16)"
-export MEILI_MASTER_KEY="$(openssl rand -hex 32)"
-export LSM_DOCKER_NETWORK=local-shell-mcp_default
+local-shell-mcp --mode mcp
 ```
 
-5. Render konfigurasi pribadi, lalu buat dan mulai tumpukan obrolan yang diterapkan secara terpisah:
+5. The original React client is maintained in `ui/workspace/`. Bun is only required for building and releases; consult the [first-party WebUI build and security notes](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md).
 
-```sh
-python3 integrations/librechat/render_config.py
-docker compose -f integrations/librechat/compose.yaml build chat
-docker compose -f integrations/librechat/compose.yaml up -d
-```
+Node.js, MongoDB, Meilisearch and the separate LibreChat Compose stack are no longer required at runtime. Workers remain ordinary Python packages.
 
-Saat menggunakan penerapan root Docker Compose, variabel Pengontrol di atas termasuk dalam root `.env` dan diteruskan ke container. Nilai layanan obrolan dapat diberikan melalui ekspor shell atau file lingkungan pribadi. Kontainer Pengontrol harus dapat dijangkau dari kontainer obrolan di `http://local-shell-mcp:8765` di jaringan Docker bernama. Balikkan port proxy `127.0.0.1:3080` ke asal HTTPS obrolan, pertahankan host eksternal, dan ikuti [deployment and security notes](https://github.com/fwerkor/local-shell-mcp/blob/main/integrations/librechat/README.md) di repositori. Tumpukan web menjalankan Node.js, MongoDB, Meilisearch dan SearXNG; mereka **tidak** termasuk dalam Pekerja. Penerapan terpisah ini tidak dimulai oleh `docker compose up -d` biasa di root repositori.
+**Migration status:** The Python Agent generation engine, SSE resume and tool approvals are still being ported. Do not deploy the draft branch as a replacement for a working production Controller.
 
 ## Masuk dan gunakan obrolan
 
-1. Buka `https://lsm.example.org/ui`, autentikasi menggunakan login **LSM Controller**, dan ikuti handoff satu kali ke ruang kerja web. Anda tidak membuat akun pengguna LibreChat kedua.
-2. Konfigurasikan penyedia model. Tumpukan web opsional menampilkan kredensial OpenAI, Anthropic, dan Google sebagai `user_provided` secara default: masukkan kunci penyedia Anda sendiri di pengaturan titik akhir obrolan, atau setel `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, atau `GOOGLE_KEY` di lingkungan Compose obrolan sebelum memulai. Pilih model yang didukung dalam obrolan. **LSM tidak menyertakan model atau kredit API.** Koneksi MCP eksternal Gemini Spark terpisah dari konfigurasi model Gemini di sini.
-3. Buat percakapan. Pencarian web dan alat LSM diaktifkan secara default, tergantung pada izin Pengontrol. Gunakan kontrol **Web**, **LSM**, **MCP Eksternal**, dan **Memori** per percakapan sesuai kebutuhan.
-4. Mulailah dengan permintaan baca-saja: "Periksa status Pengontrol dan daftarkan root ruang kerja. Jangan ubah file."
-5. Navigasikan ke **File**, **Terminal**, **Desktop**, **Sessions**, **Remote** atau **Audit** untuk pemeriksaan dan kontrol langsung.
+1. Open the LSM Controller `/ui` entrypoint and authenticate with its existing PIN or OAuth credentials. React and Controller APIs share this identity.
+2. Configure an available model endpoint/API credential in LSM. The Python Agent provider engine is being migrated; the draft branch does not yet provide complete generation support.
+3. Start a conversation after the Python Agent endpoints and SSE protocol pass the acceptance suite. Nested MCP, LSM tools and file uploads follow existing Controller permissions.
+4. Start with a read-only request: “Check Controller status and list the workspace root. Do not modify files.”
+5. Navigate to **Files**, **Terminals**, **Desktop**, **Sessions**, **Remotes** or **Audit** for direct inspection and control.
 
 Unggahan obrolan (hingga 32 MiB) disimpan di ruang kerja Pengontrol dan jalur absolutnya diberikan ke model. Unggahan browser tidak memberikan izin file tambahan. Panggilan alat yang menghadap model melewati otorisasi LSM, audit, dan router pekerja jarak jauh.
 
@@ -70,16 +58,16 @@ Unggahan obrolan (hingga 32 MiB) disimpan di ruang kerja Pengontrol dan jalur ab
 
 Gunakan sidebar MCP ruang kerja untuk mengelola server MCP eksternal bertumpuk. Ini mendukung server stdio lokal dan server HTTP, termasuk variabel lingkungan pribadi terpisah dan header permintaan. Rahasia tidak dikembalikan ke browser. Tombol obrolan **MCP Eksternal** memungkinkan penelusuran, inspeksi, dan pemanggilan alat yang disarangkan; itu tidak memberikan model `mcp_manage` ketika alat LSM asli dinonaktifkan. Manajemen UI dilindungi oleh otorisasi Pengontrol normal.
 
-Pesan obrolan, proyek, dan arsip disimpan di sisi server di MongoDB tumpukan web; pencarian menggunakan Meilisearch. Pengontrol secara terpisah memiliki izin alat, identitas Pekerja, status sesi, dan audit. Cadangkan kedua penyimpanan data jika Anda perlu menyimpan semua riwayat. Backend obrolan adalah pengguna tunggal dengan login LSM; jangan memaparkan API internal atau databasenya kepada publik.
+Chats, projects, Agents, sessions, audits and Worker metadata share `.local-shell-mcp/lsm.sqlite3`; SQLite FTS5 provides local search. Non-database artifacts remain under `.local-shell-mcp/`.
 
-UI adalah aplikasi tingkat atas, **bukan iframe**. Jika layanan obrolan opsional tidak dikonfigurasi, `/ui` terus melayani WebUI LSM asli. OpenTUI asli dan klien eksternal tetap didukung.
+The workspace is a first-party React application, not an iframe or separately hosted Web service. Python Workers and external MCP clients remain compatible.
 
 ## Pemecahan masalah
 
-- **Pengalihan tetap pada UI asli:** periksa `LOCAL_SHELL_MCP_LIBRECHAT_URL`, backend status Pengontrol yang persisten, dan proxy balik HTTPS tumpukan web.
-- **Login atau handoff gagal:** verifikasi rahasia jembatan yang sama persis berukuran 32 byte atau lebih panjang di kedua sisi, cocok dengan asal situs yang sama, HTTPS, dan jam server.
-- **Obrolan dimuat tetapi tidak dapat menjawab:** siapkan titik akhir model aktual atau kredensial API dan periksa log penampung obrolan.
-- **Alat MCP tidak ada:** verifikasi cakupan Pengontrol dan tombol per percakapan; registri server bersarang terpisah dari database LibreChat MCP.
-- **File atau sesi tampak kosong:** verifikasi bahwa obrolan mencapai Pengontrol dan ruang kerja yang benar, dan periksa log autentikasi API-nya.
+- **Unable to start the WebUI:** check the Controller Python logs, SQLite initialization and bundled frontend archive. `LOCAL_SHELL_MCP_STATE_BACKEND=file` is an emergency storage recovery option.
+- **Authentication fails:** use the existing Controller PIN/OAuth login. The React UI does not require a separate LibreChat account or bridge secret.
+- **Chat loads but cannot answer:** the Python Agent generation and SSE port is still incomplete in this draft branch; do not deploy it to production.
+- **Missing MCP tools:** check Controller authorization and the nested MCP registry; never expose `mcp_manage` to external-only model tools.
+- **Files or sessions appear empty:** verify the Controller workspace, SQLite migration and authorized principal in its logs.
 
-Untuk detail implementasi dan pembaruan, lihat [the vendored integration README](https://github.com/fwerkor/local-shell-mcp/blob/main/integrations/librechat/README.md) dan [human interface guide](../guides/human-interface.md).
+Untuk detail implementasi dan pembaruan, lihat [the vendored integration README](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md) dan [human interface guide](../guides/human-interface.md).

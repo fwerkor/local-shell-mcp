@@ -1,9 +1,9 @@
-<!-- i18n-source-sha256: e75cf6e4ffc3fe904983cd63b99b43c2877c4bdd99174b2d4a96393eff5d9e3f -->
+<!-- i18n-source-sha256: 521e0f39c8823597b1468b2d63af978794cb28fda8c8e60230da0a96cff2d5c2 -->
 # 统一 Web 工作区
 
 **统一的 LSM Web 工作区**是日常使用 local-shell-mcp 的推荐入口。它将 AI 聊天、项目历史记录和 LSM 控制面结合在一个响应式界面中，基于经过定制并内置的 LibreChat 前端。您仍然可以连接外部 MCP 客户端，例如 [ChatGPT](chatgpt-connector.md) 或 [Gemini](gemini-spark.md)。
 
-该工作区是**自托管且可选安装**：它是一个单独的 Web 服务，不是轻量 Controller 镜像、独立可执行文件或远程 Worker 安装包的一部分。仅部署 Controller 时保留原始浏览器 UI 和 OpenTUI。
+现在 Web 工作区集成在 LSM Controller 中，不再另行部署 LibreChat 服务。全部业务数据统一存储于 Python/SQLite 后端。
 
 ## 工作区里有什么？
 
@@ -23,46 +23,34 @@ Controller 页面路由包括 `/control/overview`、`/control/files`、`/control
 
 ## 部署可选的聊天服务
 
-1. [安装并启动 LSM Controller](quickstart.md) 与 OAuth、适当隔离的工作区和持久 `file` 或 `redis` 状态存储。安装 Docker Compose 并将存储库克隆到运行 Web 堆栈的主机。
-2. 在同一站点上提供**两个 HTTPS 源**，例如用于控制器的 `https://lsm.example.org` 和用于工作区的 `https://chat.example.org`。聊天服务不会直接暴露在不受信任的网络上。
-3. 使用 `openssl rand -hex 32` 生成一个桥接秘密。使用该密钥在 **控制器服务** 上配置这些环境变量，然后重新启动它：
+1. 通过[快速入门](quickstart.md)安装 LSM Controller，默认启用 SQLite；原始状态会自动迁移，旧文件保留作为回滚来源。
+2. 用户只需一个 HTTP/HTTPS 入口：`https://lsm.example.org`。聊天、终端、文件及远程控制都由同一个 Python Controller 提供。
+3. 如需修改默认配置，可以在 Controller 服务环境中设置：
 
 ```env
-LOCAL_SHELL_MCP_LIBRECHAT_URL=https://chat.example.org
-LOCAL_SHELL_MCP_LIBRECHAT_BRIDGE_SECRET=paste-the-same-64-hex-character-secret-on-both-services
+LOCAL_SHELL_MCP_STATE_BACKEND=sqlite
+LOCAL_SHELL_MCP_UI_ENABLED=true
 ```
 
-4. 在仓库目录中，配置可选的 Web 堆栈。使用私有环境文件，或导出如下所示的值；生成不同的高强度密钥，并且不要提交它们：
+4. 使用源码部署或独立可执行文件启动 Controller：
 
 ```sh
-export LSM_PUBLIC_ORIGIN=https://lsm.example.org
-export LIBRECHAT_PUBLIC_URL=https://chat.example.org
-export LSM_LIBRECHAT_BRIDGE_SECRET="paste-the-secret-from-controller-config"
-export JWT_SECRET="$(openssl rand -hex 32)"
-export JWT_REFRESH_SECRET="$(openssl rand -hex 32)"
-export CREDS_KEY="$(openssl rand -hex 32)"
-export CREDS_IV="$(openssl rand -hex 16)"
-export MEILI_MASTER_KEY="$(openssl rand -hex 32)"
-export LSM_DOCKER_NETWORK=local-shell-mcp_default
+local-shell-mcp --mode mcp
 ```
 
-5. 生成包含私密配置的运行时文件，然后构建并启动独立的聊天服务栈：
+5. React 前端源码位于 `ui/workspace/`。仅在开发与打包时需要 Bun；参见[前端构建与安全说明](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md)。
 
-```sh
-python3 integrations/librechat/render_config.py
-docker compose -f integrations/librechat/compose.yaml build chat
-docker compose -f integrations/librechat/compose.yaml up -d
-```
+Node.js、MongoDB、Meilisearch 和独立的 LibreChat Compose 服务都不再是运行时依赖。Worker 仍然是普通 Python 包。
 
-当使用根 Docker Compose 部署时，上面的 Controller 变量属于根 `.env` 并转发到容器。聊天服务值可以通过 shell 导出或私有环境文件提供。控制器容器必须可从指定 Docker 网络上位于 `http://local-shell-mcp:8765` 的聊天容器访问。将 `127.0.0.1:3080` 反向代理端口到聊天 HTTPS 源，保留外部主机，并遵循存储库中的 [部署与安全说明](https://github.com/fwerkor/local-shell-mcp/blob/main/integrations/librechat/README.md)。 Web 堆栈运行 Node.js、MongoDB、Meilisearch 和 SearXNG；这些组件**不会**进入 Worker 安装包。这个单独的部署不是由存储库根目录中的普通 `docker compose up -d` 启动的。
+**重构状态：** Python Agent 推理、SSE 恢复及工具协议仍在迁移，草稿 PR 暂不可替换生产部署。
 
 ## 登录并使用聊天功能
 
-1. 打开 `https://lsm.example.org/ui`，使用 **LSM Controller** 登录进行身份验证，然后按照一次性切换进入 Web 工作区。您无需创建第二个 LibreChat 用户帐户。
-2. 配置模型提供者。可选的 Web 堆栈默认将 OpenAI、Anthropic 和 Google 凭证公开为 `user_provided`：在聊天端点设置中输入您自己的提供商密钥，或在开始之前在聊天 Compose 环境中设置 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY` 或 `GOOGLE_KEY`。在聊天中选择支持的型号。 **LSM 不包括模型或 API 积分。** Gemini Spark 的外部 MCP 连接与此处配置 Gemini 模型是分开的。
-3. 创建对话。默认情况下启用 Web 搜索和 LSM 工具，但需遵守控制器权限。根据需要使用每个对话 **Web**、**LSM**、**外部 MCP** 和 **内存** 控件。
-4. 从只读请求开始：“检查控制器状态并列出工作空间根目录。请勿修改文件。”
-5. 导航到**文件**、**终端**、**桌面**、**会话**、**远程**或**审计**以进行直接检查和控制。
+1. 打开 LSM Controller 的 `/ui` 入口，用原有 PIN 或 OAuth 完成认证；React 与控制面共享身份。
+2. 在 LSM 中配置实际模型端点/API 凭证。Python Agent 后端仍在迁移中，草稿分支尚未完全支持生成。
+3. 待 Python Agent 与 SSE 协议通过验收测试后即可正常新建对话；MCP、LSM 工具与文件上传继续沿用 Controller 权限。
+4. 先进行只读请求：“检查 Controller 状态并列出工作区根目录，不修改文件。”
+5. 通过文件、终端、桌面、会话、远程和审计页面直接查看与管理运行环境。
 
 聊天上传（最多 32 MiB）存储在控制器工作区下，并且它们的绝对路径提供给模型。浏览器上传不会授予额外的文件权限。面向模型的工具调用通过 LSM 授权、审计和远程 Worker 路由器。
 
@@ -70,16 +58,16 @@ docker compose -f integrations/librechat/compose.yaml up -d
 
 使用工作区 MCP 侧边栏管理嵌套的外部 MCP 服务器。这支持本地 stdio 服务器和 HTTP 服务器，包括单独的私有环境变量和请求标头。秘密不会返回到浏览器。 **外部 MCP** 聊天切换允许搜索、检查和调用嵌套工具；当禁用本机 LSM 工具时，它不会授予模型 `mcp_manage`。 UI 管理受到正常控制器授权的保护。
 
-聊天消息、项目和档案存储在服务器端 Web 堆栈的 MongoDB 中；搜索使用 Meilisearch。 Controller分别拥有工具权限、Worker身份、会话状态和审计。如果需要保留所有历史记录，请备份两个数据存储。聊天后台是LSM登录下的单用户；不要向公众公开其内部 API 或数据库。
+聊天、项目、Agent、会话、审计及 Worker 状态统一使用 `.local-shell-mcp/lsm.sqlite3`，并使用 SQLite FTS5 搜索；文件产物仍在同目录下管理。
 
-UI 是独立的顶层应用，**不是 iframe**。如果未配置可选聊天服务，`/ui` 将继续为原始 LSM WebUI 提供服务。原生 OpenTUI 和外部客户端仍然受支持。
+工作区是原生 React 页面，不使用 iframe 或独立 Web 服务；Worker 与外部 MCP 客户端保持兼容。
 
 ## 故障排除
 
-- **重定向保留在原始 UI 上：** 检查 `LOCAL_SHELL_MCP_LIBRECHAT_URL`、持久控制器状态后端和 Web 堆栈的 HTTPS 反向代理。
-- **登录或切换失败：**验证双方完全相同的 32 字节或更长的桥接密钥，匹配相同站点的来源、HTTPS 和服务器时钟。
-- **聊天加载但无法应答：**设置实际模型端点或 API 凭证并检查聊天容器日志。
-- **缺少 MCP 工具：** 验证控制器范围和每个对话切换；嵌套服务器注册表与 LibreChat MCP 数据库是分开的。
-- **文件或会话显示为空：**验证聊天是否到达正确的控制器和工作区，并检查其 API 身份验证日志。
+- **WebUI 无法启动：** 查看 Python Controller 日志、SQLite 初始化和打包前端；紧急情况下可通过 `LOCAL_SHELL_MCP_STATE_BACKEND=file` 恢复文件存储。
+- **登录失败：** 使用现有 Controller PIN/OAuth 认证，不再需要 LibreChat 独立账户或桥接密钥。
+- **聊天界面可打开但无法应答：** 草稿分支的 Python Agent 与 SSE 迁移尚未完成，请勿部署到生产。
+- **MCP 工具缺失：** 核对 Controller 权限与嵌套 MCP 注册表；仅外部 MCP 模式不暴露 `mcp_manage`。
+- **文件或会话为空：** 检查 Controller 工作区、SQLite 数据迁移及认证身份。
 
-有关实现详细信息和更新，请参阅 [the vendored integration README](https://github.com/fwerkor/local-shell-mcp/blob/main/integrations/librechat/README.md) 和 [human interface guide](../guides/human-interface.md)。
+有关实现详细信息和更新，请参阅 [the vendored integration README](https://github.com/fwerkor/local-shell-mcp/blob/main/ui/workspace/README.md) 和 [human interface guide](../guides/human-interface.md)。

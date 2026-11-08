@@ -28,3 +28,9 @@ src/local_shell_mcp/ui_runtime/
 
 # Generated MkDocs site
 site/
+
+# Vendored workspace build output
+ui/workspace/node_modules/
+ui/workspace/**/node_modules/
+ui/workspace/**/dist/
+ui/workspace/.turbo/

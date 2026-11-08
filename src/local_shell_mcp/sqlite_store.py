@@ -88,6 +88,13 @@ CREATE TABLE IF NOT EXISTS agents (
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 CREATE INDEX IF NOT EXISTS idx_agents_owner ON agents(owner, updated_at DESC);
+CREATE TABLE IF NOT EXISTS agent_versions (
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    snapshot TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY(agent_id,version)
+);
 CREATE TABLE IF NOT EXISTS web_login_tickets (
     hash TEXT PRIMARY KEY,
     owner TEXT NOT NULL,

@@ -284,6 +284,7 @@ jobs:
             --collect-all zstandard
             --exclude-module cryptography
             --exclude-module playwright
+            --add-data ui/workspace/frontend.tar.gz:local_shell_mcp/webui
             --add-data src/local_shell_mcp/browser_sessions.py:local_shell_mcp/browser_external
             --add-data src/local_shell_mcp/browser_external_service.py:local_shell_mcp/browser_external
             --add-data src/local_shell_mcp/browser_external_paths.py:local_shell_mcp/browser_external
