@@ -13,9 +13,7 @@ dist
 *.egg-info
 workspaces
 node_modules
-# The frontend is compiled at build time; ship only its compressed payload.
-ui/workspace/client/
-ui/workspace/packages/
+# React sources are required by the build-only stage.
 ui/workspace/node_modules/
 vscode-extension/node_modules
 vscode-extension/out
@@ -27,3 +25,8 @@ yarn-error.log*
 
 # Release images must never ingest generated native OpenTUI payloads.
 src/local_shell_mcp/ui_runtime/
+
+# Never include persistent Controller state or developer environments.
+.local-shell-mcp
+coverage.json
+coverage.xml

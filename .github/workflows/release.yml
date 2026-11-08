@@ -272,6 +272,15 @@ jobs:
           bun run typecheck
           bun run build:web
 
+      - name: Build the integrated React payload
+        working-directory: ui/workspace
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Embed the integrated React payload
+        run: python scripts/embed-react-webui.py
+
       - name: Build self-contained executable
         shell: bash
         run: |

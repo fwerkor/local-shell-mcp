@@ -42,6 +42,8 @@ def wait_for_http(
     deadline = time.monotonic() + timeout_s
     checks = {
         "/healthz": None,
+        "/c/new": b"<div id=\"root\"",
+        "/api/config": b"local-shell-mcp",
         "/ui": b"local-shell-mcp",
         "/ui/assets/web.js": None,
         "/ui/assets/web.css": None,
