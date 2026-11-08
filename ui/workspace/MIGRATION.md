@@ -35,8 +35,8 @@
 | React SPA hosting | Implemented and browser-verified | First-party `ui/workspace` React build, deterministic compressed assets, safe Python extraction, real Chromium startup and chat tests |
 | Provider endpoints and credentials | Partial | OpenAI-compatible, Anthropic and Gemini text streaming through lazy httpx, secret isolation verified; credentials configuration and usage accounting incomplete |
 | Agent runtime + resumable event protocol | Partial and browser-verified | Python SQLite text generation, SSE delta/replay, idempotency, abort, startup-orphan recovery; tool callbacks/steering/approvals incomplete |
-| MCP and native tool execution | Partial | Per-machine `none/read/write` grants with global → project → conversation defaults in SQLite. `file_list`, `file_read`, `file_write` run locally or via Workers. Nested MCP search/inspect/call use the existing registry; external execution requires SQLite-persisted, one-shot user approval. Arbitrary shell, batched approvals and multi-provider function calling remain pending. |
-| Ask User, handoff and delegated subagents | Partial | SQLite-backed single Ask User prompt pause/answer/resume with durable action ID, original SSE event and exact generation retention; multi-question batches, tool approval, handoff and delegated subagents remain pending |
+| MCP and native tool execution | Partial | The Agent derives its tool schemas directly from `tools.build_mcp()` and calls the original FastMCP tool manager, including existing Job/Shell/File/GUI/Browser behavior and Worker RPC. Per-machine `none/read/write` permissions are checked before execution (global → project → conversation). Nested MCP requires SQLite-backed human approval; multi-provider function calling and batch approvals remain pending. |
+| Ask User, handoff and delegated subagents | Partial | SQLite-backed Ask User pause/answer/resume plus bounded owner-scoped delegated subagent and handoff flows with SQLite lifecycle records; multi-question batches, richer handoff context and complete UI parity remain pending |
 | Prompt/context, memory, attachments and projects | Not started | Full conversation functionality and client compatibility |
 | LSM Controller control routes | Implemented at routing level | Existing `/api/ui/*` handlers mounted directly under `/api/lsm/controller/*`, without Node proxy; remaining browser control flows require E2E parity |
 | Remove duplicate Hosted Chat and legacy UI | Deferred | Delete only after full parity, without leaving an undocumented fallback implementation |
@@ -81,6 +81,28 @@
   after an owner-authenticated answer. The action ID is one-shot, and a stale
   or mismatched ID returns 409. Multistep human reviews and delegated Agent
   handoffs are separate remaining tasks.
+- The Controller host itself is an ordinary machine named **`local`**.
+  It is listed next to remote Workers and uses exactly the same machine-
+  permission gate for Agent operations. Tool definitions are not separately
+  copied into the WebUI: the Python Agent derives its exposed tools, their
+  parameters and read-only annotations from LSM's existing `tools.build_mcp()`
+  registry. The call path uses that registry's original FastMCP executor, with
+  original validation, audit, preflight, timeout/watchdog rules and Worker routing. `local` is
+  normalized to the original tools' local/`None` machine argument.
+- A `read` grant permits existing observational tools such as `environment_get`,
+  `job_list`, `job_get`, `job_tail`, `shell_list`, `shell_read`, `file_tree`,
+  `file_glob`, `file_grep` and `file_read`. `write` additionally permits
+  `job_start`, `job_stop`, `job_retry`, `shell_send`, `file_write`, `file_edit`,
+  `file_patch`, `run_shell` and related mutating tools, subject to the
+  existing OAuth scopes. Shell commands are conservatively write-capable even
+  when their text appears to be observational. Cross-machine transfer checks
+  both endpoints (source read, destination write). Administrative `mcp_manage`
+  and `remote_manage` are not model tools. No separate LSM Job/Shell/File
+  implementation is maintained by the WebUI.
+- These machine grants apply only to Agent-initiated operations; they do not
+  replace a human administrator's direct Controller authorization. Permissions
+  are rechecked immediately before every native tool invocation and cannot
+  elevate the user's frozen OAuth scopes.
 - Agent machine permissions are **per machine**, with `none`, `read`, `write`
   levels. They inherit **global defaults → project defaults → conversation
   overrides** in the same SQLite database. An explicit `none` blocks inherited

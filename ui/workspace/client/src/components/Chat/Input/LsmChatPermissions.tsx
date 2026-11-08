@@ -159,7 +159,9 @@ export default function LsmChatPermissions({ conversationId }: { conversationId?
           const inherited = chosenPolicy?.effective?.[machine] ?? 'none';
           return (
             <label key={machine} className="my-2 flex items-center justify-between gap-2">
-              <span className="min-w-0 truncate" title={machine}>{machine}</span>
+              <span className="min-w-0 truncate" title={machine}>
+                {machine}{machine === 'local' && <span className="text-text-secondary"> (controller host)</span>}
+              </span>
               <select aria-label={`${machine} machine access`}
                 value={explicit ?? (active === 'global' ? 'none' : 'inherit')}
                 disabled={disabled} onChange={(event) => updateMachine(machine, event.target.value as Access | 'inherit')}
@@ -167,12 +169,12 @@ export default function LsmChatPermissions({ conversationId }: { conversationId?
                 {active !== 'global' && <option value="inherit">Inherit ({inherited})</option>}
                 <option value="none">No access</option>
                 <option value="read">Read only</option>
-                <option value="write">Read & write</option>
+                <option value="write">Read & write / execute</option>
               </select>
             </label>
           );
         })}
-        <p className="mt-2 text-text-secondary">Permissions inherit from Global → Project → This chat. Unknown machines are denied. Authorization scopes are enforced by the Controller.</p>
+        <p className="mt-2 text-text-secondary">Permissions apply separately to each machine, including local. Read-only permits inspection; read/write also permits commands. Inheritance: Global → Project → This chat. Unknown machines are denied; OAuth scopes still apply.</p>
         {hasChat && active === 'chat' && (
           <div className="mt-3 border-t border-border-medium pt-2">
             {flags.map((field) => (

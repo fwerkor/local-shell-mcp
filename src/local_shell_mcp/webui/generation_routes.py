@@ -304,10 +304,9 @@ async def _run_model(
                     # Execute the original registered MCP callable. Its own
                     # argument validation, watchdog and Worker routing are
                     # retained; per-machine permission is checked first.
-                    result = await asyncio.wait_for(
-                        call_tool(owner, generation.conversation_id, call,
-                                  granted_scopes=set(granted_scopes), grant_expires=grant_expires),
-                        timeout=125,
+                    result = await call_tool(
+                        owner, generation.conversation_id, call,
+                        granted_scopes=set(granted_scopes), grant_expires=grant_expires,
                     )
                     repo.append(owner, generation.run_id, {
                         "event": "on_run_step",
