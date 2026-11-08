@@ -27,7 +27,7 @@
 | Area | Status | Evidence / remaining contract |
 | --- | --- | --- |
 | SQLite schema, transactions, files-to-SQLite import | Partial | `sqlite_store.py`, unit tests; schema evolution and production data migration pending |
-| Existing LSM StateStore to SQLite | Partial | Opt-in `state_backend=sqlite`; direct file-only consumers and test assumptions still need migration |
+| Existing LSM StateStore to SQLite | Partial | `sqlite` is default; incremental legacy import works, but direct file-only consumers and tests need migration |
 | SQLite OAuth secret | Implemented | Preserves legacy secret; tests for persistence and isolation |
 | React auth/LSM single sign-on | Partial | One-use login ticket, HttpOnly session, LSM bearer in Python; real frontend integration pending |
 | Conversations, messages, projects | Partial | Python repository, HTTP routes and tests; full LibreChat variants/filters/uploads pending |
@@ -45,11 +45,17 @@
 
 ## Data and API safety
 
-- Legacy file-backed LSM installations must not silently switch to SQLite
-  before all consumers and security checks have migrated. The file backend
-  remains the default while the new backend is exercised explicitly.
-- `SQLiteStateStore` imports historical files transactionally and retains the
-  originals until an operator verifies the migration. SQLite backup API is
+- SQLite is the code default. Bootstrap imports durable old LSM state before
+  OAuth initialization, leaves original files intact, and retries changed
+  historical files without replacing authoritative SQLite writes. `file`
+  remains an explicit rollback configuration; do not deploy until direct-file
+  consumers and the full regression matrix are migrated.
+- Old unpublished Hosted Chat profiles, conversations, encryption keys and
+  archives are deliberately excluded from migration; the new React chat model
+  starts clean. Existing LSM sessions, audits, jobs and worker credentials
+  remain protected and must survive.
+- `SQLiteStateStore` imports historical durable files transactionally and retains
+  the originals until an operator verifies the migration. SQLite backup API is
   used for consistent snapshots, not an ordinary copy of the WAL file set.
 - The internal single-user WebUI is identified by the existing LSM OAuth
   principal, never by a browser-supplied user ID. All reads and mutations must

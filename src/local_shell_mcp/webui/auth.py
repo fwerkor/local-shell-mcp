@@ -12,7 +12,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-import jwt
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
@@ -164,6 +163,10 @@ async def refresh(request: Request) -> Response:
     session = _store().session(request.cookies.get(COOKIE, ""))
     if session is None:
         raise HTTPException(401, detail="WebUI login expired")
+    # JWT is already an LSM OAuth dependency but is not needed merely to serve
+    # the React shell or existing Controller endpoints.
+    import jwt
+
     from ..oauth import issue_access_token, issuer_url, resource_url
 
     token = issue_access_token(client_id="lsm-webui", scope=session.scopes,

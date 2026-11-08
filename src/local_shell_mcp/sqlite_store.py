@@ -7,7 +7,6 @@ import hashlib
 import os
 import sqlite3
 import threading
-import time
 from collections.abc import Iterator
 from functools import lru_cache
 from pathlib import Path
@@ -20,6 +19,22 @@ CREATE TABLE IF NOT EXISTS state (
     key TEXT PRIMARY KEY,
     value BLOB NOT NULL,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE TABLE IF NOT EXISTS state_append_chunks (
+    id INTEGER PRIMARY KEY,
+    key TEXT NOT NULL REFERENCES state(key) ON DELETE CASCADE,
+    value BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_state_append_chunks_key ON state_append_chunks(key,id);
+CREATE TABLE IF NOT EXISTS state_append_lengths (
+    key TEXT PRIMARY KEY REFERENCES state(key) ON DELETE CASCADE,
+    total_size INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS legacy_imports (
+    key TEXT PRIMARY KEY,
+    source_mtime_ns INTEGER NOT NULL,
+    source_size INTEGER NOT NULL,
+    imported_digest TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS workspaces (
     id TEXT PRIMARY KEY,
@@ -115,6 +130,9 @@ CREATE TABLE IF NOT EXISTS attachments (
     metadata TEXT NOT NULL DEFAULT '{}',
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
+"""
+
+_FTS_SCHEMA = """
 CREATE VIRTUAL TABLE IF NOT EXISTS message_search USING fts5(
     message_id UNINDEXED, conversation_id UNINDEXED, text, tokenize='trigram'
 );
@@ -138,11 +156,20 @@ class SQLiteDatabase:
         self.root = Path(state_dir)
         self.path = self.root / DB_NAME
         self.root.mkdir(parents=True, exist_ok=True)
-        if not self.path.exists() and os.name != "nt":
-            descriptor = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        if os.name != "nt":
+            # O_CREAT without EXCL tolerates simultaneous first-run processes.
+            descriptor = os.open(self.path, os.O_WRONLY | os.O_CREAT, 0o600)
             os.close(descriptor)
         with self.connect() as db:
-            db.executescript("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; " + _SCHEMA)
+            db.executescript("PRAGMA journal_mode=WAL; " + _SCHEMA)
+            try:
+                db.executescript(_FTS_SCHEMA)
+            except sqlite3.OperationalError as exc:
+                if "no such module: fts5" not in str(exc).lower():
+                    raise
+                self.fts_enabled = False
+            else:
+                self.fts_enabled = True
             db.execute("PRAGMA user_version=1")
 
     @contextlib.contextmanager
@@ -192,7 +219,13 @@ class SQLiteStateStore:
     def read_bytes(self, key: str) -> bytes | None:
         with self.database.connect() as db:
             row = db.execute("SELECT value FROM state WHERE key=?", (key,)).fetchone()
-            return bytes(row[0]) if row else None
+            if row is None:
+                return None
+            parts = [bytes(row[0])]
+            parts.extend(bytes(chunk[0]) for chunk in db.execute(
+                "SELECT value FROM state_append_chunks WHERE key=? ORDER BY id", (key,)
+            ))
+            return b"".join(parts)
 
     def write_bytes(self, key: str, value: bytes) -> None:
         with self.database.connect() as db:
@@ -201,19 +234,34 @@ class SQLiteStateStore:
                 "DO UPDATE SET value=excluded.value, updated_at=unixepoch()",
                 (key, sqlite3.Binary(value)),
             )
+            db.execute("DELETE FROM state_append_chunks WHERE key=?", (key,))
+            db.execute("DELETE FROM state_append_lengths WHERE key=?", (key,))
 
     def append_bytes(self, key: str, value: bytes) -> int:
         with self.database.connect() as db:
-            db.execute(
-                "INSERT INTO state(key,value) VALUES(?,?) ON CONFLICT(key) "
-                "DO UPDATE SET value=CAST(state.value || excluded.value AS BLOB), updated_at=unixepoch()",
-                (key, sqlite3.Binary(value)),
-            )
-            return int(db.execute("SELECT length(value) FROM state WHERE key=?", (key,)).fetchone()[0])
+            db.execute("INSERT OR IGNORE INTO state(key,value) VALUES(?,X'')", (key,))
+            if value:
+                db.execute("INSERT INTO state_append_chunks(key,value) VALUES(?,?)",
+                           (key, sqlite3.Binary(value)))
+                db.execute(
+                    "INSERT INTO state_append_lengths(key,total_size) VALUES(?,?) "
+                    "ON CONFLICT(key) DO UPDATE SET total_size=total_size+excluded.total_size",
+                    (key, len(value)),
+                )
+            size = db.execute(
+                "SELECT length(s.value) + COALESCE(a.total_size,0) FROM state s "
+                "LEFT JOIN state_append_lengths a ON a.key=s.key WHERE s.key=?",
+                (key,),
+            ).fetchone()[0]
+            return int(size)
 
     def size_bytes(self, key: str) -> int | None:
         with self.database.connect() as db:
-            row = db.execute("SELECT length(value) FROM state WHERE key=?", (key,)).fetchone()
+            row = db.execute(
+                "SELECT length(s.value) + COALESCE(a.total_size,0) FROM state s "
+                "LEFT JOIN state_append_lengths a ON a.key=s.key WHERE s.key=?",
+                (key,),
+            ).fetchone()
             return int(row[0]) if row else None
 
     def delete(self, key: str) -> None:
@@ -273,25 +321,84 @@ class SQLiteStateStore:
                     else:
                         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
-    def migrate_files(self) -> int:
-        """Copy historical file state transactionally without deleting original files.
+    def _legacy_paths(self) -> Iterator[Path]:
+        """Enumerate durable state, never job outputs, browser caches or uploads."""
+        root = self.root
+        root_files = {"oauth-jwt-secret", "remote-workers.generation"}
+        # Some state keys are created by optional tools; import their JSON
+        # objects without accidentally treating build artifacts as state.
+        for path in sorted(root.iterdir()):
+            if path.is_symlink() or not path.is_file():
+                continue
+            if path.name.startswith("hosted-chat"):
+                # Hosted Chat was an unpublished prototype. Do not carry its
+                # profiles, conversations, secrets or archives into the new UI.
+                continue
+            if path.name in root_files or path.suffix in {".json", ".jsonl"}:
+                yield path
+        for name in (
+            "sessions", "audit-archive", "audit-payloads", "remote", "agent_config",
+        ):
+            parent = root / name
+            if parent.is_symlink() or not parent.is_dir():
+                continue
+            for path in sorted(parent.rglob("*")):
+                relative = path.relative_to(parent)
+                if not path.is_file() or path.is_symlink():
+                    continue
+                if any((parent.joinpath(*relative.parts[:depth])).is_symlink()
+                       for depth in range(1, len(relative.parts))):
+                    continue
+                yield path
 
-        Idempotent: an imported record is never overwritten on subsequent starts.
-        On failure, the transaction is rolled back and the files remain untouched.
+    def migrate_files(self) -> int:
+        """Import legacy durable state, atomically, without deleting originals.
+
+        On repeated startup, only files changed since the previous import are
+        considered. SQLite-local edits win over stale file updates, while
+        never-modified imported rows can be refreshed during cutover.
         """
-        marker = "__schema/file_state_import_v1"
-        skip_names = {DB_NAME, DB_NAME + "-wal", DB_NAME + "-shm", DB_NAME + "-journal"}
-        with self.lock(marker), self.database.connect() as db:
-                if db.execute("SELECT 1 FROM state WHERE key=?", (marker,)).fetchone():
-                    return 0
-                count = 0
-                for path in self.root.rglob("*"):
-                    if not path.is_file() or path.is_symlink() or path.name in skip_names:
-                        continue
-                    key = path.relative_to(self.root).as_posix()
-                    if key.startswith("locks/") or key.startswith("chat/") or key.startswith("runtime/"):
-                        continue
-                    db.execute("INSERT OR IGNORE INTO state(key,value) VALUES(?,?)", (key, path.read_bytes()))
+        count = 0
+        with self.lock("__schema/legacy_file_import"), self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            for path in self._legacy_paths():
+                key = path.relative_to(self.root).as_posix()
+                try:
+                    key.encode("utf-8")
+                except UnicodeEncodeError:
+                    # POSIX surrogate-escaped filesystem entries are not valid
+                    # SQLite TEXT keys. Keep those files untouched.
+                    continue
+                info = path.stat()
+                previous = db.execute(
+                    "SELECT source_mtime_ns,source_size,imported_digest FROM legacy_imports WHERE key=?",
+                    (key,),
+                ).fetchone()
+                if previous and previous[0] == info.st_mtime_ns and previous[1] == info.st_size:
+                    continue
+                if info.st_size > 64 * 1024 * 1024:
+                    raise RuntimeError(f"Legacy state entry is too large for safe automatic import: {key}")
+                payload = path.read_bytes()
+                digest = hashlib.sha256(payload).hexdigest()
+                existing = db.execute("SELECT value FROM state WHERE key=?", (key,)).fetchone()
+                if existing is None:
+                    db.execute("INSERT INTO state(key,value) VALUES(?,?)", (key, sqlite3.Binary(payload)))
                     count += 1
-                db.execute("INSERT INTO state(key,value) VALUES(?,?)", (marker, str(int(time.time())).encode()))
-                return count
+                elif previous and hashlib.sha256(bytes(existing[0])).hexdigest() == previous[2] and not db.execute(
+                    "SELECT 1 FROM state_append_chunks WHERE key=? LIMIT 1", (key,)
+                ).fetchone():
+                    db.execute("UPDATE state SET value=?,updated_at=unixepoch() WHERE key=?",
+                               (sqlite3.Binary(payload), key))
+                    count += 1
+                else:
+                    # The destination may predate the import journal, or have
+                    # been modified by SQLite clients. Never overwrite it.
+                    continue
+                db.execute(
+                    "INSERT INTO legacy_imports(key,source_mtime_ns,source_size,imported_digest) "
+                    "VALUES(?,?,?,?) ON CONFLICT(key) DO UPDATE SET "
+                    "source_mtime_ns=excluded.source_mtime_ns, "
+                    "source_size=excluded.source_size, imported_digest=excluded.imported_digest",
+                    (key, info.st_mtime_ns, info.st_size, digest),
+                )
+            return count

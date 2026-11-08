@@ -213,7 +213,7 @@ class WorkspaceRepository:
         if not query.strip():
             return []
         with self.database.connect() as db:
-            if len(query.strip()) < 3:
+            if len(query.strip()) < 3 or not getattr(self.database, "fts_enabled", False):
                 rows = db.execute(
                     "SELECT m.* FROM messages m JOIN conversations c ON c.id=m.conversation_id "
                     "WHERE c.owner=? AND m.text LIKE ? ORDER BY m.created_at DESC LIMIT ?",

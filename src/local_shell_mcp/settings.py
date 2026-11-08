@@ -252,7 +252,7 @@ def _ensure_oauth_jwt_secret(settings: Settings) -> Settings:
                 stored = legacy or secrets.token_urlsafe(48)
                 db.execute("INSERT INTO state(key, value) VALUES(?,?)", (OAUTH_JWT_SECRET_FILE_NAME, stored.encode()))
             if len(stored.encode("utf-8")) < 32:
-                raise RuntimeError("Stored SQLite OAuth secret is invalid")
+                raise RuntimeError("OAuth secret file exists but is invalid (migrated to SQLite)")
         return _replace_settings(settings, oauth_jwt_secret=stored)
     return _replace_settings(
         settings,
@@ -364,7 +364,7 @@ class _SettingsFields:
     # Run the controller without persistent local state. This implies disable_local
     # and defaults the state backend to process memory unless Redis is configured.
     stateless_controller: bool = False
-    state_backend: Literal["sqlite", "file", "memory", "redis"] = "file"
+    state_backend: Literal["sqlite", "file", "memory", "redis"] = "sqlite"
     state_backend_url: str | None = None
     state_backend_prefix: str = "local-shell-mcp"
 
@@ -696,6 +696,12 @@ def get_settings() -> Settings:
         settings.workspace_root.mkdir(parents=True, exist_ok=True)
     if settings.state_backend in {"file", "sqlite"}:
         settings.state_dir.mkdir(parents=True, exist_ok=True)
+    if settings.state_backend == "sqlite":
+        # Import legacy identity and operation state before consulting OAuth.
+        # Both SQLite and its migration use the standard library only.
+        from .sqlite_store import SQLiteStateStore
+
+        SQLiteStateStore(settings.state_dir)
     settings = _ensure_oauth_jwt_secret(settings)
     if settings.state_backend in {"file", "sqlite"}:
         settings.audit_log_path.parent.mkdir(parents=True, exist_ok=True)

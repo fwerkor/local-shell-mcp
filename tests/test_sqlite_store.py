@@ -65,6 +65,7 @@ def test_webui_tables_share_state_database(tmp_path: Path) -> None:
         db.execute("INSERT INTO conversations(id,owner,title,project_id) VALUES(?,?,?,?)", ("c1", "local", "你好", "p1"))
         db.execute("INSERT INTO messages(id,conversation_id,role,text) VALUES(?,?,?,?)", ("m1", "c1", "user", "南京大学你好"))
     assert store.database.path == tmp_path / DB_NAME
+    store.write_bytes("settings/check", b"ok")
     with store.database.connect() as db:
         assert db.execute("SELECT message_id FROM message_search WHERE text MATCH '南京大' ").fetchone()[0] == "m1"
         assert db.execute("SELECT key FROM state LIMIT 1").fetchone() is not None
@@ -135,3 +136,159 @@ def test_sqlite_oauth_secret_shares_state_database(tmp_path: Path, monkeypatch) 
         assert not (tmp_path / ".local-shell-mcp" / "oauth-jwt-secret").exists()
     finally:
         get_settings.cache_clear()
+
+
+def test_default_controller_imports_legacy_state_on_startup(tmp_path: Path, monkeypatch) -> None:
+    from local_shell_mcp.settings import get_settings
+
+    state_dir = tmp_path / ".local-shell-mcp"
+    state_dir.mkdir()
+    data = {
+        "oauth-clients.json": b'{"version":1,"clients":{}}',
+        "jobs.json": b'{"version":2,"jobs":[]}',
+        "remote-workers.json": b'{"version":1,"workers":[]}',
+        "audit.jsonl": b'{"event":"hello"}\n',
+        "sessions/example.json": b'{"session_id":"example"}',
+        "audit-archive/sample.jsonl.zst": b"fake archived data",
+        "audit-payloads/abcdef.json.gz": b"fake payload",
+    }
+    for name, raw in data.items():
+        path = state_dir / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
+    for path in (state_dir / "jobs" / "attempt.log", state_dir / "tmp" / "huge.bin"):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"regenerable-only")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(state_dir))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    monkeypatch.delenv("LOCAL_SHELL_MCP_STATE_BACKEND", raising=False)
+    get_settings.cache_clear()
+    try:
+        settings = get_settings()
+        assert settings.state_backend == "sqlite"
+        store = SQLiteStateStore(state_dir)
+        for name, raw in data.items():
+            assert store.read_bytes(name) == raw
+            assert (state_dir / name).read_bytes() == raw
+        assert store.read_bytes("jobs/attempt.log") is None
+        assert store.read_bytes("tmp/huge.bin") is None
+        assert store.migrate_files() == 0
+    finally:
+        get_settings.cache_clear()
+
+
+def test_changed_old_state_is_refreshed_but_sqlite_changes_win(tmp_path: Path) -> None:
+    path = tmp_path / "jobs.json"
+    path.write_bytes(b"v1")
+    store = SQLiteStateStore(tmp_path)
+    assert store.read_bytes("jobs.json") == b"v1"
+    path.write_bytes(b"v2-with-different-size")
+    assert store.migrate_files() == 1
+    assert store.read_bytes("jobs.json") == b"v2-with-different-size"
+    store.write_bytes("jobs.json", b"sqlite-is-authoritative")
+    path.write_bytes(b"v3-updated-by-old-server")
+    assert store.migrate_files() == 0
+    assert store.read_bytes("jobs.json") == b"sqlite-is-authoritative"
+    assert path.read_bytes() == b"v3-updated-by-old-server"
+
+
+def test_legacy_scan_ignores_nested_symlinks_and_binary_runtime(tmp_path: Path) -> None:
+    outside = tmp_path.parent / (tmp_path.name + "-outside.json")
+    outside.write_bytes(b"should-not-import")
+    (tmp_path / "sessions").mkdir()
+    (tmp_path / "sessions" / "linked.json").symlink_to(outside)
+    (tmp_path / "browser-artifacts").mkdir()
+    (tmp_path / "browser-artifacts" / "snapshot.json").write_bytes(b"not-durable-state")
+    (tmp_path / "module.js").write_bytes(b"not-durable-state")
+    store = SQLiteStateStore(tmp_path)
+    assert store.read_bytes("sessions/linked.json") is None
+    assert store.read_bytes("browser-artifacts/snapshot.json") is None
+    assert store.read_bytes("module.js") is None
+
+
+def test_explicit_file_backend_still_works_without_initializing_sqlite(tmp_path: Path, monkeypatch) -> None:
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_BACKEND", "file")
+    get_settings.cache_clear()
+    try:
+        assert get_settings().state_backend == "file"
+        assert not (tmp_path / ".local-shell-mcp" / DB_NAME).exists()
+    finally:
+        get_settings.cache_clear()
+
+
+def test_search_falls_back_when_sqlite_lacks_fts5(tmp_path: Path) -> None:
+    from local_shell_mcp.webui.storage import WorkspaceRepository
+
+    store = SQLiteStateStore(tmp_path)
+    repo = WorkspaceRepository(store.database)
+    conversation_id = repo.create_conversation("local", {"title": "test"})["conversationId"]
+    repo.add_message("local", conversation_id, {"role": "user", "text": "SQLite 中文全文检索"})
+    was_enabled = store.database.fts_enabled
+    try:
+        store.database.fts_enabled = False
+        assert len(repo.search_messages("local", "中文全")) == 1
+    finally:
+        store.database.fts_enabled = was_enabled
+
+
+def test_incremental_appends_do_not_rewrite_entire_audit_blob(tmp_path: Path) -> None:
+    store = SQLiteStateStore(tmp_path)
+    store.write_bytes("audit.jsonl", b"old\n")
+    for index in range(100):
+        store.append_bytes("audit.jsonl", f"entry-{index}\n".encode())
+    expected = b"old\n" + b"".join(f"entry-{i}\n".encode() for i in range(100))
+    assert store.read_bytes("audit.jsonl") == expected
+    assert store.size_bytes("audit.jsonl") == len(expected)
+    with store.database.connect() as conn:
+        assert conn.execute("SELECT length(value) FROM state WHERE key='audit.jsonl'").fetchone()[0] == 4
+        assert conn.execute("SELECT count(*) FROM state_append_chunks WHERE key='audit.jsonl'").fetchone()[0] == 100
+    store.write_bytes("audit.jsonl", b"compacted\n")
+    assert store.read_bytes("audit.jsonl") == b"compacted\n"
+    with store.database.connect() as conn:
+        assert conn.execute("SELECT count(*) FROM state_append_chunks").fetchone()[0] == 0
+    store.delete("audit.jsonl")
+    assert store.read_bytes("audit.jsonl") is None
+
+
+def test_sqlite_append_protects_from_stale_file_import(tmp_path: Path) -> None:
+    file_path = tmp_path / "audit.jsonl"
+    file_path.write_bytes(b"old\n")
+    store = SQLiteStateStore(tmp_path)
+    store.append_bytes("audit.jsonl", b"live-sqlite\n")
+    file_path.write_bytes(b"old\nstale-file-update\n")
+    assert store.migrate_files() == 0
+    assert store.read_bytes("audit.jsonl") == b"old\nlive-sqlite\n"
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX undecodable filename")
+def test_invalid_utf8_filenames_do_not_block_controller_bootstrap(tmp_path: Path) -> None:
+    import os
+
+    name = os.fsdecode(b"invalid-\xff-name.json")
+    (tmp_path / name).write_bytes(b"should-be-skipped")
+    (tmp_path / "jobs.json").write_bytes(b"valid")
+    store = SQLiteStateStore(tmp_path)
+    assert store.read_bytes("jobs.json") == b"valid"
+
+
+def test_unreleased_hosted_chat_state_is_not_migrated(tmp_path: Path) -> None:
+    (tmp_path / "hosted-chat-encryption-key").write_bytes(b"private-old-secret")
+    (tmp_path / "hosted-chat-state.json").write_bytes(b"old-profile")
+    (tmp_path / "hosted-chat" / "profiles").mkdir(parents=True)
+    (tmp_path / "hosted-chat" / "profiles" / "old.json").write_bytes(b"old-profile")
+    (tmp_path / "chat" / "old-conversations").mkdir(parents=True)
+    (tmp_path / "chat" / "old-conversations" / "snapshot.json").write_bytes(b"old-chat")
+    (tmp_path / "remote-workers.json").write_bytes(b"active-worker")
+    store = SQLiteStateStore(tmp_path)
+    assert store.read_bytes("hosted-chat-encryption-key") is None
+    assert store.read_bytes("hosted-chat-state.json") is None
+    assert store.read_bytes("hosted-chat/profiles/old.json") is None
+    assert store.read_bytes("chat/old-conversations/snapshot.json") is None
+    assert store.read_bytes("remote-workers.json") == b"active-worker"
+    assert (tmp_path / "hosted-chat" / "profiles" / "old.json").is_file()

@@ -119,8 +119,11 @@ def test_default_oauth_secret_is_random_and_persisted(tmp_path, monkeypatch):
     assert first == second
     assert first != "dev-change-me"
     assert len(first.encode("utf-8")) >= 32
+    from local_shell_mcp.sqlite_store import SQLiteStateStore
+
     secret_path = tmp_path / ".state" / "oauth-jwt-secret"
-    assert secret_path.read_text(encoding="utf-8").strip() == first
+    assert not secret_path.exists()
+    assert SQLiteStateStore(tmp_path / ".state").read_bytes("oauth-jwt-secret").decode() == first
 
 
 def test_concurrent_oauth_secret_initialization_returns_one_value(tmp_path):
