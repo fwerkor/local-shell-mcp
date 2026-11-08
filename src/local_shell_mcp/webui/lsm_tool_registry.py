@@ -46,7 +46,7 @@ _MAX_ARGUMENT_BYTES = 32768
 def _registry_for_state(state_key: tuple[str, ...]):
     from ..tools import build_mcp
 
-    return build_mcp()
+    return build_mcp(agent_dispatch=True)
 
 
 def _registry():

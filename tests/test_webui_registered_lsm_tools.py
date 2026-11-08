@@ -301,3 +301,57 @@ async def test_original_mcp_audit_identity_uses_chat_owner_and_restores_context(
         assert current_principal().subject == "outer-request"
     finally:
         _CURRENT_PRINCIPAL.reset(outer)
+
+
+@pytest.mark.asyncio
+async def test_oauth_read_only_grant_uses_existing_mcp_tools_without_all_public_scopes(
+    tmp_path, monkeypatch,
+):
+    """Public MCP requires bundled scopes; Agent checks the frozen limited grant."""
+    from local_shell_mcp.auth import _CURRENT_PRINCIPAL, Principal
+    from local_shell_mcp.tools import build_mcp
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "oauth")
+    get_settings.cache_clear()
+    _registry_for_state.cache_clear()
+    repository = _repo()
+    conversation = repository.create_conversation("alice", {"title": "Read-only OAuth"})["conversationId"]
+    repository.save_setting("alice", "agent.machine_policy.conversation." + conversation, {"local": "read"})
+    (tmp_path / "readme.txt").write_text("OAuth read-only access")
+    try:
+        read = json.loads(await call_tool(
+            "alice", conversation, ModelToolCall("read", "file_read", {"path": "readme.txt"}),
+            granted_scopes={"shell:read"},
+        ))
+        assert read["ok"] is True
+        assert "OAuth read-only access" in str(read["data"])
+        job = json.loads(await call_tool(
+            "alice", conversation, ModelToolCall("jobs", "job_list", {"limit": 1}),
+            granted_scopes={"shell:read"},
+        ))
+        assert job["ok"] is True
+        with pytest.raises(PermissionError, match="read-only"):
+            await call_tool("alice", conversation, ModelToolCall("write", "file_write", {
+                "path": "deny.txt", "content": "Not allowed",
+            }), granted_scopes={"shell:read"})
+        with pytest.raises(PermissionError, match="read-only"):
+            await call_tool("alice", conversation, ModelToolCall("shell", "run_shell", {
+                "command": "echo forbidden",
+            }), granted_scopes={"shell:read"})
+        assert not (tmp_path / "deny.txt").exists()
+        # Ordinary public MCP still demands its advertised scope bundle.
+        regular = build_mcp()
+        token = _CURRENT_PRINCIPAL.set(Principal(
+            email=None, subject="alice", claims={"auth": "oauth", "scope": "shell:read"},
+        ))
+        try:
+            from mcp.server.fastmcp.exceptions import ToolError
+            with pytest.raises(ToolError, match="missing required"):
+                await regular._tool_manager.call_tool("job_list", {"limit": 1}, convert_result=True)
+        finally:
+            _CURRENT_PRINCIPAL.reset(token)
+    finally:
+        _registry_for_state.cache_clear()
+        get_settings.cache_clear()
