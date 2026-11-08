@@ -86,3 +86,34 @@ Memory、Context、资源生命周期、Agent Builder全部设置、完整conver
 - 原版React双问题stepper选择、提交并恢复同一generation的Chromium E2E通过，未修改问答组件。
 - 以上仅完成schema/回答验证和现有持久化接入；LangGraph图级interrupt、完整checkpoint、
   retained answers、admin gating与其他Agent机制仍未全部移植，故该模块继续标记“部分”。
+
+## 审批恢复校验源码移植
+
+`tool_approval.py`移植原版`isToolApprovalPayloadValid`、
+`mapToolApprovalResolutions`和`resolveToolApprovalResume`，包括ID覆盖、
+拒绝重复/外来决策、逐工具allowed_decisions、edit/respond必需字段以及错误优先级。
+60组输入与原Node函数差分一致，现已用于SQLite原子claim前的权限校验。
+
+本次没有把这些纯函数测试冒充完整审批运行时：现有执行层仍只支持单个nested MCP
+暂停和approve/reject；批次执行、edit/respond实际执行与graph checkpoint仍待按原版移植。
+
+## 必要的前端依赖适配
+
+原版`client/package.json`中的`rehype-katex ^6.0.3`、`rehype-highlight ^6.0.0`
+使用unified 10类型，与`react-markdown ^9.0.1`的unified 11形成插件类型冲突。
+保留组件，通过对应插件7.x对齐unified 11，并继续运行Markdown原测试和完整typecheck。
+移动后的TS依赖解析也必须隔离native UI的React 19；不能以any或降低strict掩盖此问题。
+
+原版`useLazyHighlight.ts`直接使用lowlight 2的命名导出`lowlight`。升级rehype插件后显式声明该直接依赖，避免错误拾取插件内部lowlight 3；保留原hook代码及行为。
+
+## 可复现全量源码清单
+
+`PORTING_INVENTORY.json`由`scripts/inventory-librechat-port.py`从两个固定源码树生成，
+列出生产后端、共享schema、SDK运行时与相关Agent前端模块的每个路径及SHA-256。
+未建立函数级映射的条目明确标为未移植/待源码审计，不以文件数量估算功能完成率。
+首批详细映射还新增了PluginController和原Ask User manifest两个来源，问答目录与临时
+Agent的可选开关已接通；这与LSM机器执行权限是相互独立的检查。
+
+发行审计另外发现原CI/Release引用未生成的React压缩包、Docker未打包React源码。
+已补充build-only React构建和确定性archive步骤，并使单二进制smoke检查`/c/new`。
+这些发行调整须以实际build/start/restart结果验收，不能仅以YAML存在判定完成。

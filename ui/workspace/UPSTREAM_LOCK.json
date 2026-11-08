@@ -126,9 +126,9 @@
       "path": "packages/api/src/agents/hitl/resume.ts",
       "sha256": "9fb798731c45a310d3deb88407e9f74d74116c006f8fc21186686dc0aad00ec5",
       "symbols": "resolveAskUserQuestionResume / mapToolApprovalResolutions",
-      "python_lsm": "webui/generations.py:answer_question / claim_approval",
+      "python_lsm": "webui/generations.py:answer_question / claim_approval; webui/tool_approval.py",
       "status": "部分",
-      "difference": "Ask User恢复校验与原Node函数91组输入差分一致，答案按id保存与恢复；approval仍缺批次/edit/respond等原版语义"
+      "difference": "Ask User恢复校验与原Node函数91组输入差分一致，答案按id保存与恢复；approval仍缺批次/edit/respond等原版语义；审批决策映射/校验60组原Node差分一致并接入claim；实际批次执行仍未完成"
     },
     {
       "repository": "LibreChat",
@@ -327,6 +327,24 @@
       "python_lsm": "webui/generation_routes.py",
       "status": "未实现",
       "difference": "当前串行循环，未移植原版并发/中断/回放行为"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/server/controllers/PluginController.js",
+      "sha256": "7f1bf29b3959d16c4c1d3061417cb81acfee69b854d698a3abf4ad384a6d627b",
+      "symbols": "getAvailableTools",
+      "python_lsm": "webui/agent_routes.py:tool_catalog",
+      "status": "部分",
+      "difference": "Ask User原manifest和authenticated形状已复用；其余builtin/toolkit/过滤策略仍待移植"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/app/clients/tools/manifest.json",
+      "sha256": "b4f0d29b21f000881a403180f24a24c6146c0015f76dc7b2806d028a3630d629",
+      "symbols": "ask_user_question manifest entry",
+      "python_lsm": "webui/ask_user_tools.py:ASK_USER_MANIFEST",
+      "status": "部分",
+      "difference": "原始条目精确复用并做catalog接口测试，其他LSM适用工具仍待审计"
     }
   ]
 }
