@@ -29,8 +29,19 @@ _SEPARATE_TOOLS = frozenset({
     "mcp_tool_search", "mcp_tool_inspect", "mcp_tool_call",
     "workspace_open", "open_live_workspace", "live_workspace_reconnect",
 })
-# Some diagnostic calls are read-only despite conservative MCP annotations.
-_READ_INSPECTION = frozenset({"gui_list", "gui_state"})
+# Explicit classification is intentional: MCP safety annotations are hints,
+# not an authorization contract. New native tools stay denied until audited.
+_READ_TOOLS = frozenset({
+    "environment_get", "skill_list", "skill_load", "skill_read",
+    "shell_read", "shell_list", "job_list", "job_get", "job_tail",
+    "file_list", "file_tree", "file_glob", "file_grep", "file_read",
+    "image_view", "gui_list", "gui_state", "link_list", "secret_scan",
+    "audit_tail", "browser_snapshot",
+})
+_WRITE_TOOLS = frozenset({
+    "link_create", "link_revoke", "file_write", "file_edit", "file_delete",
+    "file_patch", "remote_transfer", "browser_session",
+})
 _EXECUTION_TOOLS = frozenset({
     "run_shell", "run_python", "shell_start", "shell_send", "shell_stop",
     "job_start", "job_stop", "job_retry", "browser_run_script",
@@ -80,14 +91,18 @@ def _tool(name: str):
     return tool
 
 
-def _operation(tool: Any) -> str:
-    if tool.name in _CONTROLLER_MANAGEMENT:
+def _operation(tool: Any, arguments: dict | None = None) -> str:
+    if tool.name == "browser_session" and arguments is not None and arguments.get("action") == "list":
+        return "read"
+    if tool.name in _CONTROLLER_MANAGEMENT or tool.name in _AGENT_CONTROL:
         return "write"
-    if tool.name in _READ_INSPECTION or (tool.annotations and tool.annotations.readOnlyHint is True):
+    if tool.name in _READ_TOOLS:
         return "read"
     if tool.name in _EXECUTION_TOOLS:
         return "execute"
-    return "write"
+    if tool.name in _WRITE_TOOLS:
+        return "write"
+    raise PermissionError("Native tool has no audited Agent permission policy")
 
 
 def _targets(tool: Any, arguments: dict[str, Any]) -> list[str]:
@@ -121,7 +136,10 @@ def available_tools(owner: str, conversation_id: str, *, scopes: set[str],
     for tool in _registry()._tool_manager.list_tools():
         if tool.name in _SEPARATE_TOOLS:
             continue
-        operation = _operation(tool)
+        try:
+            operation = _operation(tool, {"action": "list"} if tool.name == "browser_session" else None)
+        except PermissionError:
+            continue
         extra_scope = _ADDITIONAL_SCOPES.get(tool.name)
         if extra_scope and extra_scope not in scopes:
             continue
@@ -178,7 +196,7 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
         raise ValueError("Invalid or oversized LSM tool arguments")
     if "logical_session_id" in arguments:
         raise PermissionError("Models cannot provide LSM internal session credentials")
-    operation = _operation(tool)
+    operation = _operation(tool, arguments)
     if tool.name in _AGENT_CONTROL:
         # Session ownership is still checked; this bypasses machine ACLs only.
         from .routes import _repo
@@ -202,6 +220,14 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
     else:
         for machine in _targets(tool, arguments):
             authorize_machine_action(owner, conversation_id, machine, operation,
+                                     scopes=granted_scopes, expires=grant_expires)
+    if tool.name == "job_retry" and arguments.get("machine") in {None, "", "local"}:
+        # Controller-managed transfer jobs retain remote endpoints in their
+        # payload. Retrying by job ID must never bypass those endpoint ACLs.
+        from ..jobs import job_retry_machine_requirements
+
+        for machine, required in job_retry_machine_requirements(arguments.get("job_id")):
+            authorize_machine_action(owner, conversation_id, machine, required,
                                      scopes=granted_scopes, expires=grant_expires)
     extra_scope = _ADDITIONAL_SCOPES.get(tool.name)
     if extra_scope and extra_scope not in granted_scopes:

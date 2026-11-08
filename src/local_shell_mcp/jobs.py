@@ -1978,6 +1978,23 @@ async def stop_job(job_id: str) -> dict[str, Any]:
         _ACTIVE_JOB_OPERATIONS.discard(operation_id)
 
 
+def job_retry_machine_requirements(job_id: str) -> list[tuple[str, str]]:
+    """Return persisted endpoints before an Agent retries a managed job.
+
+    This does not execute or refresh the job. Unknown managed handlers need
+    their own audited policy before they can be retried by an Agent.
+    """
+    with _store_transaction() as store:
+        job = _find_job(store, job_id)
+        if job.get("kind") != "managed":
+            return []
+        if job.get("managed_kind") != "transfer":
+            raise PermissionError("Managed job has no audited Agent retry policy")
+        payload = job.get("managed_payload") or {}
+        return [(payload.get("source_machine") or "local", "read"),
+                (payload.get("destination_machine") or "local", "write")]
+
+
 async def retry_job(
     job_id: str, idempotency_key: str | None = None
 ) -> dict[str, Any]:

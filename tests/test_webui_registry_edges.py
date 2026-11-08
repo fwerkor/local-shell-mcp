@@ -108,3 +108,77 @@ async def test_executor_error_audit_and_context_reset(bound_policy, monkeypatch)
     with pytest.raises(ValueError, match="too large"):
         await registry._invoke_registered("local", cid, "fake", {"payload": "a" * 35000},
                                           scopes={"shell:read"})
+
+
+def test_every_native_tool_has_audited_policy_and_new_tools_are_denied(bound_policy, monkeypatch):
+    repo, cid = bound_policy
+    tools = registry._registry()._tool_manager.list_tools()
+    classified = (registry._READ_TOOLS | registry._WRITE_TOOLS | registry._EXECUTION_TOOLS |
+                  registry._CONTROLLER_MANAGEMENT | registry._AGENT_CONTROL | registry._SEPARATE_TOOLS)
+    assert {tool.name for tool in tools} == classified
+    # A new tool cannot acquire read permission through an optimistic hint.
+    unknown = SimpleNamespace(name="future_tool", annotations=SimpleNamespace(readOnlyHint=True))
+    with pytest.raises(PermissionError, match="audited"):
+        registry._operation(unknown)
+    monkeypatch.setattr(registry, "_registry", lambda: SimpleNamespace(
+        _tool_manager=SimpleNamespace(list_tools=lambda: [unknown])))
+    assert registry.available_tools("local", cid, scopes={"shell:read", "shell:write"}) == []
+
+
+@pytest.mark.asyncio
+async def test_transfer_job_retry_rechecks_persisted_endpoints(bound_policy, monkeypatch):
+    from contextlib import contextmanager
+
+    from local_shell_mcp import jobs
+
+    repo, cid = bound_policy
+    record = {"job_id": "transfer-job", "kind": "managed", "managed_kind": "transfer",
+              "managed_payload": {"source_machine": "worker1", "destination_machine": "worker2"}}
+    @contextmanager
+    def store():
+        yield {"jobs": [record]}
+    monkeypatch.setattr(jobs, "_store_transaction", store)
+    monkeypatch.setattr(jobs, "_find_job", lambda store, job_id: record)
+    invoked = []
+    async def original(*args, **kwargs):
+        invoked.append(args)
+        return '{"ok": true}'
+    monkeypatch.setattr(registry, "_invoke_registered", original)
+    scopes = {"shell:read", "shell:write", "shell:execute", "remote:use"}
+    call = ModelToolCall("retry", "job_retry", {"job_id": "transfer-job"})
+    assert await registry.call_tool("local", cid, call, granted_scopes=scopes) == '{"ok": true}'
+    assert len(invoked) == 1
+    repo.save_setting("local", "agent.machine_policy.conversation." + cid,
+                      {"local": "write", "worker1": "none", "worker2": "write"})
+    with pytest.raises(PermissionError, match="not granted"):
+        await registry.call_tool("local", cid, call, granted_scopes=scopes)
+    assert len(invoked) == 1
+    repo.save_setting("local", "agent.machine_policy.conversation." + cid,
+                      {"local": "write", "worker1": "read", "worker2": "read"})
+    with pytest.raises(PermissionError, match="read-only"):
+        await registry.call_tool("local", cid, call, granted_scopes=scopes)
+    record["managed_kind"] = "future-handler"
+    with pytest.raises(PermissionError, match="audited"):
+        await registry.call_tool("local", cid, call, granted_scopes=scopes)
+    record["kind"] = "shell"
+    assert jobs.job_retry_machine_requirements("transfer-job") == []
+
+
+@pytest.mark.asyncio
+async def test_browser_session_listing_is_read_only_but_start_is_not(bound_policy, monkeypatch):
+    repo, cid = bound_policy
+    repo.save_setting("local", "agent.machine_policy.conversation." + cid, {"local": "read"})
+    scopes = {"shell:read", "browser:use"}
+    names = {t["function"]["name"] for t in registry.available_tools("local", cid, scopes=scopes)}
+    assert "browser_session" in names
+    observed = []
+    async def invoke(*args, **kwargs):
+        observed.append(args)
+        return '{"ok": true}'
+    monkeypatch.setattr(registry, "_invoke_registered", invoke)
+    await registry.call_tool("local", cid, ModelToolCall("list", "browser_session", {"action": "list"}),
+                             granted_scopes=scopes)
+    with pytest.raises(PermissionError, match="read-only"):
+        await registry.call_tool("local", cid, ModelToolCall("start", "browser_session", {"action": "start"}),
+                                 granted_scopes=scopes)
+    assert len(observed) == 1
