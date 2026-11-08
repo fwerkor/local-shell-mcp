@@ -1,0 +1,332 @@
+{
+  "librechat": {
+    "version": "v0.8.8",
+    "commit": "e8f3be08623663d4ad7f7241e693c94469b63bb0",
+    "repository": "https://github.com/LibreChat-AI/LibreChat"
+  },
+  "agents": {
+    "version": "4.0.1",
+    "commit": "c4ffb9b1b78421bf63eba3e56993017f922387f3",
+    "repository": "https://github.com/LibreChat-AI/agents",
+    "npm_integrity": "sha512-UAS+hfMLo06W1N0pms+GV4OMK/igp2ehioYN6ktsSFDd4GhsDpxNzD6F4Isvg8JDin3ypDhyKTrWgNkLoYiZjg=="
+  },
+  "langgraph": "1.4.8",
+  "langgraph_checkpoint": "1.1.3",
+  "modules": [
+    {
+      "repository": "LibreChat",
+      "path": "api/server/controllers/agents/protocol.js",
+      "sha256": "adfe8d44544d4deb37be528c6600a4a41e4e30095141fdd3ec0af421da4aff5f",
+      "symbols": "getRequestedGenerationProtocol / negotiate*",
+      "python_lsm": "webui/generation_routes.py",
+      "status": "部分",
+      "difference": "当前固定v2；未移植多标记降级及已有job协议锁定"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/server/controllers/agents/request.js",
+      "sha256": "3ca1d4f69dc76b00410fb60f84a70f26514c935b3f705292d595091c41c2ab93",
+      "symbols": "generation ingress / disconnect",
+      "python_lsm": "webui/generation_routes.py:start_generation",
+      "status": "部分",
+      "difference": "缺失完整入口预检及断线处置语义"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/server/controllers/agents/resume.js",
+      "sha256": "9c6ae6e847aa8a7defb124022fbd23c08a2876a9c45087cafc3599778f58fa1d",
+      "symbols": "resume / checkpoint ownership CAS",
+      "python_lsm": "webui/generation_routes.py:resume_generation",
+      "status": "部分",
+      "difference": "当前仅单action及自研resumeHistory；无原版checkpoint/actor恢复链"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/server/controllers/agents/callbacks.js",
+      "sha256": "99e1d6905ec8aa7f9f1599712d2947b9ce4329f1017216813e60d85b15b47a44",
+      "symbols": "Agent execution events",
+      "python_lsm": "webui/generation_routes.py:_run_model",
+      "status": "部分",
+      "difference": "手工生成部分事件，非原版callbacks完整移植"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/server/controllers/agents/client.js",
+      "sha256": "9b2f6accf56544096aa530d5bccff4b1cc5b76651a746da2a8aee94cc20020e1",
+      "symbols": "AgentClient / history / run lifecycle",
+      "python_lsm": "webui/generations.py; generation_routes.py",
+      "status": "部分",
+      "difference": "未移植完整AgentClient和事件actor生命周期"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/server/services/Endpoints/agents/build.js",
+      "sha256": "0e9c7727d590b8d2abe340647218e7983f4fca9ba6f23ca2a731bc7a76ed7565",
+      "symbols": "buildOptions",
+      "python_lsm": "webui/generation_routes.py:start_generation",
+      "status": "部分",
+      "difference": "project字段修复；spec、ephemeralAgent、完整模型参数未对齐"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/server/services/Endpoints/agents/initialize.js",
+      "sha256": "104e4c945a5e008e5ca476c033ed3115260c3c1e15aafa86eb04a9bcc2387522",
+      "symbols": "agent graph loading",
+      "python_lsm": "webui/delegation.py",
+      "status": "未实现",
+      "difference": "现有简单子任务调用不等价，禁止标记完成"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/runtime.ts",
+      "sha256": "8ff3723a41860d1f2f9f1140d0223528b327d493306c9527f25c1e152acfbcfb",
+      "symbols": "AgentExecutionContext",
+      "python_lsm": "webui/generation_routes.py",
+      "status": "未实现",
+      "difference": "缺少原版transport-free执行上下文"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/load.ts",
+      "sha256": "476557a1b0e428aa5c927b41a6006a02274111c419b4a378b3d0f363585ea641",
+      "symbols": "loadAgent / loadEphemeralAgent",
+      "python_lsm": "webui/agents.py; generation_routes.py",
+      "status": "部分",
+      "difference": "可选工具、spec、ephemeral选择未完成等价移植"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/initialize.ts",
+      "sha256": "173c89d39da61e6285d63485dc1f13ffedf9f0a72f9d91e9988b43458c4410bd",
+      "symbols": "initializeAgent",
+      "python_lsm": "webui/lsm_tool_registry.py; generation_routes.py",
+      "status": "部分",
+      "difference": "原生LSM复用有效；LibreChat工具选择/资源/上下文未完整移植"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/run.ts",
+      "sha256": "5e29fb16cad50fe6a770f9ab4fa45af9b492342d8c11d866eaf3c1f4bce6192f",
+      "symbols": "createRun / buildSubagentConfigs / buildAgentInput",
+      "python_lsm": "webui/delegation.py; generation_routes.py",
+      "status": "未实现",
+      "difference": "delegate_agent/handoff_agent与原版graph/Command/子图不等价"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/hitl/askUserQuestionTool.ts",
+      "sha256": "bb5555b806a8fcb0f118ff06f7c7a5505587c11f2485a6be4bdd8d5580d35840",
+      "symbols": "AskUserQuestionToolDefinition / createAskUserQuestionTool",
+      "python_lsm": "webui/ask_user_tools.py",
+      "status": "部分",
+      "difference": "原版schema已精确导出/移植，1–4问题payload和UTF-16长度上限已验证；图级interrupt/checkpoint完整语义仍待移植"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/hitl/resume.ts",
+      "sha256": "9fb798731c45a310d3deb88407e9f74d74116c006f8fc21186686dc0aad00ec5",
+      "symbols": "resolveAskUserQuestionResume / mapToolApprovalResolutions",
+      "python_lsm": "webui/generations.py:answer_question / claim_approval",
+      "status": "部分",
+      "difference": "Ask User恢复校验与原Node函数91组输入差分一致，答案按id保存与恢复；approval仍缺批次/edit/respond等原版语义"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/hitl/answers.ts",
+      "sha256": "18046aeeda9e572af53cdf7c352fa0e8b271e269032518397985c3ebe9a8e02a",
+      "symbols": "retained answers / branch ordering",
+      "python_lsm": "webui/generations.py:history",
+      "status": "部分",
+      "difference": "已改活动分支；尚无跨compact保留用户回答/来源信任标记"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/hitl/policy.ts",
+      "sha256": "30ca40677e43c5d12fe539da85262bf6d335eb238836ad8705b480789e0661ce",
+      "symbols": "approval rules / deny-ask-allow / policy hashing",
+      "python_lsm": "webui/nested_mcp.py",
+      "status": "未实现",
+      "difference": "当前对所有nested MCP强制approval，不是原版policy机制"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/checkpointer.ts",
+      "sha256": "63f0390a025a550ec4a572145f6db7dcb190797d181ac11d0bb707f364d75302",
+      "symbols": "durable checkpointer",
+      "python_lsm": "sqlite_store.py; webui/generations.py",
+      "status": "部分",
+      "difference": "SQLite保存事件与history不等于LangGraph checkpoint/channel/task语义"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/compaction.ts",
+      "sha256": "a8ba0ef364731835c437f1b9feb6e4eeb3f92390f7d3d67fede8bf65255b5b50",
+      "symbols": "summary checkpoint / manual outcome",
+      "python_lsm": "webui/generations.py:history",
+      "status": "未实现",
+      "difference": "50消息截断无summary，不能标记compact完成"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/memory.ts",
+      "sha256": "f493a11e02b5bc2ec16abe0426614afcd8dfffa288f619c50e22987cfe0e71fc",
+      "symbols": "registerMemoryTools / tool usage guard",
+      "python_lsm": "webui/misc_routes.py",
+      "status": "未实现",
+      "difference": "memory权限返回关闭；无对应持久化与工具执行"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/attachments.ts",
+      "sha256": "5077a73ec6e4a0a397e6b2b24141e90eed3affa0269a668266ae2c18b5a19ff0",
+      "symbols": "attachment limits / model-bound files",
+      "python_lsm": "webui/attachments.py",
+      "status": "部分",
+      "difference": "LSM真实路径上传已实现；原版资源分类和模型输入链未完成"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/tools.ts",
+      "sha256": "dfacd4931d42adc72af82aed3f0f7fa22fdc4b3eedec5085a85da252ed7cfc6e",
+      "symbols": "runtime tools / registry adaptation",
+      "python_lsm": "webui/lsm_tool_registry.py",
+      "status": "部分",
+      "difference": "复用LSM注册表；尚未按原版Agent选择与系统注入拆开"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/data-schemas/src/schema/agent.ts",
+      "sha256": "c085d6ac3aaa1f69adc6eef942a1086cbd38397ad12fa4a05683cbd9d9c48ead",
+      "symbols": "Agent schema / settings / graph / subagents",
+      "python_lsm": "webui/agents.py",
+      "status": "部分",
+      "difference": "保存部分JSON字段；原版验证/继承/version/图配置未完整移植"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/data-schemas/src/schema/message.ts",
+      "sha256": "7581f945999b17c59528ab22dbe3096a8ee2a680092e68b0d8fd5307aecc15b5",
+      "symbols": "message content persistence",
+      "python_lsm": "webui/storage.py",
+      "status": "部分",
+      "difference": "messages关系表；高级content与run状态恢复未完整"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/data-schemas/src/schema/convo.ts",
+      "sha256": "1ef315f8504e3e658d60f07f9525b0f288f149979c249273fa47272d8b66a011",
+      "symbols": "conversation / branch / archive",
+      "python_lsm": "webui/storage.py; conversation_routes.py",
+      "status": "部分",
+      "difference": "基础CRUD/分支/归档；其余模型字段和hooks未全面对照"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/data-schemas/src/schema/chatProject.ts",
+      "sha256": "09456bc4665f5846e8a0f11bbbb36c1eb19c0c8f18afc9b51ddf68cf6a5646f3",
+      "symbols": "project membership and resources",
+      "python_lsm": "webui/storage.py",
+      "status": "部分",
+      "difference": "项目关联/默认权限；完整资源与消息语义待移植"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/data-provider/src/createPayload.ts",
+      "sha256": "359cf8902dff0c5b9498d7292f5adb88abd29cef4464a7164fd4ef91d0ddeb6d",
+      "symbols": "React request payload",
+      "python_lsm": "ui/workspace/packages/data-provider/src/createPayload.ts",
+      "status": "部分",
+      "difference": "前端复用；后端尚未消费所有原版字段"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/data-provider/src/runSteps.ts",
+      "sha256": "a3b441835fd01728a330858e0e46739f110164c026a8787898ada8ef8447c340",
+      "symbols": "execution event types",
+      "python_lsm": "ui/workspace/packages/data-provider/src/runSteps.ts; generation_routes.py",
+      "status": "部分",
+      "difference": "共享前端类型复用；后端事件仅子集"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "client/src/components/Chat/Messages/Content/AskUserQuestions.tsx",
+      "sha256": "fba425aca86931aba16142dc45e1bea6d5999c7f5946ee99a9ab120792fc28b2",
+      "symbols": "batched questions UI",
+      "python_lsm": "ui/workspace/client/src/components/Chat/Messages/Content/AskUserQuestions.tsx",
+      "status": "部分",
+      "difference": "原组件未修改；双问题选择/提交/同generation恢复真实Chromium E2E已通过；完整恢复/保留答案链仍待验收"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "client/src/components/SidePanel/Agents/Advanced/AgentSubagents.tsx",
+      "sha256": "ed394ccdae6cb3f9cd0db858a1d4acbf8a00dfe2635328c693fde643ef5f38d1",
+      "symbols": "optional subagent configuration",
+      "python_lsm": "ui/workspace/client/src/components/SidePanel/Agents/Advanced/AgentSubagents.tsx",
+      "status": "部分",
+      "difference": "原React配置保留；Python目前误读为id数组"
+    },
+    {
+      "repository": "agents",
+      "path": "src/graphs/Graph.ts",
+      "sha256": "6b86604cdc1eb48873217561697f2e31538aea8ade1c8c78f76da6f31c5ceaae",
+      "symbols": "agent graph / tools / checkpoint",
+      "python_lsm": "webui/generation_routes.py",
+      "status": "未实现",
+      "difference": "当前手写循环不是源码级图执行移植"
+    },
+    {
+      "repository": "agents",
+      "path": "src/graphs/MultiAgentGraph.ts",
+      "sha256": "f1f76b86d07833f6635d27eb77d599361c1be7487317ee2cdd54ff5c16e09a55",
+      "symbols": "multi-agent routing / commands",
+      "python_lsm": "webui/delegation.py",
+      "status": "未实现",
+      "difference": "handoff机制未等价"
+    },
+    {
+      "repository": "agents",
+      "path": "src/graphs/handoff.ts",
+      "sha256": "0c9b395137b86f4fc6e217284445fd821582808b0f42d497017328e75754d173",
+      "symbols": "HandoffRouting / mergeHandoffState",
+      "python_lsm": "webui/delegation.py",
+      "status": "未实现",
+      "difference": "缺预算、作用域、幂等transition、持久handoff结果"
+    },
+    {
+      "repository": "agents",
+      "path": "src/tools/SubagentTool.ts",
+      "sha256": "b8bb7584c42a92af212b479e753e0f5aeae5c5e9961eb218bf1145a8bf1b5621",
+      "symbols": "buildSubagentToolParams / createSubagentToolDefinition",
+      "python_lsm": "webui/delegation.py",
+      "status": "未实现",
+      "difference": "原版subagent_type/description/config动态枚举，当前自研工具不等价"
+    },
+    {
+      "repository": "agents",
+      "path": "src/hitl/askUserQuestions.ts",
+      "sha256": "22c16a1873982a6a7c473541ae900ccff9baa50e401f7ebf36a756f7a521afb6",
+      "symbols": "askUserQuestions / interrupt / resolution",
+      "python_lsm": "webui/ask_user_tools.py; generations.py",
+      "status": "未实现",
+      "difference": "应完整保留1–4问题和按id回答，不是拼接自由字符串"
+    },
+    {
+      "repository": "agents",
+      "path": "src/hitl/askUserQuestionsInterrupt.ts",
+      "sha256": "073f202835da2625cc430f62bea92c4241c56b63a2946ab25a26fc4634f72bca",
+      "symbols": "request/interrupt guards",
+      "python_lsm": "webui/ask_user_tools.py",
+      "status": "未实现",
+      "difference": "当前未移植原版类型守卫"
+    },
+    {
+      "repository": "agents",
+      "path": "src/tools/ToolNode.ts",
+      "sha256": "6396274178fe8d245bb61a3dd06bdf9e1847bc10e1066acaecfd7b7d33448c02",
+      "symbols": "parallel tool execution / interruption",
+      "python_lsm": "webui/generation_routes.py",
+      "status": "未实现",
+      "difference": "当前串行循环，未移植原版并发/中断/回放行为"
+    }
+  ]
+}

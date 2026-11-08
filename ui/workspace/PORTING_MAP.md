@@ -1,0 +1,88 @@
+# LibreChat 源码级移植映射
+
+本清单替代“同名功能即可算完成”的旧判断。PR #343 保持 Draft。
+
+## 固定源码基线
+
+- LibreChat `v0.8.8`: `e8f3be08623663d4ad7f7241e693c94469b63bb0`。
+- 原集成 lockfile 的 `@librechat/agents 4.0.1`: tag commit `c4ffb9b1b78421bf63eba3e56993017f922387f3`。
+- 原集成 lockfile 的 LangGraph `1.4.8`、checkpoint `1.1.3`。
+- 逐文件 SHA-256 与差异记录见 `UPSTREAM_LOCK.json`。参考目录独立于有本地修改的旧clone。
+- Node/TypeScript 仅作为开发时的源码与行为对照，不成为Controller运行依赖。
+
+## 已核对的关键调用链
+
+`buildOptions → loadAgent/loadEphemeralAgent → initializeAgent → createRun/buildAgentInput
+→ @librechat/agents Graph/MultiAgentGraph → ToolNode/interrupt/checkpointer → callbacks
+→ SSE → React runSteps/问答与审批组件`。
+
+Ask User 的工具名和interrupt判别均为 `ask_user_question`；当前原版向模型暴露
+`{questions:[{id,header?,question,description?,options?,multiSelect?}]}`（1–4题）。
+单问题旧参数只用于checkpoint兼容。回答保持 `{answers:{id:string}}`；工具是否启用、
+HITL能力、admin过滤以及子图禁止暂停均在run构造时处理，与机器授权独立。
+
+Subagents 使用 `agent.subagents.enabled/allowSelf/agent_ids` 配置和动态子类型，
+隔离子图可带自己的工具。Handoff 使用 `Command.PARENT/Send`、带作用域和预算的
+路由transition，并通过checkpoint保证回放幂等。当前 `delegate_agent`、`handoff_agent`
+不能作为原版等价实现证据，必须被原版机制替代后删除。
+
+## 文件与函数映射
+
+“部分”表示已有可用代码，但未经完整行为对照或已发现差异；不表示该模块验收完成。
+“未实现”也包括已有同名或近似自研功能但尚未按原版实现的情况。
+
+| LibreChat/agents 原实现 | Python/LSM 对应 | 状态 | 具体差异 |
+| --- | --- | --- | --- |
+| `LibreChat:api/server/controllers/agents/protocol.js` — `getRequestedGenerationProtocol / negotiate*` | `webui/generation_routes.py` | 部分 | 当前固定v2；未移植多标记降级及已有job协议锁定 |
+| `LibreChat:api/server/controllers/agents/request.js` — `generation ingress / disconnect` | `webui/generation_routes.py:start_generation` | 部分 | 缺失完整入口预检及断线处置语义 |
+| `LibreChat:api/server/controllers/agents/resume.js` — `resume / checkpoint ownership CAS` | `webui/generation_routes.py:resume_generation` | 部分 | 当前仅单action及自研resumeHistory；无原版checkpoint/actor恢复链 |
+| `LibreChat:api/server/controllers/agents/callbacks.js` — `Agent execution events` | `webui/generation_routes.py:_run_model` | 部分 | 手工生成部分事件，非原版callbacks完整移植 |
+| `LibreChat:api/server/controllers/agents/client.js` — `AgentClient / history / run lifecycle` | `webui/generations.py; generation_routes.py` | 部分 | 未移植完整AgentClient和事件actor生命周期 |
+| `LibreChat:api/server/services/Endpoints/agents/build.js` — `buildOptions` | `webui/generation_routes.py:start_generation` | 部分 | project字段修复；spec、ephemeralAgent、完整模型参数未对齐 |
+| `LibreChat:api/server/services/Endpoints/agents/initialize.js` — `agent graph loading` | `webui/delegation.py` | 未实现 | 现有简单子任务调用不等价，禁止标记完成 |
+| `LibreChat:packages/api/src/agents/runtime.ts` — `AgentExecutionContext` | `webui/generation_routes.py` | 未实现 | 缺少原版transport-free执行上下文 |
+| `LibreChat:packages/api/src/agents/load.ts` — `loadAgent / loadEphemeralAgent` | `webui/agents.py; generation_routes.py` | 部分 | 可选工具、spec、ephemeral选择未完成等价移植 |
+| `LibreChat:packages/api/src/agents/initialize.ts` — `initializeAgent` | `webui/lsm_tool_registry.py; generation_routes.py` | 部分 | 原生LSM复用有效；LibreChat工具选择/资源/上下文未完整移植 |
+| `LibreChat:packages/api/src/agents/run.ts` — `createRun / buildSubagentConfigs / buildAgentInput` | `webui/delegation.py; generation_routes.py` | 未实现 | delegate_agent/handoff_agent与原版graph/Command/子图不等价 |
+| `LibreChat:packages/api/src/agents/hitl/askUserQuestionTool.ts` — `AskUserQuestionToolDefinition / createAskUserQuestionTool` | `webui/ask_user_tools.py` | 未实现 | 当前ask_user单问题工具名/schema/上限/返回值均与原版不同 |
+| `LibreChat:packages/api/src/agents/hitl/resume.ts` — `resolveAskUserQuestionResume / mapToolApprovalResolutions` | `webui/generations.py:answer_question / claim_approval` | 部分 | answers被拼接为字符串；approval只approve/reject单个，缺edit/respond和批次 |
+| `LibreChat:packages/api/src/agents/hitl/answers.ts` — `retained answers / branch ordering` | `webui/generations.py:history` | 部分 | 已改活动分支；尚无跨compact保留用户回答/来源信任标记 |
+| `LibreChat:packages/api/src/agents/hitl/policy.ts` — `approval rules / deny-ask-allow / policy hashing` | `webui/nested_mcp.py` | 未实现 | 当前对所有nested MCP强制approval，不是原版policy机制 |
+| `LibreChat:packages/api/src/agents/checkpointer.ts` — `durable checkpointer` | `sqlite_store.py; webui/generations.py` | 部分 | SQLite保存事件与history不等于LangGraph checkpoint/channel/task语义 |
+| `LibreChat:packages/api/src/agents/compaction.ts` — `summary checkpoint / manual outcome` | `webui/generations.py:history` | 未实现 | 50消息截断无summary，不能标记compact完成 |
+| `LibreChat:packages/api/src/agents/memory.ts` — `registerMemoryTools / tool usage guard` | `webui/misc_routes.py` | 未实现 | memory权限返回关闭；无对应持久化与工具执行 |
+| `LibreChat:packages/api/src/agents/attachments.ts` — `attachment limits / model-bound files` | `webui/attachments.py` | 部分 | LSM真实路径上传已实现；原版资源分类和模型输入链未完成 |
+| `LibreChat:packages/api/src/agents/tools.ts` — `runtime tools / registry adaptation` | `webui/lsm_tool_registry.py` | 部分 | 复用LSM注册表；尚未按原版Agent选择与系统注入拆开 |
+| `LibreChat:packages/data-schemas/src/schema/agent.ts` — `Agent schema / settings / graph / subagents` | `webui/agents.py` | 部分 | 保存部分JSON字段；原版验证/继承/version/图配置未完整移植 |
+| `LibreChat:packages/data-schemas/src/schema/message.ts` — `message content persistence` | `webui/storage.py` | 部分 | messages关系表；高级content与run状态恢复未完整 |
+| `LibreChat:packages/data-schemas/src/schema/convo.ts` — `conversation / branch / archive` | `webui/storage.py; conversation_routes.py` | 部分 | 基础CRUD/分支/归档；其余模型字段和hooks未全面对照 |
+| `LibreChat:packages/data-schemas/src/schema/chatProject.ts` — `project membership and resources` | `webui/storage.py` | 部分 | 项目关联/默认权限；完整资源与消息语义待移植 |
+| `LibreChat:packages/data-provider/src/createPayload.ts` — `React request payload` | `ui/workspace/packages/data-provider/src/createPayload.ts` | 部分 | 前端复用；后端尚未消费所有原版字段 |
+| `LibreChat:packages/data-provider/src/runSteps.ts` — `execution event types` | `ui/workspace/packages/data-provider/src/runSteps.ts; generation_routes.py` | 部分 | 共享前端类型复用；后端事件仅子集 |
+| `LibreChat:client/src/components/Chat/Messages/Content/AskUserQuestions.tsx` — `batched questions UI` | `ui/workspace/client/src/components/Chat/Messages/Content/AskUserQuestions.tsx` | 部分 | React原组件保留；Python当前无批问题协议 |
+| `LibreChat:client/src/components/SidePanel/Agents/Advanced/AgentSubagents.tsx` — `optional subagent configuration` | `ui/workspace/client/src/components/SidePanel/Agents/Advanced/AgentSubagents.tsx` | 部分 | 原React配置保留；Python目前误读为id数组 |
+| `agents:src/graphs/Graph.ts` — `agent graph / tools / checkpoint` | `webui/generation_routes.py` | 未实现 | 当前手写循环不是源码级图执行移植 |
+| `agents:src/graphs/MultiAgentGraph.ts` — `multi-agent routing / commands` | `webui/delegation.py` | 未实现 | handoff机制未等价 |
+| `agents:src/graphs/handoff.ts` — `HandoffRouting / mergeHandoffState` | `webui/delegation.py` | 未实现 | 缺预算、作用域、幂等transition、持久handoff结果 |
+| `agents:src/tools/SubagentTool.ts` — `buildSubagentToolParams / createSubagentToolDefinition` | `webui/delegation.py` | 未实现 | 原版subagent_type/description/config动态枚举，当前自研工具不等价 |
+| `agents:src/hitl/askUserQuestions.ts` — `askUserQuestions / interrupt / resolution` | `webui/ask_user_tools.py; generations.py` | 未实现 | 应完整保留1–4问题和按id回答，不是拼接自由字符串 |
+| `agents:src/hitl/askUserQuestionsInterrupt.ts` — `request/interrupt guards` | `webui/ask_user_tools.py` | 未实现 | 当前未移植原版类型守卫 |
+| `agents:src/tools/ToolNode.ts` — `parallel tool execution / interruption` | `webui/generation_routes.py` | 未实现 | 当前串行循环，未移植原版并发/中断/回放行为 |
+
+## 后续审计范围
+
+本表是第一轮源码级清单，不是限定范围。还须把 Actions、Artifacts、各provider adapter、
+Memory、Context、资源生命周期、Agent Builder全部设置、完整conversation API、
+事件actor与checkpoint存储、并发和取消恢复细分到函数与行为测试。
+
+完整功能覆盖率尚无法给出可信百分比；当前没有任何高级Agent模块被宣称完整等价。
+每个模块仅在原版测试/实际接口与Python差分验证通过后才能改为“完成”。
+
+## 首批源码移植验证（Ask User）
+
+- 工具定义/schema与从固定源码AST提取的原定义完全相等，移除自研`ask_user`名称。
+- 91组batch/legacy恢复输入与原版Node函数逐例差分一致，包括UTF-16边界与错误优先级。
+- 批次payload、按问题ID保存与回答、无效回答不消耗action、SQLite重开后恢复均已测试。
+- 原版React双问题stepper选择、提交并恢复同一generation的Chromium E2E通过，未修改问答组件。
+- 以上仅完成schema/回答验证和现有持久化接入；LangGraph图级interrupt、完整checkpoint、
+  retained answers、admin gating与其他Agent机制仍未全部移植，故该模块继续标记“部分”。
