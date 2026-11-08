@@ -57,3 +57,84 @@ async def test_controller_chat_attachment_upload_and_sqlite_metadata(tmp_path, m
             assert empty.status_code == 400
     finally:
         get_settings.cache_clear()
+
+
+def test_attachment_directory_symlinks_are_not_followed(tmp_path):
+    import hashlib
+
+    state = tmp_path / ".local-shell-mcp"
+    state.mkdir()
+    container = state / "attachments"
+    container.mkdir()
+    outsider = tmp_path / "outsider"
+    outsider.mkdir()
+    unsafe = container / hashlib.sha256(b"alice").hexdigest()[:32]
+    unsafe.symlink_to(outsider, target_is_directory=True)
+    with pytest.raises(PermissionError, match="Unsafe"):
+        _safe_attachment_path("alice", "notes.txt", state)
+    assert list(outsider.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_upload_denies_disabled_local_and_malformed_content_length(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_DISABLE_LOCAL", "true")
+    get_settings.cache_clear()
+    try:
+        app = _with_oauth_routes(Starlette())
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            url = "/api/lsm/controller/attachments/upload?name=ordinary.txt"
+            assert (await client.post(url, content=b"one")).status_code == 403
+            monkeypatch.setenv("LOCAL_SHELL_MCP_DISABLE_LOCAL", "false")
+            get_settings.cache_clear()
+            bad = await client.post(url, content=b"one", headers={"content-length": "NaN"})
+            assert bad.status_code == 400
+            assert (await client.post(url, content=b"one", headers={"content-length": "100"})).status_code == 400
+            assert (await client.post(url, content=b"one-more", headers={"content-length": "3"})).status_code == 400
+            assert (await client.post(url, content=b"one", headers={"content-length": str(40 * 1024 * 1024)})).status_code == 400
+            root = tmp_path / ".local-shell-mcp" / "attachments"
+            assert not list(root.glob("**/*txt"))
+    finally:
+        get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_upload_rolls_back_when_db_or_disk_write_fails(tmp_path, monkeypatch):
+    from local_shell_mcp.webui import attachments
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_DISABLE_LOCAL", "false")
+    get_settings.cache_clear()
+    try:
+        app = _with_oauth_routes(Starlette())
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            url = "/api/lsm/controller/attachments/upload?name=rollback.txt"
+            class FailDatabase:
+                def connect(self):
+                    raise OSError("Simulated database unavailability")
+
+            repo = attachments._repo()
+            with monkeypatch.context() as patch:
+                patch.setattr(attachments, "_repo", lambda: type("R", (), {"database": FailDatabase()})())
+                response = await client.post(url, content=b"should be discarded")
+                assert response.status_code == 500
+            assert list((tmp_path / ".local-shell-mcp" / "attachments").glob("**/*.txt")) == []
+            original_open = attachments.os.open
+
+            def deny_attachment_open(path, *args, **kwargs):
+                if "attachments" in str(path):
+                    raise OSError("Simulated disk failure")
+                return original_open(path, *args, **kwargs)
+
+            with monkeypatch.context() as patch:
+                patch.setattr(attachments.os, "open", deny_attachment_open)
+                response = await client.post(url, content=b"not stored")
+                assert response.status_code == 500
+            assert list((tmp_path / ".local-shell-mcp" / "attachments").glob("**/*.txt")) == []
+            assert repo is not None
+    finally:
+        get_settings.cache_clear()

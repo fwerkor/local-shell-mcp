@@ -165,3 +165,43 @@ async def test_nested_mcp_disabled_by_default_and_management_tool_absent(tmp_pat
     finally:
         get_settings.cache_clear()
         _registry_for_state.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_nested_mcp_rejects_cross_owner_wrong_tools_and_malformed_approvals(tmp_path, monkeypatch):
+    from local_shell_mcp.webui.lsm_tool_registry import _registry_for_state
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    get_settings.cache_clear()
+    _registry_for_state.cache_clear()
+    from local_shell_mcp.webui.routes import _repo
+
+    repo = _repo()
+    cid = repo.create_conversation("alice", {"title": "External tool"})["conversationId"]
+    repo.save_setting("alice", "conversation.permissions." + cid, {"mcp": True})
+    try:
+        with pytest.raises(PermissionError, match="Conversation not found"):
+            await nested_mcp.discover("bob", cid, {"shell:read"},
+                                      ModelToolCall("x", "mcp_tool_search", {}))
+        with pytest.raises(PermissionError, match="shell:read"):
+            await nested_mcp.discover("alice", cid, set(),
+                                      ModelToolCall("x", "mcp_tool_search", {}))
+        with pytest.raises(PermissionError, match="explicit approval"):
+            await nested_mcp.discover("alice", cid, {"shell:read"},
+                                      ModelToolCall("x", "mcp_tool_call", {"name": "test:call"}))
+        with pytest.raises(ValueError, match="arguments must be an object"):
+            await nested_mcp.discover("alice", cid, {"shell:read"},
+                                      ModelToolCall("x", "mcp_tool_search", ["wrong"]))
+        with pytest.raises(ValueError, match="does not match"):
+            await nested_mcp.approved_call("alice", cid, {"shell:read", "shell:execute"},
+                                           ModelToolCall("x", "mcp_tool_inspect", {"name": "test:call"}))
+        for args in ({"name": "unqualified"}, {"name": "test:call", "arguments": []},
+                     {"name": "test:call", "arguments": {"data": "x" * 9000}}):
+            with pytest.raises(ValueError, match="Invalid|too large"):
+                await nested_mcp.approved_call("alice", cid, {"shell:read", "shell:execute"},
+                                               ModelToolCall("x", "mcp_tool_call", args))
+    finally:
+        _registry_for_state.cache_clear()
+        get_settings.cache_clear()

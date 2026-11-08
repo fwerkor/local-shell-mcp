@@ -83,3 +83,60 @@ async def test_delegation_output_budget_records_error_without_partial_success(tm
         row = conn.execute("SELECT status,result FROM agent_delegations").fetchone()
     assert row["status"] == "error"
     assert row["result"] == ""
+
+
+@pytest.mark.asyncio
+async def test_delegation_rejects_invalid_target_and_task_before_dispatch(tmp_path):
+    db = SQLiteDatabase(tmp_path / ".local-shell-mcp")
+    child = AgentRepository(db).create("alice", {"name": "Child", "provider": "openAI", "model": "mock"})
+    run, _ = GenerationStore(db).begin("alice", {"text": "Begin"})
+    parent = {"id": "parent", "subagents": [child["id"]]}
+    for name, args, expected in [
+        ("file_write", {"agent_id": child["id"], "task": "read"}, "Unknown"),
+        ("delegate_agent", {"agent_id": child["id"]}, "identity and task"),
+        ("delegate_agent", {"agent_id": child["id"], "task": ""}, "1–8192"),
+        ("handoff_agent", {"agent_id": child["id"], "task": "x" * 9000}, "1–8192"),
+    ]:
+        with pytest.raises(ValueError, match=expected):
+            await run_subagent("alice", run, parent, ModelToolCall("x", name, args), db)
+    with pytest.raises(PermissionError, match="delegate to itself"):
+        await run_subagent("alice", run, {"id": child["id"], "subagents": [child["id"]]},
+                           ModelToolCall("x", "delegate_agent", {"agent_id": child["id"], "task": "loop"}), db)
+    with db.connect() as connection:
+        assert connection.execute("SELECT count(*) FROM agent_delegations").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_delegation_cancellation_is_durable_and_never_completes(tmp_path, monkeypatch):
+    import asyncio
+
+    from local_shell_mcp.webui import delegation
+
+    db = SQLiteDatabase(tmp_path / ".local-shell-mcp")
+    child = AgentRepository(db).create("alice", {"name": "Child", "provider": "openAI", "model": "mock"})
+    run, _ = GenerationStore(db).begin("alice", {"text": "Begin"})
+    entered = asyncio.Event()
+    held = asyncio.Event()
+
+    async def blocked(*args, **kwargs):
+        yield 42  # malformed model nontext chunks are ignored
+        entered.set()
+        yield "partial"
+        await held.wait()
+        yield "never stored"
+
+    monkeypatch.setattr(delegation, "stream_model", blocked)
+    monkeypatch.setattr(delegation, "provider_config", lambda *_: ProviderConfig(
+        "openai", "mock", "http://127.0.0.1:11434/v1/chat/completions", "",
+    ))
+    task = asyncio.create_task(run_subagent("alice", run, {"id": "parent", "subagents": [child["id"]]},
+                   ModelToolCall("x", "delegate_agent", {"agent_id": child["id"], "task": "slow"}), db))
+    await asyncio.wait_for(entered.wait(), timeout=3)
+    await asyncio.sleep(.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    with db.connect() as connection:
+        stored = connection.execute("SELECT status,result FROM agent_delegations").fetchone()
+    assert stored["status"] == "interrupted"
+    assert stored["result"] == ""

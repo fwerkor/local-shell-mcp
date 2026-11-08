@@ -105,3 +105,34 @@ async def test_chat_tool_permission_prefs_are_private_and_secret_keys_not_expose
                                  params={"conversationId": cid})).json() == []
         assert (await client.get("/api/agents/tools/calls", headers=bob,
                                  params={"conversationId": cid})).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_misc_settings_and_permissions_reject_untrusted_json(tmp_path, monkeypatch):
+    from local_shell_mcp import settings as settings_module
+
+    settings = SimpleNamespace(auth_mode="none", state_dir=tmp_path,
+                               disable_local=False, remote_enabled=False)
+    monkeypatch.setattr(routes, "get_settings", lambda: settings)
+    monkeypatch.setattr(settings_module, "get_settings", lambda: settings)
+    app = Starlette(routes=[*misc_routes.misc_routes(), *routes.webui_routes()])
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.post("/api/user/settings/pinned-order",
+                                  json={"pinnedOrder": ["file_list"] * 501})).status_code == 400
+        assert (await client.post("/api/user/settings/favorites",
+                                  json={"favorites": ["not-an-object"]})).status_code == 400
+        assert (await client.post("/api/user/settings/favorites",
+                                  json={"favorites": [{"id": "x" * 263000}]})).status_code == 413
+        cid = (await client.post("/api/convos", json={"title": "Scoped"})).json()["conversationId"]
+        assert (await client.put(f"/api/lsm/preferences/{cid}",
+                                 json={"web": "true"})).status_code == 400
+        assert (await client.put(f"/api/lsm/preferences/{cid}",
+                                 json={"machines": {"bad/machine": "read"}})).status_code == 400
+        assert (await client.put(f"/api/lsm/preferences/{cid}",
+                                 json={"machines": {"worker1": "read"}})).status_code == 403
+        assert (await client.get("/api/keys?name=not-supported")).status_code == 404
+        with monkeypatch.context() as patched:
+            patched.setattr("local_shell_mcp.webui.providers.provider_config",
+                            lambda *args: (_ for _ in ()).throw(ValueError("unconfigured")))
+            assert (await client.get("/api/keys?name=google")).status_code == 404
+        assert (await client.get("/api/agents/tools/calls")).status_code == 404

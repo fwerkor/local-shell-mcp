@@ -231,3 +231,23 @@ async def test_agent_write_capability_is_only_advertised_for_write_policy(tmp_pa
     finally:
         await generation_routes.shutdown_generations()
         get_settings.cache_clear()
+
+
+def test_machine_authorization_fail_closed_for_disabled_and_invalid_targets(tmp_path, monkeypatch):
+    from local_shell_mcp import settings as settings_module
+    from local_shell_mcp.webui.machine_permissions import _stored, authorize_machine_action
+
+    policy = WorkspaceRepository(SQLiteDatabase(tmp_path / ".local-shell-mcp"))
+    cid = policy.create_conversation("alice", {"title": "Control"})["conversationId"]
+    policy.save_setting("alice", "agent.machine_policy.global", {"local": "write", "worker1": "write"})
+    monkeypatch.setattr(settings_module, "get_settings", lambda: SimpleNamespace(
+        disable_local=True, remote_enabled=False,
+    ))
+    with pytest.raises(PermissionError, match="Invalid target"):
+        authorize_machine_action("alice", cid, "../worker", "read", scopes={"shell:read"}, repo=policy)
+    with pytest.raises(PermissionError, match="Local machine is disabled"):
+        authorize_machine_action("alice", cid, "local", "read", scopes={"shell:read"}, repo=policy)
+    with pytest.raises(PermissionError, match="Remote machine access is disabled"):
+        authorize_machine_action("alice", cid, "worker1", "read", scopes={"shell:read", "remote:use"}, repo=policy)
+    policy.save_setting("alice", "agent.machine_policy.global", {"local": "unknown"})
+    assert _stored(policy, "alice", "agent.machine_policy.global") == {}
