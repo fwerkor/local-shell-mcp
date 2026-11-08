@@ -168,3 +168,92 @@ async def stream_model(
                         text = part.get("text")
                         if isinstance(text, str) and text:
                             yield text
+
+
+@dataclass(frozen=True)
+class ModelToolCall:
+    """A complete model-requested function call, never partial SSE input."""
+
+    call_id: str
+    name: str
+    arguments: dict
+
+
+async def stream_model_with_tools(
+    config: ProviderConfig,
+    messages: list[dict],
+    *,
+    tools: list[dict],
+    max_tokens: int = 2048,
+    temperature: float | None = None,
+) -> AsyncIterator[str | ModelToolCall]:
+    """Stream OpenAI text and reconstruct complete tool calls, bounded by size.
+
+    Unsupported providers do not receive tool declarations. Their ordinary
+    text-stream behavior is preserved until their native tool protocols exist.
+    """
+    if not tools or config.provider != "openai":
+        async for text in stream_model(config, messages, max_tokens=max_tokens, temperature=temperature):
+            yield text
+        return
+
+    import httpx
+
+    headers = {"accept": "text/event-stream", "content-type": "application/json"}
+    if config.token:
+        headers["Authorization"] = f"Bearer {config.token}"
+    body: dict = {
+        "model": config.model, "stream": True, "messages": messages,
+        "max_completion_tokens": max_tokens, "tools": tools,
+        "tool_choice": "auto", "parallel_tool_calls": False,
+    }
+    if temperature is not None:
+        body["temperature"] = temperature
+    timeout = httpx.Timeout(connect=20, read=config.timeout_s, write=30, pool=10)
+    pending: dict[int, dict[str, str]] = {}
+    async with (
+        httpx.AsyncClient(timeout=timeout) as client,
+        client.stream("POST", config.url, headers=headers, json=body) as response,
+    ):
+        response.raise_for_status()
+        async for frame in _data_frames(response):
+            if frame == "[DONE]":
+                break
+            try:
+                event = json.loads(frame)
+            except json.JSONDecodeError:
+                continue
+            if "error" in event:
+                raise RuntimeError("Model provider rejected the generation request")
+            for choice in event.get("choices", []):
+                delta = choice.get("delta") or {}
+                content = delta.get("content")
+                if isinstance(content, str) and content:
+                    yield content
+                elif isinstance(content, list):
+                    for part in content:
+                        if isinstance(part, dict) and isinstance(part.get("text"), str):
+                            yield part["text"]
+                for fragment in delta.get("tool_calls") or []:
+                    index = fragment.get("index")
+                    if type(index) is not int or not 0 <= index < 4:
+                        raise ValueError("Invalid model tool call index")
+                    tool = pending.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                    if fragment.get("id"):
+                        tool["id"] += str(fragment["id"])
+                    function = fragment.get("function") or {}
+                    tool["name"] += str(function.get("name") or "")
+                    tool["arguments"] += str(function.get("arguments") or "")
+                    if len(tool["id"]) > 128 or len(tool["name"]) > 128 or len(tool["arguments"]) > 8192:
+                        raise ValueError("Model tool call exceeds allowed size")
+    for index in sorted(pending):
+        tool = pending[index]
+        if not tool["id"] or not tool["name"]:
+            raise ValueError("Incomplete model tool call")
+        try:
+            params = json.loads(tool["arguments"] or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError("Invalid JSON in model tool call") from exc
+        if not isinstance(params, dict):
+            raise ValueError("Model tool arguments must be an object")
+        yield ModelToolCall(tool["id"], tool["name"], params)

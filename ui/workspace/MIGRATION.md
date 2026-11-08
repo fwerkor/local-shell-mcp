@@ -35,7 +35,7 @@
 | React SPA hosting | Implemented and browser-verified | First-party `ui/workspace` React build, deterministic compressed assets, safe Python extraction, real Chromium startup and chat tests |
 | Provider endpoints and credentials | Partial | OpenAI-compatible, Anthropic and Gemini text streaming through lazy httpx, secret isolation verified; credentials configuration and usage accounting incomplete |
 | Agent runtime + resumable event protocol | Partial and browser-verified | Python SQLite text generation, SSE delta/replay, idempotency, abort, startup-orphan recovery; tool callbacks/steering/approvals incomplete |
-| MCP and native tool execution | Not started | LSM native/external tool toggles, tool permissions, approvals, auditing |
+| MCP and native tool execution | Partial | OpenAI-compatible streaming function-call parser + strictly read-only LSM file list/read loop, owner-scoped opt-in and `shell:read` enforcement, per-call revocation check, SQLite step log and audit. Mutating operations, nested MCP call/approval and multi-provider tool support are blocked until HITL is implemented. |
 | Ask User, handoff and delegated subagents | Not started | Durable task graph, parent/child lifecycle, resume, cancel, event propagation |
 | Prompt/context, memory, attachments and projects | Not started | Full conversation functionality and client compatibility |
 | LSM Controller control routes | Implemented at routing level | Existing `/api/ui/*` handlers mounted directly under `/api/lsm/controller/*`, without Node proxy; remaining browser control flows require E2E parity |
@@ -66,6 +66,13 @@
   WebUI persistence layer are deferred until used. If SQLite itself cannot
   load, set `LOCAL_SHELL_MCP_STATE_BACKEND=file` to recover the Controller;
   do not edit or delete the database until a verified backup exists.
+- The native Agent function loop is **deny-by-default** until per-conversation
+  `web` and `lsm` permissions are explicitly enabled. The first slice only
+  allows `lsm_file_list` and `lsm_file_read` within the configured workspace,
+  with dotfiles, symlinks and Controller private state denied. Write/shell,
+  remote and external MCP calls remain disabled pending durable user approval.
+  Each tool call is bounded, audited and recorded as an SQLite generation step;
+  provider responses never contain a host credential.
 - The internal single-user WebUI is identified by the existing LSM OAuth
   principal, never by a browser-supplied user ID. All reads and mutations must
   verify the owner and relevant scopes. One-time login tickets are hashed,

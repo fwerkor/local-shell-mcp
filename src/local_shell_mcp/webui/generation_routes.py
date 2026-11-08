@@ -20,7 +20,13 @@ from starlette.routing import Route
 
 from .agents import AgentRepository
 from .generations import Generation, GenerationConflict, GenerationStore
-from .providers import ProviderConfig, provider_config, stream_model
+from .providers import (
+    ModelToolCall,
+    ProviderConfig,
+    provider_config,
+    stream_model,
+    stream_model_with_tools,
+)
 from .routes import _body, _owner
 
 log = logging.getLogger(__name__)
@@ -62,6 +68,7 @@ def _generator_headers() -> dict[str, str]:
 async def _run_model(
     owner: str, generation: Generation, profile: ProviderConfig,
     *, instructions: str = "", parameters: dict | None = None,
+    native_file_tools: bool = False,
 ) -> None:
     repo = _generation_store()
     text_parts: list[str] = []
@@ -92,19 +99,62 @@ async def _run_model(
         temperature = params.get("temperature")
         if temperature is not None:
             temperature = max(0.0, min(float(temperature), 2.0))
-        async for chunk in stream_model(profile, history, max_tokens=max_tokens, temperature=temperature):
+        async def append_text(chunk: str) -> None:
             if not chunk:
-                continue
+                return
             text_parts.append(chunk)
             repo.append(owner, generation.run_id, {
                 "event": "on_message_delta",
-                "data": {
-                    "id": step_id,
-                    "delta": {
-                        "content": {"type": "text", "text": chunk, "phase": "final_answer"},
-                    },
-                },
+                "data": {"id": step_id,
+                         "delta": {"content": {"type": "text", "text": chunk, "phase": "final_answer"}}},
             })
+
+        if native_file_tools and profile.provider == "openai":
+            from .native_tools import READ_ONLY_TOOLS, run_readonly_tool
+
+            for round_number in range(3):
+                calls: list[ModelToolCall] = []
+                async for item in stream_model_with_tools(
+                    profile, history, tools=READ_ONLY_TOOLS, max_tokens=max_tokens,
+                    temperature=temperature,
+                ):
+                    if isinstance(item, ModelToolCall):
+                        calls.append(item)
+                    else:
+                        await append_text(item)
+                if not calls:
+                    break
+                if round_number == 2 or len(calls) > 4:
+                    raise ValueError("Model tool-call budget exceeded")
+                history.append({
+                    "role": "assistant", "content": None,
+                    "tool_calls": [{"id": call.call_id, "type": "function",
+                                    "function": {"name": call.name,
+                                                 "arguments": json.dumps(call.arguments)}}
+                                   for call in calls],
+                })
+                for call in calls:
+                    # Never run mutating or arbitrary MCP actions through this
+                    # implicit read-only path. Recheck current SQLite policy
+                    # immediately before execution, including after an SSE retry.
+                    result = await asyncio.wait_for(
+                        run_readonly_tool(owner, generation.conversation_id, call), timeout=10,
+                    )
+                    repo.append(owner, generation.run_id, {
+                        "event": "on_run_step",
+                        "data": {"type": "tool_calls", "id": "step_" + call.call_id,
+                                 "index": round_number + 1, "status": "completed",
+                                 "stepDetails": {"type": "tool_calls", "tool_calls": [{
+                                     "id": call.call_id, "type": "function",
+                                     "function": {"name": call.name,
+                                                  "arguments": "<redacted>"},
+                                     "status": "completed",
+                                 }]}}
+                    })
+                    history.append({"role": "tool", "tool_call_id": call.call_id, "content": result})
+        else:
+            async for chunk in stream_model(profile, history, max_tokens=max_tokens, temperature=temperature):
+                await append_text(chunk)
         repo.append(owner, generation.run_id, {
             "event": "on_run_step_closed",
             "data": {
@@ -128,7 +178,7 @@ async def _run_model(
 
 
 async def _start_task(owner: str, generation: Generation, profile: ProviderConfig,
-                      agent: dict | None) -> None:
+                      agent: dict | None, native_file_tools: bool = False) -> None:
     async with _TASK_GUARD:
         existing = _TASKS.get(generation.run_id)
         if existing and not existing.done():
@@ -136,7 +186,8 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
         task = asyncio.create_task(
             _run_model(owner, generation, profile,
                        instructions=str((agent or {}).get("instructions") or ""),
-                       parameters=(agent or {}).get("model_parameters") or {}),
+                       parameters=(agent or {}).get("model_parameters") or {},
+                       native_file_tools=native_file_tools),
             name="webui-generation-" + generation.run_id,
         )
         _TASKS[generation.run_id] = task
@@ -155,6 +206,22 @@ async def start_generation(request: Request):
             raise HTTPException(404, detail="Agent not found")
     kind = str((agent or {}).get("provider") or payload.get("provider") or "openai")
     model = (agent or {}).get("model") or payload.get("model")
+    # Validate the requesting principal before permitting a model to read
+    # workspace files. Saved conversation toggles alone are not authorization.
+    from ..auth import principal_scopes
+    from ..settings import get_settings
+    from .routes import _repo
+
+    existing_cid = payload.get("conversationId")
+    requested = (_repo().setting(owner, "conversation.permissions." + existing_cid, {})
+                 if isinstance(existing_cid, str) and existing_cid not in {"", "new", "new_conversation"}
+                 else {})
+    requested_tools = isinstance(requested, dict) and requested.get("lsm") is True and requested.get("web") is True
+    principal = getattr(request.state, "principal", None)
+    allowed_scopes = (not requested_tools or get_settings().auth_mode == "none" or
+                      (principal is not None and "shell:read" in principal_scopes(principal)))
+    if requested_tools and not allowed_scopes:
+        raise HTTPException(403, detail="shell:read scope is required for native Agent tools")
     try:
         profile = provider_config(kind, model)
         result, fresh = _generation_store().begin(owner, payload, agent)
@@ -166,7 +233,7 @@ async def start_generation(request: Request):
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     if fresh:
-        await _start_task(owner, result, profile, agent)
+        await _start_task(owner, result, profile, agent, native_file_tools=bool(requested_tools and allowed_scopes))
     return JSONResponse(_generation_body(result, status="stream" if fresh else "resumed",
                                          resumed=not fresh), status_code=202,
                         headers=_generator_headers())
