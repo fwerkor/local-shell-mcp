@@ -88,3 +88,88 @@ async def test_real_react_chat_uses_native_python_streaming_and_sqlite(tmp_path,
         server.should_exit = True
         await asyncio.wait_for(task, timeout=15)
         get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_real_react_machine_permission_scopes_and_inheritance(tmp_path, monkeypatch):
+    """Verify the user can edit global, project and chat machine permissions."""
+    playwright = pytest.importorskip("playwright.async_api")
+    import httpx
+    import uvicorn
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_UI_ENABLED", "true")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
+    get_settings.cache_clear()
+    app = _with_oauth_routes(Starlette())
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port,
+                                          lifespan="on", log_level="error", access_log=False))
+    task = asyncio.create_task(server.serve())
+    browser = None
+    try:
+        for _ in range(100):
+            if server.started:
+                break
+            if task.done():
+                raise RuntimeError("The WebUI server stopped early")
+            await asyncio.sleep(0.05)
+        assert server.started
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as http:
+            created = await http.post("/api/projects", json={"name": "Project defaults"})
+            assert created.status_code == 201, created.text
+            project_id = created.json()["id"]
+            chat = await http.post("/api/convos", json={"title": "Permission test", "projectId": project_id})
+            assert chat.status_code == 201
+            conversation_id = chat.json()["conversationId"]
+            async with playwright.async_playwright() as manager:
+                try:
+                    browser = await manager.chromium.launch(headless=True)
+                except playwright.Error as exc:
+                    if "Executable doesn't exist" in str(exc):
+                        pytest.skip("Optional Chromium executable is unavailable")
+                    raise
+                page = await browser.new_page(viewport={"width": 1366, "height": 820})
+                failures = []
+                page.on("pageerror", lambda error: failures.append(str(error)))
+                await page.goto(f"http://127.0.0.1:{port}/c/{conversation_id}",
+                                wait_until="domcontentloaded")
+                selector = page.get_by_role("button", name="Permissions", exact=True)
+                await selector.wait_for(timeout=15_000)
+                await selector.click()
+                access = page.get_by_label("local machine access")
+                await access.wait_for(timeout=10_000)
+                await page.get_by_role("button", name="Global").click()
+                await access.select_option("read")
+                for _ in range(100):
+                    if (await http.get("/api/lsm/permissions/defaults")).json().get("machines", {}).get("local") == "read":
+                        break
+                    await asyncio.sleep(0.03)
+                assert (await http.get("/api/lsm/permissions/defaults")).json()["machines"]["local"] == "read"
+                await page.get_by_role("button", name="Project", exact=True).click()
+                await access.select_option("write")
+                for _ in range(100):
+                    if (await http.get(f"/api/lsm/permissions/projects/{project_id}")).json().get("machines", {}).get("local") == "write":
+                        break
+                    await asyncio.sleep(0.03)
+                assert (await http.get(f"/api/lsm/permissions/projects/{project_id}")).json()["machines"]["local"] == "write"
+                await page.get_by_role("button", name="This chat").click()
+                await access.select_option("none")
+                for _ in range(100):
+                    if (await http.get(f"/api/lsm/preferences/{conversation_id}")).json().get("machines", {}).get("local") == "none":
+                        break
+                    await asyncio.sleep(0.03)
+                applied = (await http.get(f"/api/lsm/preferences/{conversation_id}")).json()
+                assert applied["machines"] == {"local": "none"}
+                assert applied["effective"] == {"local": "none"}
+                assert failures == [], failures
+    finally:
+        if browser:
+            await browser.close()
+        server.should_exit = True
+        await asyncio.wait_for(task, timeout=15)
+        get_settings.cache_clear()

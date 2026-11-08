@@ -68,7 +68,8 @@ def _generator_headers() -> dict[str, str]:
 async def _run_model(
     owner: str, generation: Generation, profile: ProviderConfig,
     *, instructions: str = "", parameters: dict | None = None,
-    native_file_tools: bool = False,
+    native_file_tools: bool = False, write_tools: bool = False,
+    granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
 ) -> None:
     repo = _generation_store()
     text_parts: list[str] = []
@@ -110,12 +111,13 @@ async def _run_model(
             })
 
         if native_file_tools and profile.provider == "openai":
-            from .native_tools import READ_ONLY_TOOLS, run_readonly_tool
+            from .native_tools import READ_ONLY_TOOLS, WRITE_TOOLS, run_machine_tool
 
             for round_number in range(3):
                 calls: list[ModelToolCall] = []
                 async for item in stream_model_with_tools(
-                    profile, history, tools=READ_ONLY_TOOLS, max_tokens=max_tokens,
+                    profile, history, tools=READ_ONLY_TOOLS + (WRITE_TOOLS if write_tools else []),
+                    max_tokens=max_tokens,
                     temperature=temperature,
                 ):
                     if isinstance(item, ModelToolCall):
@@ -138,7 +140,8 @@ async def _run_model(
                     # implicit read-only path. Recheck current SQLite policy
                     # immediately before execution, including after an SSE retry.
                     result = await asyncio.wait_for(
-                        run_readonly_tool(owner, generation.conversation_id, call), timeout=10,
+                        run_machine_tool(owner, generation.conversation_id, call,
+                                          granted_scopes=set(granted_scopes), grant_expires=grant_expires), timeout=10,
                     )
                     repo.append(owner, generation.run_id, {
                         "event": "on_run_step",
@@ -178,7 +181,8 @@ async def _run_model(
 
 
 async def _start_task(owner: str, generation: Generation, profile: ProviderConfig,
-                      agent: dict | None, native_file_tools: bool = False) -> None:
+                      agent: dict | None, native_file_tools: bool = False, write_tools: bool = False,
+                      granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None) -> None:
     async with _TASK_GUARD:
         existing = _TASKS.get(generation.run_id)
         if existing and not existing.done():
@@ -187,7 +191,8 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
             _run_model(owner, generation, profile,
                        instructions=str((agent or {}).get("instructions") or ""),
                        parameters=(agent or {}).get("model_parameters") or {},
-                       native_file_tools=native_file_tools),
+                       native_file_tools=native_file_tools, write_tools=write_tools,
+                       granted_scopes=granted_scopes, grant_expires=grant_expires),
             name="webui-generation-" + generation.run_id,
         )
         _TASKS[generation.run_id] = task
@@ -206,22 +211,39 @@ async def start_generation(request: Request):
             raise HTTPException(404, detail="Agent not found")
     kind = str((agent or {}).get("provider") or payload.get("provider") or "openai")
     model = (agent or {}).get("model") or payload.get("model")
-    # Validate the requesting principal before permitting a model to read
-    # workspace files. Saved conversation toggles alone are not authorization.
+    # Permission inheritance is resolved against SQLite at the start and
+    # rechecked before every tool. The initial OAuth grant cannot be elevated
+    # by modifying defaults while a generation is in progress.
     from ..auth import principal_scopes
     from ..settings import get_settings
-    from .routes import _repo
+    from .machine_permissions import require_machine_scope, resolve_access
 
     existing_cid = payload.get("conversationId")
-    requested = (_repo().setting(owner, "conversation.permissions." + existing_cid, {})
-                 if isinstance(existing_cid, str) and existing_cid not in {"", "new", "new_conversation"}
-                 else {})
-    requested_tools = isinstance(requested, dict) and requested.get("lsm") is True and requested.get("web") is True
+    try:
+        if isinstance(existing_cid, str) and existing_cid not in {"", "new", "new_conversation"}:
+            policy = resolve_access(owner, existing_cid)
+        else:
+            project_id = payload.get("projectId")
+            if project_id is not None and not isinstance(project_id, str):
+                raise HTTPException(400, detail="Invalid project id")
+            policy = resolve_access(owner, project_id=project_id)
+    except KeyError as exc:
+        raise HTTPException(404, detail=str(exc)) from exc
+    requested_tools = any(level in {"read", "write"} for level in policy.values())
     principal = getattr(request.state, "principal", None)
-    allowed_scopes = (not requested_tools or get_settings().auth_mode == "none" or
-                      (principal is not None and "shell:read" in principal_scopes(principal)))
-    if requested_tools and not allowed_scopes:
-        raise HTTPException(403, detail="shell:read scope is required for native Agent tools")
+    scopes = ({"shell:read", "shell:write", "remote:use"}
+              if get_settings().auth_mode == "none" else
+              principal_scopes(principal) if principal is not None and hasattr(principal, "claims") else set())
+    grant_expires = None if get_settings().auth_mode == "none" else (
+        principal.claims.get("exp") if principal is not None and hasattr(principal, "claims") else None
+    )
+    if requested_tools:
+        try:
+            for machine, level in policy.items():
+                if level in {"read", "write"}:
+                    require_machine_scope(scopes, machine, level, expires=grant_expires)
+        except PermissionError as exc:
+            raise HTTPException(403, detail=str(exc)) from exc
     try:
         profile = provider_config(kind, model)
         result, fresh = _generation_store().begin(owner, payload, agent)
@@ -233,7 +255,9 @@ async def start_generation(request: Request):
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     if fresh:
-        await _start_task(owner, result, profile, agent, native_file_tools=bool(requested_tools and allowed_scopes))
+        await _start_task(owner, result, profile, agent, native_file_tools=requested_tools,
+                          write_tools=any(level == "write" for level in policy.values()),
+                          granted_scopes=frozenset(scopes), grant_expires=grant_expires)
     return JSONResponse(_generation_body(result, status="stream" if fresh else "resumed",
                                          resumed=not fresh), status_code=202,
                         headers=_generator_headers())

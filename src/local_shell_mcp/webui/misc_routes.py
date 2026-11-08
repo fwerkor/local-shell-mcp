@@ -105,26 +105,46 @@ async def balance(request: Request):
 
 
 async def conversation_permissions(request: Request):
+    from .machine_permissions import (
+        _CONVERSATION,
+        _checked,
+        _stored,
+        resolve_access,
+        validate_access_map,
+    )
+
     owner = _owner(request)
     conversation_id = request.path_params["conversation_id"]
     repo = _repo()
-    if repo.conversation(owner, conversation_id) is None:
+    convo = repo.conversation(owner, conversation_id)
+    if convo is None:
         raise HTTPException(404, detail="Conversation not found")
     key = "conversation.permissions." + conversation_id
+    machine_key = _CONVERSATION + conversation_id
     defaults = {"web": False, "lsm": False, "mcp": False, "memory": False}
-    if request.method == "GET":
-        stored = repo.setting(owner, key, defaults)
-        return JSONResponse({name: bool(stored.get(name, False)) for name in defaults})
-    payload = await _body(request)
-    if set(payload) != set(defaults) or any(type(value) is not bool for value in payload.values()):
-        raise HTTPException(400, detail="Four boolean permission flags are required")
-    # These flags only describe opt-in policy. The generation runtime must
-    # independently enforce tool approvals and scopes before executing tools.
-    if payload["lsm"] and not payload["web"]:
-        raise HTTPException(400, detail="LSM tools require the parent web capability")
-    repo.save_setting(owner, key, payload)
-    return JSONResponse(payload)
-
+    if request.method == "PUT":
+        payload = await _body(request)
+        flags = {name: payload.get(name, False) for name in defaults}
+        if any(type(item) is not bool for item in flags.values()):
+            raise HTTPException(400, detail="Permission flags must be booleans")
+        # An old bare `lsm` flag never confers implicit access to every machine.
+        if "machines" in payload:
+            try:
+                machines = validate_access_map(payload["machines"])
+            except ValueError as exc:
+                raise HTTPException(400, detail=str(exc)) from exc
+            _checked(request, machines)
+            repo.save_setting(owner, machine_key, machines)
+        repo.save_setting(owner, key, flags)
+    else:
+        flags = repo.setting(owner, key, defaults)
+        if not isinstance(flags, dict):
+            flags = defaults
+    stored = _stored(repo, owner, machine_key)
+    effective = resolve_access(owner, conversation_id, repo=repo)
+    return JSONResponse({**{name: bool(flags.get(name, False)) for name in defaults},
+                         "machines": stored, "effective": effective,
+                         "projectId": convo.get("projectId")})
 
 async def user_key(request: Request):
     _owner(request)
@@ -176,7 +196,9 @@ async def web_search_auth(request: Request):
 
 
 def misc_routes() -> list[Route]:
-    return [
+    from .machine_permissions import machine_permission_routes
+
+    return [*machine_permission_routes(),
         Route("/health", api_health, methods=["GET"]),
         Route("/api/health", api_health, methods=["GET"]),
         Route("/api/banner", banner, methods=["GET"]),

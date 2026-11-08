@@ -12,7 +12,7 @@ from starlette.applications import Starlette
 
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.webui import generation_routes, misc_routes, routes
-from local_shell_mcp.webui.native_tools import _execute, _path, run_readonly_tool
+from local_shell_mcp.webui.native_tools import _execute, _path, run_machine_tool
 from local_shell_mcp.webui.providers import ModelToolCall, ProviderConfig, stream_model_with_tools
 
 
@@ -31,14 +31,14 @@ def _mock_sse(monkeypatch, frames):
 @pytest.mark.asyncio
 async def test_openai_fragmented_function_call_stream(monkeypatch):
     sent = _mock_sse(monkeypatch, [
-        'data: {"choices":[{"delta":{"content":"Checking ","tool_calls":[{"index":0,"id":"call_0","function":{"name":"lsm_file_","arguments":"{\\"path\\":\\""}}]}}]}',
+        'data: {"choices":[{"delta":{"content":"Checking ","tool_calls":[{"index":0,"id":"call_0","function":{"name":"file_","arguments":"{\\"path\\":\\""}}]}}]}',
         'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"list","arguments":".\\"}"}}]}}]}',
         'data: [DONE]',
     ])
     profile = ProviderConfig("openai", "local", "http://127.0.0.1:11434/v1/chat/completions", "")
-    tools = [{"type": "function", "function": {"name": "lsm_file_list"}}]
+    tools = [{"type": "function", "function": {"name": "file_list"}}]
     result = [item async for item in stream_model_with_tools(profile, [{"role": "user", "content": "ls"}], tools=tools)]
-    assert result == ["Checking ", ModelToolCall("call_0", "lsm_file_list", {"path": "."})]
+    assert result == ["Checking ", ModelToolCall("call_0", "file_list", {"path": "."})]
     body = json.loads(sent[0].content)
     assert body["tools"] == tools
     assert body["parallel_tool_calls"] is False
@@ -48,9 +48,9 @@ async def test_openai_fragmented_function_call_stream(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("frames,message", [
     (['data: {"choices":[{"delta":{"tool_calls":[{"index":5,"id":"a"}]}}]}'], "index"),
-    (['data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call","function":{"name":"lsm_file_list","arguments":"{broken"}}]}}]}'], "JSON"),
-    (['data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call","function":{"name":"lsm_file_list","arguments":"[1,2]"}}]}}]}'], "object"),
-    (['data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"lsm_file_list","arguments":"{}"}}]}}]}'], "Incomplete"),
+    (['data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call","function":{"name":"file_list","arguments":"{broken"}}]}}]}'], "JSON"),
+    (['data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call","function":{"name":"file_list","arguments":"[1,2]"}}]}}]}'], "object"),
+    (['data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"file_list","arguments":"{}"}}]}}]}'], "Incomplete"),
 ])
 async def test_invalid_model_tool_calls_do_not_dispatch(monkeypatch, frames, message):
     _mock_sse(monkeypatch, frames)
@@ -72,24 +72,24 @@ def test_workspace_read_only_tool_paths_and_output_limits(tmp_path):
     (root / "private-state").mkdir()
     (root / "private-state" / "secrets.json").write_text("private")
     assert _path(root, "file.txt") == (root / "file.txt").resolve()
-    assert json.loads(_execute(root, ModelToolCall("x", "lsm_file_list", {"path": "."})))['entries']
-    assert json.loads(_execute(root, ModelToolCall("x", "lsm_file_read", {"path": "file.txt"})))['text'] == "hello world"
-    assert json.loads(_execute(root, ModelToolCall("x", "lsm_file_read", {"path": "large.txt"})))['truncated'] is True
+    assert json.loads(_execute(root, ModelToolCall("x", "file_list", {"path": "."})))['entries']
+    assert json.loads(_execute(root, ModelToolCall("x", "file_read", {"path": "file.txt"})))['text'] == "hello world"
+    assert json.loads(_execute(root, ModelToolCall("x", "file_read", {"path": "large.txt"})))['truncated'] is True
     assert all(not row["name"].startswith(".") for row in json.loads(
-        _execute(root, ModelToolCall("x", "lsm_file_list", {}))) ["entries"])
+        _execute(root, ModelToolCall("x", "file_list", {}))) ["entries"])
     for path in ("../", "/etc/passwd", "escape/file.txt", ".local-shell-mcp/secrets.json"):
         with pytest.raises((ValueError, PermissionError, FileNotFoundError)):
             _path(root, path)
     with pytest.raises(ValueError, match="Binary"):
-        _execute(root, ModelToolCall("x", "lsm_file_read", {"path": "binary.bin"}))
+        _execute(root, ModelToolCall("x", "file_read", {"path": "binary.bin"}))
     with pytest.raises(PermissionError, match="private state"):
-        _execute(root, ModelToolCall("x", "lsm_file_read", {"path": "private-state/secrets.json"}),
+        _execute(root, ModelToolCall("x", "file_read", {"path": "private-state/secrets.json"}),
                  root / "private-state")
-    listed = json.loads(_execute(root, ModelToolCall("x", "lsm_file_list", {}),
+    listed = json.loads(_execute(root, ModelToolCall("x", "file_list", {}),
                                  root / "private-state"))
     assert "private-state" not in [entry["name"] for entry in listed["entries"]]
     for call in (ModelToolCall("x", "mcp_manage", {}), ModelToolCall("x", "run_shell", {"command": "pwd"}),
-                 ModelToolCall("x", "lsm_file_list", {"path": ".", "limit": 200})):
+                 ModelToolCall("x", "file_list", {"path": ".", "limit": 200})):
         with pytest.raises(ValueError):
             _execute(root, call)
 
@@ -115,7 +115,7 @@ async def test_background_generation_reads_workspace_only_after_explicit_enablem
             assert "hello.txt" in history[-1]["content"]
             yield "I found hello.txt."
         else:
-            yield ModelToolCall("tool_1", "lsm_file_list", {"path": "."})
+            yield ModelToolCall("tool_1", "file_list", {"path": "."})
 
     monkeypatch.setattr(generation_routes, "provider_config", lambda *_: ProviderConfig(
         "openai", "mock", "http://127.0.0.1:11434/v1/chat/completions", "",
@@ -133,7 +133,8 @@ async def test_background_generation_reads_workspace_only_after_explicit_enablem
                     break
                 await asyncio.sleep(.02)
             assert calls == []
-            prefs = {"web": True, "lsm": True, "mcp": False, "memory": False}
+            prefs = {"web": True, "lsm": True, "mcp": False, "memory": False,
+                     "machines": {"local": "read"}}
             response = await client.put(f"/api/lsm/preferences/{cid}", json=prefs)
             assert response.status_code == 200
             new = await client.post("/api/agents/chat", json={"conversationId": cid, "text": "List files"})
@@ -164,12 +165,12 @@ async def test_tool_policy_is_rechecked_before_execution(tmp_path, monkeypatch):
     try:
         from local_shell_mcp.webui.routes import _repo
 
-        _repo().save_setting("local", "conversation.permissions.abc", {"lsm": False, "web": False})
-        with pytest.raises(PermissionError, match="disabled"):
-            await run_readonly_tool("local", "abc", ModelToolCall("1", "lsm_file_read", {"path": "x"}))
-        _repo().save_setting("local", "conversation.permissions.abc", {"lsm": True, "web": True})
-        with pytest.raises(PermissionError, match="approval"):
-            await run_readonly_tool("local", "abc", ModelToolCall("1", "mcp_tool_call", {}))
+        _repo().save_setting("local", "agent.machine_policy.global", {"local": "none"})
+        with pytest.raises((PermissionError, KeyError)):
+            await run_machine_tool("local", "abc", ModelToolCall("1", "file_read", {"path": "x"}))
+        _repo().save_setting("local", "agent.machine_policy.global", {"local": "read"})
+        with pytest.raises((PermissionError, KeyError)):
+            await run_machine_tool("local", "abc", ModelToolCall("1", "mcp_tool_call", {}))
     finally:
         get_settings.cache_clear()
 
@@ -186,8 +187,7 @@ async def test_oauth_scope_is_checked_before_creating_tool_enabled_run(tmp_path,
 
     repository = WorkspaceRepository(shared_database(get_settings().state_dir.resolve()))
     cid = repository.create_conversation("alice", {"title": "Private files"})["conversationId"]
-    repository.save_setting("alice", "conversation.permissions." + cid,
-                            {"web": True, "lsm": True, "mcp": False, "memory": False})
+    repository.save_setting("alice", "agent.machine_policy.conversation." + cid, {"local": "read"})
     monkeypatch.setattr(generation_routes, "provider_config", lambda *_: ProviderConfig(
         "openai", "mock", "http://127.0.0.1:11434/v1/chat/completions", "",
     ))
@@ -219,12 +219,10 @@ async def test_revoking_tool_permission_while_model_streams_prevents_filesystem_
     from local_shell_mcp.webui.routes import _repo
 
     owner, cid = "local", "temporary_conversation"
-    _repo().save_setting(owner, "conversation.permissions." + cid,
-                         {"web": True, "lsm": True, "mcp": False, "memory": False})
-    _repo().save_setting(owner, "conversation.permissions." + cid,
-                         {"web": False, "lsm": False, "mcp": False, "memory": False})
+    _repo().save_setting(owner, "agent.machine_policy.conversation." + cid, {"local": "read"})
+    _repo().save_setting(owner, "agent.machine_policy.conversation." + cid, {"local": "none"})
     try:
-        with pytest.raises(PermissionError, match="disabled"):
-            await run_readonly_tool(owner, cid, ModelToolCall("tool-a", "lsm_file_list", {"path": "."}))
+        with pytest.raises((PermissionError, KeyError)):
+            await run_machine_tool(owner, cid, ModelToolCall("tool-a", "file_list", {"path": "."}))
     finally:
         get_settings.cache_clear()

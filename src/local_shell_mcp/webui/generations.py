@@ -78,6 +78,9 @@ class GenerationStore:
         new_conversation = raw_conversation_id in (None, "", "new", "new_conversation")
         if raw_conversation_id is not None and not isinstance(raw_conversation_id, str):
             raise ValueError("Invalid conversation id")
+        project_id = payload.get("projectId") if new_conversation else None
+        if project_id is not None and (not isinstance(project_id, str) or not project_id):
+            raise ValueError("Invalid project id")
         conversation_id = str(uuid.uuid4()) if new_conversation else raw_conversation_id
         prompt = payload.get("text")
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt.encode("utf-8")) > _MAX_PROMPT_BYTES:
@@ -106,11 +109,15 @@ class GenerationStore:
                 if prior:
                     return self._run(prior), False
             if new_conversation:
+                if project_id and not db.execute(
+                    "SELECT 1 FROM projects WHERE id=? AND owner=?", (project_id, owner),
+                ).fetchone():
+                    raise KeyError("Project not found")
                 db.execute(
-                    "INSERT INTO conversations(id,owner,title,model,endpoint,created_at,updated_at) "
-                    "VALUES(?,?,?,?,?,?,?)",
+                    "INSERT INTO conversations(id,owner,title,model,endpoint,project_id,created_at,updated_at) "
+                    "VALUES(?,?,?,?,?,?,?,?)",
                     (conversation_id, owner, prompt.strip()[:80], state["model"],
-                     payload.get("endpoint") or "agents", now, now),
+                     payload.get("endpoint") or "agents", project_id, now, now),
                 )
             elif not db.execute("SELECT 1 FROM conversations WHERE id=? AND owner=?",
                                 (conversation_id, owner)).fetchone():
