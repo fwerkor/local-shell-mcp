@@ -33,7 +33,14 @@ def test_unified_react_workspace_is_first_party_and_vendored_backend_is_removed(
     assert not (WORKSPACE / "compose.yaml").exists()
 
 
-def test_native_python_login_agents_and_sse_are_routed_without_node():
+def test_native_python_login_agents_and_sse_are_routed_without_node(monkeypatch):
+    from types import SimpleNamespace
+
+    from local_shell_mcp import human_ui
+
+    # Route registration must never try to initialize the default `/workspace`
+    # state directory, which does not exist or is unwritable in some CI OSes.
+    monkeypatch.setattr(human_ui, "get_settings", lambda: SimpleNamespace(ui_enabled=True, ui_path="/ui"))
     auth = {route.path for route in auth_routes()}
     assert {"/api/auth/lsm", "/api/auth/refresh", "/api/auth/logout"}.issubset(auth)
     agents = {route.path for route in agent_routes()}
