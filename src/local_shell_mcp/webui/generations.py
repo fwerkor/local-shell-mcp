@@ -97,6 +97,7 @@ class GenerationStore:
             "clientRequestId": client_request_id,
             "provider": str((agent or {}).get("provider") or payload.get("provider") or "openai"),
             "model": str((agent or {}).get("model") or payload.get("model") or ""),
+            "askUserEnabled": bool(agent and "ask_user" in (agent.get("tools") or [])),
         }
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -161,6 +162,69 @@ class GenerationStore:
             db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)", (run_id, _json(created)))
         return Generation(run_id, conversation_id, stamp_ms, response_message_id,
                           user_message_id, "running", (agent or {}).get("id") or payload.get("agent_id")), True
+
+    def pending_action(self, owner: str, run_id: str) -> dict | None:
+        with self.database.connect() as db:
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='requires_action'", (run_id, owner),
+            ).fetchone()
+        if row is None:
+            return None
+        return json.loads(row["state"]).get("pendingAction")
+
+    def pause_for_question(self, owner: str, run_id: str, pending: dict,
+                           history: list[dict], partial_text: str) -> bool:
+        if len(_json(history).encode("utf-8")) > 512 * 1024:
+            raise ValueError("Agent continuation state is too large")
+        with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
+            ).fetchone()
+            if row is None:
+                return False
+            state = json.loads(row["state"])
+            state["pendingAction"] = pending
+            state["resumeHistory"] = history
+            state["partialText"] = partial_text
+            db.execute("UPDATE runs SET state=?,status='requires_action',updated_at=? WHERE id=?",
+                       (_json(state), _now(), run_id))
+            db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)",
+                       (run_id, _json({"event": "on_pending_action", "data": pending})))
+            return True
+
+    def answer_question(self, owner: str, run_id: str, action_id: str,
+                        answer: str) -> tuple[Generation, list[dict], str]:
+        if not isinstance(answer, str) or not answer.strip() or len(answer.encode("utf-8")) > 8192:
+            raise ValueError("A non-empty answer of at most 8 KiB is required")
+        with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT r.* FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='requires_action'", (run_id, owner),
+            ).fetchone()
+            if row is None:
+                raise KeyError("No pending generation action")
+            state = json.loads(row["state"])
+            pending = state.get("pendingAction")
+            if not isinstance(pending, dict) or pending.get("actionId") != action_id:
+                raise ValueError("Stale or mismatched human action")
+            if pending.get("payload", {}).get("type") != "ask_user_question":
+                raise ValueError("An Ask User answer is required")
+            history = state.get("resumeHistory")
+            if not isinstance(history, list):
+                raise ValueError("Missing saved model continuation")
+            call_id = pending["payload"]["tool_call_id"]
+            history.append({"role": "tool", "tool_call_id": call_id, "content": answer})
+            partial_text = state.get("partialText", "")
+            state.pop("pendingAction", None)
+            state.pop("resumeHistory", None)
+            state.pop("partialText", None)
+            db.execute("UPDATE runs SET state=?,status='running',updated_at=? WHERE id=?",
+                       (_json(state), _now(), run_id))
+            return self._run(row), history, partial_text
 
     def append(self, owner: str, run_id: str, event: dict) -> int:
         encoded = _json(event)

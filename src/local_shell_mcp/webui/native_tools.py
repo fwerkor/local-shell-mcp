@@ -10,6 +10,7 @@ import asyncio
 import json
 from pathlib import Path
 
+from ..audit import audit
 from .providers import ModelToolCall
 from .routes import _repo
 
@@ -42,6 +43,31 @@ READ_ONLY_TOOLS = [
                     "machine": {"type": "string", "description": "Target machine, defaults to local", "default": "local"},
                 },
                 "required": ["path"],
+                "additionalProperties": False,
+            },
+        },
+    },
+]
+
+
+ASK_USER_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "ask_user",
+            "description": "Pause the Agent and ask the user a question before continuing.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                    "description": {"type": "string"},
+                    "options": {"type": "array", "items": {
+                        "type": "object", "properties": {"label": {"type": "string"}, "value": {"type": "string"}},
+                        "required": ["label", "value"], "additionalProperties": False,
+                    }},
+                    "multiSelect": {"type": "boolean"},
+                },
+                "required": ["question"],
                 "additionalProperties": False,
             },
         },
@@ -159,7 +185,6 @@ async def run_machine_tool(
     granted_scopes: set[str] | None = None, grant_expires: int | None = None,
 ) -> str:
     """Recheck inherited policy, OAuth scopes and expiration before execution."""
-    from ..audit import audit
     from ..settings import get_settings
     from .machine_permissions import access_level, require_machine_scope
 

@@ -36,7 +36,7 @@
 | Provider endpoints and credentials | Partial | OpenAI-compatible, Anthropic and Gemini text streaming through lazy httpx, secret isolation verified; credentials configuration and usage accounting incomplete |
 | Agent runtime + resumable event protocol | Partial and browser-verified | Python SQLite text generation, SSE delta/replay, idempotency, abort, startup-orphan recovery; tool callbacks/steering/approvals incomplete |
 | MCP and native tool execution | Partial | Per-machine `none/read/write` grants with global → project → conversation defaults in shared SQLite. `file_list`, `file_read`, `file_write` run locally or via existing Worker RPC, with scope checks, revocation, path confinement, audit, and bounded tool outputs. Arbitrary shell, nested MCP approval and multi-provider function calling remain pending. |
-| Ask User, handoff and delegated subagents | Not started | Durable task graph, parent/child lifecycle, resume, cancel, event propagation |
+| Ask User, handoff and delegated subagents | Partial | SQLite-backed single Ask User prompt pause/answer/resume with durable action ID, original SSE event and exact generation retention; multi-question batches, tool approval, handoff and delegated subagents remain pending |
 | Prompt/context, memory, attachments and projects | Not started | Full conversation functionality and client compatibility |
 | LSM Controller control routes | Implemented at routing level | Existing `/api/ui/*` handlers mounted directly under `/api/lsm/controller/*`, without Node proxy; remaining browser control flows require E2E parity |
 | Remove duplicate Hosted Chat and legacy UI | Deferred | Delete only after full parity, without leaving an undocumented fallback implementation |
@@ -66,6 +66,12 @@
   WebUI persistence layer are deferred until used. If SQLite itself cannot
   load, set `LOCAL_SHELL_MCP_STATE_BACKEND=file` to recover the Controller;
   do not edit or delete the database until a verified backup exists.
+- For Agents configured with `ask_user`, the Python model loop can pause
+  durably on a single question, persist the pending action and model history in
+  SQLite, deliver `on_pending_action` to React, then resume the same generation
+  after an owner-authenticated answer. The action ID is one-shot, and a stale
+  or mismatched ID returns 409. Multistep human reviews and delegated Agent
+  handoffs are separate remaining tasks.
 - Agent machine permissions are **per machine**, with `none`, `read`, `write`
   levels. They inherit **global defaults → project defaults → conversation
   overrides** in the same SQLite database. An explicit `none` blocks inherited

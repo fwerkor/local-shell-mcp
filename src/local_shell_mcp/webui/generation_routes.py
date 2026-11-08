@@ -11,6 +11,7 @@ import contextlib
 import json
 import logging
 import time
+import uuid
 from collections.abc import AsyncIterator
 
 from starlette.exceptions import HTTPException
@@ -69,32 +70,35 @@ async def _run_model(
     owner: str, generation: Generation, profile: ProviderConfig,
     *, instructions: str = "", parameters: dict | None = None,
     native_file_tools: bool = False, write_tools: bool = False,
+    ask_user_enabled: bool = False,
+    resume_history: list[dict] | None = None, partial_text: str = "",
     granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
 ) -> None:
     repo = _generation_store()
-    text_parts: list[str] = []
+    text_parts: list[str] = [partial_text] if partial_text else []
     params = parameters or {}
     step_id = "step_" + generation.run_id
     now_ms = int(time.time() * 1000)
     try:
-        history = repo.history(owner, generation.conversation_id)
-        if instructions:
+        history = resume_history if resume_history is not None else repo.history(owner, generation.conversation_id)
+        if instructions and resume_history is None:
             history.insert(0, {"role": "system", "content": instructions})
-        repo.append(owner, generation.run_id, {
-            "event": "on_run_step",
-            "data": {
-                "type": "message_creation", "id": step_id,
-                "runId": generation.response_message_id,
-                "index": 0, "created_at": now_ms, "status": "in_progress",
-                "stepDetails": {
-                    "type": "message_creation",
-                    "message_creation": {
-                        "message_id": generation.response_message_id,
-                        "content_type": "text", "phase": "final_answer",
+        if resume_history is None:
+            repo.append(owner, generation.run_id, {
+                "event": "on_run_step",
+                "data": {
+                    "type": "message_creation", "id": step_id,
+                    "runId": generation.response_message_id,
+                    "index": 0, "created_at": now_ms, "status": "in_progress",
+                    "stepDetails": {
+                        "type": "message_creation",
+                        "message_creation": {
+                            "message_id": generation.response_message_id,
+                            "content_type": "text", "phase": "final_answer",
+                        },
                     },
                 },
-            },
-        })
+            })
         raw_max_tokens = params.get("max_tokens") or params.get("max_output_tokens") or 2048
         max_tokens = max(1, min(int(raw_max_tokens), 16384))
         temperature = params.get("temperature")
@@ -110,14 +114,17 @@ async def _run_model(
                          "delta": {"content": {"type": "text", "text": chunk, "phase": "final_answer"}}},
             })
 
-        if native_file_tools and profile.provider == "openai":
-            from .native_tools import READ_ONLY_TOOLS, WRITE_TOOLS, run_machine_tool
+        if (native_file_tools or ask_user_enabled) and profile.provider == "openai":
+            from .native_tools import ASK_USER_TOOLS, READ_ONLY_TOOLS, WRITE_TOOLS, run_machine_tool
 
             for round_number in range(3):
                 calls: list[ModelToolCall] = []
                 async for item in stream_model_with_tools(
-                    profile, history, tools=READ_ONLY_TOOLS + (WRITE_TOOLS if write_tools else []),
-                    max_tokens=max_tokens,
+                    profile, history, tools=(
+                        (READ_ONLY_TOOLS if native_file_tools else []) +
+                        (WRITE_TOOLS if write_tools else []) +
+                        (ASK_USER_TOOLS if ask_user_enabled else [])
+                    ), max_tokens=max_tokens,
                     temperature=temperature,
                 ):
                     if isinstance(item, ModelToolCall):
@@ -128,6 +135,46 @@ async def _run_model(
                     break
                 if round_number == 2 or len(calls) > 4:
                     raise ValueError("Model tool-call budget exceeded")
+                asking = [call for call in calls if call.name == "ask_user"]
+                if asking:
+                    if not ask_user_enabled or len(calls) != 1:
+                        raise ValueError("Only one Ask User question can be pending at a time")
+                    question = asking[0].arguments.get("question")
+                    if not isinstance(question, str) or not question.strip() or len(question) > 2000:
+                        raise ValueError("An Ask User question is required")
+                    options = asking[0].arguments.get("options", [])
+                    if not isinstance(options, list) or len(options) > 12 or any(
+                        not isinstance(item, dict) or
+                        not isinstance(item.get("label"), str) or
+                        not isinstance(item.get("value"), str) or
+                        len(item["label"]) > 128 or len(item["value"]) > 128 for item in options
+                    ):
+                        raise ValueError("Invalid Ask User options")
+                    history.append({
+                        "role": "assistant", "content": None,
+                        "tool_calls": [{"id": asking[0].call_id, "type": "function",
+                                        "function": {"name": "ask_user",
+                                                     "arguments": json.dumps(asking[0].arguments)}}],
+                    })
+                    pending = {
+                        "actionId": "action_" + uuid.uuid4().hex,
+                        "streamId": generation.conversation_id,
+                        "conversationId": generation.conversation_id,
+                        "runId": generation.run_id,
+                        "responseMessageId": generation.response_message_id,
+                        "createdAt": int(time.time() * 1000),
+                        "payload": {
+                            "type": "ask_user_question", "tool_call_id": asking[0].call_id,
+                            "question": {"question": question,
+                                         "description": str(asking[0].arguments.get("description") or "")[:1000],
+                                         "options": options,
+                                         "multiSelect": asking[0].arguments.get("multiSelect") is True},
+                        },
+                    }
+                    if not repo.pause_for_question(owner, generation.run_id, pending, history,
+                                                   "".join(text_parts)):
+                        raise RuntimeError("Unable to park Ask User generation")
+                    return
                 history.append({
                     "role": "assistant", "content": None,
                     "tool_calls": [{"id": call.call_id, "type": "function",
@@ -182,6 +229,8 @@ async def _run_model(
 
 async def _start_task(owner: str, generation: Generation, profile: ProviderConfig,
                       agent: dict | None, native_file_tools: bool = False, write_tools: bool = False,
+                      ask_user_enabled: bool = False,
+                      resume_history: list[dict] | None = None, partial_text: str = "",
                       granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None) -> None:
     async with _TASK_GUARD:
         existing = _TASKS.get(generation.run_id)
@@ -192,6 +241,8 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
                        instructions=str((agent or {}).get("instructions") or ""),
                        parameters=(agent or {}).get("model_parameters") or {},
                        native_file_tools=native_file_tools, write_tools=write_tools,
+                       ask_user_enabled=ask_user_enabled,
+                       resume_history=resume_history, partial_text=partial_text,
                        granted_scopes=granted_scopes, grant_expires=grant_expires),
             name="webui-generation-" + generation.run_id,
         )
@@ -255,8 +306,10 @@ async def start_generation(request: Request):
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     if fresh:
+        ask_user_enabled = bool(agent and "ask_user" in (agent.get("tools") or []))
         await _start_task(owner, result, profile, agent, native_file_tools=requested_tools,
                           write_tools=any(level == "write" for level in policy.values()),
+                          ask_user_enabled=ask_user_enabled,
                           granted_scopes=frozenset(scopes), grant_expires=grant_expires)
     return JSONResponse(_generation_body(result, status="stream" if fresh else "resumed",
                                          resumed=not fresh), status_code=202,
@@ -312,9 +365,11 @@ async def generation_status(request: Request):
         return JSONResponse({"active": False, "generationProtocolVersion": 2},
                             headers=_generator_headers())
     active = generation.status in {"running", "requires_action"}
+    pending = _generation_store().pending_action(owner, generation.run_id)
     return JSONResponse({
         "active": active,
         "status": generation.status,
+        **({"pendingAction": pending} if pending is not None else {}),
         "streamId": generation.conversation_id,
         "createdAt": generation.generation_created_at,
         "elapsedMs": max(0, int(time.time() * 1000) - generation.generation_created_at),
@@ -364,12 +419,70 @@ async def resume_generation(request: Request):
     cid = payload.get("conversationId")
     if not isinstance(cid, str):
         raise HTTPException(400, detail="Conversation id required")
-    generation = _generation_store().latest(owner, cid)
+    store = _generation_store()
+    generation = store.latest(owner, cid)
     if generation is None:
         raise HTTPException(404, detail="Generation not found")
-    if generation.status != "running":
-        raise HTTPException(409, detail="Generation cannot be resumed")
-    return JSONResponse(_generation_body(generation, status="resumed", resumed=True),
+    action_id = payload.get("actionId")
+    if action_id is None:
+        if generation.status != "running":
+            raise HTTPException(409, detail="Generation cannot be resumed")
+        return JSONResponse(_generation_body(generation, status="resumed", resumed=True),
+                            headers=_generator_headers())
+
+    if not isinstance(action_id, str) or not action_id:
+        raise HTTPException(400, detail="Invalid human action id")
+    if generation.status != "requires_action":
+        raise HTTPException(409, detail="No pending human action")
+    expected = payload.get("generationCreatedAt")
+    if expected is not None and str(generation.generation_created_at) != str(expected):
+        raise HTTPException(409, detail="Generation identity mismatch")
+    answer = payload.get("answer")
+    if answer is None and isinstance(payload.get("answers"), dict):
+        answer = ", ".join(str(item) for item in payload["answers"].values())
+    try:
+        # Confirm the user is still entitled to use the Agent before taking
+        # the one-shot SQLite continuation claim.
+        from ..auth import principal_scopes
+        from ..settings import get_settings
+        from .machine_permissions import require_machine_scope, resolve_access
+
+        principal = getattr(request.state, "principal", None)
+        scopes = ({"shell:read", "shell:write", "remote:use"}
+                  if get_settings().auth_mode == "none" else
+                  principal_scopes(principal) if principal is not None and hasattr(principal, "claims") else set())
+        expiry = None if get_settings().auth_mode == "none" else (
+            principal.claims.get("exp") if principal is not None and hasattr(principal, "claims") else None
+        )
+        machine_policy = resolve_access(owner, cid)
+        for machine, level in machine_policy.items():
+            if level in {"read", "write"}:
+                require_machine_scope(scopes, machine, level, expires=expiry)
+        pending = store.pending_action(owner, generation.run_id)
+        if pending is None or pending.get("actionId") != action_id:
+            raise HTTPException(409, detail="Stale or mismatched human action")
+        # Read and validate the provider before mutating SQLite. Failed config
+        # cannot consume a one-shot answer and strand the pending generation.
+        with _database().connect() as db:
+            row = db.execute("SELECT state,agent_id FROM runs WHERE id=?", (generation.run_id,)).fetchone()
+        state = json.loads(row["state"])
+        profile = provider_config(state.get("provider") or "openai", state.get("model") or None)
+        agent = AgentRepository(_database()).get(owner, row["agent_id"]) if row["agent_id"] else None
+        paused_task = _TASKS.get(generation.run_id)
+        if paused_task and not paused_task.done():
+            await asyncio.wait_for(asyncio.shield(paused_task), timeout=5)
+        resumed, history, previous_text = store.answer_question(owner, generation.run_id, action_id, answer)
+    except PermissionError as exc:
+        raise HTTPException(403, detail=str(exc)) from exc
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(400, detail=str(exc)) from exc
+    await _start_task(owner, resumed, profile, agent,
+                      native_file_tools=any(level in {"read", "write"} for level in machine_policy.values()),
+                      write_tools=any(level == "write" for level in machine_policy.values()),
+                      ask_user_enabled=bool(state.get("askUserEnabled")),
+                      resume_history=history, partial_text=previous_text,
+                      granted_scopes=frozenset(scopes), grant_expires=expiry)
+    return JSONResponse(_generation_body(resumed, status="resumed", resumed=True),
                         headers=_generator_headers())
 
 
