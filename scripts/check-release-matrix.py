@@ -211,11 +211,16 @@ def main() -> int:
         {},
     )
     release_options = release_step.get("with", {})
-    if release_options.get("generate_release_notes") is not True:
-        print("GitHub releases must generate their change log from merged changes.")
+    dispatch_inputs = workflow.get("on", workflow.get(True, {})).get("workflow_dispatch", {}).get("inputs", {})
+    notes_input = dispatch_inputs.get("release_notes", {})
+    if notes_input.get("type") != "string" or notes_input.get("required", True) or notes_input.get("default") != "":
+        print("Release notes must be an optional Markdown input, empty by default.")
         return 1
-    if "body" in release_options or "body_path" in release_options:
-        print("GitHub releases must not prepend deployment instructions to the generated change log.")
+    if release_options.get("generate_release_notes") != "${{ inputs.release_notes == '' }}":
+        print("GitHub releases must generate changelogs only when no custom notes are provided.")
+        return 1
+    if release_options.get("body") != "${{ inputs.release_notes }}" or "body_path" in release_options:
+        print("GitHub releases must use the supplied notes verbatim without a static template.")
         return 1
 
     npm_job = jobs.get("publish-npm", {})

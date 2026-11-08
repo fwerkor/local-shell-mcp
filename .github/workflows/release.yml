@@ -12,6 +12,11 @@ on:
         required: true
         default: false
         type: boolean
+      release_notes:
+        description: "Optional custom Markdown release notes; blank uses auto-generated notes"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -613,7 +618,8 @@ jobs:
           tag_name: ${{ github.event.inputs.tag }}
           target_commitish: ${{ github.sha }}
           prerelease: ${{ github.event.inputs.prerelease }}
-          generate_release_notes: true
+          generate_release_notes: ${{ inputs.release_notes == '' }}
+          body: ${{ inputs.release_notes }}
           files: dist/*
 
   publish-snap:
