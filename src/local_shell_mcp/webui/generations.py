@@ -98,7 +98,7 @@ class GenerationStore:
             "clientRequestId": client_request_id,
             "provider": selected_provider(payload, agent),
             "model": str((agent or {}).get("model") or payload.get("model") or ""),
-            "askUserEnabled": bool(agent and bool({"ask_user", "ask_user_question"}.intersection(agent.get("tools") or []))),
+            "askUserEnabled": bool(agent and "ask_user_question" in (agent.get("tools") or [])),
         }
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -197,9 +197,12 @@ class GenerationStore:
             return True
 
     def answer_question(self, owner: str, run_id: str, action_id: str,
-                        answer: str) -> tuple[Generation, list[dict], str]:
-        if not isinstance(answer, str) or not answer.strip() or len(answer.encode("utf-8")) > 8192:
-            raise ValueError("A non-empty answer of at most 8 KiB is required")
+                        answer: dict | str) -> tuple[Generation, list[dict], str]:
+        from .ask_user_tools import resolve_ask_user_question_resume
+
+        body = {"answer": answer} if isinstance(answer, str) else answer
+        if not isinstance(body, dict):
+            raise ValueError("An answer is required")
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
@@ -214,11 +217,15 @@ class GenerationStore:
                 raise ValueError("Stale or mismatched human action")
             if pending.get("payload", {}).get("type") != "ask_user_question":
                 raise ValueError("An Ask User answer is required")
+            resolution = resolve_ask_user_question_resume(pending["payload"], body)
+            if "error" in resolution:
+                raise ValueError(resolution["error"])
+            output = json.dumps(resolution["resumeValue"], ensure_ascii=False, separators=(",", ":"))
             history = state.get("resumeHistory")
             if not isinstance(history, list):
                 raise ValueError("Missing saved model continuation")
             call_id = pending["payload"]["tool_call_id"]
-            history.append({"role": "tool", "tool_call_id": call_id, "content": answer})
+            history.append({"role": "tool", "tool_call_id": call_id, "content": output})
             partial_text = state.get("partialText", "")
             state.pop("pendingAction", None)
             state.pop("resumeHistory", None)

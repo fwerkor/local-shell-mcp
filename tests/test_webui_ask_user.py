@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -25,12 +26,13 @@ async def test_ask_user_halts_and_resumes_same_sqlite_generation(tmp_path, monke
     async def mock_agent(profile, history, *, tools, **kwargs):
         calls.append([tool["function"]["name"] for tool in tools])
         if not any(message.get("role") == "tool" for message in history):
-            yield ModelToolCall("ask-call-1", "ask_user", {
+            yield ModelToolCall("ask-call-1", "ask_user_question", {
                 "question": "Which file should I inspect?",
                 "options": [{"label": "README", "value": "README.md"}],
             })
         else:
-            assert history[-1] == {"role": "tool", "tool_call_id": "ask-call-1", "content": "README.md"}
+            assert history[-1]["tool_call_id"] == "ask-call-1"
+            assert json.loads(history[-1]["content"]) == {"answer": "README.md"}
             yield "I will inspect README.md."
 
     monkeypatch.setattr(generation_routes, "provider_config", lambda *_: ProviderConfig(
@@ -41,7 +43,7 @@ async def test_ask_user_halts_and_resumes_same_sqlite_generation(tmp_path, monke
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             created = await client.post("/api/agents", json={
-                "name": "Asker", "provider": "openAI", "model": "mock", "tools": ["ask_user"],
+                "name": "Asker", "provider": "openAI", "model": "mock", "tools": ["ask_user_question"],
             })
             assert created.status_code == 201, created.text
             agent_id = created.json()["id"]
@@ -85,7 +87,7 @@ async def test_ask_user_halts_and_resumes_same_sqlite_generation(tmp_path, monke
                 await asyncio.sleep(0.02)
             assert status["status"] == "complete", status
             assert "pendingAction" not in status
-            assert calls == [["session_manage", "plan_manage", "ask_user"]] * 2
+            assert calls == [["session_manage", "plan_manage", "ask_user_question"]] * 2
             latest = repo.latest("local", cid)
             assert latest.run_id == generation.run_id
             assert repo.pending_action("local", latest.run_id) is None
@@ -116,7 +118,7 @@ async def test_pending_ask_user_survives_store_recreation_and_abort(tmp_path, mo
     prompt = [{"role": "user", "content": "Choose a file"},
               {"role": "assistant", "content": None,
                "tool_calls": [{"id": "call-1", "type": "function",
-                               "function": {"name": "ask_user", "arguments": "{}"}}]}]
+                               "function": {"name": "ask_user_question", "arguments": "{}"}}]}]
     assert first.pause_for_question("alice", pending_run.run_id, pending, prompt, "partial reply")
     # A new process opening the same SQLite database can fetch the pending
     # question; no in-memory task or browser connection is needed.
@@ -129,14 +131,15 @@ async def test_pending_ask_user_survives_store_recreation_and_abort(tmp_path, mo
         after_restart.answer_question("bob", pending_run.run_id, "question-1", "README.md")
     with pytest.raises(ValueError, match="Stale"):
         after_restart.answer_question("alice", pending_run.run_id, "another-action", "README.md")
-    with pytest.raises(ValueError, match="non-empty"):
+    with pytest.raises(ValueError, match="answer is required"):
         after_restart.answer_question("alice", pending_run.run_id, "question-1", "")
     resumed, history, partial = after_restart.answer_question(
         "alice", pending_run.run_id, "question-1", "README.md",
     )
     assert resumed.run_id == pending_run.run_id
     assert partial == "partial reply"
-    assert history[-1] == {"role": "tool", "tool_call_id": "call-1", "content": "README.md"}
+    assert history[-1]["tool_call_id"] == "call-1"
+    assert json.loads(history[-1]["content"]) == {"answer": "README.md"}
     with pytest.raises(KeyError):
         after_restart.answer_question("alice", pending_run.run_id, "question-1", "duplicate")
     assert after_restart.get("alice", pending_run.run_id).status == "running"

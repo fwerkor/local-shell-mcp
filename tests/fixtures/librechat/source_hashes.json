@@ -1,0 +1,6 @@
+{
+  "src/hitl/askUserQuestionsInterrupt.ts": "073f202835da2625cc430f62bea92c4241c56b63a2946ab25a26fc4634f72bca",
+  "packages/api/src/agents/hitl/askUserQuestionTool.ts": "bb5555b806a8fcb0f118ff06f7c7a5505587c11f2485a6be4bdd8d5580d35840",
+  "packages/api/src/agents/hitl/resume.ts": "9fb798731c45a310d3deb88407e9f74d74116c006f8fc21186686dc0aad00ec5",
+  "api/server/controllers/agents/protocol.js": "adfe8d44544d4deb37be528c6600a4a41e4e30095141fdd3ec0af421da4aff5f"
+}

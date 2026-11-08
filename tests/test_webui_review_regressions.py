@@ -139,7 +139,7 @@ def test_controller_alias_rejects_cross_origin_none_auth(tmp_path, monkeypatch):
         get_settings.cache_clear()
 
 
-@pytest.mark.parametrize("identifier", ["ask_user", "ask_user_question"])
+@pytest.mark.parametrize("identifier", ["ask_user_question"])
 def test_retained_agent_ask_user_identifier_survives_restart(repository, identifier):
     job, _ = GenerationStore(repository.database).begin("local", {"text": "question"},
         {"tools": [identifier]})

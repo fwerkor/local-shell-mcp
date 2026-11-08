@@ -1,0 +1,79 @@
+{
+  "name": "ask_user_question",
+  "description": "Ask the user one to four related clarifying questions and pause the run until they answer; their answers are returned as this tool's result, keyed by each question id. Use it only when you are genuinely blocked on decisions you cannot resolve from the conversation or your other tools. Put every related question in this ONE tool call, and NEVER call this tool in parallel with any other tool call. Use stable, concise ids matching [A-Za-z][A-Za-z0-9_-]{0,63}. When the realistic answers are enumerable, provide 2-6 concise options; set multiSelect to true only when several options may sensibly apply at once (the selected option values are returned joined by \", \"). Keep every option label within 280 characters and put supporting context in the question description. The user can always type a free-form answer instead — so do NOT include a catch-all option like 'Other' or 'Something else': the answer UI always offers free-form input on its own.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "questions": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 4,
+        "description": "One to four related questions presented in one interaction.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+              "description": "Unique answer key for this question."
+            },
+            "header": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "description": "Optional short heading shown above the question."
+            },
+            "question": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000,
+              "description": "One clarifying question to ask the user."
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 4000,
+              "description": "Optional context rendered alongside the question."
+            },
+            "options": {
+              "type": "array",
+              "maxItems": 12,
+              "description": "Optional pre-defined choices. Omit for free-form only.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 280,
+                    "description": "Short choice shown to the user. Maximum 280 characters; put supporting context in the question description."
+                  },
+                  "value": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "Value returned if this option is picked."
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ]
+              }
+            },
+            "multiSelect": {
+              "type": "boolean",
+              "description": "Allow several option values for this question."
+            }
+          },
+          "required": [
+            "id",
+            "question"
+          ]
+        }
+      }
+    },
+    "required": [
+      "questions"
+    ]
+  }
+}

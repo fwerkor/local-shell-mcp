@@ -83,9 +83,9 @@ async def test_generation_rejects_invalid_model_tool_actions(active_generation, 
         if behavior == "repeated_tools":
             yield ModelToolCall("x", "file_read", {"path": "missing"})
         elif behavior == "invalid_ask_user":
-            yield ModelToolCall("x", "ask_user", {"question": ""})
+            yield ModelToolCall("x", "ask_user_question", {"question": ""})
         elif behavior == "invalid_options":
-            yield ModelToolCall("x", "ask_user", {"question": "Choose", "options": ["wrong"]})
+            yield ModelToolCall("x", "ask_user_question", {"question": "Choose", "options": ["wrong"]})
         elif behavior == "invalid_mcp_arguments":
             yield ModelToolCall("x", "mcp_tool_call", {"name": "missing", "arguments": []})
         elif behavior == "multiple_delegates":
@@ -94,7 +94,7 @@ async def test_generation_rejects_invalid_model_tool_actions(active_generation, 
         elif behavior == "orphaned_external_approval":
             yield ModelToolCall("x", "mcp_tool_call", {"name": "test:read", "arguments": {}})
         elif behavior == "oversized_call":
-            yield ModelToolCall("x", "ask_user", {"question": "a" * 3000})
+            yield ModelToolCall("x", "ask_user_question", {"question": "a" * 3000})
 
     monkeypatch.setattr(generation_routes, "stream_model_with_tools", misbehaving)
     if behavior == "orphaned_external_approval":

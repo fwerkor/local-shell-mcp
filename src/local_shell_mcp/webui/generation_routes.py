@@ -254,25 +254,17 @@ async def _run_model(
                     })
                     history.append({"role": "tool", "tool_call_id": deleg.call_id, "content": result})
                     continue
-                asking = [call for call in calls if call.name == "ask_user"]
+                asking = [call for call in calls if call.name == "ask_user_question"]
                 if asking:
                     if not ask_user_enabled or len(calls) != 1:
                         raise ValueError("Only one Ask User question can be pending at a time")
-                    question = asking[0].arguments.get("question")
-                    if not isinstance(question, str) or not question.strip() or len(question) > 2000:
-                        raise ValueError("An Ask User question is required")
-                    options = asking[0].arguments.get("options", [])
-                    if not isinstance(options, list) or len(options) > 12 or any(
-                        not isinstance(item, dict) or
-                        not isinstance(item.get("label"), str) or
-                        not isinstance(item.get("value"), str) or
-                        len(item["label"]) > 128 or len(item["value"]) > 128 for item in options
-                    ):
-                        raise ValueError("Invalid Ask User options")
+                    from .ask_user_tools import build_ask_user_payload
+
+                    question_payload = build_ask_user_payload(asking[0].arguments, asking[0].call_id)
                     history.append({
                         "role": "assistant", "content": None,
                         "tool_calls": [{"id": asking[0].call_id, "type": "function",
-                                        "function": {"name": "ask_user",
+                                        "function": {"name": "ask_user_question",
                                                      "arguments": json.dumps(asking[0].arguments)}}],
                     })
                     pending = {
@@ -282,13 +274,7 @@ async def _run_model(
                         "runId": generation.run_id,
                         "responseMessageId": generation.response_message_id,
                         "createdAt": int(time.time() * 1000),
-                        "payload": {
-                            "type": "ask_user_question", "tool_call_id": asking[0].call_id,
-                            "question": {"question": question,
-                                         "description": str(asking[0].arguments.get("description") or "")[:1000],
-                                         "options": options,
-                                         "multiSelect": asking[0].arguments.get("multiSelect") is True},
-                        },
+                        "payload": question_payload,
                     }
                     if not repo.pause_for_question(owner, generation.run_id, pending, history,
                                                    "".join(text_parts)):
@@ -439,7 +425,7 @@ async def start_generation(request: Request):
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     if fresh:
-        ask_user_enabled = bool(agent and bool({"ask_user", "ask_user_question"}.intersection(agent.get("tools") or [])))
+        ask_user_enabled = bool(agent and "ask_user_question" in (agent.get("tools") or []))
         from .routes import _repo
 
         flags = _repo().setting(owner, "conversation.permissions." + result.conversation_id, {})
@@ -574,9 +560,6 @@ async def resume_generation(request: Request):
     expected = payload.get("generationCreatedAt")
     if expected is not None and str(generation.generation_created_at) != str(expected):
         raise HTTPException(409, detail="Generation identity mismatch")
-    answer = payload.get("answer")
-    if answer is None and isinstance(payload.get("answers"), dict):
-        answer = ", ".join(str(item) for item in payload["answers"].values())
     try:
         # Confirm the user is still entitled to use the Agent before taking
         # the one-shot SQLite continuation claim.
@@ -625,7 +608,7 @@ async def resume_generation(request: Request):
                                           requested["arguments"]), decision)
         else:
             resumed, history, previous_text = store.answer_question(
-                owner, generation.run_id, action_id, answer,
+                owner, generation.run_id, action_id, payload,
             )
     except PermissionError as exc:
         raise HTTPException(403, detail=str(exc)) from exc
