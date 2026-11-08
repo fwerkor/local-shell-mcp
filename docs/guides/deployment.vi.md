@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: d7d01bc3f36f434c8e66c3fb6f65c2934937c5b2937dd9e8ba7beefc018fd14f -->
+<!-- i18n-source-sha256: cef0a90f9de3e2806e2a6bd8925217ea44ea6d6e6bce911eea09b1d4192a82d9 -->
 # Lựa chọn runtime và mô hình deployment
 
 `local-shell-mcp` có hai quyết định bổ sung:
@@ -6,7 +6,7 @@
 1. **Runtime**: process server chạy như thế nào và kiểm soát workspace nào.
 2. **Giao diện**: sử dụng [unified web workspace](../getting-started/web-workspace.md) tùy chọn hoặc kết nối ứng dụng khách MCP bên ngoài như Gemini hoặc ChatGPT.
 
-Giao diện hàng ngày được đề xuất là không gian làm việc web tự lưu trữ (trò chuyện, dự án và trang kiểm soát LSM). Nó được triển khai riêng biệt với Bộ điều khiển. Docker, phần mở rộng VS Code, các tệp nhị phân phát hành, các bản cài đặt Python và chế độ stdio là những cách để chạy Bộ điều khiển; các ứng dụng trò chuyện bên ngoài vẫn là ứng dụng khách tùy chọn.
+**Controller được khuyến nghị triển khai bằng một tệp thực thi**, không cần Python, Docker hay source. Các cách khác vẫn được hỗ trợ.
 
 ```text
 Runtime layer                      Exposure layer                 Client layer
@@ -40,11 +40,11 @@ Local MCP client
 
 | Thời gian chạy | Tốt nhất cho | Ranh giới cách ly | Nguồn chuỗi công cụ | Truy cập MCP bên ngoài | Trang |
 |---|---|---|---|---|---|
-| **Source checkout (khuyến nghị)** / `pipx` | Dùng Python-native, debugging, development | Host virtualenv or VM | Python package cộng host tools | Thêm HTTPS proxy hoặc tunnel | [Python install](../installation/python.md) |
+| **Binary một tệp (khuyến nghị)** | Đa số nền tảng được hỗ trợ | Host or VM | Host tools cộng executable cấu hình | Thêm HTTPS proxy hoặc tunnel | [Standalone binary](../installation/binary.md) |
 | Docker Soạn | Container cách ly và dùng tạm | thùng chứa | Hình ảnh Bộ điều khiển tinh gọn; cài đặt riêng các chuỗi công cụ dành riêng cho nhiệm vụ | Thêm proxy hoặc đường hầm HTTPS | [Docker Compose](../installation/docker.md) |
 | Docker Compose + xe sidecar đường hầm | Không khuyến nghị: Chuyển tiếp qua máy chủ công khai; Cloudflare Tunnel chỉ là phương án cuối | thùng chứa | Hình ảnh dự án | Chuyển tiếp qua máy chủ công khai; Cloudflare Tunnel chỉ là phương án cuối | [Docker Compose](../installation/docker.md#cloudflare-tunnel-sidecar) |
 | VS Code extension | Start/stop server từ editor workspace | Thường là host process | Host tools cộng executable cấu hình | Thêm HTTPS tunnel/proxy ngoài cho ChatGPT | [VS Code extension](../installation/vscode-extension.md) |
-| Standalone binary | Host hoặc VM không có Docker | Host or VM | Host tools cộng executable cấu hình | Thêm HTTPS proxy hoặc tunnel | [Standalone binary](../installation/binary.md) |
+| Source / pipx | Phát triển và tùy biến | Host virtualenv or VM | Python package cộng host tools | Thêm HTTPS proxy hoặc tunnel | [Python install](../installation/python.md) |
 | Stdio mode | MCP client cục bộ spawn process trực tiếp | Client process boundary | Host tools cộng executable cấu hình | Không dùng được với ChatGPT web/app | [Stdio mode](../installation/stdio.md) |
 
 ## Ma trận kết nối client
@@ -84,11 +84,11 @@ Khác biệt không nằm ở abstract API mà ở **operating environment** ph�
 
 ## Lựa chọn khuyến nghị
 
-Khuyến nghị **triển khai trực tiếp từ mã nguồn** trong môi trường cách ly; xem [hướng dẫn Python/source](../installation/python.md). Docker Compose là phương án khác.
+**Ưu tiên tệp thực thi duy nhất**: tải đúng nền tảng và chạy bằng tài khoản giới hạn với workspace riêng. [Hướng dẫn binary](../installation/binary.md).
 
 Sử dụng **tiện ích mở rộng Mã VS** khi quy trình làm việc bắt đầu từ trình chỉnh sửa và bạn muốn có trình khởi chạy cục bộ. Nó vẫn là một thời gian chạy. Máy khách web từ xa cần có proxy hoặc đường hầm HTTPS có thể truy cập được.
 
-Dùng **standalone binary** khi Docker không khả dụng nhưng VM, container host hoặc dedicated user account đã tạo boundary.
+**Cài từ source** phù hợp để phát triển, gỡ lỗi và tùy biến trong môi trường Python. [Hướng dẫn Python](../installation/python.md).
 
 Dùng **`pipx` hoặc source install** để development/debugging `local-shell-mcp` hoặc khi Python-based environment dễ duy trì hơn.
 

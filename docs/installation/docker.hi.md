@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
+<!-- i18n-source-sha256: f769f579039e6eae80c7c955b80248ae0919448b2f5ca18ea4588ee66b0beba1 -->
 # Docker Compose runtime
 
-Docker Compose अलग कंटेनर के लिए विकल्प है। **स्रोत से सीधे डिप्लॉय करना अनुशंसित है**; [Python/source गाइड](python.md) देखें।
+[एकल बाइनरी](binary.md) अनुशंसित है; Docker Compose अलग कंटेनर के लिए विकल्प है।
 
 यह runtime choice है। इसे ChatGPT, generic HTTP MCP client से जोड़ा जा सकता है या local testing के लिए रखा जा सकता है।
 

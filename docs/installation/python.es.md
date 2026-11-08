@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: c8c0d8ebdbb123b9ac4af1fd288f30e8ca69037ca086486cb8027e2592f4b75a -->
+<!-- i18n-source-sha256: 1d80cfbe14747fb0691e91065f582d1e47eb36921d8b27da1648dcd26114a2e5 -->
 # Runtimes Python, pipx y source
 
-**Se recomienda la instalación directa desde el repositorio de origen.** Utilice un entorno virtual Python y un workspace limitado. Docker Compose sigue disponible.
+Se recomienda el [binario de archivo único](binary.md) para despliegues normales. Python y fuentes quedan para desarrollo y personalización.
 
 Use esta página para tres casos relacionados:
 
@@ -48,7 +48,7 @@ El proceso usa las herramientas instaladas en el host. El paquete Python no inst
 
 ## Editable source checkout
 
-Úselo para despliegues normales y desarrollo. Para acceso público, consulte [quickstart](../getting-started/quickstart.md).
+La instalación desde fuentes sirve para desarrollo; para uso normal elija el [binario](binary.md). OAuth y HTTPS: [inicio rápido](../getting-started/quickstart.md).
 
 ```bash
 git clone https://github.com/fwerkor/local-shell-mcp.git

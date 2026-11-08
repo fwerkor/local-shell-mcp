@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
+<!-- i18n-source-sha256: f769f579039e6eae80c7c955b80248ae0919448b2f5ca18ea4588ee66b0beba1 -->
 # Docker Compose runtime
 
-Docker Compose는 격리 컨테이너용 대안입니다. **소스에서 직접 배포하는 방식을 권장**합니다. [Python/소스 안내](python.md)를 참조하세요.
+대부분의 배포는 [단일 실행 파일](binary.md)을 권장하며 Docker Compose는 격리 컨테이너를 위한 대안입니다.
 
 이는 runtime 선택입니다. ChatGPT, generic HTTP MCP client에 연결하거나 local testing에만 사용할 수 있습니다.
 

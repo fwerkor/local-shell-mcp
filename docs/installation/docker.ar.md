@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
+<!-- i18n-source-sha256: f769f579039e6eae80c7c955b80248ae0919448b2f5ca18ea4588ee66b0beba1 -->
 # Runtime عبر Docker Compose
 
-Docker Compose خيار بديل للحاويات المعزولة. **يُنصح بالنشر المباشر من المصدر**؛ انظر [دليل Python والمصدر](python.md).
+يوصى باستخدام [الملف التنفيذي الواحد](binary.md)؛ ويظل Docker Compose خياراً للحاويات المعزولة.
 
 هذا اختيار runtime. يمكن وصله بـ ChatGPT أو MCP client عام عبر HTTP أو إبقاؤه محليًا للاختبار.
 

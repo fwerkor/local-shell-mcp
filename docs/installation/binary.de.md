@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 42daa6d3dd931530a1d2e86d6a36fc6424b7494ff078626157c158b38b1f4b1e -->
+<!-- i18n-source-sha256: ed47d5e0691f17af5cd4758981c31957e299202bf72433b34b4656346312091e -->
 # Eigenständiger Binary-Runtime
 
-Release-Binaries führen `local-shell-mcp` ohne Docker und ohne Python-Umgebung aus. Verwenden Sie diesen Runtime, wenn Docker nicht verfügbar ist oder eine dedizierte VM, ein Container-Host, Laborserver oder eingeschränktes Benutzerkonto bereits die Sicherheitsgrenze bildet.
+Empfohlen ist die **einzelne ausführbare Controller-Datei** von GitHub Releases, ohne Python, Docker oder Quellcode-Checkout.
 
 Dies ist eine Runtime-Entscheidung. Der ChatGPT-Zugriff wird separat über einen HTTPS-`/mcp`-Endpoint konfiguriert.
 
@@ -19,16 +19,20 @@ GitHub Releases erstellen selbständige ausführbare Dateien für gängige Platt
 
 Jedes Archiv enthält die ausführbare Datei, README, Lizenz und eine kurze Quickstart-Datei.
 
+Die Release-Seite bietet auch eine **einzelne ausführbare Datei**. Enthalten sind nur Controller und native WebUI; Chat-Datenbanken, Worker, Entwicklerwerkzeuge und Browser bleiben separat.
+
 ## Installation
 
-1. Laden Sie das Archiv für Ihre Plattform aus GitHub Releases herunter.
-2. Entpacken Sie es.
+1. Laden Sie die Einzeldatei oder das passende Archiv von [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest) herunter.
+2. Falls Sie ein Archiv gewählt haben, entpacken Sie es.
 3. Legen Sie die ausführbare Datei in `PATH` oder notieren Sie den absoluten Pfad.
 4. Führen Sie `local-shell-mcp --help` aus, um den Start des Binary zu prüfen.
 
-Linux und macOS benötigen üblicherweise das Executable-Bit:
+Beispiel: direktes Herunterladen der Linux-x86_64-Datei; für andere Plattformen das passende Release auswählen:
 
 ```bash
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
 chmod +x local-shell-mcp
 ./local-shell-mcp --help
 ```
@@ -40,7 +44,7 @@ Unter Windows führen Sie `local-shell-mcp.exe` in PowerShell aus oder nehmen da
 ```bash
 mkdir -p ~/local-shell-mcp-workspace
 export LOCAL_SHELL_MCP_WORKSPACE_ROOT=~/local-shell-mcp-workspace
-local-shell-mcp --mode mcp
+~/lsm/local-shell-mcp --mode mcp
 ```
 
 In einem anderen Terminal:
@@ -104,7 +108,7 @@ Installieren Sie, was Ihre Aufgaben benötigen:
 | Browser automation | Playwright browser binaries and OS dependencies |
 | Document conversion | LibreOffice, Pandoc, Poppler utilities |
 
-Wenn Sie diesen Host-Toolchain nicht pflegen möchten, verwenden Sie Docker Compose.
+Die Binärdatei enthält den Controller; externe Werkzeuge und Browser sind optional. Chat und Verlauf werden separat im [Web-Arbeitsbereich](../getting-started/web-workspace.md) mit Datenbank bereitgestellt.
 
 ## Lang laufender Dienst
 
@@ -119,7 +123,7 @@ Für eine dauerhafte öffentliche Bereitstellung führen Sie das Binary unter de
 
 ## Updates
 
-1. Neues Release-Archiv für Ihre Plattform herunterladen.
+1. Die Release-Datei austauschen und Controller neu starten:
 2. Optional Prüfsummen verifizieren.
 3. Ausführbare Datei ersetzen.
 4. Process Manager neu starten.

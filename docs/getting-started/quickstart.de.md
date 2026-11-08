@@ -1,34 +1,33 @@
-<!-- i18n-source-sha256: 3575b9b50708261678473f74b66076f0c14807ccd7f7c3e60b4d1e897ac778df -->
+<!-- i18n-source-sha256: b6bf2276867332a25b6e63b3b4cf21045262a9a9535422c02722906d87a2132a -->
 # Schnellstart
 
 Diese Anleitung startet einen LSM Controller und öffnet seine Browseroberfläche. Der [unified web workspace](web-workspace.md) ist das empfohlene tägliche Erlebnis; Es handelt sich um einen separat bereitgestellten, optionalen Chat-Stack. ChatGPT, Gemini und andere externe MCP-Clients können sich mit demselben Controller verbinden. Siehe [runtime choices and deployment model](../guides/deployment.md).
 
-Die **direkte Bereitstellung aus dem Quellcode** in einer isolierten Umgebung wird empfohlen; Docker Compose ist eine Alternative.
+Empfohlen ist die **einzelne ausführbare Controller-Datei** von [GitHub Releases](https://github.com/fwerkor/local-shell-mcp/releases/latest), ohne Python, Docker oder Quellcode-Checkout. Das Beispiel gilt für **Linux x86_64**; für andere Plattformen siehe [Binärinstallation](../installation/binary.md).
 
 ## Voraussetzungen
 
-- Git und Python 3.11+ mit `venv` und `pip`.
-- Öffentliches HTTPS nur für Remote-Nutzer oder externe MCP-Clients.
-- Ein eigenes, eng begrenztes Arbeitsverzeichnis.
-- Ein starkes OAuth-Admin-PIN und ein zufälliges JWT-Geheimnis.
+- Passende Release-Datei und `curl` (Beispiel Linux x86_64).
+- Öffentliches HTTPS nur für Fernzugriff oder externe MCP-Clients.
+- Eigenes, eingeschränktes Arbeitsverzeichnis.
+- Starker OAuth-Administrator-PIN und zufälliges JWT-Geheimnis.
 
 !!! warning
     Das verbundene Modell kann den konfigurierten Workspace bedienen. Führen Sie den Dienst in einem wegwerfbaren Container oder einer VM aus und mounten Sie keine Host-Steuerressourcen.
 
-## 1. Klonen und konfigurieren
+## 1. Executable herunterladen und konfigurieren
+
+Laden Sie die einzelne Datei herunter und erstellen Sie ein JWT-Geheimnis:
 
 ```bash
-git clone https://github.com/fwerkor/local-shell-mcp.git
-cd local-shell-mcp
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e .
-cp .env.example .env
-chmod 600 .env
+mkdir -p ~/lsm && cd ~/lsm
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp
+chmod +x local-shell-mcp
+./local-shell-mcp --help
 openssl rand -hex 32
 ```
 
-Bearbeiten Sie `.env` und ersetzen Sie PIN und JWT-Geheimnis (mit `openssl rand -hex 32`). Bei Quellcodeinstallation wird `.env` nicht automatisch geladen.
+Erstellen Sie `.env` und ersetzen Sie die Platzhalter für PIN und JWT-Geheimnis (mit `openssl rand -hex 32`). Die Binärdatei liest `.env` **nicht automatisch**.
 
 ```env
 LOCAL_SHELL_MCP_PUBLIC_BASE_URL=https://your-public-host.example.com
@@ -39,14 +38,16 @@ LOCAL_SHELL_MCP_OAUTH_JWT_SECRET=change-me-64-hex-random-secret
 
 ## 2. Server starten
 
+Starten Sie die ausführbare Datei direkt:
+
 ```bash
-mkdir -p workspaces/default
+chmod 600 .env
 set -a
 . ./.env
 set +a
-. .venv/bin/activate
-export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspaces/default"
-local-shell-mcp --mode mcp
+mkdir -p workspace
+export LOCAL_SHELL_MCP_WORKSPACE_ROOT="$PWD/workspace"
+./local-shell-mcp --mode mcp
 ```
 
 Status in einem zweiten Terminal prüfen:
@@ -55,7 +56,7 @@ Status in einem zweiten Terminal prüfen:
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Die erfolgreiche Antwort ist HTTP `200`. Lassen Sie den Prozess laufen oder verwenden Sie einen Dienstmanager.
+Eine erfolgreiche Antwort ist HTTP `200`. Für den Dauerbetrieb einen Dienstmanager und ein eingeschränktes Konto verwenden.
 
 ## 3. HTTPS bereitstellen
 
@@ -114,16 +115,19 @@ Behebe den fehlgeschlagenen Test. Lies zuerst die relevanten Dateien, erstelle d
 
 ## Aktualisieren
 
-Quellcode aktualisieren, editierbares Paket neu installieren und Controller neu starten:
+Die Release-Datei austauschen und Controller neu starten:
 
 ```bash
-git pull --ff-only
-python -m pip install -e .
-# Restart the Controller process or service after updating.
+# Stop the running Controller before replacing the executable.
+curl -fL https://github.com/fwerkor/local-shell-mcp/releases/latest/download/local-shell-mcp-linux-x86_64 -o local-shell-mcp.new
+chmod +x local-shell-mcp.new
+./local-shell-mcp.new --version
+mv local-shell-mcp.new local-shell-mcp
+# Restart the Controller process or service.
 curl -i http://127.0.0.1:8765/healthz
 ```
 
-Bei Docker-Compose-Installationen stattdessen Container aktualisieren:
+Docker Compose wird durch Container-Aktualisierung gepflegt; Quellcode-Anleitung: [Python/Source](../installation/python.md).
 
 ```bash
 docker compose pull

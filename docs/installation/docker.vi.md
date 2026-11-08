@@ -1,7 +1,7 @@
-<!-- i18n-source-sha256: 670ede6656fe032f81c54057c27df5536ac478338889455a2dbc76d4c9b36fd7 -->
+<!-- i18n-source-sha256: f769f579039e6eae80c7c955b80248ae0919448b2f5ca18ea4588ee66b0beba1 -->
 # Runtime Docker Compose
 
-Docker Compose là lựa chọn khác cho container cách ly. **Nên triển khai trực tiếp từ mã nguồn**; xem [hướng dẫn Python/source](python.md).
+Khuyến nghị [binary một tệp](binary.md); Docker Compose là lựa chọn cho container cách ly.
 
 Đây là lựa chọn runtime. Có thể kết nối với ChatGPT, generic HTTP MCP client hoặc giữ local để testing.
 

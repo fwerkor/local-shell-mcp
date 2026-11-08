@@ -1,4 +1,4 @@
-<!-- i18n-source-sha256: 276e9356b895a85759d31467512bdc530c9baa216a368df4ef1bccce39530d0e -->
+<!-- i18n-source-sha256: f8fefdb11bbe7b5b755fd59ee829b2771e8c2e9694d5b9db40f8693f53c16960 -->
 <div class="hero-shell" markdown>
 <span class="hero-eyebrow">Spazio di lavoro AI self-hosted · Piano di controllo MCP</span>
 
@@ -53,7 +53,7 @@ Il confine di isolamento previsto è il container o la VM che esegue il servizio
 | Scenario | Inizia qui | Perché |
 |---|---|---|
 | Area di lavoro del browser principale | [Unified web workspace](getting-started/web-workspace.md) | Chat, progetti e pagine di controllo LSM con login condiviso |
-| Distribuzione del primo controller | [Quickstart](getting-started/quickstart.md) | Deploy consigliato dai sorgenti, OAuth e prima sessione browser. |
+| Distribuzione del primo controller | [Quickstart](getting-started/quickstart.md) | Binario consigliato, OAuth e primo accesso browser |
 | Scegliere il livello runtime | [Runtime choices](guides/deployment.md) | Spiega Docker, VS Code, binary, Python e stdio come opzioni runtime separate |
 | Collegare Gemini Spark | [Gemini Custom Apps](getting-started/gemini-spark.md) | Idoneità, URL MCP HTTPS, OAuth e test |
 | Aggiungere ChatGPT come client | [ChatGPT connector](getting-started/chatgpt-connector.md) | Endpoint, OAuth, primo prompt sicuro e tool discovery |
