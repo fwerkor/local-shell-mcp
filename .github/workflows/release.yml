@@ -12,6 +12,11 @@ on:
         required: true
         default: false
         type: boolean
+      release_notes:
+        description: "Optional custom Markdown release notes; blank uses auto-generated notes"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -608,62 +613,14 @@ jobs:
           fi
           sha256sum -- "${files[@]}" > SHA256SUMS
 
-      - name: Create release notes
-        run: |
-          # shellcheck disable=SC2006
-          cat > RELEASE_NOTES.md <<EOF
-          Docker images are published to Docker Hub and GHCR under the release tag and the unprefixed semantic-version tag. Stable releases also update `latest`; prereleases never do.
-
-          Docker platforms are built in parallel and published as a multi-arch manifest:
-
-          \`\`\`text
-          linux/amd64
-          linux/arm64
-          \`\`\`
-
-          All-in-one executable downloads are attached for:
-
-          \`\`\`text
-          linux-x86_64
-          linux-aarch64
-          macos-x86_64
-          macos-aarch64
-          windows-x86_64
-          \`\`\`
-
-          Start without Docker:
-
-          \`\`\`bash
-          ./local-shell-mcp --mode mcp
-          \`\`\`
-
-          Then open \`http://127.0.0.1:8765/ui\`, or launch the embedded native TUI through:
-
-          \`\`\`bash
-          ./local-shell-mcp tui
-          \`\`\`
-
-          VS Code extension download:
-
-          \`\`\`text
-          local-shell-mcp-${{ needs.validate-release.outputs.version }}.vsix
-          \`\`\`
-
-          Snap packages for Linux x86_64 and ARM64 are attached below. Snap Store publishing is temporarily paused while store review is pending.
-
-          Python package artifacts, executable archives, the VS Code extension, and Snap packages are attached below.
-
-          Python package version in \`pyproject.toml\`: \`${{ needs.validate-release.outputs.version }}\`
-          EOF
-
       - name: Publish GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ github.event.inputs.tag }}
           target_commitish: ${{ github.sha }}
           prerelease: ${{ github.event.inputs.prerelease }}
-          generate_release_notes: true
-          body_path: RELEASE_NOTES.md
+          generate_release_notes: ${{ inputs.release_notes == '' }}
+          body: ${{ inputs.release_notes }}
           files: dist/*
 
   publish-snap:
