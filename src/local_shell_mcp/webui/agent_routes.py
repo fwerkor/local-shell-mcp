@@ -89,8 +89,28 @@ async def revert(request: Request):
     return JSONResponse(result)
 
 
+async def tool_catalog(request: Request):
+    _owner(request)
+    from .ask_user_tools import ASK_USER_MANIFEST
+
+    # The original manifest and PluginController authentication shape are
+    # reused. Availability does not enable a saved or ephemeral Agent's tool.
+    return JSONResponse([{**ASK_USER_MANIFEST, "authenticated": True}])
+
+
+async def tool_auth(request: Request):
+    _owner(request)
+    from .ask_user_tools import ASK_USER_QUESTION_TOOL_NAME
+
+    if request.path_params["tool_id"] != ASK_USER_QUESTION_TOOL_NAME:
+        _not_found()
+    return JSONResponse({"authenticated": True})
+
+
 def agent_routes() -> list[Route]:
     return [
+        Route("/api/agents/tools", tool_catalog, methods=["GET"]),
+        Route("/api/agents/tools/{tool_id}/auth", tool_auth, methods=["GET"]),
         Route("/api/agents", list_or_create, methods=["GET", "POST"]),
         Route("/api/agents/{agent_id}/versions", versions, methods=["GET"]),
         Route("/api/agents/{agent_id}/expanded", expanded, methods=["GET"]),

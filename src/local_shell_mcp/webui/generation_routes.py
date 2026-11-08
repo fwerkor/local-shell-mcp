@@ -20,6 +20,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
 from .agents import AgentRepository
+from .ask_user_tools import ask_user_requested
 from .generations import Generation, GenerationConflict, GenerationStore
 from .providers import (
     ModelToolCall,
@@ -425,7 +426,7 @@ async def start_generation(request: Request):
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     if fresh:
-        ask_user_enabled = bool(agent and "ask_user_question" in (agent.get("tools") or []))
+        ask_user_enabled = ask_user_requested(agent, payload)
         from .routes import _repo
 
         flags = _repo().setting(owner, "conversation.permissions." + result.conversation_id, {})

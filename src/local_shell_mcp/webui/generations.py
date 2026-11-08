@@ -15,6 +15,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from .ask_user_tools import ask_user_requested
 from .providers import selected_provider
 from .storage import _json, _now
 
@@ -98,7 +99,7 @@ class GenerationStore:
             "clientRequestId": client_request_id,
             "provider": selected_provider(payload, agent),
             "model": str((agent or {}).get("model") or payload.get("model") or ""),
-            "askUserEnabled": bool(agent and "ask_user_question" in (agent.get("tools") or [])),
+            "askUserEnabled": ask_user_requested(agent, payload),
         }
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -244,8 +245,6 @@ class GenerationStore:
             raise ValueError("Exactly one external MCP decision is required")
         decision = decisions[0]
         kind = decision.get("decision")
-        if kind not in {"approve", "reject"}:
-            raise ValueError("MCP tool calls can only be approved or rejected")
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
@@ -263,8 +262,13 @@ class GenerationStore:
             if payload.get("type") != "tool_approval" or len(calls) != 1:
                 raise ValueError("Unexpected approval format")
             requested = calls[0]
-            if decision.get("tool_call_id") != requested.get("tool_call_id"):
-                raise ValueError("Mismatched tool call decision")
+            from .tool_approval import resolve_tool_approval_resume
+
+            resolution = resolve_tool_approval_resume(payload, decisions)
+            if resolution.get("status") == 403:
+                raise PermissionError(resolution["error"])
+            if "error" in resolution:
+                raise ValueError(resolution["error"])
             history = state.get("resumeHistory")
             if not isinstance(history, list):
                 raise ValueError("Missing model continuation history")

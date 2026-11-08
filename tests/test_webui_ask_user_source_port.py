@@ -99,3 +99,47 @@ def test_batch_answers_resume_after_restart_without_losing_question_ids(tmp_path
     assert list(json.loads(history[-1]["content"])["answers"]) == ["file", "format"]
     with pytest.raises(KeyError):
         recreated.answer_question("alice", job.run_id, "action", {"answers": {"file": "a", "format": "json"}})
+
+
+async def test_original_catalog_is_available_without_machine_grants_and_is_optional(tmp_path, monkeypatch):
+    import httpx
+    from starlette.applications import Starlette
+
+    from local_shell_mcp.settings import get_settings
+    from local_shell_mcp.webui import agent_routes, generation_routes
+    from local_shell_mcp.webui.ask_user_tools import ask_user_requested
+    from local_shell_mcp.webui.providers import ProviderConfig
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    get_settings.cache_clear()
+    launched = []
+    async def start(*args, **kwargs):
+        launched.append(kwargs["ask_user_enabled"])
+    monkeypatch.setattr(generation_routes, "_start_task", start)
+    monkeypatch.setattr(generation_routes, "provider_config", lambda *_: ProviderConfig("openai", "test", "http://localhost/model", ""))
+    app = Starlette(routes=[*agent_routes.agent_routes(), *generation_routes.generation_routes()])
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            catalog = await client.get("/api/agents/tools")
+            expected = json.loads((FIXTURES / "ask_user_manifest.json").read_text())
+            assert catalog.json() == [{**expected, "authenticated": True}]
+            assert (await client.get("/api/agents/tools/ask_user_question/auth")).json() == {"authenticated": True}
+            assert (await client.get("/api/agents/tools/unknown/auth")).status_code == 404
+            for enabled in [False, True]:
+                result = await client.post("/api/agents/chat", json={"text": "Choose", "endpoint": "openAI",
+                    "ephemeralAgent": {"ask_user_question": enabled}})
+                assert result.status_code == 202
+                store = generation_routes._generation_store()
+                cid = result.json()["conversationId"]
+                with store.database.connect() as db:
+                    state = json.loads(db.execute("SELECT state FROM runs WHERE conversation_id=?", (cid,)).fetchone()[0])
+                assert state["askUserEnabled"] is enabled
+            assert launched == [False, True]
+            assert not ask_user_requested({"tools": []}, {"ephemeralAgent": {"ask_user_question": True}})
+            assert ask_user_requested({"tools": ["ask_user_question"]}, {})
+            assert not ask_user_requested(None, {"ephemeralAgent": {"ask_user_question": "true"}})
+            assert not ask_user_requested(None, {})
+    finally:
+        get_settings.cache_clear()

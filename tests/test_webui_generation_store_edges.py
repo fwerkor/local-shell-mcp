@@ -69,15 +69,19 @@ def test_tool_approval_validation_and_exactly_once_claim(current_run):
                "tool_call_id": "call-42"}
     pending = {"actionId": "approval-1", "payload": {
         "type": "tool_approval", "action_requests": [request],
+        "review_configs": [{"tool_call_id": "call-42", "allowed_decisions": ["approve", "reject"]}],
     }}
     assert store.pause_for_approval("alice", job.run_id, pending, [], "partial answer")
     for decision, expected in [
         ([], "Exactly one"),
-        ([{"decision": "maybe", "tool_call_id": "call-42"}], "approved or rejected"),
-        ([{"decision": "approve", "tool_call_id": "other"}], "Mismatched"),
+
+        ([{"decision": "approve", "tool_call_id": "other"}], "Invalid tool approval decisions"),
     ]:
         with pytest.raises(ValueError, match=expected):
             store.claim_approval("alice", job.run_id, "approval-1", decision)
+    with pytest.raises(PermissionError, match="Decision not permitted"):
+        store.claim_approval("alice", job.run_id, "approval-1", [
+            {"decision": "maybe", "tool_call_id": "call-42"}])
     with pytest.raises(KeyError, match="No pending"):
         store.claim_approval("bob", job.run_id, "approval-1", [
             {"decision": "approve", "tool_call_id": "call-42"},
