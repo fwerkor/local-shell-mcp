@@ -219,7 +219,7 @@ class DynamicMCPServer:
             "command": self.command if self.transport == "stdio" else None,
             "args": list(self.args) if self.transport == "stdio" else [],
             "cwd": self.cwd if self.transport == "stdio" else None,
-            "url": self.url if self.transport == "streamable_http" else None,
+            "url": self.url if self.transport in {"streamable_http", "sse"} else None,
             "env_keys": sorted(self.env),
             "header_keys": sorted(self.headers),
             "tool_count": len(self.tools),
@@ -334,6 +334,18 @@ class DynamicMCPManager:
             ):
                 await session.initialize()
                 yield session
+            return
+
+        if server.transport == "sse":
+            # SSE client is an optional transport; import it only for servers
+            # explicitly configured to use that protocol.
+            from mcp.client.sse import sse_client
+
+            async with sse_client(server.url or "", headers=dict(server.headers)) as streams:
+                read_stream, write_stream = streams
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    yield session
             return
 
         async with streamablehttp_client(server.url or "", headers=dict(server.headers)) as streams:

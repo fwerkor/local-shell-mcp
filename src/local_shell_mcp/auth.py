@@ -484,8 +484,11 @@ class AuthMiddleware:
         path = scope.get("path", "")
         from .webui.frontend import is_public_frontend
 
-        if _is_public_path(path) or (path in {"/api/auth/lsm", "/api/auth/refresh", "/api/auth/logout"}
-                                     and scope.get("method") == "POST") or is_public_frontend(path, scope.get("method", "")):
+        if (_is_public_path(path)
+            or (path in {"/api/config", "/health"} and scope.get("method") in {"GET", "HEAD"})
+            or (path in {"/api/auth/lsm", "/api/auth/refresh", "/api/auth/logout"}
+                and scope.get("method") == "POST")
+            or is_public_frontend(path, scope.get("method", ""))):
             await self.app(scope, receive, send)
             return
 

@@ -1,0 +1,167 @@
+"""Dependency-light streaming model providers for the unified Python WebUI.
+
+httpx is imported only when a model request is made. Model credentials are
+server-side environment settings, not part of an Agent's serialized config.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from urllib.parse import quote, urlsplit
+
+
+@dataclass(frozen=True)
+class ProviderConfig:
+    provider: str
+    model: str
+    url: str
+    token: str
+    timeout_s: float = 180.0
+
+
+def _require_https_or_loopback(value: str) -> str:
+    parsed = urlsplit(value)
+    if not parsed.netloc or parsed.username or parsed.password or parsed.fragment:
+        raise ValueError("Invalid model provider URL")
+    if parsed.scheme == "https":
+        return value
+    if parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
+        return value
+    raise ValueError("A model provider must use HTTPS or the local loopback interface")
+
+
+def provider_config(provider: str, model: str | None = None) -> ProviderConfig:
+    kind = provider.strip().lower()
+    if kind in {"openai", "openai-compatible", "custom", "ollama", "azureopenai"}:
+        token = os.getenv("LOCAL_SHELL_MCP_MODEL_API_KEY") or os.getenv("OPENAI_API_KEY", "")
+        base = os.getenv("LOCAL_SHELL_MCP_MODEL_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+        if not token and urlsplit(base).hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise ValueError("An OpenAI-compatible model API key is required")
+        url = _require_https_or_loopback(base.rstrip("/") + "/chat/completions")
+        return ProviderConfig("openai", model or os.getenv("LOCAL_SHELL_MCP_MODEL") or "gpt-4.1-mini", url, token)
+    if kind == "anthropic":
+        token = os.getenv("ANTHROPIC_API_KEY", "")
+        if not token:
+            raise ValueError("ANTHROPIC_API_KEY is required")
+        return ProviderConfig("anthropic", model or "claude-sonnet-4-6", "https://api.anthropic.com/v1/messages", token)
+    if kind in {"google", "gemini"}:
+        token = os.getenv("GOOGLE_KEY") or os.getenv("GOOGLE_API_KEY", "")
+        if not token:
+            raise ValueError("GOOGLE_KEY or GOOGLE_API_KEY is required")
+        name = model or "gemini-2.5-flash"
+        if any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_." for char in name):
+            raise ValueError("Unsupported Gemini model identifier")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{quote(name)}:streamGenerateContent?alt=sse"
+        return ProviderConfig("google", name, url, token)
+    raise ValueError(f"Unsupported provider: {provider}")
+
+
+async def _data_frames(response) -> AsyncIterator[str]:
+    """Parse multi-line SSE data frames, ignoring comments and heartbeat lines."""
+    data: list[str] = []
+    async for raw in response.aiter_lines():
+        line = raw.rstrip("\r")
+        if line == "":
+            if data:
+                yield "\n".join(data)
+                data.clear()
+        elif line.startswith("data:"):
+            data.append(line[5:].lstrip(" "))
+    if data:
+        yield "\n".join(data)
+
+
+def _messages_for_google(messages: list[dict]) -> tuple[list[dict], str]:
+    items: list[dict] = []
+    systems: list[str] = []
+    for item in messages:
+        content = str(item.get("content") or "")
+        role = item.get("role")
+        if role == "system":
+            systems.append(content)
+        elif role in {"user", "assistant"}:
+            items.append({"role": "model" if role == "assistant" else "user", "parts": [{"text": content}]})
+    return items, "\n".join(systems)
+
+
+def _messages_for_anthropic(messages: list[dict]) -> tuple[list[dict], str]:
+    systems = [str(item.get("content") or "") for item in messages if item.get("role") == "system"]
+    items = [item for item in messages if item.get("role") in {"user", "assistant"}]
+    return items, "\n".join(systems)
+
+
+async def stream_model(
+    config: ProviderConfig,
+    messages: list[dict],
+    *,
+    max_tokens: int = 2048,
+    temperature: float | None = None,
+) -> AsyncIterator[str]:
+    """Stream user-visible answer text without buffering the provider response."""
+    import httpx
+
+    headers = {"accept": "text/event-stream", "content-type": "application/json"}
+    body: dict = {"model": config.model, "stream": True}
+    if config.provider == "openai":
+        headers["Authorization"] = f"Bearer {config.token}"
+        body["messages"] = messages
+        body["max_completion_tokens"] = max_tokens
+        if temperature is not None:
+            body["temperature"] = temperature
+    elif config.provider == "anthropic":
+        headers["x-api-key"] = config.token
+        headers["anthropic-version"] = "2023-06-01"
+        items, instructions = _messages_for_anthropic(messages)
+        body = {"model": config.model, "messages": items, "max_tokens": max_tokens, "stream": True}
+        if instructions:
+            body["system"] = instructions
+        if temperature is not None:
+            body["temperature"] = temperature
+    elif config.provider == "google":
+        headers["x-goog-api-key"] = config.token
+        items, instructions = _messages_for_google(messages)
+        body = {"contents": items, "generationConfig": {"maxOutputTokens": max_tokens}}
+        if instructions:
+            body["systemInstruction"] = {"parts": [{"text": instructions}]}
+        if temperature is not None:
+            body["generationConfig"]["temperature"] = temperature
+    else:
+        raise ValueError("Unsupported model provider")
+    timeout = httpx.Timeout(connect=20, read=config.timeout_s, write=30, pool=10)
+    async with (
+        httpx.AsyncClient(timeout=timeout) as http,
+        http.stream("POST", config.url, json=body, headers=headers) as response,
+    ):
+        response.raise_for_status()
+        async for frame in _data_frames(response):
+            if frame == "[DONE]":
+                return
+            try:
+                event = json.loads(frame)
+            except json.JSONDecodeError:
+                continue
+            if "error" in event:
+                raise RuntimeError("Model provider rejected the generation request")
+            if config.provider == "openai":
+                for choice in event.get("choices", []):
+                    content = choice.get("delta", {}).get("content")
+                    if isinstance(content, str) and content:
+                        yield content
+                    elif isinstance(content, list):
+                        for part in content:
+                            if isinstance(part, dict) and isinstance(part.get("text"), str):
+                                yield part["text"]
+            elif config.provider == "anthropic":
+                if event.get("type") == "content_block_delta":
+                    text = event.get("delta", {}).get("text")
+                    if isinstance(text, str) and text:
+                        yield text
+            else:
+                for candidate in event.get("candidates", []):
+                    for part in (candidate.get("content") or {}).get("parts", []):
+                        text = part.get("text")
+                        if isinstance(text, str) and text:
+                            yield text

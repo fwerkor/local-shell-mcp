@@ -141,7 +141,9 @@ async def conversation_messages(request: Request):
     conversation_id = request.path_params["conversation_id"]
     if request.method == "GET":
         try:
-            return _result(repo.messages(owner, conversation_id, limit=_integer(request.query_params.get("limit"), 25)))
+            # The original LibreChat GET /api/messages/:conversationId endpoint
+            # returns an array, unlike the paginated GET /api/messages query.
+            return _result(repo.messages(owner, conversation_id, limit=200)["messages"])
         except KeyError:
             _not_found()
     payload = await _body(request)

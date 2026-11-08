@@ -127,6 +127,20 @@ CREATE TABLE IF NOT EXISTS runs (
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
+CREATE TABLE IF NOT EXISTS generation_requests (
+    owner TEXT NOT NULL,
+    client_request_id TEXT NOT NULL,
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    PRIMARY KEY(owner,client_request_id)
+);
+CREATE TABLE IF NOT EXISTS generation_events (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    data TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS idx_generation_events_run ON generation_events(run_id,seq);
+CREATE INDEX IF NOT EXISTS idx_runs_conversation ON runs(conversation_id,created_at DESC);
 CREATE TABLE IF NOT EXISTS attachments (
     id TEXT PRIMARY KEY,
     owner TEXT NOT NULL,

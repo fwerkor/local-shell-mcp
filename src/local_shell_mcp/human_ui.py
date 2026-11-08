@@ -799,8 +799,13 @@ async def api_bootstrap(request: Request) -> Response:
             "machines": machines,
             "features": {
                 "remote": settings.remote_enabled,
-                "hosted_chat": (settings.hosted_chat_enabled and settings.mode != "http" and settings.state_backend != "memory"),
-                **({"librechat": True} if os.environ.get("LOCAL_SHELL_MCP_LIBRECHAT_URL") and settings.state_backend != "memory" else {}),
+                # The native React workspace replaces the never-released Hosted Chat.
+                "hosted_chat": False if settings.state_backend == "sqlite" else (
+                    settings.hosted_chat_enabled and settings.mode != "http" and settings.state_backend != "memory"
+                ),
+                **({"librechat": True} if settings.state_backend == "sqlite" or (
+                    os.environ.get("LOCAL_SHELL_MCP_LIBRECHAT_URL") and settings.state_backend != "memory"
+                ) else {}),
                 "live_workspace": settings.live_workspace_enabled,
                 "tui": tui_runtime_available(),
                 "wallpaper": settings.ui_wallpaper,
@@ -3378,6 +3383,22 @@ async def api_librechat_ticket(request: Request) -> Response:
     """Exchange the existing authenticated LSM principal for a one-use chat login ticket."""
     try:
         _require_ui_scopes(request, "shell:read")
+        if get_settings().state_backend == "sqlite":
+            from .auth import principal_scopes
+            from .oauth import ALL_OAUTH_SCOPES
+            from .webui.auth import WebAuthStore
+
+            principal = _request_principal(request)
+            subject = _logical_session_subject(request, create=True)
+            scopes = (" ".join(sorted(ALL_OAUTH_SCOPES))
+                      if principal.claims.get("auth") in {"none", "local-cli", "native-tui", "localhost-bypass"}
+                      else " ".join(sorted(principal_scopes(principal))))
+            expires = principal.claims.get("exp")
+            grant_until = min(int(expires), int(time.time()) + 3600) if isinstance(expires, int) else int(time.time()) + 3600
+            ticket = WebAuthStore(get_settings().state_dir).issue_ticket(subject, scopes, grant_until)
+            origin = get_settings().public_base_url or str(request.base_url).rstrip("/")
+            return _json_ok({"url": origin, "ticket": ticket})
+
         from .librechat_integration import issue_chat_ticket
 
         subject = _logical_session_subject(request, create=True)
