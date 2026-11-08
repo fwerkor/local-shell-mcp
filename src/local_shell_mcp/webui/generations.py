@@ -15,6 +15,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from .approval_runtime import ApprovalBatch, prepare_approval_batch
 from .ask_user_tools import ask_user_requested
 from .generation_protocol import job_generation_protocol
 from .providers import selected_provider
@@ -245,11 +246,8 @@ class GenerationStore:
         return self.pause_for_question(owner, run_id, pending, history, partial_text)
 
     def claim_approval(self, owner: str, run_id: str, action_id: str,
-                       decisions: list[dict]) -> tuple[Generation, list[dict], str, dict, str]:
-        if not isinstance(decisions, list) or len(decisions) != 1 or not isinstance(decisions[0], dict):
-            raise ValueError("Exactly one external MCP decision is required")
-        decision = decisions[0]
-        kind = decision.get("decision")
+                       decisions: list[dict]) -> tuple[Generation, list[dict], str, ApprovalBatch]:
+        """Claim a whole reviewed batch without dropping its recovery evidence."""
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
@@ -263,27 +261,75 @@ class GenerationStore:
             if not isinstance(pending, dict) or pending.get("actionId") != action_id:
                 raise ValueError("Stale tool approval action")
             payload = pending.get("payload") or {}
-            calls = payload.get("action_requests") or []
-            if payload.get("type") != "tool_approval" or len(calls) != 1:
+            if payload.get("type") != "tool_approval":
                 raise ValueError("Unexpected approval format")
-            requested = calls[0]
-            from .tool_approval import resolve_tool_approval_resume
-
-            resolution = resolve_tool_approval_resume(payload, decisions)
-            if resolution.get("status") == 403:
-                raise PermissionError(resolution["error"])
-            if "error" in resolution:
-                raise ValueError(resolution["error"])
+            # Validation covers every request before the one-shot claim changes
+            # state. The SDK review identity binds name, args and decisions;
+            # a later execution still has to pass fresh native permissions.
+            batch = prepare_approval_batch(payload, decisions)
             history = state.get("resumeHistory")
             if not isinstance(history, list):
                 raise ValueError("Missing model continuation history")
             prior = state.get("partialText", "")
+            state["approvedToolBatch"] = {
+                "actionId": action_id,
+                "payload": payload,
+                "resolutions": decisions,
+            }
             state.pop("pendingAction", None)
-            state.pop("resumeHistory", None)
-            state.pop("partialText", None)
+            # Keep history/text until completion is durably recorded. A crash
+            # after the claim must not erase the paused model continuation.
             db.execute("UPDATE runs SET state=?,status='running',updated_at=? WHERE id=?",
                        (_json(state), _now(), run_id))
-            return self._run(row), history, prior, requested, kind
+            resumed = self._run({**dict(row), "status": "running"})
+            return resumed, history, prior, batch
+
+    def approved_review(self, owner: str, run_id: str) -> dict | None:
+        """Load owner-bound server review proof for crash/restart continuation."""
+        with self.database.connect() as db:
+            row = db.execute(
+                "SELECT r.state,r.status FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=?", (run_id, owner),
+            ).fetchone()
+        if row is None or row["status"] not in {"running", "interrupted"}:
+            return None
+        state = json.loads(row["state"])
+        review = state.get("approvedToolBatch")
+        if review is None:
+            return None
+        if (not isinstance(review, dict) or not isinstance(review.get("actionId"), str) or
+            not review["actionId"]):
+            raise ValueError("Invalid retained tool approval review")
+        prepare_approval_batch(review.get("payload"), review.get("resolutions"))
+        return review
+
+    def approved_batch(self, owner: str, run_id: str) -> ApprovalBatch | None:
+        review = self.approved_review(owner, run_id)
+        return prepare_approval_batch(review["payload"], review["resolutions"]) if review else None
+
+    def complete_approval_batch(self, owner: str, run_id: str, action_id: str,
+                                history: list[dict], partial_text: str) -> bool:
+        """Retire approval proof only after checkpointed tool results are saved."""
+        if len(_json(history).encode("utf-8")) > 512 * 1024:
+            raise ValueError("Agent continuation state is too large")
+        with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
+            ).fetchone()
+            if row is None:
+                return False
+            state = json.loads(row["state"])
+            review = state.get("approvedToolBatch")
+            if not isinstance(review, dict) or review.get("actionId") != action_id:
+                return False
+            state.pop("approvedToolBatch")
+            state["resumeHistory"] = history
+            state["partialText"] = partial_text
+            db.execute("UPDATE runs SET state=?,updated_at=? WHERE id=?",
+                       (_json(state), _now(), run_id))
+            return True
 
     def append(self, owner: str, run_id: str, event: dict) -> int:
         encoded = _json(event)

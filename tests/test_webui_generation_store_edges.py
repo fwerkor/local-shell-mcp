@@ -69,11 +69,11 @@ def test_tool_approval_validation_and_exactly_once_claim(current_run):
                "tool_call_id": "call-42"}
     pending = {"actionId": "approval-1", "payload": {
         "type": "tool_approval", "action_requests": [request],
-        "review_configs": [{"tool_call_id": "call-42", "allowed_decisions": ["approve", "reject"]}],
+        "review_configs": [{"tool_call_id": "call-42", "action_name": "mcp_tool_call", "allowed_decisions": ["approve", "reject"]}],
     }}
     assert store.pause_for_approval("alice", job.run_id, pending, [], "partial answer")
     for decision, expected in [
-        ([], "Exactly one"),
+        ([], "Every paused tool call"),
 
         ([{"decision": "approve", "tool_call_id": "other"}], "Invalid tool approval decisions"),
     ]:
@@ -111,14 +111,15 @@ def test_tool_approval_validation_and_exactly_once_claim(current_run):
         state = json.loads(conn.execute("SELECT state FROM runs WHERE id=?", (job.run_id,)).fetchone()[0])
         state["resumeHistory"] = []
         conn.execute("UPDATE runs SET state=? WHERE id=?", (json.dumps(state), job.run_id))
-    resumed, history, partial, requested, decision = store.claim_approval(
+    resumed, history, partial, batch = store.claim_approval(
         "alice", job.run_id, "approval-1", [{"decision": "reject", "tool_call_id": "call-42"}],
     )
     assert resumed.run_id == job.run_id
     assert history == []
     assert partial == "partial answer"
-    assert requested == request
-    assert decision == "reject"
+    assert batch.entries[0].call_id == request["tool_call_id"]
+    assert batch.entries[0].tool_call().arguments == request["arguments"]
+    assert batch.entries[0].decision == {"type": "reject"}
     with pytest.raises(KeyError, match="No pending"):
         store.claim_approval("alice", job.run_id, "approval-1", [
             {"decision": "reject", "tool_call_id": "call-42"},
