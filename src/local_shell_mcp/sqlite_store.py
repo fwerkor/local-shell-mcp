@@ -127,6 +127,18 @@ CREATE TABLE IF NOT EXISTS runs (
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
+CREATE TABLE IF NOT EXISTS agent_delegations (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('delegate','handoff')),
+    task TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('running','complete','error','interrupted')),
+    result TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_delegations_run ON agent_delegations(run_id,created_at);
 CREATE TABLE IF NOT EXISTS generation_requests (
     owner TEXT NOT NULL,
     client_request_id TEXT NOT NULL,
