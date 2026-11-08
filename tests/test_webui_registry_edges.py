@@ -182,3 +182,17 @@ async def test_browser_session_listing_is_read_only_but_start_is_not(bound_polic
         await registry.call_tool("local", cid, ModelToolCall("start", "browser_session", {"action": "start"}),
                                  granted_scopes=scopes)
     assert len(observed) == 1
+
+
+@pytest.mark.asyncio
+async def test_write_machine_grant_preserves_native_read_and_write_scopes(bound_policy, monkeypatch):
+    repo, cid = bound_policy
+    dispatched = []
+    async def invoke(*args, **kwargs):
+        dispatched.append(args)
+        return '{"ok": true}'
+    monkeypatch.setattr(registry, "_invoke_registered", invoke)
+    with pytest.raises(PermissionError, match="shell:read"):
+        await registry.call_tool("local", cid, ModelToolCall("write", "file_write", {
+            "path": "notes.txt", "content": "blocked"}), granted_scopes={"shell:write"})
+    assert dispatched == []

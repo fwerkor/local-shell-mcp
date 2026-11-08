@@ -70,7 +70,9 @@ def test_scopes_are_checked_per_machine_and_access_type():
     with pytest.raises(PermissionError, match="expired"):
         require_machine_scope({"shell:read"}, "local", "read", expires=1)
     require_machine_scope({"shell:read", "remote:use"}, "remote1", "read")
-    require_machine_scope({"shell:write"}, "local", "write")
+    with pytest.raises(PermissionError, match="shell:read"):
+        require_machine_scope({"shell:write"}, "local", "write")
+    require_machine_scope({"shell:read", "shell:write"}, "local", "write")
 
 
 @pytest.mark.asyncio

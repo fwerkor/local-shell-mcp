@@ -81,9 +81,10 @@ def _principal_scopes(request: Request) -> set[str]:
 def require_machine_scope(scopes: set[str], machine: str, level: str, *, expires: int | None = None) -> None:
     if expires is not None and expires <= int(time.time()):
         raise PermissionError("Agent session authorization has expired")
-    required = "shell:write" if level == "write" else "shell:read"
-    if required not in scopes:
-        raise PermissionError(f"{required} permission is required")
+    required_scopes = ("shell:read", "shell:write") if level == "write" else ("shell:read",)
+    for required in required_scopes:
+        if required not in scopes:
+            raise PermissionError(f"{required} permission is required")
     if machine != "local" and "remote:use" not in scopes:
         raise PermissionError("remote:use permission is required")
 
