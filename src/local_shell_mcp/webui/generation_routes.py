@@ -137,13 +137,13 @@ async def _run_model(
                 "data": {"type": "tool_calls", "id": "step_" + call.call_id,
                          "index": 1, "status": "completed",
                          "stepDetails": {"type": "tool_calls", "tool_calls": [{
-                             "id": call.call_id, "type": "function",
+                             "id": call.call_id, "type": "function", **call.history_metadata(),
                              "function": {"name": call.name, "arguments": "<redacted>"},
                              "status": "completed",
                          }]}}
             })
         model_tools = []
-        if profile.provider == "openai":
+        if profile.provider in {"openai", "anthropic", "google"}:
             from .ask_user_tools import ASK_USER_TOOLS
             from .delegation import delegation_tools
             from .lsm_tool_registry import available_tools
@@ -208,7 +208,7 @@ async def _run_model(
                     }
                     history.append({
                         "role": "assistant", "content": None,
-                        "tool_calls": [{"id": calling.call_id, "type": "function",
+                        "tool_calls": [{"id": calling.call_id, "type": "function", **calling.history_metadata(),
                                         "function": {"name": calling.name,
                                                      "arguments": json.dumps(calling.arguments)}}],
                     })
@@ -217,7 +217,7 @@ async def _run_model(
                         "data": {"type": "tool_calls", "id": "step_" + calling.call_id,
                                  "index": round_number + 1, "status": "in_progress",
                                  "stepDetails": {"type": "tool_calls", "tool_calls": [{
-                                     "id": calling.call_id, "type": "function",
+                                     "id": calling.call_id, "type": "function", **calling.history_metadata(),
                                      "function": {"name": calling.name,
                                                   "arguments": json.dumps(calling.arguments)},
                                  }]}}
@@ -237,7 +237,7 @@ async def _run_model(
                         "data": {"type": "tool_calls", "id": "step_" + deleg.call_id,
                                  "index": round_number + 1, "status": "completed",
                                  "stepDetails": {"type": "tool_calls", "tool_calls": [{
-                                     "id": deleg.call_id, "type": "function",
+                                     "id": deleg.call_id, "type": "function", **deleg.history_metadata(),
                                      "function": {"name": deleg.name, "arguments": "<redacted>"},
                                      "status": "completed",
                                  }]}}
@@ -248,7 +248,7 @@ async def _run_model(
                         break
                     history.append({
                         "role": "assistant", "content": None,
-                        "tool_calls": [{"id": deleg.call_id, "type": "function",
+                        "tool_calls": [{"id": deleg.call_id, "type": "function", **deleg.history_metadata(),
                                         "function": {"name": deleg.name,
                                                      "arguments": json.dumps(deleg.arguments)}}],
                     })
@@ -296,7 +296,7 @@ async def _run_model(
                     return
                 history.append({
                     "role": "assistant", "content": None,
-                    "tool_calls": [{"id": call.call_id, "type": "function",
+                    "tool_calls": [{"id": call.call_id, "type": "function", **call.history_metadata(),
                                     "function": {"name": call.name,
                                                  "arguments": json.dumps(call.arguments)}}
                                    for call in calls],
@@ -320,7 +320,7 @@ async def _run_model(
                         "data": {"type": "tool_calls", "id": "step_" + call.call_id,
                                  "index": round_number + 1, "status": "completed",
                                  "stepDetails": {"type": "tool_calls", "tool_calls": [{
-                                     "id": call.call_id, "type": "function",
+                                     "id": call.call_id, "type": "function", **call.history_metadata(),
                                      "function": {"name": call.name,
                                                   "arguments": "<redacted>"},
                                      "status": "completed",

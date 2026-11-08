@@ -186,6 +186,10 @@ class ModelToolCall:
     call_id: str
     name: str
     arguments: dict
+    provider_data: dict | None = None
+
+    def history_metadata(self) -> dict:
+        return {"provider_data": self.provider_data} if self.provider_data else {}
 
 
 async def stream_model_with_tools(
@@ -201,6 +205,12 @@ async def stream_model_with_tools(
     Unsupported providers do not receive tool declarations. Their ordinary
     text-stream behavior is preserved until their native tool protocols exist.
     """
+    if tools and config.provider in {"anthropic", "google"}:
+        from .provider_tool_protocols import stream_native_tools
+
+        async for event in stream_native_tools(config, messages, tools=tools, max_tokens=max_tokens, temperature=temperature):
+            yield event
+        return
     if not tools or config.provider != "openai":
         async for text in stream_model(config, messages, max_tokens=max_tokens, temperature=temperature):
             yield text
