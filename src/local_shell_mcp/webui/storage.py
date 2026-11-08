@@ -12,9 +12,10 @@ import secrets
 import time
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from ..sqlite_store import SQLiteDatabase
+if TYPE_CHECKING:
+    from ..sqlite_store import SQLiteDatabase
 
 
 def _stamp(value: int | float) -> str:

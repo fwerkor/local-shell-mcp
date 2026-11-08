@@ -57,6 +57,15 @@
 - `SQLiteStateStore` imports historical durable files transactionally and retains
   the originals until an operator verifies the migration. SQLite backup API is
   used for consistent snapshots, not an ordinary copy of the WAL file set.
+- The Controller's frozen single-file executable defaults its workspace to
+  the executable's directory and persists under the adjacent `.local-shell-mcp/`.
+  Source deployments keep `/workspace` as their default. Explicit overrides
+  continue to take priority.
+- SQLite and its importer use Python's standard library. Optional FTS5/trigram
+  absence degrades local search to regular SQL `LIKE`; imports of the new
+  WebUI persistence layer are deferred until used. If SQLite itself cannot
+  load, set `LOCAL_SHELL_MCP_STATE_BACKEND=file` to recover the Controller;
+  do not edit or delete the database until a verified backup exists.
 - The internal single-user WebUI is identified by the existing LSM OAuth
   principal, never by a browser-supplied user ID. All reads and mutations must
   verify the owner and relevant scopes. One-time login tickets are hashed,

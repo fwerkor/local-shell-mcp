@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import os
 import secrets
+import sys
 import threading
 from collections.abc import Mapping
 from functools import lru_cache
@@ -28,7 +29,18 @@ except Exception:  # pragma: no cover - exercised when vendored native deps do n
 else:
     _PYDANTIC_AVAILABLE = True
 
-DEFAULT_WORKSPACE_ROOT = Path("/workspace")
+def _default_workspace_root() -> Path:
+    """Keep frozen Controller output next to its one-file executable.
+
+    Source installations retain their historical /workspace behavior. The
+    configured workspace/state directories always take precedence.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path("/workspace")
+
+
+DEFAULT_WORKSPACE_ROOT = _default_workspace_root()
 DEFAULT_STATE_DIR = DEFAULT_WORKSPACE_ROOT / ".local-shell-mcp"
 DEFAULT_AUDIT_LOG_PATH = DEFAULT_STATE_DIR / "audit.jsonl"
 DEFAULT_AGENT_CONFIG_DIR = DEFAULT_STATE_DIR / "agent_config"

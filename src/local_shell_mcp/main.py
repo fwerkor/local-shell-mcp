@@ -128,9 +128,6 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
     )
     from .remote_worker_routes import remote_routes
     from .settings import get_settings
-    from .webui.auth import auth_routes
-    from .webui.frontend import frontend_routes
-    from .webui.routes import webui_routes
 
     @asynccontextmanager
     async def lifespan(app):  # noqa: ANN001
@@ -155,11 +152,17 @@ def _with_oauth_routes(inner_app):  # noqa: ANN001
         routes[2:2] = live_channel_routes()
     if settings.ui_enabled:
         routes[2:2] = ui_routes()
-        routes[2:2] = webui_routes()
-        routes[2:2] = auth_routes()
+        if settings.state_backend == "sqlite":
+            from .webui.auth import auth_routes
+            from .webui.routes import webui_routes
+
+            routes[2:2] = webui_routes()
+            routes[2:2] = auth_routes()
     if settings.remote_enabled:
         routes[2:2] = remote_routes()
-    if settings.ui_enabled:
+    if settings.ui_enabled and settings.state_backend == "sqlite":
+        from .webui.frontend import frontend_routes
+
         routes[-1:-1] = frontend_routes()
     return Starlette(
         routes=routes,

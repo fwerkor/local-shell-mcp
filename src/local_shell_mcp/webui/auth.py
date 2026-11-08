@@ -18,7 +18,6 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from ..settings import get_settings
-from ..sqlite_store import shared_database
 
 COOKIE = "lsm_workspace"
 TICKET_TTL = 60
@@ -56,6 +55,8 @@ class WebSession:
 
 class WebAuthStore:
     def __init__(self, directory: Path):
+        from ..sqlite_store import shared_database
+
         self.database = shared_database(directory.resolve())
 
     def issue_ticket(self, owner: str, scopes: str, grant_until: int) -> str:

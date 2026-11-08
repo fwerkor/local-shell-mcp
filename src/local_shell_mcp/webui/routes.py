@@ -6,7 +6,6 @@ to controller operations or bypass the outer OAuth middleware.
 
 from __future__ import annotations
 
-import sqlite3
 from typing import Any
 
 from starlette.exceptions import HTTPException
@@ -15,7 +14,6 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from ..settings import get_settings
-from ..sqlite_store import shared_database
 from .storage import WorkspaceRepository
 
 
@@ -30,6 +28,8 @@ def _owner(request: Request) -> str:
 
 
 def _repo() -> WorkspaceRepository:
+    from ..sqlite_store import shared_database
+
     return WorkspaceRepository(shared_database(get_settings().state_dir.resolve()))
 
 
@@ -61,6 +61,8 @@ def _not_found() -> None:
 
 
 async def conversations(request: Request):
+    import sqlite3
+
     owner = _owner(request)
     repo = _repo()
     if request.method == "GET":
@@ -132,6 +134,8 @@ async def messages(request: Request):
 
 
 async def conversation_messages(request: Request):
+    import sqlite3
+
     owner = _owner(request)
     repo = _repo()
     conversation_id = request.path_params["conversation_id"]

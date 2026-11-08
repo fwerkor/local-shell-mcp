@@ -308,3 +308,63 @@ def test_conversation_title_and_message_search_works_without_fts5(tmp_path: Path
         assert repo.conversations("local", search="Research")["conversations"][0]["conversationId"] == cid
     finally:
         store.database.fts_enabled = previous
+
+
+def test_frozen_controller_defaults_beside_executable(tmp_path: Path, monkeypatch) -> None:
+    import local_shell_mcp.settings as settings_module
+
+    executable = tmp_path / "local-shell-mcp"
+    monkeypatch.setattr(settings_module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(settings_module.sys, "executable", str(executable))
+    assert settings_module._default_workspace_root() == tmp_path
+    assert settings_module._default_workspace_root() / ".local-shell-mcp" == tmp_path / ".local-shell-mcp"
+
+
+def test_source_installation_retains_configurable_workspace(tmp_path: Path, monkeypatch) -> None:
+    import local_shell_mcp.settings as settings_module
+
+    monkeypatch.setattr(settings_module.sys, "frozen", False, raising=False)
+    assert settings_module._default_workspace_root() == Path("/workspace")
+
+
+def test_webui_module_import_does_not_require_sqlite_extension() -> None:
+    """Even a broken SQLite Python build must permit explicit file-mode recovery."""
+    import subprocess
+    import sys
+
+    code = (
+        'import sys;sys.modules["sqlite3"]=None;'
+        'import local_shell_mcp.webui.routes;'
+        'import local_shell_mcp.webui.storage;'
+        'import local_shell_mcp.webui.auth;'
+        'import local_shell_mcp.webui.frontend;'
+        'print("ok")'
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
+
+
+def test_file_backend_recovery_starts_when_sqlite_module_is_missing(tmp_path: Path) -> None:
+    """Operators can recover controller configuration without a SQLite build."""
+    import os
+    import subprocess
+    import sys
+
+    code = (
+        'import sys;sys.modules["sqlite3"]=None;'
+        'from local_shell_mcp.settings import get_settings;'
+        'from local_shell_mcp.webui import routes,auth,frontend;'
+        'print(get_settings().state_backend)'
+    )
+    env = {
+        **os.environ,
+        "LOCAL_SHELL_MCP_STATE_BACKEND": "file",
+        "LOCAL_SHELL_MCP_AUTH_MODE": "none",
+        "LOCAL_SHELL_MCP_WORKSPACE_ROOT": str(tmp_path),
+        "LOCAL_SHELL_MCP_STATE_DIR": str(tmp_path / ".local-shell-mcp"),
+    }
+    result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "file"
+    assert not (tmp_path / ".local-shell-mcp" / DB_NAME).exists()
