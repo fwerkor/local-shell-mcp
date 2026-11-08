@@ -175,7 +175,7 @@ jobs:
           bun run test:client
 
       - name: Test React chat, tool UI, uploads and machine permissions in Chromium
-        run: python -m pytest -q tests/test_webui_browser_e2e.py
+        run: python -m pytest -q tests/test_webui_browser_e2e.py tests/test_webui_ask_user_browser.py tests/test_webui_ask_user_source_port.py
 
       - name: Run OAuth, PTY, navigation, and responsive browser smoke test
         run: python scripts/ui-smoke.py

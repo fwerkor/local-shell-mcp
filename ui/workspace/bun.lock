@@ -138,7 +138,7 @@
         "tailwindcss-radix": "^2.8.0",
         "ts-md5": "^1.3.1",
         "web-vitals": "^3.5.2",
-        "zod": "^4.6.7",
+        "zod": "^3.22.4",
       },
       "devDependencies": {
         "@babel/plugin-transform-runtime": "^7.22.15",
@@ -282,7 +282,7 @@
         "dayjs": "^1.11.13",
         "js-yaml": "^4.3.2",
         "re2js": "^2.8.7",
-        "zod": "^4.6.7",
+        "zod": "^3.22.4",
       },
       "devDependencies": {
         "@babel/preset-env": "^7.21.5",
@@ -3734,7 +3734,7 @@
 
     "yocto-queue": ["yocto-queue@0.1.0", "", {}, ""],
 
-    "zod": ["zod@4.6.7", "", {}, ""],
+    "zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
     "zod-to-json-schema": ["zod-to-json-schema@3.25.1", "", { "peerDependencies": { "zod": "^3.25 || ^4" } }, ""],
 
@@ -3823,6 +3823,8 @@
     "@librechat/frontend/@testing-library/jest-dom": ["@testing-library/jest-dom@5.17.0", "", { "dependencies": { "@adobe/css-tools": "^4.0.1", "@babel/runtime": "^7.9.2", "@types/testing-library__jest-dom": "^5.9.1", "aria-query": "^5.0.0", "chalk": "^3.0.0", "css.escape": "^1.5.1", "dom-accessibility-api": "^0.5.6", "lodash": "^4.17.15", "redent": "^3.0.0" } }, ""],
 
     "@modelcontextprotocol/sdk/ajv": ["ajv@8.18.0", "", { "dependencies": { "fast-deep-equal": "^3.1.3", "fast-uri": "^3.0.1", "json-schema-traverse": "^1.0.0", "require-from-string": "^2.0.2" } }, ""],
+
+    "@modelcontextprotocol/sdk/zod": ["zod@4.6.7", "", {}, ""],
 
     "@radix-ui/react-label/@radix-ui/react-primitive": ["@radix-ui/react-primitive@2.1.3", "", { "dependencies": { "@radix-ui/react-slot": "1.2.3" }, "peerDependencies": { "@types/react": "*", "@types/react-dom": "*", "react": "^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc", "react-dom": "^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc" } }, ""],
 

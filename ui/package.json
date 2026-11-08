@@ -8,7 +8,7 @@
     "build:web": "bun run scripts/build.ts",
     "compile:tui": "bun run build:tui",
     "typecheck": "bunx tsc --noEmit",
-    "test": "bun test --coverage"
+    "test": "bun test ./src --coverage"
   },
   "dependencies": {
     "@canonical/react-components": "4.6.0",
