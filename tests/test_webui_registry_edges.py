@@ -35,7 +35,7 @@ async def test_deny_bad_names_machine_selectors_session_and_oversized_input(boun
     scopes = {"shell:read", "shell:write", "shell:execute", "remote:use"}
     for name, args, error in [
         ("not_registered", {}, ValueError),
-        ("mcp_manage", {}, PermissionError),
+        ("mcp_tool_call", {}, PermissionError),
         ("file_read", {"path": "a", "machine": 123}, ValueError),
         ("remote_transfer", {"source_machine": ["local"], "destination_machine": "worker2"}, ValueError),
         ("remote_transfer", {"source_machine": "local", "destination_machine": "worker1"}, PermissionError),
@@ -72,7 +72,9 @@ def test_original_schema_respects_other_tools_and_empty_policy(bound_policy):
     assert "gui_list" in names
     repo.save_setting("local", "agent.machine_policy.conversation." + cid,
                       {"local": "none", "worker1": "none", "worker2": "none"})
-    assert registry.available_tools("local", cid, scopes=base) == []
+    assert {item["function"]["name"] for item in registry.available_tools(
+        "local", cid, scopes=base,
+    )} == {"session_manage", "plan_manage"}
     assert registry.registered_definitions(("totally_missing",)) == []
     assert registry._encode_result(([], {"ok": True})) == '{"ok": true}'
     assert registry._encode_result(([SimpleNamespace(text="hello"), {"type": "image"}], None)) == (

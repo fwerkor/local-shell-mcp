@@ -174,7 +174,7 @@ export default function LsmChatPermissions({ conversationId }: { conversationId?
             </label>
           );
         })}
-        <p className="mt-2 text-text-secondary">Permissions apply separately to each machine, including local. Read-only permits inspection; read/write also permits commands. Inheritance: Global → Project → This chat. Unknown machines are denied; OAuth scopes still apply.</p>
+        <p className="mt-2 text-text-secondary">Each machine has independent permissions. Read-only allows inspection; read/write allows commands and edits. Setting local to read/write enables Controller MCP and Worker-registration management. Session and plan management are always available, regardless of machine permissions. Inheritance: Global → Project → This chat. Unknown machines are denied.</p>
         {hasChat && active === 'chat' && (
           <div className="mt-3 border-t border-border-medium pt-2">
             {flags.map((field) => (

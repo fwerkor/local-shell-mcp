@@ -194,19 +194,17 @@ async def test_generation_resume_rejects_invalid_human_action_and_inactive_state
 
 
 @pytest.mark.asyncio
-async def test_agent_without_enabled_tools_uses_plain_text_stream(active_generation, monkeypatch):
+async def test_agent_without_machine_access_still_has_session_tools(active_generation, monkeypatch):
     _, store, profile = active_generation
     generation, _ = store.begin("local", {"conversationId": "new", "text": "Respond plainly"})
 
-    async def only_plain_model(profile, history, **kwargs):
+    async def session_tools_model(profile, history, **kwargs):
+        assert {item["function"]["name"] for item in kwargs["tools"]} == {
+            "session_manage", "plan_manage",
+        }
         yield "Plain chat works."
 
-    async def unexpected_tools(*args, **kwargs):
-        raise AssertionError("Tool-enabled model stream must not be used for an Agent without tools")
-        yield "unreachable"
-
-    monkeypatch.setattr(generation_routes, "stream_model", only_plain_model)
-    monkeypatch.setattr(generation_routes, "stream_model_with_tools", unexpected_tools)
+    monkeypatch.setattr(generation_routes, "stream_model_with_tools", session_tools_model)
     await generation_routes._run_model(
         "local", generation, profile,
         parent_agent={"id": "agent_empty", "subagents": [], "instructions": "Act normally"},

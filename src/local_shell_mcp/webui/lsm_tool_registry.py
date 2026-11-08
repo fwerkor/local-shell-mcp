@@ -16,11 +16,17 @@ from ..audit import audit
 from .machine_permissions import authorize_machine_action, resolve_access
 from .providers import ModelToolCall
 
-# These are administrator actions or have separate approval/Agent contracts.
-# In particular no model may mutate MCP registration or Worker identity.
-_ADMIN_TOOLS = frozenset({
-    "mcp_manage", "mcp_tool_search", "mcp_tool_inspect", "mcp_tool_call",
-    "remote_manage", "session_manage", "plan_manage",
+# Controller management belongs to the `local` machine and requires its
+# write grant even when a management action operates on a remote registration.
+# Do not confuse `remote_manage(machine=...)` with an RPC executed on that Worker.
+_CONTROLLER_MANAGEMENT = frozenset({"mcp_manage", "remote_manage"})
+# Agent-owned logical sessions/plans are not machine operations. A session
+# remains manageable even if all machines have `none` grants.
+_AGENT_CONTROL = frozenset({"session_manage", "plan_manage"})
+# These have separate human approval or app-only credential contracts; do not
+# expose them through the general Agent dispatch path.
+_SEPARATE_TOOLS = frozenset({
+    "mcp_tool_search", "mcp_tool_inspect", "mcp_tool_call",
     "workspace_open", "open_live_workspace", "live_workspace_reconnect",
 })
 # Some diagnostic calls are read-only despite conservative MCP annotations.
@@ -37,6 +43,7 @@ _ADDITIONAL_SCOPES = {
     "browser_session": "browser:use", "browser_snapshot": "browser:use",
     "browser_act": "browser:use", "browser_run_script": "browser:use",
     "link_create": "file:share", "link_list": "file:share", "link_revoke": "file:share",
+    "mcp_manage": "shell:execute", "remote_manage": "remote:use",
 }
 _MAX_OUTPUT_CHARS = 32768
 _MAX_ARGUMENT_BYTES = 32768
@@ -65,8 +72,8 @@ def _registry():
 
 
 def _tool(name: str):
-    if name in _ADMIN_TOOLS:
-        raise PermissionError("The requested administrative tool is not available to Agents")
+    if name in _SEPARATE_TOOLS:
+        raise PermissionError("The requested tool requires its separate Agent flow")
     tool = _registry()._tool_manager.get_tool(name)
     if tool is None:
         raise ValueError("Unknown LSM tool")
@@ -74,6 +81,8 @@ def _tool(name: str):
 
 
 def _operation(tool: Any) -> str:
+    if tool.name in _CONTROLLER_MANAGEMENT:
+        return "write"
     if tool.name in _READ_INSPECTION or (tool.annotations and tool.annotations.readOnlyHint is True):
         return "read"
     if tool.name in _EXECUTION_TOOLS:
@@ -82,6 +91,10 @@ def _operation(tool: Any) -> str:
 
 
 def _targets(tool: Any, arguments: dict[str, Any]) -> list[str]:
+    if getattr(tool, "name", None) in _AGENT_CONTROL:
+        return []
+    if getattr(tool, "name", None) in _CONTROLLER_MANAGEMENT:
+        return ["local"]
     schema = tool.parameters.get("properties", {})
     if "machine" in schema:
         value = arguments.get("machine")
@@ -104,18 +117,22 @@ def available_tools(owner: str, conversation_id: str, *, scopes: set[str],
                     expires: int | None = None) -> list[dict]:
     """Advertise registered tool schemas filtered by effective machine policy."""
     policy = resolve_access(owner, conversation_id)
-    if not any(value != "none" for value in policy.values()):
-        return []
     definitions: list[dict] = []
     for tool in _registry()._tool_manager.list_tools():
-        if tool.name in _ADMIN_TOOLS:
+        if tool.name in _SEPARATE_TOOLS:
             continue
         operation = _operation(tool)
         extra_scope = _ADDITIONAL_SCOPES.get(tool.name)
         if extra_scope and extra_scope not in scopes:
             continue
         properties = tool.parameters.get("properties", {})
-        if tool.name == "remote_transfer":
+        if tool.name in _AGENT_CONTROL:
+            # No local/remote machine grant or shell OAuth scope is needed.
+            pass
+        elif tool.name in _CONTROLLER_MANAGEMENT:
+            if not _can_authorize(owner, conversation_id, "local", "write", scopes, expires):
+                continue
+        elif tool.name == "remote_transfer":
             # Transfer requires a writable destination and a readable source;
             # no model-defined endpoint can bypass either machine's policy.
             if not any(level == "write" and _can_authorize(
@@ -162,7 +179,18 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
     if "logical_session_id" in arguments:
         raise PermissionError("Models cannot provide LSM internal session credentials")
     operation = _operation(tool)
-    if tool.name == "remote_transfer":
+    if tool.name in _AGENT_CONTROL:
+        # Session ownership is still checked; this bypasses machine ACLs only.
+        from .routes import _repo
+
+        if _repo().conversation(owner, conversation_id) is None:
+            raise KeyError("Conversation not found")
+        if grant_expires is not None:
+            import time
+
+            if float(grant_expires) <= time.time():
+                raise PermissionError("Authentication grant expired")
+    elif tool.name == "remote_transfer":
         source = arguments.get("source_machine") or "local"
         destination = arguments.get("destination_machine") or "local"
         if not isinstance(source, str) or not isinstance(destination, str):

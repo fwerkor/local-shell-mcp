@@ -34,7 +34,9 @@ def enabled_machine_policy(tmp_path, monkeypatch):
 
 def test_schema_is_original_mcp_schema_without_internal_context(enabled_machine_policy):
     repo, cid, _ = enabled_machine_policy
-    assert available_tools("local", cid, scopes={"shell:read", "shell:write", "shell:execute"}) == []
+    assert {t["function"]["name"] for t in available_tools(
+        "local", cid, scopes={"shell:read", "shell:write", "shell:execute"},
+    )} == {"session_manage", "plan_manage"}
     repo.save_setting("local", "agent.machine_policy.conversation." + cid, {"local": "read"})
     result = available_tools("local", cid, scopes={"shell:read"})
     advertised = {row["function"]["name"]: row["function"] for row in result}
@@ -63,7 +65,9 @@ def test_schema_is_original_mcp_schema_without_internal_context(enabled_machine_
     assert {"run_shell", "run_python", "job_start", "job_stop", "job_retry",
             "file_write", "file_edit", "file_delete", "file_patch",
             "shell_start", "shell_send", "shell_stop"} <= writable
-    assert not {"mcp_manage", "remote_manage", "mcp_tool_call"} & writable
+    assert {"mcp_manage", "session_manage", "plan_manage"} <= writable
+    assert "remote_manage" not in writable  # remote:use OAuth scope required
+    assert "mcp_tool_call" not in writable
 
 
 @pytest.mark.asyncio
@@ -158,9 +162,9 @@ async def test_original_tool_calls_are_fenced_by_scopes_and_revocation(enabled_m
         await call_tool("local", cid, write,
                         granted_scopes={"shell:read", "shell:write", "shell:execute"})
     assert not (workspace / "blocked.txt").exists()
-    with pytest.raises(PermissionError, match="administrative"):
+    with pytest.raises(PermissionError, match="not granted"):
         await call_tool("local", cid, ModelToolCall("admin", "mcp_manage", {"action": "list"}),
-                        granted_scopes={"shell:read", "shell:write"})
+                        granted_scopes={"shell:read", "shell:write", "shell:execute"})
     with pytest.raises(PermissionError, match="internal session"):
         repo.save_setting("local", "agent.machine_policy.conversation." + cid, {"local": "read"})
         await call_tool("local", cid, ModelToolCall("escape", "job_list", {
@@ -224,7 +228,7 @@ async def test_existing_file_write_uses_its_original_validation_and_scope(
     response = json.loads(await call_tool("local", cid, call, granted_scopes={"shell:read", "shell:write"}))
     assert response["ok"] is True
     assert (workspace / "notes.txt").read_text() == "Written via registered LSM implementation"
-    with pytest.raises(PermissionError, match="administrative"):
+    with pytest.raises(PermissionError, match="remote:use"):
         await call_tool("local", cid, ModelToolCall("admin", "remote_manage", {"action": "revoke"}),
                         granted_scopes={"shell:read", "shell:write"})
 

@@ -227,7 +227,7 @@ async def test_agent_write_capability_is_only_advertised_for_write_policy(tmp_pa
                     "file_write", "file_edit", "file_patch", "run_shell", "run_python",
                     "job_start", "job_stop", "job_retry", "shell_start", "shell_send",
                     "shell_stop"} <= set(available)
-            assert "mcp_manage" not in available
+            assert {"mcp_manage", "session_manage", "plan_manage"} <= set(available)
     finally:
         await generation_routes.shutdown_generations()
         get_settings.cache_clear()

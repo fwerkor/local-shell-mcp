@@ -149,9 +149,8 @@ async def _run_model(
             from .nested_mcp import nested_tools
 
             model_tools = (
-                (available_tools(owner, generation.conversation_id,
-                                 scopes=set(granted_scopes), expires=grant_expires)
-                 if native_file_tools else []) +
+                available_tools(owner, generation.conversation_id,
+                                scopes=set(granted_scopes), expires=grant_expires) +
                 (ASK_USER_TOOLS if ask_user_enabled else []) +
                 (nested_tools() if mcp_enabled else []) +
                 delegation_tools(parent_agent)

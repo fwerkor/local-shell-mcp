@@ -68,9 +68,10 @@
   do not edit or delete the database until a verified backup exists.
 - Nested MCP discovery and execution use the original registered LSM
   `mcp_tool_search` / `mcp_tool_inspect` / `mcp_tool_call` schemas and FastMCP
-  handlers. The conversation's `mcp` setting and OAuth scopes still gate them. The Agent sees only
-  `mcp_tool_search`, `mcp_tool_inspect`, and `mcp_tool_call`; `mcp_manage` is
-  never exposed to the model. External calls pause with a durable
+  handlers. The conversation's `mcp` setting and OAuth scopes still gate these
+  three external discovery/execution operations. Controller-side registry
+  administration (`mcp_manage`) is independently available when the `local`
+  machine is writable (and the OAuth execution scope is granted). External calls pause with a durable
   `tool_approval` action, and require an authenticated, generation-fenced
   `approve` decision and `shell:execute` scope before execution. A rejection
   continues the model without executing the tool. The first slice supports
@@ -97,9 +98,14 @@
   `file_patch`, `run_shell` and related mutating tools, subject to the
   existing OAuth scopes. Shell commands are conservatively write-capable even
   when their text appears to be observational. Cross-machine transfer checks
-  both endpoints (source read, destination write). Administrative `mcp_manage`
-  and `remote_manage` are not model tools. No separate LSM Job/Shell/File
-  implementation is maintained by the WebUI.
+  both endpoints (source read, destination write). Controller management
+  (`mcp_manage`, `remote_manage`) requires `local=write`, regardless of
+  the permissions on registered Workers; the original OAuth scopes still
+  apply (`remote:use` for `remote_manage`, `shell:execute` for `mcp_manage`).
+  Agent-owned `session_manage` and `plan_manage` are always available even
+  when every machine is `none`, and retain their session/owner checks. No
+  separate LSM Job/Shell/File or
+  management implementation is maintained by the WebUI.
 - These machine grants apply only to Agent-initiated operations; they do not
   replace a human administrator's direct Controller authorization. Permissions
   are rechecked immediately before every native tool invocation and cannot
