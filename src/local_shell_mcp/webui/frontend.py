@@ -19,7 +19,7 @@ from urllib.parse import unquote
 
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
-from starlette.routing import Route
+from starlette.routing import Match, Route
 
 _STATIC_PREFIXES = ("assets/", "fonts/", "images/", "locales/", "favicon", "robots.txt", "manifest", "sw.js", "sw-heal.js", "registerSW.js", "workbox-")
 _SPA_PREFIXES = ("c", "login", "register", "search", "agents", "settings", "control", "projects", "chat", "d", "presets", "prompts", "schedules", "memories")
@@ -128,5 +128,15 @@ async def frontend(request: Request) -> Response:
     return FileResponse(path, headers=headers)
 
 
+class FrontendRoute(Route):
+    """Leave MCP and unknown server paths to the underlying application."""
+
+    def matches(self, scope):
+        path = scope.get("path", "")
+        if scope["type"] != "http" or (path != "/" and not is_public_frontend(path, scope.get("method", ""))):
+            return Match.NONE, {}
+        return super().matches(scope)
+
+
 def frontend_routes() -> list[Route]:
-    return [Route("/{path:path}", frontend, methods=["GET", "HEAD"])]
+    return [FrontendRoute("/{path:path}", frontend, methods=["GET", "HEAD"])]

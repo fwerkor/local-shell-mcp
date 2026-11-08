@@ -37,6 +37,7 @@ PUBLIC_PATHS = {
 }
 HUMAN_UI_API_PREFIX = "/api/ui/"
 LIVE_UI_API_PREFIX = "/api/live/"
+CONTROLLER_API_PREFIX = "/api/lsm/controller/"
 _REQUEST_BODY_SCOPE_KEY = "local_shell_mcp.request_body"
 _REMOTE_TRANSFER_PREFIX = "/remote/transfer/"
 
@@ -310,7 +311,7 @@ def verify_request(request: Request) -> Principal:
                     "scope": " ".join(ui_context.scopes),
                 },
             )
-    if path.startswith((HUMAN_UI_API_PREFIX, LIVE_UI_API_PREFIX)):
+    if path.startswith((HUMAN_UI_API_PREFIX, LIVE_UI_API_PREFIX, CONTROLLER_API_PREFIX)):
         token = _extract_token(request)
         if token:
             from .live_channel import get_live_channel_manager
@@ -330,7 +331,7 @@ def verify_request(request: Request) -> Principal:
             if settings.auth_mode == "none":
                 raise HTTPException(status_code=401, detail="Invalid live workspace credential")
     if settings.auth_mode == "none":
-        if path.startswith((HUMAN_UI_API_PREFIX, LIVE_UI_API_PREFIX)) and _is_cross_origin_request(
+        if path.startswith((HUMAN_UI_API_PREFIX, LIVE_UI_API_PREFIX, CONTROLLER_API_PREFIX)) and _is_cross_origin_request(
             request
         ):
             raise HTTPException(
@@ -641,7 +642,8 @@ class RequestBodyLimitMiddleware:
             return
 
         if (scope.get("path", "").startswith("/remote/transfer/upload/")
-                or scope.get("path", "") in {"/api/ui/files/upload", "/api/ui/librechat/upload"}):
+                or scope.get("path", "") in {"/api/ui/files/upload", "/api/ui/librechat/upload",
+                    "/api/lsm/controller/attachments/upload", "/api/lsm/controller/files/upload"}):
             # Upload tickets validate an exact byte count and SHA-256 while streaming.
             # Buffering here would turn the transfer back into a memory-bound request.
             await self.app(scope, receive, send)

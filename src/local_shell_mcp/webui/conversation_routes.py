@@ -89,7 +89,7 @@ def _clone(owner: str, values: dict, *, only_to_message: str | None = None) -> d
             by_id = {row["id"]: row for row in messages}
             selected: set[str] = set()
             cursor = only_to_message
-            while cursor:
+            while cursor and cursor != "00000000-0000-0000-0000-000000000000":
                 if cursor not in by_id:
                     raise HTTPException(404, detail="Target message not found")
                 if cursor in selected:

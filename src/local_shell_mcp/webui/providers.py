@@ -33,6 +33,15 @@ def _require_https_or_loopback(value: str) -> str:
     raise ValueError("A model provider must use HTTPS or the local loopback interface")
 
 
+def selected_provider(payload: dict, agent: dict | None = None) -> str:
+    """Resolve the retained client's direct endpoint and saved Agent consistently."""
+    selected = (agent or {}).get("provider") or payload.get("provider")
+    if selected:
+        return str(selected)
+    endpoint = payload.get("endpoint")
+    return str(endpoint) if endpoint in {"openai", "anthropic", "google", "gemini"} else "openai"
+
+
 def provider_config(provider: str, model: str | None = None) -> ProviderConfig:
     kind = provider.strip().lower()
     if kind in {"openai", "openai-compatible", "custom", "ollama", "azureopenai"}:

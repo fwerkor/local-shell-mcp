@@ -58,7 +58,7 @@ class WorkspaceRepository:
         data = _decode(row["metadata"])
         data.update(
             conversationId=row["id"], title=row["title"],
-            projectId=row["project_id"], agent_id=row["agent_id"],
+            projectId=row["project_id"], chatProjectId=row["project_id"], agent_id=row["agent_id"],
             model=row["model"], endpoint=row["endpoint"],
             isArchived=bool(row["archived"]), pinned=bool(row["pinned"]),
             createdAt=_stamp(row["created_at"] / 1_000_000),

@@ -81,7 +81,7 @@ async def test_actual_mcp_file_tool_and_original_job_function(enabled_machine_po
         "local", cid, ModelToolCall("read-1", "file_read", {"path": "file.txt", "machine": "local"}),
         granted_scopes={"shell:read"},
     ))
-    assert contents["ok"] is True
+    assert contents.get("ok") is True, contents
     assert "Original LSM file_read text" in str(contents["data"])
 
     calls = []
@@ -329,7 +329,7 @@ async def test_oauth_read_only_grant_uses_existing_mcp_tools_without_all_public_
             "alice", conversation, ModelToolCall("read", "file_read", {"path": "readme.txt"}),
             granted_scopes={"shell:read"},
         ))
-        assert read["ok"] is True
+        assert read.get("ok") is True, read
         assert "OAuth read-only access" in str(read["data"])
         job = json.loads(await call_tool(
             "alice", conversation, ModelToolCall("jobs", "job_list", {"limit": 1}),

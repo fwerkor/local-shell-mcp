@@ -143,7 +143,15 @@ async def conversation_messages(request: Request):
         try:
             # The original LibreChat GET /api/messages/:conversationId endpoint
             # returns an array, unlike the paginated GET /api/messages query.
-            return _result(repo.messages(owner, conversation_id, limit=200)["messages"])
+            pages = []
+            cursor = None
+            while True:
+                page = repo.messages(owner, conversation_id, limit=200, cursor=cursor)
+                pages.append(page["messages"])
+                cursor = page["nextCursor"]
+                if cursor is None:
+                    break
+            return _result([message for page in reversed(pages) for message in page])
         except KeyError:
             _not_found()
     payload = await _body(request)

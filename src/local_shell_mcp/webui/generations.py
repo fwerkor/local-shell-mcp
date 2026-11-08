@@ -15,6 +15,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from .providers import selected_provider
 from .storage import _json, _now
 
 log = logging.getLogger(__name__)
@@ -78,7 +79,7 @@ class GenerationStore:
         new_conversation = raw_conversation_id in (None, "", "new", "new_conversation")
         if raw_conversation_id is not None and not isinstance(raw_conversation_id, str):
             raise ValueError("Invalid conversation id")
-        project_id = payload.get("projectId") if new_conversation else None
+        project_id = payload.get("projectId", payload.get("chatProjectId")) if new_conversation else None
         if project_id is not None and (not isinstance(project_id, str) or not project_id):
             raise ValueError("Invalid project id")
         conversation_id = str(uuid.uuid4()) if new_conversation else raw_conversation_id
@@ -95,9 +96,9 @@ class GenerationStore:
             "responseMessageId": response_message_id,
             "generationCreatedAt": stamp_ms,
             "clientRequestId": client_request_id,
-            "provider": str((agent or {}).get("provider") or payload.get("provider") or "openai"),
+            "provider": selected_provider(payload, agent),
             "model": str((agent or {}).get("model") or payload.get("model") or ""),
-            "askUserEnabled": bool(agent and "ask_user" in (agent.get("tools") or [])),
+            "askUserEnabled": bool(agent and bool({"ask_user", "ask_user_question"}.intersection(agent.get("tools") or []))),
         }
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -294,16 +295,34 @@ class GenerationStore:
             ).fetchall()
             return [(int(row[0]), json.loads(row[1])) for row in rows]
 
-    def history(self, owner: str, conversation_id: str, max_messages: int = 50) -> list[dict]:
+    def history(self, owner: str, conversation_id: str, max_messages: int = 50,
+                *, message_id: str | None = None) -> list[dict]:
         with self.database.connect() as db:
-            if not db.execute("SELECT 1 FROM conversations WHERE id=? AND owner=?", (conversation_id, owner)).fetchone():
+            if not db.execute("SELECT 1 FROM conversations WHERE id=? AND owner=?",
+                              (conversation_id, owner)).fetchone():
                 raise KeyError("Conversation not found")
-            rows = db.execute(
-                "SELECT role,text FROM messages WHERE conversation_id=? ORDER BY created_at DESC,id DESC LIMIT ?",
-                (conversation_id, min(max_messages, 100)),
-            ).fetchall()
-        return [{"role": row["role"], "content": row["text"]} for row in reversed(rows)
-                if row["role"] in {"user", "assistant"}]
+            if message_id is None:
+                latest = db.execute(
+                    "SELECT id FROM messages WHERE conversation_id=? ORDER BY created_at DESC,id DESC LIMIT 1",
+                    (conversation_id,),
+                ).fetchone()
+                message_id = latest["id"] if latest else None
+            result = []
+            seen = set()
+            while message_id and message_id != "00000000-0000-0000-0000-000000000000":
+                if message_id in seen:
+                    raise ValueError("Message graph contains a cycle")
+                seen.add(message_id)
+                row = db.execute("SELECT id,parent_id,role,text FROM messages WHERE id=? AND conversation_id=?",
+                                 (message_id, conversation_id)).fetchone()
+                if row is None:
+                    raise KeyError("Message ancestor not found")
+                if row["role"] in {"user", "assistant"}:
+                    result.append({"role": row["role"], "content": row["text"]})
+                if len(result) >= max(1, min(max_messages, 100)):
+                    break
+                message_id = row["parent_id"]
+        return list(reversed(result))
 
     def finish(self, owner: str, run_id: str, *, status: str, text: str = "",
                error: str | None = None) -> bool:

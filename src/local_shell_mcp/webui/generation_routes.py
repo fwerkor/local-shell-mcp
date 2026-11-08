@@ -25,6 +25,7 @@ from .providers import (
     ModelToolCall,
     ProviderConfig,
     provider_config,
+    selected_provider,
     stream_model,
     stream_model_with_tools,
 )
@@ -82,7 +83,7 @@ async def _run_model(
     step_id = "step_" + generation.run_id
     now_ms = int(time.time() * 1000)
     try:
-        history = resume_history if resume_history is not None else repo.history(owner, generation.conversation_id)
+        history = resume_history if resume_history is not None else repo.history(owner, generation.conversation_id, message_id=generation.user_message_id)
         if instructions and resume_history is None:
             history.insert(0, {"role": "system", "content": instructions})
         if resume_history is None:
@@ -379,6 +380,11 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
 async def start_generation(request: Request):
     owner = _owner(request)
     payload = await _body(request)
+    payload = dict(payload)
+    if "projectId" not in payload and "chatProjectId" in payload:
+        payload["projectId"] = payload["chatProjectId"]
+    if not payload.get("provider"):
+        payload["provider"] = selected_provider({**payload, "endpoint": payload.get("endpoint") or request.path_params.get("endpoint")})
     agent_id = payload.get("agent_id")
     agent = None
     if agent_id is not None:
@@ -387,7 +393,7 @@ async def start_generation(request: Request):
         agent = AgentRepository(_database()).get(owner, agent_id)
         if agent is None:
             raise HTTPException(404, detail="Agent not found")
-    kind = str((agent or {}).get("provider") or payload.get("provider") or "openai")
+    kind = selected_provider(payload, agent)
     model = (agent or {}).get("model") or payload.get("model")
     # Permission inheritance is resolved against SQLite at the start and
     # rechecked before every tool. The initial OAuth grant cannot be elevated
@@ -433,7 +439,7 @@ async def start_generation(request: Request):
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     if fresh:
-        ask_user_enabled = bool(agent and "ask_user" in (agent.get("tools") or []))
+        ask_user_enabled = bool(agent and bool({"ask_user", "ask_user_question"}.intersection(agent.get("tools") or [])))
         from .routes import _repo
 
         flags = _repo().setting(owner, "conversation.permissions." + result.conversation_id, {})

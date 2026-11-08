@@ -77,7 +77,10 @@ def test_crashed_generation_is_marked_interrupted_and_replayable(database):
 
 @pytest.mark.asyncio
 async def test_streaming_generation_http_reconnect_and_token_isolation(database, monkeypatch):
+    # Load native modules before replacing the settings accessor: imports in
+    # those modules otherwise retain the test lambda after monkeypatch undo.
     from local_shell_mcp import settings as settings_module
+    from local_shell_mcp import tools  # noqa: F401
     settings = settings_module.Settings(state_dir=database.root, workspace_root=database.root,
                                         auth_mode="oauth")
 
