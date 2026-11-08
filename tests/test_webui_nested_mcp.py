@@ -9,8 +9,10 @@ import httpx
 import pytest
 from starlette.applications import Starlette
 
+from local_shell_mcp import tools as core_tools
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.webui import generation_routes, nested_mcp, routes
+from local_shell_mcp.webui.lsm_tool_registry import _registry_for_state
 from local_shell_mcp.webui.providers import ModelToolCall, ProviderConfig
 
 
@@ -42,7 +44,8 @@ async def test_mcp_discovery_and_tool_call_requires_human_approval(tmp_path, mon
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
     get_settings.cache_clear()
     registry = MockRegistry()
-    monkeypatch.setattr(nested_mcp, "_manager", lambda: registry)
+    monkeypatch.setattr(core_tools, "DynamicMCPManager", lambda *args, **kwargs: registry)
+    _registry_for_state.cache_clear()
     monkeypatch.setattr(generation_routes, "provider_config", lambda *_: ProviderConfig(
         "openai", "mock", "http://127.0.0.1:11434/v1/chat/completions", "",
     ))
@@ -120,6 +123,7 @@ async def test_mcp_discovery_and_tool_call_requires_human_approval(tmp_path, mon
     finally:
         await generation_routes.shutdown_generations()
         get_settings.cache_clear()
+        _registry_for_state.cache_clear()
 
 
 @pytest.mark.asyncio
@@ -133,7 +137,8 @@ async def test_nested_mcp_disabled_by_default_and_management_tool_absent(tmp_pat
     repo = _repo()
     cid = repo.create_conversation("local", {"title": "No MCP"})["conversationId"]
     registry = MockRegistry()
-    monkeypatch.setattr(nested_mcp, "_manager", lambda: registry)
+    monkeypatch.setattr(core_tools, "DynamicMCPManager", lambda *args, **kwargs: registry)
+    _registry_for_state.cache_clear()
     try:
         with pytest.raises(PermissionError, match="disabled"):
             await nested_mcp.discover("local", cid, {"shell:read"},
@@ -141,13 +146,22 @@ async def test_nested_mcp_disabled_by_default_and_management_tool_absent(tmp_pat
         repo.save_setting("local", "conversation.permissions." + cid, {"mcp": True})
         inspected = json.loads(await nested_mcp.discover("local", cid, {"shell:read"},
                                                          ModelToolCall("2", "mcp_tool_inspect", {"name": "test:echo"})))
-        assert inspected["name"] == "test:echo"
+        assert inspected["data"]["name"] == "test:echo"
         with pytest.raises(PermissionError, match="approval"):
             await nested_mcp.discover("local", cid, {"shell:read"},
                                       ModelToolCall("3", "mcp_tool_call", {"name": "test:echo"}))
         with pytest.raises(PermissionError, match="shell:execute"):
             await nested_mcp.approved_call("local", cid, {"shell:read"},
                                            ModelToolCall("3", "mcp_tool_call", {"name": "test:echo"}))
-        assert all(tool["function"]["name"] != "mcp_manage" for tool in nested_mcp.MCP_TOOLS)
+        assert all(tool["function"]["name"] != "mcp_manage" for tool in nested_mcp.nested_tools())
+        from local_shell_mcp.webui.lsm_tool_registry import _registry
+
+        original = _registry()._tool_manager.get_tool("mcp_tool_inspect")
+        exposed = next(tool["function"] for tool in nested_mcp.nested_tools()
+                       if tool["function"]["name"] == "mcp_tool_inspect")
+        assert exposed["description"] == original.description
+        assert exposed["parameters"]["properties"]["name"] == original.parameters["properties"]["name"]
+        assert "logical_session_id" not in exposed["parameters"].get("required", [])
     finally:
         get_settings.cache_clear()
+        _registry_for_state.cache_clear()

@@ -122,8 +122,8 @@ async def _run_model(
             call, decision = approved_mcp
             if decision == "approve":
                 try:
-                    result = await asyncio.wait_for(
-                        approved_call(owner, generation.conversation_id, set(granted_scopes), call), timeout=120,
+                    result = await approved_call(
+                        owner, generation.conversation_id, set(granted_scopes), call,
                     )
                 except Exception as exc:
                     log.warning("Approved external MCP call failed: %s", type(exc).__name__)
@@ -145,7 +145,7 @@ async def _run_model(
             from .ask_user_tools import ASK_USER_TOOLS
             from .delegation import delegation_tools, run_subagent
             from .lsm_tool_registry import available_tools, call_tool
-            from .nested_mcp import MCP_TOOLS, discover
+            from .nested_mcp import discover, nested_tools
 
             for round_number in range(3):
                 calls: list[ModelToolCall] = []
@@ -155,7 +155,7 @@ async def _run_model(
                                          scopes=set(granted_scopes), expires=grant_expires)
                          if native_file_tools else []) +
                         (ASK_USER_TOOLS if ask_user_enabled else []) +
-                        (MCP_TOOLS if mcp_enabled else []) +
+                        (nested_tools() if mcp_enabled else []) +
                         delegation_tools(parent_agent)
                     ), max_tokens=max_tokens,
                     temperature=temperature,

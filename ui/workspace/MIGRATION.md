@@ -66,8 +66,9 @@
   WebUI persistence layer are deferred until used. If SQLite itself cannot
   load, set `LOCAL_SHELL_MCP_STATE_BACKEND=file` to recover the Controller;
   do not edit or delete the database until a verified backup exists.
-- Nested MCP tool discovery is wired to the existing DynamicMCPManager, gated
-  by the conversation's `mcp` setting and OAuth scopes. The Agent sees only
+- Nested MCP discovery and execution use the original registered LSM
+  `mcp_tool_search` / `mcp_tool_inspect` / `mcp_tool_call` schemas and FastMCP
+  handlers. The conversation's `mcp` setting and OAuth scopes still gate them. The Agent sees only
   `mcp_tool_search`, `mcp_tool_inspect`, and `mcp_tool_call`; `mcp_manage` is
   never exposed to the model. External calls pause with a durable
   `tool_approval` action, and require an authenticated, generation-fenced

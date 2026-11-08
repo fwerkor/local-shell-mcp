@@ -179,41 +179,65 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
     if extra_scope and extra_scope not in granted_scopes:
         raise PermissionError(f"{extra_scope} permission is required")
     # MCP uses None/omitted for the local controller. Passing the literal name
-    # `local` would instead incorrectly route to a remote Worker called local.
+    # `local` would instead incorrectly route to a Worker called local.
     invocation = dict(arguments)
-    if invocation.get("machine") == "local":
-        invocation["machine"] = None
-    if invocation.get("source_machine") == "local":
-        invocation["source_machine"] = None
-    if invocation.get("destination_machine") == "local":
-        invocation["destination_machine"] = None
-    invocation["logical_session_id"] = None
+    for field in ("machine", "source_machine", "destination_machine"):
+        if invocation.get(field) == "local":
+            invocation[field] = None
+    return await _invoke_registered(owner, conversation_id, tool.name, invocation,
+                                    scopes=granted_scopes, machines=_targets(tool, arguments))
+
+
+def registered_definitions(names: tuple[str, ...]) -> list[dict]:
+    """Use exact original MCP schemas for separately approved Agent tools."""
+    definitions = []
+    for name in names:
+        tool = _registry()._tool_manager.get_tool(name)
+        if tool is None:
+            continue
+        params = copy.deepcopy(tool.parameters)
+        params.get("properties", {}).pop("logical_session_id", None)
+        required = [field for field in params.get("required", []) if field != "logical_session_id"]
+        if required:
+            params["required"] = required
+        else:
+            params.pop("required", None)
+        definitions.append({"type": "function", "function": {
+            "name": name, "description": (tool.description or "")[:2048],
+            "parameters": params,
+        }})
+    return definitions
+
+
+async def _invoke_registered(owner: str, conversation_id: str, name: str,
+                             arguments: dict[str, Any], *, scopes: set[str],
+                             machines: list[str] | None = None) -> str:
+    """Call only an explicitly vetted tool using MCP's own validated executor."""
     from ..auth import _CURRENT_PRINCIPAL, Principal
 
-    # The MCP watchdog uses current_principal for its own scope checks,
-    # logical-session subject and audit identity. This is the authenticated
-    # browser owner with exactly the scopes frozen at generation start, not an
-    # unrestricted in-process/stdio MCP client.
-    principal_token = _CURRENT_PRINCIPAL.set(Principal(
+    if "logical_session_id" in arguments:
+        raise PermissionError("Models cannot provide LSM internal session credentials")
+    if len(json.dumps(arguments, ensure_ascii=False)) > _MAX_ARGUMENT_BYTES:
+        raise ValueError("LSM tool input is too large")
+    invocation = dict(arguments)
+    invocation["logical_session_id"] = None
+    token = _CURRENT_PRINCIPAL.set(Principal(
         email=None, subject=owner,
-        claims={"scope": " ".join(sorted(granted_scopes)), "auth": "webui-agent"},
+        claims={"scope": " ".join(sorted(scopes)), "auth": "webui-agent"},
     ))
     try:
-        # Run the actual registered FastMCP callable. Preserve its validation,
-        # OAuth checks, runtime guards, auditing, idempotency, Worker dispatch.
-        data = await _registry()._tool_manager.call_tool(tool.name, invocation, convert_result=True)
+        data = await _registry()._tool_manager.call_tool(name, invocation, convert_result=True)
         result = _encode_result(data)
         structured = data[1] if isinstance(data, tuple) and len(data) == 2 else data
         succeeded = not (isinstance(structured, dict) and structured.get("ok") is False)
     except Exception as exc:
         audit("webui_agent_lsm_tool", owner=owner, conversation_id=conversation_id,
-              tool=tool.name, machines=_targets(tool, arguments), ok=False,
-              error_type=type(exc).__name__)
+              tool=name, machines=machines or [], ok=False, error_type=type(exc).__name__)
         raise
     finally:
-        _CURRENT_PRINCIPAL.reset(principal_token)
+        _CURRENT_PRINCIPAL.reset(token)
     audit("webui_agent_lsm_tool", owner=owner, conversation_id=conversation_id,
-          tool=tool.name, machines=_targets(tool, arguments), ok=succeeded)
+          tool=name, machines=machines or [], ok=succeeded)
     return result
 
 
