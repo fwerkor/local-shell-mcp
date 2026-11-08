@@ -79,3 +79,26 @@ async def test_conversation_mutations_cannot_read_another_users_messages(tmp_pat
         assert (await client.get(f"/api/messages/{cid}", headers=bob)).status_code == 404
         assert (await client.delete("/api/convos/all", headers=bob)).json()["deletedCount"] == 0
         assert (await client.get(f"/api/convos/{cid}", headers=alice)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_conversation_mutation_rejects_missing_fields_and_unknown_fork(tmp_path, monkeypatch):
+    monkeypatch.setattr(routes, "get_settings", lambda: SimpleNamespace(auth_mode="none", state_dir=tmp_path))
+    app = Starlette(routes=[*conversation_routes.conversation_routes(), *routes.webui_routes()])
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.post("/api/convos/update", json={"arg": []})).status_code == 400
+        assert (await client.post("/api/convos/update", json={})).status_code == 400
+        assert (await client.post("/api/convos/archive", json={})).status_code == 400
+        assert (await client.post("/api/convos/pin", json={})).status_code == 400
+        assert (await client.get("/api/convos/gen_title/unknown")).status_code == 404
+        assert (await client.post("/api/convos/fork", json={"conversationId": "missing"})).status_code == 400
+        assert (await client.post("/api/convos/duplicate", json={"conversationId": "missing"})).status_code == 404
+        cid = (await client.post("/api/convos", json={"title": "Original"})).json()["conversationId"]
+        assert (await client.post("/api/convos/fork", json={"conversationId": cid, "targetMessageId": "missing"})).status_code == 404
+        created = (await client.post(f"/api/messages/{cid}", json={"role": "user", "text": "Hello"})).json()
+        child = (await client.post(f"/api/messages/{cid}", json={
+            "role": "assistant", "text": "Hi", "parentMessageId": created["messageId"]
+        })).json()
+        fork = await client.post("/api/convos/fork", json={"conversationId": cid, "messageId": child["messageId"]})
+        assert fork.status_code == 201
+        assert len(fork.json()["messages"]) == 2

@@ -368,3 +368,19 @@ def test_file_backend_recovery_starts_when_sqlite_module_is_missing(tmp_path: Pa
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "file"
     assert not (tmp_path / ".local-shell-mcp" / DB_NAME).exists()
+
+
+def test_empty_append_is_safe_and_legacy_oversize_is_not_imported(tmp_path: Path) -> None:
+    store = SQLiteStateStore(tmp_path)
+    assert store.append_bytes("audit.jsonl", b"") == 0
+    assert store.read_bytes("audit.jsonl") == b""
+    assert store.append_bytes("audit.jsonl", b"x") == 1
+    assert store.size_bytes("audit.jsonl") == 1
+    # Sparse files test the pre-read size guard without allocating 64 MiB.
+    oversize = tmp_path / "legacy.json"
+    with oversize.open("wb") as writer:
+        writer.truncate(65 * 1024 * 1024)
+    with pytest.raises(RuntimeError, match="too large"):
+        store.migrate_files()
+    assert store.read_bytes("legacy.json") is None
+    assert oversize.stat().st_size == 65 * 1024 * 1024
