@@ -88,6 +88,38 @@ def require_machine_scope(scopes: set[str], machine: str, level: str, *, expires
         raise PermissionError("remote:use permission is required")
 
 
+def authorize_machine_action(
+    owner: str, conversation_id: str, machine: str, operation: str, *,
+    scopes: set[str], expires: int | None = None, repo: Any = None,
+) -> None:
+    """The single policy gate for every model-initiated machine operation.
+
+    `read` covers inspection. `write` includes edits and other mutations.
+    `execute` is deliberately classified as write-capable: a shell command
+    cannot reliably be distinguished as read-only just by its text.
+    """
+    from ..settings import get_settings
+
+    if operation not in {"read", "write", "execute"}:
+        raise ValueError("Unknown machine operation class")
+    if not isinstance(machine, str) or not _NAME_RE.fullmatch(machine):
+        raise PermissionError("Invalid target machine")
+    settings = get_settings()
+    if machine == "local" and settings.disable_local:
+        raise PermissionError("Local machine is disabled")
+    if machine != "local" and not settings.remote_enabled:
+        raise PermissionError("Remote machine access is disabled")
+    granted = access_level(owner, conversation_id, machine, repo=repo)
+    if granted == "none":
+        raise PermissionError(f"Access to machine {machine} is not granted")
+    if operation in {"write", "execute"} and granted != "write":
+        raise PermissionError(f"Machine {machine} is read-only")
+    # The per-machine grant never expands the OAuth principal's own rights.
+    require_machine_scope(scopes, machine, "write" if operation != "read" else "read", expires=expires)
+    if operation == "execute" and "shell:execute" not in scopes:
+        raise PermissionError("shell:execute permission is required")
+
+
 def _checked(request: Request, permissions: dict[str, str]) -> None:
     from ..settings import get_settings
 
@@ -112,10 +144,17 @@ async def available_machines(request: Request):
 
     if "shell:read" not in _principal_scopes(request):
         raise HTTPException(403, detail="shell:read permission is required")
+    from ..settings import get_settings
+
     try:
         rows = _machine_rows().get("machines", [])
     except Exception:
         rows = []
+    # The Controller host is always the `local` machine, including when
+    # execution on it is disabled. Do not hide its permission row.
+    local_status = "disabled" if get_settings().disable_local else "online"
+    rows = [{"name": "local", "status": local_status},
+            *[row for row in rows if row.get("name") != "local"]]
     visible = []
     for row in rows:
         name = row.get("name")

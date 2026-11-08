@@ -71,6 +71,7 @@ async def _run_model(
     *, instructions: str = "", parameters: dict | None = None,
     native_file_tools: bool = False, write_tools: bool = False,
     ask_user_enabled: bool = False, mcp_enabled: bool = False,
+    parent_agent: dict | None = None,
     resume_history: list[dict] | None = None, partial_text: str = "",
     approved_mcp: tuple[ModelToolCall, str] | None = None,
     granted_scopes: frozenset[str] = frozenset(), grant_expires: int | None = None,
@@ -140,18 +141,22 @@ async def _run_model(
                              "status": "completed",
                          }]}}
             })
-        if (native_file_tools or ask_user_enabled or mcp_enabled) and profile.provider == "openai":
-            from .native_tools import ASK_USER_TOOLS, READ_ONLY_TOOLS, WRITE_TOOLS, run_machine_tool
+        if (native_file_tools or ask_user_enabled or mcp_enabled or parent_agent) and profile.provider == "openai":
+            from .ask_user_tools import ASK_USER_TOOLS
+            from .delegation import delegation_tools, run_subagent
+            from .lsm_tool_registry import available_tools, call_tool
             from .nested_mcp import MCP_TOOLS, discover
 
             for round_number in range(3):
                 calls: list[ModelToolCall] = []
                 async for item in stream_model_with_tools(
                     profile, history, tools=(
-                        (READ_ONLY_TOOLS if native_file_tools else []) +
-                        (WRITE_TOOLS if write_tools else []) +
+                        (available_tools(owner, generation.conversation_id,
+                                         scopes=set(granted_scopes), expires=grant_expires)
+                         if native_file_tools else []) +
                         (ASK_USER_TOOLS if ask_user_enabled else []) +
-                        (MCP_TOOLS if mcp_enabled else [])
+                        (MCP_TOOLS if mcp_enabled else []) +
+                        delegation_tools(parent_agent)
                     ), max_tokens=max_tokens,
                     temperature=temperature,
                 ):
@@ -214,6 +219,34 @@ async def _run_model(
                                                    "".join(text_parts)):
                         raise RuntimeError("Unable to park external MCP approval")
                     return
+                delegated = [call for call in calls if call.name in {"delegate_agent", "handoff_agent"}]
+                if delegated:
+                    if len(calls) != 1:
+                        raise ValueError("Only one subagent delegation is supported per model step")
+                    deleg = delegated[0]
+                    result = await run_subagent(owner, generation, parent_agent, deleg, _database())
+                    repo.append(owner, generation.run_id, {
+                        "event": "on_run_step",
+                        "data": {"type": "tool_calls", "id": "step_" + deleg.call_id,
+                                 "index": round_number + 1, "status": "completed",
+                                 "stepDetails": {"type": "tool_calls", "tool_calls": [{
+                                     "id": deleg.call_id, "type": "function",
+                                     "function": {"name": deleg.name, "arguments": "<redacted>"},
+                                     "status": "completed",
+                                 }]}}
+                    })
+                    if deleg.name == "handoff_agent":
+                        child_text = json.loads(result)["output"]
+                        await append_text(child_text)
+                        break
+                    history.append({
+                        "role": "assistant", "content": None,
+                        "tool_calls": [{"id": deleg.call_id, "type": "function",
+                                        "function": {"name": deleg.name,
+                                                     "arguments": json.dumps(deleg.arguments)}}],
+                    })
+                    history.append({"role": "tool", "tool_call_id": deleg.call_id, "content": result})
+                    continue
                 asking = [call for call in calls if call.name == "ask_user"]
                 if asking:
                     if not ask_user_enabled or len(calls) != 1:
@@ -268,12 +301,13 @@ async def _run_model(
                         )
                         history.append({"role": "tool", "tool_call_id": call.call_id, "content": result})
                         continue
-                    # Never run mutating or arbitrary MCP actions through this
-                    # implicit read-only path. Recheck current SQLite policy
-                    # immediately before execution, including after an SSE retry.
+                    # Execute the original registered MCP callable. Its own
+                    # argument validation, watchdog and Worker routing are
+                    # retained; per-machine permission is checked first.
                     result = await asyncio.wait_for(
-                        run_machine_tool(owner, generation.conversation_id, call,
-                                          granted_scopes=set(granted_scopes), grant_expires=grant_expires), timeout=10,
+                        call_tool(owner, generation.conversation_id, call,
+                                  granted_scopes=set(granted_scopes), grant_expires=grant_expires),
+                        timeout=125,
                     )
                     repo.append(owner, generation.run_id, {
                         "event": "on_run_step",
@@ -328,6 +362,7 @@ async def _start_task(owner: str, generation: Generation, profile: ProviderConfi
                        parameters=(agent or {}).get("model_parameters") or {},
                        native_file_tools=native_file_tools, write_tools=write_tools,
                        ask_user_enabled=ask_user_enabled, mcp_enabled=mcp_enabled,
+                       parent_agent=agent,
                        resume_history=resume_history, partial_text=partial_text,
                        approved_mcp=approved_mcp,
                        granted_scopes=granted_scopes, grant_expires=grant_expires),

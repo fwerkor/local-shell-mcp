@@ -173,7 +173,10 @@ async def test_new_conversation_inherits_project_machine_policy_on_first_turn(tm
                     break
                 await asyncio.sleep(0.02)
             assert len(observed) == 1
-            assert {tool["function"]["name"] for tool in observed[0]} == {"file_list", "file_read"}
+            names = {tool["function"]["name"] for tool in observed[0]}
+            assert {"environment_get", "file_list", "file_read", "file_tree", "file_grep",
+                    "job_list", "job_get", "job_tail", "shell_list", "shell_read"} <= names
+            assert not {"run_shell", "job_start", "shell_send", "file_write", "mcp_manage"} & names
             assert repo.conversation("local", cid)["projectId"] == project["id"]
             assert access_level("local", cid, "local", repo=repo) == "read"
             missing = await client.post("/api/agents/chat", json={
@@ -219,7 +222,12 @@ async def test_agent_write_capability_is_only_advertised_for_write_policy(tmp_pa
                 if (await client.get(f"/api/agents/chat/status/{cid}")).json().get("status") == "complete":
                     break
                 await asyncio.sleep(0.02)
-            assert set(available) == {"file_list", "file_read", "file_write"}
+            assert {"environment_get", "file_list", "file_read", "file_tree", "file_grep",
+                    "job_list", "job_get", "job_tail", "shell_list", "shell_read",
+                    "file_write", "file_edit", "file_patch", "run_shell", "run_python",
+                    "job_start", "job_stop", "job_retry", "shell_start", "shell_send",
+                    "shell_stop"} <= set(available)
+            assert "mcp_manage" not in available
     finally:
         await generation_routes.shutdown_generations()
         get_settings.cache_clear()

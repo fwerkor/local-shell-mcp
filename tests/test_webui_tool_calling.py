@@ -1,4 +1,4 @@
-"""Function-call streaming, owner-scoped native tools and deny-by-default policy."""
+"""SSE tool-call decoding and end-to-end Python Agent policy enforcement."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from starlette.applications import Starlette
 
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.webui import generation_routes, misc_routes, routes
-from local_shell_mcp.webui.native_tools import _execute, _path, run_machine_tool
+from local_shell_mcp.webui.lsm_tool_registry import call_tool
 from local_shell_mcp.webui.providers import ModelToolCall, ProviderConfig, stream_model_with_tools
 
 
@@ -57,41 +57,6 @@ async def test_invalid_model_tool_calls_do_not_dispatch(monkeypatch, frames, mes
     profile = ProviderConfig("openai", "mock", "https://api.example.test/chat/completions", "secret")
     with pytest.raises(ValueError, match=message):
         [item async for item in stream_model_with_tools(profile, [], tools=[{"type": "function"}])]
-
-
-def test_workspace_read_only_tool_paths_and_output_limits(tmp_path):
-    root = tmp_path / "workspace"
-    root.mkdir()
-    (root / "file.txt").write_text("hello world")
-    (root / "directory").mkdir()
-    (root / "large.txt").write_bytes(b"x" * 10000)
-    (root / "binary.bin").write_bytes(b"\x00" * 100)
-    (root / "escape").symlink_to(tmp_path)
-    (root / ".local-shell-mcp").mkdir()
-    (root / ".local-shell-mcp" / "secrets.json").write_text("private")
-    (root / "private-state").mkdir()
-    (root / "private-state" / "secrets.json").write_text("private")
-    assert _path(root, "file.txt") == (root / "file.txt").resolve()
-    assert json.loads(_execute(root, ModelToolCall("x", "file_list", {"path": "."})))['entries']
-    assert json.loads(_execute(root, ModelToolCall("x", "file_read", {"path": "file.txt"})))['text'] == "hello world"
-    assert json.loads(_execute(root, ModelToolCall("x", "file_read", {"path": "large.txt"})))['truncated'] is True
-    assert all(not row["name"].startswith(".") for row in json.loads(
-        _execute(root, ModelToolCall("x", "file_list", {}))) ["entries"])
-    for path in ("../", "/etc/passwd", "escape/file.txt", ".local-shell-mcp/secrets.json"):
-        with pytest.raises((ValueError, PermissionError, FileNotFoundError)):
-            _path(root, path)
-    with pytest.raises(ValueError, match="Binary"):
-        _execute(root, ModelToolCall("x", "file_read", {"path": "binary.bin"}))
-    with pytest.raises(PermissionError, match="private state"):
-        _execute(root, ModelToolCall("x", "file_read", {"path": "private-state/secrets.json"}),
-                 root / "private-state")
-    listed = json.loads(_execute(root, ModelToolCall("x", "file_list", {}),
-                                 root / "private-state"))
-    assert "private-state" not in [entry["name"] for entry in listed["entries"]]
-    for call in (ModelToolCall("x", "mcp_manage", {}), ModelToolCall("x", "run_shell", {"command": "pwd"}),
-                 ModelToolCall("x", "file_list", {"path": ".", "limit": 200})):
-        with pytest.raises(ValueError):
-            _execute(root, call)
 
 
 @pytest.mark.asyncio
@@ -167,10 +132,12 @@ async def test_tool_policy_is_rechecked_before_execution(tmp_path, monkeypatch):
 
         _repo().save_setting("local", "agent.machine_policy.global", {"local": "none"})
         with pytest.raises((PermissionError, KeyError)):
-            await run_machine_tool("local", "abc", ModelToolCall("1", "file_read", {"path": "x"}))
+            await call_tool("local", "abc", ModelToolCall("1", "file_read", {"path": "x"}),
+                            granted_scopes={"shell:read"})
         _repo().save_setting("local", "agent.machine_policy.global", {"local": "read"})
         with pytest.raises((PermissionError, KeyError)):
-            await run_machine_tool("local", "abc", ModelToolCall("1", "mcp_tool_call", {}))
+            await call_tool("local", "abc", ModelToolCall("1", "mcp_tool_call", {}),
+                            granted_scopes={"shell:read"})
     finally:
         get_settings.cache_clear()
 
@@ -223,6 +190,7 @@ async def test_revoking_tool_permission_while_model_streams_prevents_filesystem_
     _repo().save_setting(owner, "agent.machine_policy.conversation." + cid, {"local": "none"})
     try:
         with pytest.raises((PermissionError, KeyError)):
-            await run_machine_tool(owner, cid, ModelToolCall("tool-a", "file_list", {"path": "."}))
+            await call_tool(owner, cid, ModelToolCall("tool-a", "file_list", {"path": "."}),
+                                granted_scopes={"shell:read"})
     finally:
         get_settings.cache_clear()
