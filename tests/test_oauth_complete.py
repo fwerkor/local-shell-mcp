@@ -6,6 +6,7 @@ import time
 from urllib.parse import parse_qs, urlsplit
 
 import jwt
+import pytest
 from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.testclient import TestClient
@@ -13,6 +14,7 @@ from starlette.testclient import TestClient
 import local_shell_mcp.oauth as oauth
 from local_shell_mcp.settings import get_settings
 
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
 def _configure(tmp_path, monkeypatch, **env):
     values = {
@@ -31,7 +33,6 @@ def _configure(tmp_path, monkeypatch, **env):
     oauth._CODES.clear()
     oauth._PIN_FAILURES.clear()
 
-
 def _app() -> Starlette:
     return Starlette(
         routes=[
@@ -44,11 +45,9 @@ def _app() -> Starlette:
         ]
     )
 
-
 def _challenge(verifier: str) -> str:
     digest = hashlib.sha256(verifier.encode()).digest()
     return base64.urlsafe_b64encode(digest).decode().rstrip("=")
-
 
 def _register(client: TestClient, redirect: str = "https://client.test/callback") -> str:
     response = client.post(
@@ -57,7 +56,6 @@ def _register(client: TestClient, redirect: str = "https://client.test/callback"
     )
     assert response.status_code == 201, response.text
     return response.json()["client_id"]
-
 
 def test_metadata_and_forwarded_base_urls(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -79,7 +77,6 @@ def test_metadata_and_forwarded_base_urls(tmp_path, monkeypatch):
         headers={"x-forwarded-proto": "wss", "x-forwarded-host": "public.test"},
     )
     assert forwarded.json()["resource"] == "https://public.test"
-
 
 def test_registration_rejects_every_invalid_shape(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -117,7 +114,6 @@ def test_registration_rejects_every_invalid_shape(tmp_path, monkeypatch):
         "/oauth/register", json={"redirect_uris": ["https://client.test/cb"]}
     ).status_code == 503
 
-
 def test_registration_reuses_matching_public_client_without_consuming_capacity(
     tmp_path, monkeypatch
 ):
@@ -149,7 +145,6 @@ def test_registration_reuses_matching_public_client_without_consuming_capacity(
     assert at_capacity.status_code == 200
     assert at_capacity.json()["client_id"] == first.json()["client_id"]
     assert len(oauth._CLIENTS) == 1
-
 
 def test_registration_reuses_approved_client_after_memory_reload(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -189,7 +184,6 @@ def test_registration_reuses_approved_client_after_memory_reload(tmp_path, monke
     )
     assert distinct.status_code == 503
 
-
 def test_registered_clients_survive_memory_reset_after_approval(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     client = TestClient(_app())
@@ -219,7 +213,6 @@ def test_registered_clients_survive_memory_reset_after_approval(tmp_path, monkey
     assert "Unknown client_id" not in response.text
     assert client_id in oauth._CLIENTS
     assert oauth._CLIENTS[client_id].approved is True
-
 
 def test_unapproved_registrations_do_not_fill_persistent_store(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -277,7 +270,6 @@ def test_v2_client_id_is_migrated_after_pin_approval(tmp_path, monkeypatch):
     assert "<strong>OAuth client</strong>" in reloaded.text
     assert client_id in oauth._CLIENTS
 
-
 def test_authorize_validation_and_pin_failures(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     client = TestClient(_app())
@@ -318,7 +310,6 @@ def test_authorize_validation_and_pin_failures(tmp_path, monkeypatch):
     assert wrong_pin.status_code == 200
     assert "Invalid admin PIN" in wrong_pin.text
     assert not oauth._CODES
-
 
 def test_pin_failures_are_rate_limited_by_source(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -383,7 +374,6 @@ def test_pin_failures_are_rate_limited_by_source(tmp_path, monkeypatch):
     assert recovered_after_window.status_code == 302
     assert "198.51.100.10" not in oauth._PIN_FAILURES
 
-
 def test_pin_failure_sources_are_bounded(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setattr(oauth, "MAX_OAUTH_PIN_SOURCES", 2)
@@ -395,7 +385,6 @@ def test_pin_failure_sources_are_bounded(tmp_path, monkeypatch):
     oauth._record_pin_failure("source-c")
 
     assert list(oauth._PIN_FAILURES) == ["source-a", "source-c"]
-
 
 def test_localhost_webui_can_reauthorize_with_external_public_url(tmp_path, monkeypatch):
     _configure(
@@ -432,7 +421,6 @@ def test_localhost_webui_can_reauthorize_with_external_public_url(tmp_path, monk
     assert denied.status_code == 302
     remote_code = parse_qs(urlsplit(denied.headers["location"]).query)["code"][0]
     assert "admin:config" not in oauth._CODES[remote_code].scope.split()
-
 
 def test_complete_authorization_code_flow_and_token_failures(tmp_path, monkeypatch):
     _configure(
@@ -535,7 +523,6 @@ def test_complete_authorization_code_flow_and_token_failures(tmp_path, monkeypat
     )
     assert reused.json()["error"] == "invalid_grant"
 
-
 def test_expired_code_capacity_pruning_and_pkce_variants(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, LOCAL_SHELL_MCP_OAUTH_CODE_TTL_S=1)
     client = TestClient(_app())
@@ -630,7 +617,6 @@ def test_expired_code_capacity_pruning_and_pkce_variants(tmp_path, monkeypatch):
     assert oauth._verify_pkce(plain, "secret") is True
     assert oauth._verify_pkce(plain, "other") is False
 
-
 def test_authorization_capacity_error_and_no_pin_hint(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setenv("LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN", "")
@@ -650,7 +636,6 @@ def test_authorization_capacity_error_and_no_pin_hint(tmp_path, monkeypatch):
     monkeypatch.setattr(oauth, "MAX_OAUTH_CODES", 0)
     response = client.post("/oauth/authorize", data=params)
     assert "Too many pending authorization requests" in response.text
-
 
 def test_authorization_page_is_compact_and_follows_system_theme(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -676,7 +661,6 @@ def test_authorization_page_is_compact_and_follows_system_theme(tmp_path, monkey
     assert "prefers-color-scheme: dark" in response.text
     assert "Read workspace" not in response.text
     assert "LOCAL_SHELL_MCP_OAUTH_ADMIN_PIN" not in response.text
-
 
 def test_unnamed_oauth_client_has_neutral_authorization_label(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)

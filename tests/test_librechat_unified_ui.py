@@ -1,120 +1,69 @@
-"""Regression checks for LibreChat's unified LSM control plane."""
+"""The unified WebUI is a first-party React application backed by Python.
+
+These tests replace old Node/Mongo/bridge contracts after deleting the entire
+integrations directory. The frontend source and Controller routes now live in
+LSM's UI and Python package respectively.
+"""
+
+from __future__ import annotations
+
 from pathlib import Path
-from unittest.mock import patch
 
-import pytest
-from starlette.exceptions import HTTPException
-from starlette.requests import Request
-
-from local_shell_mcp.auth import verify_request
+from local_shell_mcp.webui.agent_routes import agent_routes
+from local_shell_mcp.webui.auth import auth_routes
+from local_shell_mcp.webui.controller_routes import controller_routes
+from local_shell_mcp.webui.generation_routes import generation_routes
 
 ROOT = Path(__file__).resolve().parents[1]
-INTEGRATION = ROOT / "integrations" / "librechat"
+WORKSPACE = ROOT / "ui" / "workspace"
 
 
-@pytest.fixture(autouse=True)
-def isolated_controller_settings(tmp_path, monkeypatch):
-    from local_shell_mcp.settings import get_settings
-
-    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
-    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / "state"))
-    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_BACKEND", "file")
-    get_settings.cache_clear()
-    yield
-    get_settings.cache_clear()
-
-
-def _request(path: str, *, service: bool = True) -> Request:
-    headers = [(b"x-lsm-chat-user-id", b"0123456789abcdef01234567")]
-    if service:
-        headers.append((b"authorization", b"Bearer integration-secret"))
-    return Request({
-        "type": "http",
-        "scheme": "http",
-        "server": ("localhost", 8765),
-        "client": ("127.0.0.1", 9999),
-        "method": "GET",
-        "path": path,
-        "headers": headers,
-        "query_string": b"",
-    })
+def test_unified_react_workspace_is_first_party_and_vendored_backend_is_removed():
+    assert not (ROOT / "integrations").exists()
+    source = WORKSPACE / "client" / "src" / "routes" / "index.tsx"
+    text = source.read_text(encoding="utf-8")
+    assert text.count("path: 'control/:section?'") == 1
+    assert 'Navigate to="/control/overview"' in text
+    assert (WORKSPACE / "LICENSE").is_file()
+    assert (WORKSPACE / "README.md").is_file()
+    assert (WORKSPACE / "bun.lock").is_file()
+    assert (WORKSPACE / "client" / "src" / "components" / "LSM" / "Control.tsx").is_file()
+    assert not (WORKSPACE / "api").exists()
+    assert not (WORKSPACE / "Dockerfile").exists()
+    assert not (WORKSPACE / "compose.yaml").exists()
 
 
-def test_lsm_proxy_uses_identity_mapping_and_original_scopes():
-    with (
-        patch("local_shell_mcp.librechat_integration.is_bridge_service", return_value=True),
-        patch("local_shell_mcp.librechat_integration.principal_for_chat_user",
-              return_value={"subject": "owner", "auth_mode": "oauth", "scopes": "shell:read remote:use"}),
-    ):
-        principal = verify_request(_request("/api/ui/files"))
-    assert principal.subject == "owner"
-    assert principal.claims["scope"] == "shell:read remote:use"
-    assert principal.claims["auth"] == "librechat-bridge"
+def test_native_python_login_agents_and_sse_are_routed_without_node():
+    auth = {route.path for route in auth_routes()}
+    assert {"/api/auth/lsm", "/api/auth/refresh", "/api/auth/logout"}.issubset(auth)
+    agents = {route.path for route in agent_routes()}
+    assert {"/api/agents", "/api/agents/{agent_id}", "/api/agents/{agent_id}/versions"}.issubset(agents)
+    generation = {route.path for route in generation_routes()}
+    assert {"/api/agents/chat", "/api/agents/chat/stream/{stream_id}",
+            "/api/agents/chat/abort", "/api/agents/chat/resume"}.issubset(generation)
+    ctl = {route.path: route.endpoint for route in controller_routes()}
+    assert len(ctl) >= 20
+    assert "/api/lsm/controller/gui/frame" in ctl
+    assert "/api/lsm/controller/settings/{action}" in ctl
+    assert all("hosted-chat" not in path and "librechat" not in path for path in ctl)
 
 
-@pytest.mark.parametrize("path", ["/api/ui/files", "/api/ui/librechat/upload"])
-def test_lsm_proxy_rejects_missing_service_credential(path):
-    with (
-        patch("local_shell_mcp.librechat_integration.is_bridge_service", return_value=False),
-        pytest.raises(HTTPException) as captured,
-    ):
-        verify_request(_request(path, service=False))
-    assert captured.value.status_code == 401
-
-
-def test_lsm_proxy_denies_expired_identity():
-    with (
-        patch("local_shell_mcp.librechat_integration.is_bridge_service", return_value=True),
-        patch("local_shell_mcp.librechat_integration.principal_for_chat_user",
-              side_effect=PermissionError("expired")),
-        pytest.raises(HTTPException) as captured,
-    ):
-        verify_request(_request("/api/ui/terminals"))
-    assert captured.value.status_code == 401
-
-
-def test_vendored_librechat_is_self_contained():
-    source = INTEGRATION / "app"
-    index = (source / "client/src/routes/index.tsx").read_text()
-    assert index.count("path: 'control/:section?'") == 1
-    assert 'Navigate to="/control/overview"' in index
-    assert "app.use('/api/lsm/controller'" in (source / "api/server/index.js").read_text()
-    assert (source / "LICENSE").is_file()
-    assert (source / "Dockerfile").is_file()
-    assert not (source / ".git").exists()
-    assert not (INTEGRATION / "prepare.py").exists()
-    compose = (INTEGRATION / "compose.yaml").read_text()
-    assert "context: ./app" in compose
-    assert "upstream-src" not in compose
-
-
-def test_single_user_auth_routes_and_gui_proxy_contract():
-    app = INTEGRATION / "app"
-    auth = (app / "api/server/routes/auth.js").read_text()
-    assert "router.post(\'/refresh\'" in auth
-    assert "router.post(\'/logout\'" in auth
-    for disabled in ("/login", "/register", "/resetPassword", "/2fa"):
-        assert disabled not in auth
-    login = (app / "api/server/routes/lsm-auth.js").read_text()
-    assert "createLsmAuthHandler" in login
-    auth_store = (app / "packages/data-schemas/src/methods/lsmAuth.ts").read_text()
-    assert "workspace@local-shell-mcp.invalid" in auth_store
-    proxy = (app / "api/server/routes/lsm-controller.js").read_text()
-    assert "makeLsmControllerProxy" in proxy
-    transport = (app / "packages/api/src/lsm/controller.ts").read_text()
-    assert "x-lsm-gui-observation-id" in transport
-    assert "x-lsm-gui-coordinate-input" in transport
-
-
-def test_unified_ui_native_pages_present():
-    pages = INTEGRATION / "app/client/src/components/LSM"
+def test_native_control_pages_and_settings_source_are_retained():
+    pages = WORKSPACE / "client" / "src" / "components" / "LSM"
     for name in ("Control.tsx", "Overview.tsx", "Files.tsx", "Operations.tsx", "Desktop.tsx", "Settings.tsx"):
         assert (pages / name).is_file()
-    navigation = (pages / "Control.tsx").read_text()
-    settings = (pages / "Settings.tsx").read_text()
-    proxy = (INTEGRATION / "app/packages/api/src/lsm/controller.ts").read_text()
-    assert "/control/" in navigation and "section === 'settings'" in navigation
-    for route in ("settings/view", "settings/save", "settings/restart"):
-        assert route in settings or route.split("/")[-1] in proxy
-    assert "admin:config" in (INTEGRATION / "README.md").read_text()
-    assert "isLsmSettingsOriginAllowed" in proxy
+    navigation = (pages / "Control.tsx").read_text(encoding="utf-8")
+    settings = (pages / "Settings.tsx").read_text(encoding="utf-8")
+    assert "/control/" in navigation
+    assert "section === 'settings'" in navigation
+    for action in ("view", "save", "restart"):
+        assert action in settings
+    assert "admin:config" in (ROOT / "src/local_shell_mcp/human_ui.py").read_text(encoding="utf-8")
+
+
+def test_webui_binary_release_embeds_frontend_and_has_no_backend_node_dependency():
+    package = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "--add-data ui/workspace/frontend.tar.gz:local_shell_mcp/webui" in package
+    built = WORKSPACE / "frontend.tar.gz"
+    assert built.is_file()
+    assert built.stat().st_size < 40_000_000

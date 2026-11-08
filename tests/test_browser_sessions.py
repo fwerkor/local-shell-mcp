@@ -25,6 +25,28 @@ def _chromium_installed() -> bool:
         return False
 
 
+@pytest.fixture
+def playwright_import_for_mock(monkeypatch):
+    """Mock the optional Playwright import without installing browser runtimes.
+
+    The actual Controller imports Playwright lazily. These three tests replace
+    its bootstrap routine and require only the importable module interface.
+    """
+    import importlib.util
+    import sys
+    import types
+
+    if importlib.util.find_spec("playwright") is not None:
+        return
+    package = types.ModuleType("playwright")
+    package.__path__ = []
+    api = types.ModuleType("playwright.async_api")
+    api.async_playwright = lambda: None
+    package.async_api = api
+    monkeypatch.setitem(sys.modules, "playwright", package)
+    monkeypatch.setitem(sys.modules, "playwright.async_api", api)
+
+
 requires_chromium = pytest.mark.skipif(
     not _chromium_installed(), reason="Playwright Chromium is not installed in this test environment"
 )
@@ -294,6 +316,7 @@ async def test_profile_dot_segments_are_rejected_without_starting_browser(tmp_pa
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("playwright_import_for_mock")
 async def test_start_reserves_slot_during_launch_and_releases_it_on_cancel(tmp_path, monkeypatch):
     manager = BrowserSessionManager(tmp_path / ".state")
     entered = asyncio.Event()
@@ -332,6 +355,7 @@ async def test_start_reserves_slot_during_launch_and_releases_it_on_cancel(tmp_p
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("playwright_import_for_mock")
 async def test_start_cancellation_after_registration_removes_and_closes_session(
     tmp_path, monkeypatch
 ):
@@ -680,6 +704,7 @@ async def test_cleanup_cancellation_retains_earlier_failures(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("playwright_import_for_mock")
 async def test_start_failure_stops_playwright(tmp_path, monkeypatch):
     manager = BrowserSessionManager(tmp_path / ".state")
     stopped = {"value": False}

@@ -9,6 +9,7 @@ from local_shell_mcp.settings import get_settings
 from local_shell_mcp.shell_ops import quote_shell_argument
 from local_shell_mcp.tools import _audit_tool_arguments, build_mcp
 
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
 @pytest.mark.asyncio
 async def test_mcp_tool_calls_are_audited(tmp_path, monkeypatch):
@@ -32,7 +33,6 @@ async def test_mcp_tool_calls_are_audited(tmp_path, monkeypatch):
     assert ends[-1]["duration_ms"] >= 0
     assert ends[-1]["result"]["ok"] is True
 
-
 def test_audit_result_status_uses_nested_tool_outcome():
     assert audit_result_ok({"ok": True, "data": {"ok": True}}) is True
     assert audit_result_ok({"ok": True, "data": {"ok": False}}) is False
@@ -45,7 +45,6 @@ def test_audit_result_status_uses_nested_tool_outcome():
         )
     ) is False
     assert audit_result_ok({"value": 1}) is True
-
 
 @pytest.mark.asyncio
 async def test_failed_shell_command_is_audited_as_failed(tmp_path, monkeypatch):
@@ -70,7 +69,6 @@ async def test_failed_shell_command_is_audited_as_failed(tmp_path, monkeypatch):
     assert nested["parent_call_id"] == end["call_id"]
 
 
-
 @pytest.mark.asyncio
 async def test_file_read_error_is_collapsed_into_failed_parent_call(tmp_path, monkeypatch):
     audit_path = tmp_path / "audit.jsonl"
@@ -89,13 +87,11 @@ async def test_file_read_error_is_collapsed_into_failed_parent_call(tmp_path, mo
     assert end["error"] == nested["error"]
     assert nested["parent_call_id"] == end["call_id"]
 
-
 def test_audit_tool_arguments_preserves_sensitive_keys():
     payload = _audit_tool_arguments((), {"token": "abc", "normal": "value"})
 
     assert payload["keyword_args"]["token"] == "abc"
     assert payload["keyword_args"]["normal"] == "value"
-
 
 def test_audit_tool_arguments_preserves_payloads():
     payload = _audit_tool_arguments(
@@ -113,7 +109,6 @@ def test_audit_tool_arguments_preserves_payloads():
     assert payload["keyword_args"]["content"] == "API_TOKEN=secret-value"
     assert payload["keyword_args"]["path"] == "safe.txt"
 
-
 @pytest.mark.asyncio
 async def test_mcp_audit_extracts_session_context(tmp_path, monkeypatch):
     audit_path = tmp_path / "audit.jsonl"
@@ -127,7 +122,6 @@ async def test_mcp_audit_extracts_session_context(tmp_path, monkeypatch):
     records = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines()]
     starts = [record for record in records if record["event"] == "mcp_tool_call_start"]
     assert starts[-1]["session"] == "missing-session"
-
 
 def test_audit_preserves_lower_level_commands_and_embedded_tokens(tmp_path, monkeypatch):
     from local_shell_mcp.audit import audit

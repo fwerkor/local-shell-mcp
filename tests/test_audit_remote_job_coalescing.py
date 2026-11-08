@@ -3,16 +3,18 @@ from __future__ import annotations
 import json
 from uuid import uuid4
 
+import pytest
+
 import local_shell_mcp.audit as audit_module
 from local_shell_mcp.settings import get_settings
 
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
 def _configure(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUDIT_LOG_PATH", str(tmp_path / "audit.jsonl"))
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "200000")
     get_settings.cache_clear()
-
 
 def test_remote_job_lifecycle_coalesces_by_job_id_and_preserves_details(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -141,7 +143,6 @@ def test_remote_job_lifecycle_coalesces_by_job_id_and_preserves_details(tmp_path
     assert len(units) == 4
     assert sorted(len(unit) for unit in units) == [1, 1, 5, 5]
 
-
 def test_remote_lifecycle_time_filters_use_child_timestamp(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     records = [
@@ -163,7 +164,6 @@ def test_remote_lifecycle_time_filters_use_child_timestamp(tmp_path, monkeypatch
     assert audit_module.query_audit(event="remote_job_claimed", start_ts=15, end_ts=18)["total_matched"] == 1
     assert audit_module.query_audit(event="remote_job_claimed", start_ts=20)["total_matched"] == 0
     assert audit_module.query_audit(event="mcp_tool_call_start", start_ts=20)["total_matched"] == 0
-
 
 def test_remote_worker_node_filter_includes_nested_transfer_nodes(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -190,7 +190,6 @@ def test_remote_worker_node_filter_includes_nested_transfer_nodes(tmp_path, monk
     assert audit_module.query_audit(node="worker-b", event="remote_job_result_accepted", start_ts=4, end_ts=4)["total_matched"] == 0
     assert audit_module.query_audit(node="worker-b", event="remote_job_result_accepted", start_ts=7, end_ts=7)["total_matched"] == 1
 
-
 def test_nested_event_without_machine_inherits_parent_node():
     records = [
         {"ts": 1, "event": "mcp_tool_call_start", "call_id": "file", "tool": "revoke_file_link"},
@@ -202,7 +201,6 @@ def test_nested_event_without_machine_inherits_parent_node():
         session=None, search=None, start_ts=1, end_ts=3,
     )
     assert [row["id"] for row in result] == ["call:file"]
-
 
 def test_bounded_audit_unit_keeps_remote_job_association():
     records = [
@@ -229,7 +227,6 @@ def test_bounded_audit_unit_keeps_remote_job_association():
     assert len(audit_module._coalesce_audit_records(retained)[0]["related_events"]) == 3
     without_enqueued = [record for record in retained if record["event"] != "remote_job_enqueued"]
     assert len(audit_module._coalesce_audit_records(without_enqueued)) == 1
-
 
 def test_tight_retention_budget_keeps_newest_remote_call_and_result(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)

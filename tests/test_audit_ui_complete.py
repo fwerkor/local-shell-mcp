@@ -13,6 +13,7 @@ import local_shell_mcp.audit as audit_module
 import local_shell_mcp.audit_archive_codec as audit_archive_codec
 from local_shell_mcp.settings import get_settings
 
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
 def _configure(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -20,7 +21,6 @@ def _configure(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_TAIL_BYTES", "100")
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "400")
     get_settings.cache_clear()
-
 
 def test_audit_call_context_marks_nested_records(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -30,7 +30,6 @@ def test_audit_call_context_marks_nested_records(tmp_path, monkeypatch):
 
     record = json.loads(get_settings().audit_log_path.read_text(encoding="utf-8"))
     assert record["parent_call_id"] == "call-123"
-
 
 def test_audit_call_context_propagates_nested_false_outcomes(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -42,7 +41,6 @@ def test_audit_call_context_propagates_nested_false_outcomes(tmp_path, monkeypat
     record = json.loads(get_settings().audit_log_path.read_text(encoding="utf-8"))
     assert record["parent_call_id"] == "call-failed"
     assert record["ok"] is False
-
 
 def test_audit_call_helpers_cover_legacy_unpaired_and_optional_fields():
     assert audit_module._operation_type({"event": "run_shell_start"}) == "shell"
@@ -161,7 +159,6 @@ def test_audit_call_helpers_cover_legacy_unpaired_and_optional_fields():
     assert rows[5]["id"] == "kept"
     assert rows[5]["operation"] == "remote"
 
-
 def test_coalescing_keeps_semantic_child_details_without_duplicate_rows():
     records = [
         {"ts": 1, "event": "mcp_tool_call_start", "call_id": "call-1", "tool": "revoke_file_link"},
@@ -200,7 +197,6 @@ def test_coalescing_keeps_semantic_child_details_without_duplicate_rows():
     units = audit_module._retention_units([(b"line\n", record, set()) for record in records])
     assert len(units) == 1
     assert [item[0] for item in units[0]] == [0, 1, 2, 3]
-
 
 def test_coalescing_attaches_legacy_command_preflight_by_call_id():
     records = [
@@ -248,7 +244,6 @@ def test_coalescing_attaches_legacy_command_preflight_by_call_id():
     assert len(units) == 1
     assert [item[0] for item in units[0]] == [0, 1, 2]
 
-
 def test_event_filter_matches_nested_command_preflight():
     records = [
         {
@@ -286,7 +281,6 @@ def test_event_filter_matches_nested_command_preflight():
 
     assert len(matched) == 1
     assert matched[0]["call_id"] == "call-1"
-
 
 def test_query_audit_covers_tail_reading_and_filter_rejections(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -330,7 +324,6 @@ def test_query_audit_covers_tail_reading_and_filter_rejections(tmp_path, monkeyp
     assert audit_module.query_audit(session="missing")["total_matched"] == 0
     assert audit_module.query_audit(search="missing")["total_matched"] == 0
 
-
 def test_payload_reference_namespace_does_not_capture_user_dictionaries():
     legacy_shaped = {
         "$audit_payload": "a" * 64,
@@ -353,7 +346,6 @@ def test_payload_reference_namespace_does_not_capture_user_dictionaries():
         == namespaced_but_not_internal
     )
 
-
 def test_payload_files_are_created_private_from_the_first_write(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     observed_modes: list[int] = []
@@ -372,7 +364,6 @@ def test_payload_files_are_created_private_from_the_first_write(tmp_path, monkey
     assert set(observed_modes) == {0o600}
     if os.name != "nt":
         assert stat.S_IMODE(payload.stat().st_mode) == 0o600
-
 
 def test_payload_pruning_defers_recent_unreferenced_files(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -396,7 +387,6 @@ def test_payload_pruning_defers_recent_unreferenced_files(tmp_path, monkeypatch)
     assert not payload.exists()
     assert not temporary.exists()
 
-
 def test_payload_pruning_defers_when_the_log_cannot_be_read(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     directory = get_settings().audit_log_path.parent / audit_module._AUDIT_PAYLOAD_DIRECTORY
@@ -413,7 +403,6 @@ def test_payload_pruning_defers_when_the_log_cannot_be_read(tmp_path, monkeypatc
 
     assert audit_module._prune_payload_store(log_path) is False
     assert payload.exists()
-
 
 def test_payload_pruning_retries_transient_stale_delete_failure(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -440,7 +429,6 @@ def test_payload_pruning_retries_transient_stale_delete_failure(tmp_path, monkey
     assert audit_module._enforce_audit_storage_limit(log_path, 200_000) is True
     assert not payload.exists()
 
-
 def test_get_audit_entry_rejects_empty_and_unknown_ids(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
 
@@ -448,7 +436,6 @@ def test_get_audit_entry_rejects_empty_and_unknown_ids(tmp_path, monkeypatch):
         audit_module.get_audit_entry("  ")
     with pytest.raises(ValueError, match="Unknown audit entry: missing"):
         audit_module.get_audit_entry("missing")
-
 
 def test_get_audit_entry_loads_only_the_selected_payloads(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -492,7 +479,6 @@ def test_get_audit_entry_loads_only_the_selected_payloads(tmp_path, monkeypatch)
 
     assert detail["input"]["content"] == "s" * 30_000
     assert detail["output"]["stdout"] == "s" * 30_000
-
 
 def test_audit_payload_helpers_cover_edge_paths(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -587,7 +573,6 @@ def test_audit_payload_helpers_cover_edge_paths(tmp_path, monkeypatch):
     assert retained["id"] == "oversized"
     assert retained["audit_payloads_omitted"] == "record exceeded audit retention limit"
 
-
 def test_audit_skips_full_retention_scan_while_storage_is_below_budget(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "20000000")
@@ -613,7 +598,6 @@ def test_audit_skips_full_retention_scan_while_storage_is_below_budget(tmp_path,
     assert calls == 1
     assert len(log_path.read_text(encoding="utf-8").splitlines()) == 101
 
-
 def test_audit_periodically_runs_payload_housekeeping_below_budget(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "20000000")
@@ -633,7 +617,6 @@ def test_audit_periodically_runs_payload_housekeeping_below_budget(tmp_path, mon
     audit_module.audit("maintenance_event")
 
     assert calls == 1
-
 
 def test_audit_pressure_backoff_avoids_repeated_scans_for_recent_orphans(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -659,7 +642,6 @@ def test_audit_pressure_backoff_avoids_repeated_scans_for_recent_orphans(tmp_pat
     assert calls == 1
     assert audit_module._audit_pressure_backoff_active(log_path) is True
 
-
 def test_audit_storage_size_ignores_interrupted_payload_temporaries(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     log_path = get_settings().audit_log_path
@@ -669,7 +651,6 @@ def test_audit_storage_size_ignores_interrupted_payload_temporaries(tmp_path, mo
     (directory / ".interrupted.json.gz.123.tmp").write_bytes(b"x" * 50_000)
 
     assert audit_module._audit_storage_bytes(log_path) == log_path.stat().st_size
-
 
 def test_new_payload_clears_pressure_backoff_and_rechecks_budget(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -692,7 +673,6 @@ def test_new_payload_clears_pressure_backoff_and_rechecks_budget(tmp_path, monke
     audit_module.audit("large_event", payload=os.urandom(18_000).hex())
 
     assert calls == 1
-
 
 def test_reused_payload_preserves_pressure_backoff(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -718,7 +698,6 @@ def test_reused_payload_preserves_pressure_backoff(tmp_path, monkeypatch):
 
     assert calls == 0
     assert audit_module._audit_pressure_backoff_active(log_path) is True
-
 
 def test_failed_retention_pass_is_retried_without_backoff(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -749,7 +728,6 @@ def test_failed_retention_pass_is_retried_without_backoff(tmp_path, monkeypatch)
     assert key in audit_module._AUDIT_LAST_MAINTENANCE
     assert audit_module._audit_pressure_backoff_active(log_path) is True
 
-
 def test_audit_enters_full_retention_scan_only_after_storage_exceeds_budget(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "3000")
@@ -770,7 +748,6 @@ def test_audit_enters_full_retention_scan_only_after_storage_exceeds_budget(tmp_
     assert calls > 0
     assert get_settings().audit_log_path.stat().st_size <= 3000
 
-
 def test_small_retention_budget_externalizes_recoverable_values(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "12000")
@@ -785,7 +762,6 @@ def test_small_retention_budget_externalizes_recoverable_values(tmp_path, monkey
     entry = audit_module.query_audit()["entries"][0]
     assert audit_module.get_audit_entry(entry["id"])["payload"] == value
 
-
 def test_payload_store_follows_configured_audit_log(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     audit_path = tmp_path / "persisted-audit" / "records.jsonl"
@@ -799,7 +775,6 @@ def test_payload_store_follows_configured_audit_log(tmp_path, monkeypatch):
     payloads = list((audit_path.parent / audit_module._AUDIT_PAYLOAD_DIRECTORY).glob("*.json.gz"))
     assert len(payloads) == 1
     assert not (get_settings().state_dir / audit_module._AUDIT_PAYLOAD_DIRECTORY).exists()
-
 
 def test_audit_retention_keeps_latest_call_pair_together(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -852,7 +827,6 @@ def test_audit_retention_keeps_latest_call_pair_together(tmp_path, monkeypatch):
     assert detail["input"]["content"] == latest_input
     assert detail["output"]["stdout"] == latest_output
 
-
 def test_audit_retention_bounds_log_and_external_payload_bytes(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     max_bytes = 26_000
@@ -889,7 +863,6 @@ def test_audit_retention_bounds_log_and_external_payload_bytes(tmp_path, monkeyp
     second_entry = next(entry for entry in entries if entry["event"] == "second_large_event")
     assert audit_module.get_audit_entry(second_entry["id"])["payload"] == second
 
-
 def test_audit_archive_budget_prunes_oldest_compressed_files(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "2500")
@@ -909,7 +882,6 @@ def test_audit_archive_budget_prunes_oldest_compressed_files(tmp_path, monkeypat
         for path in (tmp_path / audit_module._AUDIT_ARCHIVE_DIRECTORY).glob("*.jsonl.zst")
     }
     assert files == keys
-
 
 def test_archive_pruning_retains_entry_when_file_delete_fails(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -942,7 +914,6 @@ def test_archive_pruning_retains_entry_when_file_delete_fails(tmp_path, monkeypa
     assert audit_module._prune_file_archives(log_path, [entry], 0) == []
     assert not archive_path.exists()
 
-
 def test_archive_index_rejects_paths_outside_archive_directory(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     log_path = get_settings().audit_log_path
@@ -972,7 +943,6 @@ def test_archive_index_rejects_paths_outside_archive_directory(tmp_path, monkeyp
         audit_module._archive_file_path(log_path, "audit-archive/../../victim.jsonl.zst")
     assert victim.read_bytes() == b"keep"
 
-
 def test_archive_time_bounds_ignore_invalid_timestamps():
     parsed = [
         (b"bad\n", {"ts": "bad"}, set()),
@@ -982,7 +952,6 @@ def test_archive_time_bounds_ignore_invalid_timestamps():
     ]
 
     assert audit_module._archive_time_bounds(parsed, [0, 1, 2, 3]) == (7.5, 7.5)
-
 
 def test_corrupt_utf8_payload_is_unavailable_instead_of_raising(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -994,7 +963,6 @@ def test_corrupt_utf8_payload_is_unavailable_instead_of_raising(tmp_path, monkey
 
     assert resolved["error"] == "Audit payload is unavailable"
     assert resolved["payload_id"] == digest
-
 
 def test_archive_payload_materialization_is_bounded(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -1019,7 +987,6 @@ def test_archive_payload_materialization_is_bounded(tmp_path, monkeypatch):
     )
     assert "32 bytes" in actual_envelope["payloads"]["payload"]["detail"]
 
-
 def test_archive_payload_materialization_budget_is_shared_across_batch(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setattr(audit_module, "_AUDIT_ARCHIVE_MAX_PAYLOAD_MATERIALIZATION_BYTES", 32)
@@ -1041,7 +1008,6 @@ def test_archive_payload_materialization_budget_is_shared_across_batch(tmp_path,
     assert envelopes[1]["payloads"]["payload"]["error"] == "Audit payload is unavailable"
     assert "safe materialization limit" in envelopes[1]["payloads"]["payload"]["detail"]
 
-
 def test_archive_index_rejects_malformed_metadata(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     valid = {
@@ -1059,7 +1025,6 @@ def test_archive_index_rejects_malformed_metadata(tmp_path, monkeypatch):
 
     assert audit_module._parse_archive_index(raw) == [{**valid, "start_ts": 1.0, "end_ts": 2.0}]
 
-
 def test_archive_index_recovers_orphaned_file_from_storage(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     log_path = get_settings().audit_log_path
@@ -1076,7 +1041,6 @@ def test_archive_index_recovers_orphaned_file_from_storage(tmp_path, monkeypatch
     assert audit_module._prune_file_archives(log_path, recovered, 0) == []
     assert not archive_path.exists()
 
-
 def test_archive_reconciliation_removes_only_stale_temporary_files(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     log_path = get_settings().audit_log_path
@@ -1092,7 +1056,6 @@ def test_archive_reconciliation_removes_only_stale_temporary_files(tmp_path, mon
 
     assert recent.exists()
     assert not stale.exists()
-
 
 def test_file_archive_pruning_waits_for_hot_log_commit(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -1130,7 +1093,6 @@ def test_file_archive_pruning_waits_for_hot_log_commit(tmp_path, monkeypatch):
     assert len(archives) >= 2
     assert log_path.read_bytes() == original
 
-
 def test_archive_index_write_rejects_symlinked_directory(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     log_path = get_settings().audit_log_path
@@ -1143,7 +1105,6 @@ def test_archive_index_write_rejects_symlinked_directory(tmp_path, monkeypatch):
         audit_module._write_file_archive_index(log_path, [])
     assert not (outside / "index.json").exists()
 
-
 def test_under_budget_maintenance_does_not_create_archive_index(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     log_path = get_settings().audit_log_path
@@ -1151,7 +1112,6 @@ def test_under_budget_maintenance_does_not_create_archive_index(tmp_path, monkey
 
     assert audit_module._enforce_audit_storage_limit(log_path, 10_000, 0) is True
     assert not (tmp_path / audit_module._AUDIT_ARCHIVE_DIRECTORY).exists()
-
 
 def test_query_audit_reads_complete_hot_log_not_tail_window(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -1175,7 +1135,6 @@ def test_query_audit_reads_complete_hot_log_not_tail_window(tmp_path, monkeypatc
     result = audit_module.query_audit(limit=100, search="hot_history", sort="asc")
 
     assert [entry["index"] for entry in result["entries"]] == list(range(30))
-
 
 def test_corrupt_cold_archive_does_not_affect_hot_query(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)

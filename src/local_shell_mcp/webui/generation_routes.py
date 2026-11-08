@@ -226,6 +226,7 @@ async def generation_status(request: Request):
         "status": generation.status,
         "streamId": generation.conversation_id,
         "createdAt": generation.generation_created_at,
+        "elapsedMs": max(0, int(time.time() * 1000) - generation.generation_created_at),
         "generationProtocolVersion": 2,
     }, headers=_generator_headers())
 
@@ -240,6 +241,7 @@ async def active_generations(request: Request):
         ).fetchall()
     running = [_generation_body(GenerationStore._run(row), status="running") for row in rows]
     return JSONResponse({"jobs": running, "activeJobs": running,
+                         "activeJobIds": [job["conversationId"] for job in running],
                          "generationProtocolVersion": 2}, headers=_generator_headers())
 
 

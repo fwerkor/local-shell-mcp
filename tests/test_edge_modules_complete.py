@@ -27,6 +27,7 @@ import local_shell_mcp.version as version
 from local_shell_mcp.models import CommandResult
 from local_shell_mcp.settings import get_settings
 
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
 def _configure(tmp_path, monkeypatch, **extra):
     values = {
@@ -40,7 +41,6 @@ def _configure(tmp_path, monkeypatch, **extra):
     for key, value in values.items():
         monkeypatch.setenv(key, value)
     get_settings.cache_clear()
-
 
 def _request(
     path="/tools/read_file",
@@ -65,7 +65,6 @@ def _request(
             "server": ("test", 80),
         }
     )
-
 
 def test_audit_serialization_and_all_filters(tmp_path, monkeypatch):
     _configure(
@@ -129,7 +128,6 @@ def test_audit_serialization_and_all_filters(tmp_path, monkeypatch):
     assert audit_module._operation_type({"tool": "job_tail"}) == "jobs"
     assert audit_module._operation_type({"tool": "create_file_link"}) == "files"
     assert audit_module._operation_type({"tool": "remote_transfer"}) == "remote"
-
 
 def test_auth_scopes_hosts_tokens_and_metadata(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -195,7 +193,6 @@ def test_auth_scopes_hosts_tokens_and_metadata(tmp_path, monkeypatch):
         assert auth._is_public_path(path)
     assert not auth._is_public_path("/private")
 
-
 def test_auth_oauth_body_and_mcp_helpers(tmp_path, monkeypatch):
     _configure(
         tmp_path,
@@ -257,7 +254,6 @@ def test_auth_oauth_body_and_mcp_helpers(tmp_path, monkeypatch):
     assert auth._mcp_methods_from_body(b"[1,{\"method\":\"ping\"}]") == {"ping"}
     assert not auth._is_mcp_discovery_request({"path": "/other", "method": "POST"}, b"{}")
     assert not auth._is_mcp_discovery_request({"path": "/mcp", "method": "POST"}, b"[]")
-
 
 def test_auth_middlewares_all_fast_paths(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, LOCAL_SHELL_MCP_MCP_MAX_SESSIONS=1)
@@ -359,7 +355,6 @@ def test_auth_middlewares_all_fast_paths(tmp_path, monkeypatch):
     )
     assert calls and calls[-1][auth._REQUEST_BODY_SCOPE_KEY] == b"{}"
 
-
 def test_playwright_helpers_and_generated_scripts(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, LOCAL_SHELL_MCP_MAX_FILE_WRITE_BYTES=4)
     with pytest.raises(ValueError, match="Refusing"):
@@ -426,7 +421,6 @@ def test_playwright_helpers_and_generated_scripts(tmp_path, monkeypatch):
     assert custom["script_path"].endswith(".py")
     assert commands[-1][1]["max_output_bytes"] == 1_000_000
 
-
 def test_tmux_selection_backend_and_version(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setattr(tmux_helper.platform, "system", lambda: "Linux")
@@ -491,7 +485,6 @@ def test_tmux_selection_backend_and_version(tmp_path, monkeypatch):
     assert version.package_version() == version.__version__
     assert "package 2.0" in version.format_version_info({"version": "1.0", "package_version": "2.0"})
     assert version.format_version_info({"version": "1.0", "package_version": "1.0"}) == "local-shell-mcp 1.0"
-
 
 def test_ui_security_process_local_token_and_loopback(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -564,7 +557,6 @@ def test_ui_security_process_local_token_and_loopback(tmp_path, monkeypatch):
     ):
         assert ui_security.is_loopback_connection(_request(client=client)) is expected
 
-
 def test_search_real_tree_and_fake_grep_branches(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, LOCAL_SHELL_MCP_MAX_TREE_ENTRIES=2)
     file_path = tmp_path / "file.txt"
@@ -628,7 +620,6 @@ def test_search_real_tree_and_fake_grep_branches(tmp_path, monkeypatch):
     assert result["matches"][0]["column"] == 3
     assert result["truncated"] is True
     assert process.terminated is True
-
 
 
 def test_http_app_executes_every_route_wrapper(tmp_path, monkeypatch):
@@ -712,7 +703,6 @@ def test_http_app_executes_every_route_wrapper(tmp_path, monkeypatch):
     assert client.post("/tools/run_shell", json={"command": "x"}).status_code == 400
     assert client.post("/tools/skill_load", json={"name": "x", "extra": 1}).status_code == 400
 
-
 def test_search_timeout_no_stream_and_tree_permission_branches(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
 
@@ -754,7 +744,6 @@ def test_search_timeout_no_stream_and_tree_permission_branches(tmp_path, monkeyp
     tree_result = search.tree_sync("blocked")
     assert tree_result["entries"] == []
 
-
 def test_bundled_tmux_permissions_and_windows_import_failure(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     module_path = tmp_path / "tmux_helper.py"
@@ -779,7 +768,6 @@ def test_bundled_tmux_permissions_and_windows_import_failure(tmp_path, monkeypat
     monkeypatch.setattr(tmux_helper, "os", os_proxy)
     monkeypatch.setattr(conpty_ops, "is_available", lambda: (_ for _ in ()).throw(RuntimeError("import")))
     assert tmux_helper.persistent_shell_backend_info()["backend"] == "native"
-
 
 def test_ui_token_creation_never_touches_filesystem(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)

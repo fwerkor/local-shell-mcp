@@ -304,16 +304,16 @@ class DynamicMCPManager:
     def _validate_config(server: DynamicMCPServer) -> None:
         if not _SERVER_NAME_RE.fullmatch(server.name):
             raise ValueError("name must match [A-Za-z0-9._-] and be at most 64 characters")
-        if server.transport not in {"stdio", "streamable_http"}:
-            raise ValueError("transport must be stdio or streamable_http")
+        if server.transport not in {"stdio", "streamable_http", "sse"}:
+            raise ValueError("transport must be stdio, streamable_http or sse")
         if server.transport == "stdio":
             if not server.command or not server.command.strip():
                 raise ValueError("command is required for stdio MCP servers")
             if server.url:
-                raise ValueError("url is only valid for streamable_http MCP servers")
+                raise ValueError("url is only valid for HTTP(S) MCP servers")
         else:
             if not server.url or not server.url.startswith(("http://", "https://")):
-                raise ValueError("an absolute HTTP(S) url is required for streamable_http MCP servers")
+                raise ValueError("an absolute HTTP(S) url is required for network MCP servers")
             if server.command:
                 raise ValueError("command is only valid for stdio MCP servers")
 

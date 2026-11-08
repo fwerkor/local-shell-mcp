@@ -123,6 +123,9 @@ def test_enrollment_payload_overrides_and_restores_existing_environment(tmp_path
 
 @pytest.mark.asyncio
 async def test_run_worker_overrides_stale_scope(tmp_path, monkeypatch):
+    # The controller test host can have a real Worker outbox; isolate the
+    # Worker state before evaluating first-connect / polling behavior.
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKER_STATE_DIR", str(tmp_path / "worker-state"))
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", "/stale/workspace")
     monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "false")
     monkeypatch.setattr(cli.remote, "worker_capabilities", lambda: [])

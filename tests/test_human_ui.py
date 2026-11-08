@@ -46,6 +46,7 @@ from local_shell_mcp.session_runtime import get_session_runtime_manager
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.ui_security import UI_LOCAL_TOKEN_HEADER, issue_ui_local_token
 
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
 def _configure(tmp_path, monkeypatch, *, auth_mode: str = "none") -> None:
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
@@ -54,7 +55,6 @@ def _configure(tmp_path, monkeypatch, *, auth_mode: str = "none") -> None:
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", auth_mode)
     monkeypatch.setenv("LOCAL_SHELL_MCP_REMOTE_ENABLED", "false")
     get_settings.cache_clear()
-
 
 
 def test_trusted_local_ui_maps_logical_session_subject_for_listing_and_creation(
@@ -86,7 +86,6 @@ def test_trusted_local_ui_maps_logical_session_subject_for_listing_and_creation(
     monkeypatch.setattr("local_shell_mcp.human_ui.get_settings", lambda: fallback_settings)
     assert _logical_session_subject(request, create=True) == "local-mcp-client"
 
-
 def test_ui_gui_dependency_bootstrap_requires_execute_scope(monkeypatch):
     import local_shell_mcp.human_ui as human_ui
 
@@ -107,7 +106,6 @@ def test_ui_gui_dependency_bootstrap_requires_execute_scope(monkeypatch):
 
     monkeypatch.setattr(human_ui, "_request_principal", lambda _request: execute)
     assert human_ui._ui_principal_allows(request, "shell:execute") is True
-
 
 def test_webui_logical_sessions_api_ignores_unknown_status_in_counts(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -130,7 +128,6 @@ def test_webui_logical_sessions_api_ignores_unknown_status_in_counts(tmp_path, m
         "stale": 0,
         "total": 1,
     }
-
 
 def test_webui_logical_sessions_api_is_principal_scoped(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -172,7 +169,6 @@ def test_webui_logical_sessions_api_is_principal_scoped(tmp_path, monkeypatch):
     )
     assert hidden.status_code == 404
 
-
 def test_webui_logical_session_lifecycle_accepts_preentered_prompt(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     client = TestClient(build_http_app())
@@ -199,7 +195,6 @@ def test_webui_logical_session_lifecycle_accepts_preentered_prompt(tmp_path, mon
     )
     assert deleted.status_code == 200
     assert deleted.json()["data"] == {"session_id": session_id, "deleted": True}
-
 
 def test_webui_logical_session_finish_updates_bound_live_workspace(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -244,7 +239,6 @@ def test_webui_logical_session_finish_updates_bound_live_workspace(tmp_path, mon
         )
     ]
 
-
 def test_webui_logical_session_actions_validate_requests(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     client = TestClient(build_http_app())
@@ -260,7 +254,6 @@ def test_webui_logical_session_actions_validate_requests(tmp_path, monkeypatch):
     missing_id = client.post("/api/ui/logical-sessions/finish", json={})
     assert missing_id.status_code == 400
     assert "session_id is required" in missing_id.text
-
 
 def test_webui_logical_session_api_reports_missing_context_and_runtime_errors(
     tmp_path, monkeypatch
@@ -300,7 +293,6 @@ def test_webui_logical_session_api_reports_missing_context_and_runtime_errors(
     assert broken_list.status_code == 400
     assert "session list unavailable" in broken_list.text
 
-
 def test_webui_shell_uses_available_viewport_without_fixed_desktop_cap():
     css_path = Path(__file__).parents[1] / "src/local_shell_mcp/ui_static/web.css"
     css = css_path.read_text(encoding="utf-8")
@@ -308,7 +300,6 @@ def test_webui_shell_uses_available_viewport_without_fixed_desktop_cap():
     assert "1540px" not in css
     assert "960px" not in css
     assert ".desktop-panel:fullscreen" in css
-
 
 def test_webui_index_versions_static_assets_for_cache_busting(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -319,7 +310,6 @@ def test_webui_index_versions_static_assets_for_cache_busting(tmp_path, monkeypa
     assert f"/ui/assets/web.js?v={__version__}" in html
     assert f"/ui/assets/favicon.svg?v={__version__}" in html
     assert "__LSM_UI_ASSET_VERSION__" not in html
-
 
 def test_webui_visual_regressions_are_packaged():
     asset_root = Path(__file__).parents[1] / "src/local_shell_mcp/ui_static"
@@ -356,7 +346,6 @@ def test_webui_visual_regressions_are_packaged():
     assert "/logical-sessions" in script
     assert "row-menu" not in script
 
-
 def test_ui_assets_reject_symlinks_outside_asset_root(tmp_path, monkeypatch):
     assets = tmp_path / "assets"
     assets.mkdir()
@@ -374,7 +363,6 @@ def test_ui_assets_reject_symlinks_outside_asset_root(tmp_path, monkeypatch):
 
     assert response.status_code == 404
     assert "outside-secret" not in response.text
-
 
 @pytest.mark.asyncio
 async def test_local_file_api_does_not_block_event_loop(tmp_path, monkeypatch):
@@ -418,7 +406,6 @@ def test_human_file_api_has_three_pane_directory_payload(tmp_path, monkeypatch):
     assert [entry["name"] for entry in payload["entries"]][:2] == [".state", "folder"]
     assert any(entry["name"] == "alpha.txt" and entry["type"] == "file" for entry in payload["entries"])
 
-
 def test_human_file_api_renders_image_preview(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     png = base64.b64decode(
@@ -440,7 +427,6 @@ def test_human_file_api_renders_image_preview(tmp_path, monkeypatch):
     assert (payload["cell_width"], payload["cell_height"]) == (2, 1)
     assert len(base64.b64decode(payload["rgba"])) == 4
 
-
 def test_editor_content_reads_the_complete_bounded_file(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     content = "\n".join(f"line-{index}" for index in range(350))
@@ -457,7 +443,6 @@ def test_editor_content_reads_the_complete_bounded_file(tmp_path, monkeypatch):
     assert payload["truncated"] is False
     assert payload["content"] == content
     assert "line-349" in payload["content"]
-
 
 def test_editor_rejects_stale_save_and_preserves_newer_file(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -507,7 +492,6 @@ def test_editor_rejects_stale_save_and_preserves_newer_file(tmp_path, monkeypatc
         assert path.stat().st_mode & 0o777 == 0o640
     assert not list(tmp_path.glob(".shared.txt.*.tmp"))
 
-
 def test_editor_refuses_files_larger_than_the_read_limit(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_FILE_READ_BYTES", "64")
@@ -524,7 +508,6 @@ def test_editor_refuses_files_larger_than_the_read_limit(tmp_path, monkeypatch):
     assert response.status_code == 400
     assert "editor read limit" in response.json()["message"]
     assert (tmp_path / "too-large.txt").read_text(encoding="utf-8") == original
-
 
 def test_file_manager_rejects_workspace_escape_and_recursive_self_copy(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -549,7 +532,6 @@ def test_file_manager_rejects_workspace_escape_and_recursive_self_copy(tmp_path,
     assert not (tmp_path.parent / "escaped").exists()
     assert not (source / "nested").exists()
 
-
 @pytest.mark.asyncio
 async def test_remote_human_file_action_keeps_worker_workspace_policy(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -567,7 +549,6 @@ async def test_remote_human_file_action_keeps_worker_workspace_policy(tmp_path, 
     assert result["path"] == "safe.txt"
     assert (tmp_path / "safe.txt").is_file()
 
-
 def test_ui_path_rejects_reserved_and_ambiguous_mounts(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     for value in ["/", "/api/ui", "/oauth/panel", "/ui/../mcp", "ui"]:
@@ -579,7 +560,6 @@ def test_ui_path_rejects_reserved_and_ambiguous_mounts(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_UI_PATH", "/operator/console/")
     get_settings.cache_clear()
     assert get_settings().ui_path == "/operator/console"
-
 
 def test_remotes_api_honors_disabled_server_configuration(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -603,7 +583,6 @@ def test_remotes_api_honors_disabled_server_configuration(tmp_path, monkeypatch)
     assert "disabled" in invite.json()["message"]
 
 
-
 def test_terminal_api_rejects_invalid_line_count(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     client = TestClient(build_http_app())
@@ -616,7 +595,6 @@ def test_terminal_api_rejects_invalid_line_count(tmp_path, monkeypatch):
     assert response.status_code == 400
     assert response.json()["message"] == "lines must be an integer"
 
-
 def test_windows_tui_command_parser_preserves_backslashes_and_quotes():
     assert _split_tui_command(
         r'D:\a\local-shell-mcp\ui\dist\local-shell-mcp-tui.exe',
@@ -626,7 +604,6 @@ def test_windows_tui_command_parser_preserves_backslashes_and_quotes():
         r'"D:\Program Files\local-shell-mcp-tui.exe" --flag',
         windows=True,
     ) == [r'D:\Program Files\local-shell-mcp-tui.exe', "--flag"]
-
 
 def test_pyinstaller_entry_quotes_embedded_tui_paths():
     entry_path = Path(__file__).resolve().parents[1] / "scripts" / "pyinstaller-entry.py"
@@ -644,7 +621,6 @@ def test_pyinstaller_entry_quotes_embedded_tui_paths():
         str(windows_path)
     ]
 
-
 def test_terminal_dimensions_are_clamped_to_safe_limits():
     assert _bounded_int("2", default=120, minimum=20, maximum=500, label="cols") == 20
     assert _bounded_int("99999", default=120, minimum=20, maximum=500, label="cols") == 500
@@ -661,7 +637,6 @@ def test_terminal_dimensions_are_clamped_to_safe_limits():
     with pytest.raises(ValueError, match="cols must be an integer"):
         _bounded_int("wide", default=120, minimum=20, maximum=500, label="cols")
 
-
 def test_human_file_mutations_are_not_audited(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     client = TestClient(build_http_app())
@@ -675,7 +650,6 @@ def test_human_file_mutations_are_not_audited(tmp_path, monkeypatch):
     assert (tmp_path / "manual.txt").read_text(encoding="utf-8") == "human"
     audit_path = tmp_path / "audit.jsonl"
     assert not audit_path.exists() or audit_path.read_text(encoding="utf-8") == ""
-
 
 def test_suppress_audit_context_excludes_manual_activity(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -693,7 +667,6 @@ def test_suppress_audit_context_excludes_manual_activity(tmp_path, monkeypatch):
         "mcp_tool_call_start",
         "mcp_tool_call_end",
     ]
-
 
 def test_audit_storage_remains_valid_under_concurrent_trim_and_append(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -713,7 +686,6 @@ def test_audit_storage_remains_valid_under_concurrent_trim_and_append(tmp_path, 
     assert all(record["event"] == "mcp_tool_call_end" for record in records)
     assert path.stat().st_size < 5000
     assert not list(tmp_path.glob(".audit.jsonl.*.tmp"))
-
 
 def test_audit_large_payloads_are_previewed_and_loaded_on_demand(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -761,7 +733,6 @@ def test_audit_large_payloads_are_previewed_and_loaded_on_demand(tmp_path, monke
     assert detail["input"]["content"] == large_input
     assert detail["output"]["stdout"] == large_output
 
-
 def test_audit_trim_prunes_unreferenced_payload_files(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_AUDIT_LOG_BYTES", "3500")
@@ -777,7 +748,6 @@ def test_audit_trim_prunes_unreferenced_payload_files(tmp_path, monkeypatch):
 
     assert not payloads[0].exists()
     assert query_audit()["entries"][0]["event"] == "small_event"
-
 
 def test_query_audit_pairs_calls_filters_compact_operations_and_hides_auth(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -834,7 +804,6 @@ def test_query_audit_pairs_calls_filters_compact_operations_and_hides_auth(tmp_p
     assert all(item["event"] != "auth_ok" for item in query_audit()["entries"])
 
 
-
 def test_audit_node_and_session_filters_are_exact(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     path = get_settings().audit_log_path
@@ -868,7 +837,6 @@ def test_webui_shell_is_public_but_api_remains_oauth_protected(tmp_path, monkeyp
     assert 'id="application"' in page.text
     assert api.status_code == 401
 
-
 def test_scoped_ui_token_preserves_oauth_permissions(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth_mode="oauth")
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST", "false")
@@ -899,7 +867,6 @@ def test_scoped_ui_token_preserves_oauth_permissions(tmp_path, monkeypatch):
     assert forbidden.status_code == 403
     assert "remote:use" in forbidden.json()["message"]
 
-
 def test_native_tui_token_is_rejected_from_non_loopback_peer(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth_mode="oauth")
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_BYPASS_LOCALHOST", "false")
@@ -913,7 +880,6 @@ def test_native_tui_token_is_rejected_from_non_loopback_peer(tmp_path, monkeypat
     )
 
     assert response.status_code == 401
-
 
 def test_human_ui_rejects_destructive_action_without_write_scope(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth_mode="oauth")
@@ -939,7 +905,6 @@ def test_human_ui_rejects_destructive_action_without_write_scope(tmp_path, monke
     assert response.status_code == 403
     assert response.headers["www-authenticate"].startswith('Bearer error="insufficient_scope"')
     assert victim.read_text(encoding="utf-8") == "keep"
-
 
 def test_native_tui_api_base_must_be_loopback():
     assert _validate_tui_api_base("http://127.0.0.1:8765/api/ui/") == (
@@ -984,11 +949,9 @@ def _websocket_for_test(*, client_host: str = "127.0.0.1", protocols: list[str] 
     return WebSocket(scope, receive, send)
 
 
-
 def _bearer_protocol(token: str) -> str:
     encoded = base64.urlsafe_b64encode(token.encode()).decode().rstrip("=")
     return f"bearer.{encoded}"
-
 
 def test_websocket_requires_full_human_ui_scope_set(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth_mode="oauth")
@@ -1035,19 +998,16 @@ def test_oauth_websocket_does_not_trust_loopback_reverse_proxy(tmp_path, monkeyp
 
     assert _authorize_websocket(_websocket_for_test(client_host="127.0.0.1")) is False
 
-
 def test_none_auth_mode_allows_websocket_without_token(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth_mode="none")
 
     assert _authorize_websocket(_websocket_for_test(client_host="203.0.113.9")) is True
-
 
 def test_websocket_origin_maps_to_http_oauth_resource(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth_mode="oauth")
     websocket = _websocket_for_test(client_host="203.0.113.9")
 
     assert public_base_url(websocket) == "https://control.example.com"
-
 
 def test_http_localhost_bypass_is_not_inherited_by_reverse_proxy(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth_mode="oauth")
@@ -1070,7 +1030,6 @@ def test_http_localhost_bypass_is_not_inherited_by_reverse_proxy(tmp_path, monke
     assert direct.status_code == 200
     assert proxied.status_code == 401
 
-
 def test_legacy_ui_token_path_is_ignored(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     token_path = tmp_path / ".state" / "ui" / "local-token"
@@ -1083,7 +1042,6 @@ def test_legacy_ui_token_path_is_ignored(tmp_path, monkeypatch):
     assert token != legacy
     assert token_path.read_text(encoding="utf-8") == legacy
 
-
 def test_ui_token_creation_ignores_unusable_legacy_path(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     token_path = tmp_path / ".state" / "ui" / "local-token"
@@ -1094,12 +1052,10 @@ def test_ui_token_creation_ignores_unusable_legacy_path(tmp_path, monkeypatch):
     assert len(token) >= 32
     assert token_path.is_dir()
 
-
 def test_terminal_idle_timeout_uses_latest_input_or_output_activity():
     assert _idle_timeout_remaining(100.0, 60.0, 130.0) == 30.0
     assert _idle_timeout_remaining(100.0, 60.0, 160.0) == 0.0
     assert _idle_timeout_remaining(150.0, 60.0, 160.0) == 50.0
-
 
 @pytest.mark.asyncio
 async def test_unix_pty_write_retries_short_writes(monkeypatch):
@@ -1129,7 +1085,6 @@ async def test_unix_pty_write_retries_short_writes(monkeypatch):
     assert bytes(written) == b"abcdef"
     assert waits == [([], [123], [], 0.1)]
 
-
 @pytest.mark.asyncio
 async def test_windows_pty_write_accepts_zero_from_async_pywinpty():
     process = _WindowsPtyProcess.__new__(_WindowsPtyProcess)
@@ -1144,7 +1099,6 @@ async def test_windows_pty_write_accepts_zero_from_async_pywinpty():
     await process.write(b"\x1bOR")
 
     assert calls == ["\x1bOR"]
-
 
 
 def test_windows_worker_paths_use_windows_semantics():
@@ -1165,7 +1119,6 @@ def test_windows_worker_paths_use_windows_semantics():
     )
     assert [entry["name"] for entry in normalized] == ["folder", ".hidden"]
     assert normalized[1]["hidden"] is True
-
 
 def test_webui_remote_gui_windows_uses_bootstrap_safe_timeout(tmp_path, monkeypatch):
     import local_shell_mcp.human_ui as human_ui
@@ -1190,7 +1143,6 @@ def test_webui_remote_gui_windows_uses_bootstrap_safe_timeout(tmp_path, monkeypa
             210,
         )
     ]
-
 
 def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
     import local_shell_mcp.human_ui as human_ui
@@ -1323,7 +1275,6 @@ def test_webui_gui_windows_frame_and_human_input(tmp_path, monkeypatch):
         )
     ]
 
-
 def test_webui_gui_frame_and_action_respect_disable_local(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setenv("LOCAL_SHELL_MCP_DISABLE_LOCAL", "true")
@@ -1366,7 +1317,6 @@ def test_webui_gui_frame_and_action_respect_disable_local(tmp_path, monkeypatch)
     assert "Local access is disabled" in action.json()["message"]
     assert action_called == []
 
-
 def test_webui_gui_action_validates_human_payload(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     client = TestClient(build_http_app())
@@ -1407,7 +1357,6 @@ def test_webui_gui_action_validates_human_payload(tmp_path, monkeypatch):
     )
     assert too_many.status_code == 400
     assert "At most 8" in too_many.json()["message"]
-
 
 def test_webui_gui_api_error_paths(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -1476,7 +1425,6 @@ def test_webui_gui_api_error_paths(tmp_path, monkeypatch):
     assert missing_actions.status_code == 400
     assert "non-empty list" in missing_actions.json()["message"]
 
-
 def test_webui_gui_remote_human_action_dispatch(tmp_path, monkeypatch):
     import local_shell_mcp.human_ui as human_ui
 
@@ -1544,7 +1492,6 @@ def test_webui_gui_remote_human_action_dispatch(tmp_path, monkeypatch):
         ),
     ]
 
-
 def test_native_file_download_ticket_is_short_lived_and_binary_safe(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     from local_shell_mcp import human_ui
@@ -1577,7 +1524,6 @@ def test_native_file_download_ticket_is_short_lived_and_binary_safe(tmp_path, mo
         human_ui._UI_DOWNLOAD_GRANTS[ticket] = (0, machine, path, size, name)
     assert client.get(url).status_code == 404
 
-
 def test_file_upload_streams_binary_larger_than_http_json_limit(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_HTTP_REQUEST_BYTES", "1024")
@@ -1597,7 +1543,6 @@ def test_file_upload_streams_binary_larger_than_http_json_limit(tmp_path, monkey
     assert again.status_code == 409
     assert (tmp_path / "large.bin").read_bytes() == data
     assert not list(tmp_path.glob(".large.bin.local-shell-mcp-transfer-*.tmp"))
-
 
 def test_native_file_download_ticket_enforces_machine_permissions(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -1630,7 +1575,6 @@ def test_native_file_download_ticket_enforces_machine_permissions(tmp_path, monk
     assert asyncio.run(check(deny, "local")).status_code == 403
     assert asyncio.run(check(read_only, "remote-a")).status_code == 403
 
-
 def test_remote_download_chunks_verify_integrity(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     import asyncio
@@ -1652,7 +1596,6 @@ def test_remote_download_chunks_verify_integrity(tmp_path, monkeypatch):
         return bytes(result)
     assert asyncio.run(read()) == data[10:-11]
 
-
 def test_web_file_list_skips_unneeded_parent_rpc(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     (tmp_path / "parent").mkdir()
@@ -1665,7 +1608,6 @@ def test_web_file_list_skips_unneeded_parent_rpc(tmp_path, monkeypatch):
     assert result.json()["data"]["parent_entries"] == []
     assert result.json()["data"]["truncated"] is False
 
-
 def test_web_file_list_marks_truncated_directories(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     for name in ("a.txt", "b.txt", "c.txt"):
@@ -1676,7 +1618,6 @@ def test_web_file_list_marks_truncated_directories(tmp_path, monkeypatch):
     })
     assert result.status_code == 200
     assert result.json()["data"]["truncated"] is True
-
 
 def test_native_remote_file_download_grant_and_range(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -1731,7 +1672,6 @@ def test_native_remote_file_download_grant_and_range(tmp_path, monkeypatch):
     assert client.get(url, headers={"Range": "bytes=0-999999"}).content == payload
     for invalid_range in ("bytes=-0", "bytes=8-3", "bytes=--", "bytes=999999-"):
         assert client.get(url, headers={"Range": invalid_range}).status_code == 416
-
 
 def test_native_remote_binary_upload_uses_bounded_chunks(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)

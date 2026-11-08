@@ -9,6 +9,7 @@ import pytest
 from local_shell_mcp import remote
 from local_shell_mcp.settings import get_settings
 
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
 @pytest.fixture
 def isolated_remote(tmp_path, monkeypatch):
@@ -18,7 +19,6 @@ def isolated_remote(tmp_path, monkeypatch):
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
-
 
 @pytest.mark.asyncio
 async def test_invite_defaults_bounds_and_validation(isolated_remote):
@@ -34,7 +34,6 @@ async def test_invite_defaults_bounds_and_validation(isolated_remote):
             await manager.create_invite(max_uses=invalid)
     with pytest.raises(ValueError, match="name must be omitted"):
         await manager.create_invite(name="fixed", max_uses=2)
-
 
 @pytest.mark.asyncio
 async def test_multiple_registrations_survive_restart_and_consume_exact_quota(isolated_remote):
@@ -67,7 +66,6 @@ async def test_multiple_registrations_survive_restart_and_consume_exact_quota(is
         "name"
     ] == names[0]
 
-
 @pytest.mark.asyncio
 async def test_duplicate_does_not_consume_quota(isolated_remote):
     manager = remote.RemoteManager()
@@ -78,7 +76,6 @@ async def test_duplicate_does_not_consume_quota(isolated_remote):
     assert manager.invites[code].used_count == 1
     await manager.register_worker({"invite": code, "name": "two"})
     assert code not in manager.invites
-
 
 @pytest.mark.asyncio
 async def test_last_slot_is_atomic_between_managers(isolated_remote):
@@ -97,7 +94,6 @@ async def test_last_slot_is_atomic_between_managers(isolated_remote):
     assert len(fresh.list_machines()["machines"]) == 2
     assert code not in fresh.invites
 
-
 @pytest.mark.asyncio
 async def test_failed_registry_write_does_not_consume_slot(isolated_remote, monkeypatch):
     manager = remote.RemoteManager()
@@ -115,7 +111,6 @@ async def test_failed_registry_write_does_not_consume_slot(isolated_remote, monk
     assert fresh.workers == {}
     await fresh.register_worker({"invite": code, "name": "test"})
     assert fresh.invites[code].used_count == 1
-
 
 @pytest.mark.asyncio
 async def test_replayed_registration_returns_original_identity_without_spending_uses(
@@ -146,7 +141,6 @@ async def test_replayed_registration_returns_original_identity_without_spending_
     with pytest.raises(ValueError, match="invalid invite"):
         await after_quota.register_worker({**payload, "enrollment_id": "third-worker"})
 
-
 @pytest.mark.asyncio
 async def test_registration_replay_survives_expiry_and_revoke_blocks_identity(
     isolated_remote, monkeypatch
@@ -162,7 +156,6 @@ async def test_registration_replay_survives_expiry_and_revoke_blocks_identity(
     with pytest.raises(ValueError, match="enrollment has been revoked"):
         await remote.RemoteManager().register_worker(payload)
 
-
 @pytest.mark.asyncio
 async def test_registration_enrollment_id_validation(isolated_remote):
     manager = remote.RemoteManager()
@@ -171,7 +164,6 @@ async def test_registration_enrollment_id_validation(isolated_remote):
         with pytest.raises(ValueError, match="enrollment_id"):
             await manager.register_worker({"invite": code, "enrollment_id": invalid})
     assert manager.invites[code].used_count == 0
-
 
 @pytest.mark.asyncio
 async def test_lost_http_response_is_retried_without_duplicate_registration(
@@ -199,7 +191,6 @@ async def test_lost_http_response_is_retried_without_duplicate_registration(
     assert attempts[0] == attempts[1] == returned["data"]
     assert len(manager.workers) == 1
     assert manager.invites[invite["code"]].used_count == 1
-
 
 @pytest.mark.asyncio
 async def test_revoked_enrollment_cannot_retry_into_available_invite(isolated_remote):
@@ -246,7 +237,6 @@ async def test_revoked_enrollment_cannot_retry_into_available_invite(isolated_re
     )
     assert final["token"] not in {registered["token"], another["token"]}
 
-
 @pytest.mark.asyncio
 async def test_revoked_enrollment_tombstone_expires_and_is_pruned(isolated_remote, monkeypatch):
     now = remote._utc()
@@ -273,7 +263,6 @@ async def test_revoked_enrollment_tombstone_expires_and_is_pruned(isolated_remot
     assert remote.RemoteManager._read_registry(fresh._registry_path())[
         "revoked_registrations"
     ] == {}
-
 
 @pytest.mark.asyncio
 async def test_revoke_registry_write_failure_rolls_back_tombstone(
@@ -304,7 +293,6 @@ async def test_revoke_registry_write_failure_rolls_back_tombstone(
         )
     ) == worker
 
-
 @pytest.mark.parametrize(
     "revoked",
     [
@@ -331,7 +319,6 @@ def test_registry_rejects_invalid_revoked_enrollment_records(revoked):
         b'{"version":1,"workers":[],"invites":[]}'
     )
     assert old_registry["revoked_registrations"] == {}
-
 
 @pytest.mark.asyncio
 async def test_http_retry_after_revocation_does_not_resurrect_worker(

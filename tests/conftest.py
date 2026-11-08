@@ -28,3 +28,20 @@ def python_shell_command(code: str) -> str:
         wrapper = f"import base64; exec(base64.b64decode('{encoded}'))"
         return f'& "{escaped_executable}" -c "{wrapper}"'
     return f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
+
+
+@pytest.fixture
+def legacy_file_state_backend(monkeypatch):
+    """Preserve legacy file-specific contract tests alongside SQLite-default tests.
+
+    Old tests intentionally inspect audit.jsonl, job backup files, lock files,
+    and on-disk registry permissions. Do not silently assume those file-level
+    contracts apply to SQLite. New SQLite-default tests verify migrations and
+    DB-backed equivalents independently.
+    """
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_BACKEND", "file")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()

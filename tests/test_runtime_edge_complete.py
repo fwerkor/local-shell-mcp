@@ -16,6 +16,7 @@ from local_shell_mcp.models import CommandResult
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.tmux_helper import TmuxSelection
 
+pytestmark = pytest.mark.usefixtures("legacy_file_state_backend")
 
 def _configure(tmp_path, monkeypatch, **extra):
     values = {
@@ -34,7 +35,6 @@ def _configure(tmp_path, monkeypatch, **extra):
     shell._NATIVE_SHELL_SESSIONS.clear()
     conpty._CONPTY_SHELL_SESSIONS.clear()
 
-
 def _command_result(*, ok=True, stdout="", stderr=""):
     return CommandResult(
         ok=ok,
@@ -47,7 +47,6 @@ def _command_result(*, ok=True, stdout="", stderr=""):
         stderr=stderr,
         truncated=False,
     )
-
 
 def test_job_store_helpers_recovery_pruning_and_attempt_files(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, LOCAL_SHELL_MCP_MAX_JOBS=1)
@@ -103,7 +102,6 @@ def test_job_store_helpers_recovery_pruning_and_attempt_files(tmp_path, monkeypa
     }
     jobs._prune_store(store)
     assert [job["job_id"] for job in store["jobs"]] == ["active"]
-
 
 def test_job_runner_arguments_status_and_operations(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
@@ -163,7 +161,6 @@ def test_job_runner_arguments_status_and_operations(tmp_path, monkeypatch):
         with pytest.raises(ValueError):
             jobs._parse_runner_env_policy(raw, "value")
 
-
 def test_job_refresh_every_recovery_state(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
     assert jobs._refresh_job_status({"status": "done"}, set()) == {"status": "done"}
@@ -202,7 +199,6 @@ def test_job_refresh_every_recovery_state(tmp_path, monkeypatch):
     assert jobs._refresh_job_status(running, {"s"}, 5)["status"] == "running"
     jobs._refresh_job_status(running, set(), 5)
     assert running["status"] == "lost"
-
 
 def test_job_log_compaction_and_runner_error_status(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, LOCAL_SHELL_MCP_MAX_JOB_LOG_BYTES=5)
@@ -244,7 +240,6 @@ def test_job_log_compaction_and_runner_error_status(tmp_path, monkeypatch):
     payload = json.loads(status.read_text(encoding="utf-8"))
     assert "did not expose stdout" in payload["error"]
 
-
 def test_job_start_tail_stop_and_retry_failures(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
 
@@ -276,7 +271,6 @@ def test_job_start_tail_stop_and_retry_failures(tmp_path, monkeypatch):
         asyncio.run(jobs.retry_job(job_id))
     with jobs._store_transaction() as store:
         assert "retry failed" in jobs._find_job(store, job_id)["error"]
-
 
 def test_shell_buffers_arguments_timeouts_and_reader_helpers(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, LOCAL_SHELL_MCP_MAX_OUTPUT_BYTES=5)
@@ -350,7 +344,6 @@ def test_shell_buffers_arguments_timeouts_and_reader_helpers(tmp_path, monkeypat
     asyncio.run(finish())
     assert task is not None and task.cancelled()
 
-
 def test_shell_process_termination_native_sessions_and_dispatch(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
 
@@ -415,7 +408,6 @@ def test_shell_process_termination_native_sessions_and_dispatch(tmp_path, monkey
     assert sent["enter"] is True
     assert asyncio.run(shell.read_shell("tmux"))["output"] == "pane"
     assert asyncio.run(shell.kill_shell("tmux"))["killed"] is True
-
 
 def test_conpty_helpers_cleanup_start_send_read_kill_and_list(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, LOCAL_SHELL_MCP_MAX_TMUX_SESSIONS=1)
@@ -495,7 +487,6 @@ def test_conpty_helpers_cleanup_start_send_read_kill_and_list(tmp_path, monkeypa
     assert asyncio.run(conpty.kill_shell("missing"))["killed"] is False
     with pytest.raises(RuntimeError, match="not found"):
         asyncio.run(conpty._get_session("missing"))
-
 
 def test_conpty_reader_exception_and_cleanup_variants(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
