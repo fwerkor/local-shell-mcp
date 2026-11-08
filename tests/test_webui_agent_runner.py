@@ -228,3 +228,54 @@ async def test_completed_model_checkpoint_never_invokes_provider_again(runtime):
     await reopened.run([])
     assert calls == [True] and text == ["completed response"]
     assert reopened.partial_text == "completed response"
+
+
+@pytest.mark.asyncio
+async def test_auth_none_uses_native_scope_catalog_for_start_and_resume(runtime, monkeypatch):
+    _, _, store, _ = runtime
+    from local_shell_mcp.oauth import ALL_OAUTH_SCOPES
+    from local_shell_mcp.webui.lsm_tool_registry import available_tools
+
+    captured = []
+
+    async def capture(*args, **kwargs):
+        captured.append(kwargs)
+
+    monkeypatch.setattr(generation_routes, "_start_task", capture)
+    app = Starlette(routes=generation_routes.generation_routes())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/agents/chat", json={"text": "scope check"})
+        assert response.status_code == 202
+        cid = response.json()["conversationId"]
+        assert captured[-1]["granted_scopes"] == frozenset(ALL_OAUTH_SCOPES)
+        names = {tool["function"]["name"] for tool in available_tools(
+            "local", cid, scopes=set(captured[-1]["granted_scopes"]),
+        )}
+        assert {"browser_session", "browser_snapshot", "link_list", "link_create"} <= names
+        generation = store.latest("local", cid)
+        pending = {"actionId": "scope-answer", "payload": {"type": "ask_user_question", "tool_call_id": "scope",
+                   "questions": [{"id": "choice", "question": "Continue?"}]}}
+        history = [{"role": "assistant", "tool_calls": [{"id": "scope", "type": "function",
+                    "function": {"name": "ask_user_question", "arguments": "{}"}}]}]
+        assert store.pause_for_question("local", generation.run_id, pending, history, "")
+        response = await client.post("/api/agents/chat/resume", json={
+            "conversationId": cid, "actionId": "scope-answer", "answers": {"choice": "yes"},
+        })
+        assert response.status_code == 200, response.text
+        assert captured[-1]["granted_scopes"] == frozenset(ALL_OAUTH_SCOPES)
+
+
+def test_oauth_grant_is_never_expanded_to_controller_scopes(runtime, monkeypatch):
+    from types import SimpleNamespace
+
+    from starlette.requests import Request
+
+    from local_shell_mcp import settings
+
+    monkeypatch.setattr(settings, "get_settings", lambda: SimpleNamespace(auth_mode="oauth"))
+    request = Request({"type": "http", "method": "POST", "path": "/", "headers": [], "state": {
+        "principal": SimpleNamespace(claims={"scope": "shell:read", "exp": 123}),
+    }})
+    assert generation_routes._request_grant(request) == ({"shell:read"}, 123)
+    missing = Request({"type": "http", "method": "POST", "path": "/", "headers": [], "state": {}})
+    assert generation_routes._request_grant(missing) == (set(), None)

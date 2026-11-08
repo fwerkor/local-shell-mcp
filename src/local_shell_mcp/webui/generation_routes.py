@@ -47,6 +47,20 @@ def _generation_store() -> GenerationStore:
     return GenerationStore(_database())
 
 
+def _request_grant(request: Request) -> tuple[set[str], int | None]:
+    from ..auth import principal_scopes
+    from ..settings import get_settings
+
+    if get_settings().auth_mode == "none":
+        from ..oauth import ALL_OAUTH_SCOPES
+
+        return set(ALL_OAUTH_SCOPES), None
+    principal = getattr(request.state, "principal", None)
+    if principal is None or not hasattr(principal, "claims"):
+        return set(), None
+    return principal_scopes(principal), principal.claims.get("exp")
+
+
 def _generation_body(job: Generation, *, status: str = "stream", resumed: bool = False,
                      protocol_version: int | None = None) -> dict:
     return {
@@ -196,8 +210,6 @@ async def start_generation(request: Request):
     # Permission inheritance is resolved against SQLite at the start and
     # rechecked before every tool. The initial OAuth grant cannot be elevated
     # by modifying defaults while a generation is in progress.
-    from ..auth import principal_scopes
-    from ..settings import get_settings
     from .machine_permissions import require_machine_scope, resolve_access
 
     existing_cid = payload.get("conversationId")
@@ -212,13 +224,7 @@ async def start_generation(request: Request):
     except KeyError as exc:
         raise HTTPException(404, detail=str(exc)) from exc
     requested_tools = any(level in {"read", "write"} for level in policy.values())
-    principal = getattr(request.state, "principal", None)
-    scopes = ({"shell:read", "shell:write", "shell:execute", "remote:use"}
-              if get_settings().auth_mode == "none" else
-              principal_scopes(principal) if principal is not None and hasattr(principal, "claims") else set())
-    grant_expires = None if get_settings().auth_mode == "none" else (
-        principal.claims.get("exp") if principal is not None and hasattr(principal, "claims") else None
-    )
+    scopes, grant_expires = _request_grant(request)
     if requested_tools:
         try:
             for machine, level in policy.items():
@@ -384,17 +390,9 @@ async def resume_generation(request: Request):
     try:
         # Confirm the user is still entitled to use the Agent before taking
         # the one-shot SQLite continuation claim.
-        from ..auth import principal_scopes
-        from ..settings import get_settings
         from .machine_permissions import require_machine_scope, resolve_access
 
-        principal = getattr(request.state, "principal", None)
-        scopes = ({"shell:read", "shell:write", "shell:execute", "remote:use"}
-                  if get_settings().auth_mode == "none" else
-                  principal_scopes(principal) if principal is not None and hasattr(principal, "claims") else set())
-        expiry = None if get_settings().auth_mode == "none" else (
-            principal.claims.get("exp") if principal is not None and hasattr(principal, "claims") else None
-        )
+        scopes, expiry = _request_grant(request)
         machine_policy = resolve_access(owner, cid)
         for machine, level in machine_policy.items():
             if level in {"read", "write"}:
