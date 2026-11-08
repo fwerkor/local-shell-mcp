@@ -120,3 +120,14 @@ def test_reused_frontend_release_cache_is_not_unpacked_again(tmp_path):
     frontend._extract_frontend.cache_clear()
     assert frontend._extract_frontend(archive, state) == cached
     assert (cached / "index.html").read_bytes() == b"preexisting-index"
+
+
+def test_frontend_discovery_without_build_and_with_installed_assets(tmp_path, monkeypatch):
+    root = tmp_path / "installed" / "local_shell_mcp" / "webui"
+    root.mkdir(parents=True)
+    monkeypatch.setattr(frontend, "__file__", str(root / "frontend.py"))
+    assert frontend.bundled_frontend() is None
+    assets = root / "assets"
+    assets.mkdir()
+    (assets / "index.html").write_text("installed React build", encoding="utf-8")
+    assert frontend.bundled_frontend() == assets

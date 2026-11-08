@@ -42,6 +42,14 @@ class CustomBuildHook(BuildHookInterface):
         if self.target_name != "wheel":
             return
 
+        # Wheels install outside the source tree, so the Python package must
+        # carry the same React payload as standalone and container releases.
+        frontend = Path(self.root) / "ui" / "workspace" / "frontend.tar.gz"
+        if frontend.is_file():
+            build_data["force_include"][str(frontend)] = (
+                "local_shell_mcp/webui/frontend.tar.gz"
+            )
+
         executable_name = "local-shell-mcp-tui.exe" if os.name == "nt" else "local-shell-mcp-tui"
         payload = (
             Path(self.root)

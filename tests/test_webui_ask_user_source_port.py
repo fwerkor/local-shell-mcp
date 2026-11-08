@@ -19,7 +19,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "librechat"
 
 
 def test_provider_definition_is_exact_original_source_export():
-    original = json.loads((FIXTURES / "ask_user_definition.json").read_text())
+    original = json.loads((FIXTURES / "ask_user_definition.json").read_text(encoding="utf-8"))
     assert original == ASK_USER_QUESTION_DEFINITION
     assert ASK_USER_TOOLS[0]["function"] == {
         "name": original["name"], "description": original["description"], "parameters": original["schema"]}
@@ -123,7 +123,7 @@ async def test_original_catalog_is_available_without_machine_grants_and_is_optio
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             catalog = await client.get("/api/agents/tools")
-            expected = json.loads((FIXTURES / "ask_user_manifest.json").read_text())
+            expected = json.loads((FIXTURES / "ask_user_manifest.json").read_text(encoding="utf-8"))
             assert catalog.json() == [{**expected, "authenticated": True}]
             assert (await client.get("/api/agents/tools/ask_user_question/auth")).json() == {"authenticated": True}
             assert (await client.get("/api/agents/tools/unknown/auth")).status_code == 404
