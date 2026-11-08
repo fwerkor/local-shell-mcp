@@ -77,8 +77,9 @@ def test_crashed_generation_is_marked_interrupted_and_replayable(database):
 
 @pytest.mark.asyncio
 async def test_streaming_generation_http_reconnect_and_token_isolation(database, monkeypatch):
-    settings = SimpleNamespace(state_dir=database.root, auth_mode="oauth")
     from local_shell_mcp import settings as settings_module
+    settings = settings_module.Settings(state_dir=database.root, workspace_root=database.root,
+                                        auth_mode="oauth")
 
     monkeypatch.setattr(settings_module, "get_settings", lambda: settings)
     monkeypatch.setattr(routes, "get_settings", lambda: settings)
@@ -90,7 +91,7 @@ async def test_streaming_generation_http_reconnect_and_token_isolation(database,
             await asyncio.sleep(0.01)
             yield fragment
 
-    monkeypatch.setattr(generation_routes, "stream_model", fake_stream)
+    monkeypatch.setattr(generation_routes, "stream_model_with_tools", fake_stream)
     monkeypatch.setattr(generation_routes, "provider_config",
                         lambda kind, model: ProviderConfig("openai", model or "test", "https://test.invalid", "model-secret"))
     app = Starlette(routes=generation_routes.generation_routes())

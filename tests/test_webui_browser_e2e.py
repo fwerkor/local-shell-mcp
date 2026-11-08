@@ -39,7 +39,7 @@ async def test_real_react_chat_uses_native_python_streaming_and_sqlite(tmp_path,
             await asyncio.sleep(0.01)
             yield chunk
 
-    monkeypatch.setattr(generation_routes, "stream_model", generated_tokens)
+    monkeypatch.setattr(generation_routes, "stream_model_with_tools", generated_tokens)
     app = _with_oauth_routes(Starlette())
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as port_probe:
         port_probe.bind(("127.0.0.1", 0))

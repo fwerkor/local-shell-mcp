@@ -85,7 +85,7 @@ async def test_ask_user_halts_and_resumes_same_sqlite_generation(tmp_path, monke
                 await asyncio.sleep(0.02)
             assert status["status"] == "complete", status
             assert "pendingAction" not in status
-            assert calls == [["ask_user"], ["ask_user"]]
+            assert calls == [["session_manage", "plan_manage", "ask_user"]] * 2
             latest = repo.latest("local", cid)
             assert latest.run_id == generation.run_id
             assert repo.pending_action("local", latest.run_id) is None

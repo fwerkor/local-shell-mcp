@@ -70,13 +70,14 @@ async def test_background_generation_reads_workspace_only_after_explicit_enablem
     get_settings.cache_clear()
     calls = []
 
-    async def plain(*_args, **_kwargs):
-        yield "Native tools are disabled."
-
     async def model(*_args, **kwargs):
         calls.append(kwargs)
         history = _args[1]
-        if any(row.get("role") == "tool" for row in history):
+        tools = {item["function"]["name"] for item in kwargs["tools"]}
+        if "file_list" not in tools:
+            assert tools == {"session_manage", "plan_manage"}
+            yield "Native tools are disabled."
+        elif any(row.get("role") == "tool" for row in history):
             assert "hello.txt" in history[-1]["content"]
             yield "I found hello.txt."
         else:
@@ -86,7 +87,6 @@ async def test_background_generation_reads_workspace_only_after_explicit_enablem
         "openai", "mock", "http://127.0.0.1:11434/v1/chat/completions", "",
     ))
     monkeypatch.setattr(generation_routes, "stream_model_with_tools", model)
-    monkeypatch.setattr(generation_routes, "stream_model", plain)
     app = Starlette(routes=[*generation_routes.generation_routes(), *routes.webui_routes(), *misc_routes.misc_routes()])
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
@@ -97,7 +97,7 @@ async def test_background_generation_reads_workspace_only_after_explicit_enablem
                 if (await client.get(f"/api/agents/chat/status/{cid}")).json().get("status") == "complete":
                     break
                 await asyncio.sleep(.02)
-            assert calls == []
+            assert len(calls) == 1
             prefs = {"web": True, "lsm": True, "mcp": False, "memory": False,
                      "machines": {"local": "read"}}
             response = await client.put(f"/api/lsm/preferences/{cid}", json=prefs)
@@ -110,7 +110,7 @@ async def test_background_generation_reads_workspace_only_after_explicit_enablem
                     break
                 await asyncio.sleep(.02)
             assert outcome["status"] == "complete"
-            assert len(calls) == 2
+            assert len(calls) == 3
             assert (await client.get(f"/api/messages/{cid}")).json()[-1]["text"] == "I found hello.txt."
             generation = generation_routes._generation_store().latest("local", cid)
             events = generation_routes._generation_store().events("local", generation.run_id)

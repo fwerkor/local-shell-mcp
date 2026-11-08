@@ -17,7 +17,8 @@ from local_shell_mcp.webui.providers import ProviderConfig
 def configured_generation_routes(tmp_path, monkeypatch):
     from local_shell_mcp import settings as settings_module
 
-    config = SimpleNamespace(auth_mode="oauth", state_dir=tmp_path)
+    config = settings_module.Settings(auth_mode="oauth", state_dir=tmp_path,
+                                      workspace_root=tmp_path)
     monkeypatch.setattr(settings_module, "get_settings", lambda: config)
     monkeypatch.setattr(routes, "get_settings", lambda: config)
     monkeypatch.setattr(generation_routes, "provider_config",
@@ -45,7 +46,7 @@ async def test_generation_aborts_cancels_live_task_and_enforces_epoch(configured
         await held.wait()
         yield "second"
 
-    monkeypatch.setattr(generation_routes, "stream_model", slow_model)
+    monkeypatch.setattr(generation_routes, "stream_model_with_tools", slow_model)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=configured_generation_routes),
                                 base_url="http://test") as client:
         alice, bob = {"x-owner": "alice"}, {"x-owner": "bob"}
@@ -111,7 +112,7 @@ async def test_generation_model_failure_is_durable_and_redacted(configured_gener
         raise RuntimeError("Bearer secret-model-token")
         yield "never"  # pragma: no cover
 
-    monkeypatch.setattr(generation_routes, "stream_model", broken_provider)
+    monkeypatch.setattr(generation_routes, "stream_model_with_tools", broken_provider)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=configured_generation_routes),
                                 base_url="http://test") as client:
         alice = {"x-owner": "alice"}
