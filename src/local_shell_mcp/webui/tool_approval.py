@@ -57,7 +57,7 @@ def resolve_tool_approval_resume(payload: dict, resolutions: list[dict]) -> dict
     seen = set()
     for resolution in resolutions:
         identity = resolution.get("tool_call_id")
-        if identity in seen or identity not in requested:
+        if not isinstance(identity, str) or identity in seen or identity not in requested:
             return {"status": 400, "error": "Invalid tool approval decisions"}
         seen.add(identity)
     undecided = [item["tool_call_id"] for item in payload["action_requests"] if item["tool_call_id"] not in seen]
