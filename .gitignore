@@ -2,6 +2,12 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+# Coverage.py output (including parallel worker databases)
+.coverage
+.coverage.*
+coverage.json
+coverage.xml
+htmlcov/
 .ruff_cache/
 dist/
 build/
