@@ -8,6 +8,7 @@ import pytest
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
+
 from local_shell_mcp.main import _with_oauth_routes
 from local_shell_mcp.settings import get_settings
 
@@ -45,11 +46,17 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
     task = asyncio.create_task(server.serve())
     try:
         for _ in range(100):
-            if server.started: break
+            if server.started:
+                break
             await asyncio.sleep(.05)
         assert server.started
         async with playwright.async_playwright() as manager:
-            browser = await manager.chromium.launch(headless=True)
+            try:
+                browser = await manager.chromium.launch(headless=True)
+            except playwright.Error as exc:
+                if "Executable doesn't exist" in str(exc):
+                    pytest.skip("Optional Chromium executable is not installed in this CI job")
+                raise
             try:
                 page = await browser.new_page(viewport={"width": 1280, "height": 800})
                 errors = []
@@ -70,17 +77,21 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                 assert response.status == 200, await response.text()
                 assert "private-test-token" not in await response.text()
                 await page.get_by_role("link", name="Start a new chat and select a model").click()
-                await page.get_by_text("first-model", exact=True).first.wait_for(timeout=15000)
+                await page.get_by_test_id("model-selector-button").get_by_text("first-model", exact=True).wait_for(timeout=15000)
+                await page.get_by_test_id("model-selector-button").click()
+                await page.locator("#model-search").fill("second-model")
+                await page.get_by_text("second-model", exact=True).first.click()
+                await page.get_by_test_id("model-selector-button").get_by_text("second-model", exact=True).wait_for()
                 await page.get_by_test_id("text-input").fill("Verify configured model.")
                 await page.locator('button[type="submit"]').first.click()
                 if reject_provider:
-                    await page.get_by_text("Model generation failed (HTTPStatusError)", exact=False).first.wait_for(timeout=15000)
+                    await page.get_by_test_id("screenshot-target").get_by_text("Model generation failed (HTTPStatusError)", exact=False).wait_for(timeout=15000)
                 else:
-                    await page.get_by_text("Model channel works.", exact=True).wait_for(timeout=15000)
+                    await page.get_by_test_id("screenshot-target").get_by_text("Model channel works.", exact=True).wait_for(timeout=15000)
                 if reject_provider:
                     await page.reload()
-                    await page.get_by_text("Model generation failed (HTTPStatusError)", exact=False).first.wait_for(timeout=15000)
-                assert requests and requests[-1]["model"] == "first-model"
+                    await page.get_by_test_id("screenshot-target").get_by_text("Model generation failed (HTTPStatusError)", exact=False).wait_for(timeout=15000)
+                assert requests and requests[-1]["model"] == "second-model"
                 assert not errors, errors
             except Exception:
                 print(await page.locator("body").inner_text())
