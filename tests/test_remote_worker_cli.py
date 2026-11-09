@@ -57,8 +57,8 @@ from local_shell_mcp.remote_worker import main
 
 assert str(Path(__import__('local_shell_mcp').__file__).resolve()).startswith(sys.argv[1])
 main(["status"])
-from local_shell_mcp.settings import get_settings
-assert get_settings().state_backend == "file"
+import os
+assert os.environ["LOCAL_SHELL_MCP_STATE_BACKEND"] == "sqlite"
 assert "local_shell_mcp.sqlite_store" not in sys.modules
 """
     result = subprocess.run(

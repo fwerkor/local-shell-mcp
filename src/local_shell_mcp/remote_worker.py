@@ -7,9 +7,23 @@ from pathlib import Path
 
 def main(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
-    # Workers have only lightweight local configuration and recovery state.
-    # Never initialize the Controller SQLite database from the worker runtime.
+    # Workers do not initialize the Controller's database.  Restore the
+    # caller's environment when invoking this entrypoint in-process (tests).
+    old_backend = os.environ.get("LOCAL_SHELL_MCP_STATE_BACKEND")
     os.environ["LOCAL_SHELL_MCP_STATE_BACKEND"] = "file"
+    try:
+        _run_worker_main(args)
+    finally:
+        if old_backend is None:
+            os.environ.pop("LOCAL_SHELL_MCP_STATE_BACKEND", None)
+        else:
+            os.environ["LOCAL_SHELL_MCP_STATE_BACKEND"] = old_backend
+        from .settings import get_settings
+
+        get_settings.cache_clear()
+
+
+def _run_worker_main(args: list[str]) -> None:
     # Worker subprocess helpers execute controller-assigned jobs or GUI capture.
     # They do not expose the controller CLI or its tool-call credentials.
     if args and args[0] == "job-runner":
