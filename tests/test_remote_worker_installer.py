@@ -128,7 +128,11 @@ def test_fetch_manifest_validation(monkeypatch):
         installer.fetch_manifest("https://example.test")
 
 
-def test_fetch_bytes_uses_urlopen(monkeypatch):
+def test_fetch_bytes_uses_urlopen_when_curl_is_unavailable(monkeypatch):
+    # Windows normally prefers curl; force its absence to exercise urllib
+    # instead of invoking the real curl executable against example.test.
+    monkeypatch.setattr(installer.shutil, "which", lambda name: None)
+
     class Response:
         def __enter__(self):
             return self
