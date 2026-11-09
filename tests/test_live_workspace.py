@@ -1456,10 +1456,16 @@ def test_live_workspace_is_hidden_when_feature_is_disabled(tmp_path, monkeypatch
     assert "open_live_workspace" not in tools
     assert LIVE_RESOURCE_URI not in resources
 
+    from local_shell_mcp.webui.frontend import frontend_routes
+
     app = _build_mcp_http_app(mcp)
+    app.router.routes[-1:-1] = frontend_routes()
     with TestClient(app, base_url="http://testserver") as client:
         assert client.get("/api/live/snapshot").status_code == 404
-        assert client.get("/ui/").status_code == 200
+        response = client.get("/ui/")
+        assert response.status_code == 200
+        assert 'id="root"' in response.text
+        assert response.url.path == "/c/new"
 
 def test_live_workspace_is_hidden_in_stdio_mode(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth="none")

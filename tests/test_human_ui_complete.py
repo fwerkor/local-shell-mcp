@@ -124,7 +124,7 @@ class FakeRemoteManager:
         return {"machine": machine, "revoked": True}
 
 
-def test_root_redirects_to_relative_ui_path_without_auth(tmp_path, monkeypatch):
+def test_root_redirects_to_unified_workspace_without_auth(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch, auth="oauth")
     monkeypatch.setenv("LOCAL_SHELL_MCP_UI_PATH", "/console")
     get_settings.cache_clear()
@@ -134,7 +134,7 @@ def test_root_redirects_to_relative_ui_path_without_auth(tmp_path, monkeypatch):
     response = TestClient(app).get("/", follow_redirects=False)
 
     assert response.status_code == 307
-    assert response.headers["location"] == "./console/"
+    assert response.headers["location"] == "/c/new"
 
 
 def test_audit_detail_missing_entry_returns_not_found(tmp_path, monkeypatch):
@@ -285,16 +285,19 @@ def test_audit_view_image_detail_keeps_non_images_and_sanitizes_invalid_data():
 
 def test_index_assets_principal_and_basic_helpers(tmp_path, monkeypatch):
     _configure(tmp_path, monkeypatch)
-    empty = tmp_path / "assets"
-    empty.mkdir()
-    monkeypatch.setattr(ui, "_assets_dir", lambda: empty)
-    assert "assets are not built" in ui._ui_index_html()
+    from local_shell_mcp.webui import frontend
 
-    index = empty / "index.html"
-    index.write_text("__LSM_UI_PATH__ __LSM_UI_CONFIG_JSON__", encoding="utf-8")
-    rendered = ui._ui_index_html()
-    assert "/ui" in rendered
-    assert "apiPrefix" in rendered
+    monkeypatch.setattr(frontend, "bundled_frontend", lambda: None)
+    missing = asyncio.run(frontend.frontend(_request("/c/new")))
+    assert missing.status_code == 503
+    assert b"WebUI assets have not been built" in missing.body
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "index.html").write_text('<div id="root"></div>', encoding="utf-8")
+    monkeypatch.setattr(frontend, "bundled_frontend", lambda: assets)
+    rendered = asyncio.run(frontend.frontend(_request("/c/new")))
+    assert rendered.path == assets / "index.html"
+    assert rendered.headers["cache-control"] == "no-store"
 
     principal = Principal(email=None, subject="s", claims={"scope": "shell:read remote:use"})
     request = _request()
