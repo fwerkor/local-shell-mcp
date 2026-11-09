@@ -1,0 +1,5779 @@
+{
+  "sources": {
+    "commit": "e8f3be08623663d4ad7f7241e693c94469b63bb0",
+    "files": {
+      "packages/data-schemas/src/methods/agent.ts": "876bad9c93e267afa94ffb1cf53dbae1e874d91ace1057abf333c428c4383f72"
+    },
+    "functions": [
+      "hasOperatorKeys",
+      "resolveDocumentPath",
+      "deleteDocumentPath",
+      "addToSetCandidates",
+      "operatorsMutateDocument",
+      "isDuplicateVersion",
+      "updateAgent",
+      "addAgentResourceFile",
+      "removeAgentResourceFiles"
+    ],
+    "boundary": "Original resource/update functions; Mongo storage and no-code-environment dependency are supplied by a strict test adapter. No OCR/RAG/runtime parity claim."
+  },
+  "cases": [
+    [
+      {
+        "action": "add",
+        "resource": "context",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "context",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "context",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "context",
+            "file_id": "one"
+          }
+        ]
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "context",
+            "file_id": "missing"
+          }
+        ]
+      },
+      {
+        "action": "remove",
+        "files": []
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "context",
+            "file_id": "two"
+          }
+        ]
+      },
+      {
+        "action": "add",
+        "resource": "context",
+        "file": "one"
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "file_search",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "file_search",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "file_search",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "file_search",
+            "file_id": "one"
+          }
+        ]
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "file_search",
+            "file_id": "missing"
+          }
+        ]
+      },
+      {
+        "action": "remove",
+        "files": []
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "file_search",
+            "file_id": "two"
+          }
+        ]
+      },
+      {
+        "action": "add",
+        "resource": "file_search",
+        "file": "one"
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "ocr",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "ocr",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "ocr",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "ocr",
+            "file_id": "one"
+          }
+        ]
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "ocr",
+            "file_id": "missing"
+          }
+        ]
+      },
+      {
+        "action": "remove",
+        "files": []
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "ocr",
+            "file_id": "two"
+          }
+        ]
+      },
+      {
+        "action": "add",
+        "resource": "ocr",
+        "file": "one"
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "execute_code",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "execute_code",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "execute_code",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "execute_code",
+            "file_id": "one"
+          }
+        ]
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "execute_code",
+            "file_id": "missing"
+          }
+        ]
+      },
+      {
+        "action": "remove",
+        "files": []
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "execute_code",
+            "file_id": "two"
+          }
+        ]
+      },
+      {
+        "action": "add",
+        "resource": "execute_code",
+        "file": "one"
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "image_edit",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "image_edit",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "image_edit",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "image_edit",
+            "file_id": "one"
+          }
+        ]
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "image_edit",
+            "file_id": "missing"
+          }
+        ]
+      },
+      {
+        "action": "remove",
+        "files": []
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "image_edit",
+            "file_id": "two"
+          }
+        ]
+      },
+      {
+        "action": "add",
+        "resource": "image_edit",
+        "file": "one"
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "context",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "context",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "context",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "context",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "context",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "file_search",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "context",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "file_search",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "context",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "ocr",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "context",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "ocr",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "context",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "execute_code",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "context",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "execute_code",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "context",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "image_edit",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "context",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "image_edit",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "file_search",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "context",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "file_search",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "context",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "file_search",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "file_search",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "file_search",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "file_search",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "file_search",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "ocr",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "file_search",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "ocr",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "file_search",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "execute_code",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "file_search",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "execute_code",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "file_search",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "image_edit",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "file_search",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "image_edit",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "ocr",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "context",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "ocr",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "context",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "ocr",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "file_search",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "ocr",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "file_search",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "ocr",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "ocr",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "ocr",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "ocr",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "ocr",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "execute_code",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "ocr",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "execute_code",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "ocr",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "image_edit",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "ocr",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "image_edit",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "execute_code",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "context",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "execute_code",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "context",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "execute_code",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "file_search",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "execute_code",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "file_search",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "execute_code",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "ocr",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "execute_code",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "ocr",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "execute_code",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "execute_code",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "execute_code",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "execute_code",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "execute_code",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "image_edit",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "execute_code",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "image_edit",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "image_edit",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "context",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "image_edit",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "context",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "image_edit",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "file_search",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "image_edit",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "file_search",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "image_edit",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "ocr",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "image_edit",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "ocr",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "image_edit",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "execute_code",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "image_edit",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "execute_code",
+            "file_id": "two"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "action": "add",
+        "resource": "image_edit",
+        "file": "one"
+      },
+      {
+        "action": "add",
+        "resource": "image_edit",
+        "file": "two"
+      },
+      {
+        "action": "remove",
+        "files": [
+          {
+            "tool_resource": "image_edit",
+            "file_id": "one"
+          },
+          {
+            "tool_resource": "image_edit",
+            "file_id": "two"
+          }
+        ]
+      }
+    ]
+  ],
+  "expected": [
+    [
+      {
+        "tools": [
+          "context"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "context"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "context"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": [
+              "one",
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "context"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "context"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "context"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "context"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": []
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "context"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 5,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "file_search"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "file_search"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "file_search"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": [
+              "one",
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "file_search"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "file_search"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "file_search"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "file_search"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": []
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "file_search"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 5,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "ocr"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "ocr"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "ocr"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": [
+              "one",
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "ocr"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "ocr"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "ocr"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "ocr"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": []
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "ocr"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 5,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "execute_code"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "execute_code"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "execute_code"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": [
+              "one",
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "execute_code"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "execute_code"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "execute_code"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "execute_code"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": []
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "execute_code"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 5,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "image_edit"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "image_edit"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "image_edit"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": [
+              "one",
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "image_edit"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "image_edit"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "image_edit"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "image_edit"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": []
+          }
+        },
+        "version": 4,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "image_edit"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 5,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "context"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "context"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": [
+              "one",
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "context"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "context"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "context",
+          "file_search"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "file_search": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "context",
+          "file_search"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": []
+          },
+          "file_search": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "context"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "context",
+          "ocr"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "ocr": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "context",
+          "ocr"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": []
+          },
+          "ocr": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "context"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "context",
+          "execute_code"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "execute_code": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "context",
+          "execute_code"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": []
+          },
+          "execute_code": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "context"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "context",
+          "image_edit"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "image_edit": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "context",
+          "image_edit"
+        ],
+        "tool_resources": {
+          "context": {
+            "file_ids": []
+          },
+          "image_edit": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "context": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "context"
+            ],
+            "tool_resources": {
+              "context": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "file_search"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "file_search",
+          "context"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "context": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "context": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "file_search",
+          "context"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": []
+          },
+          "context": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "context": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "file_search"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "file_search"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": [
+              "one",
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "file_search"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "file_search"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "file_search",
+          "ocr"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "ocr": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "file_search",
+          "ocr"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": []
+          },
+          "ocr": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "file_search"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "file_search",
+          "execute_code"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "execute_code": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "file_search",
+          "execute_code"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": []
+          },
+          "execute_code": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "file_search"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "file_search",
+          "image_edit"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "image_edit": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "file_search",
+          "image_edit"
+        ],
+        "tool_resources": {
+          "file_search": {
+            "file_ids": []
+          },
+          "image_edit": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "file_search"
+            ],
+            "tool_resources": {
+              "file_search": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "ocr"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "ocr",
+          "context"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "context": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "context": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "ocr",
+          "context"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": []
+          },
+          "context": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "context": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "ocr"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "ocr",
+          "file_search"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "file_search": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "ocr",
+          "file_search"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": []
+          },
+          "file_search": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "ocr"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "ocr"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": [
+              "one",
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "ocr"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "ocr"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "ocr",
+          "execute_code"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "execute_code": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "ocr",
+          "execute_code"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": []
+          },
+          "execute_code": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "ocr"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "ocr",
+          "image_edit"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "image_edit": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "ocr",
+          "image_edit"
+        ],
+        "tool_resources": {
+          "ocr": {
+            "file_ids": []
+          },
+          "image_edit": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "ocr"
+            ],
+            "tool_resources": {
+              "ocr": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "execute_code"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "execute_code",
+          "context"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "context": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "context": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "execute_code",
+          "context"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": []
+          },
+          "context": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "context": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "execute_code"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "execute_code",
+          "file_search"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "file_search": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "execute_code",
+          "file_search"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": []
+          },
+          "file_search": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "execute_code"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "execute_code",
+          "ocr"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "ocr": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "execute_code",
+          "ocr"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": []
+          },
+          "ocr": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "execute_code"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "execute_code"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": [
+              "one",
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "execute_code"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "execute_code"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "execute_code",
+          "image_edit"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "image_edit": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "execute_code",
+          "image_edit"
+        ],
+        "tool_resources": {
+          "execute_code": {
+            "file_ids": []
+          },
+          "image_edit": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "execute_code"
+            ],
+            "tool_resources": {
+              "execute_code": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "image_edit"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "image_edit",
+          "context"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "context": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "context": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "image_edit",
+          "context"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": []
+          },
+          "context": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "context": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "image_edit"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "image_edit",
+          "file_search"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "file_search": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "image_edit",
+          "file_search"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": []
+          },
+          "file_search": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "file_search": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "image_edit"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "image_edit",
+          "ocr"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "ocr": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "image_edit",
+          "ocr"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": []
+          },
+          "ocr": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "ocr": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "image_edit"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "image_edit",
+          "execute_code"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": [
+              "one"
+            ]
+          },
+          "execute_code": {
+            "file_ids": [
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "image_edit",
+          "execute_code"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": []
+          },
+          "execute_code": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              },
+              "execute_code": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "tools": [
+          "image_edit"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": [
+              "one"
+            ]
+          }
+        },
+        "version": 2,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "image_edit"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": [
+              "one",
+              "two"
+            ]
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          "image_edit"
+        ],
+        "tool_resources": {
+          "image_edit": {
+            "file_ids": []
+          }
+        },
+        "version": 3,
+        "snapshots": [
+          {
+            "tools": [],
+            "tool_resources": {}
+          },
+          {
+            "tools": [],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": []
+              }
+            }
+          },
+          {
+            "tools": [
+              "image_edit"
+            ],
+            "tool_resources": {
+              "image_edit": {
+                "file_ids": [
+                  "one"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  ]
+}

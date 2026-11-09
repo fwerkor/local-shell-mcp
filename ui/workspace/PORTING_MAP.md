@@ -183,3 +183,16 @@ HTTP、MCP、PTY、browser smoke通过。随后补充的React原生工具卡片�
 已验证：真实React上传/模型输入、缺失/重复/他人文件ID、空文件、超限流、坏multipart、
 无效临时ID、存储失败回滚、已删除文件下载404。文件不会自动复制到Remote Worker。
 未完成：Agent资源版本事务、文件删除API、OCR/RAG、图片预览/Provider多模态直送、可选上传SSE。
+
+
+## Agent资源事务、运行中授权及迁移恢复（2026-11-09）
+
+| 原版/LSM边界 | 实际模块 | 已验证行为及限制 |
+| --- | --- | --- |
+| `data-schemas/src/methods/agent.ts:addAgentResourceFile/updateAgent/removeAgentResourceFiles` | `webui/agents.py:add_resource_file/_update_locked/remove_resource_files` | 原addToSet成员去重、operator写前版本、重复operator仍造版本、pullAll不造版本；同SQLite事务绑定真实附件，归属与并发检查。不是OCR/RAG processing实现 |
+| 上述原函数及版本辅助函数（AST原样提取） | `tests/fixtures/librechat/agent_resource_operators.cjs` 与source/golden/oracle | 执行原版函数的30条操作序列、115次状态转换与Python成员/版本快照逐项相等；测试Mongo适配器只覆盖这些operator和无code-environment依赖分支，不宣称完整Mongo/Agent Runtime等价 |
+| LSM统一执行权限 | `lsm_tool_registry.py:_await_authorized` | 等待原生调用时每0.5秒重验授权；撤权/过期取消该调用并等待原生清理，原生不可取消写入继续原子收敛。已返回后台job与Remote取消传播仍须独立验收 |
+| 已发布文件状态→统一SQLite | `sqlite_store.py:migrate_files/_import_legacy_file` | 删除tombstone防旧文件复活；复用现有1MiB分块存储导入超64MiB文件；源stat一致性、摘要、所有行/chunk/journal事务回滚，保留原件。32个迁移测试含65MiB和重启恢复通过；不替代真实用户生产备份验收 |
+
+原生执行中撤权、过期、调用隔离、Agent自身工具、protected写入收敛等30项测试通过。
+资源事务含真实磁盘发布回滚和多线程追加无丢失，16项测试通过。
