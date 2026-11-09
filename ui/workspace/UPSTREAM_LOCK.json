@@ -346,5 +346,30 @@
       "status": "部分",
       "difference": "原始条目精确复用并做catalog接口测试，其他LSM适用工具仍待审计"
     }
-  ]
+  ],
+  "runtime_dependency_lock": {
+    "manager": "npm",
+    "lsm_snapshot": "5ef93c39",
+    "path": "integrations/librechat/app/package-lock.json",
+    "sha256": "7ea857cc6963db15919ba9d75a7c4636db78a0dfa4c237d9496d840377910405",
+    "build_evidence": {
+      "path": "integrations/librechat/app/Dockerfile",
+      "sha256": "cec26eefd970d690ca08272a1ed1fd16331c95486c22c50e5cb44e6e190017d1",
+      "commands": [
+        "npm ci --no-audit",
+        "npm run frontend",
+        "npm prune --production"
+      ]
+    },
+    "resolved": {
+      "@librechat/agents": "4.0.1",
+      "@langchain/core": "1.2.8",
+      "@langchain/openai": "1.5.5",
+      "@langchain/anthropic": "1.5.2",
+      "@langchain/google-genai": "2.2.0",
+      "@langchain/langgraph": "1.4.8",
+      "@langchain/langgraph-checkpoint": "1.1.3"
+    },
+    "alternative_bun_lock": "The upstream bun.lock resolves agents 3.6.0/core 1.2.4; it was not consumed by the integrated Docker runtime and is not the port baseline."
+  }
 }

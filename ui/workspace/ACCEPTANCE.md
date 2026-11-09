@@ -162,3 +162,31 @@ Source-port status and the exact upstream commits are authoritative in PORTING_M
   while resource removal is an atomic pull without a new version. Resource
   processing, runtime revocation and stronger released-state migration recovery
   are being audited independently; none is counted as finished by this checkpoint.
+
+
+## Verified native-contract checkpoint (`b7c87d6c`)
+
+Complete local regression: 2212 passed, 2 skipped; 95.26% total and every
+module >=90%. Full CI run 42605821187 passed, including Windows Python
+3.11/3.12, platform wheels/binaries, Docker and React/source browser gates.
+
+The native bridge no longer imposes an independent 32KiB argument/output cap.
+Input uses the existing LSM UTF-8 request budget; individual native limits and
+schemas still reject invalid calls. Original JSON/MCP content/metadata is
+retained in checkpoint writes, while the model uses the source SDK's result
+limit. Native error envelopes are audited as failures. Windows cancellation
+uses the owned process tree and retains process-start ownership until cleanup;
+real Windows expiry/revocation and startup-race tests pass.
+
+This evidence applies to that commit. Subsequent Graph/provider ports require
+new validation and do not establish full scheduler or multimodal parity.
+
+## Actual integrated dependency lock
+
+The original integrated Dockerfile at LSM `5ef93c39` copies package-lock.json
+and runs npm ci, npm frontend and npm prune. Its resolved runtime is agents
+4.0.1, core 1.2.8, openai 1.5.5, anthropic 1.5.2, google-genai 2.2.0,
+LangGraph 1.4.8/checkpoint 1.1.3. UPSTREAM_LOCK.json records original file hashes
+and build commands. Upstream's alternative bun.lock resolves different agents
+3.6/core 1.2.4 versions; it is not the original integrated runtime baseline.
+The new React-only Bun build is independent of this backend reference choice.
