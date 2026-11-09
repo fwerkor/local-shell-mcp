@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import httpx
@@ -65,7 +66,9 @@ async def test_controller_chat_attachment_upload_and_sqlite_metadata(tmp_path, m
                 {"file_id": uploaded["file_id"], "filepath": "/forged/private"}]})
             history = store.history("local", generation.conversation_id)
             assert "/forged/private" not in str(history)
-            assert str(tmp_path / ".local-shell-mcp" / "attachments") in history[-1]["content"]
+            descriptors = json.loads(history[-1]["content"].split("Controller attachments (use authorized LSM file tools):\n")[1])
+            assert Path(descriptors[0]["path"]).is_relative_to(tmp_path / ".local-shell-mcp" / "attachments")
+            assert Path(descriptors[0]["path"]).read_bytes() == b"chat attachment"
             assert _repo().messages("local", generation.conversation_id)["messages"][0]["files"][0]["file_id"] == uploaded["file_id"]
             with pytest.raises(KeyError, match="Attachment not found"):
                 store.begin("foreign-owner", {"text": "Read stolen", "files": [uploaded]})
