@@ -12,6 +12,7 @@ import secrets
 from typing import Any
 
 from .agent_validation import (
+    _RESOURCE_KEYS,
     clean_agent_config,
     replace_agent_references,
     sanitize_model_parameters,
@@ -144,26 +145,111 @@ class AgentRepository:
         values = self._clean(changes)
         with self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT * FROM agents WHERE owner=? AND id=?", (owner, agent_id)).fetchone()
-            if row is None:
-                return None
-            values = replace_agent_references(values, "", agent_id)
-            self._references(db, owner, values, agent_id)
-            if "model_parameters" in values:
-                values["model_parameters"] = sanitize_model_parameters(values["model_parameters"])
-            if "category" in values:
-                values["category"] = values["category"].strip()
-            config = json.loads(row["config"])
-            config.update(values)
-            version = int(config.get("_version", 1)) + 1
-            config["_version"] = version
-            now = _now()
-            db.execute("UPDATE agents SET name=?,description=?,config=?,updated_at=? WHERE id=? AND owner=?",
-                       (str(config.get("name") or ""), str(config.get("description") or ""),
-                        _json(config), now, agent_id, owner))
-            db.execute("INSERT INTO agent_versions(agent_id,version,snapshot,created_at) VALUES(?,?,?,?)",
-                       (agent_id, version, _json(config), now))
-            return self._from_row(db.execute("SELECT * FROM agents WHERE id=?", (agent_id,)).fetchone())
+            return self._update_locked(db, owner, agent_id, values)
+
+    def _update_locked(self, db: Any, owner: str, agent_id: str, values: dict,
+                       *, operator_snapshot: dict | None = None) -> dict | None:
+        """Apply one validated revision inside the caller's SQLite transaction."""
+        row = db.execute("SELECT * FROM agents WHERE owner=? AND id=?", (owner, agent_id)).fetchone()
+        if row is None:
+            return None
+        values = replace_agent_references(values, "", agent_id)
+        self._references(db, owner, values, agent_id)
+        if "model_parameters" in values:
+            values["model_parameters"] = sanitize_model_parameters(values["model_parameters"])
+        if "category" in values:
+            values["category"] = values["category"].strip()
+        config = json.loads(row["config"])
+        config.update(values)
+        version = int(config.get("_version", 1)) + 1
+        config["_version"] = version
+        now = _now()
+        db.execute("UPDATE agents SET name=?,description=?,config=?,updated_at=? WHERE id=? AND owner=?",
+                   (str(config.get("name") or ""), str(config.get("description") or ""),
+                    _json(config), now, agent_id, owner))
+        snapshot = config if operator_snapshot is None else {**operator_snapshot, "_version": version}
+        db.execute("INSERT INTO agent_versions(agent_id,version,snapshot,created_at) VALUES(?,?,?,?)",
+                   (agent_id, version, _json(snapshot), now))
+        return self._from_row(db.execute("SELECT * FROM agents WHERE id=?", (agent_id,)).fetchone())
+
+    @staticmethod
+    def _resource_key(resource: str) -> str:
+        if not isinstance(resource, str) or resource not in _RESOURCE_KEYS:
+            raise ValueError("Unknown Agent tool resource")
+        return resource
+
+    def add_resource_file(self, owner: str, agent_id: str, resource: str, file_id: str,
+                          *, db: Any = None) -> dict:
+        """Port addAgentResourceFile's addToSet and versioned update.
+
+        A publisher may pass its active transaction so attachment metadata, the
+        association and its revision commit together; no second connection is opened.
+        Processing/embedding a resource is deliberately outside this storage method.
+        """
+        self._resource_key(resource)
+        if not isinstance(file_id, str) or not file_id:
+            raise ValueError("Invalid resource file id")
+        if db is None:
+            with self.database.connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                return self.add_resource_file(owner, agent_id, resource, file_id, db=connection)
+        if not db.in_transaction:
+            raise ValueError("Resource binding requires an active transaction")
+        row = db.execute("SELECT config FROM agents WHERE id=? AND owner=?", (agent_id, owner)).fetchone()
+        if row is None:
+            raise KeyError("Agent not found")
+        if not db.execute("SELECT 1 FROM attachments WHERE id=? AND owner=?", (file_id, owner)).fetchone():
+            raise KeyError("Attachment not found")
+        config = json.loads(row["config"])
+        resources = config.get("tool_resources", {})
+        ids = resources.setdefault(resource, {}).setdefault("file_ids", [])
+        config["tool_resources"] = resources
+        # Original updateAgent snapshots operator updates before applying them;
+        # the preceding resource-array initialization is already visible to it.
+        snapshot = copy.deepcopy(config)
+        if file_id not in ids:
+            ids.append(file_id)
+        tools = config.get("tools", [])
+        if resource not in tools:
+            tools.append(resource)
+        return self._update_locked(db, owner, agent_id, self._clean({"tools": tools, "tool_resources": resources}),
+                                   operator_snapshot=snapshot)
+
+    def remove_resource_files(self, owner: str, agent_id: str, files: list[dict], *, db: Any = None) -> dict:
+        """Port removeAgentResourceFiles's pullAll without creating a revision.
+
+        Detaching is separate from deleting physical blobs. As in the source, the
+        optional tool and empty resource remain configured after the last detach.
+        """
+        if not isinstance(files, list):
+            raise ValueError("Invalid resource file list")
+        grouped: dict[str, set[str]] = {}
+        for value in files:
+            if not isinstance(value, dict):
+                raise ValueError("Invalid resource file")
+            resource = self._resource_key(value.get("tool_resource"))
+            file_id = value.get("file_id")
+            if not isinstance(file_id, str) or not file_id:
+                raise ValueError("Invalid resource file id")
+            grouped.setdefault(resource, set()).add(file_id)
+        if db is None:
+            with self.database.connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                return self.remove_resource_files(owner, agent_id, files, db=connection)
+        if not db.in_transaction:
+            raise ValueError("Resource binding requires an active transaction")
+        row = db.execute("SELECT * FROM agents WHERE id=? AND owner=?", (agent_id, owner)).fetchone()
+        if row is None:
+            raise KeyError("Agent not found")
+        config = json.loads(row["config"])
+        resources = config.get("tool_resources", {})
+        for resource, removed in grouped.items():
+            current = resources.get(resource, {})
+            if "file_ids" in current:
+                current["file_ids"] = [identity for identity in current["file_ids"] if identity not in removed]
+        db.execute("UPDATE agents SET config=?,updated_at=? WHERE id=? AND owner=?",
+                   (_json(config), _now(), agent_id, owner))
+        return self._from_row(db.execute("SELECT * FROM agents WHERE id=?", (agent_id,)).fetchone())
 
     def versions(self, owner: str, agent_id: str) -> list[dict] | None:
         with self.database.connect() as db:
