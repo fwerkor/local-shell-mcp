@@ -1,13 +1,12 @@
 """Dependency-light streaming model providers for the unified Python WebUI.
 
 httpx is imported only when a model request is made. Model credentials are
-server-side environment settings, not part of an Agent's serialized config.
+server-side SQLite settings (with environment defaults), not part of an Agent's serialized config.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from urllib.parse import quote, urlsplit
@@ -43,29 +42,33 @@ def selected_provider(payload: dict, agent: dict | None = None) -> str:
 
 
 def provider_config(provider: str, model: str | None = None) -> ProviderConfig:
+    from .provider_profiles import profile
+
     kind = provider.strip().lower()
-    if kind in {"openai", "openai-compatible", "custom", "ollama", "azureopenai"}:
-        token = os.getenv("LOCAL_SHELL_MCP_MODEL_API_KEY") or os.getenv("OPENAI_API_KEY", "")
-        base = os.getenv("LOCAL_SHELL_MCP_MODEL_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+    if kind in {"openai-compatible", "custom", "ollama", "azureopenai"}:
+        kind = "openai"
+    if kind == "gemini":
+        kind = "google"
+    if kind not in {"openai", "anthropic", "google"}:
+        raise ValueError(f"Unsupported provider: {provider}")
+    value = profile(kind)
+    token, base = value.get("api_key", ""), value["base_url"]
+    name = model or value["models"][0]
+    if kind == "openai":
         if not token and urlsplit(base).hostname not in {"localhost", "127.0.0.1", "::1"}:
             raise ValueError("An OpenAI-compatible model API key is required")
         url = _require_https_or_loopback(base.rstrip("/") + "/chat/completions")
-        return ProviderConfig("openai", model or os.getenv("LOCAL_SHELL_MCP_MODEL") or "gpt-4.1-mini", url, token)
-    if kind == "anthropic":
-        token = os.getenv("ANTHROPIC_API_KEY", "")
+    elif kind == "anthropic":
         if not token:
             raise ValueError("ANTHROPIC_API_KEY is required")
-        return ProviderConfig("anthropic", model or "claude-sonnet-4-6", "https://api.anthropic.com/v1/messages", token)
-    if kind in {"google", "gemini"}:
-        token = os.getenv("GOOGLE_KEY") or os.getenv("GOOGLE_API_KEY", "")
+        url = _require_https_or_loopback(base.rstrip("/") + "/messages")
+    else:
         if not token:
             raise ValueError("GOOGLE_KEY or GOOGLE_API_KEY is required")
-        name = model or "gemini-2.5-flash"
         if any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_." for char in name):
             raise ValueError("Unsupported Gemini model identifier")
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{quote(name)}:streamGenerateContent?alt=sse"
-        return ProviderConfig("google", name, url, token)
-    raise ValueError(f"Unsupported provider: {provider}")
+        url = _require_https_or_loopback(base.rstrip("/") + f"/models/{quote(name)}:streamGenerateContent?alt=sse")
+    return ProviderConfig(kind, name, url, token)
 
 
 async def _data_frames(response) -> AsyncIterator[str]:

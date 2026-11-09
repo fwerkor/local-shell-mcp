@@ -17,6 +17,7 @@ from .routes import _body, _owner, _repo
 
 
 def _endpoint_models() -> dict[str, list[str]]:
+    from .provider_profiles import profile
     from .providers import provider_config
 
     available: dict[str, list[str]] = {}
@@ -25,7 +26,7 @@ def _endpoint_models() -> dict[str, list[str]]:
             config = provider_config(kind)
         except ValueError:
             continue
-        available[label] = [config.model]
+        available[label] = profile(config.provider)["models"]
     return available
 
 
@@ -186,7 +187,10 @@ async def delete_preset(request: Request):
 
 
 def config_routes() -> list[Route]:
+    from .provider_profiles import provider_profiles
+
     return [
+        Route("/api/lsm/providers", provider_profiles, methods=["GET", "PUT"]),
         Route("/api/config", startup_config, methods=["GET"]),
         Route("/api/endpoints", endpoint_configs, methods=["GET"]),
         Route("/api/endpoints/token-config", token_configs, methods=["GET"]),
