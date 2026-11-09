@@ -85,7 +85,14 @@ def test_crashed_generation_is_marked_interrupted_and_replayable(database):
     assert store.recover_orphans() == 0
     assert store.latest("alice", job.conversation_id).status == "interrupted"
     assert store.events("alice", job.run_id)[-1][1]["final"] is True
-    assert store.events("alice", job.run_id)[-1][1]["error"]
+    final = store.events("alice", job.run_id)[-1][1]
+    assert final["error"]
+    assert final["responseMessage"]["content"][-1] == {"type": "error", "error": "Generation failed"}
+    # The original React content renderer sees the same part on history reload.
+    with database.connect() as conn:
+        import json
+        row = conn.execute("SELECT content FROM messages WHERE id=?", (job.response_message_id,)).fetchone()
+    assert json.loads(row[0])[-1] == final["responseMessage"]["content"][-1]
 
 
 @pytest.mark.asyncio

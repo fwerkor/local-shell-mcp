@@ -429,6 +429,11 @@ class GenerationStore:
                             **result["tool_call"], "stepId": result["id"],
                         }}
             content = ([{"type": "text", "text": text, "phase": "final_answer"}] if text else []) + list(tool_parts.values())
+            # LibreChat agents/client.js emits ContentTypes.ERROR as a content
+            # part. A top-level final.error alone is ignored by finalHandler.
+            # Persist the same part so the error survives history reload too.
+            if status in {"error", "interrupted"}:
+                content.append({"type": "error", "error": error or "Generation failed"})
             response_message = {
                 "messageId": generation.response_message_id,
                 "conversationId": generation.conversation_id,

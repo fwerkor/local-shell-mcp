@@ -13,7 +13,7 @@ from local_shell_mcp.settings import get_settings
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("reject_provider", [False])
+@pytest.mark.parametrize("reject_provider", [False, True])
 async def test_first_launch_composer_can_type_and_model_settings_are_discoverable(tmp_path, monkeypatch, reject_provider):
     playwright = pytest.importorskip("playwright.async_api")
     import uvicorn
@@ -77,6 +77,9 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     await page.get_by_text("Model generation failed (HTTPStatusError)", exact=False).first.wait_for(timeout=15000)
                 else:
                     await page.get_by_text("Model channel works.", exact=True).wait_for(timeout=15000)
+                if reject_provider:
+                    await page.reload()
+                    await page.get_by_text("Model generation failed (HTTPStatusError)", exact=False).first.wait_for(timeout=15000)
                 assert requests and requests[-1]["model"] == "first-model"
                 assert not errors, errors
             except Exception:
