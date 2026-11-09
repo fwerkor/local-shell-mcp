@@ -137,9 +137,13 @@ class GenerationStore:
             ).fetchone()
             if active:
                 raise GenerationConflict(self._run(active))
+            from .attachments import resolve_files
+
+            files = resolve_files(db, owner, payload.get("files", []))
             user_metadata = {
                 "sender": "User", "isCreatedByUser": True,
                 "endpoint": str(payload.get("endpoint") or "agents"),
+                "files": files,
             }
             db.execute(
                 "INSERT INTO messages(id,conversation_id,parent_id,role,text,content,metadata,created_at,updated_at) "
@@ -164,6 +168,7 @@ class GenerationStore:
                     "parentMessageId": payload.get("parentMessageId"),
                     "text": prompt,
                     "sender": "User",
+                    "files": files,
                     "isCreatedByUser": True,
                 },
             }
@@ -376,12 +381,23 @@ class GenerationStore:
                 if message_id in seen:
                     raise ValueError("Message graph contains a cycle")
                 seen.add(message_id)
-                row = db.execute("SELECT id,parent_id,role,text FROM messages WHERE id=? AND conversation_id=?",
+                row = db.execute("SELECT id,parent_id,role,text,metadata FROM messages WHERE id=? AND conversation_id=?",
                                  (message_id, conversation_id)).fetchone()
                 if row is None:
                     raise KeyError("Message ancestor not found")
                 if row["role"] in {"user", "assistant"}:
-                    result.append({"role": row["role"], "content": row["text"]})
+                    content = row["text"]
+                    files = json.loads(row["metadata"]).get("files", [])
+                    if row["role"] == "user" and files:
+                        descriptors = []
+                        for file in files:
+                            attachment = db.execute("SELECT id,name,path FROM attachments WHERE id=? AND owner=?",
+                                                    (file["file_id"], owner)).fetchone()
+                            descriptors.append({"file_id": file["file_id"], "machine": "local",
+                                **({"filename": attachment["name"], "path": attachment["path"]}
+                                   if attachment else {"unavailable": True})})
+                        content += "\n\nController attachments (use authorized LSM file tools):\n" + _json(descriptors)
+                    result.append({"role": row["role"], "content": content})
                 if len(result) >= max(1, min(max_messages, 100)):
                     break
                 message_id = row["parent_id"]

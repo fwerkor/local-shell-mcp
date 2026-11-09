@@ -18,7 +18,8 @@ from local_shell_mcp.webui import generation_routes
 
 
 @pytest.mark.asyncio
-async def test_real_react_chat_uses_native_python_streaming_and_sqlite(tmp_path, monkeypatch):
+@pytest.mark.parametrize("with_attachment", [False, True])
+async def test_real_react_chat_uses_native_python_streaming_and_sqlite(tmp_path, monkeypatch, with_attachment):
     playwright = pytest.importorskip("playwright.async_api")
     import uvicorn
 
@@ -34,7 +35,16 @@ async def test_real_react_chat_uses_native_python_streaming_and_sqlite(tmp_path,
 
     async def generated_tokens(profile, messages, **_kwargs):
         assert profile.model == "mock-test-model"
-        assert messages[-1]["content"] == "Verify Python streaming works."
+        if with_attachment:
+            import json
+            from pathlib import Path
+            text, descriptors = messages[-1]["content"].split("Controller attachments (use authorized LSM file tools):\n")
+            assert "Verify Python streaming works." in text
+            uploaded = json.loads(descriptors)[0]
+            assert uploaded["machine"] == "local"
+            assert Path(uploaded["path"]).read_text() == "Actual original React upload"
+        else:
+            assert messages[-1]["content"] == "Verify Python streaming works."
         for chunk in ("Hello ", "from ", "the mocked model."):
             await asyncio.sleep(0.01)
             yield chunk
@@ -68,6 +78,15 @@ async def test_real_react_chat_uses_native_python_streaming_and_sqlite(tmp_path,
             page.on("pageerror", lambda error: errors.append(str(error)))
             await page.goto(f"http://127.0.0.1:{port}/c/new", wait_until="domcontentloaded")
             await page.get_by_text("mock-test-model").first.wait_for(timeout=15_000)
+            if with_attachment:
+                async with page.expect_response(lambda response: response.request.method == "POST" and
+                                                response.url.endswith("/api/files")) as uploaded:
+                    await page.locator('input[type="file"]').first.set_input_files({
+                        "name": "original-react.txt", "mimeType": "text/plain",
+                        "buffer": b"Actual original React upload"})
+                response = await uploaded.value
+                assert response.status == 200, await response.text()
+                await page.get_by_text("original-react.txt", exact=True).first.wait_for(timeout=10000)
             await page.locator("textarea").first.fill("Verify Python streaming works.")
             await page.locator('button[type="submit"]').first.click()
             await page.get_by_text("Hello from the mocked model.", exact=True).first.wait_for(timeout=15_000)

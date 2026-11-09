@@ -59,7 +59,7 @@ async def test_disabled_optional_capabilities_never_claim_unsupported_services(t
         assert (await client.get("/api/health")).json()["status"] == "ok"
         assert (await client.get("/health")).json()["status"] == "ok"
         assert (await client.get("/api/tags")).json() == []
-        assert (await client.get("/api/files/config")).json()["serverFileSizeLimit"] == 0
+        assert (await client.get("/api/files/config")).json()["serverFileSizeLimit"] == 32 * 1024 * 1024
         assert (await client.get("/api/agents/tools/web_search/auth")).json()["authenticated"] is False
 
 

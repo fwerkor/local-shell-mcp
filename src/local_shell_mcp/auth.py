@@ -577,7 +577,8 @@ class RequestBodyLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        if (scope.get("path", "").startswith("/remote/transfer/upload/")
+        if ((scope.get("method", "").upper() == "POST" and scope.get("path", "") in {"/api/files", "/api/files/images"})
+                or scope.get("path", "").startswith("/remote/transfer/upload/")
                 or scope.get("path", "") in {"/api/ui/files/upload",
                     "/api/lsm/controller/attachments/upload", "/api/lsm/controller/files/upload"}):
             # Upload tickets validate an exact byte count and SHA-256 while streaming.

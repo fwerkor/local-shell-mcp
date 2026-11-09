@@ -25,21 +25,12 @@ async def banner(request: Request):
 
 async def files(request: Request):
     owner = _owner(request)
-    with _repo().database.connect() as db:
-        rows = db.execute(
-            "SELECT id,name,content_type,metadata,created_at,conversation_id "
-            "FROM attachments WHERE owner=? ORDER BY created_at DESC LIMIT 500",
-            (owner,),
-        ).fetchall()
-    import json
+    from .attachments import file_record
 
-    return JSONResponse([{
-        "file_id": row["id"], "filename": row["name"],
-        "type": row["content_type"],
-        "conversationId": row["conversation_id"],
-        "createdAt": row["created_at"],
-        **json.loads(row["metadata"]),
-    } for row in rows])
+    with _repo().database.connect() as db:
+        rows = db.execute("SELECT * FROM attachments WHERE owner=? ORDER BY created_at DESC LIMIT 500",
+                          (owner,)).fetchall()
+    return JSONResponse([file_record(row) for row in rows])
 
 
 async def preferences(request: Request):
@@ -184,10 +175,14 @@ async def tags(request: Request):
 
 async def files_config(request: Request):
     _owner(request)
-    # Chat file uploads are not yet enabled through the LibreChat API. LSM's
-    # native workspace attachment path is controlled separately; an explicit
-    # zero limit prevents the React client from advertising a broken upload.
-    return JSONResponse({"endpoints": {}, "serverFileSizeLimit": 0})
+    from ..settings import get_settings
+    from .attachments import MAX_ATTACHMENT_BYTES
+
+    disabled = get_settings().disable_local
+    endpoint = {"disabled": disabled, "fileLimit": 32, "fileSizeLimit": MAX_ATTACHMENT_BYTES,
+                "totalSizeLimit": MAX_ATTACHMENT_BYTES, "legacyFileUploadUX": True}
+    return JSONResponse({"endpoints": {"default": endpoint, "agents": endpoint},
+                         "serverFileSizeLimit": MAX_ATTACHMENT_BYTES, "legacyFileUploadUX": True})
 
 
 async def web_search_auth(request: Request):

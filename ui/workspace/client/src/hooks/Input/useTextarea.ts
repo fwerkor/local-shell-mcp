@@ -148,16 +148,7 @@ export default function useTextarea({
     setActivePrompt(undefined);
   }, [activePrompt, insertComposerText, setActivePrompt]);
 
-  useEffect(() => {
-    const onAttachment = (event: Event) => {
-      const path = (event as CustomEvent<{ path: string }>).detail?.path;
-      if (typeof path !== 'string' || !path || path.length > 2048) return;
-      if (!textAreaRef.current?.getClientRects().length) return;
-      insertComposerText(`\nLocal attachment: ${path}\nRead this file using LSM tools if needed.\n`);
-    };
-    window.addEventListener('lsm:local-attachment', onAttachment);
-    return () => window.removeEventListener('lsm:local-attachment', onAttachment);
-  }, [insertComposerText, textAreaRef]);
+
 
   /** Text a surface the user was leaving handed to THIS conversation (see
    *  `pendingComposerTextByConvoId`). It is drained once, on the first render

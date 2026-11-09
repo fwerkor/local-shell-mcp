@@ -47,6 +47,55 @@ async def test_controller_chat_attachment_upload_and_sqlite_metadata(tmp_path, m
             assert attachment.read_bytes() == b"hello from React"
             assert payload["data"]["size"] == len(b"hello from React")
             assert not (tmp_path / ".lsm-chat-uploads").exists()
+            multipart = await client.post("/api/files", files={"file": ("chat.txt", b"chat attachment", "text/plain")},
+                                          data={"file_id": "client-temp-id"})
+            assert multipart.status_code == 200, multipart.text
+            uploaded = multipart.json()
+            assert uploaded["temp_file_id"] == "client-temp-id"
+            assert uploaded["file_id"] != "client-temp-id"
+            assert uploaded["bytes"] == 15
+            assert uploaded["filepath"].startswith("/api/files/download/")
+            download = await client.get(uploaded["filepath"])
+            assert download.content == b"chat attachment"
+            assert download.headers["x-content-type-options"] == "nosniff"
+            from local_shell_mcp.webui.generations import GenerationStore
+            from local_shell_mcp.webui.routes import _repo
+            store = GenerationStore(_repo().database)
+            generation, _ = store.begin("local", {"text": "Read this", "files": [
+                {"file_id": uploaded["file_id"], "filepath": "/forged/private"}]})
+            history = store.history("local", generation.conversation_id)
+            assert "/forged/private" not in str(history)
+            assert str(tmp_path / ".local-shell-mcp" / "attachments") in history[-1]["content"]
+            assert _repo().messages("local", generation.conversation_id)["messages"][0]["files"][0]["file_id"] == uploaded["file_id"]
+            with pytest.raises(KeyError, match="Attachment not found"):
+                store.begin("foreign-owner", {"text": "Read stolen", "files": [uploaded]})
+            bad = await client.post("/api/files", files={"file": ("empty.txt", b"", "text/plain")})
+            assert bad.status_code == 400
+            missing = await client.post("/api/files", data={"file_id": "no-file"})
+            assert missing.status_code == 400
+            assert (await client.get("/api/files/download/missing")).status_code == 404
+            for extra in ({"file_id": "x" * 201}, {"tool_resource": "file_search"}):
+                error = await client.post("/api/files", files={"file": ("bad.txt", b"body", "text/plain")}, data=extra)
+                assert error.status_code == 400
+            bad_form = await client.post("/api/files", content=b"broken", headers={"Content-Type": "multipart/form-data"})
+            assert bad_form.status_code == 400
+            from local_shell_mcp.webui import attachments
+            with monkeypatch.context() as patch:
+                patch.setattr(attachments, "MAX_ATTACHMENT_BYTES", 3)
+                large = await client.post("/api/files", files={"file": ("big.txt", b"1234", "text/plain")})
+                assert large.status_code == 400
+                bounded = await client.post("/api/files", files={"file": ("big.txt", b"x" * 66000, "text/plain")})
+                assert bounded.status_code == 400
+            with _repo().database.connect() as db:
+                for values in (None, ["bad"], [{}], [uploaded] * 33):
+                    with pytest.raises(ValueError):
+                        attachments.resolve_files(db, "local", values)
+                assert len(attachments.resolve_files(db, "local", [uploaded, uploaded])) == 1
+                row = db.execute("SELECT path FROM attachments WHERE id=?", (uploaded["file_id"],)).fetchone()
+            Path(row["path"]).unlink()
+            assert (await client.get(uploaded["filepath"])).status_code == 404
+
+
             listed = await client.get("/api/files")
             assert listed.status_code == 200
             assert any(item["file_id"] == payload["data"]["file_id"] for item in listed.json())
@@ -87,6 +136,7 @@ async def test_upload_denies_disabled_local_and_malformed_content_length(tmp_pat
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             url = "/api/lsm/controller/attachments/upload?name=ordinary.txt"
             assert (await client.post(url, content=b"one")).status_code == 403
+            assert (await client.post("/api/files", files={"file": ("blocked.txt", b"body")})).status_code == 403
             monkeypatch.setenv("LOCAL_SHELL_MCP_DISABLE_LOCAL", "false")
             get_settings.cache_clear()
             bad = await client.post(url, content=b"one", headers={"content-length": "NaN"})

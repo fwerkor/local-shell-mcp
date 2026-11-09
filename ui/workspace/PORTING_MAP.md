@@ -167,3 +167,19 @@ on_run_step_completed.result；工具结果保留到最终消息及SQLite历史�
 本轮本地全量验收：2287 passed、2 skipped；总覆盖率95.30%，所有模块至少90%；
 HTTP、MCP、PTY、browser smoke通过。随后补充的React原生工具卡片及历史刷新用例
 与批次Ask User合计2项浏览器测试通过。新运行时尚须当前提交的跨平台CI验收。
+
+
+## 原版聊天附件链路（2026-11-09）
+
+| 原版源码 | Python/LSM | 状态与必要适配 |
+| --- | --- | --- |
+| `api/server/routes/files/files.js:handleFileUpload`、`images.js`、`multer.js` | `webui/attachments.py:upload_react_file/publish_attachment` | 部分；multipart、服务端UUID、temp_file_id、解码文件名、flat DTO；32MiB流式安全存储复用原上传发布器 |
+| `api/server/services/Files/process.js:processAgentFileUpload`、`packages/api/src/files/sse.ts:sendUploadSuccess` | `upload_react_file` | JSON成功响应字段及message对齐；可选上传SSE未启用；Agent resource/OCR/RAG未实现并明确拒绝 |
+| `client/.../Files/AttachFileChat.tsx`、`useFileHandling.ts`、`createPayload.ts` | 保留原组件与状态；`ChatForm.tsx`恢复原调用 | 已验证实际Chromium选文件→原multipart→消息files；删除自研上传按钮/文本框事件桥 |
+| Agent输入文件解析 | `generations.py:begin/history` | LSM必要适配：文件ID按当前owner从SQLite查真实Controller路径传给模型，不信任客户端filepath；历史保留原files DTO |
+
+原版JSON上传返回值保留`file_id/temp_file_id/filepath/filename/type/source/bytes/context`。
+浏览器filepath是认证下载URL，物理路径只从服务端所有权查询进入模型上下文。
+已验证：真实React上传/模型输入、缺失/重复/他人文件ID、空文件、超限流、坏multipart、
+无效临时ID、存储失败回滚、已删除文件下载404。文件不会自动复制到Remote Worker。
+未完成：Agent资源版本事务、文件删除API、OCR/RAG、图片预览/Provider多模态直送、可选上传SSE。

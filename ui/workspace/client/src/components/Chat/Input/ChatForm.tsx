@@ -51,7 +51,7 @@ import { useGetStartupConfig } from '~/data-provider';
 import { mainTextareaId, BadgeItem } from '~/common';
 import PendingSteerChips from './PendingSteerChips';
 import PendingQuoteChips from './PendingQuoteChips';
-import LsmLocalAttachmentButton from './LsmLocalAttachmentButton';
+import AttachFileChat from './Files/AttachFileChat';
 import CodeWorkspaceMenu from './CodeWorkspaceMenu';
 import useSteering from '~/hooks/Chat/useSteering';
 import CodeApprovalMenu from './CodeApprovalMenu';
@@ -854,7 +854,13 @@ const ChatForm = memo(function ChatForm({
                 )}
               >
                 <div className="shrink-0">
-                  <LsmLocalAttachmentButton />
+                  <AttachFileChat
+                    conversation={conversation}
+                    disableInputs={disableInputs}
+                    files={files}
+                    setFiles={setFiles}
+                    setFilesLoading={setFilesLoading}
+                  />
                 </div>
                 <BadgeRow
                   showEphemeralBadges={
