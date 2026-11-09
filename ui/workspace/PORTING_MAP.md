@@ -196,3 +196,20 @@ HTTP、MCP、PTY、browser smoke通过。随后补充的React原生工具卡片�
 
 原生执行中撤权、过期、调用隔离、Agent自身工具、protected写入收敛等30项测试通过。
 资源事务含真实磁盘发布回滚和多线程追加无丢失，16项测试通过。
+
+
+## SDK Graph构造语义与执行准入（2026-11-09）
+
+| 原版源码 | Python对应 | 实际状态 |
+| --- | --- | --- |
+| `graphs/MultiAgentGraph.ts:constructor/validateEdgeAgents/categorizeEdges/validateCommandRoutedDirectEdges/analyzeGraph/computeParallelCapability/resolveEntryReachability/validateHandoffScopes` | `webui/graph_topology.py:GraphTopology` | 原函数AST提取后的Node构造oracle与967组Python拓扑、分组、可达性、错误结果逐项相等；不执行StateGraph |
+| `MultiAgentGraph.categorizeEdges`的隐式边规则 | `handoff.py:outgoing_handoff_edges` | 无edgeType的1→1边按上游生成transfer工具；默认single-source fan-out按direct处理，不再静默漏掉普通handoff |
+| 当前可执行子集准入（LSM必要适配） | `graph_topology.py:admit_agent_graph`、`AgentRunner._context/_dispatch` | 所有成员重验owner；direct/多入口图当前明确拒绝，多个handoff提案在路由状态/完成结果写入前拒绝，避免运行局部图冒充成功 |
+
+原版构造函数仅替换无模型作用的StandardGraph agent-context初始化和HandoffRouting构造记录，
+createHandoffTools在oracle中禁用；原构造/验证方法体不改写，fixture含SDK commit/hash和MIT license。
+保存到SQLite的隐式单边Agent真实经过同一模型/工具循环，已验证parent→owned child完成；
+unsupported direct/default-fanout在首次provider调用前拒绝。原单目标handoff回归保留。
+
+这不是parallel/direct-edge执行完成：完整SDK执行仍依赖消息ID归约器、agentMessages替换通道、
+runStep/handoff reducers、superstep checkpoint与子图中断恢复；没有使用gather拼接文本替代。

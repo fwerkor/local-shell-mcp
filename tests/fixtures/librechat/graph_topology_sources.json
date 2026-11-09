@@ -1,0 +1,18 @@
+{
+  "commit": "c4ffb9b1b78421bf63eba3e56993017f922387f3",
+  "files": {
+    "src/graphs/MultiAgentGraph.ts": "f1f76b86d07833f6635d27eb77d599361c1be7487317ee2cdd54ff5c16e09a55",
+    "src/graphs/Graph.ts": "6b86604cdc1eb48873217561697f2e31538aea8ade1c8c78f76da6f31c5ceaae"
+  },
+  "methods": [
+    "constructor",
+    "validateHandoffScopes",
+    "resolveEntryReachability",
+    "validateEdgeAgents",
+    "categorizeEdges",
+    "validateCommandRoutedDirectEdges",
+    "analyzeGraph",
+    "computeParallelCapability"
+  ],
+  "boundary": "Only original construction/categorization/validation/reachability/parallel-group analysis. StandardGraph nonempty agent-context initialization (non-summarizeOnly inputs) and HandoffRouting constructor are storage-free test adapters. createHandoffTools is deliberately a no-op: no graph scheduler parity claim."
+}

@@ -13,6 +13,8 @@ import secrets
 from collections.abc import Callable
 from typing import Any
 
+from .graph_topology import is_direct_edge
+
 PARENT = "__parent__"
 TRANSFER_PREFIX = "transfer_to_"
 _NANOID_ALPHABET = "_-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -201,11 +203,11 @@ def outgoing_handoff_edges(agent: dict, source_agent_id: str | None = None) -> l
     for edge in agent.get("edges") or []:
         if not isinstance(edge, dict):
             raise ValueError("Invalid Agent graph edge")
-        if edge.get("edgeType") != "handoff":
+        if is_direct_edge(edge):
             if edge.get("handoffScope") is not None:
                 raise ValueError("handoffScope is only valid on handoff edges")
             continue
-        scope = edge.get("handoffScope", "turn")
+        scope = "turn" if edge.get("handoffScope") is None else edge["handoffScope"]
         if scope not in {"turn", "conversation"}:
             raise ValueError("Invalid handoffScope")
         sources = edge.get("from") if isinstance(edge.get("from"), list) else [edge.get("from")]

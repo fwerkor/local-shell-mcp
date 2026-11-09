@@ -68,10 +68,12 @@ class AgentRunner:
             raise RuntimeSafetyError("Authentication grant expired")
 
     def _context(self, agent, *, profile=None, selected_tools=None):
+        from .graph_topology import admit_agent_graph
         from .lsm_tool_registry import available_tools
         from .nested_mcp import nested_tools
 
         self._check_grant()
+        admit_agent_graph(self.owner, self.root_agent, self.repository)
         selected = set(selected_tools if selected_tools is not None else (agent or {}).get("tools") or [])
         unrestricted = agent is None and selected_tools is None
         native = available_tools(self.owner, self.generation.conversation_id,
@@ -236,6 +238,8 @@ class AgentRunner:
 
         if len({call.call_id for call in calls}) != len(calls) or any(not call.call_id for call in calls):
             raise ValueError("Tool call IDs must be non-empty and unique")
+        if sum(is_transfer_tool(call.name) for call in calls) > 1:
+            raise RuntimeSafetyError("Parallel handoff recipients require the source StateGraph executor")
         unresolved = [call for index, call in enumerate(calls) if replay_key(call, index) not in self.cache]
         enabled = {tool["function"]["name"] for tool in state.context.tools}
         if any(call.name not in enabled for call in unresolved):
