@@ -25,7 +25,7 @@ def file(repo, identity, owner="alice"):
 
 
 @pytest.mark.parametrize("resource", ["context", "file_search", "ocr", "execute_code", "image_edit"])
-def test_resource_add_to_set_prewrite_snapshot_and_unversioned_remove(repo, resource):
+def test_resource_add_to_set_prewrite_snapshot_and_unversioned_remove(repo, resource, monkeypatch):
     ident = agent(repo)
     file(repo, "owned")
     added = repo.add_resource_file("alice", ident, resource, "owned")
@@ -46,7 +46,12 @@ def test_resource_add_to_set_prewrite_snapshot_and_unversioned_remove(repo, reso
     assert len(repo.versions("alice", ident)) == 3
     assert removed["tools"] == [resource]
     assert removed["tool_resources"][resource]["file_ids"] == []
-    assert repo.remove_resource_files("alice", ident, []) == removed
+    # Mongo timestamps still advance for an empty $pull update; membership
+    # and revision remain unchanged. Exercise a second boundary explicitly.
+    next_second = removed["updatedAt"] + 1
+    monkeypatch.setattr("local_shell_mcp.webui.agents._now", lambda: next_second * 1_000_000)
+    assert repo.remove_resource_files("alice", ident, []) == {**removed, "updatedAt": next_second}
+    assert len(repo.versions("alice", ident)) == 3
 
 
 def test_resource_owner_validation_and_transaction_contract(repo):
