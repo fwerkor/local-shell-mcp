@@ -12,6 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 
 DB_NAME = "lsm.sqlite3"
+_LEGACY_CHUNK_BYTES = 1024 * 1024
 
 
 _SCHEMA = """
@@ -374,6 +375,34 @@ class SQLiteStateStore:
                     continue
                 yield path
 
+    @staticmethod
+    def _import_legacy_file(db: sqlite3.Connection, key: str, path: Path, expected: os.stat_result) -> str:
+        """Stream one stable source snapshot inside the caller's transaction."""
+        digest = hashlib.sha256()
+        appended_size = 0
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+        with os.fdopen(os.open(path, flags), "rb") as source:
+            before = os.fstat(source.fileno())
+            def signature(info):
+                return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+            if signature(before) != signature(expected):
+                raise RuntimeError(f"Legacy state changed during import; retry required: {key}")
+            first = source.read(_LEGACY_CHUNK_BYTES)
+            digest.update(first)
+            db.execute("INSERT INTO state(key,value) VALUES(?,?) ON CONFLICT(key) "
+                       "DO UPDATE SET value=excluded.value,updated_at=unixepoch()", (key, sqlite3.Binary(first)))
+            db.execute("DELETE FROM state_append_chunks WHERE key=?", (key,))
+            db.execute("DELETE FROM state_append_lengths WHERE key=?", (key,))
+            while chunk := source.read(_LEGACY_CHUNK_BYTES):
+                digest.update(chunk)
+                appended_size += len(chunk)
+                db.execute("INSERT INTO state_append_chunks(key,value) VALUES(?,?)", (key, sqlite3.Binary(chunk)))
+            if signature(os.fstat(source.fileno())) != signature(before):
+                raise RuntimeError(f"Legacy state changed during import; retry required: {key}")
+            if appended_size:
+                db.execute("INSERT INTO state_append_lengths(key,total_size) VALUES(?,?)", (key, appended_size))
+        return digest.hexdigest()
+
     def migrate_files(self) -> int:
         """Import legacy durable state, atomically, without deleting originals.
 
@@ -405,23 +434,19 @@ class SQLiteStateStore:
                     # a later SQLite deletion. Old file writers must not revive
                     # state that the Controller has deliberately removed.
                     continue
-                if info.st_size > 64 * 1024 * 1024:
-                    raise RuntimeError(f"Legacy state entry is too large for safe automatic import: {key}")
-                payload = path.read_bytes()
-                digest = hashlib.sha256(payload).hexdigest()
-                if existing is None:
-                    db.execute("INSERT INTO state(key,value) VALUES(?,?)", (key, sqlite3.Binary(payload)))
-                    count += 1
-                elif previous and hashlib.sha256(bytes(existing[0])).hexdigest() == previous[2] and not db.execute(
-                    "SELECT 1 FROM state_append_chunks WHERE key=? LIMIT 1", (key,)
-                ).fetchone():
-                    db.execute("UPDATE state SET value=?,updated_at=unixepoch() WHERE key=?",
-                               (sqlite3.Binary(payload), key))
-                    count += 1
-                else:
-                    # The destination may predate the import journal, or have
-                    # been modified by SQLite clients. Never overwrite it.
-                    continue
+                if existing is not None:
+                    # Imported files may span multiple SQLite chunks. Compare
+                    # the complete committed bytes before replacing any of them;
+                    # ordinary SQLite writes/appends remain authoritative.
+                    if previous is None:
+                        continue
+                    current_digest = hashlib.sha256(bytes(existing[0]))
+                    for part in db.execute("SELECT value FROM state_append_chunks WHERE key=? ORDER BY id", (key,)):
+                        current_digest.update(bytes(part[0]))
+                    if current_digest.hexdigest() != previous[2]:
+                        continue
+                digest = self._import_legacy_file(db, key, path, info)
+                count += 1
                 db.execute(
                     "INSERT INTO legacy_imports(key,source_mtime_ns,source_size,imported_digest) "
                     "VALUES(?,?,?,?) ON CONFLICT(key) DO UPDATE SET "
