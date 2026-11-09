@@ -22,7 +22,7 @@ function NavigationIcon({ view }: { view: string }) {
     remotes: "M3 3h18v7H3zM3 14h18v7H3zM7 6.5h.01M7 17.5h.01M11 6.5h6M11 17.5h6",
     audit: "M5 3h14v18H5zM8 7h8M8 11h8M8 15h5",
     settings: "M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1M12 8a4 4 0 1 0 0 8a4 4 0 0 0 0-8z",
-    "hosted-chat": "M4 5h16v12H8l-4 3V5zM8 9h8M8 13h5",
+    "chat": "M4 5h16v12H8l-4 3V5zM8 9h8M8 13h5",
   }
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={paths[view] || paths.terminals} /></svg>
 }
@@ -47,8 +47,8 @@ export function ApplicationShell() {
           <Button className="active" data-interface-mode="web" aria-pressed="true">Web UI</Button>
           <Button data-interface-mode="tui" aria-pressed="false">TUI</Button>
         </div>
-        <button className="hosted-chat-entry" type="button" data-interface-mode="chat" aria-pressed="false" hidden>
-          <NavigationIcon view="hosted-chat" />
+        <button className="webui-chat-entry" type="button" data-interface-mode="chat" aria-pressed="false" hidden>
+          <NavigationIcon view="chat" />
           <span><strong>Workspace</strong><small>Chat · Controller</small></span>
         </button>
         <div className="navigation-label">Workspace</div>
@@ -131,7 +131,7 @@ export function mountApplication() {
   }))
   scrim.addEventListener("click", () => { setOpen(false); restoreFocus() })
   document.querySelector(".primary-nav")!.addEventListener("click", () => setOpen(false))
-  document.querySelector(".hosted-chat-entry")!.addEventListener("click", () => setOpen(false))
+  document.querySelector(".webui-chat-entry")!.addEventListener("click", () => setOpen(false))
   document.addEventListener("keydown", event => {
     if (event.key === "Escape" && document.body.classList.contains("navigation-open")) {
       event.preventDefault()

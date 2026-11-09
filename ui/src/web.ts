@@ -332,7 +332,7 @@ async function finishOAuthCallback(): Promise<boolean> {
 }
 
 const PAGE_TITLES: Record<Exclude<WebViewName, "console">, string> = {
-  "hosted-chat": "Hosted Chat",
+  "chat": "WebUI",
   overview: "Overview",
   files: "Files",
   terminals: "Terminals",
@@ -387,7 +387,6 @@ function renderActiveView(): void {
     api: { get: apiGet, send: apiSend },
     uiPath: UI_PATH,
     liveWorkspaceEnabled: bootstrapData?.features?.live_workspace === true,
-    librechatEnabled: bootstrapData?.features?.librechat === true,
     apiPrefix: API_PREFIX,
     accessToken,
     machines: uiMachines,
@@ -491,9 +490,9 @@ async function refreshAll(manual = false): Promise<void> {
     ])
     bootstrapData = bootstrap
     document.querySelectorAll<HTMLElement>('[data-interface-mode="chat"]').forEach((entry) => {
-      entry.hidden = bootstrap.features?.hosted_chat !== true && bootstrap.features?.librechat !== true
+      entry.hidden = bootstrap.features?.webui !== true
     })
-    if (activeView === "hosted-chat" && bootstrap.features?.hosted_chat !== true && bootstrap.features?.librechat !== true) {
+    if (activeView === "chat" && bootstrap.features?.webui !== true) {
       showView("overview")
     }
     dashboardData = dashboard
@@ -944,7 +943,7 @@ document.querySelectorAll<HTMLButtonElement>(".nav-item[data-view]").forEach((bu
 interfaceButtons.forEach((button) => {
   button.addEventListener("click", () => {
     const mode = button.dataset.interfaceMode
-    showView(mode === "tui" ? "console" : mode === "chat" ? "hosted-chat" : lastWebView)
+    showView(mode === "tui" ? "console" : mode === "chat" ? "chat" : lastWebView)
   })
 })
 loginButton.addEventListener("click", () => void startOAuth("console"))
@@ -965,7 +964,7 @@ async function boot(): Promise<void> {
     authenticated = true
     authGate.hidden = true
     appShell.hidden = false
-    const initialView = callbackView || viewFromHash(location.hash) || (bootstrapData?.features?.librechat ? "hosted-chat" : "overview")
+    const initialView = callbackView || viewFromHash(location.hash) || (bootstrapData?.features?.webui ? "chat" : "overview")
     showView(initialView, { syncHash: callbackView !== "console", replaceHash: true })
     await refreshAll(false)
     startRefreshTimer()

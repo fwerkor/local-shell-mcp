@@ -81,7 +81,7 @@ def _env_locked(name: str) -> bool:
 def _group(name: str) -> str:
     if name.startswith(("oauth_", "auth_", "require_auth", "public_base_url")):
         return "Authentication"
-    if name.startswith(("ui_", "hosted_chat_", "live_workspace_")):
+    if name.startswith(("ui_", "live_workspace_")):
         return "Web UI & Chat"
     if name.startswith(("remote_", "file_download_")):
         return "Remotes & Transfers"

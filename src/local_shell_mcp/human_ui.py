@@ -37,7 +37,7 @@ from starlette.responses import (
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from . import __version__, hosted_chat
+from . import __version__
 from .audit import get_audit_entry, query_audit, suppress_audit
 from .auth import Principal, principal_scopes, require_scopes, verify_request
 from .fs_ops import (
@@ -799,13 +799,7 @@ async def api_bootstrap(request: Request) -> Response:
             "machines": machines,
             "features": {
                 "remote": settings.remote_enabled,
-                # The native React workspace replaces the never-released Hosted Chat.
-                "hosted_chat": False if settings.state_backend == "sqlite" else (
-                    settings.hosted_chat_enabled and settings.mode != "http" and settings.state_backend != "memory"
-                ),
-                **({"librechat": True} if settings.state_backend == "sqlite" or (
-                    os.environ.get("LOCAL_SHELL_MCP_LIBRECHAT_URL") and settings.state_backend != "memory"
-                ) else {}),
+                "webui": settings.state_backend == "sqlite",
                 "live_workspace": settings.live_workspace_enabled,
                 "tui": tui_runtime_available(),
                 "wallpaper": settings.ui_wallpaper,
@@ -3280,147 +3274,38 @@ async def api_nested_mcp(request: Request) -> Response:
         return _json_error(exc)
 
 
-async def api_librechat_policy(request: Request) -> Response:
-    """Mirror per-conversation LSM tool authorization into the controller's own state."""
-    from .librechat_integration import is_bridge_service, set_chat_tool_policy
-
-    if not is_bridge_service(request):
-        return JSONResponse({"error": "LibreChat service authentication required"}, status_code=403)
-    try:
-        payload = await request.json()
-        if not isinstance(payload, dict):
-            raise ValueError("Expected JSON object")
-        updated = set_chat_tool_policy(
-            str(payload.get("user_id") or ""),
-            str(payload.get("conversation_id") or ""),
-            payload.get("lsm"),
-            payload.get("mcp", True),
-            revision=payload.get("revision"),
-        )
-        return _json_ok({"updated": updated})
-    except Exception as exc:
-        return _json_error(exc)
 
 
-async def api_librechat_upload(request: Request) -> Response:
-    """Store a user attachment on the controller's local machine, not in LibreChat's container."""
-    from .librechat_integration import MAX_CHAT_UPLOAD_BYTES, local_upload_path
-
-    path: Path | None = None
-    try:
-        _require_ui_scopes(request, "shell:read", "shell:write")
-        if get_settings().disable_local:
-            raise PermissionError("Local workspace uploads are disabled")
-        subject = _logical_session_subject(request, create=True)
-        if not subject:
-            raise PermissionError("An authenticated user is required")
-        expected = int(request.headers.get("content-length") or -1)
-        if not 0 < expected <= MAX_CHAT_UPLOAD_BYTES:
-            raise ValueError("Upload must declare a size between 1 byte and 32 MiB")
-        name = request.query_params.get("name", "")
-        path = local_upload_path(subject, name, Path(get_settings().workspace_root))
-        # Exclusive, no-follow creation; interrupted streams never publish partial files.
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(path, flags, 0o600)
-        received = 0
-        try:
-            with os.fdopen(descriptor, "wb") as handle:
-                async for chunk in request.stream():
-                    received += len(chunk)
-                    if received > expected:
-                        raise ValueError("Upload exceeds the declared size")
-                    await asyncio.to_thread(handle.write, chunk)
-                if received != expected:
-                    raise ValueError("Incomplete upload")
-                await asyncio.to_thread(handle.flush)
-                await asyncio.to_thread(os.fsync, handle.fileno())
-        except BaseException:
-            path.unlink(missing_ok=True)
-            path = None
-            raise
-        return _json_ok({"machine": "local", "path": str(path), "size": received})
-    except asyncio.CancelledError:
-        if path is not None:
-            path.unlink(missing_ok=True)
-        raise
-    except Exception as exc:
-        return _json_error(exc)
 
 
-async def api_librechat_identity(request: Request) -> Response:
-    """Only the LibreChat service may register the authenticated subject behind its own user id."""
-    try:
-        from .librechat_integration import is_bridge_service, register_identity
-
-        if not is_bridge_service(request):
-            return JSONResponse({"error": "LibreChat service authentication required"}, status_code=403)
-        payload = await request.json()
-        if not isinstance(payload, dict):
-            raise ValueError("Expected JSON object")
-        register_identity(str(payload.get("user_id") or ""), str(payload.get("ticket") or ""))
-        return _json_ok({"registered": True})
-    except Exception as exc:
-        return _json_error(exc)
 
 
-async def api_librechat_session(request: Request) -> Response:
-    """Allow the single LibreChat account to refresh only while its LSM grant is valid."""
-    from .librechat_integration import is_bridge_service, principal_for_chat_user
-
-    if not is_bridge_service(request):
-        return JSONResponse({"error": "LibreChat service authentication required"}, status_code=403)
-    try:
-        payload = await request.json()
-        if not isinstance(payload, dict):
-            raise ValueError("Expected JSON object")
-        principal_for_chat_user(str(payload.get("user_id") or ""))
-        return _json_ok({"valid": True})
-    except (ValueError, PermissionError) as exc:
-        return _json_error(exc, status_code=401)
 
 
-async def api_librechat_ticket(request: Request) -> Response:
-    """Exchange the existing authenticated LSM principal for a one-use chat login ticket."""
+async def api_webui_ticket(request: Request) -> Response:
+    """Exchange native LSM authorization for the first-party Python WebUI."""
     try:
         _require_ui_scopes(request, "shell:read")
-        if get_settings().state_backend == "sqlite":
-            from .auth import principal_scopes
-            from .oauth import ALL_OAUTH_SCOPES
-            from .webui.auth import WebAuthStore
-
-            principal = _request_principal(request)
-            subject = _logical_session_subject(request, create=True)
-            scopes = (" ".join(sorted(ALL_OAUTH_SCOPES))
-                      if principal.claims.get("auth") in {"none", "local-cli", "native-tui", "localhost-bypass"}
-                      else " ".join(sorted(principal_scopes(principal))))
-            expires = principal.claims.get("exp")
-            grant_until = min(int(expires), int(time.time()) + 3600) if isinstance(expires, int) else int(time.time()) + 3600
-            ticket = WebAuthStore(get_settings().state_dir).issue_ticket(subject, scopes, grant_until)
-            origin = get_settings().public_base_url or str(request.base_url).rstrip("/")
-            return _json_ok({"url": origin, "ticket": ticket})
-
-        from .librechat_integration import issue_chat_ticket
-
-        subject = _logical_session_subject(request, create=True)
-        if not subject:
-            raise PermissionError("An authenticated LSM identity is required")
-        from .auth import current_principal, principal_scopes
-
-        principal = current_principal()
+        if get_settings().state_backend != "sqlite":
+            raise HTTPException(status_code=404, detail="WebUI requires SQLite persistence")
+        from .auth import principal_scopes
         from .oauth import ALL_OAUTH_SCOPES
+        from .webui.auth import WebAuthStore
 
-        local_auth = {"none", "native-tui", "local-cli", "localhost-bypass"}
+        principal = _request_principal(request)
+        subject = _logical_session_subject(request, create=True)
         scopes = (" ".join(sorted(ALL_OAUTH_SCOPES))
-                  if principal and principal.claims.get("auth") in local_auth
-                  else " ".join(sorted(principal_scopes(principal))) if principal else "")
-        auth_mode = "none" if principal and principal.claims.get("auth") == "none" else "oauth"
-        expires_at = principal.claims.get("exp") if principal else None
-        return _json_ok(issue_chat_ticket(
-            subject, scopes=scopes, auth_mode=auth_mode,
-            grant_expires_at=expires_at if isinstance(expires_at, int) else None,
-        ))
+                  if principal.claims.get("auth") in {"none", "local-cli", "native-tui", "localhost-bypass"}
+                  else " ".join(sorted(principal_scopes(principal))))
+        expires = principal.claims.get("exp")
+        grant_until = min(int(expires), int(time.time()) + 3600) if isinstance(expires, int) else int(time.time()) + 3600
+        ticket = WebAuthStore(get_settings().state_dir).issue_ticket(subject, scopes, grant_until)
+        origin = get_settings().public_base_url or str(request.base_url).rstrip("/")
+        return _json_ok({"url": origin, "ticket": ticket})
     except Exception as exc:
         return _json_error(exc)
+
+
 def _settings_same_origin(request: Request) -> bool:
     origin = request.headers.get("origin")
     if not origin:
@@ -3483,166 +3368,6 @@ async def api_settings(request: Request) -> Response:
         return _json_error(exc, status_code=409 if isinstance(exc, RuntimeError) else 400)
 
 
-async def api_hosted_chat(request: Request) -> Response:
-    """Durable Hosted Chat, using the caller's principal for all MCP operations."""
-    try:
-        settings = get_settings()
-        if not settings.hosted_chat_enabled or settings.mode == "http":
-            raise HTTPException(status_code=404, detail="Hosted Chat requires an MCP-enabled controller")
-        if settings.state_backend == "memory":
-            raise HTTPException(status_code=503, detail="Hosted Chat requires persistent file or Redis state storage")
-        _require_ui_scopes(request, "shell:read")
-        from .hosted_chat_store import hosted_chat_runner, hosted_chat_store
-
-        subject = _logical_session_subject(request, create=True)
-        if not subject:
-            raise PermissionError("Hosted Chat requires an authenticated identity")
-        action = str(request.path_params.get("action") or "")
-        if request.method == "GET":
-            if action == "profiles":
-                result = await asyncio.to_thread(hosted_chat_store.profiles, subject)
-            elif action == "conversations":
-                result = await asyncio.to_thread(hosted_chat_store.conversations, subject)
-            elif action == "archives":
-                result = await asyncio.to_thread(hosted_chat_store.archived_conversations, subject)
-            elif action == "archive":
-                result = await asyncio.to_thread(
-                    hosted_chat_store.archived_conversation, subject,
-                    str(request.query_params.get("id") or ""),
-                )
-            elif action == "conversation":
-                conversation_id = str(request.query_params.get("id") or "")
-                result = await asyncio.to_thread(
-                    hosted_chat_runner.reconcile, subject, conversation_id
-                )
-            else:
-                raise HTTPException(status_code=404, detail="Unknown Hosted Chat action")
-            return _json_ok(result)
-
-        data = await request.json()
-        if not isinstance(data, dict):
-            raise ValueError("Expected a JSON object")
-        if action == "profile-save":
-            result = await asyncio.to_thread(hosted_chat_store.put_profile, subject, data)
-        elif action == "profile-delete":
-            await asyncio.to_thread(hosted_chat_store.delete_profile, subject, str(data["id"]))
-            result = {}
-        elif action == "conversation-create":
-            session_id = str(data.get("session_id") or "").strip() or None
-            if session_id:
-                await asyncio.to_thread(
-                    get_session_runtime_manager().get, session_id, subject=subject
-                )
-            result = await asyncio.to_thread(
-                hosted_chat_store.create_conversation, subject,
-                profile_id=str(data["profile_id"]), session_id=session_id,
-            )
-        elif action == "conversation-compact":
-            result = await hosted_chat_store.compact_conversation(subject, str(data["id"]))
-        elif action == "conversation-archive":
-            cid = str(data["id"])
-            current = await asyncio.to_thread(hosted_chat_runner.reconcile, subject, cid)
-            if current["status"] == "running":
-                raise ValueError("Stop the active turn before archiving this conversation")
-            result = await asyncio.to_thread(hosted_chat_store.archive_conversation, subject, cid)
-        elif action == "conversation-restore":
-            result = await asyncio.to_thread(
-                hosted_chat_store.restore_conversation, subject, str(data["id"])
-            )
-        elif action == "archive-delete":
-            await asyncio.to_thread(
-                hosted_chat_store.delete_archived_conversation, subject, str(data["id"])
-            )
-            result = {}
-        elif action == "conversation-delete":
-            cid = str(data["id"])
-            current = await asyncio.to_thread(hosted_chat_runner.reconcile, subject, cid)
-            if current["status"] == "running":
-                raise ValueError("Stop the active turn before deleting this conversation")
-            await asyncio.to_thread(hosted_chat_store.delete_conversation, subject, cid)
-            result = {}
-        elif action == "conversation-update":
-            def change(record: dict) -> dict:
-                if record["status"] == "running":
-                    raise ValueError("Cannot modify a running conversation")
-                if "title" in data:
-                    record["title"] = str(data["title"] or "").strip()[:180] or "New chat"
-                if "profile_id" in data:
-                    new_profile_id = str(data["profile_id"] or "")
-                    hosted_chat_store.profile(subject, new_profile_id)
-                    record["profile_id"] = new_profile_id
-                if "session_id" in data:
-                    session_id = str(data["session_id"] or "").strip() or None
-                    if session_id:
-                        get_session_runtime_manager().get(session_id, subject=subject)
-                    record["session_id"] = session_id
-                return record
-            result = await asyncio.to_thread(
-                hosted_chat_store.update_conversation, subject, str(data["id"]),
-                updater=change,
-            )
-        elif action == "send":
-            bearer = str(request.headers.get("authorization") or "")
-            if get_settings().auth_mode != "none" and not bearer.startswith("Bearer "):
-                raise HTTPException(status_code=401, detail="OAuth bearer token required")
-            settings = get_settings()
-            host = "[::1]" if settings.host in {"::", "[::]"} else "127.0.0.1" if settings.host == "0.0.0.0" else settings.host
-            if ":" in host and not host.startswith("["):
-                host = f"[{host}]"
-            from .oauth import public_base_url
-
-            result = await hosted_chat_runner.start(
-                subject, str(data["id"]), str(data.get("text") or ""),
-                f"http://{host}:{settings.port}", bearer,
-                public_origin=public_base_url(request) if settings.auth_mode == "oauth" else None,
-            )
-        elif action == "stop":
-            await asyncio.to_thread(hosted_chat_runner.stop, subject, str(data["id"]))
-            result = {}
-        elif action in {"tool", "resource"}:
-            if not settings.live_workspace_enabled:
-                raise HTTPException(status_code=404, detail="Live Workspace is disabled")
-            bearer = str(request.headers.get("authorization") or "")
-            if get_settings().auth_mode != "none" and not bearer.startswith("Bearer "):
-                raise HTTPException(status_code=401, detail="OAuth bearer token required")
-            settings = get_settings()
-            host = "[::1]" if settings.host in {"::", "[::]"} else "127.0.0.1" if settings.host == "0.0.0.0" else settings.host
-            if ":" in host and not host.startswith("["):
-                host = f"[{host}]"
-            base_url = f"http://{host}:{settings.port}"
-            from .oauth import public_base_url
-
-            origin_arg = (
-                {"public_origin": public_base_url(request)}
-                if settings.auth_mode == "oauth" else {}
-            )
-            if action == "tool":
-                if str(data.get("name") or "") not in {"workspace_open", "live_workspace_reconnect"}:
-                    raise PermissionError("Only Workspace app tools are available to the host bridge")
-                if not isinstance(data.get("arguments"), dict):
-                    raise ValueError("Tool arguments must be an object")
-                result = await hosted_chat.call_mcp(
-                    base_url, bearer, str(data["name"]), data["arguments"], **origin_arg,
-                )
-            else:
-                uri = str(data.get("uri") or "")
-                if not uri.startswith("ui://local-shell-mcp/live-workspace"):
-                    raise PermissionError("Unknown MCP App resource")
-                result = await hosted_chat.read_mcp_resource(
-                    base_url, bearer, uri, **origin_arg
-                )
-        else:
-            raise HTTPException(status_code=404, detail="Unknown Hosted Chat action")
-        return _json_ok(result)
-    except HTTPException as exc:
-        return _json_error(exc)
-    except (ValueError, TypeError, PermissionError, KeyError) as exc:
-        return _json_error(exc, status_code=403 if isinstance(exc, PermissionError) else 400)
-    except Exception:
-        _LOGGER.exception("Hosted Chat request failed")
-        return _json_error(
-            HTTPException(status_code=502, detail="Hosted Chat storage or MCP request failed")
-        )
 
 async def ui_desktop_websocket(websocket: WebSocket) -> None:
     """Dedicated human control channel; frames/actions are not tool calls."""
@@ -3895,13 +3620,7 @@ def ui_routes() -> list[Any]:
         WebSocketRoute(ui_path + "/ws", ui_terminal_websocket),
         WebSocketRoute(ui_path + "/ws/shell", ui_shell_websocket),
         WebSocketRoute(ui_path + "/ws/desktop", ui_desktop_websocket),
-        Route(UI_API_PREFIX + "/librechat/upload", api_librechat_upload, methods=["POST"]),
         Route(UI_API_PREFIX + "/nested-mcp", api_nested_mcp, methods=["GET", "POST"]),
-        Route(UI_API_PREFIX + "/librechat/policy", api_librechat_policy, methods=["POST"]),
-        Route(UI_API_PREFIX + "/librechat/identity", api_librechat_identity, methods=["POST"]),
-        Route(UI_API_PREFIX + "/librechat/session", api_librechat_session, methods=["POST"]),
-        Route(UI_API_PREFIX + "/librechat/ticket", api_librechat_ticket, methods=["POST"]),
-        Route(UI_API_PREFIX + "/hosted-chat/{action}", api_hosted_chat, methods=["GET", "POST"]),
         Route(UI_API_PREFIX + "/settings/{action}", api_settings, methods=["GET", "POST"]),
         Route(UI_API_PREFIX + "/bootstrap", api_bootstrap, methods=["GET"]),
         Route(UI_API_PREFIX + "/dashboard", api_dashboard, methods=["GET"]),
@@ -3927,6 +3646,7 @@ def ui_routes() -> list[Any]:
         Route(UI_API_PREFIX + "/logical-sessions", api_logical_sessions, methods=["GET"]),
         Route(UI_API_PREFIX + "/logical-sessions/detail", api_logical_session_detail, methods=["GET"]),
         Route(UI_API_PREFIX + "/logical-sessions/{action}", api_logical_session_action, methods=["POST"]),
+        Route(UI_API_PREFIX + "/webui/ticket", api_webui_ticket, methods=["POST"]),
         Route(UI_API_PREFIX + "/audit", api_audit, methods=["GET"]),
         Route(UI_API_PREFIX + "/audit/detail", api_audit_detail, methods=["GET"]),
         Route(UI_API_PREFIX + "/remotes", api_remotes, methods=["GET", "POST"]),

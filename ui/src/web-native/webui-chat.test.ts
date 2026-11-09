@@ -1,16 +1,16 @@
 import { describe, expect, test } from "bun:test"
-import { libreChatLoginAction } from "./librechat"
+import { webUIChatLoginAction } from "./webui-chat"
 
 describe("Full-page LSM workspace handoff", () => {
   test("posts tickets directly to the configured HTTPS chat origin", () => {
-    expect(libreChatLoginAction("https://chat.example.org/control/overview"))
+    expect(webUIChatLoginAction("https://chat.example.org/control/overview"))
       .toBe("https://chat.example.org/api/auth/lsm")
   })
 
   test("allows HTTP loopback solely for isolated development", () => {
-    expect(libreChatLoginAction("http://localhost:3080"))
+    expect(webUIChatLoginAction("http://localhost:3080"))
       .toBe("http://localhost:3080/api/auth/lsm")
-    expect(libreChatLoginAction("http://127.0.0.1:3080"))
+    expect(webUIChatLoginAction("http://127.0.0.1:3080"))
       .toBe("http://127.0.0.1:3080/api/auth/lsm")
   })
 
@@ -18,11 +18,11 @@ describe("Full-page LSM workspace handoff", () => {
     for (const url of [
       "http://chat.example.org", "http://10.1.1.1:3080",
       "https://user:password@chat.example.org", "not-a-url",
-    ]) expect(() => libreChatLoginAction(url)).toThrow()
+    ]) expect(() => webUIChatLoginAction(url)).toThrow()
   })
 
   test("uses the top-level login rather than an iframe", async () => {
-    const source = await Bun.file(new URL("./librechat.ts", import.meta.url)).text()
+    const source = await Bun.file(new URL("./webui-chat.ts", import.meta.url)).text()
     expect(source).toContain('form.target = "_top"')
     expect(source).not.toContain("<iframe")
     expect(source).not.toContain("postMessage")

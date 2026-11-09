@@ -29,23 +29,23 @@ def test_default_path_save_restart_loading_and_reset(configured):
     snapshot = config_snapshot()
     assert Path(snapshot["path"]) == configured / ".local-shell-mcp" / "config.yaml"
     assert len(snapshot["fields"]) >= 80
-    initial = get_settings().hosted_chat_enabled
+    initial = get_settings().live_workspace_enabled
     changed = not initial
 
-    saved = save_config({"hosted_chat_enabled": changed, "ui_wallpaper": "none"}, snapshot["revision"])
+    saved = save_config({"live_workspace_enabled": changed, "ui_wallpaper": "none"}, snapshot["revision"])
     assert saved["restart_required"]
-    upcoming = next(field for field in config_snapshot()["fields"] if field["name"] == "hosted_chat_enabled")
+    upcoming = next(field for field in config_snapshot()["fields"] if field["name"] == "live_workspace_enabled")
     assert upcoming["value"] is changed and upcoming["pending"] is True
     assert stat.S_IMODE(config_file().stat().st_mode) == 0o600 if os.name != "nt" else config_file().exists()
     get_settings.cache_clear()
-    assert get_settings().hosted_chat_enabled is changed
+    assert get_settings().live_workspace_enabled is changed
     assert get_settings().ui_wallpaper == "none"
-    assert next(field for field in config_snapshot()["fields"] if field["name"] == "hosted_chat_enabled")["pending"] is False
-    assert next(f for f in config_snapshot()["fields"] if f["name"] == "hosted_chat_enabled")["source"] == "config"
+    assert next(field for field in config_snapshot()["fields"] if field["name"] == "live_workspace_enabled")["pending"] is False
+    assert next(f for f in config_snapshot()["fields"] if f["name"] == "live_workspace_enabled")["source"] == "config"
 
-    save_config({"hosted_chat_enabled": None}, saved["revision"])
+    save_config({"live_workspace_enabled": None}, saved["revision"])
     get_settings.cache_clear()
-    assert get_settings().hosted_chat_enabled is initial
+    assert get_settings().live_workspace_enabled is initial
 
 def test_validation_failure_does_not_write(configured):
     before = config_snapshot()

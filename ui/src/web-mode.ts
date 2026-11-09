@@ -1,4 +1,4 @@
-export const WEB_VIEWS = ["overview", "files", "terminals", "desktop", "sessions", "remotes", "audit", "settings", "workloads", "activity", "hosted-chat"] as const
+export const WEB_VIEWS = ["overview", "files", "terminals", "desktop", "sessions", "remotes", "audit", "settings", "workloads", "activity", "chat"] as const
 export type WebViewName = (typeof WEB_VIEWS)[number] | "console"
 export type InterfaceMode = "web" | "tui" | "chat"
 
@@ -23,7 +23,7 @@ export function hashForView(view: WebViewName): string {
 }
 
 export function interfaceModeForView(view: WebViewName): InterfaceMode {
-  return view === "console" ? "tui" : view === "hosted-chat" ? "chat" : "web"
+  return view === "console" ? "tui" : view === "chat" ? "chat" : "web"
 }
 
 export function oauthReturnView(hash: string, requestedView: WebViewName): WebViewName {

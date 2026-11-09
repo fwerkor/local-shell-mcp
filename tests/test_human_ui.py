@@ -856,7 +856,7 @@ def test_scoped_ui_token_preserves_oauth_permissions(tmp_path, monkeypatch):
     assert isinstance(features.pop("tui"), bool)
     assert features == {
         "remote": False, "wallpaper": "bing",
-        "hosted_chat": True, "live_workspace": True,
+        "webui": False, "live_workspace": True,
     }
 
     forbidden = client.post(

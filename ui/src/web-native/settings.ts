@@ -7,7 +7,7 @@ const HELP: Record<string, string> = {
   host: "Controller listen address", port: "Listener port (may change the browser URL)",
   ui_path: "WebUI URL prefix", auth_mode: "Disabling authentication can expose the controller",
   oauth_jwt_secret: "Changing this invalidates current OAuth tokens", oauth_admin_pin: "PIN used to approve OAuth clients",
-  hosted_chat_enabled: "Enable hosted BYOK Chat", workspace_root: "Local filesystem workspace root",
+  workspace_root: "Local filesystem workspace root",
   state_dir: "Directory for controller state", allow_full_container: "Disable built-in command and path restrictions",
 }
 

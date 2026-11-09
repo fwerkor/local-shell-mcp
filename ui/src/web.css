@@ -237,14 +237,14 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
   .terminal-touchbar { grid-template-columns: repeat(4, minmax(0,1fr)); }
 }
 
-/* Hosted Chat is a separate interface directly below the Web UI / TUI selector. */
-.hosted-chat-entry { display: flex; align-items: center; gap: 10px; width: calc(100% - 32px); margin: 0 16px 10px; padding: 10px 12px; background: transparent; color: #ddd; border: 1px solid #ffffff26; text-align: left; }
-.hosted-chat-entry svg { flex: none; width: 20px; height: 20px; }
-.hosted-chat-entry strong { display: block; font-weight: 500; }
-.hosted-chat-entry small { display: block; color: #bbb; font-size: 11px; }
-.hosted-chat-entry:hover, .hosted-chat-entry.active { color: white; border-color: #77b5ef; background: #ffffff14; }
-.hosted-chat-entry:hover small, .hosted-chat-entry.active small { color: #ddd; }
-.hosted-chat-entry[hidden] { display: none; }
+/* WebUI is a separate interface directly below the Web UI / TUI selector. */
+.webui-chat-entry { display: flex; align-items: center; gap: 10px; width: calc(100% - 32px); margin: 0 16px 10px; padding: 10px 12px; background: transparent; color: #ddd; border: 1px solid #ffffff26; text-align: left; }
+.webui-chat-entry svg { flex: none; width: 20px; height: 20px; }
+.webui-chat-entry strong { display: block; font-weight: 500; }
+.webui-chat-entry small { display: block; color: #bbb; font-size: 11px; }
+.webui-chat-entry:hover, .webui-chat-entry.active { color: white; border-color: #77b5ef; background: #ffffff14; }
+.webui-chat-entry:hover small, .webui-chat-entry.active small { color: #ddd; }
+.webui-chat-entry[hidden] { display: none; }
 
 /* Full-height native workspaces should not scroll the entire document. */
 @media (min-width: 1101px) and (min-height: 560px) {
@@ -344,7 +344,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 :root[data-theme="dark"] .toast { color: var(--text); }
 :root[data-theme="dark"] .native-dialog-overlay { background: #060b10b8; }
 
-/* Stacked Hosted Chat workspaces cannot fit within one viewport. */
+/* Stacked WebUI workspaces cannot fit within one viewport. */
 @media (min-width: 1101px) and (max-width: 1350px) and (min-height: 560px) {
   .native-view-active:has(.hosted-chat .hosted-workspace:not([hidden])) .main-content { overflow-y: auto; }
   .native-view-active:has(.hosted-chat .hosted-workspace:not([hidden])) #view-root { flex: 0 0 auto; }

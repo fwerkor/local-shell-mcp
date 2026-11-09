@@ -35,3 +35,20 @@ def test_controller_routes_do_not_duplicate_registered_paths(monkeypatch):
     monkeypatch.setattr(human_ui, "get_settings", lambda: SimpleNamespace(ui_enabled=True, ui_path="ui"))
     rows = controller_routes()
     assert len({(row.path, tuple(sorted(row.methods))) for row in rows}) == len(rows)
+
+
+def test_controller_routes_keep_login_private_and_coalesce_aliases(monkeypatch):
+    from starlette.routing import Route
+
+    from local_shell_mcp.webui import controller_routes as module
+
+    async def handler(request):
+        pass
+
+    row = Route("/api/ui/files", handler)
+    monkeypatch.setattr(module, "ui_routes", lambda: [
+        row, row, Route("/api/ui/webui/ticket", handler), Route("/unrelated", handler),
+    ])
+    paths = [row.path for row in module.controller_routes()]
+    assert paths.count("/api/lsm/controller/files") == 1
+    assert not any("ticket" in path for path in paths)

@@ -25,9 +25,9 @@ async def test_existing_login_portal_issues_sqlite_workspace_ticket(tmp_path, mo
         subject="alice", claims={"scope": "shell:read remote:use", "auth": "oauth",
                                   "exp": int(time.time()) + 3600},
     ))
-    req = Request({"type": "http", "method": "POST", "path": "/api/ui/librechat/ticket",
+    req = Request({"type": "http", "method": "POST", "path": "/api/ui/webui/ticket",
                    "scheme": "https", "server": ("lsm.example.invalid", 443), "headers": []})
-    response = await human_ui.api_librechat_ticket(req)
+    response = await human_ui.api_webui_ticket(req)
     assert response.status_code == 200
     body = json.loads(response.body)
     assert body["ok"] is True

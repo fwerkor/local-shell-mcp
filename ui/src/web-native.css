@@ -622,7 +622,7 @@ button.summary-card { cursor: pointer; }
   .native-table th, .native-table td { padding-left: 8px; padding-right: 8px; }
 }
 
-/* Hosted Chat is a separate interface, not a dashboard panel. */
+/* WebUI is a separate interface, not a dashboard panel. */
 .hosted-chat { display:grid; grid-template-columns:220px minmax(340px,1fr); gap:0; min-height:calc(100dvh - 174px); border:1px solid #dde1eb; border-radius:14px; background:white; box-shadow:0 5px 30px #15204308; overflow:hidden; }
 .hosted-chat:has(.hosted-workspace:not([hidden])) { grid-template-columns:190px minmax(300px,1fr) minmax(360px,42%); }
 .hosted-chats { display:flex; flex-direction:column; gap:12px; padding:16px 12px; border-right:1px solid #e7eaf1; background:#f7f8fc; min-height:0; }
@@ -696,18 +696,18 @@ button.summary-card { cursor: pointer; }
 .hosted-dialog-actions button:last-child { color:#fff; background:#06c; }
 .hosted-dialog-actions button[disabled] { opacity:.4; cursor:not-allowed; }
 
-/* Archived Hosted Chat conversations use an independent, read-only browser. */
+/* Archived WebUI conversations use an independent, read-only browser. */
 .hosted-archive-filter { width:calc(100% - 24px); min-width:0; margin:8px 12px; padding:9px 10px; border:1px solid #d7dceb; border-radius:8px; background:#fff; color:#253048; font-size:12px; }
 .hosted-archive-filter:focus { outline:2px solid #06c; outline-offset:1px; }
 .hosted-archive-filter[hidden] { display:none; }
 
-/* Hosted Chat compact checkpoints are stored separately from raw history. */
+/* WebUI compact checkpoints are stored separately from raw history. */
 .hosted-context-info { padding:7px 14px; border-bottom:1px solid #e3e7ef; color:#768096; font-size:11px; }
 .hosted-context-info[hidden] { display:none; }
 .hosted-context-info summary { cursor:pointer; }
 .hosted-context-info pre { max-height:220px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
 
-/* Hosted Chat follows the Canonical WebUI spacing and control conventions. */
+/* WebUI follows the Canonical WebUI spacing and control conventions. */
 .hosted-chat { border-radius: 4px; border-color: var(--line); box-shadow: none; min-height: calc(100dvh - 205px); }
 .hosted-chats { background: #f7f7f7; border-right-color: var(--line); }
 .hosted-chat button { border-radius: 3px; font-size: 14px; }
@@ -739,30 +739,30 @@ button.summary-card { cursor: pointer; }
 
 
 /* The LSM entry only displays a short-lived handoff to the full workspace. */
-body:has(.lsm-librechat) .sidebar,
-body:has(.lsm-librechat) .topbar,
-body:has(.lsm-librechat) .page-footer { display:none; }
-body:has(.lsm-librechat) .main-content {
+body:has(.lsm-webui-chat) .sidebar,
+body:has(.lsm-webui-chat) .topbar,
+body:has(.lsm-webui-chat) .page-footer { display:none; }
+body:has(.lsm-webui-chat) .main-content {
   height:100dvh; min-height:0; margin:0; overflow:hidden;
 }
-body:has(.lsm-librechat) #view-root {
+body:has(.lsm-webui-chat) #view-root {
   display:flex; height:100%; padding:0; min-height:0;
 }
-body:has(.lsm-librechat) #view-root > .controller-page {
+body:has(.lsm-webui-chat) #view-root > .controller-page {
   display:flex; flex:1 1 auto; min-height:0; min-width:0;
 }
-.lsm-librechat { display:flex; position:relative; flex:1 1 auto; min-height:0; min-width:0; }
-.lsm-librechat-loading {
+.lsm-webui-chat { display:flex; position:relative; flex:1 1 auto; min-height:0; min-width:0; }
+.lsm-webui-chat-loading {
   position:absolute; z-index:2; inset:0; display:grid; place-items:center;
   background:var(--surface, #fff); color:var(--text, #222);
 }
-.lsm-librechat-loading[hidden] { display:none; }
-.lsm-librechat [data-chat-reconnect] {
+.lsm-webui-chat-loading[hidden] { display:none; }
+.lsm-webui-chat [data-chat-reconnect] {
   position:absolute; z-index:3; inset:auto 20px 20px auto; padding:10px 16px;
   border:1px solid var(--line, #ccc); border-radius:8px;
   background:var(--surface, #fff); color:var(--text, #222);
 }
-.lsm-librechat [data-chat-reconnect][hidden] { display:none; }
+.lsm-webui-chat [data-chat-reconnect][hidden] { display:none; }
 /* Controller configuration */
 .settings-page { display: grid; gap: 14px; padding-bottom: 30px; }
 .settings-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 14px; }

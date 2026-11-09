@@ -519,3 +519,57 @@ async def test_refresh_discards_tools_when_configuration_changes(tmp_path, monke
     searched = await manager.search(server="demo")
     assert searched["tools"] == []
     assert searched["unrefreshed_servers"] == ["demo"]
+
+
+@pytest.mark.asyncio
+async def test_transport_reconfiguration_invalidates_tools_and_honors_local_policy(tmp_path, monkeypatch):
+    manager = DynamicMCPManager(tmp_path / ".state")
+    await manager.manage(action="register", name="switch", transport="streamable_http",
+                         url="https://mcp.example.test/api", refresh=False)
+    changed = await manager.manage(action="update", name="switch", transport="stdio",
+                                   command=sys.executable, args=["-V"], cwd=str(tmp_path),
+                                   env={"API_KEY": "secret"}, headers={"X-Test": "value"})
+    assert changed["refreshed"] is False
+    assert changed["server"]["tool_count"] == 0
+    assert changed["server"]["transport"] == "stdio"
+    assert "secret" not in repr(changed)
+    monkeypatch.setattr(dynamic_mcp, "get_settings", lambda: SimpleNamespace(disable_local=True, state_backend="file"))
+    with pytest.raises(ValueError, match="stdio dynamic MCP servers are disabled"):
+        await manager.manage(action="update", name="switch", args=[])
+    monkeypatch.undo()
+    changed = await manager.manage(action="update", name="switch", transport="streamable_http",
+                                   url="https://new.example.test/api", env={}, headers={})
+    assert changed["server"]["transport"] == "streamable_http"
+    assert changed["server"]["url"] == "https://new.example.test/api"
+    assert changed["server"]["command"] is None
+    assert changed["server"]["args"] == []
+
+
+@pytest.mark.asyncio
+async def test_optional_sse_transport_initializes_session(tmp_path, monkeypatch):
+    import mcp.client.sse
+
+    calls = []
+
+    @asynccontextmanager
+    async def transport(url, headers):
+        calls.append((url, headers))
+        yield "read", "write"
+
+    class Session:
+        def __init__(self, read, write):
+            assert (read, write) == ("read", "write")
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        async def initialize(self):
+            calls.append("initialized")
+
+    monkeypatch.setattr(mcp.client.sse, "sse_client", transport)
+    monkeypatch.setattr(dynamic_mcp, "ClientSession", Session)
+    server = dynamic_mcp.DynamicMCPServer(name="events", transport="sse",
+                url="https://mcp.example.test/sse", headers={"Authorization": "token"})
+    async with DynamicMCPManager(tmp_path)._session(server) as session:
+        assert isinstance(session, Session)
+    assert calls == [(server.url, server.headers), "initialized"]

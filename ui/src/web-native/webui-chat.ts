@@ -3,7 +3,7 @@ import { BaseController, type NativePageContext } from "./common"
 type LoginTicket = { url: string; ticket: string }
 
 /** Exchange LSM authorization for a single-user workspace session. */
-export function libreChatLoginAction(url: string): string {
+export function webUIChatLoginAction(url: string): string {
   const destination = new URL(url)
   const local = destination.protocol === "http:" &&
     ["localhost", "127.0.0.1", "[::1]"].includes(destination.hostname)
@@ -14,16 +14,16 @@ export function libreChatLoginAction(url: string): string {
   return destination.origin + "/api/auth/lsm"
 }
 
-/** The LSM WebUI is the login gateway; LibreChat renders the whole workspace. */
-export class LibreChatController extends BaseController {
+/** The LSM WebUI is the login gateway; the Python WebUI renders the workspace. */
+export class WebUIChatController extends BaseController {
   private loading = false
 
   constructor(context: NativePageContext) { super(context) }
 
   mount(root: HTMLElement): void {
     this.root = root
-    root.innerHTML = `<section class="lsm-librechat">
-      <div class="lsm-librechat-loading" role="status" data-chat-status>
+    root.innerHTML = `<section class="lsm-webui-chat">
+      <div class="lsm-webui-chat-loading" role="status" data-chat-status>
         Opening LSM Workspace…
       </div>
       <button type="button" data-chat-reconnect hidden>Retry</button>
@@ -42,9 +42,9 @@ export class LibreChatController extends BaseController {
     reconnect.hidden = true
     status.textContent = "Opening LSM Workspace…"
     try {
-      const { url, ticket } = await this.context.api.send<LoginTicket>("/librechat/ticket", "POST", {})
+      const { url, ticket } = await this.context.api.send<LoginTicket>("/webui/ticket", "POST", {})
       if (this.destroyed) return
-      const action = libreChatLoginAction(url)
+      const action = webUIChatLoginAction(url)
       const form = document.createElement("form")
       form.method = "POST"
       form.action = action

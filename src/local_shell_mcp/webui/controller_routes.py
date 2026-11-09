@@ -10,7 +10,7 @@ from starlette.routing import Route
 
 from ..human_ui import UI_API_PREFIX, ui_routes
 
-_PRIVATE_PREFIXES = ("librechat", "hosted-chat")
+_PRIVATE_PREFIXES = ("webui",)
 
 
 def controller_routes() -> list[Route]:
