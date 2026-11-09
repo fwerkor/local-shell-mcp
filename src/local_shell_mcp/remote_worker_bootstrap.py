@@ -17,6 +17,10 @@ import time
 from pathlib import Path
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
 def _state_dir() -> Path:
     return Path(__file__).resolve().parent
 
@@ -122,12 +126,12 @@ def main() -> int:
             )
             inherited_lock = env.get("LOCAL_SHELL_MCP_WORKER_LOCK_FD", "")
             kwargs = {}
-            if inherited_lock and os.name != "nt":
+            if inherited_lock and not _is_windows():
                 kwargs["pass_fds"] = (int(inherited_lock),)
-            elif inherited_lock and os.name == "nt":
+            elif inherited_lock and _is_windows():
                 kwargs["close_fds"] = False
             worker_python = sys.executable
-            if os.name == "nt" and Path(worker_python).name.lower() == "pythonw.exe":
+            if _is_windows() and Path(worker_python).name.lower() == "pythonw.exe":
                 # A scheduled task uses pythonw, whose stdout/stderr may be
                 # None. Start the child without a console but retain logs.
                 python = str(Path(worker_python).with_name("python.exe"))
