@@ -372,7 +372,11 @@ def test_shell_process_termination_native_sessions_and_dispatch(tmp_path, monkey
         lambda *args: (_ for _ in ()).throw(OSError()),
         raising=False,
     )
-    assert asyncio.run(shell._terminate_process_group(proc)) == ""
+    # This mock exercises POSIX signal fallback; never send its invented PID
+    # to the Windows OS helper. Windows tree behavior has separate real tests.
+    with monkeypatch.context() as platform:
+        platform.setattr(shell, "sys", SimpleNamespace(platform="linux"))
+        assert asyncio.run(shell._terminate_process_group(proc)) == ""
     assert proc.terminated and proc.killed
 
     proc = Proc()

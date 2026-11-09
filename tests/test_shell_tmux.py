@@ -145,7 +145,7 @@ def test_run_exec_reports_timeout_before_process_creation(tmp_path, monkeypatch)
     _configure(tmp_path, monkeypatch)
 
     async def delayed_spawn(*args, **kwargs):
-        await asyncio.sleep(60)
+        await asyncio.sleep(0.05)
 
     monkeypatch.setattr(shell.asyncio, "create_subprocess_exec", delayed_spawn)
     monkeypatch.setattr(shell, "clamp_timeout", lambda timeout_s: 0.01)
