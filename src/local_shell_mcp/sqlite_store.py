@@ -399,11 +399,16 @@ class SQLiteStateStore:
                 ).fetchone()
                 if previous and previous[0] == info.st_mtime_ns and previous[1] == info.st_size:
                     continue
+                existing = db.execute("SELECT value FROM state WHERE key=?", (key,)).fetchone()
+                if existing is None and previous:
+                    # A committed import journal without its destination row is
+                    # a later SQLite deletion. Old file writers must not revive
+                    # state that the Controller has deliberately removed.
+                    continue
                 if info.st_size > 64 * 1024 * 1024:
                     raise RuntimeError(f"Legacy state entry is too large for safe automatic import: {key}")
                 payload = path.read_bytes()
                 digest = hashlib.sha256(payload).hexdigest()
-                existing = db.execute("SELECT value FROM state WHERE key=?", (key,)).fetchone()
                 if existing is None:
                     db.execute("INSERT INTO state(key,value) VALUES(?,?)", (key, sqlite3.Binary(payload)))
                     count += 1
