@@ -17,7 +17,6 @@ from starlette.routing import Route
 from starlette.websockets import WebSocket
 
 import local_shell_mcp.audit as audit_module
-from local_shell_mcp import __version__
 from local_shell_mcp.audit import audit, query_audit, suppress_audit
 from local_shell_mcp.auth import Principal
 from local_shell_mcp.http_app import build_http_app
@@ -33,7 +32,6 @@ from local_shell_mcp.human_ui import (
     _parent_path,
     _path_name,
     _split_tui_command,
-    _ui_index_html,
     _UnixPtyProcess,
     _validate_tui_api_base,
     _WindowsPtyProcess,
@@ -293,58 +291,13 @@ def test_webui_logical_session_api_reports_missing_context_and_runtime_errors(
     assert broken_list.status_code == 400
     assert "session list unavailable" in broken_list.text
 
-def test_webui_shell_uses_available_viewport_without_fixed_desktop_cap():
-    css_path = Path(__file__).parents[1] / "src/local_shell_mcp/ui_static/web.css"
-    css = css_path.read_text(encoding="utf-8")
-
-    assert "1540px" not in css
-    assert "960px" not in css
-    assert ".desktop-panel:fullscreen" in css
-
-def test_webui_index_versions_static_assets_for_cache_busting(tmp_path, monkeypatch):
-    _configure(tmp_path, monkeypatch)
-
-    html = _ui_index_html()
-
-    assert f"/ui/assets/web.css?v={__version__}" in html
-    assert f"/ui/assets/web.js?v={__version__}" in html
-    assert f"/ui/assets/favicon.svg?v={__version__}" in html
-    assert "__LSM_UI_ASSET_VERSION__" not in html
-
-def test_webui_visual_regressions_are_packaged():
-    asset_root = Path(__file__).parents[1] / "src/local_shell_mcp/ui_static"
-    html = (asset_root / "index.html").read_text(encoding="utf-8")
-    css = (asset_root / "web.css").read_text(encoding="utf-8")
-    script = (asset_root / "web.js").read_text(encoding="utf-8")
-
-    assert 'id="application"' in html
-    for label in ("Overview", "Files", "Terminals", "Desktop", "Sessions", "Remotes", "Audit"):
-        assert label in script
-    assert "p-button--positive" in css
-    assert "p-modal__dialog" in css
-    assert ".overview-metrics" in css
-    assert ".navigation-scrim" in css
-    assert ".desktop-panel:fullscreen" in css
-    assert not list(asset_root.glob("*.scss"))
-    assert ".explorer-host{" in css
-    assert ".wx-willow-theme" in css
-    assert "cdn.svar.dev" not in css
-    assert ".terminal-touchbar{" in css
-    assert ".terminal-layout.sidebar-hidden,.terminal-layout{display:flex;flex-direction:column;height:auto;min-height:0}" in css
-    assert ".terminal-sessions{display:grid;grid-template-rows:auto auto minmax(0,1fr);flex:0 0 184px;max-height:none}" in css
-    assert ".terminal-scrollbar{" in css
-    assert ".terminal-scrollbar-spacer{" in css
-    assert "overflow-y:scroll" in css
-    assert 'data-role="scrollbar"' in script
-    assert ".audit-layout{" in css
-    assert "Call result" in script
-    assert "Call input" in script
-    assert "/ws/shell" in script
-    assert "Persistent terminal" in script
-    assert "Loading terminals" in script
-    assert "Logical Sessions" in script
-    assert "/logical-sessions" in script
-    assert "row-menu" not in script
+def test_retired_browser_assets_are_not_packaged():
+    assets = Path(__file__).parents[1] / "src/local_shell_mcp/ui_static"
+    assert not (assets / "index.html").exists()
+    assert not (assets / "web.js").exists()
+    assert not (assets / "web.css").exists()
+    # The MCP embedded client remains independent of the retired browser UI.
+    assert (assets / "live-workspace.html").is_file()
 
 def test_ui_assets_reject_symlinks_outside_asset_root(tmp_path, monkeypatch):
     assets = tmp_path / "assets"
@@ -830,11 +783,11 @@ def test_webui_shell_is_public_but_api_remains_oauth_protected(tmp_path, monkeyp
     get_settings.cache_clear()
     client = TestClient(build_http_app())
 
-    page = client.get("/ui")
+    page = client.get("/ui", follow_redirects=False)
     api = client.get("/api/ui/bootstrap")
 
-    assert page.status_code == 200
-    assert 'id="application"' in page.text
+    assert page.status_code == 307
+    assert page.headers["location"] == "/c/new"
     assert api.status_code == 401
 
 def test_scoped_ui_token_preserves_oauth_permissions(tmp_path, monkeypatch):
