@@ -16,10 +16,20 @@ from local_shell_mcp import remote_worker_state as state
 def _bundle() -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
-        content = b"value = 1\n"
-        info = tarfile.TarInfo("local_shell_mcp/example.py")
-        info.size = len(content)
-        tar.addfile(info, io.BytesIO(content))
+        payloads = {
+            "__init__.py": b'__version__ = "3.0.1"\n',
+            "remote_worker.py": b"def main(argv=None): pass\n",
+            "remote_worker_cli.py": b"def run_worker_cli(argv=None): pass\n",
+            "settings.py": (
+                b"from types import SimpleNamespace\n"
+                b"def get_settings(): return SimpleNamespace(state_backend='file')\n"
+            ),
+            "example.py": b"value = 1\n",
+        }
+        for name, content in payloads.items():
+            info = tarfile.TarInfo("local_shell_mcp/" + name)
+            info.size = len(content)
+            tar.addfile(info, io.BytesIO(content))
     return buffer.getvalue()
 
 
@@ -124,7 +134,7 @@ def test_fetch_bytes_uses_urlopen(monkeypatch):
             return self
         def __exit__(self, *args):
             return False
-        def read(self):
+        def read(self, size=-1):
             return b"payload"
     captured = []
     monkeypatch.setattr(
@@ -578,3 +588,126 @@ def test_gui_dependency_bootstrap_unknown_platform_is_noop(tmp_path, monkeypatch
     assert result["available"] is True
     assert result["installed"] is False
     assert result["missing"] == []
+
+
+def test_windows_fetch_uses_curl_with_retry_and_tls_verification(monkeypatch):
+    monkeypatch.setattr(installer.sys, "platform", "win32")
+    monkeypatch.setattr(installer.shutil, "which", lambda name: "curl.exe" if name == "curl.exe" else None)
+    invoked = []
+
+    def run(command, **kwargs):
+        invoked.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout=b"payload", stderr=b"")
+
+    monkeypatch.setattr(installer.subprocess, "run", run)
+    assert installer._fetch_bytes("https://example.test/worker", timeout=20) == b"payload"  # noqa: SLF001
+    command, kwargs = invoked[0]
+    assert command[0] == "curl.exe"
+    assert "--retry" in command and "--retry-max-time" in command
+    assert "--fail" in command and "--location" in command
+    assert "--insecure" not in command and "-k" not in command
+    assert kwargs["timeout"] == 35
+
+
+def test_windows_fetch_rejects_bad_response_and_timeout(monkeypatch):
+    monkeypatch.setattr(installer.sys, "platform", "win32")
+    monkeypatch.setattr(installer.shutil, "which", lambda name: "curl.exe" if name == "curl.exe" else None)
+    monkeypatch.setattr(
+        installer.subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(
+            command, 22, stdout=b"<html>error</html>", stderr=b"HTTP 530"
+        ),
+    )
+    with pytest.raises(RuntimeError, match="curl exit 22"):
+        installer._fetch_bytes("https://example.test/worker")  # noqa: SLF001
+
+    def timeout(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, 30)
+
+    monkeypatch.setattr(installer.subprocess, "run", timeout)
+    with pytest.raises(TimeoutError, match="download timed out"):
+        installer._fetch_bytes("https://example.test/worker", timeout=15)  # noqa: SLF001
+
+
+def test_preflight_fails_closed_before_overwriting_existing_worker(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    original = state.worker_runtime_dir() / "local_shell_mcp"
+    original.mkdir(parents=True)
+    (original / "marker").write_text("original")
+    before = state.read_worker_config()
+    payload = _bundle()
+    digest = hashlib.sha256(payload).hexdigest()
+    monkeypatch.setattr(
+        installer,
+        "fetch_manifest",
+        lambda server: {"sha256": digest, "bundle_version": "bad", "url": "https://s/b.tgz"},
+    )
+    monkeypatch.setattr(installer, "_fetch_bytes", lambda *args, **kwargs: payload)
+    monkeypatch.setattr(
+        installer,
+        "_preflight_runtime",
+        lambda *args: (_ for _ in ()).throw(RuntimeError("invalid new worker")),
+    )
+
+    with pytest.raises(RuntimeError, match="invalid new worker"):
+        installer.install_or_update_runtime("https://s")
+    assert (original / "marker").read_text() == "original"
+    assert state.read_worker_config() == before
+
+
+def test_preflight_of_actual_worker_bundle(tmp_path):
+    from local_shell_mcp.remote_worker_routes import worker_bundle_bytes
+
+    with tarfile.open(fileobj=io.BytesIO(worker_bundle_bytes()), mode="r:gz") as archive:
+        archive.extractall(tmp_path / "runtime", filter="data")
+
+    installer._preflight_runtime(tmp_path / "runtime", tmp_path)  # noqa: SLF001
+
+
+def test_preflight_rejects_missing_worker_dependency(tmp_path):
+    package = tmp_path / "runtime" / "local_shell_mcp"
+    package.mkdir(parents=True)
+    for name in ("__init__.py", "remote_worker.py", "remote_worker_cli.py", "settings.py"):
+        (package / name).write_text("")
+    (package / "remote_worker_cli.py").write_text("import local_shell_mcp.missing_dependency")
+    with pytest.raises(RuntimeError, match="failed preflight"):
+        installer._preflight_runtime(tmp_path / "runtime", tmp_path)  # noqa: SLF001
+
+
+
+def test_windows_upgrade_retains_previous_runtime_until_healthy_poll(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    original = state.worker_runtime_dir() / "local_shell_mcp"
+    original.mkdir(parents=True)
+    (original / "marker").write_text("prior runtime")
+    monkeypatch.setattr(installer.sys, "platform", "win32")
+    payload = _bundle()
+    digest = hashlib.sha256(payload).hexdigest()
+    monkeypatch.setattr(
+        installer,
+        "fetch_manifest",
+        lambda server: {"sha256": digest, "bundle_version": "3.0.1", "url": "https://s/b.tgz"},
+    )
+    monkeypatch.setattr(installer, "_fetch_bytes", lambda *args, **kwargs: payload)
+
+    result = installer.install_or_update_runtime("https://s")
+    assert result["updated"] is True
+    prior = state.worker_state_dir() / "runtime.previous"
+    pending = state.worker_state_dir() / "runtime.pending.json"
+    assert (prior / "local_shell_mcp" / "marker").read_text() == "prior runtime"
+    assert pending.is_file()
+    assert state.read_worker_config()["runtime_digest"] == digest
+
+    monkeypatch.setattr(
+        installer,
+        "fetch_manifest",
+        lambda server: {"sha256": "1" * 64, "bundle_version": "4.0.0", "url": "https://s/b.tgz"},
+    )
+    with pytest.raises(RuntimeError, match="already awaiting startup verification"):
+        installer.install_or_update_runtime("https://s", force=True)
+
+    installer.confirm_runtime_healthy()
+    assert not prior.exists()
+    assert not pending.exists()
+    assert state.read_worker_config()["runtime_digest"] == digest

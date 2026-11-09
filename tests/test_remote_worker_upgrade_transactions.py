@@ -25,10 +25,20 @@ def _setup(tmp_path, monkeypatch, *, previous: bool = True):
         (old / "value.py").write_text('version = "old"\n')
     archive = io.BytesIO()
     with tarfile.open(fileobj=archive, mode="w:gz") as tar:
-        data = b'version = "new"\n'
-        member = tarfile.TarInfo("local_shell_mcp/value.py")
-        member.size = len(data)
-        tar.addfile(member, io.BytesIO(data))
+        payloads = {
+            "__init__.py": b"",
+            "remote_worker.py": b"def main(argv=None): pass\n",
+            "remote_worker_cli.py": b"def run_worker_cli(argv=None): pass\n",
+            "settings.py": (
+                b"from types import SimpleNamespace\n"
+                b"def get_settings(): return SimpleNamespace(state_backend='file')\n"
+            ),
+            "value.py": b'version = "new"\n',
+        }
+        for name, data in payloads.items():
+            member = tarfile.TarInfo("local_shell_mcp/" + name)
+            member.size = len(data)
+            tar.addfile(member, io.BytesIO(data))
     payload = archive.getvalue()
     digest = hashlib.sha256(payload).hexdigest()
     monkeypatch.setattr(

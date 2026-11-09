@@ -58,6 +58,9 @@ def _mock_bundle(monkeypatch: pytest.MonkeyPatch, code: str) -> str:
         lambda server: {"sha256": digest, "bundle_version": "bad-version", "url": "/bundle"},
     )
     monkeypatch.setattr(installer, "_fetch_bytes", lambda url, timeout=60: payload)
+    # Exercise supervisor rollback on deliberately broken candidates; other
+    # tests verify that the real install preflight rejects these before swap.
+    monkeypatch.setattr(installer, "_preflight_runtime", lambda *args: None)
     return digest
 
 
