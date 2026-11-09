@@ -86,10 +86,12 @@ def _validate(body: dict) -> dict:
 
 
 async def provider_profiles(request):
-    from ..auth import require_scopes
+    from ..auth import _is_cross_origin_request, require_scopes
     from ..settings import get_settings
 
     _owner(request)
+    if get_settings().auth_mode == "none" and _is_cross_origin_request(request):
+        raise HTTPException(401, detail="Cross-origin Controller settings access is not allowed")
     if get_settings().auth_mode != "none":
         require_scopes(request.state.principal, ["admin:config"])
     if request.method == "PUT":

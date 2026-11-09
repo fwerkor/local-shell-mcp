@@ -84,6 +84,9 @@ async def test_profiles_authorization_persistence_catalog_and_runtime(setup_prof
         # Auth-disabled Controller remains configurable without inventing scopes.
         settings.auth_mode = "none"
         assert (await client.get("/api/lsm/providers")).status_code == 200
+        assert (await client.get("/api/lsm/providers", headers={"Origin": "https://lsm.invalid"})).status_code == 200
+        assert (await client.get("/api/lsm/providers", headers={"Origin": "https://other.invalid"})).status_code == 401
+        assert (await client.put("/api/lsm/providers", headers={"Origin": "https://other.invalid"}, json={})).status_code == 401
 
 
 @pytest.mark.asyncio
