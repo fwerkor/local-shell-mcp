@@ -50,6 +50,7 @@ async def test_workspace_navigation_requires_a_live_cookie(tmp_path, monkeypatch
 async def test_browser_default_entry_authenticates_without_an_open_button(tmp_path, monkeypatch):
     playwright = pytest.importorskip("playwright.async_api")
     import uvicorn
+
     from local_shell_mcp.auth import AuthMiddleware
     from local_shell_mcp.main import _with_oauth_routes
     from local_shell_mcp.settings import get_settings
