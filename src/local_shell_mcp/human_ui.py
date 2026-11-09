@@ -28,7 +28,6 @@ from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import (
     FileResponse,
-    HTMLResponse,
     JSONResponse,
     RedirectResponse,
     Response,
@@ -37,7 +36,6 @@ from starlette.responses import (
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from . import __version__
 from .audit import get_audit_entry, query_audit, suppress_audit
 from .auth import Principal, principal_scopes, require_scopes, verify_request
 from .fs_ops import (
