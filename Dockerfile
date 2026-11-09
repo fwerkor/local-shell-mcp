@@ -105,9 +105,9 @@ RUN pip install --no-cache-dir -e . \
   && rm -rf /root/.cache/pip \
   && python -c "import zstandard" \
   && test -s /app/src/local_shell_mcp/webui/frontend.tar.gz \
-  && test -s /app/src/local_shell_mcp/ui_static/index.html \
-  && test -s /app/src/local_shell_mcp/ui_static/web.js \
-  && test -s /app/src/local_shell_mcp/ui_static/web.css \
+  && test -s /app/src/local_shell_mcp/ui_static/live-workspace.html \
+  && test ! -e /app/src/local_shell_mcp/ui_static/web.js \
+  && test ! -e /app/src/local_shell_mcp/ui_static/index.html \
   && test ! -e /app/src/local_shell_mcp/ui_runtime \
   && test ! -d "${PLAYWRIGHT_BROWSERS_PATH}"
 
