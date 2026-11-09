@@ -6,6 +6,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from mcp.server.fastmcp.exceptions import ToolError
 
 from local_shell_mcp.settings import get_settings
 from local_shell_mcp.webui import lsm_tool_registry as registry
@@ -31,7 +32,9 @@ def bound_policy(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_deny_bad_names_machine_selectors_session_and_oversized_input(bound_policy):
+async def test_deny_bad_names_machine_selectors_session_and_oversized_input(bound_policy, monkeypatch):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_HTTP_REQUEST_BYTES", "32768")
+    get_settings.cache_clear()
     repo, cid = bound_policy
     scopes = {"shell:read", "shell:write", "shell:execute", "remote:use"}
     for name, args, error in [
@@ -119,7 +122,9 @@ async def test_executor_error_audit_and_context_reset(bound_policy, monkeypatch)
     with pytest.raises(PermissionError, match="internal session"):
         await registry._invoke_registered("local", cid, "fake", {"logical_session_id": "x"},
                                           scopes={"shell:read"})
-    with pytest.raises(ValueError, match="too large"):
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_HTTP_REQUEST_BYTES", "32768")
+    get_settings.cache_clear()
+    with pytest.raises(ValueError, match="configured 32768 byte request limit"):
         await registry._invoke_registered("local", cid, "fake", {"payload": "a" * 35000},
                                           scopes={"shell:read"})
 
@@ -210,3 +215,70 @@ async def test_write_machine_grant_preserves_native_read_and_write_scopes(bound_
         await registry.call_tool("local", cid, ModelToolCall("write", "file_write", {
             "path": "notes.txt", "content": "blocked"}), granted_scopes={"shell:write"})
     assert dispatched == []
+
+
+@pytest.mark.asyncio
+async def test_large_native_arguments_reuse_transport_and_operation_limits(bound_policy, tmp_path, monkeypatch):
+    _, cid = bound_policy
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_HTTP_REQUEST_BYTES", "200000")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_FILE_WRITE_BYTES", "100000")
+    get_settings.cache_clear()
+    registry._registry_for_state.cache_clear()
+    scopes = {"shell:read", "shell:write"}
+    payload = "a" * 70000
+    result = json.loads(await registry.call_tool("local", cid, ModelToolCall("write-large", "file_write", {
+        "path": "native-large.txt", "content": payload,
+    }), granted_scopes=scopes))
+    assert result["ok"] is True
+    assert (tmp_path / "native-large.txt").read_text() == payload
+
+    # The request fits the shared transport budget; the original file executor
+    # still rejects it with its own configured error structure and no file.
+    result = json.loads(await registry.call_tool("local", cid, ModelToolCall("write-native-denied", "file_write", {
+        "path": "native-denied.txt", "content": "x" * 100001,
+    }), granted_scopes=scopes))
+    assert result["isError"] is True
+    assert result["structuredContent"]["data"]["error_type"] == "ValueError"
+    assert "100000" in result["structuredContent"]["message"]
+    assert not (tmp_path / "native-denied.txt").exists()
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_HTTP_REQUEST_BYTES", "1000")
+    get_settings.cache_clear()
+    for payload in ("x" * 1000, "🙂" * 300):
+        with pytest.raises(ValueError, match="configured 1000 byte request limit"):
+            await registry.call_tool("local", cid, ModelToolCall("transport-denied", "file_write", {
+                "path": "transport-denied.txt", "content": payload,
+            }), granted_scopes=scopes)
+    assert not (tmp_path / "transport-denied.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_both_internal_entries_reject_invalid_json_and_forged_credentials(bound_policy, tmp_path):
+    _, cid = bound_policy
+    scopes = {"shell:read", "shell:write"}
+    cyclic = {"path": "invalid.txt"}
+    cyclic["content"] = cyclic
+    malformed = [None, [], {"content": float("nan")}, {"content": float("inf")},
+                 {"content": {1, 2}}, {"content": b"binary"}, {"content": "\ud800"}, cyclic]
+    for arguments in malformed:
+        with pytest.raises(ValueError):
+            await registry.call_tool("local", cid, ModelToolCall("invalid", "file_write", arguments),
+                                     granted_scopes=scopes)
+        with pytest.raises(ValueError):
+            await registry._invoke_registered("local", cid, "file_write", arguments, scopes=scopes)
+    for invoke in (
+        lambda arguments: registry.call_tool("local", cid, ModelToolCall("forged", "file_write", arguments), granted_scopes=scopes),
+        lambda arguments: registry._invoke_registered("local", cid, "file_write", arguments, scopes=scopes),
+    ):
+        with pytest.raises(PermissionError, match="internal session credentials"):
+            await invoke({"logical_session_id": "forged", "path": "forged.txt", "content": "never"})
+    assert not (tmp_path / "invalid.txt").exists()
+    assert not (tmp_path / "forged.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_original_schema_still_rejects_missing_required_arguments(bound_policy):
+    _, cid = bound_policy
+    with pytest.raises(ToolError, match="(?is)path.*required|required.*path"):
+        await registry.call_tool("local", cid, ModelToolCall("missing-path", "file_write", {"content": "never"}),
+                                 granted_scopes={"shell:read", "shell:write"})

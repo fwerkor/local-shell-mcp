@@ -58,7 +58,6 @@ _ADDITIONAL_SCOPES = {
     "mcp_manage": "shell:execute", "remote_manage": "remote:use",
 }
 _AUTHORIZATION_RECHECK_SECONDS = 0.5
-_MAX_ARGUMENT_BYTES = 32768
 
 
 @lru_cache(maxsize=8)
@@ -188,15 +187,37 @@ def _can_authorize(owner: str, conversation_id: str, machine: str, operation: st
         return False
 
 
+def _validate_arguments(arguments: Any) -> None:
+    """Apply the existing LSM transport budget, not a separate Agent limit.
+
+    Internal dispatch skips HTTP, so enforce the same configured byte ceiling
+    here. Tool-specific file/script limits and schemas remain in the native
+    executor. SDK history/input previews are a different, non-execution concern.
+    """
+    from ..settings import get_settings
+
+    if not isinstance(arguments, dict):
+        raise ValueError("LSM tool arguments must be an object")
+    if "logical_session_id" in arguments:
+        raise PermissionError("Models cannot provide LSM internal session credentials")
+    limit = max(1, get_settings().max_http_request_bytes)
+    size = 0
+    try:
+        encoder = json.JSONEncoder(ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        for chunk in encoder.iterencode(arguments):
+            size += len(chunk.encode("utf-8"))
+            if size > limit:
+                raise ValueError(f"LSM tool arguments exceed the configured {limit} byte request limit")
+    except (TypeError, RecursionError, UnicodeError) as error:
+        raise ValueError("LSM tool arguments must contain valid JSON") from error
+
+
 async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
                     granted_scopes: set[str], grant_expires: int | None = None) -> str:
     """Dispatch through FastMCP's original validated, audited tool function."""
     tool = _tool(call.name)
     arguments = call.arguments
-    if not isinstance(arguments, dict) or len(json.dumps(arguments, ensure_ascii=False)) > _MAX_ARGUMENT_BYTES:
-        raise ValueError("Invalid or oversized LSM tool arguments")
-    if "logical_session_id" in arguments:
-        raise PermissionError("Models cannot provide LSM internal session credentials")
+    _validate_arguments(arguments)
     def check_authorization():
         operation = _operation(tool, arguments)
         if tool.name in _AGENT_CONTROL:
@@ -309,10 +330,7 @@ async def _invoke_registered(owner: str, conversation_id: str, name: str,
     """Call only an explicitly vetted tool using MCP's own validated executor."""
     from ..auth import _CURRENT_PRINCIPAL, Principal
 
-    if "logical_session_id" in arguments:
-        raise PermissionError("Models cannot provide LSM internal session credentials")
-    if len(json.dumps(arguments, ensure_ascii=False)) > _MAX_ARGUMENT_BYTES:
-        raise ValueError("LSM tool input is too large")
+    _validate_arguments(arguments)
     invocation = dict(arguments)
     invocation["logical_session_id"] = None
     token = _CURRENT_PRINCIPAL.set(Principal(
