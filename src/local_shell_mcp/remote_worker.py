@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 
 def main(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
+    # Workers have only lightweight local configuration and recovery state.
+    # Never initialize the Controller SQLite database from the worker runtime.
+    os.environ["LOCAL_SHELL_MCP_STATE_BACKEND"] = "file"
     # Worker subprocess helpers execute controller-assigned jobs or GUI capture.
     # They do not expose the controller CLI or its tool-call credentials.
     if args and args[0] == "job-runner":

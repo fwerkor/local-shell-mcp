@@ -283,6 +283,12 @@ def _run_command(args: argparse.Namespace) -> None:
 
 
 def run_worker_cli(argv: list[str] | None = None) -> None:
+    # The full Controller CLI also dispatches worker commands here.
+    # Override SQLite defaults without adding a Worker database dependency.
+    os.environ["LOCAL_SHELL_MCP_STATE_BACKEND"] = "file"
+    from .settings import get_settings
+
+    get_settings.cache_clear()
     argv = sys.argv[1:] if argv is None else list(argv)
     try:
         _run_command(_parser().parse_args(argv))
