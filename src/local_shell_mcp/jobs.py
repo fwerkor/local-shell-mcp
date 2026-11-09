@@ -2283,8 +2283,12 @@ def run_job_runner_cli(argv: list[str] | None = None) -> None:
                 if not chunk:
                     break
                 output_bytes += len(chunk)
-                sys.stdout.buffer.write(chunk)
-                sys.stdout.buffer.flush()
+                # A Windows scheduled Worker uses pythonw.exe without stdio.
+                # The job log remains authoritative even without stdout.
+                output_stream = getattr(sys.stdout, "buffer", None)
+                if output_stream is not None:
+                    output_stream.write(chunk)
+                    output_stream.flush()
                 log.write(chunk)
                 log.flush()
                 if log.tell() > max_log_bytes * 2:
@@ -2293,7 +2297,8 @@ def run_job_runner_cli(argv: list[str] | None = None) -> None:
             truncated = _compact_log(log, max_log_bytes) or truncated
     except BaseException as exc:  # noqa: BLE001
         error = f"{type(exc).__name__}: {exc}"
-        print(error, file=sys.stderr, flush=True)
+        if sys.stderr is not None:
+            print(error, file=sys.stderr, flush=True)
         if exit_code is None:
             exit_code = 127
     finally:

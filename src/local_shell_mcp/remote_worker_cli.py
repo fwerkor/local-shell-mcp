@@ -283,12 +283,26 @@ def _run_command(args: argparse.Namespace) -> None:
 
 
 def run_worker_cli(argv: list[str] | None = None) -> None:
-    argv = sys.argv[1:] if argv is None else list(argv)
+    # The full Controller CLI also dispatches worker commands here.  Restore
+    # its SQLite setting when a short-lived CLI invocation returns.
+    old_backend = os.environ.get("LOCAL_SHELL_MCP_STATE_BACKEND")
+    os.environ["LOCAL_SHELL_MCP_STATE_BACKEND"] = "file"
+    from .settings import get_settings
+
+    get_settings.cache_clear()
     try:
-        _run_command(_parser().parse_args(argv))
-    except KeyboardInterrupt:
-        print("\nStatus: disconnected by user.", file=sys.stderr, flush=True)
-        raise SystemExit(130) from None
-    except Exception as exc:  # noqa: BLE001
-        print(f"Status: worker command failed: {exc}", file=sys.stderr, flush=True)
-        raise SystemExit(1) from None
+        argv = sys.argv[1:] if argv is None else list(argv)
+        try:
+            _run_command(_parser().parse_args(argv))
+        except KeyboardInterrupt:
+            print("\nStatus: disconnected by user.", file=sys.stderr, flush=True)
+            raise SystemExit(130) from None
+        except Exception as exc:  # noqa: BLE001
+            print(f"Status: worker command failed: {exc}", file=sys.stderr, flush=True)
+            raise SystemExit(1) from None
+    finally:
+        if old_backend is None:
+            os.environ.pop("LOCAL_SHELL_MCP_STATE_BACKEND", None)
+        else:
+            os.environ["LOCAL_SHELL_MCP_STATE_BACKEND"] = old_backend
+        get_settings.cache_clear()

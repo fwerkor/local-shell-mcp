@@ -304,7 +304,52 @@ def ensure_gui_dependencies(
         )
 
 
+_MAX_WORKER_DOWNLOAD_BYTES = 32 * 1024 * 1024
+
+
 def _fetch_bytes(url: str, timeout: float = 60) -> bytes:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in {"https", "http"} or not parsed.netloc:
+        raise ValueError("worker bundle URL must use HTTP(S)")
+
+    # On Windows the Worker uses curl for its long-poll transport.  Reuse that
+    # TLS/proxy stack for upgrades; urllib was repeatedly timing out during
+    # TLS handshakes on Windows machines even when their curl poll succeeded.
+    curl = (shutil.which("curl.exe") or shutil.which("curl")) if sys.platform == "win32" else None
+    if curl:
+        command = [
+            curl,
+            "--fail", "--silent", "--show-error", "--location",
+            "--connect-timeout", "10",
+            "--max-time", str(max(1, int(timeout))),
+            "--retry", "3", "--retry-delay", "2", "--retry-connrefused",
+            "--retry-max-time", str(max(1, int(timeout))),
+            "--max-filesize", str(_MAX_WORKER_DOWNLOAD_BYTES),
+            "--header", "Cache-Control: no-cache",
+            "--header", "Pragma: no-cache",
+            "--user-agent", f"local-shell-mcp-worker/{__version__}",
+            url,
+        ]
+        try:
+            result = subprocess.run(  # noqa: S603
+                command,
+                capture_output=True,
+                check=False,
+                timeout=timeout + 15,
+                **managed_process_kwargs(),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError("Windows worker download timed out") from exc
+        if result.returncode:
+            detail = result.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(
+                f"Windows worker download failed (curl exit {result.returncode}): "
+                f"{detail[:240]}"
+            )
+        if len(result.stdout) > _MAX_WORKER_DOWNLOAD_BYTES:
+            raise ValueError("worker download exceeded maximum bundle size")
+        return result.stdout
+
     request = urllib.request.Request(
         url,
         headers={
@@ -314,7 +359,10 @@ def _fetch_bytes(url: str, timeout: float = 60) -> bytes:
         },
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
-        return response.read()
+        data = response.read(_MAX_WORKER_DOWNLOAD_BYTES + 1)
+        if len(data) > _MAX_WORKER_DOWNLOAD_BYTES:
+            raise ValueError("worker download exceeded maximum bundle size")
+        return data
 
 
 def fetch_manifest(server: str) -> dict[str, Any]:
@@ -342,6 +390,57 @@ def _safe_extract(archive: Path, destination: Path) -> None:
         tar.extractall(destination)  # noqa: S202
 
 
+def _preflight_runtime(extracted: Path, scratch: Path) -> None:
+    """Exercise the isolated Worker import chain before replacing a working runtime."""
+    package = extracted / "local_shell_mcp"
+    required = ("__init__.py", "remote_worker.py", "remote_worker_cli.py", "settings.py")
+    missing = [name for name in required if not (package / name).is_file()]
+    if missing:
+        raise ValueError(f"worker bundle is missing required modules: {', '.join(missing)}")
+
+    python = Path(sys.executable)
+    if sys.platform == "win32" and python.name.lower() == "pythonw.exe":
+        candidate = python.with_name("python.exe")
+        if not candidate.is_file():
+            raise RuntimeError(f"python.exe is required to validate Windows Worker: {candidate}")
+        python = candidate
+
+    env = os.environ.copy()
+    env.update(
+        PYTHONPATH=str(extracted),
+        LOCAL_SHELL_MCP_STATE_BACKEND="file",
+        LOCAL_SHELL_MCP_AUTH_MODE="none",
+        LOCAL_SHELL_MCP_WORKSPACE_ROOT=str(scratch),
+        LOCAL_SHELL_MCP_STATE_DIR=str(scratch / "state"),
+        LOCAL_SHELL_MCP_WORKER_STATE_DIR=str(scratch / "worker-state"),
+        LOCAL_SHELL_MCP_CONFIG="",
+    )
+    script = """
+import sys
+sys.path.insert(0, sys.argv[1])
+import local_shell_mcp.remote_worker
+import local_shell_mcp.remote_worker_cli
+from local_shell_mcp.settings import get_settings
+assert get_settings().state_backend == 'file'
+"""
+    try:
+        result = subprocess.run(  # noqa: S603
+            [str(python), "-c", script, str(extracted)],
+            env=env,
+            cwd=scratch,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=20,
+            **managed_process_kwargs(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("new Worker runtime failed preflight: startup timed out") from exc
+    if result.returncode:
+        details = (result.stderr or result.stdout or "").strip()[-1200:]
+        raise RuntimeError(f"new Worker runtime failed preflight: {details}")
+
+
 def install_or_update_runtime(server: str, *, force: bool = False) -> dict[str, Any]:
     manifest = fetch_manifest(server)
     digest = str(manifest["sha256"])
@@ -356,6 +455,11 @@ def install_or_update_runtime(server: str, *, force: bool = False) -> dict[str, 
 
     state_dir = worker_state_dir()
     state_dir.mkdir(parents=True, exist_ok=True)
+    windows_previous = state_dir / "runtime.previous"
+    windows_pending = state_dir / "runtime-upgrade-pending.json"
+    if sys.platform == "win32" and (windows_previous.exists() or windows_pending.exists()):
+        raise RuntimeError("previous Windows Worker upgrade has not yet been confirmed")
+
     payload = _fetch_bytes(str(manifest["url"]), timeout=120)
     actual = hashlib.sha256(payload).hexdigest()
     if actual != digest:
@@ -370,24 +474,73 @@ def install_or_update_runtime(server: str, *, force: bool = False) -> dict[str, 
         _safe_extract(archive, extracted)
         if not (extracted / "local_shell_mcp").is_dir():
             raise ValueError("worker bundle does not contain local_shell_mcp")
+        _preflight_runtime(extracted, temporary_path)
 
         staged = state_dir / f"runtime.next.{os.getpid()}"
-        backup = state_dir / f"runtime.previous.{os.getpid()}"
+        backup = (
+            windows_previous
+            if sys.platform == "win32" and runtime.exists()
+            else state_dir / f"runtime.previous.{os.getpid()}"
+        )
+        keep_backup = backup == windows_previous
         shutil.rmtree(staged, ignore_errors=True)
-        shutil.rmtree(backup, ignore_errors=True)
+        if not keep_backup:
+            shutil.rmtree(backup, ignore_errors=True)
         shutil.copytree(extracted, staged)
         try:
+            if keep_backup:
+                pending_data = {
+                    "old_digest": current.get("runtime_digest", ""),
+                    "old_version": current.get("runtime_version", ""),
+                    "new_digest": digest,
+                }
+                marker_tmp = temporary_path / "upgrade-pending.json"
+                marker_tmp.write_text(json.dumps(pending_data), encoding="utf-8")
             if runtime.exists():
                 runtime.replace(backup)
+            if keep_backup:
+                marker_tmp.replace(windows_pending)
             staged.replace(runtime)
+            if current:
+                update_runtime_metadata(digest, version)
         except Exception:
-            if not runtime.exists() and backup.exists():
+            # Keep the original runtime and config usable if any install step
+            # fails.  A successful Windows switch retains the backup until
+            # the new Worker actually resumes polling.
+            if backup.exists():
+                if runtime.exists():
+                    shutil.rmtree(runtime)
                 backup.replace(runtime)
+                if current:
+                    update_runtime_metadata(
+                        str(current.get("runtime_digest") or ""),
+                        str(current.get("runtime_version") or ""),
+                    )
+            if keep_backup:
+                windows_pending.unlink(missing_ok=True)
             raise
         finally:
             shutil.rmtree(staged, ignore_errors=True)
-            shutil.rmtree(backup, ignore_errors=True)
+            if not keep_backup:
+                shutil.rmtree(backup, ignore_errors=True)
 
-    if current:
-        update_runtime_metadata(digest, version)
     return {"updated": True, "sha256": digest, "version": version, "runtime": str(runtime)}
+
+
+
+def confirm_runtime_upgrade() -> None:
+    """Remove the Windows rollback copy only after an upgraded Worker has polled."""
+    if sys.platform != "win32":
+        return
+    state = worker_state_dir()
+    pending = state / "runtime-upgrade-pending.json"
+    previous = state / "runtime.previous"
+    if not pending.is_file():
+        return
+    data = json.loads(pending.read_text(encoding="utf-8"))
+    config = read_worker_config()
+    if config.get("runtime_digest") != data.get("new_digest"):
+        return
+    if previous.is_dir():
+        shutil.rmtree(previous)
+    pending.unlink(missing_ok=True)

@@ -412,9 +412,12 @@ def _write_windows_task_launcher() -> Path:
     log_path = str(worker_log_path().resolve())
     content = f'''from __future__ import annotations
 
+import json
 import os
+import shutil
 import sys
 import traceback
+from pathlib import Path
 
 STATE_DIR = {state_dir!r}
 RUNTIME_DIR = {runtime_dir!r}
@@ -439,8 +442,41 @@ with open(LOG_PATH, "a", encoding="utf-8", buffering=1) as worker_log:
         from local_shell_mcp.remote_worker import main
 
         main(["run"])
-    except BaseException:
+    except BaseException as exc:
         traceback.print_exc()
+        # The launcher lives outside the versioned runtime.  If the new
+        # Worker cannot even start, recover the last known-good version
+        # before Task Scheduler retries the job.
+        should_restore = not isinstance(exc, KeyboardInterrupt) and not (
+            isinstance(exc, SystemExit) and exc.code in (None, 0)
+        )
+        previous = Path(STATE_DIR) / "runtime.previous"
+        pending = Path(STATE_DIR) / "runtime-upgrade-pending.json"
+        if should_restore and previous.is_dir() and pending.is_file():
+            try:
+                old = json.loads(pending.read_text(encoding="utf-8"))
+                failed = Path(STATE_DIR) / ("runtime.failed." + str(os.getpid()))
+                if failed.exists():
+                    shutil.rmtree(failed)
+                live = Path(RUNTIME_DIR)
+                if live.exists():
+                    live.replace(failed)
+                previous.replace(live)
+                config_path = Path(STATE_DIR) / "config.json"
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+                config["runtime_digest"] = old["old_digest"]
+                config["runtime_version"] = old["old_version"]
+                temp_config = config_path.with_suffix(".rollback.tmp")
+                temp_config.write_text(
+                    json.dumps(config, indent=2, sort_keys=True), encoding="utf-8"
+                )
+                temp_config.replace(config_path)
+                pending.unlink()
+                shutil.rmtree(failed, ignore_errors=True)
+                print("Status: Windows Worker restored previous runtime after failed startup.", flush=True)
+                os.execv(sys.executable, [sys.executable, __file__])
+            except Exception:
+                traceback.print_exc()
         raise
 '''
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -547,14 +583,17 @@ def _unregister_windows_task() -> None:
     )
 
 
-def refresh_installed_service_definition() -> Path | None:
+def refresh_installed_service_definition(*, register_task: bool = True) -> Path | None:
     kind = service_kind()
     if kind == "launchd" and _launchd_plist_path().exists():
         launcher = _installed_launchd_launcher_path() or worker_launcher_path()
         return _write_launchd_plist(launcher)
     if kind == "scheduled-task" and _windows_task_status() is not None:
         service_file = _write_windows_task_launcher()
-        _register_windows_task(service_file)
+        # Re-registering a currently running Task Scheduler task can terminate
+        # the only active Worker.  Its action already targets this fixed path.
+        if register_task:
+            _register_windows_task(service_file)
         return service_file
     return None
 
