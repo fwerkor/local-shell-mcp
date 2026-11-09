@@ -1234,8 +1234,18 @@ class RemoteManager:
         if protocol_version > 0:
             upgrade = {
                 "required": (
-                    worker_version != __version__
-                    or protocol_version < REMOTE_WORKER_POLL_PROTOCOL_VERSION
+                    protocol_version < REMOTE_WORKER_POLL_PROTOCOL_VERSION
+                    or (
+                        worker_version != __version__
+                        and worker.name
+                        not in {
+                            name.strip()
+                            for name in os.environ.get(
+                                "LOCAL_SHELL_MCP_REMOTE_WORKER_UPGRADE_HOLD", ""
+                            ).split(",")
+                            if name.strip()
+                        }
+                    )
                 ),
                 "version": __version__,
                 "protocol_version": REMOTE_WORKER_POLL_PROTOCOL_VERSION,
