@@ -58,7 +58,6 @@ _ADDITIONAL_SCOPES = {
     "mcp_manage": "shell:execute", "remote_manage": "remote:use",
 }
 _AUTHORIZATION_RECHECK_SECONDS = 0.5
-_MAX_OUTPUT_CHARS = 32768
 _MAX_ARGUMENT_BYTES = 32768
 
 
@@ -339,14 +338,10 @@ async def _invoke_registered(owner: str, conversation_id: str, name: str,
 def _encode_result(value: Any) -> str:
     if isinstance(value, tuple) and len(value) == 2:
         content, structured = value
-        if structured is not None:
-            value = structured
-        else:
-            value = [item.text if hasattr(item, "text") else {"type": "non_text_result"}
-                     for item in content]
+        value = structured if structured is not None else list(content)
     if hasattr(value, "model_dump"):
-        value = value.model_dump(mode="json")
-    text = json.dumps(value, ensure_ascii=False, default=str)
-    if len(text) > _MAX_OUTPUT_CHARS:
-        return text[:_MAX_OUTPUT_CHARS] + "... [truncated]"
-    return text
+        value = value.model_dump(mode="json", by_alias=True)
+    # Keep the native structured result intact for audit/checkpoint replay.
+    # Model-facing clipping belongs to the source ToolNode ingestion boundary.
+    return json.dumps(value, ensure_ascii=False,
+                      default=lambda item: item.model_dump(mode="json", by_alias=True) if hasattr(item, "model_dump") else str(item))

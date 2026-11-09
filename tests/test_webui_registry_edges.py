@@ -1,7 +1,8 @@
-"""Registry adapter reject-by-default behavior and bounded MCP outputs."""
+"""Registry adapter reject-by-default behavior and lossless native MCP output."""
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -61,7 +62,7 @@ async def test_deny_bad_names_machine_selectors_session_and_oversized_input(boun
     }}), {"source_machine": "local", "destination_machine": "worker2"}) == ["local", "worker2"]
 
 
-def test_original_schema_respects_other_tools_and_empty_policy(bound_policy):
+def test_original_schema_respects_other_tools_and_empty_policy(bound_policy, tmp_path):
     repo, cid = bound_policy
     base = {"shell:read", "shell:write", "shell:execute", "remote:use"}
     found = registry.available_tools("local", cid, scopes=base)
@@ -77,10 +78,23 @@ def test_original_schema_respects_other_tools_and_empty_policy(bound_policy):
     )} == {"session_manage", "plan_manage"}
     assert registry.registered_definitions(("totally_missing",)) == []
     assert registry._encode_result(([], {"ok": True})) == '{"ok": true}'
-    assert registry._encode_result(([SimpleNamespace(text="hello"), {"type": "image"}], None)) == (
-        '["hello", {"type": "non_text_result"}]'
+    from mcp.types import (
+        EmbeddedResource,
+        ImageContent,
+        ResourceLink,
+        TextContent,
+        TextResourceContents,
     )
-    assert '... [truncated]' in registry._encode_result({"payload": "z" * 40000})
+
+    blocks = [TextContent(type="text", text="hello"),
+              ImageContent(type="image", data="aGVsbG8=", mimeType="image/png", _meta={"source": "native"}),
+              EmbeddedResource(type="resource", resource=TextResourceContents(uri="file:///known.txt", text="kept")),
+              ResourceLink(type="resource_link", name="native-file", uri="file:///known.txt")]
+    assert json.loads(registry._encode_result((blocks, None))) == [block.model_dump(mode="json", by_alias=True) for block in blocks]
+    assert json.loads(registry._encode_result((blocks, None)))[1]["_meta"] == {"source": "native"}
+    assert json.loads(registry._encode_result({"path": tmp_path})) == {"path": str(tmp_path)}
+    oversized = {"payload": "z" * 40000}
+    assert json.loads(registry._encode_result(oversized)) == oversized
     assert '"ok": true' in registry._encode_result(SimpleNamespace(model_dump=lambda **_: {"ok": True}))
     assert registry._can_authorize("local", cid, "local", "read", base, None) is False
 

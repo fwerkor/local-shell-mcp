@@ -144,6 +144,7 @@ class ApprovalResult:
     content: str
     status: str
     decision: str
+    raw_content: str | None = None
 
     def history_message(self) -> dict:
         # Provider adapters consume the original call ID. Error status belongs
@@ -154,10 +155,10 @@ class ApprovalResult:
 def truncate_approval_result(content: str, max_chars: int) -> str:
     """Port SDK truncateToolResultContent, including UTF-16-safe boundaries."""
     encoded = content.encode("utf-16-le", errors="surrogatepass")
+    if len(encoded) // 2 <= max_chars:
+        return content
     units = "".join(chr(int.from_bytes(encoded[index:index + 2], "little"))
                     for index in range(0, len(encoded), 2))
-    if len(units) <= max_chars:
-        return content
 
     def sliced(start: int, end: int | None = None) -> str:
         value = units[start:end]
@@ -216,7 +217,9 @@ async def execute_approval_batch(
         else:
             # No exception wrapper here: cancellation / checkpoint interruption
             # must unwind to the runtime, rather than fabricate a completed call.
-            result = ApprovalResult(call, truncate_approval_result(await dispatch(call), max_result_chars), "success", kind)
+            raw_content = await dispatch(call)
+            result = ApprovalResult(call, truncate_approval_result(raw_content, max_result_chars),
+                                    "success", kind, raw_content=raw_content)
         if on_completed is not None:
             await on_completed(result)
         results.append(result)

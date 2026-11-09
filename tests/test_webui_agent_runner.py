@@ -279,3 +279,58 @@ def test_oauth_grant_is_never_expanded_to_controller_scopes(runtime, monkeypatch
     assert generation_routes._request_grant(request) == ({"shell:read"}, 123)
     missing = Request({"type": "http", "method": "POST", "path": "/", "headers": [], "state": {}})
     assert generation_routes._request_grant(missing) == (set(), None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size", [70000, 500000])
+@pytest.mark.parametrize("reviewed", [False, True])
+async def test_native_result_remains_lossless_while_model_uses_source_ingestion_limit(runtime, monkeypatch, size, reviewed):
+    import json
+
+    from local_shell_mcp.webui.approval_runtime import truncate_approval_result
+
+    root, database, store, profile = runtime
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_FILE_READ_BYTES", "1000000")
+    get_settings.cache_clear()
+    payload = "head:" + "x" * size + ":tail"
+    (root / "native-large.txt").write_text(payload, encoding="utf-8")
+    generation, _ = store.begin("local", {"text": "Read the native result"})
+    received = []
+
+    async def model(profile, history, **kwargs):
+        if history[-1].get("role") != "tool":
+            yield ModelToolCall("large", "file_read", {"path": "native-large.txt"})
+        else:
+            received.append(history[-1]["content"])
+            yield "done"
+
+    async def emit(text):
+        pass
+
+    runner = AgentRunner("local", generation, database, store, scopes={"shell:read"},
+                         grant_expires=None, stream_tools=model, stream_text=model,
+                         on_text=emit, profile=profile)
+    if reviewed:
+        _repo().save_setting("local", "endpoints", {"agents": {"toolApproval": {"enabled": True, "ask": ["file_read"]}}})
+        with pytest.raises(AgentSuspended):
+            await runner.run(store.history("local", generation.conversation_id))
+        pending = store.pending_action("local", generation.run_id)
+        _, history, partial, batch = store.claim_approval("local", generation.run_id, pending["actionId"],
+            [{"tool_call_id": "large", "decision": "approve"}])
+        runner = AgentRunner("local", generation, database, store, scopes={"shell:read"},
+                             grant_expires=None, stream_tools=model, stream_text=model,
+                             on_text=emit, profile=profile, approved_batch=batch, resume_history=history,
+                             resume_namespace="", partial_text=partial)
+        await runner.run(history)
+    else:
+        await runner.run(store.history("local", generation.conversation_id))
+    raw = next(iter(runner.cache.values()))["output"]
+    assert json.loads(raw)["data"]["content"] == payload
+    assert received == [truncate_approval_result(raw, 400000)]
+    if size < 400000:
+        assert received[0] == raw
+    else:
+        assert "truncated:" in received[0] and ":tail" in received[0]
+    saved = list(runner.saver.list(runner.config))
+    assert any(write[2].get("content") == raw for checkpoint in saved
+               for write in checkpoint["pendingWrites"] if isinstance(write[2], dict))

@@ -21,6 +21,7 @@ from .approval_runtime import (
     approval_policy_decision,
     build_approval_payload,
     execute_approval_batch,
+    truncate_approval_result,
 )
 from .ask_user_tools import ASK_USER_TOOLS, build_ask_user_payload
 from .checkpoints import SQLiteCheckpointSaver
@@ -268,7 +269,8 @@ class AgentRunner:
             check_breaker=self._check_grant, on_completed=self._completed,
         )
         commands = [output for output in outputs if isinstance(output, dict) and output.get("graph")]
-        messages = [{"role": "tool", "tool_call_id": call.call_id, "content": output}
+        messages = [{"role": "tool", "tool_call_id": call.call_id,
+                     "content": truncate_approval_result(output, 400_000)}
                     for call, output in zip(calls, outputs, strict=True) if isinstance(output, str)]
         if not commands:
             return ToolBatchOutput(messages)
@@ -332,7 +334,7 @@ class AgentRunner:
         if self.approved_batch is not None and self.resume_namespace == self.namespace:
             async def completed(result):
                 original = next(call for call in state.pending_calls if call.call_id == result.call.call_id)
-                record = {"proposal": {"name": original.name, "args": copy.deepcopy(original.arguments)}, "output": result.content}
+                record = {"proposal": {"name": original.name, "args": copy.deepcopy(original.arguments)}, "output": result.raw_content if result.raw_content is not None else result.content}
                 self.cache[replay_key(original, state.pending_calls.index(original))] = record
                 await self._completed(original, record)
 
