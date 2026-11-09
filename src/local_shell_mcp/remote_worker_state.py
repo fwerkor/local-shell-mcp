@@ -36,6 +36,10 @@ def worker_runtime_dir() -> Path:
     return worker_state_dir() / "runtime"
 
 
+def worker_bootstrap_path() -> Path:
+    return worker_state_dir() / "worker-bootstrap.py"
+
+
 def worker_config_path() -> Path:
     return worker_state_dir() / _CONFIG_FILE_NAME
 
@@ -118,6 +122,12 @@ def update_runtime_metadata(digest: str, version: str) -> dict[str, Any]:
 
 def install_launcher() -> Path:
     launcher = worker_launcher_path()
+    bootstrap = worker_bootstrap_path()
+    # Keep the proven supervisor during a trial upgrade. A broken new bundle
+    # must not be allowed to overwrite its own recovery mechanism.
+    if not (worker_state_dir() / "runtime.pending.json").exists() or not bootstrap.is_file():
+        source = Path(__file__).with_name("remote_worker_bootstrap.py")
+        _atomic_write_text(bootstrap, source.read_text(encoding="utf-8"))
     state_home = str(worker_state_dir().resolve())
     python = str(Path(sys.executable).resolve())
     if _is_windows():
@@ -125,9 +135,9 @@ def install_launcher() -> Path:
 setlocal
 set "STATE_HOME={state_home}"
 set "RUNTIME=%STATE_HOME%\\runtime"
-if not exist "%RUNTIME%\\local_shell_mcp" (
-  echo local-shell-mcp worker runtime is not installed: %RUNTIME% 1>&2
-  exit /b 1
+if /I "%~1"=="worker" if /I "%~2"=="run" (
+  "{python}" "{bootstrap}"
+  exit /b %ERRORLEVEL%
 )
 set "PYTHONPATH=%RUNTIME%;%PYTHONPATH%"
 "{python}" -m local_shell_mcp.remote_worker %*
@@ -138,9 +148,8 @@ exit /b %ERRORLEVEL%
 set -eu
 STATE_HOME={shlex.quote(state_home)}
 RUNTIME="$STATE_HOME/runtime"
-if [ ! -d "$RUNTIME/local_shell_mcp" ]; then
-  echo "local-shell-mcp worker runtime is not installed: $RUNTIME" >&2
-  exit 1
+if [ "$#" -eq 2 ] && [ "$1" = worker ] && [ "$2" = run ]; then
+  exec {shlex.quote(python)} {shlex.quote(str(bootstrap))}
 fi
 export PYTHONPATH="$RUNTIME${{PYTHONPATH:+:$PYTHONPATH}}"
 exec {shlex.quote(python)} -m local_shell_mcp.remote_worker "$@"

@@ -304,7 +304,52 @@ def ensure_gui_dependencies(
         )
 
 
+_MAX_WORKER_DOWNLOAD_BYTES = 32 * 1024 * 1024
+
+
 def _fetch_bytes(url: str, timeout: float = 60) -> bytes:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in {"https", "http"} or not parsed.netloc:
+        raise ValueError("worker bundle URL must use HTTP(S)")
+
+    # On Windows the Worker uses curl for its long-poll transport.  Reuse that
+    # TLS/proxy stack for upgrades; urllib was repeatedly timing out during
+    # TLS handshakes on Windows machines even when their curl poll succeeded.
+    curl = (shutil.which("curl.exe") or shutil.which("curl")) if sys.platform == "win32" else None
+    if curl:
+        command = [
+            curl,
+            "--fail", "--silent", "--show-error", "--location",
+            "--connect-timeout", "10",
+            "--max-time", str(max(1, int(timeout))),
+            "--retry", "3", "--retry-delay", "2", "--retry-connrefused",
+            "--retry-max-time", str(max(1, int(timeout))),
+            "--max-filesize", str(_MAX_WORKER_DOWNLOAD_BYTES),
+            "--header", "Cache-Control: no-cache",
+            "--header", "Pragma: no-cache",
+            "--user-agent", f"local-shell-mcp-worker/{__version__}",
+            url,
+        ]
+        try:
+            result = subprocess.run(  # noqa: S603
+                command,
+                capture_output=True,
+                check=False,
+                timeout=timeout + 15,
+                **managed_process_kwargs(),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError("Windows worker download timed out") from exc
+        if result.returncode:
+            detail = result.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(
+                f"Windows worker download failed (curl exit {result.returncode}): "
+                f"{detail[:240]}"
+            )
+        if len(result.stdout) > _MAX_WORKER_DOWNLOAD_BYTES:
+            raise ValueError("worker download exceeded maximum bundle size")
+        return result.stdout
+
     request = urllib.request.Request(
         url,
         headers={
@@ -314,7 +359,10 @@ def _fetch_bytes(url: str, timeout: float = 60) -> bytes:
         },
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
-        return response.read()
+        data = response.read(_MAX_WORKER_DOWNLOAD_BYTES + 1)
+        if len(data) > _MAX_WORKER_DOWNLOAD_BYTES:
+            raise ValueError("worker download exceeded maximum bundle size")
+        return data
 
 
 def fetch_manifest(server: str) -> dict[str, Any]:
@@ -342,19 +390,102 @@ def _safe_extract(archive: Path, destination: Path) -> None:
         tar.extractall(destination)  # noqa: S202
 
 
+def _preflight_runtime(extracted: Path, scratch: Path) -> None:
+    """Exercise the isolated Worker import chain before replacing a working runtime."""
+    package = extracted / "local_shell_mcp"
+    required = ("__init__.py", "remote_worker.py", "remote_worker_cli.py", "settings.py")
+    missing = [name for name in required if not (package / name).is_file()]
+    if missing:
+        raise ValueError(f"worker bundle is missing required modules: {', '.join(missing)}")
+
+    python = Path(sys.executable)
+    if sys.platform == "win32" and python.name.lower() == "pythonw.exe":
+        candidate = python.with_name("python.exe")
+        if not candidate.is_file():
+            raise RuntimeError(f"python.exe is required to validate Windows Worker: {candidate}")
+        python = candidate
+
+    env = os.environ.copy()
+    env.update(
+        PYTHONPATH=str(extracted),
+        LOCAL_SHELL_MCP_STATE_BACKEND="file",
+        LOCAL_SHELL_MCP_AUTH_MODE="none",
+        LOCAL_SHELL_MCP_WORKSPACE_ROOT=str(scratch),
+        LOCAL_SHELL_MCP_STATE_DIR=str(scratch / "state"),
+        LOCAL_SHELL_MCP_WORKER_STATE_DIR=str(scratch / "worker-state"),
+        LOCAL_SHELL_MCP_CONFIG="",
+    )
+    script = """
+import sys
+sys.path.insert(0, sys.argv[1])
+import local_shell_mcp.remote_worker
+import local_shell_mcp.remote_worker_cli
+from local_shell_mcp.settings import get_settings
+assert get_settings().state_backend == 'file'
+"""
+    try:
+        result = subprocess.run(  # noqa: S603
+            [str(python), "-c", script, str(extracted)],
+            env=env,
+            cwd=scratch,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=20,
+            **managed_process_kwargs(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("new Worker runtime failed preflight: startup timed out") from exc
+    if result.returncode:
+        details = (result.stderr or result.stdout or "").strip()[-1200:]
+        raise RuntimeError(f"new Worker runtime failed preflight: {details}")
+
+
+def rollback_pending_runtime() -> bool:
+    """Restore the proven worker after an unsuccessful candidate startup."""
+    from .remote_worker_bootstrap import _rollback
+
+    state = worker_state_dir()
+    if not (state / "runtime.pending.json").exists():
+        return False
+    return _rollback(state)
+
+
+def confirm_runtime_healthy() -> None:
+    """Commit a candidate only after the controller accepts an actual poll."""
+    state = worker_state_dir()
+    pending = state / "runtime.pending.json"
+    if not pending.exists():
+        return
+    journal = json.loads(pending.read_text(encoding="utf-8"))
+    # A host interruption can occur between swapping the runtime and writing
+    # its digest; finish that metadata commit before deleting the journal.
+    if journal.get("candidate_digest"):
+        update_runtime_metadata(
+            str(journal["candidate_digest"]), str(journal.get("candidate_version") or "")
+        )
+    pending.unlink()
+    (state / "runtime.attempted").unlink(missing_ok=True)
+    shutil.rmtree(state / "runtime.previous", ignore_errors=True)
+
+
 def install_or_update_runtime(server: str, *, force: bool = False) -> dict[str, Any]:
     manifest = fetch_manifest(server)
     digest = str(manifest["sha256"])
     version = str(manifest.get("bundle_version") or "")
     runtime = worker_runtime_dir()
+    state_dir = worker_state_dir()
+    pending = state_dir / "runtime.pending.json"
+    backup = state_dir / "runtime.previous"
     try:
         current = read_worker_config()
     except (FileNotFoundError, ValueError):
         current = {}
     if not force and runtime.is_dir() and current.get("runtime_digest") == digest:
         return {"updated": False, "sha256": digest, "version": version, "runtime": str(runtime)}
+    if pending.exists():
+        raise RuntimeError("worker runtime upgrade is already awaiting startup verification")
 
-    state_dir = worker_state_dir()
     state_dir.mkdir(parents=True, exist_ok=True)
     payload = _fetch_bytes(str(manifest["url"]), timeout=120)
     actual = hashlib.sha256(payload).hexdigest()
@@ -370,24 +501,34 @@ def install_or_update_runtime(server: str, *, force: bool = False) -> dict[str, 
         _safe_extract(archive, extracted)
         if not (extracted / "local_shell_mcp").is_dir():
             raise ValueError("worker bundle does not contain local_shell_mcp")
+        _preflight_runtime(extracted, temporary_path)
 
         staged = state_dir / f"runtime.next.{os.getpid()}"
-        backup = state_dir / f"runtime.previous.{os.getpid()}"
         shutil.rmtree(staged, ignore_errors=True)
-        shutil.rmtree(backup, ignore_errors=True)
         shutil.copytree(extracted, staged)
         try:
+            # A stale backup without a journal is left by a completed upgrade.
+            if backup.exists():
+                shutil.rmtree(backup)
             if runtime.exists():
+                journal = {
+                    "previous_digest": str(current.get("runtime_digest") or ""),
+                    "previous_version": str(current.get("runtime_version") or ""),
+                    "candidate_digest": digest,
+                    "candidate_version": version,
+                }
+                journal_file = state_dir / f"runtime.pending.{os.getpid()}.tmp"
+                journal_file.write_text(json.dumps(journal, sort_keys=True), encoding="utf-8")
+                journal_file.replace(pending)
                 runtime.replace(backup)
             staged.replace(runtime)
+            if current:
+                update_runtime_metadata(digest, version)
         except Exception:
-            if not runtime.exists() and backup.exists():
-                backup.replace(runtime)
+            if pending.exists():
+                rollback_pending_runtime()
             raise
         finally:
             shutil.rmtree(staged, ignore_errors=True)
-            shutil.rmtree(backup, ignore_errors=True)
 
-    if current:
-        update_runtime_metadata(digest, version)
     return {"updated": True, "sha256": digest, "version": version, "runtime": str(runtime)}

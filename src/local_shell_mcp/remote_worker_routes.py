@@ -36,6 +36,7 @@ _WORKER_PYTHON_FILES = {
     "remote_terminal_worker.py",
     "remote_terminal_ws_client.py",
     "remote_worker.py",
+    "remote_worker_bootstrap.py",
     "remote_worker_cli.py",
     "remote_worker_installer.py",
     "remote_worker_service.py",

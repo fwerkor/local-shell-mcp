@@ -24,6 +24,7 @@ from .remote_worker_state import (
     ensure_user_bin_on_path,
     install_launcher,
     user_home,
+    worker_bootstrap_path,
     worker_launcher_path,
     worker_lock_path,
     worker_log_path,
@@ -436,9 +437,11 @@ with open(LOG_PATH, "a", encoding="utf-8", buffering=1) as worker_log:
     sys.stdout = worker_log
     sys.stderr = worker_log
     try:
-        from local_shell_mcp.remote_worker import main
+        import runpy
 
-        main(["run"])
+        runpy.run_path({str(worker_bootstrap_path().resolve())!r}, run_name="__main__")
+    except SystemExit:
+        raise
     except BaseException:
         traceback.print_exc()
         raise
@@ -585,7 +588,9 @@ def _pid_is_running(pid: int) -> bool:
 def _is_worker_command(command: str) -> bool:
     normalized = command.replace("\\", "/")
     module = "local_shell_mcp.main" in normalized or "local_shell_mcp.remote_worker" in normalized
-    return module and "worker" in normalized and "run" in normalized
+    return (module and "worker" in normalized and "run" in normalized) or (
+        "worker-bootstrap.py" in normalized
+    )
 
 
 def _linux_process_identity(pid: int) -> str | None:
@@ -702,7 +707,7 @@ def _start_process() -> None:
     if _read_pid():
         return
     worker_state_dir().mkdir(parents=True, exist_ok=True)
-    command = [sys.executable, "-m", "local_shell_mcp.remote_worker", "run"]
+    command = [sys.executable, str(worker_bootstrap_path())]
     with worker_log_path().open("ab") as log:
         if os.name == "nt":
             flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(

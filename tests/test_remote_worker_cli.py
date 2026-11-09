@@ -123,6 +123,7 @@ def test_enrollment_payload_overrides_and_restores_existing_environment(tmp_path
 
 @pytest.mark.asyncio
 async def test_run_worker_overrides_stale_scope(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.remote, "_worker_result_outbox_dir", lambda: tmp_path / "outbox")
     monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", "/stale/workspace")
     monkeypatch.setenv("LOCAL_SHELL_MCP_ALLOW_FULL_CONTAINER", "false")
     monkeypatch.setattr(cli.remote, "worker_capabilities", lambda: [])
