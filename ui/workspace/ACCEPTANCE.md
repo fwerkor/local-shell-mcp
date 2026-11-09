@@ -1,6 +1,6 @@
 # PR #343 architecture and acceptance audit
 
-Status: **Draft; incomplete migration; do not deploy**. Audit date: 2026-11-08.
+Status: **Draft; incomplete migration; do not deploy**. Audit date: 2026-11-09.
 This report records source inspection and executable evidence, not a declaration
 of complete LibreChat feature parity. See MIGRATION.md for the migration history.
 
@@ -190,3 +190,36 @@ LangGraph 1.4.8/checkpoint 1.1.3. UPSTREAM_LOCK.json records original file hashe
 and build commands. Upstream's alternative bun.lock resolves different agents
 3.6/core 1.2.4 versions; it is not the original integrated runtime baseline.
 The new React-only Bun build is independent of this backend reference choice.
+
+## Default-entry and first-run configuration audit
+
+The previous green runs did not cover an unconfigured first launch. Actual
+Chromium reproduction found that the retained ChatForm omitted its textarea
+when no endpoint existed. Environment-only provider configuration also lacked
+a visible persistent configuration flow. These are integration gaps, not
+evidence of complete LibreChat parity.
+
+- `785e2600` merges current main and remote PR work without rewriting history.
+  Worker supervision/recovery regression: 247 passed.
+- `f5784770` adds installer rejection and transactional recovery coverage:
+  34 passed; the installer's branch coverage is 96.4%.
+- `ad67d559` deletes the retired browser app, its bundled HTML/JS/CSS and
+  exclusive dependencies. Native APIs, terminal/desktop WebSockets, TUI and
+  MCP Live Workspace remain. The retained React Control pages use these APIs.
+- `36d4bd34` routes the default entry and `/ui` to the unified React workspace;
+  unauthenticated navigation automatically opens the existing OAuth/PIN flow.
+  Real Chromium checks PIN, PKCE/state, the existing scope boundary, HttpOnly
+  session cookie and expired/revoked sessions: 21 passed; OAuth regression:
+  another 19 passed. No extra Open WebUI button is required.
+- `b9bd8cb4` and `6b2f686f` persist provider configuration in the unified SQLite
+  settings, enforce existing admin authorization and same-origin protection,
+  redact keys, and update runtime/model catalogs. Provider tests: 22 passed,
+  new module 100% line and branch coverage. Each provider kind currently has
+  one endpoint with multiple model names; multiple named channels of the same
+  kind remain unsupported.
+
+Current React configuration UI/browser integration, rebuilt release assets and
+full-head CI are still being verified. Earlier green commits do not validate
+this checkpoint. The graph scheduler, background child threads, full memory/
+semantic compaction, rich MCP provider projection, complete Actions/Artifacts
+and resource processing/lifecycle remain incomplete as documented above.
