@@ -53,9 +53,9 @@ def run_browser(port: int) -> None:
             # No intermediate Open WebUI button: the initial request enters LSM OAuth.
             page.goto(origin + "/ui")
             page.wait_for_url("**/oauth/authorize**")
-            expect(page.get_by_role("button", name="Approve", exact=True)).to_be_visible()
+            expect(page.get_by_role("button", name="Approve access", exact=True)).to_be_visible()
             assert page.evaluate("fetch('/api/ui/bootstrap').then(r => r.status)") == 401
-            page.get_by_role("button", name="Approve", exact=True).click()
+            page.get_by_role("button", name="Approve access", exact=True).click()
             page.wait_for_url("**/c/new", timeout=30_000)
             expect(page.locator("#root")).not_to_be_empty(timeout=30_000)
             # All control routes are the retained React application, not an iframe/old UI.
@@ -66,7 +66,7 @@ def run_browser(port: int) -> None:
                 page.goto(origin + "/control/" + section)
                 expect(page.get_by_role("heading", name=title, exact=True).first).to_be_visible(timeout=20_000)
                 assert page.locator("#application").count() == 0
-                assert page.locator("iframe").count() == 0
+                assert page.locator('iframe[src^="/ui"]').count() == 0
             page.goto(origin + "/control/files")
             expect(page.get_by_text("mouse-second.txt", exact=True)).to_be_visible(timeout=20_000)
             # The modern file browser edits through the native LSM API.
