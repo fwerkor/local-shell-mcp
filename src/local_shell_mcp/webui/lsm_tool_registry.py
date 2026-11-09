@@ -340,8 +340,7 @@ async def _invoke_registered(owner: str, conversation_id: str, name: str,
     try:
         data = await _registry()._tool_manager.call_tool(name, invocation, convert_result=True)
         result = _encode_result(data)
-        structured = data[1] if isinstance(data, tuple) and len(data) == 2 else data
-        succeeded = not (isinstance(structured, dict) and structured.get("ok") is False)
+        succeeded = _result_succeeded(data)
     except Exception as exc:
         audit("webui_agent_lsm_tool", owner=owner, conversation_id=conversation_id,
               tool=name, machines=machines or [], ok=False, error_type=type(exc).__name__)
@@ -351,6 +350,18 @@ async def _invoke_registered(owner: str, conversation_id: str, name: str,
     audit("webui_agent_lsm_tool", owner=owner, conversation_id=conversation_id,
           tool=name, machines=machines or [], ok=succeeded)
     return result
+
+
+
+def _result_succeeded(value: Any) -> bool:
+    """Respect native MCP error envelopes without interpreting tool text."""
+    from mcp.types import CallToolResult
+
+    if isinstance(value, CallToolResult):
+        return not value.isError and _result_succeeded(value.structuredContent)
+    if isinstance(value, tuple) and len(value) == 2:
+        return _result_succeeded(value[1])
+    return not (isinstance(value, dict) and value.get("ok") is False)
 
 
 def _encode_result(value: Any) -> str:

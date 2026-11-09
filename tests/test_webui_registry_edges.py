@@ -220,6 +220,8 @@ async def test_write_machine_grant_preserves_native_read_and_write_scopes(bound_
 @pytest.mark.asyncio
 async def test_large_native_arguments_reuse_transport_and_operation_limits(bound_policy, tmp_path, monkeypatch):
     _, cid = bound_policy
+    audits = []
+    monkeypatch.setattr(registry, "audit", lambda event, **data: audits.append((event, data)))
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_HTTP_REQUEST_BYTES", "200000")
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_FILE_WRITE_BYTES", "100000")
     get_settings.cache_clear()
@@ -231,6 +233,7 @@ async def test_large_native_arguments_reuse_transport_and_operation_limits(bound
     }), granted_scopes=scopes))
     assert result["ok"] is True
     assert (tmp_path / "native-large.txt").read_text() == payload
+    assert audits[-1][0] == "webui_agent_lsm_tool" and audits[-1][1]["ok"] is True
 
     # The request fits the shared transport budget; the original file executor
     # still rejects it with its own configured error structure and no file.
@@ -241,6 +244,7 @@ async def test_large_native_arguments_reuse_transport_and_operation_limits(bound
     assert result["structuredContent"]["data"]["error_type"] == "ValueError"
     assert "100000" in result["structuredContent"]["message"]
     assert not (tmp_path / "native-denied.txt").exists()
+    assert audits[-1][0] == "webui_agent_lsm_tool" and audits[-1][1]["ok"] is False
 
     monkeypatch.setenv("LOCAL_SHELL_MCP_MAX_HTTP_REQUEST_BYTES", "1000")
     get_settings.cache_clear()
@@ -282,3 +286,15 @@ async def test_original_schema_still_rejects_missing_required_arguments(bound_po
     with pytest.raises(ToolError, match="(?is)path.*required|required.*path"):
         await registry.call_tool("local", cid, ModelToolCall("missing-path", "file_write", {"content": "never"}),
                                  granted_scopes={"shell:read", "shell:write"})
+
+
+def test_native_mcp_error_envelopes_control_audit_status():
+    from mcp.types import CallToolResult, TextContent
+
+    content = [TextContent(type="text", text="do not classify arbitrary content")]
+    assert registry._result_succeeded(CallToolResult(content=content, isError=False))
+    assert not registry._result_succeeded(CallToolResult(content=content, isError=True))
+    assert not registry._result_succeeded(CallToolResult(content=content, structuredContent={"ok": False}))
+    assert registry._result_succeeded(CallToolResult(content=content, structuredContent={"data": {"ok": False}}))
+    assert not registry._result_succeeded((content, {"ok": False}))
+    assert registry._result_succeeded((content, {"ok": True}))
