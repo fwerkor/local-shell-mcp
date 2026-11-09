@@ -116,7 +116,7 @@ as soon as permissions change. This remains an acceptance blocker. Arbitrary
 | Attachments | Controller private directory, real local path, owner metadata; streaming size/path checks | Full project/remote attachment lifecycle and deletion/download browser coverage |
 | Native control pages | Reuse existing Python Files/Terminal/GUI/Remote/Settings/Audit handlers | End-to-end validation of each page, GUI permissions and mobile/dark-mode walkthrough |
 | SQLite migration | Default backend; transactional incremental legacy import; original files retained; DB writes win over old files | Production-scale legacy snapshot, rollback rehearsal, oversized legacy entry policy |
-| Retired code | `integrations/` has zero tracked files | Python legacy `hosted_chat*` and `librechat_integration.py` remain and are not yet eliminated |
+| Retired code | `integrations/`, Python `hosted_chat*`, external `librechat_integration.py`, duplicate native chat UI and service-secret identity bridge are removed | Protocol v1 remains supported intentionally; existing unreleased SQLite tables are not destructively dropped |
 
 ## Verification checkpoints
 
@@ -143,3 +143,22 @@ functional and validation gaps above are closed. In particular, passing unit
 or build checks does not constitute complete LibreChat equivalence.
 
 Source-port status and the exact upstream commits are authoritative in PORTING_MAP.md and UPSTREAM_LOCK.json.
+
+
+## 2026-11-09 current acceptance checkpoint
+
+- `cb5af9fa` removes the obsolete Python Hosted Chat modules, external Node
+  identity bridge and duplicate native chat. One Python ticket/login flow remains.
+  The old file-state backend is not a second chat runtime; protocol v1 is retained.
+- `4ffff73d` restores original React `AttachFileChat` multipart uploads, private
+  Controller storage and owner-resolved file paths in model history. Its source
+  mapping and explicitly unsupported file-processing paths are in PORTING_MAP.md.
+- Complete combined gate: **2145 passed, 2 skipped**, **95.20% total**, every
+  module **>=90%**, HTTP/MCP/PTY/browser smoke passed. Independent real React
+  Chromium suite: **5 passed**; React build/typecheck and repository Ruff passed.
+- Latest earlier complete CI success is `04081812`; cleanup and attachment runs
+  are pending/in progress. They must not be represented as green yet.
+- Source review of Agent resource writes confirms add-to-set plus version update,
+  while resource removal is an atomic pull without a new version. Resource
+  processing, runtime revocation and stronger released-state migration recovery
+  are being audited independently; none is counted as finished by this checkpoint.

@@ -39,7 +39,7 @@
 | Ask User, handoff and delegated subagents | Partial | SQLite-backed Ask User pause/answer/resume plus bounded owner-scoped delegated subagent and handoff flows with SQLite lifecycle records; multi-question batches, richer handoff context and complete UI parity remain pending |
 | Prompt/context, memory, attachments and projects | Not started | Full conversation functionality and client compatibility |
 | LSM Controller control routes | Implemented at routing level | Existing `/api/ui/*` handlers mounted directly under `/api/lsm/controller/*`, without Node proxy; remaining browser control flows require E2E parity |
-| Remove duplicate Hosted Chat and legacy UI | Deferred | Delete only after full parity, without leaving an undocumented fallback implementation |
+| Remove duplicate Hosted Chat and legacy UI | Removed | Python Hosted Chat/Node bridge and duplicate native chat deleted; one Python React entry and one-use Python auth ticket retained; protocol v1 intentionally supported |
 | Standalone Controller packaging + Worker compatibility | Partial | Compressed React bundle embedded by standalone binary CI, no Node runtime or browser dependency in Worker; full release matrix verification still needed |
 | End-to-end UI tests and rollout | Partial | Reproducible Chromium-to-Python-to-SQLite streaming reply test passes; full Agent/browser/authorization parity, production migration and rollback pending |
 
