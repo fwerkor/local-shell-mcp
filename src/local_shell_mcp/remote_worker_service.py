@@ -24,6 +24,7 @@ from .remote_worker_state import (
     ensure_user_bin_on_path,
     install_launcher,
     user_home,
+    worker_bootstrap_path,
     worker_launcher_path,
     worker_lock_path,
     worker_log_path,
@@ -412,12 +413,9 @@ def _write_windows_task_launcher() -> Path:
     log_path = str(worker_log_path().resolve())
     content = f'''from __future__ import annotations
 
-import json
 import os
-import shutil
 import sys
 import traceback
-from pathlib import Path
 
 STATE_DIR = {state_dir!r}
 RUNTIME_DIR = {runtime_dir!r}
@@ -439,44 +437,13 @@ with open(LOG_PATH, "a", encoding="utf-8", buffering=1) as worker_log:
     sys.stdout = worker_log
     sys.stderr = worker_log
     try:
-        from local_shell_mcp.remote_worker import main
+        import runpy
 
-        main(["run"])
-    except BaseException as exc:
+        runpy.run_path({str(worker_bootstrap_path().resolve())!r}, run_name="__main__")
+    except SystemExit:
+        raise
+    except BaseException:
         traceback.print_exc()
-        # The launcher lives outside the versioned runtime.  If the new
-        # Worker cannot even start, recover the last known-good version
-        # before Task Scheduler retries the job.
-        should_restore = not isinstance(exc, KeyboardInterrupt) and not (
-            isinstance(exc, SystemExit) and exc.code in (None, 0)
-        )
-        previous = Path(STATE_DIR) / "runtime.previous"
-        pending = Path(STATE_DIR) / "runtime-upgrade-pending.json"
-        if should_restore and previous.is_dir() and pending.is_file():
-            try:
-                old = json.loads(pending.read_text(encoding="utf-8"))
-                failed = Path(STATE_DIR) / ("runtime.failed." + str(os.getpid()))
-                if failed.exists():
-                    shutil.rmtree(failed)
-                live = Path(RUNTIME_DIR)
-                if live.exists():
-                    live.replace(failed)
-                previous.replace(live)
-                config_path = Path(STATE_DIR) / "config.json"
-                config = json.loads(config_path.read_text(encoding="utf-8"))
-                config["runtime_digest"] = old["old_digest"]
-                config["runtime_version"] = old["old_version"]
-                temp_config = config_path.with_suffix(".rollback.tmp")
-                temp_config.write_text(
-                    json.dumps(config, indent=2, sort_keys=True), encoding="utf-8"
-                )
-                temp_config.replace(config_path)
-                pending.unlink()
-                shutil.rmtree(failed, ignore_errors=True)
-                print("Status: Windows Worker restored previous runtime after failed startup.", flush=True)
-                os.execv(sys.executable, [sys.executable, __file__])
-            except Exception:
-                traceback.print_exc()
         raise
 '''
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -624,7 +591,9 @@ def _pid_is_running(pid: int) -> bool:
 def _is_worker_command(command: str) -> bool:
     normalized = command.replace("\\", "/")
     module = "local_shell_mcp.main" in normalized or "local_shell_mcp.remote_worker" in normalized
-    return module and "worker" in normalized and "run" in normalized
+    return (module and "worker" in normalized and "run" in normalized) or (
+        "worker-bootstrap.py" in normalized
+    )
 
 
 def _linux_process_identity(pid: int) -> str | None:
@@ -741,7 +710,7 @@ def _start_process() -> None:
     if _read_pid():
         return
     worker_state_dir().mkdir(parents=True, exist_ok=True)
-    command = [sys.executable, "-m", "local_shell_mcp.remote_worker", "run"]
+    command = [sys.executable, str(worker_bootstrap_path())]
     with worker_log_path().open("ab") as log:
         if os.name == "nt":
             flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(

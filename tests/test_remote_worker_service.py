@@ -244,7 +244,7 @@ def test_install_and_manage_windows_scheduled_task(tmp_path, monkeypatch):
     launcher_text = service_file.read_text(encoding="utf-8")
     assert "os.environ['LOCAL_SHELL_MCP_WORKER_MANAGED'] = \"1\"" in launcher_text
     assert 'os.environ["LOCAL_SHELL_MCP_WORKER_STATE_DIR"] = STATE_DIR' in launcher_text
-    assert 'main(["run"])' in launcher_text
+    assert 'runpy.run_path(' in launcher_text
     assert 'open(LOG_PATH, "a", encoding="utf-8", buffering=1)' in launcher_text
     registration = next(script for script, _ in scripts if "Register-ScheduledTask" in script)
     assert "New-ScheduledTaskTrigger -AtLogOn -User $user" in registration
@@ -319,7 +319,7 @@ def test_windows_service_refresh_and_process_fallback(tmp_path, monkeypatch):
     refreshed = service.refresh_installed_service_definition()
     assert refreshed == service._windows_task_launcher_path()  # noqa: SLF001
     assert refreshed.exists()
-    assert 'main(["run"])' in refreshed.read_text(encoding="utf-8")
+    assert 'runpy.run_path(' in refreshed.read_text(encoding="utf-8")
     assert registrations == [refreshed]
 
     monkeypatch.setattr(service, "_windows_task_status", lambda: None)
@@ -487,7 +487,7 @@ def test_process_fallback_start_stop_and_stale_pid(tmp_path, monkeypatch):
     service.install_service(start=True)
     record = json.loads(service.worker_pid_path().read_text(encoding="utf-8"))
     assert record == {"identity": "worker-identity", "pid": 123, "version": 1}
-    assert popen_calls[0][0][0][-2:] == ["local_shell_mcp.remote_worker", "run"]
+    assert popen_calls[0][0][0][-1] == str(service.worker_bootstrap_path())
     assert "PYTHONPATH" in popen_calls[0][1]["env"]
     assert service.service_status()["running"] is True
     service.stop_service()
@@ -957,13 +957,16 @@ def test_windows_task_bootstrap_rolls_back_unstartable_new_runtime(tmp_path, mon
     previous.mkdir(parents=True)
     (previous / "__init__.py").write_text("")
     (previous / "remote_worker.py").write_text("def main(argv=None): pass\n")
-    (root / "runtime-upgrade-pending.json").write_text(json.dumps({
-        "old_digest": "original", "old_version": "6.0.0", "new_digest": "broken"
+    (root / "runtime.pending.json").write_text(json.dumps({
+        "previous_digest": "original", "previous_version": "6.0.0", "candidate_digest": "broken"
     }))
     (root / "config.json").write_text(json.dumps({
         "version": 1, "server": "https://s", "name": "worker-a",
         "workdir": str(tmp_path), "runtime_digest": "broken", "runtime_version": "6.0.1"
     }))
+    from local_shell_mcp.remote_worker_state import install_launcher
+
+    install_launcher()
     launcher = service._write_windows_task_launcher()  # noqa: SLF001
     result = subprocess.run(
         [sys.executable, str(launcher)],
@@ -972,5 +975,5 @@ def test_windows_task_bootstrap_rolls_back_unstartable_new_runtime(tmp_path, mon
     assert result.returncode == 0, result.stderr
     assert (root / "runtime" / "local_shell_mcp" / "remote_worker.py").is_file()
     assert json.loads((root / "config.json").read_text())["runtime_digest"] == "original"
-    assert not (root / "runtime-upgrade-pending.json").exists()
-    assert "restored previous runtime" in (root / "worker.log").read_text()
+    assert not (root / "runtime.pending.json").exists()
+    assert "rolled back; reconnecting" in (root / "worker.log").read_text()

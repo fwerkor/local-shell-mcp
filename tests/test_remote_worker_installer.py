@@ -128,8 +128,10 @@ def test_fetch_manifest_validation(monkeypatch):
         installer.fetch_manifest("https://example.test")
 
 
-def test_fetch_bytes_uses_urlopen(monkeypatch):
-    monkeypatch.setattr(installer.shutil, "which", lambda _name: None)
+def test_fetch_bytes_uses_urlopen_when_curl_is_unavailable(monkeypatch):
+    # Windows normally prefers curl; force its absence to exercise urllib
+    # instead of invoking the real curl executable against example.test.
+    monkeypatch.setattr(installer.shutil, "which", lambda name: None)
 
     class Response:
         def __enter__(self):
@@ -592,7 +594,6 @@ def test_gui_dependency_bootstrap_unknown_platform_is_noop(tmp_path, monkeypatch
     assert result["missing"] == []
 
 
-
 def test_windows_fetch_uses_curl_with_retry_and_tls_verification(monkeypatch):
     monkeypatch.setattr(installer.sys, "platform", "win32")
     monkeypatch.setattr(installer.shutil, "which", lambda name: "curl.exe" if name == "curl.exe" else None)
@@ -697,7 +698,7 @@ def test_windows_upgrade_retains_previous_runtime_until_healthy_poll(tmp_path, m
     result = installer.install_or_update_runtime("https://s")
     assert result["updated"] is True
     prior = state.worker_state_dir() / "runtime.previous"
-    pending = state.worker_state_dir() / "runtime-upgrade-pending.json"
+    pending = state.worker_state_dir() / "runtime.pending.json"
     assert (prior / "local_shell_mcp" / "marker").read_text() == "prior runtime"
     assert pending.is_file()
     assert state.read_worker_config()["runtime_digest"] == digest
@@ -707,10 +708,10 @@ def test_windows_upgrade_retains_previous_runtime_until_healthy_poll(tmp_path, m
         "fetch_manifest",
         lambda server: {"sha256": "1" * 64, "bundle_version": "4.0.0", "url": "https://s/b.tgz"},
     )
-    with pytest.raises(RuntimeError, match="not yet been confirmed"):
-        installer.install_or_update_runtime("https://s")
+    with pytest.raises(RuntimeError, match="already awaiting startup verification"):
+        installer.install_or_update_runtime("https://s", force=True)
 
-    installer.confirm_runtime_upgrade()
+    installer.confirm_runtime_healthy()
     assert not prior.exists()
     assert not pending.exists()
     assert state.read_worker_config()["runtime_digest"] == digest
