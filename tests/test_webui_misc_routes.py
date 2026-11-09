@@ -45,6 +45,9 @@ async def test_sidebar_preferences_are_server_side_and_owner_isolated(tmp_path, 
 
 @pytest.mark.asyncio
 async def test_disabled_optional_capabilities_never_claim_unsupported_services(tmp_path, monkeypatch):
+    from local_shell_mcp import settings
+
+    monkeypatch.setattr(settings, "get_settings", lambda: SimpleNamespace(disable_local=False))
     monkeypatch.setattr(routes, "get_settings", lambda: SimpleNamespace(auth_mode="none", state_dir=tmp_path))
     app = Starlette(routes=misc_routes.misc_routes())
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
