@@ -3,6 +3,7 @@ import {
   AlertTriangle, CheckCircle2, LockKeyhole, RefreshCw, RotateCcw, Save, Search, Settings2,
 } from 'lucide-react';
 import useLocalize from '~/hooks/useLocalize';
+import ModelProviders from './ModelProviders';
 import { useControllerServices } from './hooks';
 
 type SettingField = {
@@ -227,6 +228,7 @@ export default function Settings() {
   };
 
   return <div className="space-y-5">
+    <ModelProviders />
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div className="min-w-0">
         <h2 className="flex items-center gap-2 text-xl font-semibold"><Settings2 size={21} />{localize('com_lsm_settings_title')}</h2>

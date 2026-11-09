@@ -1,3 +1,5 @@
+import { useGetModelsQuery } from 'librechat-data-provider/react-query';
+import { Link } from 'react-router-dom';
 import { memo, useRef, useMemo, useEffect, useState, useCallback } from 'react';
 import { useWatch } from 'react-hook-form';
 import { useRecoilState, useRecoilValue, useRecoilCallback } from 'recoil';
@@ -181,6 +183,8 @@ const ChatForm = memo(function ChatForm({
   const mentionPopoverAtom = useMemo(() => store.showMentionPopoverFamily(index), [index]);
 
   const { requiresKey } = useRequiresKey();
+  const { data: modelInventory } = useGetModelsQuery();
+  const hasConfiguredModels = Object.values(modelInventory ?? {}).some((models) => Array.isArray(models) && models.length > 0);
   const methods = useChatFormContext();
   const {
     generateConversation,
@@ -626,7 +630,7 @@ const ChatForm = memo(function ChatForm({
    *  for typed, dictated, and shortcut-bound submissions. */
   const submitComposerText = useCallback(
     (data: { text: string }): false | void =>
-      submitFromComposer(
+      (!endpoint || !hasConfiguredModels) ? false : submitFromComposer(
         {
           answerMode,
           steering,
@@ -641,7 +645,7 @@ const ChatForm = memo(function ChatForm({
         },
         data,
       ),
-    [answerMode, steering, submitMessage, methods, index],
+    [answerMode, steering, submitMessage, methods, index, endpoint, hasConfiguredModels],
   );
 
   return (
@@ -677,6 +681,10 @@ const ChatForm = memo(function ChatForm({
               onRestoreToComposer={restoreReclaimedSteer}
             />
           )}
+          <div className="mb-2 text-right text-xs text-text-secondary">
+            {!hasConfiguredModels && <span>Configure a model to send messages. </span>}
+            <Link className="underline hover:text-text-primary" to="/control/settings#models">Channels &amp; models / 渠道与模型</Link>
+          </div>
           {(project || codeWorkspace.visible) && (
             <div
               data-testid="composer-context-rail"
@@ -787,7 +795,7 @@ const ChatForm = memo(function ChatForm({
                 onClose={pastedTextEdit.closeEditor}
                 onSave={pastedTextEdit.saveEdit}
               />
-              {endpoint && (
+              {(
                 <div className={cn('flex', isRTL ? 'flex-row-reverse' : 'flex-row')}>
                   <div
                     className="relative flex-1"
@@ -922,6 +930,7 @@ const ChatForm = memo(function ChatForm({
                           fileCount={submittableFileCount}
                           disabled={
                             filesLoading ||
+                            !hasConfiguredModels ||
                             disableInputs ||
                             !codeWorkspace.canSubmit ||
                             isNotAppendable ||
