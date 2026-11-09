@@ -1,0 +1,236 @@
+{
+  "source_hashes": {
+    "packages/api/src/agents/validation.ts": "942f86026c5877c03e84b321a1f292d22c872fbbce77a9c555df8c053eb99837",
+    "packages/api/src/agents/parameters.ts": "e54365f18bd8832a84bc2f10033938e08202e3a3383c1af5fd89718740aecfbe"
+  },
+  "cases": [
+    {
+      "temperature": null,
+      "topP": null,
+      "maxTokens": null,
+      "thinkingBudget": null,
+      "custom": null
+    },
+    {
+      "temperature": false,
+      "topP": false,
+      "maxTokens": false,
+      "thinkingBudget": false,
+      "custom": false
+    },
+    {
+      "temperature": true,
+      "topP": true,
+      "maxTokens": true,
+      "thinkingBudget": true,
+      "custom": true
+    },
+    {
+      "temperature": 0,
+      "topP": 0,
+      "maxTokens": 0,
+      "thinkingBudget": 0,
+      "custom": 0
+    },
+    {
+      "temperature": -1,
+      "topP": -1,
+      "maxTokens": -1,
+      "thinkingBudget": -1,
+      "custom": -1
+    },
+    {
+      "temperature": 0.75,
+      "topP": 0.75,
+      "maxTokens": 0.75,
+      "thinkingBudget": 0.75,
+      "custom": 0.75
+    },
+    {
+      "temperature": "",
+      "topP": "",
+      "maxTokens": "",
+      "thinkingBudget": "",
+      "custom": ""
+    },
+    {
+      "temperature": "  ",
+      "topP": "  ",
+      "maxTokens": "  ",
+      "thinkingBudget": "  ",
+      "custom": "  "
+    },
+    {
+      "temperature": "0",
+      "topP": "0",
+      "maxTokens": "0",
+      "thinkingBudget": "0",
+      "custom": "0"
+    },
+    {
+      "temperature": " -2 ",
+      "topP": " -2 ",
+      "maxTokens": " -2 ",
+      "thinkingBudget": " -2 ",
+      "custom": " -2 "
+    },
+    {
+      "temperature": "1e3",
+      "topP": "1e3",
+      "maxTokens": "1e3",
+      "thinkingBudget": "1e3",
+      "custom": "1e3"
+    },
+    {
+      "temperature": "0x10",
+      "topP": "0x10",
+      "maxTokens": "0x10",
+      "thinkingBudget": "0x10",
+      "custom": "0x10"
+    },
+    {
+      "temperature": "0b11",
+      "topP": "0b11",
+      "maxTokens": "0b11",
+      "thinkingBudget": "0b11",
+      "custom": "0b11"
+    },
+    {
+      "temperature": "0o10",
+      "topP": "0o10",
+      "maxTokens": "0o10",
+      "thinkingBudget": "0o10",
+      "custom": "0o10"
+    },
+    {
+      "temperature": "Infinity",
+      "topP": "Infinity",
+      "maxTokens": "Infinity",
+      "thinkingBudget": "Infinity",
+      "custom": "Infinity"
+    },
+    {
+      "temperature": "NaN",
+      "topP": "NaN",
+      "maxTokens": "NaN",
+      "thinkingBudget": "NaN",
+      "custom": "NaN"
+    },
+    {
+      "temperature": "placeholder",
+      "topP": "placeholder",
+      "maxTokens": "placeholder",
+      "thinkingBudget": "placeholder",
+      "custom": "placeholder"
+    },
+    {
+      "temperature": [],
+      "topP": [],
+      "maxTokens": [],
+      "thinkingBudget": [],
+      "custom": []
+    },
+    {
+      "temperature": {},
+      "topP": {},
+      "maxTokens": {},
+      "thinkingBudget": {},
+      "custom": {}
+    }
+  ],
+  "expected": [
+    {
+      "custom": null
+    },
+    {
+      "custom": false
+    },
+    {
+      "custom": true
+    },
+    {
+      "temperature": 0,
+      "topP": 0,
+      "maxTokens": 0,
+      "thinkingBudget": 0,
+      "custom": 0
+    },
+    {
+      "temperature": -1,
+      "topP": -1,
+      "maxTokens": -1,
+      "thinkingBudget": -1,
+      "custom": -1
+    },
+    {
+      "temperature": 0.75,
+      "topP": 0.75,
+      "maxTokens": 0.75,
+      "thinkingBudget": 0.75,
+      "custom": 0.75
+    },
+    {
+      "custom": ""
+    },
+    {
+      "custom": "  "
+    },
+    {
+      "temperature": 0,
+      "topP": 0,
+      "maxTokens": 0,
+      "thinkingBudget": 0,
+      "custom": "0"
+    },
+    {
+      "temperature": -2,
+      "topP": -2,
+      "maxTokens": -2,
+      "thinkingBudget": -2,
+      "custom": " -2 "
+    },
+    {
+      "temperature": 1000,
+      "topP": 1000,
+      "maxTokens": 1000,
+      "thinkingBudget": 1000,
+      "custom": "1e3"
+    },
+    {
+      "temperature": 16,
+      "topP": 16,
+      "maxTokens": 16,
+      "thinkingBudget": 16,
+      "custom": "0x10"
+    },
+    {
+      "temperature": 3,
+      "topP": 3,
+      "maxTokens": 3,
+      "thinkingBudget": 3,
+      "custom": "0b11"
+    },
+    {
+      "temperature": 8,
+      "topP": 8,
+      "maxTokens": 8,
+      "thinkingBudget": 8,
+      "custom": "0o10"
+    },
+    {
+      "custom": "Infinity"
+    },
+    {
+      "custom": "NaN"
+    },
+    {
+      "custom": "placeholder"
+    },
+    {
+      "custom": []
+    },
+    {
+      "custom": {}
+    }
+  ]
+}

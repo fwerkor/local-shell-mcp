@@ -22,8 +22,13 @@ FIXTURES = ROOT / "tests/fixtures/librechat"
 def _oracle(cases, *, parameters=False):
     node = shutil.which("node")
     modules = Path(os.environ.get("LSM_REFERENCE_NODE_MODULES", ROOT / "ui/workspace/node_modules"))
+    vector_name = "agent_parameter_vectors.json" if parameters else "agent_validation_vectors.json"
+    recorded = json.loads((FIXTURES / vector_name).read_text(encoding="utf-8"))
+    assert recorded["cases"] == cases, "Regenerate reference vectors after changing source cases"
+    assert recorded["source_hashes"] == json.loads((FIXTURES / "agent_config_source_hashes.json").read_text(encoding="utf-8"))
     if node is None or not (modules / "zod").exists():
-        pytest.skip("Original Node oracle requires the build-only React dependencies")
+        assert os.environ.get("LSM_REQUIRE_SOURCE_ORACLES") != "1", "Required original Node/Zod oracle is unavailable"
+        return recorded["expected"]
     fixture = FIXTURES / ("agent_parameters_reference.cjs" if parameters else "agent_validation_reference.cjs")
     script = """
 const fs=require('fs'); const source=require(process.argv[1]);
@@ -36,10 +41,12 @@ process.stdout.write(JSON.stringify(cases.map(item => {
 })));
 """
     env = {**os.environ, "NODE_PATH": str(modules)}
-    return json.loads(subprocess.check_output(
+    live = json.loads(subprocess.check_output(
         [node, "-e", script, str(fixture), "parameters" if parameters else "schema"],
         input=json.dumps(cases).encode(), env=env,
     ))
+    assert live == recorded["expected"], "Recorded vectors must match the pinned original implementation"
+    return live
 
 
 def _graph():
@@ -148,11 +155,16 @@ def test_authoring_schema_matches_original_zod_behavior():
     assert actual == expected
 
 
-def test_numeric_model_parameters_match_original_source():
-    cases = [{"temperature": value, "topP": value, "maxTokens": value,
+def _parameter_cases():
+    return [{"temperature": value, "topP": value, "maxTokens": value,
               "thinkingBudget": value, "custom": value}
              for value in [None, False, True, 0, -1, 0.75, "", "  ", "0", " -2 ", "1e3",
                            "0x10", "0b11", "0o10", "Infinity", "NaN", "placeholder", [], {}]]
+
+
+
+def test_numeric_model_parameters_match_original_source():
+    cases = _parameter_cases()
     assert [sanitize_model_parameters(case) for case in cases] == _oracle(cases, parameters=True)
 
 
