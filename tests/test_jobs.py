@@ -1647,3 +1647,42 @@ async def test_cancelled_job_stop_reconciles_state_after_shell_termination(
         assert row["status"] == "stopped"
         assert "operation_id" not in row
     assert not active
+
+
+
+def test_runner_succeeds_without_stdout_under_pythonw(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    command = tmp_path / "command.txt"
+    log = tmp_path / "runner.log"
+    status = tmp_path / "runner.json"
+    command.write_text("echo restored-runner-output", encoding="utf-8")
+    shell = "cmd.exe" if os.name == "nt" else "/bin/sh"
+    args = [
+        "--command-file", str(command),
+        "--log-file", str(log),
+        "--status-file", str(status),
+        "--cwd", str(tmp_path),
+        "--shell", shell,
+        "--max-log-bytes", "10000",
+    ]
+    script = """
+import sys
+from local_shell_mcp.jobs import run_job_runner_cli
+sys.stdout = None
+sys.stderr = None
+run_job_runner_cli(sys.argv[1:])
+"""
+    from pathlib import Path
+
+    result = subprocess.run(
+        [sys.executable, "-c", script, *args],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(Path(jobs_module.__file__).resolve().parents[1])},
+        capture_output=True, text=True, timeout=15, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "restored-runner-output" in log.read_text()
+    assert json.loads(status.read_text())["exit_code"] == 0

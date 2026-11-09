@@ -3427,7 +3427,10 @@ def _reexec_updated_worker_runtime() -> None:
 
 async def _upgrade_worker_runtime(server: str, target_version: str) -> None:
     from .remote_worker_installer import install_or_update_runtime
-    from .remote_worker_service import refresh_installed_service_definition
+    from .remote_worker_service import (
+        _current_worker_is_managed,
+        refresh_installed_service_definition,
+    )
     from .remote_worker_state import install_launcher
 
     result = await asyncio.to_thread(install_or_update_runtime, server)
@@ -3438,7 +3441,10 @@ async def _upgrade_worker_runtime(server: str, target_version: str) -> None:
             f"{installed_version or 'no version'}"
         )
     await asyncio.to_thread(install_launcher)
-    await asyncio.to_thread(refresh_installed_service_definition)
+    await asyncio.to_thread(
+        refresh_installed_service_definition,
+        register_task=not (sys.platform == "win32" and _current_worker_is_managed()),
+    )
     print(
         f"Status: worker runtime updated to {installed_version or 'unknown'}; restarting...",
         file=sys.stderr,
@@ -4277,6 +4283,16 @@ async def _worker_poll_lane(
         upgrade = payload.get("upgrade") if isinstance(payload, dict) else None
         upgrade_required = isinstance(upgrade, dict) and upgrade.get("required")
         job = payload.get("job") if isinstance(payload, dict) else None
+
+        if sys.platform == "win32" and not upgrade_required:
+            # Do not discard the last known-good runtime until this process
+            # has actually resumed work after a Windows in-place upgrade.
+            from .remote_worker_installer import confirm_runtime_upgrade
+
+            try:
+                await asyncio.to_thread(confirm_runtime_upgrade)
+            except (OSError, ValueError) as exc:
+                _worker_log_retry("finalize worker upgrade", exc, 0)
 
         state.polling -= 1
         if job:

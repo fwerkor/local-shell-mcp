@@ -1104,12 +1104,12 @@ async def test_upgrade_worker_runtime_validates_manifest_version(monkeypatch):
     monkeypatch.setattr(
         remote_worker_service,
         "refresh_installed_service_definition",
-        lambda: calls.append("refresh"),
+        lambda **kwargs: calls.append(("refresh", kwargs)),
     )
     monkeypatch.setattr(remote_worker_state, "install_launcher", lambda: calls.append("launcher"))
     monkeypatch.setattr(remote, "_reexec_updated_worker_runtime", lambda: calls.append("reexec"))
     await remote._upgrade_worker_runtime("https://example.test", "3.2.0")  # noqa: SLF001
-    assert calls == ["launcher", "refresh", "reexec"]
+    assert calls == ["launcher", ("refresh", {"register_task": True}), "reexec"]
 
 
 @pytest.mark.asyncio

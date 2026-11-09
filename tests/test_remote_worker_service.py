@@ -927,3 +927,50 @@ def test_uninstall_removes_launchd_plist(tmp_path, monkeypatch):
     assert plist.exists()
     service.uninstall_service()
     assert not plist.exists()
+
+
+
+def test_windows_refresh_does_not_replace_running_scheduled_task(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    monkeypatch.setattr(service, "service_kind", lambda: "scheduled-task")
+    monkeypatch.setattr(service, "_windows_task_status", lambda: {"state": 4})
+    launcher = tmp_path / "worker-service.pyw"
+    monkeypatch.setattr(service, "_write_windows_task_launcher", lambda: launcher)
+    monkeypatch.setattr(
+        service, "_register_windows_task",
+        lambda path: pytest.fail("replaced a running Windows scheduled task"),
+    )
+    assert service.refresh_installed_service_definition(register_task=False) == launcher
+
+
+
+def test_windows_task_bootstrap_rolls_back_unstartable_new_runtime(tmp_path, monkeypatch):
+    _configure(tmp_path, monkeypatch)
+    from local_shell_mcp.remote_worker_state import worker_state_dir
+
+    root = worker_state_dir()
+    root.mkdir(parents=True, exist_ok=True)
+    broken = root / "runtime" / "local_shell_mcp"
+    broken.mkdir(parents=True)
+    (broken / "__init__.py").write_text("raise RuntimeError('cannot import new worker')\n")
+    previous = root / "runtime.previous" / "local_shell_mcp"
+    previous.mkdir(parents=True)
+    (previous / "__init__.py").write_text("")
+    (previous / "remote_worker.py").write_text("def main(argv=None): pass\n")
+    (root / "runtime-upgrade-pending.json").write_text(json.dumps({
+        "old_digest": "original", "old_version": "6.0.0", "new_digest": "broken"
+    }))
+    (root / "config.json").write_text(json.dumps({
+        "version": 1, "server": "https://s", "name": "worker-a",
+        "workdir": str(tmp_path), "runtime_digest": "broken", "runtime_version": "6.0.1"
+    }))
+    launcher = service._write_windows_task_launcher()  # noqa: SLF001
+    result = subprocess.run(
+        [sys.executable, str(launcher)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=12, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (root / "runtime" / "local_shell_mcp" / "remote_worker.py").is_file()
+    assert json.loads((root / "config.json").read_text())["runtime_digest"] == "original"
+    assert not (root / "runtime-upgrade-pending.json").exists()
+    assert "restored previous runtime" in (root / "worker.log").read_text()
