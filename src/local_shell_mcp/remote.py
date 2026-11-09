@@ -3394,7 +3394,7 @@ def _reexec_updated_worker_runtime() -> None:
         cancel_worker_lock_reexec,
         prepare_worker_lock_reexec,
     )
-    from .remote_worker_state import worker_runtime_dir
+    from .remote_worker_state import worker_bootstrap_path, worker_runtime_dir
 
     runtime = worker_runtime_dir()
     preferred = [str(runtime)]
@@ -3403,7 +3403,17 @@ def _reexec_updated_worker_runtime() -> None:
         preferred + [entry for entry in current if entry not in preferred]
     )
     argv = _worker_run_exec_argv()
-    if sys.platform == "win32" and _current_worker_is_managed():
+    if not os.environ.get("LOCAL_SHELL_MCP_WORKER_BOOTSTRAPPED"):
+        # Foreground workers need their own supervisor; managed workers already
+        # have a systemd/launchd/task restart path.
+        bootstrap = worker_bootstrap_path()
+        if bootstrap.is_file():
+            argv = [sys.executable, str(bootstrap)]
+    if (
+        sys.platform == "win32"
+        and _current_worker_is_managed()
+        and not os.environ.get("LOCAL_SHELL_MCP_WORKER_BOOTSTRAPPED")
+    ):
         service_launcher = _windows_task_launcher_path()
         if service_launcher.is_file():
             pythonw = str(_windows_pythonw_executable())
@@ -3416,25 +3426,41 @@ def _reexec_updated_worker_runtime() -> None:
 
 
 async def _upgrade_worker_runtime(server: str, target_version: str) -> None:
-    from .remote_worker_installer import install_or_update_runtime
-    from .remote_worker_service import refresh_installed_service_definition
+    from .remote_worker_installer import install_or_update_runtime, rollback_pending_runtime
     from .remote_worker_state import install_launcher
 
-    result = await asyncio.to_thread(install_or_update_runtime, server)
-    installed_version = str(result.get("version") or "")
-    if target_version and installed_version != target_version:
-        raise RuntimeError(
-            f"controller requested worker {target_version}, but manifest provides "
-            f"{installed_version or 'no version'}"
-        )
+    # Prepare the trusted supervisor before changing the runtime. On Windows
+    # the scheduled task invokes a separate .pyw script rather than the
+    # command launcher, so rewrite that trusted entrypoint *before* swapping.
     await asyncio.to_thread(install_launcher)
-    await asyncio.to_thread(refresh_installed_service_definition)
-    print(
-        f"Status: worker runtime updated to {installed_version or 'unknown'}; restarting...",
-        file=sys.stderr,
-        flush=True,
-    )
-    _reexec_updated_worker_runtime()
+    if sys.platform == "win32":
+        from .remote_worker_service import (
+            _current_worker_is_managed,
+            _windows_task_launcher_path,
+            _write_windows_task_launcher,
+        )
+
+        if _current_worker_is_managed() and _windows_task_launcher_path().is_file():
+            await asyncio.to_thread(_write_windows_task_launcher)
+    try:
+        result = await asyncio.to_thread(install_or_update_runtime, server)
+        installed_version = str(result.get("version") or "")
+        if target_version and installed_version != target_version:
+            raise RuntimeError(
+                f"controller requested worker {target_version}, but manifest provides "
+                f"{installed_version or 'no version'}"
+            )
+        # Do not replace the known-good launcher/service watchdog until the
+        # candidate proves it can connect and poll the controller.
+        print(
+            f"Status: worker runtime updated to {installed_version or 'unknown'}; restarting...",
+            file=sys.stderr,
+            flush=True,
+        )
+        _reexec_updated_worker_runtime()
+    except BaseException:
+        await asyncio.to_thread(rollback_pending_runtime)
+        raise
 
 
 def _parse_worker_http_json(url: str, status_code: int, response_body: str) -> dict[str, Any]:
@@ -4266,6 +4292,18 @@ async def _worker_poll_lane(
             poll_request_timeout_s = updated_poll_request_timeout_s
         upgrade = payload.get("upgrade") if isinstance(payload, dict) else None
         upgrade_required = isinstance(upgrade, dict) and upgrade.get("required")
+        if not upgrade_required:
+            # Only perform the health-commit I/O for an actual trial upgrade.
+            # Normal polling remains unchanged and has no extra await point.
+            from .remote_worker_state import worker_state_dir
+
+            if (worker_state_dir() / "runtime.pending.json").exists():
+                from .remote_worker_installer import confirm_runtime_healthy
+
+                try:
+                    await asyncio.to_thread(confirm_runtime_healthy)
+                except Exception as exc:  # noqa: BLE001
+                    _worker_log_retry("confirm worker upgrade", exc, 1.0)
         job = payload.get("job") if isinstance(payload, dict) else None
 
         state.polling -= 1

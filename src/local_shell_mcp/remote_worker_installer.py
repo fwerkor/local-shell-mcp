@@ -342,19 +342,51 @@ def _safe_extract(archive: Path, destination: Path) -> None:
         tar.extractall(destination)  # noqa: S202
 
 
+def rollback_pending_runtime() -> bool:
+    """Restore the proven worker after an unsuccessful candidate startup."""
+    from .remote_worker_bootstrap import _rollback
+
+    state = worker_state_dir()
+    if not (state / "runtime.pending.json").exists():
+        return False
+    return _rollback(state)
+
+
+def confirm_runtime_healthy() -> None:
+    """Commit a candidate only after the controller accepts an actual poll."""
+    state = worker_state_dir()
+    pending = state / "runtime.pending.json"
+    if not pending.exists():
+        return
+    journal = json.loads(pending.read_text(encoding="utf-8"))
+    # A host interruption can occur between swapping the runtime and writing
+    # its digest; finish that metadata commit before deleting the journal.
+    if journal.get("candidate_digest"):
+        update_runtime_metadata(
+            str(journal["candidate_digest"]), str(journal.get("candidate_version") or "")
+        )
+    pending.unlink()
+    (state / "runtime.attempted").unlink(missing_ok=True)
+    shutil.rmtree(state / "runtime.previous", ignore_errors=True)
+
+
 def install_or_update_runtime(server: str, *, force: bool = False) -> dict[str, Any]:
     manifest = fetch_manifest(server)
     digest = str(manifest["sha256"])
     version = str(manifest.get("bundle_version") or "")
     runtime = worker_runtime_dir()
+    state_dir = worker_state_dir()
+    pending = state_dir / "runtime.pending.json"
+    backup = state_dir / "runtime.previous"
     try:
         current = read_worker_config()
     except (FileNotFoundError, ValueError):
         current = {}
     if not force and runtime.is_dir() and current.get("runtime_digest") == digest:
         return {"updated": False, "sha256": digest, "version": version, "runtime": str(runtime)}
+    if pending.exists():
+        raise RuntimeError("worker runtime upgrade is already awaiting startup verification")
 
-    state_dir = worker_state_dir()
     state_dir.mkdir(parents=True, exist_ok=True)
     payload = _fetch_bytes(str(manifest["url"]), timeout=120)
     actual = hashlib.sha256(payload).hexdigest()
@@ -372,22 +404,31 @@ def install_or_update_runtime(server: str, *, force: bool = False) -> dict[str, 
             raise ValueError("worker bundle does not contain local_shell_mcp")
 
         staged = state_dir / f"runtime.next.{os.getpid()}"
-        backup = state_dir / f"runtime.previous.{os.getpid()}"
         shutil.rmtree(staged, ignore_errors=True)
-        shutil.rmtree(backup, ignore_errors=True)
         shutil.copytree(extracted, staged)
         try:
+            # A stale backup without a journal is left by a completed upgrade.
+            if backup.exists():
+                shutil.rmtree(backup)
             if runtime.exists():
+                journal = {
+                    "previous_digest": str(current.get("runtime_digest") or ""),
+                    "previous_version": str(current.get("runtime_version") or ""),
+                    "candidate_digest": digest,
+                    "candidate_version": version,
+                }
+                journal_file = state_dir / f"runtime.pending.{os.getpid()}.tmp"
+                journal_file.write_text(json.dumps(journal, sort_keys=True), encoding="utf-8")
+                journal_file.replace(pending)
                 runtime.replace(backup)
             staged.replace(runtime)
+            if current:
+                update_runtime_metadata(digest, version)
         except Exception:
-            if not runtime.exists() and backup.exists():
-                backup.replace(runtime)
+            if pending.exists():
+                rollback_pending_runtime()
             raise
         finally:
             shutil.rmtree(staged, ignore_errors=True)
-            shutil.rmtree(backup, ignore_errors=True)
 
-    if current:
-        update_runtime_metadata(digest, version)
     return {"updated": True, "sha256": digest, "version": version, "runtime": str(runtime)}
