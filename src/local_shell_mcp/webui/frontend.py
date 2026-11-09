@@ -95,7 +95,7 @@ def bundled_frontend() -> Path | None:
 
 def is_spa_path(path: str) -> bool:
     first = path.strip("/").split("/", 1)[0]
-    return first in _SPA_PREFIXES
+    return not first or first in _SPA_PREFIXES
 
 
 def is_public_frontend(path: str, method: str) -> bool:

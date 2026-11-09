@@ -18,6 +18,7 @@ async def test_react_assets_and_routes(tmp_path, monkeypatch):
     monkeypatch.setattr(frontend, "bundled_frontend", lambda: bundle)
     app = Starlette(routes=frontend.frontend_routes())
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.get("/")).status_code == 200
         assert (await client.get("/c/new")).status_code == 200
         assert "LSM WebUI" in (await client.get("/control/files")).text
         assert "console.log" in (await client.get("/assets/app.js")).text
