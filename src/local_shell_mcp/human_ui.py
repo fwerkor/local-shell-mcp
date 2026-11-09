@@ -564,25 +564,9 @@ def _assets_dir() -> Path:
     return Path(__file__).resolve().parent / "ui_static"
 
 
-def _ui_index_html() -> str:
-    settings = get_settings()
-    ui_path = "/" + settings.ui_path.strip("/")
-    path = _assets_dir() / "index.html"
-    if path.exists():
-        html = path.read_text(encoding="utf-8")
-        config = json.dumps({"uiPath": ui_path, "apiPrefix": UI_API_PREFIX, "tuiAvailable": tui_runtime_available()})
-        return (
-            html.replace("__LSM_UI_PATH__", ui_path)
-            .replace("__LSM_UI_ASSET_VERSION__", __version__)
-            .replace("__LSM_UI_CONFIG_JSON__", config)
-        )
-    return """<!doctype html><html><head><meta charset=\"utf-8\"><title>local-shell-mcp UI</title></head>
-<body style=\"background:#050812;color:#dbeafe;font:16px system-ui;padding:48px\">
-<h1>local-shell-mcp UI assets are not built</h1><p>Build them with <code>cd ui &amp;&amp; bun run build</code>.</p></body></html>"""
-
-
 async def ui_index(request: Request) -> Response:  # noqa: ARG001
-    return HTMLResponse(_ui_index_html(), headers={"Cache-Control": "no-store"})
+    """Preserve bookmarked native UI URLs while using the unified workspace."""
+    return RedirectResponse("/c/new", status_code=307)
 
 
 async def ui_asset(request: Request) -> Response:
@@ -3227,8 +3211,7 @@ async def ui_shell_websocket(websocket: WebSocket) -> None:
 
 
 async def ui_root_redirect(request: Request) -> RedirectResponse:  # noqa: ARG001
-    ui_path = get_settings().ui_path.strip("/")
-    return RedirectResponse(f"./{ui_path}/", status_code=307)
+    return RedirectResponse("/c/new", status_code=307)
 
 
 async def api_nested_mcp(request: Request) -> Response:

@@ -703,9 +703,11 @@ async def oauth_authorize_post(request: Request) -> Response:
     from .auth import _is_direct_localhost_request
 
     ui_path = get_settings().ui_path
-    ui_callbacks = {f"{public_base_url(request)}{ui_path}/callback"}
+    ui_callbacks = {f"{public_base_url(request)}{ui_path}/callback",
+                    f"{public_base_url(request)}/auth/login"}
     if _is_direct_localhost_request(request):
         ui_callbacks.add(f"{request.url.scheme}://{request.url.netloc}{ui_path}/callback")
+        ui_callbacks.add(f"{request.url.scheme}://{request.url.netloc}/auth/login")
     ui_admin = (
         params.get("redirect_uri") in ui_callbacks
         and "admin:config" in params.get("scope", "").split()

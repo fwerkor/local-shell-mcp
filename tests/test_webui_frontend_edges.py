@@ -14,6 +14,16 @@ from starlette.applications import Starlette
 from local_shell_mcp.webui import frontend
 
 
+@pytest.fixture(autouse=True)
+def _unauthenticated_controller(monkeypatch):
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 def _archive(tmp_path: Path, entries: list[tuple[str, bytes, str]]):
     path = tmp_path / "assets.tar.gz"
     with path.open("wb") as output, gzip.GzipFile(fileobj=output, mode="wb", filename="") as zipped, \

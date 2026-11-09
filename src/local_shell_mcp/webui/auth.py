@@ -14,7 +14,7 @@ from pathlib import Path
 
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.responses import JSONResponse, RedirectResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from ..settings import get_settings
@@ -137,6 +137,72 @@ def _frontend_user(session: WebSession) -> dict:
     }
 
 
+# This is an OAuth client bootstrap, not another identity or login service.
+# The existing Controller authorize endpoint owns PIN verification and grants.
+_LOGIN_HTML = r'''<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>local-shell-mcp</title>
+<style>html{color-scheme:light dark}body{font:16px system-ui;max-width:32rem;margin:20vh auto;padding:1.5rem}a{color:inherit}</style>
+</head><body><p role="status" id="status">Opening authentication…</p>
+<a href="/auth/login" id="retry" hidden>Try again</a><script type="module">
+const key = 'lsm.workspace.oauth';
+const status = document.getElementById('status');
+const b64 = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const random = () => b64(crypto.getRandomValues(new Uint8Array(48)));
+async function checked(response) {
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error_description || data.error || data.detail || `Authentication failed (${response.status})`);
+  return data;
+}
+try {
+  const url = new URL(location.href);
+  const callback = `${location.origin}/auth/login`;
+  if (url.searchParams.has('error')) throw new Error('Authorization was declined. Start authentication again.');
+  if (url.searchParams.has('code')) {
+    const pending = JSON.parse(sessionStorage.getItem(key) || 'null');
+    if (!pending || url.searchParams.get('state') !== pending.state) throw new Error('OAuth state verification failed. Start authentication again.');
+    sessionStorage.removeItem(key);
+    history.replaceState(null, '', '/auth/login');
+    const token = await checked(await fetch('/oauth/token', {
+      method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: new URLSearchParams({grant_type:'authorization_code', code:url.searchParams.get('code'),
+        client_id:pending.client_id, redirect_uri:callback, code_verifier:pending.verifier})
+    }));
+    if (!token.access_token) throw new Error('The Controller did not return an OAuth token.');
+    const ticket = await checked(await fetch('/api/ui/webui-ticket', {
+      method:'POST', headers:{Authorization:`Bearer ${token.access_token}`}
+    }));
+    const form = document.createElement('form');
+    form.method = 'POST'; form.action = '/api/auth/lsm';
+    const input = document.createElement('input');
+    input.type = 'hidden'; input.name = 'ticket'; input.value = ticket.ticket;
+    form.append(input); document.body.append(form); form.submit();
+  } else {
+    const client = await checked(await fetch('/oauth/register', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({client_name:'WebUI', redirect_uris:[callback]})
+    }));
+    const verifier = random(), state = random();
+    const challenge = b64(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
+    sessionStorage.setItem(key, JSON.stringify({client_id:client.client_id, verifier, state}));
+    const authorize = new URL('/oauth/authorize', location.origin);
+    authorize.search = new URLSearchParams({response_type:'code', client_id:client.client_id,
+      redirect_uri:callback, scope:'shell:read shell:write shell:execute browser:use file:share remote:use admin:config',
+      resource:location.origin, code_challenge:challenge, code_challenge_method:'S256', state});
+    location.replace(authorize);
+  }
+} catch (error) {
+  status.textContent = error instanceof Error ? error.message : String(error);
+  document.getElementById('retry').hidden = false;
+}
+</script></body></html>'''
+
+
+async def login_page(request: Request) -> Response:
+    if get_settings().auth_mode == "none" or _store().session(request.cookies.get(COOKIE, "")):
+        return RedirectResponse("/c/new", status_code=303)
+    return HTMLResponse(_LOGIN_HTML, headers={"Cache-Control": "no-store", "Referrer-Policy": "same-origin"})
+
+
 async def login_ticket(request: Request) -> Response:
     owner, scopes, expiry = _owner(request)
     token = _store().issue_ticket(owner, scopes, expiry)
@@ -207,6 +273,7 @@ async def current_user(request: Request) -> Response:
 
 def auth_routes() -> list[Route]:
     return [
+        Route("/auth/login", login_page, methods=["GET"]),
         Route("/api/ui/webui-ticket", login_ticket, methods=["POST"]),
         Route("/api/auth/lsm", authenticate, methods=["POST"]),
         Route("/api/auth/refresh", refresh, methods=["POST"]),

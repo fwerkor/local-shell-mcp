@@ -18,7 +18,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, Response
+from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Match, Route
 
 _STATIC_PREFIXES = ("assets/", "fonts/", "images/", "locales/", "favicon", "robots.txt", "manifest", "sw.js", "sw-heal.js", "registerSW.js", "workbox-")
@@ -102,10 +102,16 @@ def is_public_frontend(path: str, method: str) -> bool:
     if method not in {"GET", "HEAD"}:
         return False
     relative = path.lstrip("/")
-    return is_spa_path(path) or relative.startswith(_STATIC_PREFIXES)
+    return path == "/auth/login" or is_spa_path(path) or relative.startswith(_STATIC_PREFIXES)
 
 
 async def frontend(request: Request) -> Response:
+    if is_spa_path(request.url.path):
+        from ..settings import get_settings
+        from .auth import COOKIE, _store
+
+        if get_settings().auth_mode != "none" and not _store().session(request.cookies.get(COOKIE, "")):
+            return RedirectResponse("/auth/login", status_code=303)
     try:
         root = bundled_frontend()
     except (OSError, ValueError, tarfile.TarError):

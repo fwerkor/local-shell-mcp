@@ -7,6 +7,16 @@ from starlette.applications import Starlette
 from local_shell_mcp.webui import frontend
 
 
+@pytest.fixture(autouse=True)
+def _unauthenticated_controller(monkeypatch):
+    from local_shell_mcp.settings import get_settings
+
+    monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @pytest.mark.asyncio
 async def test_react_assets_and_routes(tmp_path, monkeypatch):
     bundle = tmp_path / "assets"
