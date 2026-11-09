@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import shutil
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -1685,3 +1686,38 @@ async def test_cancelled_job_stop_reconciles_state_after_shell_termination(
         assert row["status"] == "stopped"
         assert "operation_id" not in row
     assert not active
+
+
+def test_job_runner_without_console_streams_preserves_log_and_receipt(
+    tmp_path, monkeypatch
+):
+    """Windows pythonw workers may not have sys.stdout or sys.stderr."""
+    command_file = tmp_path / "command.txt"
+    log_file = tmp_path / "output.log"
+    status_file = tmp_path / "status.json"
+    command_file.write_text("ignored by mocked runner", encoding="utf-8")
+    monkeypatch.setattr(
+        jobs_module,
+        "_runner_shell_args",
+        lambda _shell, _command: [
+            sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'worker output')"
+        ],
+    )
+    args = [
+        "--command-file", str(command_file),
+        "--log-file", str(log_file),
+        "--status-file", str(status_file),
+        "--cwd", str(tmp_path),
+        "--shell", "powershell.exe",
+        "--max-log-bytes", "1024",
+    ]
+    with monkeypatch.context() as patch:
+        patch.setattr(jobs_module.sys, "stdout", None)
+        patch.setattr(jobs_module.sys, "stderr", None)
+        with pytest.raises(SystemExit) as exited:
+            jobs_module.run_job_runner_cli(args)
+    assert exited.value.code == 0
+    assert log_file.read_bytes() == b"worker output"
+    receipt = json.loads(status_file.read_text(encoding="utf-8"))
+    assert receipt["exit_code"] == 0
+    assert receipt["output_bytes"] == len(b"worker output")
