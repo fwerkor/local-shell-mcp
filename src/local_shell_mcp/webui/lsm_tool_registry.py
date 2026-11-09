@@ -7,6 +7,7 @@ contains no duplicate job, shell, file, or Worker RPC implementations.
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 from functools import lru_cache
@@ -56,6 +57,7 @@ _ADDITIONAL_SCOPES = {
     "link_create": "file:share", "link_list": "file:share", "link_revoke": "file:share",
     "mcp_manage": "shell:execute", "remote_manage": "remote:use",
 }
+_AUTHORIZATION_RECHECK_SECONDS = 0.5
 _MAX_OUTPUT_CHARS = 32768
 _MAX_ARGUMENT_BYTES = 32768
 
@@ -196,50 +198,89 @@ async def call_tool(owner: str, conversation_id: str, call: ModelToolCall, *,
         raise ValueError("Invalid or oversized LSM tool arguments")
     if "logical_session_id" in arguments:
         raise PermissionError("Models cannot provide LSM internal session credentials")
-    operation = _operation(tool, arguments)
-    if tool.name in _AGENT_CONTROL:
-        # Session ownership is still checked; this bypasses machine ACLs only.
-        from .routes import _repo
+    def check_authorization():
+        operation = _operation(tool, arguments)
+        if tool.name in _AGENT_CONTROL:
+            # Session ownership is still checked; this bypasses machine ACLs only.
+            from .routes import _repo
 
-        if _repo().conversation(owner, conversation_id) is None:
-            raise KeyError("Conversation not found")
-        if grant_expires is not None:
-            import time
+            if _repo().conversation(owner, conversation_id) is None:
+                raise KeyError("Conversation not found")
+            if grant_expires is not None:
+                import time
 
-            if float(grant_expires) <= time.time():
-                raise PermissionError("Authentication grant expired")
-    elif tool.name == "remote_transfer":
-        source = arguments.get("source_machine") or "local"
-        destination = arguments.get("destination_machine") or "local"
-        if not isinstance(source, str) or not isinstance(destination, str):
-            raise ValueError("Invalid transfer machines")
-        authorize_machine_action(owner, conversation_id, source, "read",
-                                 scopes=granted_scopes, expires=grant_expires)
-        authorize_machine_action(owner, conversation_id, destination, "write",
-                                 scopes=granted_scopes, expires=grant_expires)
-    else:
-        for machine in _targets(tool, arguments):
-            authorize_machine_action(owner, conversation_id, machine, operation,
+                if float(grant_expires) <= time.time():
+                    raise PermissionError("Authentication grant expired")
+        elif tool.name == "remote_transfer":
+            source = arguments.get("source_machine") or "local"
+            destination = arguments.get("destination_machine") or "local"
+            if not isinstance(source, str) or not isinstance(destination, str):
+                raise ValueError("Invalid transfer machines")
+            authorize_machine_action(owner, conversation_id, source, "read",
                                      scopes=granted_scopes, expires=grant_expires)
-    if tool.name == "job_retry" and arguments.get("machine") in {None, "", "local"}:
-        # Controller-managed transfer jobs retain remote endpoints in their
-        # payload. Retrying by job ID must never bypass those endpoint ACLs.
-        from ..jobs import job_retry_machine_requirements
-
-        for machine, required in job_retry_machine_requirements(arguments.get("job_id")):
-            authorize_machine_action(owner, conversation_id, machine, required,
+            authorize_machine_action(owner, conversation_id, destination, "write",
                                      scopes=granted_scopes, expires=grant_expires)
-    extra_scope = _ADDITIONAL_SCOPES.get(tool.name)
-    if extra_scope and extra_scope not in granted_scopes:
-        raise PermissionError(f"{extra_scope} permission is required")
+        else:
+            for machine in _targets(tool, arguments):
+                authorize_machine_action(owner, conversation_id, machine, operation,
+                                         scopes=granted_scopes, expires=grant_expires)
+        if tool.name == "job_retry" and arguments.get("machine") in {None, "", "local"}:
+            # Controller-managed transfer jobs retain remote endpoints in their
+            # payload. Retrying by job ID must never bypass those endpoint ACLs.
+            from ..jobs import job_retry_machine_requirements
+
+            for machine, required in job_retry_machine_requirements(arguments.get("job_id")):
+                authorize_machine_action(owner, conversation_id, machine, required,
+                                         scopes=granted_scopes, expires=grant_expires)
+        extra_scope = _ADDITIONAL_SCOPES.get(tool.name)
+        if extra_scope and extra_scope not in granted_scopes:
+            raise PermissionError(f"{extra_scope} permission is required")
+
+    check_authorization()
     # MCP uses None/omitted for the local controller. Passing the literal name
     # `local` would instead incorrectly route to a Worker called local.
     invocation = dict(arguments)
     for field in ("machine", "source_machine", "destination_machine"):
         if invocation.get(field) == "local":
             invocation[field] = None
-    return await _invoke_registered(owner, conversation_id, tool.name, invocation,
-                                    scopes=granted_scopes, machines=_targets(tool, arguments))
+    try:
+        return await _await_authorized(
+            _invoke_registered(owner, conversation_id, tool.name, invocation,
+                               scopes=granted_scopes, machines=_targets(tool, arguments)),
+            check_authorization,
+        )
+    except PermissionError:
+        audit("webui_agent_lsm_tool_revoked", owner=owner, conversation_id=conversation_id,
+              tool=tool.name, machines=_targets(tool, arguments), ok=False)
+        raise
+
+
+async def _await_authorized(invocation, check_authorization):
+    """Recheck a live dispatch without bypassing native cancellation cleanup.
+
+    Cancellation reaches the original tool executor. Its protected mutations
+    still settle before returning; cancellable processes use native process
+    group termination. Already-returned background jobs require a separate
+    durable ownership lease and are deliberately not inferred from job lists.
+    """
+    task = asyncio.create_task(invocation)
+    try:
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=_AUTHORIZATION_RECHECK_SECONDS)
+            try:
+                check_authorization()
+            except KeyError as error:
+                raise PermissionError("Agent authorization is no longer available") from error
+            if task in done:
+                return task.result()
+    except BaseException:
+        if not task.done():
+            task.cancel()
+        # Native non-cancellable writes/start operations may still be settling.
+        # Keep ownership of the task until their cleanup has actually finished.
+        await asyncio.gather(task, return_exceptions=True)
+        raise
+
 
 
 def registered_definitions(names: tuple[str, ...]) -> list[dict]:
