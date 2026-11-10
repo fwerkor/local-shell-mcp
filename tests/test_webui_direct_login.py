@@ -47,7 +47,8 @@ async def test_workspace_navigation_requires_a_live_cookie(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_browser_default_entry_authenticates_without_an_open_button(tmp_path, monkeypatch):
+@pytest.mark.parametrize("controller_mode", ["http", "stdio"])
+async def test_browser_default_entry_authenticates_without_an_open_button(tmp_path, monkeypatch, controller_mode):
     playwright = pytest.importorskip("playwright.async_api")
     import uvicorn
 
@@ -59,6 +60,7 @@ async def test_browser_default_entry_authenticates_without_an_open_button(tmp_pa
         "WORKSPACE_ROOT": str(tmp_path), "STATE_DIR": str(tmp_path / ".local-shell-mcp"),
         "AUTH_MODE": "oauth", "UI_ENABLED": "true", "REMOTE_ENABLED": "false",
         "OAUTH_ADMIN_PIN": "246810", "OAUTH_ACCESS_TOKEN_TTL_S": "300",
+        "MODE": controller_mode, "AUTH_BYPASS_LOCALHOST": "true",
     }.items():
         monkeypatch.setenv("LOCAL_SHELL_MCP_" + key, value)
     get_settings.cache_clear()
@@ -90,6 +92,7 @@ async def test_browser_default_entry_authenticates_without_an_open_button(tmp_pa
                 await page.locator('input[name="pin"]').wait_for(timeout=15000)
                 assert "/oauth/authorize?" in page.url
                 assert await page.get_by_role("button", name="Open WebUI").count() == 0
+                assert "admin:config" in (await page.locator('input[name="scope"]').input_value()).split(), page.url
                 await page.locator('input[name="pin"]').fill("246810")
                 await page.locator('button[type="submit"]').first.click()
                 try:
@@ -118,4 +121,38 @@ async def test_browser_default_entry_authenticates_without_an_open_button(tmp_pa
     finally:
         server.should_exit = True
         await asyncio.wait_for(task, timeout=15)
+        get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scopes", ["shell:read", "shell:read admin:config"])
+async def test_local_bypass_does_not_replace_explicit_oauth_grant(tmp_path, monkeypatch, scopes):
+    from local_shell_mcp.auth import AuthMiddleware
+    from local_shell_mcp.oauth import issue_access_token
+    from local_shell_mcp.settings import get_settings
+
+    for key, value in {
+        "WORKSPACE_ROOT": str(tmp_path), "STATE_DIR": str(tmp_path / ".local-shell-mcp"),
+        "AUTH_MODE": "oauth", "MODE": "http", "AUTH_BYPASS_LOCALHOST": "true",
+        "PUBLIC_BASE_URL": "http://127.0.0.1:8765", "OAUTH_ACCESS_TOKEN_TTL_S": "300",
+    }.items():
+        monkeypatch.setenv("LOCAL_SHELL_MCP_" + key, value)
+    get_settings.cache_clear()
+    origin = "http://127.0.0.1:8765"
+    token = issue_access_token(client_id="browser", scope=scopes, resource=origin,
+                               subject="oauth-alice", issuer=origin)
+    app = AuthMiddleware(Starlette(routes=auth.auth_routes()))
+    try:
+        transport = httpx.ASGITransport(app=app, client=("127.0.0.1", 12345))
+        async with httpx.AsyncClient(transport=transport, base_url=origin) as client:
+            response = await client.post("/api/ui/webui-ticket", headers={"Authorization": f"Bearer {token}"})
+            assert response.status_code == 200, response.text
+            _, grant = auth.WebAuthStore(get_settings().state_dir).redeem(response.json()["ticket"])
+            assert grant.owner == "oauth-alice"
+            assert set(grant.scopes.split()) == set(scopes.split())
+            assert grant.grant_until <= int(time.time()) + 300
+            # A local connection cannot turn a forged bearer into a valid grant.
+            rejected = await client.post("/api/ui/webui-ticket", headers={"Authorization": "Bearer forged"})
+            assert rejected.status_code == 401
+    finally:
         get_settings.cache_clear()

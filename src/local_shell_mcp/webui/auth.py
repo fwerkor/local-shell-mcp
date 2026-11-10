@@ -204,6 +204,14 @@ async def login_page(request: Request) -> Response:
 
 
 async def login_ticket(request: Request) -> Response:
+    # This exchange represents the OAuth grant just approved in the browser.
+    # The Controller's optional local bypass must not replace an explicitly
+    # supplied bearer identity or its scopes with the ambient localhost user.
+    settings = get_settings()
+    if settings.auth_mode == "oauth" and request.headers.get("authorization"):
+        from ..auth import _verify_oauth
+
+        request.state.principal = _verify_oauth(request, settings)
     owner, scopes, expiry = _owner(request)
     token = _store().issue_ticket(owner, scopes, expiry)
     origin = get_settings().public_base_url or str(request.base_url).rstrip("/")
