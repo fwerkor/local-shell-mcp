@@ -240,3 +240,12 @@ The active background child-task store guard awaits the full graph host; durable
 child metadata and the original reserved UUID namespace are already read-only.
 Malformed non-integer indexes/non-string edit bodies are rejected with 400 at the
 Python boundary rather than surfacing the upstream route's accidental 500.
+
+The retained React Artifact editor now loads its original Monaco component from
+self-hosted build assets (`/monaco/vs`), including the upstream MIT license. The
+build copies the installed, lockfile-resolved Monaco assets; production requires
+no CDN or Node service. A real Chromium test blocks every external request,
+uses the original radio controls and editor, saves through the original route,
+then reloads and verifies the persisted code. Editor assets revalidate on each
+page load to prevent a stale AMD loader after a Controller upgrade. Oracle
+fixtures use explicit UTF-8 and LF checkout to preserve source hashes on Windows.

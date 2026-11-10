@@ -21,7 +21,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Match, Route
 
-_STATIC_PREFIXES = ("assets/", "fonts/", "images/", "locales/", "favicon", "robots.txt", "manifest", "sw.js", "sw-heal.js", "registerSW.js", "workbox-")
+_STATIC_PREFIXES = ("monaco/", "assets/", "fonts/", "images/", "locales/", "favicon", "robots.txt", "manifest", "sw.js", "sw-heal.js", "registerSW.js", "workbox-")
 _SPA_PREFIXES = ("c", "login", "register", "search", "agents", "settings", "control", "projects", "chat", "d", "presets", "prompts", "schedules", "memories")
 _CACHE_LOCK = threading.Lock()
 _MAX_FILE_BYTES = 60 * 1024 * 1024
@@ -130,7 +130,8 @@ async def frontend(request: Request) -> Response:
         if not is_spa_path("/" + relative):
             return Response(status_code=404)
         path = root / "index.html"
-    headers = {"Cache-Control": "no-store"} if path.name == "index.html" else {"Cache-Control": "public, max-age=3600"}
+    cache = "no-store" if path.name == "index.html" else ("no-cache" if relative.startswith("monaco/") else "public, max-age=3600")
+    headers = {"Cache-Control": cache}
     return FileResponse(path, headers=headers)
 
 

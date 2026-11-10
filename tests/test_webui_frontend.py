@@ -46,3 +46,23 @@ def test_only_safe_get_paths_are_public():
     assert not frontend.is_public_frontend("/c/new", "POST")
     assert not frontend.is_public_frontend("/api/ui/settings", "GET")
     assert not frontend.is_public_frontend("/mcp", "GET")
+
+
+@pytest.mark.asyncio
+async def test_packaged_editor_assets_are_public_and_revalidate(tmp_path, monkeypatch):
+    bundle = tmp_path / "bundle"
+    editor = bundle / "monaco" / "vs"
+    editor.mkdir(parents=True)
+    (editor / "loader.js").write_text("self.hosted = true", encoding="utf-8")
+    (editor / "loader.js.map").write_text("private", encoding="utf-8")
+    monkeypatch.setattr(frontend, "bundled_frontend", lambda: bundle)
+    app = Starlette(routes=frontend.frontend_routes())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/monaco/vs/loader.js")
+        assert response.status_code == 200 and response.text == "self.hosted = true"
+        assert response.headers["cache-control"] == "no-cache"
+        assert frontend.is_public_frontend("/monaco/vs/loader.js", "GET")
+        assert not frontend.is_public_frontend("/monaco/vs/loader.js", "POST")
+        assert (await client.get("/monaco/vs/loader.js.map")).status_code == 404
+        assert (await client.get("/monaco/vs/.env")).status_code == 404
+        assert (await client.get("/monaco/vs/missing.js")).status_code == 404

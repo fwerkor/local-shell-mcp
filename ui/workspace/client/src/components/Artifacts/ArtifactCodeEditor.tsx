@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback, useContext } from 'react';
 import debounce from 'lodash/debounce';
-import MonacoEditor from '@monaco-editor/react';
+import MonacoEditor, { loader } from '@monaco-editor/react';
 import { ThemeContext, highContrastDarkTheme, highContrastLightTheme } from '@librechat/client';
 import type { Monaco } from '@monaco-editor/react';
 import type { IThemeRGB } from '@librechat/client';
@@ -10,6 +10,9 @@ import { useMutationState, useCodeState } from '~/Providers/EditorContext';
 import { getResponseStatus } from '~/utils/errors';
 import { useArtifactsContext } from '~/Providers';
 import { useEditArtifact } from '~/data-provider';
+
+// The Controller serves the original AMD editor from the bundled release assets.
+loader.config({ paths: { vs: '/monaco/vs' } });
 
 const LANG_MAP: Record<string, string> = {
   javascript: 'javascript',
