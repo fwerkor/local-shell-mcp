@@ -6,7 +6,7 @@
     "LibreChat": 1892,
     "agents": 258
   },
-  "reviewed_mapping_count": 37,
+  "reviewed_mapping_count": 40,
   "modules": [
     {
       "repository": "LibreChat",
@@ -1749,10 +1749,10 @@
       "repository": "LibreChat",
       "path": "api/server/routes/messages.js",
       "sha256": "022edeae357ec52aa10645d4167d03f1f22318604d22c0042447b3d803d6bb3f",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/artifact_routes.py",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "Artifact编辑保留原React API、owner与子线程只读、SQL原子提交与回滚。host content-filter和active child-task-store guard待完整图宿主接入。"
     },
     {
       "repository": "LibreChat",
@@ -9489,10 +9489,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/artifacts/update.ts",
       "sha256": "231fdb14c172324c7f653dea777b189104ecc8d2b2ab75067d5f4ed97a05516a",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/artifacts.py",
+      "status": "完成（文本 Artifact 解析与替换）",
+      "reviewed_mapping": true,
+      "difference": "630组原版Node向量与Python一致，覆盖UTF-16、fence和未闭合边界；不代表整个Artifacts系统完成。"
     },
     {
       "repository": "LibreChat",
@@ -14007,10 +14007,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/utils/latex.ts",
       "sha256": "177aa21b44ac8268724f85b55664cc90d9ba053c330afed301d59c83b08326ae",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/artifacts.py:unescape_latex",
+      "status": "完成（LaTeX 预处理逆变换）",
+      "reviewed_mapping": true,
+      "difference": "原始模块转译为oracle，空值/非字符串/货币与mhchem输入均按原行为验证。"
     },
     {
       "repository": "LibreChat",

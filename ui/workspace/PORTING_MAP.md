@@ -249,3 +249,16 @@ uses the original radio controls and editor, saves through the original route,
 then reloads and verifies the persisted code. Editor assets revalidate on each
 page load to prevent a stale AMD loader after a Controller upgrade. Oracle
 fixtures use explicit UTF-8 and LF checkout to preserve source hashes on Windows.
+
+Text-history replay now reads persisted structured text parts before
+the top-level text snapshot, following the field precedence in the original
+`api/app/clients/prompts/formatMessages.js:formatAgentMessages`. Consequently
+an artifact edit reaches the next model turn while the source editor contract
+still leaves unrelated top-level text untouched. Full rich/tool-step history
+reconstruction is not claimed by this text-history change.
+
+The full editor browser flow also continues the chat after reload and asserts
+that the model sees the edited code. This uncovered and fixed an existing
+conversation DTO mismatch: `convoSchema.agent_id` is optional but not nullable,
+so an unassigned Agent is omitted instead of serialized as null. The retained
+React schema remains unchanged.

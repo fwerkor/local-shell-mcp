@@ -9,6 +9,7 @@ import pytest
 from starlette.applications import Starlette
 
 from local_shell_mcp.webui import auth, routes
+from local_shell_mcp.webui.generations import GenerationStore
 from local_shell_mcp.webui.storage import WorkspaceRepository
 
 
@@ -52,6 +53,9 @@ async def test_original_editor_contract_persists_only_selected_text(artifact_app
         assert reloaded["content"] == response.json()["content"]
         assert reloaded["userSubmittedPaths"] == ["/earlier", "/content/0/text"]
         assert reloaded["toolCallMetadata"] == {"keep": True}
+        replay = GenerationStore(repo.database).history("alice", convo["conversationId"], message_id=message["messageId"])
+        assert replay == [{"role": "assistant", "content": response.json()["content"][0]["text"]}]
+        assert message["text"] not in replay[0]["content"]
         again = await client.post(endpoint, headers={"x-owner": "alice"}, json={**body, "original": "new 🚀", "updated": "next"})
         assert again.status_code == 200
         assert repo.messages("alice", convo["conversationId"])["messages"][0]["userSubmittedPaths"] == ["/earlier", "/content/0/text"]
@@ -114,3 +118,25 @@ async def test_cross_origin_editor_mutation_is_rejected(artifact_app):
             assert (await client.post(endpoint, headers={"Origin": origin}, json=body)).status_code == 403
             assert repo.messages("alice", convo["conversationId"]) == before
         assert (await client.post(endpoint, headers={"Origin": "http://test"}, json=body)).status_code == 200
+
+
+def test_unassigned_agent_is_omitted_from_retained_conversation_dto(artifact_app):
+    repo, convo, _, _ = artifact_app
+    assert "agent_id" not in convo
+    assert "agent_id" not in repo.conversation("alice", convo["conversationId"])
+    assigned = repo.create_conversation("alice", {"agent_id": "configured-agent"})
+    assert assigned["agent_id"] == "configured-agent"
+
+
+@pytest.mark.asyncio
+async def test_owned_user_artifact_edit_reaches_model_history(artifact_app):
+    repo, convo, _, app = artifact_app
+    message = repo.add_message("alice", convo["conversationId"], {
+        "role": "user", "text": "display snapshot",
+        "content": [{"type": "text", "text": ":::artifact\nold\n:::"}],
+    })
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", headers={"x-owner": "alice"}) as client:
+        response = await client.post("/api/messages/artifact/" + message["messageId"], json={"index": 0, "original": "old", "updated": "fresh"})
+        assert response.status_code == 200
+    history = GenerationStore(repo.database).history("alice", convo["conversationId"], message_id=message["messageId"])
+    assert history == [{"role": "user", "content": ":::artifact\nfresh\n:::"}]

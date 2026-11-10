@@ -64,6 +64,9 @@ class WorkspaceRepository:
             createdAt=_stamp(row["created_at"] / 1_000_000),
             updatedAt=_stamp(row["updated_at"] / 1_000_000),
         )
+        # Retained convoSchema permits an absent Agent but rejects null.
+        if row["agent_id"] is None:
+            data.pop("agent_id", None)
         return data
 
     @staticmethod

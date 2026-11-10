@@ -24,7 +24,12 @@ async def test_original_react_artifact_edit_and_reload(tmp_path, monkeypatch):
         monkeypatch.setenv("LOCAL_SHELL_MCP_" + key, value)
     get_settings.cache_clear()
 
-    async def generated(*_args, **_kwargs):
+    async def generated(_profile, messages, **_kwargs):
+        if messages[-1]["content"] == "Continue from the edited artifact.":
+            previous = [item["content"] for item in messages if item["role"] == "assistant"]
+            assert previous and "A-->C" in previous[-1] and "A-->B" not in previous[-1]
+            yield "Edited artifact context restored."
+            return
         yield ':::artifact{identifier="diagram" type="application/vnd.mermaid" title="Source diagram"}\n```mermaid\ngraph TD; A-->B\n```\n:::'
 
     monkeypatch.setattr(generation_routes, "stream_model_with_tools", generated)
@@ -92,6 +97,9 @@ async def test_original_react_artifact_edit_and_reload(tmp_path, monkeypatch):
                 await panel.locator(".monaco-editor").get_by_role("textbox").wait_for()
                 rendered = await panel.locator(".monaco-editor .view-lines").inner_text()
                 assert "A-->C" in rendered.replace("\u00a0", " "), rendered
+                await page.get_by_test_id("text-input").fill("Continue from the edited artifact.")
+                await page.locator('button[type="submit"]').first.click()
+                await page.get_by_test_id("screenshot-target").get_by_text("Edited artifact context restored.", exact=True).wait_for(timeout=15000)
                 assert not external, external
                 assert not errors, errors
             except Exception:

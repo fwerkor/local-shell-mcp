@@ -345,6 +345,33 @@
       "python_lsm": "webui/ask_user_tools.py:ASK_USER_MANIFEST",
       "status": "部分",
       "difference": "原始条目精确复用并做catalog接口测试，其他LSM适用工具仍待审计"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/artifacts/update.ts",
+      "sha256": "231fdb14c172324c7f653dea777b189104ecc8d2b2ab75067d5f4ed97a05516a",
+      "symbols": "findAllArtifacts / replaceArtifactContent",
+      "python_lsm": "webui/artifacts.py",
+      "status": "完成（文本 Artifact 解析与替换）",
+      "difference": "630组原版Node向量与Python一致，覆盖UTF-16、fence和未闭合边界；不代表整个Artifacts系统完成。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/utils/latex.ts",
+      "sha256": "177aa21b44ac8268724f85b55664cc90d9ba053c330afed301d59c83b08326ae",
+      "symbols": "unescapeLaTeX",
+      "python_lsm": "webui/artifacts.py:unescape_latex",
+      "status": "完成（LaTeX 预处理逆变换）",
+      "difference": "原始模块转译为oracle，空值/非字符串/货币与mhchem输入均按原行为验证。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/server/routes/messages.js",
+      "sha256": "022edeae357ec52aa10645d4167d03f1f22318604d22c0042447b3d803d6bb3f",
+      "symbols": "POST /artifact/:messageId",
+      "python_lsm": "webui/artifact_routes.py",
+      "status": "部分",
+      "difference": "Artifact编辑保留原React API、owner与子线程只读、SQL原子提交与回滚。host content-filter和active child-task-store guard待完整图宿主接入。"
     }
   ],
   "runtime_dependency_lock": {

@@ -381,12 +381,22 @@ class GenerationStore:
                 if message_id in seen:
                     raise ValueError("Message graph contains a cycle")
                 seen.add(message_id)
-                row = db.execute("SELECT id,parent_id,role,text,metadata FROM messages WHERE id=? AND conversation_id=?",
+                row = db.execute("SELECT id,parent_id,role,text,content,metadata FROM messages WHERE id=? AND conversation_id=?",
                                  (message_id, conversation_id)).fetchone()
                 if row is None:
                     raise KeyError("Message ancestor not found")
                 if row["role"] in {"user", "assistant"}:
                     content = row["text"]
+                    # Original formatMessage/formatAgentMessages read persisted
+                    # structured text before the top-level display snapshot.
+                    # Keep this existing text-only history boundary; rich/tool
+                    # message reconstruction is handled separately.
+                    parts = json.loads(row["content"])
+                    if isinstance(parts, list):
+                        texts = [part["text"] for part in parts if isinstance(part, dict)
+                                 and part.get("type") == "text" and isinstance(part.get("text"), str)]
+                        if texts:
+                            content = "".join(texts)
                     files = json.loads(row["metadata"]).get("files", [])
                     if row["role"] == "user" and files:
                         descriptors = []
