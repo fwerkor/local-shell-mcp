@@ -64,15 +64,22 @@ async def test_cancel_during_process_registration_cleans_child_and_pipes(tmp_pat
     monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
     get_settings.cache_clear()
     marker, leaked = tmp_path / "started", tmp_path / "leaked"
-    code = ("from pathlib import Path; import time; Path(" + repr(str(marker)) +
-            ").write_text('ready'); time.sleep(3); Path(" + repr(str(leaked)) + ").write_text('bad')")
+    allow_effect = tmp_path / "allow-effect"
+    code = ("from pathlib import Path\nimport time\n"
+            f"Path({str(marker)!r}).write_text('ready')\n"
+            f"while not Path({str(allow_effect)!r}).exists():\n"
+            "    time.sleep(.02)\n"
+            f"Path({str(leaked)!r}).write_text('bad')\n")
+    compile(code, "owned-child", "exec")
     original = shell_ops.asyncio.create_subprocess_exec
     release = asyncio.Event()
+    created = asyncio.Event()
     processes = []
 
     async def delayed_registration(*args, **kwargs):
         process = await original(*args, **kwargs)
         processes.append(process)
+        created.set()
         await release.wait()
         return process
 
@@ -80,11 +87,10 @@ async def test_cancel_during_process_registration_cleans_child_and_pipes(tmp_pat
     task = asyncio.create_task(shell_ops.run_shell(python_shell_command(code), cwd=str(tmp_path), timeout_s=15)
         if mode == "shell" else shell_ops._run_exec([sys.executable, "-c", code], cwd=str(tmp_path), timeout_s=15))
     try:
-        async with asyncio.timeout(10):
-            while not marker.exists():
-                if task.done():
-                    await task
-                await asyncio.sleep(.02)
+        # Target the ownership-registration window, not Python interpreter
+        # startup speed. The real OS process exists while its handle is held
+        # behind release; user code remains gated until after cleanup.
+        await asyncio.wait_for(created.wait(), timeout=10)
         task.cancel()
         await asyncio.sleep(.02)
         assert not task.done(), "Cancellation must wait until the spawned process has an owner"
@@ -93,6 +99,7 @@ async def test_cancel_during_process_registration_cleans_child_and_pipes(tmp_pat
             await asyncio.wait_for(task, timeout=10)
         assert processes[0].returncode is not None
         assert processes[0]._transport.is_closing()
+        allow_effect.write_text("released", encoding="utf-8")
         await asyncio.sleep(3.1)
         assert not leaked.exists()
     finally:
