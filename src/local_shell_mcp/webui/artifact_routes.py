@@ -10,12 +10,14 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from .artifacts import edit_artifact
+from .auth import _same_origin
 from .routes import _body, _owner, _repo
 from .storage import _json, _now
 
 
 async def update_artifact(request: Request):
     owner = _owner(request)
+    _same_origin(request)
     payload = await _body(request)
     index, original, updated = (payload.get(name) for name in ("index", "original", "updated"))
     if type(index) is not int or index < 0 or not isinstance(original, str) or not isinstance(updated, str):

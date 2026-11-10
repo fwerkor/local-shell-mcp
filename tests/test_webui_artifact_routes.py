@@ -8,13 +8,14 @@ import httpx
 import pytest
 from starlette.applications import Starlette
 
-from local_shell_mcp.webui import routes
+from local_shell_mcp.webui import auth, routes
 from local_shell_mcp.webui.storage import WorkspaceRepository
 
 
 @pytest.fixture
 def artifact_app(tmp_path, monkeypatch):
     monkeypatch.setattr(routes, "get_settings", lambda: SimpleNamespace(auth_mode="oauth", state_dir=tmp_path))
+    monkeypatch.setattr(auth, "get_settings", routes.get_settings)
     repo = routes._repo()
     convo = repo.create_conversation("alice", {"title": "Artifacts"})
     message = repo.add_message("alice", convo["conversationId"], {
@@ -100,3 +101,16 @@ async def test_legacy_text_artifact_edits_preserve_metadata(artifact_app):
         with repo.database.connect() as db:
             row = db.execute("SELECT metadata FROM messages WHERE id=?", (message["messageId"],)).fetchone()
         assert json.loads(row["metadata"])["userSubmittedPaths"] == ["/text"]
+
+
+@pytest.mark.asyncio
+async def test_cross_origin_editor_mutation_is_rejected(artifact_app):
+    repo, convo, message, app = artifact_app
+    before = repo.messages("alice", convo["conversationId"])
+    endpoint = "/api/messages/artifact/" + message["messageId"]
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", headers={"x-owner": "alice"}) as client:
+        body = {"index": 0, "original": "old", "updated": "changed"}
+        for origin in ["https://evil.invalid", "null"]:
+            assert (await client.post(endpoint, headers={"Origin": origin}, json=body)).status_code == 403
+            assert repo.messages("alice", convo["conversationId"]) == before
+        assert (await client.post(endpoint, headers={"Origin": "http://test"}, json=body)).status_code == 200
