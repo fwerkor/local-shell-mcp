@@ -15,6 +15,19 @@ from local_shell_mcp.webui.providers import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _controller_state(tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+
+    # Provider configuration now consults the Controller's SQLite settings.
+    # Keep that real startup state in a writable test-owned workspace.
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 @pytest.mark.parametrize("url", [
     "http://model.example/v1", "ftp://example.com/v1", "https://user:pass@example.test/v1",
     "https://example.test/v1#secrets", "not a URL", "/v1/chat/completions",

@@ -78,7 +78,8 @@ async def test_profiles_authorization_persistence_catalog_and_runtime(setup_prof
         assert {"openAI", "anthropic", "google", "agents"} == set(endpoints)
         assert "private-secret" not in (await client.get("/api/lsm/providers", headers=_ADMIN)).text
         restarted = subprocess.run([sys.executable, "-c", "from local_shell_mcp.webui.providers import provider_config; import json; p=provider_config('openai'); print(json.dumps([p.model,p.url,p.token]))"],
-                                   env={**os.environ, "LOCAL_SHELL_MCP_STATE_DIR": str(settings.state_dir)},
+                                   env={**os.environ, "LOCAL_SHELL_MCP_STATE_DIR": str(settings.state_dir),
+                                        "LOCAL_SHELL_MCP_WORKSPACE_ROOT": str(settings.state_dir / "workspace")},
                                    capture_output=True, text=True, check=True)
         assert json.loads(restarted.stdout) == ["replacement", "https://models.invalid/v1/chat/completions", "private-secret"]
         # Auth-disabled Controller remains configurable without inventing scopes.

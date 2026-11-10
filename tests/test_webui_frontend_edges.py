@@ -15,10 +15,12 @@ from local_shell_mcp.webui import frontend
 
 
 @pytest.fixture(autouse=True)
-def _unauthenticated_controller(monkeypatch):
+def _unauthenticated_controller(tmp_path, monkeypatch):
     from local_shell_mcp.settings import get_settings
 
     monkeypatch.setenv("LOCAL_SHELL_MCP_AUTH_MODE", "none")
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

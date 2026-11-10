@@ -11,6 +11,19 @@ import pytest
 from local_shell_mcp.webui.providers import ProviderConfig, provider_config, stream_model
 
 
+@pytest.fixture(autouse=True)
+def _controller_state(tmp_path, monkeypatch):
+    from local_shell_mcp.settings import get_settings
+
+    # Provider configuration now consults the Controller's SQLite settings.
+    # Keep that real startup state in a writable test-owned workspace.
+    monkeypatch.setenv("LOCAL_SHELL_MCP_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 def test_provider_url_guard_and_environment(monkeypatch):
     monkeypatch.setenv("LOCAL_SHELL_MCP_MODEL_BASE_URL", "http://127.0.0.1:11434/v1")
     monkeypatch.delenv("LOCAL_SHELL_MCP_MODEL_API_KEY", raising=False)
@@ -120,3 +133,21 @@ async def test_loopback_openai_with_no_key_omits_authorization(monkeypatch):
     config = ProviderConfig("openai", "local", "http://127.0.0.1:11434/v1/chat/completions", "")
     assert await _collect(stream_model(config, [{"role": "user", "content": "hi"}])) == ["ok"]
     assert "authorization" not in captured["request"].headers
+
+
+def test_provider_configuration_does_not_require_writable_default_workspace(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    original = Path.mkdir
+
+    def deny_default_workspace(path, *args, **kwargs):
+        if path == Path("/workspace"):
+            raise PermissionError("Default workspace is not writable")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", deny_default_workspace)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_MODEL_BASE_URL", "http://127.0.0.1:11434/v1")
+    monkeypatch.delenv("LOCAL_SHELL_MCP_MODEL_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert provider_config("ollama", "local-model").model == "local-model"
+    assert (tmp_path / ".local-shell-mcp" / "lsm.sqlite3").is_file()
