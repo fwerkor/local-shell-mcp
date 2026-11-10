@@ -188,7 +188,8 @@ jobs:
             tests/test_webui_agent_runner.py tests/test_webui_approval_store.py \
             tests/test_webui_resource_source.py \
             tests/test_webui_graph_topology.py tests/test_webui_graph_admission_runtime.py \
-            tests/test_webui_direct_login.py tests/test_webui_provider_browser.py
+            tests/test_webui_direct_login.py tests/test_webui_provider_browser.py \
+            tests/test_webui_artifacts_source.py tests/test_webui_artifact_routes.py
 
       - name: Run OAuth, PTY, navigation, and responsive browser smoke test
         run: python scripts/ui-smoke.py
