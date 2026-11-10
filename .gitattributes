@@ -1,3 +1,7 @@
 
 # Unified diff context lines consist of a single space.
 ui/workspace/** linguist-vendored whitespace=-blank-at-eol
+
+# Source-oracle hashes must not change with checkout platform defaults.
+tests/fixtures/librechat/*.cjs text eol=lf
+tests/fixtures/librechat/*.json text eol=lf

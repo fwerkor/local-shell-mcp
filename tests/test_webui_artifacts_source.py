@@ -18,11 +18,11 @@ from local_shell_mcp.webui.artifacts import (
 )
 
 FIXTURES = Path(__file__).parent / "fixtures/librechat"
-VECTORS = json.loads((FIXTURES / "artifacts_vectors.json").read_text())
+VECTORS = json.loads((FIXTURES / "artifacts_vectors.json").read_text(encoding="utf-8"))
 
 
 def test_pinned_original_artifact_oracle():
-    manifest = json.loads((FIXTURES / "artifacts_sources.json").read_text())
+    manifest = json.loads((FIXTURES / "artifacts_sources.json").read_text(encoding="utf-8"))
     assert manifest["commit"] == "e8f3be08623663d4ad7f7241e693c94469b63bb0"
     assert hashlib.sha256((FIXTURES / "artifacts_reference.cjs").read_bytes()).hexdigest() == manifest["fixtureSha256"]
     assert hashlib.sha256((FIXTURES / "artifacts_latex_reference.cjs").read_bytes()).hexdigest() == manifest["latexFixtureSha256"]
