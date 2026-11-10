@@ -6,7 +6,7 @@
     "LibreChat": 1892,
     "agents": 258
   },
-  "reviewed_mapping_count": 40,
+  "reviewed_mapping_count": 41,
   "modules": [
     {
       "repository": "LibreChat",
@@ -84,10 +84,10 @@
       "repository": "LibreChat",
       "path": "api/app/clients/prompts/formatMessages.js",
       "sha256": "88f8a1b77d6171c9e180c942d6f59775c7e2c6103b3c4d75cb8b74622eff02ad",
-      "python_lsm": null,
-      "status": "未移植/待源码审计",
-      "reviewed_mapping": false,
-      "difference": "No verified source-level mapping yet"
+      "python_lsm": "webui/generations.py:GenerationStore.history",
+      "status": "部分",
+      "reviewed_mapping": true,
+      "difference": "已保存结构化text优先于旧text快照，Artifact编辑进入下一轮模型；完整tool/rich/steer重建未完成。"
     },
     {
       "repository": "LibreChat",

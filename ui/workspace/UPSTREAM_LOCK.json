@@ -372,6 +372,15 @@
       "python_lsm": "webui/artifact_routes.py",
       "status": "部分",
       "difference": "Artifact编辑保留原React API、owner与子线程只读、SQL原子提交与回滚。host content-filter和active child-task-store guard待完整图宿主接入。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/app/clients/prompts/formatMessages.js",
+      "sha256": "88f8a1b77d6171c9e180c942d6f59775c7e2c6103b3c4d75cb8b74622eff02ad",
+      "symbols": "formatMessage / formatAgentMessages text-field precedence",
+      "python_lsm": "webui/generations.py:GenerationStore.history",
+      "status": "部分",
+      "difference": "已保存结构化text优先于旧text快照，Artifact编辑进入下一轮模型；完整tool/rich/steer重建未完成。"
     }
   ],
   "runtime_dependency_lock": {
