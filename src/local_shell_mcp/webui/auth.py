@@ -40,6 +40,15 @@ def _same_origin(request: Request) -> None:
     if configured_origin:
         expected = urlsplit(configured_origin)
         allowed = (parsed.scheme == expected.scheme and parsed.netloc == expected.netloc)
+        if not allowed:
+            # A directly connected local browser may use loopback while the
+            # Controller advertises a public URL. Forwarded proxy connections
+            # must never inherit this local-origin exception.
+            from ..auth import _is_direct_localhost_request
+
+            allowed = (_is_direct_localhost_request(request)
+                       and parsed.scheme == request.url.scheme
+                       and parsed.netloc == request.headers.get("host"))
     else:
         allowed = parsed.scheme == request.url.scheme and parsed.netloc == request.headers.get("host")
     if not allowed:
@@ -177,6 +186,8 @@ try {
     input.type = 'hidden'; input.name = 'ticket'; input.value = ticket.ticket;
     form.append(input); document.body.append(form); form.submit();
   } else {
+    const metadata = await checked(await fetch('/.well-known/oauth-protected-resource'));
+    if (typeof metadata.resource !== 'string' || !metadata.resource) throw new Error('The Controller did not advertise an OAuth resource.');
     const client = await checked(await fetch('/oauth/register', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({client_name:'WebUI', redirect_uris:[callback]})
@@ -187,7 +198,7 @@ try {
     const authorize = new URL('/oauth/authorize', location.origin);
     authorize.search = new URLSearchParams({response_type:'code', client_id:client.client_id,
       redirect_uri:callback, scope:'shell:read shell:write shell:execute browser:use file:share remote:use admin:config',
-      resource:location.origin, code_challenge:challenge, code_challenge_method:'S256', state});
+      resource:metadata.resource, code_challenge:challenge, code_challenge_method:'S256', state});
     location.replace(authorize);
   }
 } catch (error) {

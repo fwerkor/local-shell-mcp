@@ -47,8 +47,12 @@ async def test_workspace_navigation_requires_a_live_cookie(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("controller_mode", ["http", "stdio"])
-async def test_browser_default_entry_authenticates_without_an_open_button(tmp_path, monkeypatch, controller_mode):
+@pytest.mark.parametrize("controller_mode,origin_configuration", [
+    ("http", "origin"), ("stdio", "origin"),
+    ("http", "public"), ("http", "resource"),
+])
+async def test_browser_default_entry_authenticates_without_an_open_button(
+        tmp_path, monkeypatch, controller_mode, origin_configuration):
     playwright = pytest.importorskip("playwright.async_api")
     import uvicorn
 
@@ -68,7 +72,10 @@ async def test_browser_default_entry_authenticates_without_an_open_button(tmp_pa
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
     origin = f"http://127.0.0.1:{port}"
-    monkeypatch.setenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL", origin)
+    advertised = "https://controller.example.invalid" if origin_configuration == "public" else origin
+    resource = "https://api.example.invalid/lsm" if origin_configuration == "resource" else advertised
+    monkeypatch.setenv("LOCAL_SHELL_MCP_PUBLIC_BASE_URL", advertised)
+    monkeypatch.setenv("LOCAL_SHELL_MCP_OAUTH_RESOURCE", resource)
     get_settings.cache_clear()
     server = uvicorn.Server(uvicorn.Config(AuthMiddleware(_with_oauth_routes(Starlette())),
         host="127.0.0.1", port=port, log_level="error", access_log=False))
@@ -106,6 +113,7 @@ async def test_browser_default_entry_authenticates_without_an_open_button(tmp_pa
                 assert token.status == 200
                 import jwt
                 claims = jwt.decode((await token.json())["token"], options={"verify_signature": False})
+                assert claims["aud"] == resource
                 assert "admin:config" in claims["scope"].split()
                 assert claims["exp"] <= time.time() + 301
                 # Forged callbacks cannot exchange a code or replace the cookie.
@@ -156,3 +164,33 @@ async def test_local_bypass_does_not_replace_explicit_oauth_grant(tmp_path, monk
             assert rejected.status_code == 401
     finally:
         get_settings.cache_clear()
+
+
+@pytest.mark.parametrize("origin,client_host,forwarded,allowed", [
+    ("http://127.0.0.1:8765", "127.0.0.1", False, True),
+    ("http://127.0.0.1:8765", "127.0.0.1", True, False),
+    ("http://127.0.0.1:8765", "203.0.113.1", False, False),
+    ("https://attacker.example", "127.0.0.1", False, False),
+    ("null", "127.0.0.1", False, False),
+    ("https://controller.example", "203.0.113.1", True, True),
+])
+def test_public_origin_exception_requires_a_direct_local_connection(
+        monkeypatch, origin, client_host, forwarded, allowed):
+    from starlette.exceptions import HTTPException
+    from starlette.requests import Request
+
+    monkeypatch.setattr(auth, "get_settings", lambda: SimpleNamespace(
+        public_base_url="https://controller.example"))
+    headers = [(b"host", b"127.0.0.1:8765"), (b"origin", origin.encode())]
+    if forwarded:
+        headers.extend([(b"x-forwarded-for", b"203.0.113.1"),
+                        (b"x-forwarded-host", b"controller.example")])
+    request = Request({"type": "http", "method": "POST", "scheme": "http",
+                       "path": "/api/auth/lsm", "headers": headers,
+                       "server": ("127.0.0.1", 8765), "client": (client_host, 12345)})
+    if allowed:
+        auth._same_origin(request)
+    else:
+        with pytest.raises(HTTPException) as denied:
+            auth._same_origin(request)
+        assert denied.value.status_code == 403
