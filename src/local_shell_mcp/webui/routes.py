@@ -221,7 +221,10 @@ async def message_search(request: Request):
 
 
 def webui_routes() -> list[Route]:
+    from .artifact_routes import artifact_routes
+
     return [
+        *artifact_routes(),
         Route("/api/convos", conversations, methods=["GET", "POST", "PUT", "DELETE"]),
         Route("/api/convos/{conversation_id}", conversation, methods=["GET", "PUT", "PATCH", "DELETE"]),
         Route("/api/messages", messages, methods=["GET"]),

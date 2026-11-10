@@ -213,3 +213,30 @@ unsupported direct/default-fanout在首次provider调用前拒绝。原单目标
 
 这不是parallel/direct-edge执行完成：完整SDK执行仍依赖消息ID归约器、agentMessages替换通道、
 runStep/handoff reducers、superstep checkpoint与子图中断恢复；没有使用gather拼接文本替代。
+
+## Artifact editor backend source port
+
+Source: `packages/api/src/artifacts/update.ts`, `packages/api/src/utils/latex.ts`,
+`api/server/routes/messages.js` (`POST /artifact/:messageId`), and the immutable
+child policy in `packages/api/src/agents/guard.ts` / `subagentThreadIds.ts` at
+LibreChat `e8f3be08623663d4ad7f7241e693c94469b63bb0`.
+
+Python: `webui/artifacts.py` and `webui/artifact_routes.py`; the original React
+artifact editor's POST route is registered before generic message routes.
+Original code is transpiled by `scripts/export-librechat-artifacts.cjs`, with
+source/fixture SHA-256 provenance and 630 parser/replacement vectors. Unicode
+offsets and submitted-path lengths follow JavaScript UTF-16 semantics, including
+fenced/unclosed blocks and LaTeX preprocessing reversal. SQLite updates preserve
+other content and metadata, commit atomically, and retain source path provenance.
+
+Validated: actual Node-vs-Python behavior, owner denial, missing/invalid edits,
+reconnect persistence, immutable child/reserved thread rejection, failed SQLite
+write rollback and successful retry. New parser module coverage is 97.6%; route
+coverage is 100% in the focused suite.
+
+Scope remains **partial Artifacts parity**: this ports text-artifact editing,
+not all model/tool artifact production callbacks or host content-filter policy.
+The active background child-task store guard awaits the full graph host; durable
+child metadata and the original reserved UUID namespace are already read-only.
+Malformed non-integer indexes/non-string edit bodies are rejected with 400 at the
+Python boundary rather than surfacing the upstream route's accidental 500.
