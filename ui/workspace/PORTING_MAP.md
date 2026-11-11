@@ -379,3 +379,15 @@ PDF and DOCX optional text parsers were run against real generated documents,
 with 64-page PDF and 128-KiB extraction limits. Scanned pages still require
 OCR; file_search vector extraction and execution-session file downloads still
 require their dedicated upstream-style processors.
+
+**Tool-completion crash boundary:** the native LSM tool result remains the
+single execution result. When it contains explicit published Controller
+`artifact.files[].file_id` references, `GenerationStore.append_tool_completion`
+commits the `on_run_step_completed` record, `tool_attachment_links`, and
+original `attachment` SSE events within **one** `BEGIN IMMEDIATE`
+transaction. A failed file-link SQL write rolls back the completion and all
+links; a lost acknowledgement may be retried by the immutable run-step ID
+without duplicating events. A mutated replay is rejected. Foreign/remote
+unpublished file IDs are skipped and do not falsely materialize files.
+This covers the tool completion-to-file link window. Graph checkpoint and
+external code-environment file download/recovery remain separate projects.

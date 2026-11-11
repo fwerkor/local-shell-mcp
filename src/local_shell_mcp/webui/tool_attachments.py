@@ -7,6 +7,7 @@ nor may untrusted tool output claim a file from another user or run.
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from pathlib import Path
 
 from .storage import _json, _now
@@ -78,7 +79,8 @@ def controller_tool_file_ids(output):
     return identities
 
 
-def link_tool_attachment(database, owner: str, run_id: str, tool_call_id: str, file_id: str):
+def link_tool_attachment(database, owner: str, run_id: str, tool_call_id: str, file_id: str,
+                         *, db=None):
     """Register a *previously owned* Controller file to an actual emitted call.
 
     The graph's run and its persisted tool call must both exist; a caller
@@ -88,8 +90,10 @@ def link_tool_attachment(database, owner: str, run_id: str, tool_call_id: str, f
     if any(not isinstance(value, str) or not value or len(value) > 200
            for value in (run_id, tool_call_id, file_id)):
         raise ValueError("Invalid tool attachment identity")
-    with database.connect() as db:
-        db.execute("BEGIN IMMEDIATE")
+    independent = db is None
+    with (database.connect() if independent else nullcontext(db)) as db:
+        if independent:
+            db.execute("BEGIN IMMEDIATE")
         run = db.execute(
             "SELECT r.*,c.owner FROM runs r JOIN conversations c ON c.id=r.conversation_id "
             "WHERE r.id=? AND c.owner=? AND r.status='running'",

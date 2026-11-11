@@ -325,3 +325,57 @@ def test_agent_resource_unlink_preserves_historical_user_message_reference(works
         ["generated"], owner="alice")["deletedFileIds"] == ["generated"]
     assert "unavailable" in GenerationStore(workspace).history(
         "alice", run.conversation_id)[0]["content"]
+
+
+def test_tool_completion_and_link_roll_back_together_on_database_fault(workspace):
+    import sqlite3
+
+    file(workspace, "generated")
+    run = run_with_step(workspace)
+    event = {
+        "event": "on_run_step_completed",
+        "data": {"result": {"id": "step-real", "tool_call": {"id": "call-123"}}},
+    }
+    store = GenerationStore(workspace)
+    before = store.events("alice", run.run_id)
+    with workspace.connect() as sql:
+        sql.execute(
+            "CREATE TRIGGER reject_link BEFORE INSERT ON tool_attachment_links "
+            "BEGIN SELECT RAISE(ABORT,'injected fault'); END",
+        )
+    with pytest.raises(sqlite3.DatabaseError, match="injected fault"):
+        store.append_tool_completion("alice", run.run_id, event, "call-123", ["generated"])
+    assert store.events("alice", run.run_id) == before
+    with workspace.connect() as sql:
+        assert sql.execute("SELECT count(*) FROM tool_attachment_links").fetchone()[0] == 0
+        sql.execute("DROP TRIGGER reject_link")
+    store.append_tool_completion("alice", run.run_id, event, "call-123", ["generated"])
+    attachments_for_run = [
+        value for _, value in store.events("alice", run.run_id)
+        if value.get("event") == "attachment"
+    ]
+    assert len(attachments_for_run) == 1
+    assert attachments_for_run[0]["data"]["file_id"] == "generated"
+    assert store.events("alice", run.run_id)[-2][1] == event
+    events_before = store.events("alice", run.run_id)
+    step = store.append_tool_completion("alice", run.run_id, event, "call-123", ["generated"])
+    assert events_before == store.events("alice", run.run_id)
+    assert step == events_before[-2][0]
+    with pytest.raises(ValueError, match="Cannot change"):
+        store.append_tool_completion("alice", run.run_id, {
+            **event, "data": {"result": {**event["data"]["result"], "mutated": True}},
+        }, "call-123", ["generated"])
+
+
+def test_completed_tool_does_not_link_file_from_different_owner_during_atomic_append(workspace):
+    file(workspace, "foreign", owner="bob")
+    run = run_with_step(workspace)
+    store = GenerationStore(workspace)
+    event = {"event": "on_run_step_completed", "data": {"result": {
+        "id": "step-real", "tool_call": {"id": "call-123"},
+    }}}
+    store.append_tool_completion("alice", run.run_id, event, "call-123", ["foreign"])
+    assert [value for _, value in store.events("alice", run.run_id)
+            if value.get("event") == "attachment"] == []
+    with workspace.connect() as sql:
+        assert sql.execute("SELECT count(*) FROM tool_attachment_links").fetchone()[0] == 0

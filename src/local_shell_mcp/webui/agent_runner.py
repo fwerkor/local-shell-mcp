@@ -156,7 +156,7 @@ class AgentRunner:
         step = self._tool_step(call)
         preview = output if isinstance(output, str) else "Agent control transferred"
         preview = preview.encode("utf-8")[:128 * 1024].decode("utf-8", errors="ignore")
-        self.store.append(self.owner, self.generation.run_id, {
+        event = {
             "event": "on_run_step_completed", "data": {"result": {
                 "id": step["id"], "index": step["index"], "completed_at": int(time.time() * 1000),
                 "type": "tool_call", "tool_call": {
@@ -164,21 +164,18 @@ class AgentRunner:
                     "type": "tool_call", "output": preview, "progress": 1,
                 },
             }},
-        })
-        # LibreChat createToolEndCallback consumes explicit artifact.files,
-        # not arbitrary tool text/path strings. Retain native execution; only
-        # project files previously published to this Controller and owner.
-        from .tool_attachments import controller_tool_file_ids, link_tool_attachment
+        }
+        # Tool completion and file references must commit together; a
+        # crash after the tool event cannot strand its attached files.
+        from .tool_attachments import controller_tool_file_ids
 
-        for file_id in controller_tool_file_ids(output):
-            try:
-                link_tool_attachment(
-                    self.database, self.owner, self.generation.run_id, call.call_id, file_id,
-                )
-            except (OSError, PermissionError, KeyError, ValueError):
-                # Remote code-environment file IDs are not automatically
-                # Controller file references. Do not invent stored bytes.
-                continue
+        identities = controller_tool_file_ids(output)
+        if identities:
+            self.store.append_tool_completion(
+                self.owner, self.generation.run_id, event, call.call_id, identities,
+            )
+        else:
+            self.store.append(self.owner, self.generation.run_id, event)
 
     async def _invoke(self, call, state):
         from .lsm_tool_registry import call_tool

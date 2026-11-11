@@ -353,6 +353,53 @@ class GenerationStore:
             cursor = db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)", (run_id, encoded))
             return int(cursor.lastrowid)
 
+    def append_tool_completion(self, owner: str, run_id: str, event: dict,
+                               tool_call_id: str, file_ids: list[str]) -> int:
+        """Commit a tool completion and its file attachments atomically."""
+        from .tool_attachments import link_tool_attachment
+
+        encoded = _json(event)
+        if len(encoded.encode("utf-8")) > 256 * 1024:
+            raise ValueError("Generation event exceeds 256 KiB")
+        if len(file_ids) > 16:
+            raise ValueError("Tool attachment count exceeds limit")
+        with self.database.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not db.execute(
+                "SELECT 1 FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
+            ).fetchone():
+                raise KeyError("Generation not active or unauthorized")
+            step_id = (event.get("data") or {}).get("result", {}).get("id")
+            if not isinstance(step_id, str) or not step_id:
+                raise ValueError("Tool completion requires a run step identifier")
+            prior = db.execute(
+                "SELECT seq,data FROM generation_events WHERE run_id=? "
+                "AND json_extract(data,'$.event')='on_run_step_completed' "
+                "AND json_extract(data,'$.data.result.id')=? LIMIT 1",
+                (run_id, step_id),
+            ).fetchone()
+            if prior:
+                if json.loads(prior["data"]) != event:
+                    raise ValueError("Cannot change a persisted tool completion")
+                return int(prior["seq"])
+            count = db.execute(
+                "SELECT count(*) FROM generation_events WHERE run_id=?", (run_id,),
+            ).fetchone()[0]
+            if count + 1 + len(file_ids) > _EVENT_LIMIT:
+                raise ValueError("Generation event retention limit reached")
+            cursor = db.execute("INSERT INTO generation_events(run_id,data) VALUES(?,?)",
+                                (run_id, encoded))
+            for ident in file_ids:
+                try:
+                    link_tool_attachment(
+                        self.database, owner, run_id, tool_call_id, ident, db=db,
+                    )
+                except (OSError, PermissionError, KeyError, ValueError):
+                    # Remote file IDs are not Controller-published blobs.
+                    continue
+            return int(cursor.lastrowid)
+
     def events(self, owner: str, run_id: str, after: int = 0, limit: int = 200) -> list[tuple[int, dict]]:
         with self.database.connect() as db:
             rows = db.execute(
