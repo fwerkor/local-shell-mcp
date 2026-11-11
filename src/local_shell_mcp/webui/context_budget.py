@@ -59,6 +59,48 @@ def calculate_budget(messages: list[dict], tools: list[dict], max_context_tokens
                          reserve, available, available - messages_count)
 
 
+def context_usage_snapshot(messages: list[dict], tools: list[dict],
+                           max_context_tokens: int, *, reserve_ratio: float = DEFAULT_RESERVE_RATIO,
+                           run_id: str | None = None, agent_id: str | None = None) -> dict:
+    """Project the offline BPE budget onto the pinned SDK context-usage shape.
+
+    This is a pre-invoke estimate. Source-specific provider token calibration,
+    prompt cache and native tool-output pricing remain the provider adapter's
+    responsibility; do not label these values as billed usage.
+    """
+    budget = calculate_budget(messages, tools, max_context_tokens, reserve_ratio=reserve_ratio)
+    summaries = [message for message in messages if message.get('role') == 'system'
+                 and isinstance(message.get('content'), str)
+                 and message['content'].startswith('<summary>\n')]
+    summary_tokens = sum(map(message_token_count, summaries))
+    system_tokens = budget.instruction_tokens - summary_tokens
+    instructions = system_tokens + budget.tool_schema_tokens
+    tool_messages = [message for message in messages if message.get('role') == 'tool'
+                     or message.get('tool_calls')]
+    tool_message_tokens = sum(map(message_token_count, tool_messages))
+    return {
+        **({'runId': run_id} if run_id else {}),
+        **({'agentId': agent_id} if agent_id else {}),
+        'breakdown': {
+            'maxContextTokens': budget.max_context_tokens,
+            'instructionTokens': instructions,
+            'systemMessageTokens': system_tokens,
+            'dynamicInstructionTokens': 0,
+            'toolSchemaTokens': budget.tool_schema_tokens,
+            'summaryTokens': summary_tokens,
+            'toolCount': len(tools),
+            'messageCount': len([message for message in messages if message.get('role') != 'system']),
+            'messageTokens': budget.message_tokens,
+            'availableForMessages': budget.available_for_messages,
+            'toolMessageTokens': tool_message_tokens,
+        },
+        'contextBudget': max(0, budget.max_context_tokens - budget.reserve_tokens),
+        'effectiveInstructionTokens': instructions,
+        'prePruneContextTokens': budget.message_tokens,
+        'remainingContextTokens': max(0, budget.remaining_context_tokens),
+    }
+
+
 def should_trigger_summarization(*, messages_to_refine_count: int,
                                  trigger: dict | None = None,
                                  max_context_tokens: int | None = None,

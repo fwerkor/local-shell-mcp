@@ -192,6 +192,11 @@ async def test_runtime_auto_compacts_with_real_model_callback_and_resume(ctx):
     state = AgentLoopState(AgentContext(profile, [], {'max_context_tokens': 300}), original)
     await runner._before_model(state)
     assert called
+    usage = [value['data'] for _, value in store.events('a', next_run.run_id)
+             if value.get('event') == 'on_context_usage']
+    assert len(usage) == 1
+    assert usage[0]['breakdown']['summaryTokens'] > 0
+    assert usage[0]['breakdown']['messageCount'] == len(state.messages) - 1
     assert state.messages[0]['content'].startswith('<summary>')
     assert state.messages[-1]['content'] == 'last question'
     assert len(state.messages) < len(original)

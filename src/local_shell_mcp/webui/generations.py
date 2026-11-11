@@ -382,6 +382,36 @@ class GenerationStore:
             ).fetchall()
             return [(int(row[0]), json.loads(row[1])) for row in rows]
 
+    def record_context_usage(self, owner: str, run_id: str, snapshot: dict) -> int:
+        """Commit a visible context snapshot to run state and the SSE replay log.
+
+        Like the upstream contextUsageSink, the last pre-invoke snapshot wins;
+        the same transaction ensures process recovery can replay what users saw.
+        """
+        event = {'event': 'on_context_usage', 'data': snapshot}
+        encoded = _json(event)
+        if len(encoded.encode('utf-8')) > 256 * 1024:
+            raise ValueError('Context usage event exceeds 256 KiB')
+        with self.database.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute(
+                "SELECT r.state FROM runs r JOIN conversations c ON c.id=r.conversation_id "
+                "WHERE r.id=? AND c.owner=? AND r.status='running'", (run_id, owner),
+            ).fetchone()
+            if row is None:
+                raise KeyError('Generation not active or unauthorized')
+            count = db.execute('SELECT count(*) FROM generation_events WHERE run_id=?',
+                               (run_id,)).fetchone()[0]
+            if count >= _EVENT_LIMIT:
+                raise ValueError('Generation event retention limit reached')
+            state = json.loads(row['state'])
+            state['contextUsage'] = snapshot
+            db.execute('UPDATE runs SET state=?,updated_at=? WHERE id=?',
+                       (_json(state), _now(), run_id))
+            event_row = db.execute('INSERT INTO generation_events(run_id,data) VALUES(?,?)',
+                                   (run_id, encoded))
+            return int(event_row.lastrowid)
+
     def stage_summary(self, owner: str, run_id: str, summary_text: str, token_count: int,
                       *, boundary: int = 0, manual: bool = False) -> None:
         """Atomic candidate checkpoint in the *existing run state*, no deletion.
@@ -545,7 +575,12 @@ class GenerationStore:
                 content.append({"type": "error", "error": error or "Generation failed"})
             if run_state.get('manualCompaction'):
                 mark_compaction_outcome(content, aborted=False)
+            response_metadata = {"sender": "Assistant", "isCreatedByUser": False,
+                                 "unfinished": status != "complete"}
+            if isinstance(run_state.get('contextUsage'), dict):
+                response_metadata['metadata'] = {'contextUsage': run_state['contextUsage']}
             response_message = {
+                **({'metadata': response_metadata['metadata']} if 'metadata' in response_metadata else {}),
                 "messageId": generation.response_message_id,
                 "conversationId": generation.conversation_id,
                 "parentMessageId": generation.user_message_id,
@@ -560,8 +595,7 @@ class GenerationStore:
                     "VALUES(?,?,?,?,?,?,?,?,?)",
                     (generation.response_message_id, generation.conversation_id, generation.user_message_id,
                      "assistant", text, _json(response_message["content"]),
-                     _json({"sender": "Assistant", "isCreatedByUser": False,
-                            "unfinished": status != "complete"}), now, now),
+                     _json(response_metadata), now, now),
                 )
             db.execute("UPDATE runs SET status=?, updated_at=? WHERE id=?", (status, now, run_id))
             db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, generation.conversation_id))

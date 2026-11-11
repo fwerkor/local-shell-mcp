@@ -115,7 +115,7 @@ async def startup_config(request: Request):
             "mcpServers": {"use": True, "create": True, "share": False, "public": False},
             "webSearch": False,
             "fileSearch": False,
-            "contextUsage": False,
+            "contextUsage": True,
             "memories": has_memory,
             "marketplace": {"use": False},
             "peoplePicker": {"users": False, "groups": False, "roles": False},

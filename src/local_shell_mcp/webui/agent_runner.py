@@ -423,50 +423,65 @@ class AgentRunner:
         max_raw = params.get('max_context_tokens') or params.get('maxContextTokens') or agent_settings.get('maxContextTokens')
         if not isinstance(max_raw, (int, float)) or isinstance(max_raw, bool) or not 0 < max_raw <= 2000000:
             return
-        config = settings.get('summarization') or {}
-        if isinstance(config, dict) and config.get('enabled') is False:
-            return
-        if not isinstance(config, dict):
-            config = {}
-        budget = calculate_budget(state.messages, state.context.tools, int(max_raw),
-                                  reserve_ratio=config.get('reserveRatio', 0.05))
-        if budget.remaining_context_tokens > 0:
-            return
-        if len(state.messages) == self._last_compaction_attempt_size or self._summary_failures >= 3:
-            return
-        system = [message for message in state.messages if message.get('role') == 'system']
-        messages = [message for message in state.messages if message.get('role') != 'system']
-        retain = config.get('retainRecent') or {}
-        head, tail = split_recent_turns(messages, turns=retain.get('turns', 2), tokens=retain.get('tokens'))
-        if not should_trigger_summarization(
-            messages_to_refine_count=len(head), trigger=config.get('trigger'),
-            max_context_tokens=budget.max_context_tokens,
-            pre_prune_context_tokens=budget.max_context_tokens - budget.remaining_context_tokens,
-            remaining_context_tokens=budget.remaining_context_tokens,
-        ):
-            return
-        self._last_compaction_attempt_size = len(state.messages)
-        if budget.instruction_tokens + budget.tool_schema_tokens >= budget.max_context_tokens:
-            return
         try:
-            options = config.get('parameters') or {}
-            summary = await self._summarize_history(
-                [*system, *head], head_count=len(head),
-                max_tokens=options.get('maxSummaryTokens', 2048),
-                prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'))
-            # Keep stable instructions and current summary, then the exact
-            # retained recent turns. Original messages stay in SQLite.
-            plain_system = [message for message in system if not (
-                isinstance(message.get('content'), str)
-                and message['content'].startswith('<summary>\n'))]
-            state.messages = [*plain_system, {'role': 'system', 'content': build_summary_carrier_text(summary)}, *tail]
-            self._summary_failures = 0
-            await self._save(state, [])
-        except Exception:
-            self._summary_failures += 1
-            # The source leaves the state intact on summary failure; never
-            # substitute an empty checkpoint or truncate a tool result.
-            return
+            config = settings.get('summarization') or {}
+            if isinstance(config, dict) and config.get('enabled') is False:
+                return
+            if not isinstance(config, dict):
+                config = {}
+            budget = calculate_budget(state.messages, state.context.tools, int(max_raw),
+                                      reserve_ratio=config.get('reserveRatio', 0.05))
+            if budget.remaining_context_tokens > 0:
+                return
+            if len(state.messages) == self._last_compaction_attempt_size or self._summary_failures >= 3:
+                return
+            system = [message for message in state.messages if message.get('role') == 'system']
+            messages = [message for message in state.messages if message.get('role') != 'system']
+            retain = config.get('retainRecent') or {}
+            head, tail = split_recent_turns(messages, turns=retain.get('turns', 2), tokens=retain.get('tokens'))
+            if not should_trigger_summarization(
+                messages_to_refine_count=len(head), trigger=config.get('trigger'),
+                max_context_tokens=budget.max_context_tokens,
+                pre_prune_context_tokens=budget.max_context_tokens - budget.remaining_context_tokens,
+                remaining_context_tokens=budget.remaining_context_tokens,
+            ):
+                return
+            self._last_compaction_attempt_size = len(state.messages)
+            if budget.instruction_tokens + budget.tool_schema_tokens >= budget.max_context_tokens:
+                return
+            try:
+                options = config.get('parameters') or {}
+                summary = await self._summarize_history(
+                    [*system, *head], head_count=len(head),
+                    max_tokens=options.get('maxSummaryTokens', 2048),
+                    prompt=config.get('prompt'), update_prompt=config.get('updatePrompt'))
+                # Keep stable instructions and current summary, then the exact
+                # retained recent turns. Original messages stay in SQLite.
+                plain_system = [message for message in system if not (
+                    isinstance(message.get('content'), str)
+                    and message['content'].startswith('<summary>\n'))]
+                state.messages = [*plain_system, {'role': 'system', 'content': build_summary_carrier_text(summary)}, *tail]
+                self._summary_failures = 0
+                await self._save(state, [])
+            except Exception:
+                self._summary_failures += 1
+                # The source leaves the state intact on summary failure; never
+                # substitute an empty checkpoint or truncate a tool result.
+                return
+
+        finally:
+            # The pinned frontend consumes this event before the model call and
+            # reads the same last snapshot from response metadata after reload.
+            from .context_budget import context_usage_snapshot
+
+            config = settings.get('summarization') or {}
+            ratio = config.get('reserveRatio', 0.05) if isinstance(config, dict) else 0.05
+            snapshot = context_usage_snapshot(
+                state.messages, state.context.tools, int(max_raw), reserve_ratio=ratio,
+                run_id=self.generation.run_id,
+                agent_id=(state.context.agent or {}).get('id'),
+            )
+            self.store.record_context_usage(self.owner, self.generation.run_id, snapshot)
 
     async def _manual_compact(self, history):
         from .storage import WorkspaceRepository
