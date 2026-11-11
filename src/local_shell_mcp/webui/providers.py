@@ -33,25 +33,19 @@ def _require_https_or_loopback(value: str) -> str:
 
 
 def selected_provider(payload: dict, agent: dict | None = None) -> str:
-    """Resolve the retained client's direct endpoint and saved Agent consistently."""
+    """Use the exact configured endpoint identity for history and Agents."""
     selected = (agent or {}).get("provider") or payload.get("provider")
     if selected:
         return str(selected)
     endpoint = payload.get("endpoint")
-    return str(endpoint) if endpoint in {"openai", "anthropic", "google", "gemini"} else "openai"
+    return str(endpoint) if isinstance(endpoint, str) and endpoint not in {"agents", ""} else "openai"
 
 
 def provider_config(provider: str, model: str | None = None) -> ProviderConfig:
     from .provider_profiles import profile
 
-    kind = provider.strip().lower()
-    if kind in {"openai-compatible", "custom", "ollama", "azureopenai"}:
-        kind = "openai"
-    if kind == "gemini":
-        kind = "google"
-    if kind not in {"openai", "anthropic", "google"}:
-        raise ValueError(f"Unsupported provider: {provider}")
-    value = profile(kind)
+    value = profile(provider)
+    kind = value["provider"]
     token, base = value.get("api_key", ""), value["base_url"]
     name = model or value["models"][0]
     if kind == "openai":
@@ -62,12 +56,14 @@ def provider_config(provider: str, model: str | None = None) -> ProviderConfig:
         if not token:
             raise ValueError("ANTHROPIC_API_KEY is required")
         url = _require_https_or_loopback(base.rstrip("/") + "/messages")
-    else:
+    elif kind == "google":
         if not token:
             raise ValueError("GOOGLE_KEY or GOOGLE_API_KEY is required")
         if any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_." for char in name):
             raise ValueError("Unsupported Gemini model identifier")
         url = _require_https_or_loopback(base.rstrip("/") + f"/models/{quote(name)}:streamGenerateContent?alt=sse")
+    else:
+        raise ValueError("Unsupported model provider")
     return ProviderConfig(kind, name, url, token)
 
 
@@ -111,6 +107,7 @@ async def stream_model(
     *,
     max_tokens: int = 2048,
     temperature: float | None = None,
+    top_p: float | None = None,
 ) -> AsyncIterator[str]:
     """Stream user-visible answer text without buffering the provider response."""
     import httpx
@@ -126,6 +123,8 @@ async def stream_model(
         body["max_completion_tokens"] = max_tokens
         if temperature is not None:
             body["temperature"] = temperature
+        if top_p is not None:
+            body["top_p"] = top_p
     elif config.provider == "anthropic":
         headers["x-api-key"] = config.token
         headers["anthropic-version"] = "2023-06-01"
@@ -135,6 +134,8 @@ async def stream_model(
             body["system"] = instructions
         if temperature is not None:
             body["temperature"] = temperature
+        if top_p is not None:
+            body["top_p"] = top_p
     elif config.provider == "google":
         headers["x-goog-api-key"] = config.token
         items, instructions = _messages_for_google(messages)
@@ -143,6 +144,8 @@ async def stream_model(
             body["systemInstruction"] = {"parts": [{"text": instructions}]}
         if temperature is not None:
             body["generationConfig"]["temperature"] = temperature
+        if top_p is not None:
+            body["generationConfig"]["topP"] = top_p
     else:
         raise ValueError("Unsupported model provider")
     timeout = httpx.Timeout(connect=20, read=config.timeout_s, write=30, pool=10)
@@ -202,6 +205,7 @@ async def stream_model_with_tools(
     tools: list[dict],
     max_tokens: int = 2048,
     temperature: float | None = None,
+    top_p: float | None = None,
 ) -> AsyncIterator[str | ModelToolCall]:
     """Stream OpenAI text and reconstruct complete tool calls, bounded by size.
 
@@ -211,11 +215,11 @@ async def stream_model_with_tools(
     if tools and config.provider in {"anthropic", "google"}:
         from .provider_tool_protocols import stream_native_tools
 
-        async for event in stream_native_tools(config, messages, tools=tools, max_tokens=max_tokens, temperature=temperature):
+        async for event in stream_native_tools(config, messages, tools=tools, max_tokens=max_tokens, temperature=temperature, top_p=top_p):
             yield event
         return
     if not tools or config.provider != "openai":
-        async for text in stream_model(config, messages, max_tokens=max_tokens, temperature=temperature):
+        async for text in stream_model(config, messages, max_tokens=max_tokens, temperature=temperature, top_p=top_p):
             yield text
         return
 
@@ -231,6 +235,8 @@ async def stream_model_with_tools(
     }
     if temperature is not None:
         body["temperature"] = temperature
+    if top_p is not None:
+        body["top_p"] = top_p
     timeout = httpx.Timeout(connect=20, read=config.timeout_s, write=30, pool=10)
     pending: dict[int, dict[str, str]] = {}
     async with (

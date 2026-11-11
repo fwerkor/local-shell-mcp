@@ -140,8 +140,8 @@ async def conversation_permissions(request: Request):
 async def user_key(request: Request):
     _owner(request)
     provider = request.query_params.get("name", "")
-    if provider not in {"openAI", "google", "anthropic"}:
-        raise HTTPException(404, detail="Unknown model provider")
+    if not provider:
+        raise HTTPException(404, detail="Unknown model channel")
     # The API key belongs to the server environment and is never echoed to
     # React. A fixed expiry advertises availability without secret disclosure.
     from .providers import provider_config
