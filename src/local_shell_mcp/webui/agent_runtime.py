@@ -60,6 +60,8 @@ async def run_agent_loop(
     dispatch: Callable[[list[ModelToolCall], AgentLoopState], Awaitable[ToolBatchOutput]],
     on_text: Callable[[str], Awaitable[None]],
     save_state: Callable[[AgentLoopState, list[ModelToolCall]], Awaitable[None]] | None = None,
+    inject_controls: Callable[[AgentLoopState, str], Awaitable[bool]] | None = None,
+    should_preempt: Callable[[], bool] | None = None,
 ) -> list[dict]:
     if state.completed:
         return state.messages
@@ -87,7 +89,11 @@ async def run_agent_loop(
                 await save_state(state, [])
             if state.completed:
                 return state.messages
+            if inject_controls is not None:
+                await inject_controls(state, "tool")
             continue
+        if inject_controls is not None:
+            await inject_controls(state, "tool")
         if state.step >= state.context.recursion_limit:
             raise ValueError("Recursion limit reached without hitting a stop condition")
         context = state.context
@@ -103,12 +109,25 @@ async def run_agent_loop(
         source = stream_tools(context.profile, state.messages, tools=context.tools,
                               max_tokens=max_tokens, temperature=temperature) if context.tools else \
             stream_text(context.profile, state.messages, max_tokens=max_tokens, temperature=temperature)
+        preempted = False
         async for item in source:
             if isinstance(item, ModelToolCall):
                 calls.append(item)
             elif item:
                 text_parts.append(item)
                 await on_text(item)
+            if should_preempt is not None and should_preempt():
+                preempted = True
+                break
+        if preempted:
+            state.messages.append({"role": "assistant", "content": "".join(text_parts) or None})
+            state.pending_calls = []
+            state.completed = False
+            if save_state is not None:
+                await save_state(state, [])
+            if inject_controls is not None:
+                await inject_controls(state, "preempt")
+            continue
         message: dict[str, Any] = {"role": "assistant", "content": "".join(text_parts) or None}
         if calls:
             import json
@@ -124,4 +143,9 @@ async def run_agent_loop(
         if save_state is not None:
             await save_state(state, calls)
         if not calls:
+            if inject_controls is not None and await inject_controls(state, "turn"):
+                state.completed = False
+                if save_state is not None:
+                    await save_state(state, [])
+                continue
             return state.messages

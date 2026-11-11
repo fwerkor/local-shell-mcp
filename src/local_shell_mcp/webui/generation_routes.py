@@ -509,6 +509,9 @@ async def shutdown_generations() -> None:
     if tasks:
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=10)
+    from .subagent_task_host import shutdown_subagent_tasks
+
+    await shutdown_subagent_tasks()
 
 
 def generation_routes() -> list[Route]:

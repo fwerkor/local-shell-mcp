@@ -61,6 +61,7 @@ class SubagentInvocation:
     parent_tool_call_id: str
     subagent_type: str
     child_configs: tuple[SubagentConfig, ...]
+    parent_agent_id: str | None = None
 
 
 def resolve_subagent_max_turns(agent: dict, endpoint_config: dict | None = None) -> int:
@@ -199,10 +200,12 @@ def build_subagent_tool_params(configs: list[SubagentConfig], *, background: boo
             "description": description}
 
 
-def subagent_tools(configs: list[SubagentConfig]) -> list[dict]:
+def subagent_tools(configs: list[SubagentConfig], *, background: bool = False,
+                   thread_continuation: bool = False) -> list[dict]:
     if not configs:
         return []
-    params = build_subagent_tool_params(configs)
+    params = build_subagent_tool_params(configs, background=background,
+                                        thread_continuation=thread_continuation)
     return [{"type": "function", "function": {
         "name": params["name"], "description": params["description"],
         "parameters": params["schema"],
@@ -267,7 +270,9 @@ def filter_subagent_result(messages: list[dict]) -> str:
 
 async def invoke_subagent(call: Any, configs: list[SubagentConfig], *,
                           execute_child: Callable[[SubagentInvocation], Awaitable[list[dict] | str]],
+                          start_background: Callable[[SubagentInvocation, str | None], Awaitable[str]] | None = None,
                           owner: str, conversation_id: str, parent_run_id: str, database: Any,
+                          parent_agent_id: str | None = None,
                           scopes: frozenset[str], grant_expires: int | None,
                           max_depth: int = MAX_SUBAGENT_DEPTH,
                           propagate_error: Callable[[Exception], bool] | None = None) -> str:
@@ -291,11 +296,12 @@ async def invoke_subagent(call: Any, configs: list[SubagentConfig], *,
         raise PermissionError("Subagent is not owned by the current principal")
     if grant_expires is not None and grant_expires <= time.time():
         raise PermissionError("Authentication grant expired")
-    if args.get("run_in_background") is True:
-        raise ValueError("Background subagent execution is not available without a host task store")
+    background = args.get("run_in_background") is True
     thread = args.get("subagent_thread_id")
-    if isinstance(thread, str) and thread.strip():
+    if isinstance(thread, str) and thread.strip() and not background:
         return '{"status":"rejected","tool":"subagent","message":"Child-thread continuation requires run_in_background."}'
+    if background and start_background is None:
+        raise ValueError("Background subagent execution is not available without a host task store")
     task = args.get("description")
     description = task if isinstance(task, str) and task.strip() else "No task description provided"
     messages = []
@@ -313,8 +319,12 @@ async def invoke_subagent(call: Any, configs: list[SubagentConfig], *,
         scopes=frozenset(scopes), grant_expires=grant_expires, owner=owner,
         conversation_id=conversation_id, parent_run_id=parent_run_id,
         parent_tool_call_id=call.call_id, subagent_type=kind,
+        parent_agent_id=parent_agent_id,
         child_configs=config.children if max_depth > 1 else (),
     )
+    if background:
+        assert start_background is not None
+        return await start_background(invocation, thread.strip() if isinstance(thread, str) and thread.strip() else None)
     try:
         result = await execute_child(invocation)
     except Exception as error:

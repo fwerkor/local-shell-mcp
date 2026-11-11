@@ -34,7 +34,7 @@ from .handoff import (
     is_transfer_tool,
 )
 from .providers import ModelToolCall, provider_config, selected_provider
-from .subagents import build_subagent_configs, invoke_subagent, subagent_tools
+from .subagents import MAX_SUBAGENT_DEPTH, build_subagent_configs, invoke_subagent, subagent_tools
 
 
 class AgentRunner:
@@ -44,7 +44,9 @@ class AgentRunner:
                  namespace="", child_configs=None, selected_tools=None,
                  resume_history=None, resume_namespace="", partial_text="",
                  approved_batch=None, graph_node=False, graph_definition=None,
-                 graph_entry_id=None, graph_parallel=False, graph_max_handoffs=None):
+                 graph_entry_id=None, graph_parallel=False, graph_max_handoffs=None,
+                 authorization_conversation_id=None, background_deny=False,
+                 task_control_host=None, task_control_id=None, subagent_depth=MAX_SUBAGENT_DEPTH):
         self.owner, self.generation, self.database, self.store = owner, generation, database, store
         self.scopes, self.grant_expires = scopes, grant_expires
         self.stream_tools, self.stream_text, self.on_text = stream_tools, stream_text, on_text
@@ -54,6 +56,10 @@ class AgentRunner:
         self.graph_entry_id = graph_entry_id or (self.graph_definition or {}).get("id") or "default"
         self.graph_parallel = graph_parallel
         self.graph_max_handoffs = graph_max_handoffs
+        self.authorization_conversation_id = authorization_conversation_id or generation.conversation_id
+        self.background_deny = background_deny
+        self.task_control_host, self.task_control_id = task_control_host, task_control_id
+        self.subagent_depth = subagent_depth
         self.initial_parameters = parameters or {}
         self.ask_user_enabled, self.mcp_enabled = ask_user_enabled, mcp_enabled
         self.namespace, self.child_configs, self.selected_tools = namespace, child_configs, selected_tools
@@ -71,6 +77,8 @@ class AgentRunner:
     def _check_grant(self):
         if self.grant_expires is not None and self.grant_expires <= time.time():
             raise RuntimeSafetyError("Authentication grant expired")
+        if self.task_control_host is not None and self.task_control_id is not None:
+            self.task_control_host.assert_execution_lease(self.task_control_id)
 
     def _context(self, agent, *, profile=None, selected_tools=None):
         from .graph_topology import admit_agent_graph
@@ -81,7 +89,7 @@ class AgentRunner:
         admit_agent_graph(self.owner, self.graph_definition, self.repository)
         selected = set(selected_tools if selected_tools is not None else (agent or {}).get("tools") or [])
         unrestricted = agent is None and selected_tools is None
-        native = available_tools(self.owner, self.generation.conversation_id,
+        native = available_tools(self.owner, self.authorization_conversation_id,
                                  scopes=set(self.scopes), expires=self.grant_expires)
         tools = [tool for tool in native if unrestricted or tool["function"]["name"] in selected
                  or tool["function"]["name"] in {"session_manage", "plan_manage"}]
@@ -94,8 +102,14 @@ class AgentRunner:
         configs = self.child_configs if self.child_configs is not None else build_subagent_configs(
             self.owner, agent, self.database,
         )
+        if self.subagent_depth <= 0:
+            configs = []
         self.configs[identity] = configs
-        tools += subagent_tools(configs)
+        if configs:
+            from .subagent_task_host import check_background_task_tools
+
+            tools += subagent_tools(configs, background=True, thread_continuation=True)
+            tools += check_background_task_tools()
         if self.graph_definition:
             tools += handoff_tools(self.owner, self.graph_definition, self.repository, source_agent_id=identity)
         override = (agent or {}).get("recursion_limit")
@@ -115,6 +129,7 @@ class AgentRunner:
                 "graph_commands": state.graph_commands}
 
     async def _save(self, state, calls):
+        self._check_grant()
         if calls and not state.tool_step_started:
             self.cache = {}
         identity = f"{time.time_ns():020d}"
@@ -179,12 +194,31 @@ class AgentRunner:
         self._check_grant()
         if call.name not in {tool["function"]["name"] for tool in state.context.tools}:
             raise RuntimeSafetyError("Tool is not enabled for the current Agent")
+        if call.name == "check_background_task":
+            from .subagent_task_host import SQLiteSubagentTaskHost
+
+            host = SQLiteSubagentTaskHost(
+                self.database, self.owner, self.authorization_conversation_id,
+                stream_tools=self.stream_tools, stream_text=self.stream_text,
+            )
+            return await host.check(call.arguments, tool_call_id=call.call_id,
+                                    parent_run_id=self.generation.run_id,
+                                    parent_agent_id=(state.context.agent or {}).get("id", "default"))
         if call.name == "subagent":
+            from .subagent_task_host import SQLiteSubagentTaskHost
+
+            host = SQLiteSubagentTaskHost(
+                self.database, self.owner, self.authorization_conversation_id,
+                stream_tools=self.stream_tools, stream_text=self.stream_text,
+            )
             return await invoke_subagent(
                 call, self.configs[(state.context.agent or {}).get("id") or "default"],
-                execute_child=self._child, owner=self.owner,
-                conversation_id=self.generation.conversation_id, parent_run_id=self.generation.run_id,
+                execute_child=self._child, start_background=lambda invocation, thread: host.start(
+                    invocation, thread_id=thread, mcp_enabled=self.mcp_enabled), owner=self.owner,
+                conversation_id=self.authorization_conversation_id, parent_run_id=self.generation.run_id,
+                parent_agent_id=(state.context.agent or {}).get("id"),
                 scopes=frozenset(self.scopes), grant_expires=self.grant_expires, database=self.database,
+                max_depth=self.subagent_depth,
                 propagate_error=lambda error: isinstance(error, (AgentSuspended, RuntimeSafetyError)),
             )
         if is_transfer_tool(call.name):
@@ -198,10 +232,10 @@ class AgentRunner:
                                          call.name, call.arguments, call.call_id, state.messages)
         try:
             if call.name in {"mcp_tool_search", "mcp_tool_inspect"}:
-                return await discover(self.owner, self.generation.conversation_id, set(self.scopes), call)
+                return await discover(self.owner, self.authorization_conversation_id, set(self.scopes), call)
             if call.name == "mcp_tool_call":
-                return await approved_call(self.owner, self.generation.conversation_id, set(self.scopes), call)
-            return await call_tool(self.owner, self.generation.conversation_id, call,
+                return await approved_call(self.owner, self.authorization_conversation_id, set(self.scopes), call)
+            return await call_tool(self.owner, self.authorization_conversation_id, call,
                                    granted_scopes=set(self.scopes), grant_expires=self.grant_expires)
         except PermissionError as error:
             raise RuntimeSafetyError(str(error)) from error
@@ -221,7 +255,11 @@ class AgentRunner:
                             namespace=self.namespace + "/subagent:" + invocation.parent_tool_call_id,
                             child_configs=invocation.child_configs, selected_tools=invocation.selected_tools,
                             resume_history=self.resume_history, resume_namespace=self.resume_namespace,
-                            partial_text=self.partial_text)
+                            partial_text=self.partial_text,
+                            authorization_conversation_id=self.authorization_conversation_id,
+                            background_deny=self.background_deny,
+                            task_control_host=self.task_control_host, task_control_id=self.task_control_id,
+                            subagent_depth=invocation.remaining_depth)
         return await child.run(invocation.messages, recursion_limit=invocation.recursion_limit)
 
     async def _pause(self, payload, state, *, approval=False):
@@ -268,7 +306,16 @@ class AgentRunner:
                 self.cache[replay_key(call, calls.index(call))] = record
             elif decision and decision["decision"] == "ask":
                 ask.append(call)
-        if ask:
+        if ask and self.background_deny:
+            # LibreChat SubagentExecutor.executeDetached: a detached child cannot
+            # park the parent generation for HITL; deny the protected tools.
+            for requested in ask:
+                blocked = "Blocked: Approval required for \"" + requested.name + "\" in background execution."
+                record = {"proposal": {"name": requested.name,
+                                       "args": copy.deepcopy(requested.arguments)}, "output": blocked}
+                await self._completed(requested, record)
+                self.cache[replay_key(requested, calls.index(requested))] = record
+        elif ask:
             await self._pause(build_approval_payload(ask), state, approval=True)
         outputs = await execute_tool_batch(
             calls, lambda call: self._invoke(call, state), settled=self.cache,
@@ -349,8 +396,28 @@ class AgentRunner:
                 self.partial_text += text
             await self.on_text(text)
 
-        result = await run_agent_loop(state, stream_tools=self.stream_tools, stream_text=self.stream_text,
-                                      dispatch=self._dispatch, on_text=emit, save_state=self._save)
+        async def inject(current, boundary):
+            if not self.task_control_host or not self.task_control_id:
+                return False
+            ids = {m.get("id") for m in current.messages if isinstance(m, dict)}
+            additions = self.task_control_host.pending(self.task_control_id, boundary, ids)
+            if additions:
+                current.messages.extend(additions)
+                current.completed = False
+                await self._save(current, [])
+            self.task_control_host.acknowledge(
+                self.task_control_id, boundary,
+                {m.get("id") for m in current.messages if isinstance(m, dict) and m.get("id")},
+            )
+            return bool(additions)
+
+        result = await run_agent_loop(
+            state, stream_tools=self.stream_tools, stream_text=self.stream_text,
+            dispatch=self._dispatch, on_text=emit, save_state=self._save,
+            inject_controls=inject if self.task_control_host else None,
+            should_preempt=(lambda: self.task_control_host.has_interrupt(self.task_control_id))
+            if self.task_control_host and self.task_control_id else None,
+        )
         self.graph_commands = state.graph_commands
         if review and review.get("namespace", "") == self.namespace:
             self.store.complete_approval_batch(self.owner, self.generation.run_id,
