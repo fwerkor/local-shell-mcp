@@ -44,10 +44,10 @@
       "repository": "LibreChat",
       "path": "api/server/controllers/agents/callbacks.js",
       "sha256": "99e1d6905ec8aa7f9f1599712d2947b9ce4329f1017216813e60d85b15b47a44",
-      "symbols": "Agent execution events",
-      "python_lsm": "webui/generation_routes.py:_run_model",
+      "symbols": "tool-output artifact attachments and SSE",
+      "python_lsm": "webui/generations.py; webui/agent_runner.py",
       "status": "部分",
-      "difference": "工具name/args/completion/result字段对齐React并持久化；完整callbacks、子运行progress和actor生命周期未全部移植"
+      "difference": "文本产物消息与SSE跑通，工具附件加工/异步处理/host filter未完成，交由消息协议与附件任务"
     },
     {
       "repository": "LibreChat",
@@ -98,10 +98,10 @@
       "repository": "LibreChat",
       "path": "packages/api/src/agents/initialize.ts",
       "sha256": "173c89d39da61e6285d63485dc1f13ffedf9f0a72f9d91e9988b43458c4410bd",
-      "symbols": "initializeAgent",
-      "python_lsm": "webui/lsm_tool_registry.py; generation_routes.py",
+      "symbols": "Artifact capability / appendAdditionalInstructions",
+      "python_lsm": "webui/generation_routes.py; webui/subagents.py; webui/agent_runner.py",
       "status": "部分",
-      "difference": "原生LSM复用有效；LibreChat工具选择/资源/上下文未完整移植"
+      "difference": "现有Python图路径和run state接入，完整动态图以及原host content-filter不在本PR"
     },
     {
       "repository": "LibreChat",
@@ -371,7 +371,7 @@
       "symbols": "POST /artifact/:messageId",
       "python_lsm": "webui/artifact_routes.py",
       "status": "部分",
-      "difference": "Artifact编辑保留原React API、owner与子线程只读、SQL原子提交与回滚。host content-filter和active child-task-store guard待完整图宿主接入。"
+      "difference": "Artifact编辑、owner和静态子线程只读不变；新增同事务活动子线程SQLite查询。图任务spawn/settle集成及host content-filter仍未完成。"
     },
     {
       "repository": "LibreChat",
@@ -381,6 +381,69 @@
       "python_lsm": "webui/generations.py:GenerationStore.history",
       "status": "部分",
       "difference": "已保存结构化text优先于旧text快照，Artifact编辑进入下一轮模型；完整tool/rich/steer重建未完成。"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/prompts/artifacts/index.ts",
+      "sha256": "94871f10b8fa868b40f8d19a8e54355091e6ee0501ec1526f474dc4a2912239a",
+      "symbols": "generateArtifactsPrompt, artifactsPrompt, artifactsOpenAIPrompt",
+      "python_lsm": "webui/artifact_prompts.py; artifact_prompt_snapshot.json",
+      "status": "完成（提示词源码差分）",
+      "difference": "Node 15组逐字节对照一致，three-mode端点选择与SQLite恢复写入已接入；不代表工具回调/全量Artifacts完成"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/prompts/artifacts/generate.ts",
+      "sha256": "dec5351e841dca1101ccd93aa1c15066c7ab65703e654ea9341b9b2399698033",
+      "symbols": "generateShadcnPrompt",
+      "python_lsm": "webui/artifact_prompts.py; scripts/export-librechat-artifact-prompts.py",
+      "status": "完成（Shadcn提示词生成）",
+      "difference": "JS原函数嵌套dedent文本逐字节对照通过"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/prompts/artifacts/components.ts",
+      "sha256": "62ae18fd08c6f0507294894bc30924791345fb48f3a706944393e76fd5470d01",
+      "symbols": "components, componentName/importDocs/usageDocs",
+      "python_lsm": "artifact_prompt_snapshot.json",
+      "status": "完成（Shadcn源码数据）",
+      "difference": "47源记录、33合并后有效组件，快照包含源文件SHA-256"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "packages/api/src/agents/guard.ts",
+      "sha256": "b68203af3b24f14eb8f7db171afe5550e228957a27fd5391956a4e42fe99e35c",
+      "symbols": "isSubagentThreadWriteBlocked",
+      "python_lsm": "webui/child_thread_activity.py; webui/artifact_routes.py",
+      "status": "部分",
+      "difference": "新增SQLite活动子线程owner/run校验及编辑事务查询；图任务真正spawn/settle wiring尚待联动"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "api/server/services/Endpoints/agents/subagentThreadStore.js",
+      "sha256": "aada9ea0c8d50588aaf4dd6b26a3025bd5511004cdca73a27eea98ac2ab69a6f",
+      "symbols": "isThreadActiveForOwner / task routing",
+      "python_lsm": "webui/child_thread_activity.py",
+      "status": "部分",
+      "difference": "活动登记可信SQLite接口已具备；后台/远端task生命周期及撤权需图/任务PR接入"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "client/src/components/Artifacts/ArtifactPreview.tsx",
+      "sha256": "14b41d04d19bf06e76c85bf7b8325ed657af839dbcd79afadc5298bd7c8008e7",
+      "symbols": "SandpackPreview / SandpackProvider",
+      "python_lsm": "ui/workspace/client/src/components/Artifacts/ArtifactPreview.tsx",
+      "status": "原版保留；外部依赖确认",
+      "difference": "Chromium网络拦截证实codesandbox.io静态与React bundler外部请求，不得宣称全离线"
+    },
+    {
+      "repository": "LibreChat",
+      "path": "client/src/utils/artifacts.ts",
+      "sha256": "719f3b3a50c9aa495c2c667d5049400d5de035ed1de3e3ec75eccbf458b5e55b",
+      "symbols": "getTemplate / artifact mime routing",
+      "python_lsm": "ui/workspace/client/src/utils/artifacts.ts",
+      "status": "原版保留；部分实测",
+      "difference": "HTML/React/Mermaid/SVG/Markdown真实浏览器运行；Office转换后预览尚未端到端验证"
     }
   ],
   "runtime_dependency_lock": {

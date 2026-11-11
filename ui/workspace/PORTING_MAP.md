@@ -262,3 +262,36 @@ that the model sees the edited code. This uncovered and fixed an existing
 conversation DTO mismatch: `convoSchema.agent_id` is optional but not nullable,
 so an unassigned Agent is omitted instead of serialized as null. The retained
 React schema remains unchanged.
+
+## Artifacts model generation, original previews, active-thread edit fence (incremental)
+
+Pinned source: LibreChat 0.8.8 `e8f3be08623663d4ad7f7241e693c94469b63bb0`.
+This section supplements the existing Artifacts editor/source-vector port above;
+it does not replace that implementation.
+
+| Behavior | Pinned source | Python/React path | State / evidence |
+| --- | --- | --- | --- |
+| Prompt selection and Agent capability | `packages/api/src/prompts/artifacts/index.ts` and `packages/api/src/agents/initialize.ts` | `webui/artifact_prompts.py`, `generation_routes.py`, `generations.py` | Done for default/shadcnui/custom mode and openai/anthropic/google selectors. Original JS `generateArtifactsPrompt` and nested `generateShadcnPrompt` output compared byte-for-byte across 15 provider-mode combinations. |
+| Source-locked Shadcn component docs | `packages/api/src/prompts/artifacts/components.ts` and `generate.ts` | `artifact_prompt_snapshot.json` and `scripts/export-librechat-artifact-prompts.py` | Done, 47 source records -> 33 effective keys after object spreads; SHA-256 of pinned source stored; source-locked build-time extraction, no Node at runtime. |
+| Agent / child / handoff system injection | `packages/api/src/agents/initialize.ts`; `@librechat/agents` 4.0.1 runtime | `generation_routes._start_task`, `subagents.invoke_subagent`, `agent_runner.AgentRunner` | Done for existing supported Python graph paths. Ephemeral mode saved in SQLite run state for resume; no mutation of saved Agent instructions. Test checks real run-loop, incremental stream events, persistence, edit and next model-turn read. |
+| Artifact output delta / final history | `api/server/controllers/agents/callbacks.js`; `api/app/clients/prompts/formatMessages.js` | Existing `GenerationStore.append/finish/history` and retained `ArtifactRow` | Text Artifact format passes through unchanged; streamed partial text, full final structured text and saved edits are retained. Generated multi-artifact cards verified in original Chromium; no parallel rich/tool payload protocol introduced. |
+| Child thread read-only while *active* | `packages/api/src/agents/guard.ts`; `api/server/services/Endpoints/agents/subagentThreadStore.js` | `webui/child_thread_activity.py`; `artifact_routes._update`; shared SQLite `active_subagent_threads` | Activity lookup now checked inside the same SQLite write transaction as edit, before static metadata and reserved UUID checks. Trusted `activate` verifies owner/active parent run and forbids parent thread; `settle` verifies run ownership. The **full graph task owner must wire its actual child creation/settlement paths** to these calls before runtime-wide active thread parity can be claimed. |
+| Preview MIME routing | `client/src/utils/artifacts.ts`, `client/src/components/Artifacts/ArtifactPreview.tsx` | Original retained React preview and Monaco components | HTML, React, Mermaid, SVG and Markdown appeared in real Chromium; source also contains Office previews and aliases, not yet fully exercised with converted binary files. No custom editor/preview replacement. |
+| Offline and CSP limits | Original `@codesandbox/sandpack-react` `SandpackProvider` and preview components | Retained frontend assets | Chromium with all non-loopback requests blocked confirmed `*.sandpack-static-server.codesandbox.io/__csb_relay/` for static HTML/SVG/Markdown and `2-19-8-sandpack.codesandbox.io/` for React. Monaco editor offline **does not imply offline Sandpack runtime**; blocked-network test only asserts the shell/cards, not that external previews rendered. Mermaid panel did not require an iframe in this test. |
+| Tool-produced artifacts, filtering | `api/server/controllers/agents/callbacks.js`, `packages/api/src/mcp/parsers.ts`, original host content-filter helpers | Existing tool event/attachment and message protocol paths | **Not complete**: upstream callback's file-backed artifact attachment events, `files` mapping, content-filter host policy, image/UI resource projections and full rich/tool history await their owners' shared message-protocol/attachment implementations. No duplicate payload representation was created. |
+
+Evidence commands (independent worktree):
+
+```sh
+PYTHONPATH="$PWD/src" python -m pytest -q tests/test_webui_artifact_prompts.py tests/test_webui_artifact_routes.py tests/test_webui_artifacts_source.py
+PYTHONPATH="$PWD/src" python -m pytest -q tests/test_webui_artifact_browser.py tests/test_webui_artifact_preview_browser.py
+# Source-differential oracle only; Node and npm dedent are BUILD/TEST dependencies,
+# not needed by the Python+SQLite controller:
+node scripts/check-librechat-artifact-prompt-diff.cjs /path/to/pinned-LibreChat /path/to/dedent-1.7.0
+```
+
+Original editor's retry/invalid input/owner boundaries still apply. New tests additionally
+cover active owner-scoped child mutation denial and two competing edits with the
+same original source (one 200, the stale second 400). No remaining behavior is
+represented as fully source-equivalent merely because an identically named
+frontend feature appears.
