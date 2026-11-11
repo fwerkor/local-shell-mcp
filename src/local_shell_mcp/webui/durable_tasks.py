@@ -337,7 +337,7 @@ async def _stop(row: Any) -> bool:
         # An RPC delivered successfully is not proof that tmux/ConPTY killed
         # the session; the native tool reports the actual outcome separately.
         return data.get("killed") is True
-    return data.get("status") in {"stopped", "succeeded", "failed", "lost"}
+    return data.get("status") in jobs.TERMINAL_STATUSES
 
 
 async def _reconcile_one(row: dict) -> int:

@@ -198,6 +198,9 @@ async def test_stop_requires_actual_native_terminal_status(policy, monkeypatch):
     assert not await durable._stop(job_row)
     reply = {"ok": True, "data": {"job": {"status": "stopped"}, "killed": False}}
     assert await durable._stop(job_row)
+    # Already-exited native jobs are complete, even when nothing was killed.
+    reply = {"ok": True, "data": {"job": {"status": "exited"}, "killed": False}}
+    assert await durable._stop(job_row)
     reply = {"ok": True, "data": {"killed": False}}
     assert not await durable._stop(shell_row)
     reply = {"ok": True, "data": {"killed": True}}
