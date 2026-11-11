@@ -33,7 +33,8 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
     async def fake_model(request):
         body = await request.json()
         requests.append(body)
-        assert request.headers.get("authorization") == "Bearer private-test-token"
+        expected_key = "secondary-private-token" if body["model"] == "independent-model" else "private-test-token"
+        assert request.headers.get("authorization") == "Bearer " + expected_key
         if reject_provider:
             return JSONResponse({"error": {"message": "Invalid API key"}}, status_code=401)
         return StreamingResponse(iter(['data: {"choices":[{"delta":{"content":"Model channel works."}}]}\n\n', 'data: [DONE]\n\n']), media_type="text/event-stream")
@@ -92,6 +93,55 @@ async def test_first_launch_composer_can_type_and_model_settings_are_discoverabl
                     await page.reload()
                     await page.get_by_test_id("screenshot-target").get_by_text("Model generation failed (HTTPStatusError)", exact=False).wait_for(timeout=15000)
                 assert requests and requests[-1]["model"] == "second-model"
+                if not reject_provider:
+                    # Two OpenAI-compatible profiles with independent credentials
+                    # must remain distinct through the actual original React
+                    # model selector and Python streaming call, not just storage.
+                    await page.get_by_role("link", name="Channels & models / 渠道与模型").click()
+                    await page.get_by_role("button", name="Add named channel").click()
+                    await page.get_by_label("Channel name").fill("Secondary Research")
+                    await page.get_by_label("Model provider").select_option("openai")
+                    await page.get_by_label("Model API base URL").fill(f"http://127.0.0.1:{model_port}/v1")
+                    await page.get_by_label("Model API key").fill("secondary-private-token")
+                    await page.get_by_label("Model identifiers").fill("independent-model")
+                    async with page.expect_response(lambda response: response.request.method == "PUT" and response.url.endswith("/api/lsm/providers")) as named_saved:
+                        await page.get_by_role("button", name="Save model channel").click()
+                    named_response = await named_saved.value
+                    assert named_response.status == 200, await named_response.text()
+                    assert "secondary-private-token" not in await named_response.text()
+                    inventory = await page.request.get(f"http://127.0.0.1:{port}/api/models")
+                    assert (await inventory.json())["Secondary Research"] == ["independent-model"]
+                    endpoint = await page.request.get(f"http://127.0.0.1:{port}/api/endpoints")
+                    assert (await endpoint.json())["Secondary Research"]["type"] == "openAI"
+                    await page.get_by_role("link", name="Start a new chat and select a model").click()
+                    await page.get_by_test_id("model-selector-button").click()
+                    await page.locator("#model-search").fill("independent-model")
+                    await page.get_by_text("independent-model", exact=True).first.click()
+                    await page.get_by_test_id("model-selector-button").get_by_text("independent-model", exact=True).wait_for(timeout=15000)
+                    await page.get_by_test_id("text-input").fill("Verify secondary named channel.")
+                    await page.locator('button[type="submit"]').first.click()
+                    await page.get_by_test_id("screenshot-target").get_by_text("Model channel works.", exact=True).wait_for(timeout=15000)
+                    assert requests[-1]["model"] == "independent-model"
+                    # Agent authoring through the same browser login, save/reload
+                    # and version evolution without exposing provider secrets.
+                    agent = await page.request.post(f"http://127.0.0.1:{port}/api/agents", data={
+                        "name": "Secondary Agent", "description": "Browser-created Agent",
+                        "provider": "Secondary Research", "model": "independent-model",
+                        "instructions": "Be concise.", "tools": ["ask_user_question"],
+                        "model_parameters": {"maxTokens": 128, "topP": 0.75},
+                    })
+                    assert agent.status == 201, await agent.text()
+                    agent_value = await agent.json()
+                    assert "secondary-private-token" not in str(agent_value)
+                    agent_id = agent_value["id"]
+                    await page.reload()
+                    saved_agent = await page.request.get(f"http://127.0.0.1:{port}/api/agents/{agent_id}")
+                    assert (await saved_agent.json())["model_parameters"] == {"maxTokens": 128, "topP": 0.75}
+                    assert (await saved_agent.json())["tools"] == ["ask_user_question"]
+                    profiles = await page.request.get(f"http://127.0.0.1:{port}/api/lsm/providers")
+                    payload = await profiles.json()
+                    assert {p.get("name") for p in payload["providers"]} >= {"Secondary Research"}
+                    assert "secondary-private-token" not in str(payload)
                 assert not errors, errors
             except Exception:
                 print(await page.locator("body").inner_text())
