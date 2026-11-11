@@ -36,6 +36,8 @@ Subagents 使用 `agent.subagents.enabled/allowSelf/agent_ids` 配置和动态�
 | `LibreChat:api/server/controllers/agents/protocol.js` — `getRequestedGenerationProtocol / negotiate*` | `webui/generation_protocol.py; generations.py; generation_routes.py` | 完成（协议协商函数） | 2197组body/query/header组合与原版Node函数差分一致；SQLite固定首次job版本，HTTP/SSE入口使用协商结果。整个request/resume controller及图级恢复仍不完整。 |
 | `LibreChat:api/server/controllers/agents/request.js` — `generation ingress / disconnect` | `webui/generation_routes.py:start_generation` | 部分 | 缺失完整入口预检及断线处置语义 |
 | `LibreChat:api/server/controllers/agents/resume.js` — `resume / checkpoint ownership CAS` | `webui/generation_routes.py:resume_generation` | 部分 | 批审批claim、已审核证据、owner/generation checkpoint与pending tools重放已接入；完整actor/steer/子中断聚合仍缺失 |
+| `LibreChat:packages/data-provider/src/types/runs.ts` — `TContextUsageEvent / TTokenBudgetBreakdown` | `webui/context_budget.py; agent_runner.py; generations.py` | 部分 | 已发布SSE `on_context_usage`并在assistant.metadata.contextUsage持久化，重新加载与SSE断线重播可读；尚缺完整provider token校准/usage rollup |
+| `agents:src/types/graph.ts` — `ContextUsageEvent` | `webui/context_budget.py` | 部分 | 原schema预算字段已接入，用离线BPE计算System/summary/tool schema/messages各份额；provider实际计费和精确prune仍未移植 |
 | `LibreChat:api/server/controllers/agents/callbacks.js` — `Agent execution events` | `webui/generation_routes.py:_run_model` | 部分 | 工具name/args/completion/result字段对齐React并持久化；完整callbacks、子运行progress和actor生命周期未全部移植 |
 | `LibreChat:api/server/controllers/agents/client.js` — `AgentClient / history / run lifecycle` | `webui/generations.py; generation_routes.py` | 部分 | 未移植完整AgentClient和事件actor生命周期 |
 | `LibreChat:api/server/services/Endpoints/agents/build.js` — `buildOptions` | `webui/generation_routes.py:start_generation` | 部分 | project字段修复；spec、ephemeralAgent、完整模型参数未对齐 |
@@ -271,6 +273,8 @@ React schema remains unchanged.
 - token：单独的可选 WebUI 依赖 `tiktoken`，`o200k_base.tiktoken.gz` 随Wheel发行（gzip压缩后1.69 MB，内存解压，SHA256校验原始内容）；SHA256 `446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d`，首次使用绝不下载。主Worker不依赖它。
 - compaction：前置模型调用生成摘要，只有完整非空结果才存入当前run的 `summaryCheckpoint` 并在结束事务中提交为有效message part。旧消息永不删除。读取完整活动分支，遇最后有效summary载体停止回溯；失败/取消/崩溃或无效summary不替换历史。图检查点继续使用原有 `SQLiteCheckpointSaver`。
 - 已验证：纯函数2079组源向量、memory SQLite CRUD+并发/配额/隔离、51轮长会话/tool结果配对/思考内容、失败与取消、完整HTTP/SSE summarizer和原版React浏览器下一轮及刷新后恢复。
+- context usage：原版 `on_context_usage` 事件形状接入SSE重播；根据每次模型调用前的有效消息计算system、summary、tool schema及message份额，写入同一run的state并在结束事务中固定到 `responseMessage.metadata.contextUsage`，React刷新后可恢复。该预算是离线BPE保守估计，缺少provider真实token校准/请求cache/fading费用，不能当作provider计费统计；只有指定了合法max context时才生成快照。授权后的启动配置开放原版上下文用量UI，匿名仍不暴露接口能力。
+- 新增Windows粗粒度事件循环下GUI TTL回归稳定性测试；新增真实SQLite重启后“摘要已完成但answer崩溃”与“摘要失败”两种历史恢复测试，CI旧Linux安装失败是Runner解析Ubuntu包源域名中断，未擅改构建依赖。
 - 未完全等价：source RBAC/filters接入、SDK模型token校准和按provider native消息格式计算、跨tool pair的intra-turn fallback、动态semantic index/完整事件actor、自定义摘要策略的Graph reducer；这些仍标记“部分”，不可用这批纯函数向量充当整套图运行时已完成的证据。
 
 **WebUI发行适配：** PyPI Wheel 保持 `webui` 可选 extra；Docker和单二进制发行始终提供完整WebUI，构建时额外安装 `.[webui]` 并收集 tiktoken。Worker 通过显式源文件白名单打包，不携带 tokenizer 或 WebUI 编码数据。
