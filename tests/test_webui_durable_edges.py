@@ -123,6 +123,26 @@ def test_abort_and_session_owner_and_expires(policy):
     assert durable._revoked(all_rows()[0])
 
 
+def test_restart_preserves_background_job_but_explicit_abort_revokes_it(policy):
+    repo, cid = policy
+    native = intent(cid)
+    assert all_rows()[0]["state"] == "reserved"
+    with repo.database.connect() as db:
+        db.execute("UPDATE runs SET status='interrupted' WHERE id='run'")
+    # Recovery of interrupted generation state is not an authorization revoke.
+    assert durable.mark_revoked("owner") == 0
+    assert not durable._revoked(all_rows()[0])
+    with pytest.raises(PermissionError, match="generation"):
+        durable.check_intent(native)
+    assert all_rows()[0]["state"] == "reserved"
+    # A recorded explicit abort is distinct from a Controller restart.
+    with repo.database.connect() as db:
+        db.execute("UPDATE runs SET status='aborted' WHERE id='run'")
+    assert durable.mark_revoked("owner") == 1
+    assert durable._revoked(all_rows()[0])
+    assert all_rows()[0]["state"] == "cancel_pending"
+
+
 @pytest.mark.asyncio
 async def test_lookup_error_and_stop_statuses(policy, monkeypatch):
     from local_shell_mcp import tools

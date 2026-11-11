@@ -130,7 +130,11 @@ def reserve(owner: str, conversation_id: str, run_id: str | None, call_id: str,
 
 def check_intent(intent: Intent) -> None:
     with _database().connect() as db:
-        row = db.execute("SELECT state FROM agent_durable_tasks WHERE id=?", (intent.id,)).fetchone()
+        row = db.execute("SELECT state,run_id FROM agent_durable_tasks WHERE id=?", (intent.id,)).fetchone()
+        if row is not None and row["run_id"]:
+            run = db.execute("SELECT status FROM runs WHERE id=?", (row["run_id"],)).fetchone()
+            if run is None or run["status"] in {"aborted", "error", "interrupted"}:
+                raise PermissionError("The generation that created this task has ended")
     if row is None or row["state"] not in {"reserved", "active"}:
         raise PermissionError("Durable task authorization was revoked")
 
@@ -251,8 +255,14 @@ def _revoked(row: Any) -> bool:
         if _repo().conversation(row["owner"], row["conversation_id"]) is None:
             return True
         if row["run_id"]:
-            with _database().connect() as db:
+            with _repo().database.connect() as db:
                 if db.execute("SELECT 1 FROM agent_run_cancellations WHERE run_id=?", (row["run_id"],)).fetchone():
+                    return True
+                run = db.execute("SELECT status FROM runs WHERE id=?", (row["run_id"],)).fetchone()
+                # A Controller restart marks in-flight generations interrupted,
+                # but native background jobs must survive that restart. Only an
+                # explicit abort revokes an otherwise still-authorized lease.
+                if run is not None and run["status"] == "aborted":
                     return True
         for machine, operation in json.loads(row["requirements"]).items():
             authorize_machine_action(row["owner"], row["conversation_id"], machine, operation,
