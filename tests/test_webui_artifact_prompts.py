@@ -102,6 +102,7 @@ def test_artifact_ephemeral_mode_snapshotted_for_resumable_generation(tmp_path):
         "local",
         {
             "text": "Make a diagram",
+            "clientRequestId": "fixed-artifact-turn",
             "ephemeralAgent": {
                 "artifacts": "shadcnui",
             },
@@ -114,6 +115,15 @@ def test_artifact_ephemeral_mode_snapshotted_for_resumable_generation(tmp_path):
             db.execute("SELECT state FROM runs WHERE id=?", (job.run_id,)).fetchone()[0]
         )
     assert state["artifactsMode"] == "shadcnui"
+    duplicate, fresh = store.begin("local", {
+        "text": "Make a diagram",
+        "clientRequestId": "fixed-artifact-turn",
+        "ephemeralAgent": {"artifacts": "custom"},
+    }, agent)
+    assert duplicate.run_id == job.run_id and fresh is False
+    with store.database.connect() as db:
+        preserved = json.loads(db.execute("SELECT state FROM runs WHERE id=?", (job.run_id,)).fetchone()[0])
+    assert preserved["artifactsMode"] == "shadcnui"
     same, fresh = store.begin(
         "local",
         {"text": "Make a diagram", "clientRequestId": "same", "ephemeralAgent": {"artifacts": ""}},
@@ -257,6 +267,94 @@ async def test_cancelled_artifact_stream_preserves_partial_event_and_persistence
         assert store.history("local", run.conversation_id)[-1]["content"] == (
             final["responseMessage"]["text"]
         )
+    finally:
+        await generation_routes.shutdown_generations()
+        get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_artifact_mode_survives_real_ask_user_pause_and_http_resume(tmp_path, monkeypatch):
+    """Resume from a SQLite checkpoint with the original Artifact mode and no duplicate system."""
+    import httpx
+    from starlette.applications import Starlette
+
+    from local_shell_mcp.settings import get_settings
+    from local_shell_mcp.sqlite_store import shared_database
+    from local_shell_mcp.webui import generation_routes
+    from local_shell_mcp.webui.agents import AgentRepository
+    from local_shell_mcp.webui.providers import ModelToolCall, ProviderConfig
+
+    for key, value in {
+        "WORKSPACE_ROOT": str(tmp_path),
+        "STATE_DIR": str(tmp_path / ".local-shell-mcp"),
+        "AUTH_MODE": "none",
+    }.items():
+        monkeypatch.setenv("LOCAL_SHELL_MCP_" + key, value)
+    get_settings.cache_clear()
+    db = shared_database(get_settings().state_dir.resolve())
+    store = GenerationStore(db)
+    agent = AgentRepository(db).create("local", {
+        "name": "Artifact writer",
+        "provider": "openAI",
+        "model": "test",
+        "tools": ["ask_user_question"],
+        "instructions": "Write a document.",
+        "artifacts": "default",
+    })
+    profile = ProviderConfig("openai", "test", "http://127.0.0.1:11434/v1/chat/completions", "")
+    monkeypatch.setattr(generation_routes, "provider_config", lambda *args: profile)
+    observed_system_prompts = []
+
+    async def respond(_profile, history, **kwargs):
+        assert "ask_user_question" in {
+            tool["function"]["name"] for tool in kwargs["tools"]
+        }
+        systems = [message["content"] for message in history if message["role"] == "system"]
+        assert len(systems) == 1
+        assert "## Additional Artifact Instructions for React Components" in systems[0]
+        observed_system_prompts.extend(systems)
+        if history[-1]["role"] == "tool":
+            yield ':::artifact{identifier="document" type="text/markdown" title="Recovered"}\n'
+            yield "```markdown\n# Restored from checkpoint\n```\n:::"
+        else:
+            yield ModelToolCall("ask-which", "ask_user_question", {
+                "questions": [{"id": "format", "question": "Choose a format"}],
+            })
+
+    monkeypatch.setattr(generation_routes, "stream_model_with_tools", respond)
+    run, _ = store.begin("local", {
+        "text": "Make an artifact after confirmation",
+        "ephemeralAgent": {"artifacts": "shadcnui"},
+    }, agent)
+    try:
+        await generation_routes._start_task(
+            "local", run, profile, agent, ask_user_enabled=True,
+            artifacts_mode="shadcnui",
+        )
+        first_task = generation_routes._TASKS[run.run_id]
+        await asyncio.wait_for(first_task, timeout=10)
+        assert store.latest("local", run.conversation_id).status == "requires_action"
+        pending = store.pending_action("local", run.run_id)
+        assert pending
+        app = Starlette(routes=generation_routes.generation_routes())
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test",
+        ) as client:
+            result = await client.post("/api/agents/chat/resume", json={
+                "conversationId": run.conversation_id,
+                "actionId": pending["actionId"],
+                "answers": {"format": "Markdown"},
+            })
+        assert result.status_code == 200, result.text
+        second_task = generation_routes._TASKS[run.run_id]
+        await asyncio.wait_for(second_task, timeout=10)
+        assert store.latest("local", run.conversation_id).status == "complete"
+        assert len(observed_system_prompts) == 2
+        assert observed_system_prompts[0] == observed_system_prompts[1]
+        assert "# Restored from checkpoint" in store.history("local", run.conversation_id)[-1]["content"]
+        deltas = [event for _, event in store.events("local", run.run_id)
+                  if event.get("event") == "on_message_delta"]
+        assert deltas and deltas[-1]["data"]["delta"]["content"]["text"].endswith(":::")
     finally:
         await generation_routes.shutdown_generations()
         get_settings.cache_clear()
