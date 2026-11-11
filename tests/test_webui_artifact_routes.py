@@ -264,6 +264,23 @@ async def test_active_owned_subagent_thread_blocks_artifact_edits_before_lineage
     )
     activity = ActiveChildThreads(repo.database)
     activity.activate("alice", child["conversationId"], run.run_id)
+    activity.activate("alice", child["conversationId"], run.run_id)  # idempotent same-run
+    for invalid in ("", None):
+        with pytest.raises(ValueError):
+            activity.activate("alice", invalid, run.run_id)
+    intruder = repo.create_conversation("bob", {"title": "Other owner's child"})
+    with pytest.raises(PermissionError, match="another owner"):
+        activity.activate("alice", intruder["conversationId"], run.run_id)
+    other_parent = repo.create_conversation("alice", {"title": "Other parent"})
+    other_run, _ = store.begin(
+        "alice",
+        {"conversationId": other_parent["conversationId"], "text": "another active delegation"},
+    )
+    with pytest.raises(PermissionError, match="different parent run"):
+        activity.activate("alice", child["conversationId"], other_run.run_id)
+    assert store.finish("alice", other_run.run_id, status="complete", text="done")
+    with pytest.raises(PermissionError, match="not active"):
+        activity.activate("alice", "child-after-complete", other_run.run_id)
     with pytest.raises(PermissionError):
         activity.activate("bob", child["conversationId"], run.run_id)
     with pytest.raises(ValueError):
