@@ -25,7 +25,9 @@ ORACLE = json.loads((REPO / "tests/fixtures/librechat/actions_source_oracle.json
 
 def test_exact_upstream_source_hashes():
     for path, expected in ORACLE["hashes"].items():
-        assert hashlib.sha256((REPO / path).read_bytes()).hexdigest() == expected, path
+        # Git may check out text with CRLF under core.autocrlf on Windows.
+        raw = (REPO / path).read_bytes().replace(b"\r\n", b"\n")
+        assert hashlib.sha256(raw).hexdigest() == expected, path
     assert "e8f3be08623663d4ad7f7241e693c94469b63bb0" in ORACLE["source"]
 
 

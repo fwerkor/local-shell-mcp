@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 
 import pytest
 from cryptography.fernet import Fernet
@@ -383,9 +384,14 @@ def test_encryption_isolated_by_file_permission(tmp_path):
     assert isinstance(key, Fernet)
     assert key.decrypt(key.encrypt(b"test")) == b"test"
     p = tmp_path / "actions-fernet.key"
-    p.chmod(0o666)
-    with pytest.raises(PermissionError, match="Unsafe"):
-        repo._cipher()
+    if os.name != "nt":
+        p.chmod(0o666)
+        with pytest.raises(PermissionError, match="Unsafe"):
+            repo._cipher()
+    else:
+        # Windows uses ACLs rather than POSIX mode bits; chmod() cannot emulate
+        # a world-readable UNIX secret file on Windows.
+        assert isinstance(repo._cipher(), Fernet)
 
 
 def test_oauth_storage_explicit_interactive_blocker(tmp_path):

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -144,7 +145,8 @@ def test_storage_credentials_version_and_boundaries(tmp_path, server):
     assert "api_key" not in str(saved) and "action-secret" not in str(saved)
     assert "action-secret" not in db.path.read_bytes().decode("utf-8", errors="ignore")
     assert "action-secret" not in json.dumps(AgentRepository(db).versions("alice", agent["id"]))
-    assert (tmp_path / "actions-fernet.key").stat().st_mode & 0o077 == 0
+    if os.name != "nt":
+        assert (tmp_path / "actions-fernet.key").stat().st_mode & 0o077 == 0
     names = {tool["function"]["name"] for tool in repo.tool_schemas("alice", updated)}
     assert names == {normalize_action_tool_name(x) for x in updated["tools"]}
     assert repo.tool_schemas("alice", updated, selected_tools=[]) == []

@@ -334,3 +334,102 @@ async def test_native_result_remains_lossless_while_model_uses_source_ingestion_
     saved = list(runner.saver.list(runner.config))
     assert any(write[2].get("content") == raw for checkpoint in saved
                for write in checkpoint["pendingWrites"] if isinstance(write[2], dict))
+
+
+@pytest.mark.asyncio
+async def test_agent_action_from_saved_browser_schema_through_real_http_and_model(runtime, monkeypatch):
+    """Browser-saved OpenAPI tool reaches the existing AgentRunner without LSM tool duplication."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from local_shell_mcp.webui.action_spec import normalize_action_tool_name, tool_name
+    from local_shell_mcp.webui.actions import ActionRepository
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            payload = json.dumps({
+                "path": self.path,
+                "authorized": self.headers.get("Authorization") == "Bearer private-test-token",
+            }).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setenv("LSM_ACTION_ALLOWED_ADDRESSES", f"127.0.0.1:{server.server_port}")
+    try:
+        _, database, store, profile = runtime
+        url = f"http://127.0.0.1:{server.server_port}"
+        agent = AgentRepository(database).create("local", {
+            "name": "Action Agent", "provider": "openAI", "model": "test",
+        })
+        spec = {
+            "openapi": "3.0.0", "servers": [{"url": url}], "paths": {
+                "/echo/{id}": {"get": {
+                    "operationId": "fetchItem", "description": "Lookup item",
+                    "parameters": [
+                        {"name": "id", "in": "path", "required": True,
+                         "schema": {"type": "string"}},
+                    ],
+                }},
+            },
+        }
+        agent, action = ActionRepository(database).save("local", agent["id"], {
+            "functions": [{"type": "function", "function": {"name": "fetchItem"}}],
+            "metadata": {"domain": url, "raw_spec": json.dumps(spec),
+                         "auth": {"type": "service_http", "authorization_type": "bearer"},
+                         "api_key": "private-test-token"},
+        })
+        tool = normalize_action_tool_name(tool_name("fetchItem", url))
+        assert tool in [x["function"]["name"] for x in ActionRepository(database).tool_schemas("local", agent)]
+        assert "private-test-token" not in json.dumps(agent)
+
+        generation, _ = store.begin("local", {"text": "look up the record"}, agent)
+        results = []
+
+        async def emit(text):
+            results.append(text)
+
+        async def model(_profile, history, *, tools, **kwargs):
+            advertised = {item["function"]["name"] for item in tools}
+            if history[-1].get("content") == "unselected test":
+                assert tool not in advertised
+            else:
+                assert tool in advertised
+            assert "private-test-token" not in json.dumps(tools)
+            if history[-1]["role"] == "tool":
+                response = json.loads(history[-1]["content"])
+                assert response == {"path": "/echo/123", "authorized": True}
+                yield "Action completed."
+            else:
+                yield ModelToolCall("actual-action", tool, {"id": "123"})
+
+        runner = AgentRunner("local", generation, database, store,
+                             scopes=set(), grant_expires=None, stream_tools=model,
+                             stream_text=model, on_text=emit, agent=agent, profile=profile)
+        completed = await runner.run(store.history("local", generation.conversation_id))
+        assert completed[-1]["content"] == "Action completed."
+        assert results == ["Action completed."]
+        events = json.dumps([event for _, event in store.events("local", generation.run_id)])
+        assert "actual-action" in events
+        assert "private-test-token" not in events
+
+        # Tool selection is not a blanket grant. A per-run exclusion must prevent execution.
+        generation2, _ = store.begin("local", {"text": "unselected test"}, agent)
+        denied_runner = AgentRunner("local", generation2, database, store, scopes=set(),
+                                    grant_expires=None, stream_tools=model, stream_text=model,
+                                    on_text=emit, agent=agent, profile=profile, selected_tools=[])
+        with pytest.raises(RuntimeSafetyError, match="not enabled"):
+            await denied_runner.run(store.history("local", generation2.conversation_id))
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
