@@ -337,3 +337,54 @@ async def test_command_routed_source_defaults_to_direct_when_no_transfer(context
     result = await obj.run(store.history("local", job.conversation_id))
     assert reached == ["root", "direct"]
     assert result[-1]["content"] == "direct done"
+
+@pytest.mark.asyncio
+async def test_graph_team_designated_result_from_parallel_join(context):
+    from local_shell_mcp.webui.subagents import build_subagent_configs
+
+    repo, store, _ = context
+    entry, result, trailing, helper = [create(repo, name) for name in ("entry", "result", "trailing", "helper")]
+    lead = create(repo, "lead")
+    definition = {"type": "team", "name": "Team", "description": "Concurrent",
+                  "agent_ids": [entry["id"], result["id"], trailing["id"], helper["id"]],
+                  "entry_agent_id": entry["id"], "result_agent_id": result["id"],
+                  "edges": [{"from": entry["id"], "to": [trailing["id"], helper["id"]], "edgeType": "direct"},
+                            {"from": [trailing["id"], helper["id"]], "to": result["id"], "edgeType": "direct"}]}
+    lead = repo.update("local", lead["id"], {"subagents": {
+        "enabled": True, "allowSelf": False, "agent_ids": [], "graphs": [definition]}})
+    assert build_subagent_configs("local", lead, context[2])[0].agent["graphAgentIds"] == [
+        entry["id"], result["id"], trailing["id"], helper["id"]]
+    seen = []
+
+    async def model(profile, history, **kwargs):
+        seen.append(profile.model)
+        if profile.model == "lead":
+            if history[-1].get("role") == "tool":
+                yield "all done"
+            else:
+                yield ModelToolCall("team", "subagent", {"subagent_type": "team", "description": "Run"})
+        elif profile.model == "result":
+            yield "designated result"
+        elif profile.model == "trailing":
+            await asyncio.sleep(0.02)
+            yield "non-result sibling"
+        else:
+            yield "initial result"
+
+    obj, job = runner(context, lead, model)
+    response = await obj.run(store.history("local", job.conversation_id))
+    assert set(seen) == {"entry", "result", "trailing", "helper", "lead"}
+    assert [m["content"] for m in response if m.get("role") == "tool"] == ["designated result"]
+
+
+def test_graph_team_rejects_orphan_member_before_runtime(context):
+    repo, _, _ = context
+    entry, result, extra = [create(repo, name) for name in ("entry", "result", "extra")]
+    lead = create(repo, "lead")
+    definition = {"type": "team", "name": "Team", "description": "Directed",
+                  "agent_ids": [entry["id"], result["id"], extra["id"]],
+                  "entry_agent_id": entry["id"], "result_agent_id": result["id"],
+                  "edges": [{"from": entry["id"], "to": result["id"], "edgeType": "direct"}]}
+    with pytest.raises(ValueError, match="only root"):
+        repo.update("local", lead["id"], {"subagents": {
+            "enabled": True, "allowSelf": False, "agent_ids": [], "graphs": [definition]}})

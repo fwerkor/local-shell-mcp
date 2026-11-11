@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from local_shell_mcp.settings import get_settings
-from local_shell_mcp.sqlite_store import shared_database
+from local_shell_mcp.sqlite_store import SQLiteDatabase
 from local_shell_mcp.webui.message_reducers import (
     REMOVE_ALL_MESSAGES,
     agent_messages_reducer,
@@ -32,14 +31,12 @@ def test_message_ids_types_clear_and_replacements():
 
 
 @pytest.mark.asyncio
-async def test_owned_graph_saver_tuples_list_async_writes_and_owner_isolation(tmp_path, monkeypatch):
+async def test_owned_graph_saver_tuples_list_async_writes_and_owner_isolation(tmp_path):
     from langgraph.types import Send
 
     from local_shell_mcp.webui.graph_checkpoint import OwnedGraphCheckpointer
 
-    monkeypatch.setenv("LOCAL_SHELL_MCP_STATE_DIR", str(tmp_path / ".local-shell-mcp"))
-    get_settings.cache_clear()
-    db = shared_database(get_settings().state_dir)
+    db = SQLiteDatabase(tmp_path / ".local-shell-mcp")
     saver = OwnedGraphCheckpointer(db, "alice")
     config = saver.storage.config("thread", "generation:graph", event_actor=True)
     assert saver.get_tuple(config) is None
@@ -63,7 +60,6 @@ async def test_owned_graph_saver_tuples_list_async_writes_and_owner_isolation(tm
     assert other.get_tuple(other.storage.config("thread", "generation:graph")) is None
     with pytest.raises(PermissionError):
         other.get_tuple(second)
-    get_settings.cache_clear()
 
 
 def test_graph_import_error_and_command_validation(monkeypatch):

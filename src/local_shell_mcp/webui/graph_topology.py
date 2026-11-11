@@ -191,7 +191,9 @@ def admit_agent_graph(owner: str, agent: dict | None, repository: Any) -> GraphT
     """Validate all owned members before allowing a StateGraph execution."""
     if not agent or not agent.get("edges"):
         return None
-    identities = [agent["id"]]
+    identities = list(dict.fromkeys([agent["id"], *(agent.get("graphAgentIds") or [])]))
+    if any(not isinstance(identity, str) or not identity for identity in identities):
+        raise ValueError("Graph Agent identifiers must be non-empty strings")
     for edge in agent["edges"]:
         for key in ("from", "to"):
             for ident in endpoints(edge, key):

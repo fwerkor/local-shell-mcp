@@ -160,6 +160,8 @@ def build_subagent_configs(owner: str, parent: dict | None, database: Any, *,
             raise ValueError("Graph subagent entry is not a configured member")
         team = copy.deepcopy(entry)
         team["edges"] = [copy.deepcopy(edge) for edge in definition["edges"]]
+        # The upstream graph receives every member, even a non-edge member.
+        team["graphAgentIds"] = [member["id"] for member in members]
         team["entryAgentId"] = definition["entry_agent_id"]
         team["resultAgentId"] = definition["result_agent_id"]
         for edge in team["edges"]:

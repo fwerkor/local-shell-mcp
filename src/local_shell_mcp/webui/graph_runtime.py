@@ -233,4 +233,11 @@ async def run_multi_agent_graph(parent: Any, history: list[dict], topology: Grap
     limit = recursion_limit or root.get("recursion_limit") or 50
     config = {**checkpoint_config, "recursion_limit": int(limit)}
     outcome = await compiled.ainvoke(initial, config)
+    # Source SubagentExecutor returns the designated resultAgentId, never the
+    # last sibling to settle in a parallel team. Keep intermediate messages
+    # only in the isolated child graph and its SQLite checkpoints.
+    if parent.namespace and "/subagent:" in parent.namespace and root.get("resultAgentId"):
+        result = outcome.get("subagentResult") or {}
+        message = result.get("message") if result.get("agentId") == root["resultAgentId"] else None
+        return [message] if isinstance(message, dict) else []
     return outcome["messages"]
