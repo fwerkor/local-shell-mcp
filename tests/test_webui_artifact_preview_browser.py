@@ -32,6 +32,15 @@ SAMPLES = [
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 50"><text x="5" y="30">SVG render</text></svg>',
     ),
     ("Markdown preview", "text/markdown", "# Markdown rendering check"),
+    ("SVG alias preview", "image/svg", '<svg viewBox="0 0 40 20"><text y="12">SVG alias</text></svg>'),
+    # These synthetic MIME types are the pinned original viewer contracts.
+    # A real Office attachment must be converted to sanitized HTML by the
+    # shared file pipeline; this browser test checks the *retained viewer*,
+    # not the still-unported binary conversion path.
+    ("Document preview", "application/vnd.librechat.docx-preview", "<html><body><h1>DOCX check</h1></body></html>"),
+    ("Spreadsheet preview", "application/vnd.librechat.spreadsheet-preview", "<html><body><table><tr><td>Sheet check</td></tr></table></body></html>"),
+    ("Presentation preview", "application/vnd.librechat.presentation-preview", "<html><body><section>Slides check</section></body></html>"),
+    ("Source code preview", "application/vnd.code", "def fixture(): return 1"),
 ]
 
 
@@ -89,7 +98,7 @@ async def test_artifact_types_preview_dependency_inventory(tmp_path, monkeypatch
                 if "Executable doesn't exist" in str(exc):
                     pytest.skip("Optional Chromium not installed")
                 raise
-            page = await browser.new_page(viewport={"width": 1440, "height": 900})
+            page = await browser.new_page(viewport={"width": 1440, "height": 900}, accept_downloads=True)
             external: list[str] = []
             failures: list[str] = []
 
@@ -106,7 +115,7 @@ async def test_artifact_types_preview_dependency_inventory(tmp_path, monkeypatch
             page.on("pageerror", lambda error: failures.append(str(error)))
             try:
                 await page.goto(origin + "/c/new", wait_until="domcontentloaded")
-                await page.get_by_test_id("text-input").fill("Produce the five sample artifacts.")
+                await page.get_by_test_id("text-input").fill("Produce the ten sample artifacts.")
                 await page.locator('button[type="submit"]').first.click()
                 for title, _, _ in SAMPLES:
                     await page.get_by_text(title, exact=True).first.wait_for(timeout=20000)
@@ -124,7 +133,30 @@ async def test_artifact_types_preview_dependency_inventory(tmp_path, monkeypatch
                     radio = panel.get_by_role("radio", name="Preview", exact=True)
                     if await radio.count():
                         await radio.click()
-                    await page.wait_for_timeout(1200)
+                    if title in {"Document preview", "Spreadsheet preview", "Presentation preview"}:
+                        # Original Office buckets are preview-only, not an
+                        # editable HTML code document.
+                        assert await panel.get_by_role("radio", name="Code", exact=True).count() == 0
+                        assert await panel.get_by_role("radio").count() == 1
+                    if title == "Source code preview":
+                        # The generated code bucket has a source-only view.
+                        assert await panel.get_by_role("radio", name="Preview", exact=True).count() == 0
+                        assert await panel.get_by_role("radio").count() == 1
+                    if title in {"Document preview", "Source code preview"}:
+                        # Unlike an original-file attachment, these model-only
+                        # artifacts must export the preview/source as real
+                        # downloadable bytes using the existing UI hook.
+                        async with page.expect_download(timeout=10000) as pending:
+                            await panel.get_by_role("button", name=re.compile("Download", re.I)).click()
+                        download = await pending.value
+                        target = tmp_path / ("office-preview-export.html" if title == "Document preview" else "code-export.txt")
+                        await download.save_as(target)
+                        marker = "DOCX check" if title == "Document preview" else "def fixture"
+                        assert marker in target.read_text(encoding="utf-8")
+                        assert download.suggested_filename.lower().endswith(
+                            ".html" if title == "Document preview" else ".txt"
+                        )
+                    await page.wait_for_timeout(700)
                     seen[title] = {
                         "iframes": await panel.locator("iframe").count(),
                         "external": list(external),
