@@ -59,7 +59,8 @@ def native_messages(messages: list[dict], provider: str) -> tuple[list[dict], st
 
 
 async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, tools: list[dict],
-                              max_tokens: int, temperature: float | None) -> AsyncIterator[str | ModelToolCall]:
+                              max_tokens: int, temperature: float | None,
+                              top_p: float | None = None) -> AsyncIterator[str | ModelToolCall]:
     import httpx
 
     history, instructions = native_messages(messages, config.provider)
@@ -73,6 +74,8 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
             body["system"] = instructions
         if temperature is not None:
             body["temperature"] = temperature
+        if top_p is not None:
+            body["top_p"] = top_p
     else:
         headers["x-goog-api-key"] = config.token
         body = {"contents": history, "generationConfig": {"maxOutputTokens": max_tokens},
@@ -83,6 +86,8 @@ async def stream_native_tools(config: ProviderConfig, messages: list[dict], *, t
             body["systemInstruction"] = {"parts": [{"text": instructions}]}
         if temperature is not None:
             body["generationConfig"]["temperature"] = temperature
+        if top_p is not None:
+            body["generationConfig"]["topP"] = top_p
     pending = {}
     timeout = httpx.Timeout(connect=20, read=config.timeout_s, write=30, pool=10)
     async with httpx.AsyncClient(timeout=timeout) as client, client.stream(
