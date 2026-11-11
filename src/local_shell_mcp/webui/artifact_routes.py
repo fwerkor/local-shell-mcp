@@ -11,6 +11,7 @@ from starlette.routing import Route
 
 from .artifacts import edit_artifact
 from .auth import _same_origin
+from .child_thread_activity import is_active_child_thread
 from .routes import _body, _owner, _repo
 from .storage import _json, _now
 
@@ -38,7 +39,8 @@ def _update(repo, owner: str, message_id: str, index: int, original: str, update
             return JSONResponse({"error": "Message not found"}, status_code=404)
         # The original immutable-child guard also reserves IDs before child
         # conversation creation finishes (agents/subagentThreadIds.ts).
-        if (json.loads(row["conversation_metadata"]).get("subagentThread") is not None
+        if (is_active_child_thread(db, owner, row["conversation_id"])
+                or json.loads(row["conversation_metadata"]).get("subagentThread") is not None
                 or re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-b[0-9a-f]{3}-[0-9a-f]{12}",
                                 row["conversation_id"], re.IGNORECASE)):
             return JSONResponse({"error": "This subagent thread is view-only. Continue it from its parent agent or create a separate chat."}, status_code=409)
